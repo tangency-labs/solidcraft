@@ -71,7 +71,11 @@
 //!   [`Hcr::compute_silhouettes`] and [`Hcr::compute_global_visibility`] take the
 //!   kernel mutably.
 //! - `IsPointVisible` keeps the ray tracer's surface set and grid and rebuilds the
-//!   tracer (which borrows the surfaces) for each ray. A face-owned surface's cache
+//!   tracer (which borrows the surfaces) for each ray. The surfaces' caches and the
+//!   grid elements made from them are built for the first ray, as upstream builds
+//!   `m_pRayTracer` once; each later ray's tracer gets a copy of that grid and the same
+//!   surfaces in the same order (rebuilding the caches and grid per ray took most of
+//!   `topology.api_projection`'s time). A face-owned surface's cache
 //!   (`smsurf_GetSurfaceCache`, then the `GetTree` calls of `AddSurfaceToGrid` and
 //!   `ExpandHierarchy`, in that order) runs through its face before the tracer borrows
 //!   the surfaces: the trimmed cache's `BuildTree` reads the face and may change its
@@ -510,6 +514,18 @@ enum RaySurface {
     Owned(Box<Surface>),
 }
 
+/// The surface a ray surface stands for: the scene face's, or the tracer's own copy.
+fn ray_surface<'a>(scene: &'a Brep, s: &'a RaySurface) -> Result<&'a Surface> {
+    match s {
+        RaySurface::Face(f) => scene
+            .face(*f)?
+            .surface
+            .as_ref()
+            .ok_or(undefined("face without surface")),
+        RaySurface::Owned(s) => Ok(&**s),
+    }
+}
+
 /// First cache handle of a scene entity: below it are the tracer's surface indices.
 const ENTITY_HANDLE_BASE: usize = usize::MAX / 2;
 
@@ -519,6 +535,22 @@ const ENTITY_HANDLE_BASE: usize = usize::MAX / 2;
 enum ListedCache {
     Lazy(SurfaceCache<usize>),
     Fetched(SurfaceCache<usize>),
+}
+
+/// The caches the visibility tracer lists, one per ray surface (`None` where the cache
+/// or its tree fails), and the scene face of each listed surface (`None` for one the
+/// tracer owns).
+type RayCaches = (Vec<Option<ListedCache>>, Vec<Option<FaceId>>);
+
+/// The first ray's tracer, kept for the later rays as upstream keeps `m_pRayTracer`:
+/// its grid holding every listed surface's elements, the index into
+/// [`RaySetup`]'s surfaces of each surface it registered (in its order), and the scene
+/// face of each listed surface.
+#[derive(Debug, Clone)]
+struct PrebuiltTracer {
+    grid: Grid<usize>,
+    registered: Vec<usize>,
+    faces: Vec<Option<FaceId>>,
 }
 
 /// `smsurf_GetSurfaceCache` of a surface without face and `AddSurfaceToGrid`'s
@@ -764,6 +796,8 @@ struct RaySetup {
     size: [usize; 3],
     approx_tol: f64,
     surfaces: Vec<RaySurface>,
+    /// The tracer built for the first ray, kept for the later rays.
+    prebuilt: Option<PrebuiltTracer>,
 }
 
 /// A hidden curve removal object (`SmHCR`).
@@ -1619,6 +1653,7 @@ impl Hcr {
                 size,
                 approx_tol: self.approx_tol_3d,
                 surfaces: Vec::new(),
+                prebuilt: None,
             };
             let z_vector = Vec3::new(0.0, 0.0, -1.0);
             for f in surfaces {
@@ -1672,6 +1707,58 @@ impl Hcr {
             self.ray = Some(setup);
         }
 
+        // The tracer is built for the first ray and kept, as upstream keeps
+        // `m_pRayTracer`. It borrows the surfaces, so each ray gets a new one over a copy
+        // of the first one's grid, with the same surfaces registered in the same order;
+        // FireRay re-marks the grid per call (Setup3DDDA).
+        if self.ray.as_ref().is_some_and(|s| s.prebuilt.is_none()) {
+            let prebuilt = self.prebuild_tracer(k)?;
+            if let Some(setup) = self.ray.as_mut() {
+                setup.prebuilt = Some(prebuilt);
+            }
+        }
+        let setup = self.ray.as_ref().ok_or(undefined("ray tracer"))?;
+        let prebuilt = setup.prebuilt.as_ref().ok_or(undefined("ray tracer"))?;
+        let mut tracer = RayTracer::new(prebuilt.grid.clone(), setup.approx_tol, 1.0e-10);
+        tracer.set_solver_tolerance(setup.approx_tol); // [B387]
+        let classifier = SceneFaceClassifier {
+            scene: &self.scene,
+            faces: prebuilt.faces.clone(),
+        };
+        tracer.set_face_classifier(&classifier);
+        for &i in &prebuilt.registered {
+            let s = setup
+                .surfaces
+                .get(i)
+                .ok_or(undefined("ray tracer surface"))?;
+            tracer.register_surface(ray_surface(&self.scene, s)?);
+        }
+
+        // create a ray segment [rayEnd RayStart], and rayVec = [0 0 -1]
+        let mut ray_end = point;
+        ray_end.z += self.ray_offset_tolerance;
+        let ray_vec = Vec3::new(0.0, 0.0, -1.0);
+        let max_distance = 2.0 * (self.proj_bbox.max().z - self.proj_bbox.min().z);
+        let mut ray_start = ray_end;
+        ray_start.z += max_distance;
+
+        match tracer.fire_ray(k, ray_start, ray_vec, max_distance) {
+            Ok(hit) => Ok(!hit.hits_something),
+            Err(err) if err.is_unported() => Err(err),
+            // signal an error and guess that the point is visible
+            Err(_) => Ok(true),
+        }
+    }
+
+    /// The caches [`Hcr::is_point_visible`]'s tracer lists, one per ray surface (`None`
+    /// for one whose cache or tree fails), and the scene face of each listed one, built
+    /// once from the scene as it is on the first ray (`AddSurfaceToGrid` of each surface
+    /// of `m_pRayTracer`).
+    ///
+    /// # Errors
+    ///
+    /// Those of the scene surfaces and the cache builds.
+    fn build_ray_caches(&mut self, k: &Kernel) -> Result<RayCaches> {
         let setup = self.ray.as_ref().ok_or(undefined("ray tracer"))?;
         // Each surface's cache is built before the tracer borrows the surfaces: a
         // face-owned surface builds its trimmed cache through its face, which may
@@ -1731,28 +1818,33 @@ impl Hcr {
             }
         }
 
-        // The tracer borrows the surfaces, so it is rebuilt per ray: FireRay re-marks the
-        // grid per call (Setup3DDDA), at O(surfaces) extra cost per ray. `Grid::new`
-        // fails only for a zero voxel count, which the sizes above exclude (upstream
-        // `new SmGrid` cannot fail).
+        Ok((caches, listed_faces))
+    }
+
+    /// [`Hcr::is_point_visible`]'s tracer as the first ray builds it (`m_pRayTracer`):
+    /// the grid over the ray box, each listed surface added with its cache
+    /// ([`Hcr::build_ray_caches`]; `AddSurfaceToGrid`, its status ignored), and which
+    /// surfaces it registered.
+    ///
+    /// # Errors
+    ///
+    /// Those of the cache builds; `Grid::new` fails only for a zero voxel count, which
+    /// the sizes exclude (upstream `new SmGrid` cannot fail).
+    fn prebuild_tracer(&mut self, k: &Kernel) -> Result<PrebuiltTracer> {
+        let (caches, listed_faces) = self.build_ray_caches(k)?;
+        let setup = self.ray.as_ref().ok_or(undefined("ray tracer"))?;
         let grid = Grid::new(&setup.bbox, setup.size)?;
         let mut tracer = RayTracer::new(grid, setup.approx_tol, 1.0e-10);
         tracer.set_solver_tolerance(setup.approx_tol); // [B387]
         let classifier = SceneFaceClassifier {
             scene: &self.scene,
-            faces: listed_faces,
+            faces: listed_faces.clone(),
         };
         tracer.set_face_classifier(&classifier);
-        for (s, cache) in setup.surfaces.iter().zip(caches) {
-            let surface = match *s {
-                RaySurface::Face(f) => self
-                    .scene
-                    .face(f)?
-                    .surface
-                    .as_ref()
-                    .ok_or(undefined("face without surface"))?,
-                RaySurface::Owned(ref s) => &**s,
-            };
+        let mut registered = Vec::new();
+        for (i, (s, cache)) in setup.surfaces.iter().zip(caches).enumerate() {
+            let surface = ray_surface(&self.scene, s)?;
+            let before = tracer.surfaces().len();
             match cache {
                 Some(ListedCache::Fetched(cache)) => {
                     ignore_status(tracer.add_surface_with_fetched_cache(k, surface, cache))?;
@@ -1762,22 +1854,15 @@ impl Hcr {
                 }
                 None => {}
             }
+            if tracer.surfaces().len() > before {
+                registered.push(i);
+            }
         }
-
-        // create a ray segment [rayEnd RayStart], and rayVec = [0 0 -1]
-        let mut ray_end = point;
-        ray_end.z += self.ray_offset_tolerance;
-        let ray_vec = Vec3::new(0.0, 0.0, -1.0);
-        let max_distance = 2.0 * (self.proj_bbox.max().z - self.proj_bbox.min().z);
-        let mut ray_start = ray_end;
-        ray_start.z += max_distance;
-
-        match tracer.fire_ray(k, ray_start, ray_vec, max_distance) {
-            Ok(hit) => Ok(!hit.hits_something),
-            Err(err) if err.is_unported() => Err(err),
-            // signal an error and guess that the point is visible
-            Err(_) => Ok(true),
-        }
+        Ok(PrebuiltTracer {
+            grid: tracer.grid().clone(),
+            registered,
+            faces: listed_faces,
+        })
     }
 
     /// Splits `cc` at the projections along the view vector of the silhouette vertices
