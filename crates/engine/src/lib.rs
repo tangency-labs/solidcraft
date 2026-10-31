@@ -644,12 +644,24 @@ impl Session {
         // The session keeps what is hidden (an undo step of its own); the design file carries it.
         let visibility = std::mem::take(&mut doc.visibility);
         let doc = Arc::new(doc);
+        let saved = saved.filter(|_| solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none());
         let adopted = saved
-            .filter(|_| solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none())
+            .filter(|saved| saved.has_model())
             .and_then(|saved| Model::adopt(&doc, saved).map_err(|e| log::info!("the saved model is not used: {e}")).ok());
         let model = adopted.unwrap_or_else(|| {
             let mut model = Model::new();
+            // The STEP imports the file keeps, read by this build's importer: evaluating the
+            // timeline again does not read those files again (#9456).
+            if let Some(saved) = saved {
+                model.take_imports(saved);
+            }
             model.evaluate_shared(&doc);
+            if model.imports.reused() > 0 {
+                log::info!(
+                    "the design was saved by another version of SolidCraft: evaluated again, {} STEP imports taken from the file",
+                    model.imports.reused()
+                );
+            }
             model
         });
         Session {

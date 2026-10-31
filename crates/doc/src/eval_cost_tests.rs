@@ -686,6 +686,7 @@ fn saved_states_read_back_their_sketch_keys() {
             r
         },
         bodies: saved.bodies.clone(),
+        imports: Default::default(),
     };
     let first = *model.state().sketch_keys.keys().next().unwrap();
     let dropped = with_sets(serde_json::json!([

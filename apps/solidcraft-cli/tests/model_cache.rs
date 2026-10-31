@@ -149,6 +149,58 @@ fn imported_assemblies_open_from_their_model_as_evaluated() {
     check("imported hinge", s);
 }
 
+/// #9456: a design whose model was computed by another evaluation source (saved by another
+/// release) evaluates its timeline again, but takes its STEP imports from the file when this
+/// build's importer read them: the same model as one that reads the files again, bodies to the
+/// bit, after an edit too. A save then keeps those imports without reading them.
+#[test]
+fn a_design_evaluated_again_takes_its_imports_from_the_file() {
+    let mut source = Session::default();
+    let hinge = solidcraft_engine::sample::samples().into_iter().find(|s| s.name == "Hinge Assembly").unwrap();
+    for c in (hinge.script)()["commands"].as_array().unwrap() {
+        source.execute(c["command"].as_str().unwrap(), &c["params"]).unwrap();
+    }
+    let step = std::env::temp_dir().join(format!("solidcraft-model-cache-{}-imports.step", std::process::id()));
+    source.execute("file.export", &json!({"path": step.to_string_lossy()})).unwrap();
+    let mut built = Session::default();
+    built.execute("file.insert_step", &json!({"path": step.to_string_lossy()})).unwrap();
+    built.execute("file.insert_step", &json!({"path": step.to_string_lossy(), "matrix": [1, 0, 0, 200, 0, 1, 0, 0, 0, 0, 1, 0]})).unwrap();
+    let _ = std::fs::remove_file(&step);
+    let design = built.design();
+    // The file another release's save leaves to this build: the imports, a model it cannot use.
+    let imports = SavedModel::imports_only(built.model.saved_imports(&design));
+    assert_eq!(imports.imports.digests.len(), 1, "both features import the same text");
+    assert_eq!(imports.imports.read.len(), 1, "read in this session");
+    let bytes =
+        solidcraft_engine::io::write_design_container_with_cache(&design, solidcraft_engine::io::DesignCompression::Fast, None, Some(&imports))
+            .unwrap();
+    assert!(solidcraft_engine::io::read_design_geometry(&bytes).is_none());
+    let kept = solidcraft_engine::io::DesignContainerReader::new(std::io::Cursor::new(&bytes)).unwrap().geometry().unwrap();
+    assert!(kept.imports.stored.as_ref().is_some_and(|s| s.has(&imports.imports.digests[0])), "the file keeps the import");
+    let path = temp("imports");
+    std::fs::write(&path, &bytes).unwrap();
+    let mut cached = open(&path);
+    assert!(cached.model.recomputed > 0, "evaluated again");
+    assert_eq!(cached.model.imports.reused(), 1, "the import taken from the file");
+    let mut rebuilt = Session::new(solidcraft_engine::io::read_design(&bytes).unwrap());
+    assert_eq!(rebuilt.model.imports.reused(), 0);
+    assert_eq!(model("imports", &cached), model("imports", &rebuilt), "evaluated with the file's import");
+    edit(&mut cached);
+    edit(&mut rebuilt);
+    assert_eq!(model("imports", &cached), model("imports", &rebuilt), "after the same edit");
+    // Saved now, it keeps the model and the import; opened again, nothing is evaluated.
+    cached.execute("file.save", &json!({})).unwrap();
+    let reopened = open(&path);
+    assert_eq!(reopened.model.last_recomputed, 0);
+    // A model taken from the file keeps the file's import for its next save, unread.
+    let saved = reopened.model.saved(&reopened.design()).unwrap();
+    assert_eq!(saved.imports.digests.len(), 1);
+    assert!(saved.imports.read.is_empty());
+    assert!(saved.imports.stored.as_ref().is_some_and(|s| s.has(&saved.imports.digests[0])));
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(format!("{}.bak", path.display()));
+}
+
 /// `built` saved with `saved`, a model of it that keeps only some states (as a file without room
 /// for all of them does, #3220), opens as the design evaluated again: evaluating just the
 /// features whose state the file left out, then after suppressing a feature at, before or after

@@ -7,7 +7,7 @@ use super::*;
 use solidcraft_doc::{ModelState, SavedModel};
 
 const FORMAT: &str = "solidcraft-model-cache/5";
-const PRODUCER: &str = "solidcraft-truck-adapter/3";
+pub(super) const PRODUCER: &str = "solidcraft-truck-adapter/3";
 const MANIFEST: &str = "cache/model.json";
 const PAYLOAD: &str = "cache/bodies.bin";
 /// Body records (a placed copy is one record; its part is stored once).
@@ -17,7 +17,7 @@ const MAX_UNIQUE: usize = 100_000;
 const MAX_MANIFEST: usize = 32 << 20;
 
 /// The build that wrote a cache (recorded; earlier builds read only their own caches).
-fn build() -> String {
+pub(super) fn build() -> String {
     format!("{}/{}-{}", env!("SOLIDCRAFT_SOURCE_COMMIT"), std::env::consts::ARCH, std::env::consts::OS)
 }
 
@@ -388,7 +388,7 @@ pub(super) fn read_geometry_with<R: Read + Seek>(reader: &mut PackageReader<R>, 
         bodies.push(b);
     }
     let records = manifest.get_mut("model").map(Value::take).ok_or_else(|| invalid("cached model"))?;
-    Ok(SavedModel { records, bodies })
+    Ok(SavedModel { records, bodies, imports: Default::default() })
 }
 
 /// A 4 x 4 matrix from its 16 numbers in storage order, finite.

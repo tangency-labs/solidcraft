@@ -546,11 +546,10 @@ impl Session {
 
 /// The evaluated model a save keeps, so opening need not rebuild it: only the finished evaluation
 /// of `design`, the document saved (no sketch being edited, no uncaptured moves, no feature errors).
+/// Without the model, the STEP imports alone, which do not depend on the rest (#9456).
 fn saved_geometry(s: &Session, design: &Document) -> Option<solidcraft_doc::SavedModel> {
-    if s.active_sketch.is_some() || !s.pending_moves.is_empty() || s.model.state().bodies.is_empty() {
-        return None;
-    }
-    s.model.saved(design)
+    let model = (s.active_sketch.is_none() && s.pending_moves.is_empty() && !s.model.state().bodies.is_empty()).then(|| s.model.saved(design));
+    model.flatten().or_else(|| Some(solidcraft_doc::SavedModel::imports_only(s.model.saved_imports(design))).filter(|m| !m.imports.is_empty()))
 }
 
 /// Cache only warm display geometry. A save never waits for an unevaluated mesh.

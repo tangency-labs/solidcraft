@@ -1314,6 +1314,8 @@ pub struct Model {
     placement_inputs: Option<placement_reuse::Inputs>,
     /// All evaluated features use supported local inputs; computed with the existing owner index.
     placement_local: bool,
+    /// The STEP imports the features read, and those the design file kept (#9456).
+    pub imports: Arc<crate::ImportResults>,
 }
 
 /// Parameters a feature uses directly (inputs, sketch dimensions and the expressions of a
@@ -2323,7 +2325,7 @@ impl Model {
             let (r, mut boolean_diagnostics) = kernel::capture_boolean_diagnostics(|| match bad_param {
                 Some(e) => Err(kernel::KernelError::Failed(e)),
                 None => kernel::guard(&f.name, || {
-                    eval_feature(doc, &vals, f, &mut next, &mut warning).map_err(|e| kernel::KernelError::Failed(e.to_string()))
+                    eval_feature(doc, &vals, f, &mut next, &mut warning, &self.imports).map_err(|e| kernel::KernelError::Failed(e.to_string()))
                 }),
             });
             if r.is_ok() {
@@ -7173,7 +7175,14 @@ fn chamfer_with(
     })
 }
 
-fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
+fn eval_feature(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &mut ModelState,
+    warning: &mut Option<String>,
+    imports: &crate::ImportResults,
+) -> Result<()> {
     // Its tools meet bodies in other placements where those are shown (#3383).
     let _frames = ToolFrames::install(doc, f, st);
     match &f.kind {
@@ -7979,8 +7988,8 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             Ok(())
         }
         FeatureKind::Import { step, skip, .. } => {
-            let imp = kernel::step_import_shared(step)?;
             let digest = crate::config::payload_digest(step);
+            let imp = imports.import(&digest, step)?;
             let names = import_body_names(st, &f.body_names, &imp, skip);
             for (k, (b, name)) in imp.bodies.iter().zip(names).enumerate() {
                 let Some(name) = name else { continue };
