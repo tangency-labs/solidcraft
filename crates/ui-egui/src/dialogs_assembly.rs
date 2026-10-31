@@ -133,6 +133,7 @@ pub type Hover = Option<(Sel, Option<SnapPt>)>;
 /// The Joint and As-built Joint dialogs.
 #[derive(Clone, Debug)]
 pub struct JointForm {
+    pub name: String,
     pub as_built: bool,
     /// Editing this joint (its origins stay; type, alignment and limits change).
     pub editing: Option<u64>,
@@ -158,6 +159,7 @@ pub struct JointForm {
 impl JointForm {
     fn new(as_built: bool, doc: &solidcraft_engine::doc::Document) -> JointForm {
         JointForm {
+            name: String::new(),
             as_built,
             editing: None,
             kind: 0,
@@ -424,11 +426,20 @@ fn nearest_pick(own: &[&solidcraft_engine::doc::ModelBody], p: Vec3, edges: bool
     best.map(|(_, sel)| sel)
 }
 
+/// Default name for a new joint based on its type (e.g. "Planar Joint1", "Revolute Joint1").
+pub(crate) fn default_joint_name(doc: &solidcraft_engine::doc::Document, kind: JointKind) -> String {
+    let prefix = format!("{} Joint", kind_label(kind));
+    let names: std::collections::BTreeSet<_> = doc.assembly.joints.iter().map(|j| j.name.as_str()).collect();
+    let number = (1..=doc.assembly.joints.len().saturating_add(1)).find(|n| !names.contains(format!("{prefix}{n}").as_str())).unwrap_or(1);
+    format!("{prefix}{number}")
+}
+
 /// The Edit Joint dialog for a joint (by id). Its two sides show as the Joint dialog's do, each
 /// pre-filled with the pick it sits on.
 pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let j = app.session.doc.assembly.joints.iter().find(|j| j.id == id)?;
     let mut f = JointForm::new(false, &app.session.doc);
+    f.name = j.name.clone();
     f.editing = Some(id);
     f.sides = [side_pick(app, &j.a), side_pick(app, &j.b)];
     let mut inputs = side_inputs();
@@ -685,6 +696,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 ui.label("");
             });
             choice_row(ui, "Type", "jt_type", &mut f.kind, &TYPE_LABELS);
+            let hint = default_joint_name(&app.session.doc, f.joint_kind());
+            enter |= text_row(ui, "Name", &mut f.name, &hint).0;
             f.fit_limits(&app.session.doc);
             if !f.as_built {
                 enter |= expr_row(ui, "Angle", &mut f.angle);
@@ -1077,10 +1090,14 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
         Asm::Joint(f) => {
             let kind = TYPES.get(f.kind).copied().unwrap_or("rigid");
             let jk = f.joint_kind();
+            let custom_name = f.name.trim();
             let limits: Vec<Value> =
                 f.limits.iter().take(jk.dofs().len()).map(|(on, lo, hi)| if *on { json!([lo, hi]) } else { Value::Null }).collect();
             if let Some(id) = f.editing {
                 let mut p = json!({"joint": id, "type": kind, "flip": f.flip, "offset": f.offset[2]});
+                if !custom_name.is_empty() {
+                    p["name"] = json!(custom_name);
+                }
                 // The angle only when the user changed it: a side moved without it turns B as joint.create would.
                 if f.angle != f.angle_shown {
                     p["angle"] = json!(f.angle);
@@ -1109,6 +1126,9 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
                     return Err("select two components".into());
                 }
                 let mut p = json!({"type": kind, "a": occs.first(), "b": occs.get(1), "limits": limits});
+                if !custom_name.is_empty() {
+                    p["name"] = json!(custom_name);
+                }
                 if let Some(x) = sel_items(inputs, 1).first().and_then(|x| snap_of(s, x)) {
                     p["at"] = x.param;
                 }
@@ -1123,7 +1143,10 @@ pub fn commands(app: &SolveApp, k: &Asm, inputs: &[SelInput]) -> Result<Vec<(Str
             // Picked origins mate by default (the engine's default: B's z opposite A's, faces
             // meet face to face, a pin goes into its hole); the dialog's Flip is the command's
             // `flip`, which turns B the other way.
-            let p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip, "offset": f.offset[2], "angle": f.angle, "limits": limits});
+            let mut p = json!({"type": kind, "a": a_param, "b": b.param, "flip": f.flip, "offset": f.offset[2], "angle": f.angle, "limits": limits});
+            if !custom_name.is_empty() {
+                p["name"] = json!(custom_name);
+            }
             cmd("joint.create", p)
         }
         Asm::JointOrigin { name, .. } => {
