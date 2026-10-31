@@ -768,13 +768,19 @@ fn face_box(f: &mt::Face, tol: f64) -> Option<Aabb3> {
 /// each other (the tops of two posts standing on one floor) don't coincide: they need no
 /// pushing apart. A face whose extent can't be found counts as meeting every face in its plane.
 pub(crate) fn coincident_planes(a: &Body, b: &Body) -> Vec<(Vec3, f64, bool)> {
+    let tol = (a.size().max(b.size()) * 1e-7).max(1e-9) * 10.0;
+    planes_within(a, b, tol).into_iter().map(|(n, d, same, _)| (n, d, same)).collect()
+}
+
+/// [`coincident_planes`] for faces up to `tol` apart, each with the offset along the normal of
+/// the plane `b`'s face lies in.
+fn planes_within(a: &Body, b: &Body, tol: f64) -> Vec<(Vec3, f64, bool, f64)> {
     let size = a.size().max(b.size());
-    let tol = (size * 1e-7).max(1e-9) * 10.0;
     let sample = (size * 1e-4).max(tol);
     let (fa, fb): (Vec<&mt::Face>, Vec<&mt::Face>) = (a.solid.face_iter().collect(), b.solid.face_iter().collect());
     let (pa, pb) = (planes(a), planes(b));
     let (mut boxes_a, mut boxes_b): (Vec<Option<Option<Aabb3>>>, Vec<Option<Option<Aabb3>>>) = (vec![None; fa.len()], vec![None; fb.len()]);
-    let mut found: Vec<(Vec3, f64, bool)> = Vec::new();
+    let mut found: Vec<(Vec3, f64, bool, f64)> = Vec::new();
     for (ia, x) in &pa {
         for (ib, y) in &pb {
             let cos = x.n.dot(y.n);
@@ -782,14 +788,14 @@ pub(crate) fn coincident_planes(a: &Body, b: &Body) -> Vec<(Vec3, f64, bool)> {
                 continue;
             }
             let same = cos > 0.0;
-            if found.iter().any(|(n, d, s)| *s == same && n.dot(x.n) > 1.0 - 1e-9 && (d - x.d).abs() < tol) {
+            if found.iter().any(|(n, d, s, _)| *s == same && n.dot(x.n) > 1.0 - 1e-9 && (d - x.d).abs() < tol) {
                 continue;
             }
             let ba = boxes_a.get_mut(*ia).and_then(|b| *b.get_or_insert_with(|| fa.get(*ia).and_then(|f| face_box(f, sample))));
             let bb = boxes_b.get_mut(*ib).and_then(|b| *b.get_or_insert_with(|| fb.get(*ib).and_then(|f| face_box(f, sample))));
             // Each box is within `sample` of its face.
             if !ba.zip(bb).is_some_and(|(p, q)| boxes_separate(p, q, 2.0 * sample)) {
-                found.push((x.n, x.d, same));
+                found.push((x.n, x.d, same, y.d * cos));
             }
         }
     }
@@ -817,6 +823,49 @@ pub(crate) fn boolean_grown(a: &Body, b: &Body, op: BoolOp) -> Option<Result<Opt
     }
     let (pa, pb) = (crate::planar_faces::planarized(a), crate::planar_faces::planarized(b));
     apart_with(pa.as_ref().unwrap_or(a), pb.as_ref().unwrap_or(b), op, true)
+}
+
+/// A join of faces that point the same way and lie a hair out of one plane (a prism's bottom 1e-4 above a slab's), which
+/// the general boolean failed on: the inner face is moved out into the outer one's plane where points sampled on it, moved
+/// half the gap out, lie in the other body, and the faces, now coincident, are pushed apart as in [`boolean_apart`]. What
+/// the move adds lies between the two planes, under 1e-5 of the smaller body's size thick; the caller's checks and the
+/// retry guard bound its volume. A face that can't be moved, or whose samples leave the other body, stays. Asked after the
+/// general boolean's tries and the exact planar and prism routes have failed, before the nudge: the nudge's result here
+/// passes the caller's checks and only the outer retry guard refuses it, so a later slot is never reached. `None` when no
+/// face is moved.
+pub(crate) fn boolean_near(a: &Body, b: &Body) -> Option<Result<Option<Body>>> {
+    let small = a.size().min(b.size());
+    // Faces closer than this (1e-7 of the smaller body's size) are left in place, as already in one plane.
+    let tol = (small * 1e-7).max(1e-9);
+    let (mut a2, mut b2) = (a.clone(), b.clone());
+    let (mut ha, mut hb) = (crate::boolean_record::kept(a, 0, 1), crate::boolean_record::kept(b, 0, 1));
+    let mut moved = false;
+    for (n, d, same, e) in planes_within(a, b, small * 1e-5) {
+        let gap = e - d;
+        if !same || gap.abs() <= tol {
+            continue;
+        }
+        // The face further in along n, its plane, its history, and the other body.
+        let (x, at, h, other) = if gap > 0.0 { (&mut a2, d, &mut ha, b) } else { (&mut b2, e, &mut hb, a) };
+        if !backed(other, x, n, at, gap.abs() * 0.5) {
+            continue;
+        }
+        let Ok(pushed) = push_faces(x, n, at, gap.abs()) else { continue };
+        *h = crate::boolean_record::through(&pushed, 0, h.as_ref());
+        *x = pushed;
+        moved = true;
+    }
+    if !moved {
+        return None;
+    }
+    let counts = record::counts(&[a, b]);
+    let (ha, hb) = (crate::boolean_record::placed(ha, 0, 2), crate::boolean_record::placed(hb, 1, 2));
+    Some(apart_with(&a2, &b2, BoolOp::Union, false)?.map(|r| {
+        r.map(|r| {
+            let h = crate::boolean_record::of_pair(&r, &ha, &hb);
+            r.with_checked_history(h, &counts)
+        })
+    }))
 }
 
 fn apart_with(a: &Body, b: &Body, op: BoolOp, grow: bool) -> Option<Result<Option<Body>>> {

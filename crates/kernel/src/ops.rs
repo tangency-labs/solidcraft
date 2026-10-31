@@ -1766,6 +1766,30 @@ where
         }
         last = format!("{last}; the prisms joined in 2D gave an implausible volume {v:.4}");
     }
+    // A join of faces pointing the same way a hair out of one plane (a prism's bottom 1e-4 above a slab's): the general
+    // boolean fails on them, and the nudge below moves the tool by about as much as they are apart. The inner face is
+    // moved out into the other's plane where sampled points say the other body holds that layer, and the faces are
+    // pushed apart. Before the nudge: its result passes `check` here and only the outer retry guard refuses it.
+    if op == BoolOp::Union && !APART.with(|c| c.get()) {
+        APART.with(|c| c.set(true));
+        let (r, diagnostics) = capture_boolean_diagnostics(|| crate::coplanar::boolean_near(a, b));
+        APART.with(|c| c.set(false));
+        match r {
+            Some(Ok(Some(body))) => {
+                let (ok, v) = check(&body);
+                if ok {
+                    merge(diagnostics);
+                    let mut event = BooleanFallback::new(BooleanStrategy::CoplanarSeparation);
+                    event.face_shift_mm = size * 0.0229;
+                    record(event);
+                    return Ok(Some(body));
+                }
+                last = format!("{last}; faces moved into one plane gave an implausible volume {v:.4}");
+            }
+            Some(Err(e)) => last = format!("{last}; {e}"),
+            Some(Ok(None)) | None => {}
+        }
+    }
     // Last resort: nudge the tool by a micron-scale screw motion (turned 2e-6 rad about a
     // skew axis and moved 2e-6 of the size), which breaks tangencies and seams lying exactly on
     // the other body. The result moves by no more than that.
