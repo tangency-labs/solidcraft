@@ -352,11 +352,7 @@ pub(crate) fn text_emphasis(ui: &mut Ui, bold: &mut bool, italic: &mut bool, bol
         if !enabled {
             *value = false;
         }
-        let mut response = ui
-            .add_enabled_ui(enabled, |ui| {
-                ui.toggle_value(value, text).on_hover_text(crate::i18n::tr(id))
-            })
-            .inner;
+        let mut response = ui.add_enabled_ui(enabled, |ui| ui.toggle_value(value, text).on_hover_text(crate::i18n::tr(id))).inner;
         if !enabled {
             response = response.on_disabled_hover_text(crate::i18n::tr("sketch_text.no_bold"));
         }
