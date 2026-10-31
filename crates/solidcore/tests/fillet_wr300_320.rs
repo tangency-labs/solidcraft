@@ -7,6 +7,7 @@
     clippy::panic,
     clippy::indexing_slicing
 )] // test helpers
+use solidcore::blend::fillet_executive::p3::NoRoomReason;
 use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::blend::fillet_geom::p1::FilletErrorType;
 use solidcore::blend::fillet_standard_solver::p1::FilletLaw;
@@ -442,4 +443,58 @@ fn chamfer_as_wide_as_its_face_is_refused() {
             );
         }
     }
+}
+
+// ---- #960: the refusals named, not only commented ----
+
+/// What a refused blend's error info names (`ErrorInfo::no_room_reason`).
+fn no_room_reason(
+    k: &mut Kernel,
+    b: &mut Brep,
+    edges: &[EdgeId],
+    size: f64,
+) -> Option<NoRoomReason> {
+    let mut session = FilletSession::new(k, b).unwrap();
+    session
+        .prepare_constant_radius_edges(k, edges, size, 0, 1, 1.0)
+        .unwrap();
+    assert!(session.do_fillet(k).is_err(), "size {size}: built");
+    session.error_info().no_room_reason()
+}
+
+/// The `NoRoom` refusals name themselves (#960): a rail leaving its face (the holed cube's
+/// blend of 6) and a blend taking a whole face (the cylinder's chamfer of 10), where the
+/// comment was the only difference; a refusal under another code names none.
+#[test]
+fn no_room_refusals_are_named() {
+    let mut k = kernel(|f| f.fillet_refuse_rails_leaving_faces = true);
+    let mut b = holed_cube(&mut k);
+    let e = edge_between(&k, &b, [0.0, 0.0, 20.0], [20.0, 0.0, 20.0]);
+    assert_eq!(
+        no_room_reason(&mut k, &mut b, &[e], 6.0),
+        Some(NoRoomReason::RailLeavesFace)
+    );
+
+    let mut k = kernel(|f| f.fillet_refuse_face_consuming_blends = true);
+    let mut b = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 20.0).unwrap();
+    let rim = *b
+        .edge_list()
+        .iter()
+        .find(|&&e| {
+            let c = edge::curve(&b, e).unwrap().unwrap();
+            let ivl = edge::interval(&b, e).unwrap();
+            let p = c.evaluate_point(&k, ivl.min()).unwrap();
+            (p.z - 20.0).abs() < 1e-6 && (p.x.hypot(p.y) - 10.0).abs() < 1e-6
+        })
+        .unwrap();
+    assert_eq!(
+        no_room_reason(&mut k, &mut b, &[rim], 10.0),
+        Some(NoRoomReason::FaceConsumed)
+    );
+
+    // the rim-rollover failure of the holed cube's blend of 5 (SM_FILERR_EDGE_PROBLEM)
+    let mut k = Kernel::default();
+    let mut b = holed_cube(&mut k);
+    let e = edge_between(&k, &b, [0.0, 0.0, 20.0], [20.0, 0.0, 20.0]);
+    assert_eq!(no_room_reason(&mut k, &mut b, &[e], 5.0), None);
 }
