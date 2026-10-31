@@ -31,6 +31,13 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::text(ui, app.tr("prefs.graphics_card_restart"), ui_kit::Text::Hint("graphics_card_restart"));
             if missing {
                 ui_kit::text(ui, app.tr("prefs.graphics_card_missing"), ui_kit::Text::Hint("graphics_card_missing"));
+            } else if !app.preferences.graphics_adapter.is_empty() {
+                // Status / Help show the adapter actually in use; the dropdown shows the saved
+                // preference. When they differ the saved card was not applied (#8341).
+                let active = app.viewport.adapter.rsplit(" · ").next().unwrap_or("");
+                if !active.is_empty() && !active.eq_ignore_ascii_case(&app.preferences.graphics_adapter) {
+                    ui_kit::text(ui, app.tr("prefs.graphics_card_unused"), ui_kit::Text::Hint("graphics_card_unused"));
+                }
             }
         });
     }

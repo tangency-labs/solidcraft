@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.graphics_card_unused": "The saved graphics card was not used for this window; the card in use is shown in Help › About and in the status line. Try Automatic, or set WGPU_ADAPTER_NAME to a unique part of the card's name."
+  },
+  "ar": {
+    "prefs.graphics_card_unused": "لم تُستخدم بطاقة الرسوميات المحفوظة لهذه النافذة؛ البطاقة المستخدمة تظهر في مساعدة › حول وفي شريط الحالة. جرّب تلقائي، أو عيّن WGPU_ADAPTER_NAME إلى جزء فريد من اسم البطاقة."
+  },
+  "de": {
+    "prefs.graphics_card_unused": "Die gespeicherte Grafikkarte wurde für dieses Fenster nicht verwendet; die tatsächlich genutzte Karte steht unter Hilfe › Info und in der Statuszeile. Versuchen Sie Automatisch, oder setzen Sie WGPU_ADAPTER_NAME auf einen eindeutigen Teil des Kartennamens."
+  },
+  "he": {
+    "prefs.graphics_card_unused": "כרטיס המסך השמור לא שימש לחלון זה; הכרטיס שבשימוש מוצג בעזרה › אודות ובשורת המצב. נסו אוטומטי, או הגדירו את WGPU_ADAPTER_NAME לחלק ייחודי משם הכרטיס."
+  },
+  "ja": {
+    "prefs.graphics_card_unused": "保存したグラフィックスカードはこのウィンドウでは使われていません。使用中のカードは「ヘルプ › SolidCraft について」とステータス行に表示されます。自動を試すか、カード名の一意な部分を WGPU_ADAPTER_NAME に設定してください。"
+  },
+  "vi": {
+    "prefs.graphics_card_unused": "Card đồ họa đã lưu không được dùng cho cửa sổ này; card đang dùng hiện trong Trợ giúp › Giới thiệu và trên dòng trạng thái. Thử Tự động, hoặc đặt WGPU_ADAPTER_NAME thành phần tên card mang tính duy nhất."
+  },
+  "zh": {
+    "prefs.graphics_card_unused": "已保存的显卡未用于此窗口；实际使用的显卡显示在“帮助 › 关于”和状态栏中。请尝试“自动”，或将 WGPU_ADAPTER_NAME 设为显卡名称中的唯一部分。"
+  },
+  "zh-TW": {
+    "prefs.graphics_card_unused": "已儲存的顯示卡未用於此視窗；實際使用的顯示卡顯示在「說明 › 關於」和狀態列中。請嘗試「自動」，或將 WGPU_ADAPTER_NAME 設為顯示卡名稱中的唯一部分。"
+  }
+}
