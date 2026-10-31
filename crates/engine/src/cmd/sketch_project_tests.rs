@@ -1198,3 +1198,76 @@ fn a_thicker_angle_moves_the_projected_face_of_the_sketch_on_it() {
     check(&s);
     check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
 }
+
+/// A 40 × 30 × 10 box and a sketch on its top face with the face projected. Returns the
+/// session, the sketch, the projected top edge along y = 0 and the projected corner (40, 0).
+fn projected_top() -> (Session, u64, String, String) {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"body_name":"B"}));
+    let id = run(&mut s, "sketch.create", json!({"plane":"XY","offset":10}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs":[{"body":"B","face":[5,5,10]}]}));
+    let sk = s.doc.sketch(id).unwrap();
+    let edge = sk
+        .curves
+        .iter()
+        .enumerate()
+        .find(|(i, c)| {
+            c.link.is_some()
+                && matches!(sk.curve_link_geom(*i), Some(solidcraft_sketch::LinkGeom::Line(a, b)) if a.y.abs() < 1e-9 && b.y.abs() < 1e-9)
+        })
+        .unwrap()
+        .1
+        .id
+        .clone();
+    let corner = sk.points.iter().find(|p| p.link.is_some() && (p.pos.x - 40.0).abs() < 1e-9 && p.pos.y.abs() < 1e-9).unwrap().id.clone();
+    (s, id, edge, corner)
+}
+
+#[test]
+fn constraints_on_a_projection_survive_a_rebuild_of_its_source() {
+    let (mut s, id, edge, corner) = projected_top();
+    run(&mut s, "sketch.point", json!({"point":[12,3],"id":"on_edge"}));
+    run(&mut s, "sketch.point", json!({"point":[38,2],"id":"at_corner"}));
+    let kept = run(&mut s, "sketch.constraint.coincident", json!({"a":"on_edge","b":edge}))["constraint"].as_str().unwrap().to_string();
+    let lost = run(&mut s, "sketch.constraint.coincident", json!({"a":"at_corner","b":corner}))["constraint"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    // A chamfer on the corner's vertical edge, moved before the sketch: the face changes shape.
+    let chamfer = run(&mut s, "solid.chamfer", json!({"edges":[[40,0,5]],"distance":2}))["feature"].as_u64().unwrap();
+    let at = s.doc.features.iter().position(|f| f.id == id).unwrap();
+    run(&mut s, "timeline.reorder", json!({"feature":chamfer,"position":at}));
+    let state = s.model.state();
+    let sk = &state.sketch(id).unwrap().sketch;
+    assert!(sk.constraints.iter().any(|c| c.id == kept), "the point stays on the shortened edge");
+    assert!(!sk.constraints.iter().any(|c| c.id == lost), "the corner is gone");
+    let p = sk.point(sk.point_index("on_edge").unwrap()).unwrap();
+    assert!(p.y.abs() < 1e-6, "{p:?}");
+    let warning = s.model.result(id).and_then(|r| r.warning.clone()).unwrap_or_default();
+    assert!(warning.contains(&lost) && warning.contains("removed 1 constraint"), "{warning}");
+}
+
+#[test]
+fn constraints_only_between_projections_are_explained_not_stored() {
+    let (mut s, id, edge, corner) = projected_top();
+    let count = s.doc.sketch(id).unwrap().constraints.len();
+    // The opposite corner: no line joins it to `corner`.
+    let other = s
+        .doc
+        .sketch(id)
+        .unwrap()
+        .points
+        .iter()
+        .find(|p| p.link.is_some() && p.pos.x.abs() < 1e-9 && (p.pos.y - 30.0).abs() < 1e-9)
+        .unwrap()
+        .id
+        .clone();
+    let e = s.execute("sketch.constraint.coincident", &json!({"a":corner,"b":other})).unwrap_err().to_string();
+    assert!(e.contains("only between projections"), "{e}");
+    let r = run(&mut s, "sketch.constraint.fix", json!({"entity":edge}));
+    assert!(r["result"]["note"].as_str().is_some_and(|n| n.contains("always fixed")), "{r}");
+    let e = s.execute("sketch.dimension", &json!({"entities":[edge]})).unwrap_err().to_string();
+    assert!(e.contains("only projected geometry") && !e.contains("conflicts with k"), "{e}");
+    assert_eq!(s.doc.sketch(id).unwrap().constraints.len(), count);
+    let r = run(&mut s, "sketch.dimension", json!({"entities":[edge],"if_redundant":"driven"}));
+    assert_eq!(r["driven"], true, "{r}");
+    assert!((r["measured"].as_f64().unwrap() - 40.0).abs() < 1e-6, "{r}");
+}

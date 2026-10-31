@@ -2316,7 +2316,9 @@ impl Entry {
             key: f.id.to_string(),
             row_key: format!("s:{}", f.id),
             thing: Thing::Sketch(f.id),
-            patterns: crate::sketch_pattern_tree::has_patterns(app, f.id).then(|| format!("s:{}/patterns", f.id)),
+            // A sketch's patterns and projections fold under it.
+            patterns: (crate::sketch_pattern_tree::has_patterns(app, f.id) || crate::sketch_link_tree::has_links(app, f.id))
+                .then(|| format!("s:{}/patterns", f.id)),
             label: if lost {
                 crate::i18n::format("browser.sketch_attachment_lost", &[("name", &crate::i18n::tr_name(&f.name))])
             } else if active {
@@ -2948,7 +2950,9 @@ fn entry_row(
         acts.menu = Some((p, t));
     }
     if patterns_open && let Some(Sel::Feature { id }) = &e.sel {
-        crate::sketch_pattern_tree::rows(app, ui, *id, depth + 1, "browser", path.map(|path| (comp, path)), !visible || parent_hidden);
+        let dim = !visible || parent_hidden;
+        crate::sketch_pattern_tree::rows(app, ui, *id, depth + 1, "browser", path.map(|path| (comp, path)), dim);
+        crate::sketch_link_tree::rows(app, ui, *id, depth + 1, "browser", dim);
     }
     let Some(resp) = &r.resp else { return };
     // Drag: the selected items of this folder when this one is selected, else just this one.

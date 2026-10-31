@@ -551,6 +551,12 @@ completed drawings publish atomically. The browser still exports synchronously.
   curves and points retain their source sketch identity; model geometry, axes and planes use
   the existing linked projection commands. Rejection preserves the document and selection;
   mixed selections retain ordinary tool-first picking.
+- Cross-part projection (#47): links to another component keep the exact source occurrence
+  path and the sketch's authoring placement, so a projection from `A:2` follows A:2 (moves,
+  turns, nested parents) and never A:1, with dependent geometry and features rebuilt. Lost
+  sources keep their last stored geometry. Update References (capture pending moves, update
+  linked designs), Freeze/Resume, Repair, Remove Projection and per-projection Show/Hide;
+  projections are listed under their sketch; deleted members stay deleted.
 - Inline sketch dimensions: Tab and Shift+Tab cycle within the active shape's value boxes,
   selecting visited values for replacement. Expression completion retains forward-Tab
   priority; real keyboard regressions cover rectangles, lines and single-value circles.

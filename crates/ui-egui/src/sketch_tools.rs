@@ -48,6 +48,7 @@ pub const MODIFIERS: &[ToolModifiers] = &[
     ToolModifiers { tool: "sketch.construction_line.tangent_two", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.construction_line.bisector", scopes: DRAW_SCOPES, bindings: &[], audit: Audit::Implemented },
     ToolModifiers { tool: "sketch.project", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
+    ToolModifiers { tool: "sketch.repair_link", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.intersect", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.include_3d", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
     ToolModifiers { tool: "sketch.fit_curves_to_section", scopes: NONE, bindings: &[], audit: Audit::VerifiedNoOp },
@@ -104,6 +105,10 @@ thread_local! {
     static COMBS: RefCell<Vec<Vec<[Vec3; 2]>>> = const { RefCell::new(Vec::new()) };
     /// The image file a Canvas or Decal tool places.
     static IMAGE: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The link the Repair Link tool gives a new source.
+    static REPAIR: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The tool finished its job with this click and ends.
+    static ENDED: Cell<bool> = const { Cell::new(false) };
     /// Analysis markers shown while an analysis tool is active: (where, label).
     static MARKS: RefCell<Vec<(Vec3, String)>> = const { RefCell::new(Vec::new()) };
     /// Isocurve analysis polylines (as segments) while the tool is active.
@@ -739,6 +744,7 @@ fn mode(id: &str) -> Option<Mode> {
     }
     Some(match id {
         "sketch.project" | "sketch.intersect" | "sketch.include_3d" | "sketch.fit_curves_to_section" | "sketch.isoparametric_curve" => Mode::ModelRef,
+        "sketch.repair_link" => Mode::ModelRef,
         "inspect.curvature_comb" | "canvas.insert" | "canvas.decal" => Mode::ModelRef,
         "inspect.minimum_radius" | "inspect.center_of_mass" | "inspect.isocurve" | "inspect.continuity" => Mode::ModelRef,
         "sketch.trim" | "sketch.extend" | "sketch.break" => Mode::CurveAt,
@@ -791,6 +797,7 @@ pub fn hint(id: &str) -> Option<String> {
     Some(
         match id {
             "sketch.project" => "Project: click edges, faces, vertices, other sketches' curves, axes or planes",
+            "sketch.repair_link" => "Repair Link: click the edge, face, vertex or sketch curve the projection should follow now",
             "sketch.intersect" => "Intersect: click faces or edges to cut with the sketch plane",
             "sketch.include_3d" => "Include 3D Geometry: click edges or vertices",
             "sketch.fit_curves_to_section" => "Fit Curves to Mesh Section: click a body",
@@ -837,6 +844,18 @@ fn active_sketch(app: &SolveApp) -> Option<u64> {
 }
 
 /// A model reference for a hit (for Project and friends).
+/// Did the last click end its tool (the job is done)? Reading it resets it.
+pub(crate) fn take_ended() -> bool {
+    ENDED.with(|e| e.replace(false))
+}
+
+/// Start Repair Link for `link` of the sketch being edited: the next model reference clicked
+/// becomes its source.
+pub(crate) fn start_repair(app: &mut SolveApp, link: &str) {
+    REPAIR.with(|l| *l.borrow_mut() = Some(link.to_string()));
+    app.start("sketch.repair_link");
+}
+
 pub(crate) fn model_ref(app: &SolveApp, h: &Hit) -> Option<Value> {
     let active = active_sketch(app);
     Some(match h {
@@ -1089,6 +1108,14 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                     if r.get("face").is_some() {
                         let along = SHIFT.with(Cell::get);
                         let _ = app.run(cmd, json!({"face": r["face"], "body": r["body"], "direction": if along { "v" } else { "u" }}));
+                    }
+                }
+                "sketch.repair_link" => {
+                    let Some(link) = REPAIR.with(|l| l.borrow().clone()) else { return };
+                    if app.run(cmd, json!({"link": link, "ref": r})).is_ok() {
+                        REPAIR.with(|l| *l.borrow_mut() = None);
+                        app.set_status("Projection repaired", false);
+                        ENDED.with(|e| e.set(true));
                     }
                 }
                 _ => {

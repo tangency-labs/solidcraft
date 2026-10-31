@@ -1,0 +1,86 @@
+{
+  "en": {
+    "browser.link_frozen": "Frozen",
+    "browser.link_lost": "Lost",
+    "browser.link_pending": "Pending",
+    "cmd.sketch_freeze_link": "Freeze Link",
+    "cmd.sketch_link_visibility": "Show/Hide Projection",
+    "cmd.sketch_references": "Sketch References",
+    "cmd.sketch_remove_link": "Remove Projection",
+    "cmd.sketch_repair_link": "Repair Link",
+    "cmd.sketch_resume_link": "Resume Link",
+    "cmd.sketch_update_references": "Update References"
+  },
+  "ja": {
+    "browser.link_frozen": "凍結",
+    "browser.link_lost": "参照切れ",
+    "browser.link_pending": "保留中",
+    "cmd.sketch_freeze_link": "リンクを凍結",
+    "cmd.sketch_link_visibility": "投影の表示/非表示",
+    "cmd.sketch_references": "スケッチの参照",
+    "cmd.sketch_remove_link": "投影を削除",
+    "cmd.sketch_repair_link": "リンクを修復",
+    "cmd.sketch_resume_link": "リンクを再開",
+    "cmd.sketch_update_references": "参照を更新"
+  },
+  "pl": {
+    "browser.link_frozen": "Zamrożone",
+    "browser.link_lost": "Utracone",
+    "browser.link_pending": "Oczekujące",
+    "cmd.sketch_freeze_link": "Zamroź łącze",
+    "cmd.sketch_link_visibility": "Pokaż/ukryj rzutowanie",
+    "cmd.sketch_references": "Odniesienia szkicu",
+    "cmd.sketch_remove_link": "Usuń rzutowanie",
+    "cmd.sketch_repair_link": "Napraw łącze",
+    "cmd.sketch_resume_link": "Wznów łącze",
+    "cmd.sketch_update_references": "Aktualizuj odniesienia"
+  },
+  "zh": {
+    "browser.link_frozen": "已冻结",
+    "browser.link_lost": "已丢失",
+    "browser.link_pending": "待定",
+    "cmd.sketch_freeze_link": "冻结链接",
+    "cmd.sketch_link_visibility": "显示/隐藏投影",
+    "cmd.sketch_references": "草图参照",
+    "cmd.sketch_remove_link": "移除投影",
+    "cmd.sketch_repair_link": "修复链接",
+    "cmd.sketch_resume_link": "恢复链接",
+    "cmd.sketch_update_references": "更新参照"
+  },
+  "ar": {
+    "browser.link_frozen": "مجمّد",
+    "browser.link_lost": "مفقود",
+    "browser.link_pending": "معلّق",
+    "cmd.sketch_freeze_link": "تجميد الرابط",
+    "cmd.sketch_link_visibility": "إظهار/إخفاء الإسقاط",
+    "cmd.sketch_references": "مراجع الرسم",
+    "cmd.sketch_remove_link": "إزالة الإسقاط",
+    "cmd.sketch_repair_link": "إصلاح الرابط",
+    "cmd.sketch_resume_link": "استئناف الرابط",
+    "cmd.sketch_update_references": "تحديث المراجع"
+  },
+  "he": {
+    "browser.link_frozen": "מוקפא",
+    "browser.link_lost": "אבד",
+    "browser.link_pending": "ממתין",
+    "cmd.sketch_freeze_link": "הקפאת קישור",
+    "cmd.sketch_link_visibility": "הצגה/הסתרה של הטלה",
+    "cmd.sketch_references": "ייחוסי הסקיצה",
+    "cmd.sketch_remove_link": "הסרת הטלה",
+    "cmd.sketch_repair_link": "תיקון קישור",
+    "cmd.sketch_resume_link": "חידוש קישור",
+    "cmd.sketch_update_references": "עדכון ייחוסים"
+  },
+  "vi": {
+    "browser.link_frozen": "Đã đóng băng",
+    "browser.link_lost": "Bị mất",
+    "browser.link_pending": "Đang chờ",
+    "cmd.sketch_freeze_link": "Đóng băng liên kết",
+    "cmd.sketch_link_visibility": "Hiện/Ẩn hình chiếu",
+    "cmd.sketch_references": "Tham chiếu của phác thảo",
+    "cmd.sketch_remove_link": "Xóa hình chiếu",
+    "cmd.sketch_repair_link": "Sửa liên kết",
+    "cmd.sketch_resume_link": "Tiếp tục liên kết",
+    "cmd.sketch_update_references": "Cập nhật tham chiếu"
+  }
+}

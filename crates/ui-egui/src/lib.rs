@@ -255,6 +255,7 @@ mod sketch_edit_tests;
 mod sketch_families;
 #[cfg(test)]
 mod sketch_guidance_ui_tests;
+mod sketch_link_tree;
 pub mod sketch_modify_ui;
 #[cfg(test)]
 mod sketch_modify_ui_tests;

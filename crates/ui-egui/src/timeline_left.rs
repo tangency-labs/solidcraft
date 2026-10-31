@@ -1449,7 +1449,10 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
     let reference = matches!(row_kind, RowKind::Reference { .. });
     let listed =
         (row_kind == RowKind::Own).then(|| plan.row_at(index)).flatten().map(|row| row.listed.as_slice()).filter(|listed| !listed.is_empty());
-    let has_patterns = !reference && matches!(kind, TimelineKind::Sketch) && crate::sketch_pattern_tree::has_patterns(app, id);
+    // Its patterns and projections fold under a sketch.
+    let has_patterns = !reference
+        && matches!(kind, TimelineKind::Sketch)
+        && (crate::sketch_pattern_tree::has_patterns(app, id) || crate::sketch_link_tree::has_links(app, id));
     let sketch_state = matches!(kind, TimelineKind::Sketch).then(|| rows.sketch_states.get(id)).flatten();
     // One fold per row: a feature's listed sketches, or a sketch's patterns.
     let fold = match listed {
@@ -1608,6 +1611,7 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
     if names && has_patterns && fold_open {
         let depth = group_id.map_or(1, |group| group_depth(groups, group) + 2) + usize::from(row_kind == RowKind::Nested);
         crate::sketch_pattern_tree::rows(app, ui, id, depth, "timeline", None, false);
+        crate::sketch_link_tree::rows(app, ui, id, depth, "timeline", false);
     }
     if let Some(listed) = listed.filter(|_| names && fold_open) {
         for child in listed {
