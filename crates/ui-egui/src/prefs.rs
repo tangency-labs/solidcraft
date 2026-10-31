@@ -8784,9 +8784,8 @@ mod tests {
     #[test]
     fn language_preference_switches_and_persists() {
         let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        // A first start follows the system (#10138); pin English so the words below are fixed.
+        // A first start follows the system (#10138), which is English in a test.
         assert_eq!(app.preferences.language, crate::i18n::SYSTEM);
-        app.preferences.language = "en".into();
         assert_eq!(app.tr("ui.preferences"), "Preferences");
         assert_eq!(app.tr("ui.extrude"), "Extrude");
 
