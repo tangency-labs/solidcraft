@@ -248,7 +248,11 @@ pub(super) fn test_and_convert_big_rad_fillet(
             this: Some((Some(running_id), &*running)),
             exec: None,
         };
-        match pseudo.calc_rail_int_rail_with_solver_ops(k, sv_sq, lookup, live, target) {
+        // fork 873c7c9 passes this on (SER)
+        match crate::error::passed_on(
+            pseudo.calc_rail_int_rail_with_solver_ops(k, sv_sq, lookup, live, target),
+            k.fixes.fillet_statuses_pass_on,
+        )? {
             Err(e) if e.is_unported() => return Err(e),
             _ => {}
         }

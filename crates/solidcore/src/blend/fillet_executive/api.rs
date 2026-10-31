@@ -307,7 +307,11 @@ fn fillet_all_edges(
             continue;
         };
         session.set_solver_generator(solver, generator)?;
-        ignored(session.load_solver(k, solver))?;
+        // fork 66b02de passes this on (SER)
+        ignored(crate::error::passed_on(
+            session.load_solver(k, solver),
+            k.fixes.fillet_statuses_pass_on,
+        )?)?;
     }
 
     session.create_corners(k, None)?;

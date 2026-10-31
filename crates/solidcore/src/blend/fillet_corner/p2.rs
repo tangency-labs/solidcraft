@@ -422,8 +422,16 @@ impl FilletCorner {
             .curve
             .as_ref()
             .ok_or_else(|| null_deref("side edge without curve"))?;
-        let pnt1 = unchecked_point(side_edge_curve.evaluate_point(k, edge_param1))?;
-        let pnt2 = unchecked_point(side_edge_curve.evaluate_point(k, edge_param2))?;
+        // fork 66b02de passes these on (SER)
+        let pass_on = k.fixes.fillet_statuses_pass_on;
+        let pnt1 = unchecked_point(crate::error::passed_on(
+            side_edge_curve.evaluate_point(k, edge_param1),
+            pass_on,
+        )?)?;
+        let pnt2 = unchecked_point(crate::error::passed_on(
+            side_edge_curve.evaluate_point(k, edge_param2),
+            pass_on,
+        )?)?;
 
         // See if we have coincident geometry, i.e. two rails intersect at this vertex.
         let gap_dist = pnt1.distance(pnt2);
@@ -921,8 +929,13 @@ impl FilletCorner {
         // Check that the two filleted edges are tangent at this vertex.
         // (the statuses are ignored upstream: a failed evaluation leaves the derivative
         // default-constructed)
+        let pass_on = k.fixes.fillet_statuses_pass_on;
         let mut deriv = |t: f64| -> Result<Vec3> {
-            match eu3::normalized_evaluate(k, target, solver_eu, t, false, true, true) {
+            // fork 66b02de passes this on (SER)
+            match crate::error::passed_on(
+                eu3::normalized_evaluate(k, target, solver_eu, t, false, true, true),
+                pass_on,
+            )? {
                 Ok(ev) => Ok(ev.first_deriv.unwrap_or(Vec3::UNDEF)),
                 Err(e) if e.is_unported() => Err(e),
                 Err(_) => Ok(Vec3::UNDEF),
@@ -953,14 +966,17 @@ impl FilletCorner {
 
         let srf_domain = fillet_srf.natural_uv_domain_with_nurb(k)?;
         // u runs the long way, v goes across the fillet. (statuses ignored)
-        let srf_pt00 =
-            unchecked_point(fillet_srf.evaluate_point(k, srf_domain.evaluate(0.0, 0.0)))?;
-        let srf_pt10 =
-            unchecked_point(fillet_srf.evaluate_point(k, srf_domain.evaluate(1.0, 0.0)))?;
-        let srf_pt01 =
-            unchecked_point(fillet_srf.evaluate_point(k, srf_domain.evaluate(0.0, 1.0)))?;
-        let srf_pt11 =
-            unchecked_point(fillet_srf.evaluate_point(k, srf_domain.evaluate(1.0, 1.0)))?;
+        // fork 66b02de passes these on (SER)
+        let corner_pt = |u: f64, v: f64| -> Result<Point3> {
+            unchecked_point(crate::error::passed_on(
+                fillet_srf.evaluate_point(k, srf_domain.evaluate(u, v)),
+                pass_on,
+            )?)
+        };
+        let srf_pt00 = corner_pt(0.0, 0.0)?;
+        let srf_pt10 = corner_pt(1.0, 0.0)?;
+        let srf_pt01 = corner_pt(0.0, 1.0)?;
+        let srf_pt11 = corner_pt(1.0, 1.0)?;
 
         let dist0 = srf_pt00.distance(srf_pt10);
         let dist1 = srf_pt01.distance(srf_pt11);
@@ -973,12 +989,11 @@ impl FilletCorner {
         // Either it overlaps, or there is a gap. Drop the fillet surface end point to the
         // start point plus its u-derivative. (The status is ignored: a failure keeps the
         // point and leaves the derivative default-constructed.)
-        let (srf_pt00, su00) = match ignored(fillet_srf.evaluate_1st_derivatives(
-            k,
-            srf_domain.evaluate(0.0, 0.0),
-            true,
-            true,
-        ))? {
+        // fork 66b02de passes this on (SER)
+        let (srf_pt00, su00) = match ignored(crate::error::passed_on(
+            fillet_srf.evaluate_1st_derivatives(k, srf_domain.evaluate(0.0, 0.0), true, true),
+            pass_on,
+        )?)? {
             Some((p, su, _)) => (p, su),
             None => (srf_pt00, Vec3::UNDEF),
         };

@@ -3305,13 +3305,13 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             ))?;
         }
         let mut maybe_not_solid = false;
-        ignore(access.finish_orient_trimmed_surfaces(
-            k,
-            target,
-            true,
-            &mut maybe_not_solid,
-            false,
-        ))?;
+        // fork 873c7c9 passes this on (SER)
+        let oriented =
+            access.finish_orient_trimmed_surfaces(k, target, true, &mut maybe_not_solid, false);
+        ignore(crate::error::passed_on(
+            oriented,
+            k.fixes.fillet_statuses_pass_on,
+        )?)?;
         Ok(())
     }
 

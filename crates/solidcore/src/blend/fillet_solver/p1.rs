@@ -110,8 +110,10 @@
 //! - **Iteration.** No loop here depends on more than the caller's array sizes; there
 //!   is no recursion.
 //!
-//! With `Kernel::fixes.fillet_edge_curve_domain_statuses`, failed edge-curve
-//! copy/trim statuses propagate before returning the copy as trimmed (#483).
+//! With `Kernel::fixes.fillet_edge_curve_domain_statuses`, an edge-curve copy that
+//! cannot be trimmed is no trimmed curve, as the fork does (66b02de; #483, #2009). With
+//! `Kernel::fixes.fillet_statuses_pass_on` the statuses tangency-labs/smlib 66b02de
+//! passes on (`SER`) are returned (WR-661).
 //!
 
 use crate::blend::fillet_classification::{FilletClassObject, LegacyClassificationObjects};
@@ -128,7 +130,7 @@ use crate::blend::fillet_standard_solver::p1::{
 };
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
-use crate::error::{checked_or_ignored, ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
 use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::matrix::Matrix;
@@ -1388,11 +1390,13 @@ impl FilletSolver {
         // of old to new.
         // FG::SetOffsetSurface() deletes what's there; its status is not checked
         let off_surf = geom_offset_surface_copy(k, self, pseudo, fillet_geom, other_idx)?;
-        ignore_status(
+        // fork 66b02de passes this on (SER)
+        ignore_status(crate::error::passed_on(
             pseudo
                 .geom_mut(new_fillet_geom)?
                 .set_offset_surface(other_idx, off_surf),
-        )?;
+            k.fixes.fillet_statuses_pass_on,
+        )?)?;
 
         if which_end == 0 {
             let rail = pseudo
@@ -1404,16 +1408,20 @@ impl FilletSolver {
                 .set_original_face(Some(adj_face));
 
             let off_surf = geom_offset_surface_copy(k, self, pseudo, fillet_geom, rail_idx)?;
-            ignore_status(
+            // fork 66b02de passes this on (SER)
+            ignore_status(crate::error::passed_on(
                 pseudo
                     .geom_mut(new_fillet_geom)?
                     .set_offset_surface(rail_idx, off_surf),
-            )?;
-            ignore_status(
+                k.fixes.fillet_statuses_pass_on,
+            )?)?;
+            // fork 66b02de passes this on (SER)
+            ignore_status(crate::error::passed_on(
                 pseudo
                     .geom_mut(fillet_geom)?
                     .set_offset_surface(rail_idx, Some(adj_off_surf)),
-            )?;
+                k.fixes.fillet_statuses_pass_on,
+            )?)?;
         } else {
             // New FG becomes rollover, on adjacent face.
             pseudo
@@ -1427,11 +1435,13 @@ impl FilletSolver {
                 .fillet_edge_mut(rail)?
                 .set_original_face(Some(adj_face));
 
-            ignore_status(
+            // fork 66b02de passes this on (SER)
+            ignore_status(crate::error::passed_on(
                 pseudo
                     .geom_mut(new_fillet_geom)?
                     .set_offset_surface(rail_idx, Some(adj_off_surf)),
-            )?;
+                k.fixes.fillet_statuses_pass_on,
+            )?)?;
         }
         self.fillet_geoms.push(new_fillet_geom);
 
@@ -2105,12 +2115,15 @@ fn copy_offset_surface(k: &Kernel, s: Option<&OffsetSurfaceSlot>) -> Result<Opti
     let Some(slot) = s else {
         return Ok(None);
     };
-    Ok(
-        ignored(slot.surface.surface.copy(k))?.map(|surface| OffsetSurface {
-            surface,
-            base_id: slot.surface.base_id,
-        }),
-    )
+    // fork 66b02de passes this on (SER)
+    Ok(ignored(crate::error::passed_on(
+        slot.surface.surface.copy(k),
+        k.fixes.fillet_statuses_pass_on,
+    )?)?
+    .map(|surface| OffsetSurface {
+        surface,
+        base_id: slot.surface.base_id,
+    }))
 }
 
 /// `pFG->GetOffsetSurface(rail)` copied with `Copy(m_crContext, pSurf)` (status
@@ -2129,7 +2142,12 @@ fn geom_offset_surface_copy(
     else {
         return Ok(None);
     };
-    Ok(ignored(orig.surface.copy(k))?.map(|surface| OffsetSurface {
+    // fork 66b02de passes this on (SER)
+    Ok(ignored(crate::error::passed_on(
+        orig.surface.copy(k),
+        k.fixes.fillet_statuses_pass_on,
+    )?)?
+    .map(|surface| OffsetSurface {
         surface,
         base_id: orig.base_id,
     }))
@@ -2938,9 +2956,10 @@ pub fn tol_ang_tol_rad(solver: Option<&FilletSolver>) -> f64 {
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] for an edge without curve (upstream dereferences
-/// `NULL`). With `fillet_edge_curve_domain_statuses`, copy/trim failures propagate
-/// before returning the copy. Off by default the trim status is ignored as upstream
-/// ([`SolidError::Unported`] still propagates).
+/// `NULL`). The copy's and the trim's statuses are ignored as upstream
+/// ([`SolidError::Unported`] still propagates); with `fillet_edge_curve_domain_statuses`,
+/// as the fork does (tangency-labs/smlib 66b02de), a copy that cannot be trimmed is no
+/// trimmed curve (`None`).
 pub fn check_edge_curve_domains(
     k: &Kernel,
     b: &Brep,
@@ -2963,15 +2982,15 @@ pub fn check_edge_curve_domains(
         t1 = edge_ivl.max();
     }
     if trim {
-        if let Some(mut copy) =
-            checked_or_ignored(curve.copy(k), k.fixes.fillet_edge_curve_domain_statuses)?
-        {
+        // a failed copy is NULL, checked next
+        if let Some(mut copy) = ignored(curve.copy(k))? {
             let mut trim_ivl = Extent1d::from_min_max(t0, t1);
-            checked_or_ignored(
-                copy.trim(k, &mut trim_ivl, TrimMode::Notify),
-                k.fixes.fillet_edge_curve_domain_statuses,
-            )?;
-            return Ok(Some(copy));
+            let trimmed = ignored(copy.trim(k, &mut trim_ivl, TrimMode::Notify))?;
+            // with fillet_edge_curve_domain_statuses, as the fork's change (66b02de): a
+            // copy that could not be trimmed is no trimmed curve
+            if trimmed.is_some() || !k.fixes.fillet_edge_curve_domain_statuses {
+                return Ok(Some(copy));
+            }
         }
     }
     Ok(None)
@@ -3271,7 +3290,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn audit_483_edge_domain_does_not_return_failed_trim_as_success() {
+    fn audit_483_edge_domain_is_no_trimmed_curve_after_a_failed_trim() {
         let mut k = Kernel::default();
         let mut b = Brep::new();
         let first = b.add_vertex(Vec3::ZERO).unwrap();
@@ -3281,19 +3300,18 @@ mod tests {
         b.edge_mut(edge).unwrap().curve = Some(curve.clone());
         let ivl = Extent1d::from_min_max(0.5, 0.5);
         b.edge_mut(edge).unwrap().interval = ivl;
+        let mut failing = curve.copy(&k).unwrap();
+        let mut trim_ivl = ivl;
+        assert!(failing.trim(&k, &mut trim_ivl, TrimMode::Notify).is_err());
+        // upstream: the untrimmed copy is returned as the trimmed curve
         assert!(check_edge_curve_domains(&k, &b, edge, false, false)
             .unwrap()
             .is_some());
+        // fork 66b02de: a copy that could not be trimmed is no trimmed curve
         k.fixes.fillet_edge_curve_domain_statuses = true;
-        let mut expected_curve = curve.copy(&k).unwrap();
-        let mut trim_ivl = ivl;
-        let expected = expected_curve
-            .trim(&k, &mut trim_ivl, TrimMode::Notify)
-            .unwrap_err();
-        assert_eq!(
-            check_edge_curve_domains(&k, &b, edge, false, false).unwrap_err(),
-            expected
-        );
+        assert!(check_edge_curve_domains(&k, &b, edge, false, false)
+            .unwrap()
+            .is_none());
         assert_eq!(
             edge::curve(&b, edge).unwrap().unwrap().natural_interval(),
             curve.natural_interval()

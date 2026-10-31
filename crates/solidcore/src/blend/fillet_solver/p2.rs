@@ -831,7 +831,11 @@ impl FilletSolver {
 
         // CreateConePatch() makes a STEP-parameterized cone,
         // we go the other way: u along the edge, v around the fillet surface.
-        ignore_status(cone_patch.swap_uv())?;
+        // fork 66b02de passes this on (SER)
+        ignore_status(crate::error::passed_on(
+            cone_patch.swap_uv(),
+            k.fixes.fillet_statuses_pass_on,
+        )?)?;
 
         // Copy pConePatch, when possible as an analytic surface
         let cylinder = cone_patch.copy_and_add_analytics(k)?;
@@ -980,7 +984,11 @@ impl FilletSolver {
         step_domain = Extent2d::from_points(step_domain.min, uv_max);
         cone.adjust_step_uv_domain(k, &step_domain)?;
         let mut cone = Surface::from(cone);
-        ignore_status(cone.swap_uv(k))?;
+        // fork 66b02de passes this on (SER)
+        ignore_status(crate::error::passed_on(
+            cone.swap_uv(k),
+            k.fixes.fillet_statuses_pass_on,
+        )?)?;
 
         let uv_domain = cone.natural_uv_domain_with_nurb(k)?;
         let ivl = Extent1d::from_min_max(uv_domain.min.x, uv_domain.max.x);
@@ -1251,7 +1259,11 @@ impl FilletSolver {
         }
 
         // CCWAngleBetween status ignored upstream: dSpanAng stays 0 on a failure
-        let mut span_ang = match axis_of_revolution.ccw_angle_between(vec, end_vec) {
+        // fork 66b02de passes this on (SER)
+        let mut span_ang = match crate::error::passed_on(
+            axis_of_revolution.ccw_angle_between(vec, end_vec),
+            k.fixes.fillet_statuses_pass_on,
+        )? {
             Ok(a) => a,
             Err(e @ SolidError::Unported { .. }) => return Err(e),
             Err(_) => 0.0,
@@ -1370,7 +1382,11 @@ impl FilletSolver {
             cs.translate(-ref_frame.origin());
             cs.rotate_about_axis(PI, ref_frame.z_axis());
             cs.translate(ref_frame.origin());
-            ignore_status(arc.transform(&cs, None))?;
+            // fork 66b02de passes this on (SER)
+            ignore_status(crate::error::passed_on(
+                arc.transform(&cs, None),
+                k.fixes.fillet_statuses_pass_on,
+            )?)?;
         }
 
         // create surface of revolution
@@ -2289,7 +2305,11 @@ impl FilletSolver {
                 // edge's tolerance as zone tolerance (as `sm_TrimRail`, p1 notes).
                 let tk = edge_zone_kernel(k, edge::tolerance(pseudo.brep(), cross_section)?);
                 // Set the cross section curve interval (status ignored upstream)
-                ignore_status(cs_curve.trim(&tk, &mut trim_ivl, TrimMode::Notify))?;
+                // fork 66b02de passes this on (SER)
+                ignore_status(crate::error::passed_on(
+                    cs_curve.trim(&tk, &mut trim_ivl, TrimMode::Notify),
+                    k.fixes.fillet_statuses_pass_on,
+                )?)?;
                 if let Some(c) = pseudo.brep_mut().edge_mut(cross_section)?.curve.as_mut() {
                     *c = cs_curve.clone();
                 }
@@ -2301,7 +2321,11 @@ impl FilletSolver {
                     .ok_or_else(|| invalid("edge use without mate"))?;
                 for e_u in [prim, mate] {
                     if let Some(uv) = pseudo.brep_mut().edgeuse_mut(e_u)?.uv_trim_curve.as_mut() {
-                        ignore_status(uv.trim(&tk, &mut trim_ivl, TrimMode::Notify))?;
+                        // fork 66b02de passes this on (SER)
+                        ignore_status(crate::error::passed_on(
+                            uv.trim(&tk, &mut trim_ivl, TrimMode::Notify),
+                            k.fixes.fillet_statuses_pass_on,
+                        )?)?;
                     }
                 }
             }

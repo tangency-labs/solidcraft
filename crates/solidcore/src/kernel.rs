@@ -484,11 +484,17 @@ pub struct UpstreamFixes {
     /// Planar path sweeps propagate mandatory operation failures and delete their
     /// owned temporary B-reps on failure (#483). Off by default for pinned compatibility.
     pub planar_path_sweep_statuses: bool,
-    /// Fillet corners return failed tangent/binormal evaluations, angles and UV
-    /// refinements before installing invalid geometry (#483). Off by default.
+    /// Fillet corners fail softly where a status upstream ignores would leave an unset
+    /// value, as the fork does (tangency-labs/smlib 66b02de; #483, changed by #2009):
+    /// `sm_TestG1Continuity` finds no tangency when an end tangent cannot be evaluated,
+    /// and `CheckAndFixDegeneracy` refines a vertex's UV point only with a computed one.
+    /// The binormal evaluations, the G1 angle and the Nx1 degeneracy test keep upstream's
+    /// handling, as the fork does. Off by default.
     pub fillet_corner_statuses: bool,
-    /// Fillet edge-domain preparation returns copy/trim failures instead of using
-    /// an untrimmed curve as the requested domain (#483). Off by default.
+    /// `sm_CheckEdgeCurveDomains` returns no trimmed curve (the edge's own curve is
+    /// used) when the copy cannot be made or trimmed, as the fork does
+    /// (tangency-labs/smlib 66b02de; #483, changed by #2009), instead of returning an
+    /// untrimmed copy as the requested domain. Off by default.
     pub fillet_edge_curve_domain_statuses: bool,
     /// Offset tangent-gap checks skip a sample they cannot evaluate instead of
     /// measuring an unset point, as the fork does (`HaveTangentGaps`, tangency-labs/smlib
@@ -506,6 +512,12 @@ pub struct UpstreamFixes {
     /// instead of the operation carrying on and reporting success (WR-658, #2009 group A;
     /// tangency-labs/smlib 60a8a51, 4803d6d, e7ebc8d). Off by default for pinned parity.
     pub brep_edit_statuses_pass_on: bool,
+    /// The fillet executive, solvers, corners and geometry pass on the statuses SMLib
+    /// drops: a failed solver load, orientation, list edit, copy, trim, interval edit,
+    /// evaluation, knot edit or split-face update returns its error instead of the fillet
+    /// carrying on and reporting success (WR-661, #2009 group B; tangency-labs/smlib
+    /// 873c7c9, 66b02de, 9b7cd48). Off by default for pinned parity.
+    pub fillet_statuses_pass_on: bool,
     /// `SmShell::IsInnerShellOf` passes on the statuses it ignores (fork 4038552): `UNSURE` when the outer shell's closure, the B-rep's box, the sample points or a crossing face's point or normal cannot be computed; a ray that cannot be solved or classified decides nothing and the next ray is tried (WR-497, #1473).
     pub shell_inner_shell_of_statuses: bool,
     /// `SmEdge::ReverseOrientation` returns a failed curve reversal's status before installing the interval, flipping the edge uses or deleting their UV trims, and an edge without curve keeps its interval (WR-260, #521; WR-260 addendum, tangency-labs/smlib 47507b6).

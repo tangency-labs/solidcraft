@@ -4388,8 +4388,11 @@ impl SessionObjects<'_> {
         // in this case we can set FilletVertex and SideFilletEdge shapes
         // without having the filletSurface - do so
 
-        // set filletVertex->Positions
-        crate::error::ignore_status(self.calc_nx1_corner_vert_geom(k, id))?;
+        // set filletVertex->Positions (fork 66b02de passes this on: SER)
+        crate::error::ignore_status(crate::error::passed_on(
+            self.calc_nx1_corner_vert_geom(k, id),
+            k.fixes.fillet_statuses_pass_on,
+        )?)?;
 
         // set FilletSideEdge->Curves
         for edge in [gaps.edge1, gaps.edge2] {
@@ -4423,7 +4426,11 @@ impl SessionObjects<'_> {
                 Some(&mut note),
             );
             replay_corner_error(&mut executive.error, &note);
-            crate::error::ignore_status(result)?;
+            // fork 66b02de passes this on (SER)
+            crate::error::ignore_status(crate::error::passed_on(
+                result,
+                k.fixes.fillet_statuses_pass_on,
+            )?)?;
         }
 
         // When proposing an extended surface
@@ -4446,8 +4453,9 @@ impl SessionObjects<'_> {
             .corners
             .get(id.0 as usize)
             .ok_or_else(|| invalid("corner is not live"))?;
-        // get extendedSurface/OtherSideEdge coincidence to within tolerance
-        let found = crate::error::ignored(
+        // get extendedSurface/OtherSideEdge coincidence to within tolerance (fork
+        // 66b02de passes this on: SER)
+        let found = crate::error::ignored(crate::error::passed_on(
             surface.simple_coincidence_checker::<crate::topology::ObjectHandle>(
                 k,
                 &surface.natural_uv_domain_with_nurb(k)?,
@@ -4457,7 +4465,8 @@ impl SessionObjects<'_> {
                 false,
                 [None, None],
             ),
-        )?
+            k.fixes.fillet_statuses_pass_on,
+        )?)?
         .flatten()
         .is_some();
         // when extendedSurface/OtherSideEdge are not coincident

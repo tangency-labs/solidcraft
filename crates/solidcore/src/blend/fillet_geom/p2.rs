@@ -1776,13 +1776,12 @@ impl FilletBrep {
         // For FilletGeom1: find the rail/sideEdge intersection, place it on the
         // sideEdge curve, save it and update any mates
         if let Some(g1) = fillet_geom1 {
-            // its status is ignored upstream (lRailIndex stays 0)
-            let rail_index = ignore_status(self.rail_index_of_side_eu_resolved(
-                g1,
-                side_eu1,
-                target,
-                &|id| solvers.solver(id),
-            ))?
+            // its status is ignored upstream (lRailIndex stays 0); fork 9b7cd48 passes
+            // this on (SER)
+            let rail_index = ignore_status(crate::error::passed_on(
+                self.rail_index_of_side_eu_resolved(g1, side_eu1, target, &|id| solvers.solver(id)),
+                k.fixes.fillet_statuses_pass_on,
+            )?)?
             .unwrap_or(0);
 
             let vu1 = vu1.ok_or_else(|| SolidError::null_pointer(OP))?;
@@ -1957,13 +1956,18 @@ impl FilletBrep {
         // Process intersection for adjacent solver if presented
         if let Some(g2) = fillet_geom2 {
             let side_eu2 = eu1::radial(target, side_eu1)?;
-            // its status is ignored upstream
+            // its status is ignored upstream; fork 9b7cd48 passes this on (SER)
             let other_rail_index =
                 // upstream dereferences a NULL side edge use there
-                ignore_status(match side_eu2 {
-                    Some(eu) => self.rail_index_of_side_eu_resolved(g2, eu, target, &|id| solvers.solver(id)),
-                    None => Err(SolidError::null_pointer(OP)),
-                })?
+                ignore_status(crate::error::passed_on(
+                    match side_eu2 {
+                        Some(eu) => self.rail_index_of_side_eu_resolved(g2, eu, target, &|id| {
+                            solvers.solver(id)
+                        }),
+                        None => Err(SolidError::null_pointer(OP)),
+                    },
+                    k.fixes.fillet_statuses_pass_on,
+                )?)?
                 .unwrap_or(0);
             let side_eu2 = side_eu2.ok_or_else(|| SolidError::null_pointer(OP))?;
 
@@ -2163,10 +2167,12 @@ impl FilletBrep {
                     .ok_or_else(|| SolidError::null_pointer(OP))?;
                 if target.faceuse(fu)?.face == face {
                     // its status is ignored upstream (the point is then whatever the
-                    // call left; here the previous value)
-                    if let Some(uv) =
-                        ignore_status(vertexuse_unit::compute_uv_point(k, target, vu, true))?
-                    {
+                    // call left; here the previous value); fork 9b7cd48 passes this on
+                    // (SER)
+                    if let Some(uv) = ignore_status(crate::error::passed_on(
+                        vertexuse_unit::compute_uv_point(k, target, vu, true),
+                        k.fixes.fillet_statuses_pass_on,
+                    )?)? {
                         *slot = uv;
                     }
                     break;
@@ -2787,8 +2793,11 @@ impl FilletBrep {
             curve_3d = Some(c3);
         } else {
             let mut uv = new_curve;
-            // its status is ignored upstream
-            ignore_status(uv.convert_to_2d())?;
+            // its status is ignored upstream; fork 9b7cd48 passes this on (SER)
+            ignore_status(crate::error::passed_on(
+                uv.convert_to_2d(),
+                k.fixes.fillet_statuses_pass_on,
+            )?)?;
             uv_curve = Some(Curve::from(uv));
             curve_3d = None;
         }

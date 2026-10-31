@@ -1609,10 +1609,12 @@ fn c2_offset_point_ignored(
     uv: Point2,
 ) -> Result<Point3> {
     let surface = offset_surface_mut(ops, 0)?;
-    Ok(
-        crate::error::ignored(surface.surface.evaluate_point_extending(k, uv))?
-            .unwrap_or(Vec3::UNDEF),
-    )
+    // fork 66b02de passes this on (SER)
+    Ok(crate::error::ignored(crate::error::passed_on(
+        surface.surface.evaluate_point_extending(k, uv),
+        k.fixes.fillet_statuses_pass_on,
+    )?)?
+    .unwrap_or(Vec3::UNDEF))
 }
 
 /// :1872-1920: `SM_ERR` without points; with more than two, drop the penultimate
@@ -2992,7 +2994,11 @@ fn c5_split_rail(
         st.base_surfaces[1].evaluate_point(cx.k, uv)?
     };
 
-    ignore_status(trim_ivl.set_min_max(trim_ivl.min(), split_at_param))?;
+    // fork 66b02de passes this on (SER)
+    ignore_status(crate::error::passed_on(
+        trim_ivl.set_min_max(trim_ivl.min(), split_at_param),
+        cx.k.fixes.fillet_statuses_pass_on,
+    )?)?;
     cx.fillets
         .brep_mut()
         .edge_mut(rail)?
@@ -3000,7 +3006,12 @@ fn c5_split_rail(
         .as_mut()
         .ok_or_else(|| SolidError::null_pointer(OP))?
         .trim(cx.k, &mut trim_ivl, TrimMode::Notify)?; // may snap sIvl by tol to existing knots
-    ignore_status(new_trim_ivl.set_min_max(split_at_param, new_trim_ivl.max()))?;
+
+    // fork 66b02de passes this on (SER)
+    ignore_status(crate::error::passed_on(
+        new_trim_ivl.set_min_max(split_at_param, new_trim_ivl.max()),
+        cx.k.fixes.fillet_statuses_pass_on,
+    )?)?;
     cx.fillets
         .brep_mut()
         .edge_mut(new_rail)?
@@ -3129,15 +3140,19 @@ fn c5_undo_reversal(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<()
                 .ok_or_else(|| invalid("reverse: rail edge use without mate"))?;
             // pMateEU->GetOrCreateUVTrimCurve(pUVCurve) (defaults): status ignored; the
             // curve attached to the edge use or its mate is reversed in place
-            let _ = edgeuse_p3::get_or_create_uv_trim_curve(
-                cx.k,
-                cx.fillets.brep_mut(),
-                mate_eu,
-                false,
-                false,
-                true,
-            )?
-            .status;
+            // fork 66b02de passes this on (SER)
+            let _ = crate::error::passed_on(
+                edgeuse_p3::get_or_create_uv_trim_curve(
+                    cx.k,
+                    cx.fillets.brep_mut(),
+                    mate_eu,
+                    false,
+                    false,
+                    true,
+                )?
+                .status,
+                cx.k.fixes.fillet_statuses_pass_on,
+            )?;
             let (uv_curve, uv_owner) = eu::uv_trim_curve(cx.fillets.brep(), mate_eu)?;
             let (Some(_), Some(uv_owner)) = (uv_curve, uv_owner) else {
                 return Err(SolidError::null_pointer(OP));
@@ -3747,7 +3762,11 @@ fn c6_compute_point_values(
     point.point_type = IntersectionPointType::Crossing;
 
     // :3764 ComputeUVVectors, status ignored
-    ignore_status(compute_uv_vectors(point))?;
+    // fork 66b02de passes this on (SER)
+    ignore_status(crate::error::passed_on(
+        compute_uv_vectors(point),
+        k.fixes.fillet_statuses_pass_on,
+    )?)?;
 
     Ok(())
 }

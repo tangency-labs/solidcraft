@@ -2248,9 +2248,11 @@ fn bspline_is_arc(k: &Kernel, c: &BSplineCurve) -> Result<Option<(Axis2Placement
     )
 }
 
-/// `GetKnots` with the status ignored: the unique knots, or `old` on failure.
-fn knots_or(c: &BSplineCurve, old: Vec<f64>) -> Result<Vec<f64>> {
-    Ok(ignored(c.knots(None))?.map_or(old, |k| k.0))
+/// `GetKnots` with the status ignored: the unique knots, or `old` on failure (with
+/// `pass_on`, `fixes.fillet_statuses_pass_on`, the failure is returned).
+fn knots_or(c: &BSplineCurve, old: Vec<f64>, pass_on: bool) -> Result<Vec<f64>> {
+    // fork 66b02de passes this on (SER)
+    Ok(ignored(crate::error::passed_on(c.knots(None), pass_on)?)?.map_or(old, |k| k.0))
 }
 
 /// The knot at `i` of a knot array upstream indexes unchecked.
@@ -2265,13 +2267,16 @@ fn knot(knots: &[f64], i: usize, op: &'static str) -> Result<f64> {
 /// get two more at the thirds of the interval, then mid-span knots go into the
 /// largest span until there are four (`bail_if_stuck`: an insertion that adds no knot
 /// is `SM_ERR`; otherwise upstream loops forever, here
-/// [`SolidError::InvalidInput`]). Returns the knots of `rail1`.
+/// [`SolidError::InvalidInput`]). Returns the knots of `rail1`. The insertion and
+/// `GetKnots` statuses are ignored, or returned with `pass_on`
+/// (`fixes.fillet_statuses_pass_on`).
 fn add_section_knots(
     rail1: &mut BSplineCurve,
     rail2: &mut BSplineCurve,
     mut knots: Vec<f64>,
     bail_if_stuck: bool,
     op: &'static str,
+    pass_on: bool,
 ) -> Result<Vec<f64>> {
     // insert a mid knot for 2 knot curves
     if knots.len() == 2 {
@@ -2279,11 +2284,24 @@ fn add_section_knots(
         let new1 = knot(&knots, 0, op)? + step;
         let new2 = new1 + step;
         // (statuses ignored upstream)
-        ignore_status(rail1.insert_one_knot(new1, 1))?;
-        ignore_status(rail2.insert_one_knot(new1, 1))?;
-        ignore_status(rail1.insert_one_knot(new2, 1))?;
-        ignore_status(rail2.insert_one_knot(new2, 1))?;
-        knots = knots_or(rail1, knots)?;
+        // fork 66b02de passes this on (SER)
+        ignore_status(crate::error::passed_on(
+            rail1.insert_one_knot(new1, 1),
+            pass_on,
+        )?)?;
+        ignore_status(crate::error::passed_on(
+            rail2.insert_one_knot(new1, 1),
+            pass_on,
+        )?)?;
+        ignore_status(crate::error::passed_on(
+            rail1.insert_one_knot(new2, 1),
+            pass_on,
+        )?)?;
+        ignore_status(crate::error::passed_on(
+            rail2.insert_one_knot(new2, 1),
+            pass_on,
+        )?)?;
+        knots = knots_or(rail1, knots, pass_on)?;
     }
 
     let mut n_knots_old = knots.len();
@@ -2301,9 +2319,16 @@ fn add_section_knots(
         }
 
         let mid = (knot(&knots, max_span, op)? + knot(&knots, sub(max_span, 1, op)?, op)?) / 2.0;
-        ignore_status(rail1.insert_one_knot(mid, 1))?;
-        ignore_status(rail2.insert_one_knot(mid, 1))?;
-        knots = knots_or(rail1, knots)?;
+        // fork 66b02de passes this on (SER)
+        ignore_status(crate::error::passed_on(
+            rail1.insert_one_knot(mid, 1),
+            pass_on,
+        )?)?;
+        ignore_status(crate::error::passed_on(
+            rail2.insert_one_knot(mid, 1),
+            pass_on,
+        )?)?;
+        knots = knots_or(rail1, knots, pass_on)?;
 
         let n_knots_new = knots.len();
 
@@ -2363,15 +2388,26 @@ fn section_mut<'a>(
 
 /// The cross boundary derivative surface at one end of a skin: the ruled surface from
 /// the end cross section to its copy scaled, translated and rotated onto the rail
-/// tangents `start` / `end` (`CreateByScaleTransRot`), over `[curve interval] x [0, 1]`.
-fn deriv_surface(gen_curve: &BSplineCurve, start: Vec3, end: Vec3) -> Result<BSplineSurface> {
+/// tangents `start` / `end` (`CreateByScaleTransRot`), over `[curve interval] x [0, 1]`
+/// (the domain status ignored, or returned with `pass_on`,
+/// `fixes.fillet_statuses_pass_on`).
+fn deriv_surface(
+    gen_curve: &BSplineCurve,
+    start: Vec3,
+    end: Vec3,
+    pass_on: bool,
+) -> Result<BSplineSurface> {
     let new_curve = gen_curve.create_by_scale_trans_rot(start, end, 0.0)?;
     let mut surf = BSplineSurface::create_ruled_surface(gen_curve, &new_curve, SurfParamType::U)?;
     let crv_ivl = gen_curve.natural_interval();
     let uv_min = Point2::new(crv_ivl.min(), 0.0);
     let uv_max = Point2::new(crv_ivl.max(), 1.0);
     // (status ignored upstream)
-    ignore_status(surf.adjust_step_uv_domain(&Extent2d::from_points(uv_min, uv_max)))?;
+    // fork 66b02de passes this on (SER)
+    ignore_status(crate::error::passed_on(
+        surf.adjust_step_uv_domain(&Extent2d::from_points(uv_min, uv_max)),
+        pass_on,
+    )?)?;
     Ok(surf)
 }
 
@@ -2385,21 +2421,36 @@ fn tangent_at(c: &BSplineCurve, t: f64, op: &'static str) -> Result<Vec3> {
 }
 
 /// Inserts the mid knots of the first and last spans of `rail1` into both rails (the
-/// G1 continuity set-up of the generators).
+/// G1 continuity set-up of the generators; statuses ignored, or returned with
+/// `pass_on`, `fixes.fillet_statuses_pass_on`).
 fn insert_end_span_knots(
     rail1: &mut BSplineCurve,
     rail2: &mut BSplineCurve,
     op: &'static str,
+    pass_on: bool,
 ) -> Result<()> {
     // (statuses ignored upstream)
-    let knts = knots_or(rail1, Vec::new())?;
+    // fork 66b02de passes this on (SER)
+    let knts = knots_or(rail1, Vec::new(), pass_on)?;
     let n = knts.len();
     let start_knot_mid = (knot(&knts, 0, op)? + knot(&knts, 1, op)?) / 2.0;
-    ignore_status(rail1.insert_one_knot(start_knot_mid, 1))?;
-    ignore_status(rail2.insert_one_knot(start_knot_mid, 1))?;
+    ignore_status(crate::error::passed_on(
+        rail1.insert_one_knot(start_knot_mid, 1),
+        pass_on,
+    )?)?;
+    ignore_status(crate::error::passed_on(
+        rail2.insert_one_knot(start_knot_mid, 1),
+        pass_on,
+    )?)?;
     let end_knot_mid = (knot(&knts, sub(n, 2, op)?, op)? + knot(&knts, sub(n, 1, op)?, op)?) / 2.0;
-    ignore_status(rail1.insert_one_knot(end_knot_mid, 1))?;
-    ignore_status(rail2.insert_one_knot(end_knot_mid, 1))?;
+    ignore_status(crate::error::passed_on(
+        rail1.insert_one_knot(end_knot_mid, 1),
+        pass_on,
+    )?)?;
+    ignore_status(crate::error::passed_on(
+        rail2.insert_one_knot(end_knot_mid, 1),
+        pass_on,
+    )?)?;
     Ok(())
 }
 
@@ -2448,7 +2499,11 @@ fn equalise_singular_rows(
             w1 = (w1 + w2) / 2.0;
             for ii in 0..num_v {
                 // (status ignored upstream)
-                ignore_status(surface.set_control_point(form, idx_u, ii, pt1, w1))?;
+                // fork 66b02de passes this on (SER)
+                ignore_status(crate::error::passed_on(
+                    surface.set_control_point(form, idx_u, ii, pt1, w1),
+                    k.fixes.fillet_statuses_pass_on,
+                )?)?;
             }
         }
     }
@@ -2546,7 +2601,14 @@ impl CircularCrossSectionFsg {
 
         // Surface creation requires 4 or more cross sections so add
         // some extra knots if needed.
-        let knots = add_section_knots(rail1, rail2, knots, true, OP)?;
+        let knots = add_section_knots(
+            rail1,
+            rail2,
+            knots,
+            true,
+            OP,
+            k.fixes.fillet_statuses_pass_on,
+        )?;
 
         // Where the rails meet at an end of the fillet (a degenerate corner whose cross
         // section is a point), both rails end at that one point: each rail is lifted
@@ -2739,12 +2801,17 @@ impl CircularCrossSectionFsg {
                 let end = tangent_at(rail2, t, OP)?;
 
                 // save the crossTangent surface
-                *slot = Some(deriv_surface(gen_curve, st, end)?);
+                *slot = Some(deriv_surface(
+                    gen_curve,
+                    st,
+                    end,
+                    k.fixes.fillet_statuses_pass_on,
+                )?);
             }
 
             // add a new knot in the NewSurface start/end intervals
             // to allow the newSurface to interpolate the computed crossTangent values
-            insert_end_span_knots(rail1, rail2, OP)?;
+            insert_end_span_knots(rail1, rail2, OP, k.fixes.fillet_statuses_pass_on)?;
         }
 
         // Build the Skinned Surface to interpolate crossSections and optional end Cross Tangents
@@ -3146,7 +3213,14 @@ impl BlendCurveCrossSectionFsg {
 
         // Surface creation requires 4 or more cross sections so add
         // some extra knots if needed.
-        let knots = add_section_knots(rail1, rail2, knots, false, OP)?;
+        let knots = add_section_knots(
+            rail1,
+            rail2,
+            knots,
+            false,
+            OP,
+            k.fixes.fillet_statuses_pass_on,
+        )?;
 
         for i in 1..knots.len() {
             let num_between: usize = 0;
@@ -3248,9 +3322,14 @@ impl BlendCurveCrossSectionFsg {
                     gen_curve.ok_or_else(|| SolidError::invalid_input(OP, "no cross sections"))?;
                 let st = tangent_at(rail1, t, OP)?;
                 let end = tangent_at(center_line, t, OP)?;
-                *slot = Some(deriv_surface(gen_curve, st, end)?);
+                *slot = Some(deriv_surface(
+                    gen_curve,
+                    st,
+                    end,
+                    k.fixes.fillet_statuses_pass_on,
+                )?);
             }
-            insert_end_span_knots(rail1, rail2, OP)?;
+            insert_end_span_knots(rail1, rail2, OP, k.fixes.fillet_statuses_pass_on)?;
         }
         if is_closed_base(k, &*rail1, &rail1.natural_interval(), 0.0)?
             && is_closed_base(k, &*rail2, &rail2.natural_interval(), 0.0)?
@@ -3538,6 +3617,29 @@ impl BlendCurveCrossSectionFsg {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Fork 66b02de (the rail end-span knots: `SER( pRail2->InsertOneKnot(..) )`): the
+    /// second rail runs over another parameter range, so the first rail's span middle
+    /// is not inside it. Upstream drops the failed insertion and the rails go on out of
+    /// step; with `fillet_statuses_pass_on` the error is returned.
+    #[test]
+    fn fillet_statuses_pass_on_end_span_knots_return_a_failed_insertion() {
+        let rails = || {
+            let r1 = BSplineCurve::create_line_segment(3, Vec3::ZERO, Vec3::X).unwrap();
+            let mut r2 = BSplineCurve::create_line_segment(3, Vec3::Y, Vec3::X + Vec3::Y).unwrap();
+            r2.edit_parameterization(&Extent1d::from_min_max(10.0, 11.0))
+                .unwrap();
+            (r1, r2)
+        };
+        let (mut r1, mut r2) = rails();
+        let expected = r2.clone().insert_one_knot(0.5, 1).unwrap_err();
+        insert_end_span_knots(&mut r1, &mut r2, "test", false).unwrap();
+        let (mut r1, mut r2) = rails();
+        assert_eq!(
+            insert_end_span_knots(&mut r1, &mut r2, "test", true).unwrap_err(),
+            expected
+        );
+    }
     use crate::blend::fillet_solver::p1::OffsetSurfaceSlot;
     use crate::nurbs::crv_basic::Curve as NurbCurve;
     use crate::nurbs::math::{CPoint, NOW};

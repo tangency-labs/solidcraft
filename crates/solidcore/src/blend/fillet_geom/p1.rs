@@ -2496,7 +2496,8 @@ impl FilletBrep {
     ///
     /// [`SolidError::Upstream`] (`SM_ERR_NULL_POINTER`) for a missing rail;
     /// [`SolidError::Unported`] from a trim; [`SolidError::NotFound`] for dangling ids.
-    /// With [`crate::kernel::UpstreamFixes::fillet_trim_status`] enabled, every
+    /// With [`crate::kernel::UpstreamFixes::fillet_trim_status`] (or
+    /// [`crate::kernel::UpstreamFixes::fillet_statuses_pass_on`]) enabled, every
     /// curve/surface trim and interval-intersection error is propagated. Earlier
     /// successful edits and parameter snapping remain when a later step fails.
     pub fn trim_geom(
@@ -2505,6 +2506,8 @@ impl FilletBrep {
         g: FilletGeomId,
         trim_interval: &mut Extent1d,
     ) -> Result<()> {
+        // fork 9b7cd48 passes these on (SER), as `fillet_trim_status` does
+        let pass_on = k.fixes.fillet_trim_status || k.fixes.fillet_statuses_pass_on;
         let geom = self.geom(g)?;
         let mut rails: Vec<EdgeId> = Vec::new();
         for rail in geom.rails {
@@ -2522,13 +2525,13 @@ impl FilletBrep {
                 // may snap sIvl by tol to existing knots
                 let trimmed =
                     curve.trim_with_zone_tol(k, trim_interval, TrimMode::Notify, rail_tol);
-                if k.fixes.fillet_trim_status {
+                if pass_on {
                     trimmed?;
                 } else {
                     ignore_non_unported(trimmed)?;
                 }
                 let intersection = edge.interval.intersect(trim_interval);
-                let temp = if k.fixes.fillet_trim_status {
+                let temp = if pass_on {
                     intersection?
                 } else {
                     intersection.unwrap_or_else(|_| Extent1d::new())
@@ -2542,7 +2545,7 @@ impl FilletBrep {
         // Spine curve:
         if let Some(center) = geom.center_line_curve.as_mut() {
             let trimmed = center.trim(k, trim_interval, TrimMode::Notify);
-            if k.fixes.fillet_trim_status {
+            if pass_on {
                 trimmed?;
             } else {
                 ignore_non_unported(trimmed)?;
@@ -2555,7 +2558,7 @@ impl FilletBrep {
             // Trimming is in the u-direction.
             let u_domain = domain.u_interval();
             let intersection = u_domain.intersect(trim_interval);
-            let temp = if k.fixes.fillet_trim_status {
+            let temp = if pass_on {
                 intersection?
             } else {
                 intersection.unwrap_or_else(|_| Extent1d::new())
@@ -2564,7 +2567,7 @@ impl FilletBrep {
 
             // trim to domain
             let trimmed = surface.trim_with_domain(k, &mut domain);
-            if k.fixes.fillet_trim_status {
+            if pass_on {
                 trimmed?;
             } else {
                 ignore_non_unported(trimmed)?;
@@ -3437,8 +3440,12 @@ pub fn create_cubic_rail_rail_interpolant(
     }
     let (vu, _) = eu_vertex(brep, eu)?;
     // ComputeUVPoint(sUVGuess) with its default bOKToMakeUVTrimCurve = TRUE; its status
-    // is ignored, so a failure leaves SmPoint2d()'s (SM_UNDEF_DOUBLE, SM_UNDEF_DOUBLE)
-    let uv_guess = match vertexuse_unit::compute_uv_point(k, brep, vu, true) {
+    // is ignored, so a failure leaves SmPoint2d()'s (SM_UNDEF_DOUBLE, SM_UNDEF_DOUBLE);
+    // fork 9b7cd48 passes this on (SER)
+    let uv_guess = match crate::error::passed_on(
+        vertexuse_unit::compute_uv_point(k, brep, vu, true),
+        k.fixes.fillet_statuses_pass_on,
+    )? {
         Ok(uv) => uv,
         Err(e) if e.is_unported() => return Err(e),
         Err(_) => Point2::new(UNDEF_DOUBLE, UNDEF_DOUBLE),
@@ -4387,6 +4394,31 @@ mod tests {
                     .u_interval(),
                 Extent1d::from_min_max(0.0, 1.0)
             );
+        }
+    }
+
+    /// Fork 9b7cd48 (`SmFilletGeom::Trim`: `SER( pRail->Trim(..) )`): with
+    /// `fillet_statuses_pass_on` alone (not `fillet_trim_status`) a rail curve that
+    /// cannot be trimmed returns its error; with neither flag the trim carries on.
+    #[test]
+    fn fillet_statuses_pass_on_trim_geom_returns_a_failed_rail_trim() {
+        for pass_on in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.fillet_statuses_pass_on = pass_on;
+            let (mut fb, g, rails) = trim_test_geom();
+            fb.brep_mut().edge_mut(rails[0]).unwrap().curve =
+                Some(Curve::from(trim_test_curve(0.5)));
+            let mut interval = Extent1d::from_min_max(0.25, 0.75);
+            let mut failing_curve = trim_test_curve(0.5);
+            let expected = failing_curve
+                .trim(&k, &mut interval, TrimMode::Notify)
+                .unwrap_err();
+            let r = fb.trim_geom(&k, g, &mut interval);
+            if pass_on {
+                assert_eq!(r.unwrap_err(), expected);
+            } else {
+                assert_ne!(r, Err(expected));
+            }
         }
     }
 

@@ -1230,8 +1230,14 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
 
             // Traverse forwards.
             if let Some(edge) = start_edge {
+                // fork 873c7c9 (SolidCraft change): GetFilletSolverOfEdge returns NULL
+                // when GetEdgeuses fails
+                let pass_on = k.fixes.fillet_statuses_pass_on;
                 fs = self
-                    .fillet_solver_of_edge_with(edge, |e| access.smooth_edge_edgeuses(e))?
+                    .fillet_solver_of_edge_with(edge, |e| match access.smooth_edge_edgeuses(e) {
+                        Err(err) if pass_on && !err.is_unported() => Ok(Vec::new()),
+                        r => r,
+                    })?
                     .ok_or_else(|| null!("no solver of edge"))?;
             }
 
@@ -1566,7 +1572,9 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
             fs,
             rail_idx: rail_index,
         };
-        let setup = change.set_up(access);
+        // fork 873c7c9 SERs inside SetUp (its constructor still cannot report, so the
+        // status reaches the caller only with temporary_radius_setup_errors)
+        let setup = change.set_up_with(access, fixes.fillet_statuses_pass_on);
         if fixes.temporary_radius_setup_errors {
             setup?;
         } else {
@@ -1585,6 +1593,15 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
     /// `SM_ERR_NULL_POINTER` for a missing edge use or owning edge; those of the law
     /// evaluation (`SmFilletLaw::Evaluate`) and the constant law curve.
     pub fn set_up<A>(&mut self, access: &mut A) -> Result<()>
+    where
+        A: ExecutiveAccess<O> + ?Sized,
+    {
+        self.set_up_with(access, false)
+    }
+
+    /// [`Self::set_up`]; with `pass_on` the constant law curve's re-parameterization
+    /// status is returned (fork 873c7c9 `SER`) instead of ignored.
+    fn set_up_with<A>(&mut self, access: &mut A, pass_on: bool) -> Result<()>
     where
         A: ExecutiveAccess<O> + ?Sized,
     {
@@ -1678,7 +1695,11 @@ impl<O: ClassObject + SolutionObject + Ord> TemporaryRadiusChange<O> {
                 Point3::new(end_rad, 1.0, 0.0),
                 Point3::new(end_rad, 2.0, 0.0),
             )?;
-            ignored(const_bsp.edit_parameterization(&unit_ivl))?;
+            // fork 873c7c9 passes this on (SER)
+            ignored(crate::error::passed_on(
+                const_bsp.edit_parameterization(&unit_ivl),
+                pass_on,
+            )?)?;
 
             let vrfs = access
                 .variable_radius_solver_mut(self.fs)?

@@ -762,11 +762,19 @@ fn initial_setup(
     let min = Point2::new(ivl_u.min(), ivl_v.min());
     let max = Point2::new(ivl_u.max(), ivl_v.max());
     // (status ignored upstream)
-    ignore_status(domain1.set_min_max(min, max))?;
+    // fork 66b02de passes this on (SER)
+    ignore_status(crate::error::passed_on(
+        domain1.set_min_max(min, max),
+        k.fixes.fillet_statuses_pass_on,
+    )?)?;
     let size2: Vec2 = fs.solver.surface_extension_factor * domain2.size();
     let min = Point2::new(domain2.min().x - size2.x, domain2.min().y - size2.y);
     let max = Point2::new(domain2.max().x + size2.x, domain2.max().y + size2.y);
-    ignore_status(domain2.set_min_max(min, max))?;
+    // fork 66b02de passes this on (SER)
+    ignore_status(crate::error::passed_on(
+        domain2.set_min_max(min, max),
+        k.fixes.fillet_statuses_pass_on,
+    )?)?;
 
     Ok(InitialSetup {
         surface2_rail: other_rail,
@@ -1371,13 +1379,19 @@ impl EiffelTowerCrossSectionFsg {
                 let uv_min = Point2::new(crv_ivl.min(), 0.0);
                 let uv_max = Point2::new(crv_ivl.max(), 1.0);
                 // (status ignored upstream)
-                ignore_status(
+                // fork 66b02de passes this on (SER)
+                ignore_status(crate::error::passed_on(
                     surf.adjust_step_uv_domain(k, &Extent2d::from_points(uv_min, uv_max)),
-                )?;
+                    k.fixes.fillet_statuses_pass_on,
+                )?)?;
                 *slot = Some(surf);
             }
             // (statuses ignored upstream)
-            let knots_local = rail1.knots(None).map(|r| r.0).unwrap_or_default();
+            // fork 66b02de passes this on (SER)
+            let knots_local =
+                crate::error::passed_on(rail1.knots(None), k.fixes.fillet_statuses_pass_on)?
+                    .map(|r| r.0)
+                    .unwrap_or_default();
             let knot = |i: usize| {
                 knots_local
                     .get(i)
@@ -1389,11 +1403,27 @@ impl EiffelTowerCrossSectionFsg {
                 return Err(SolidError::invalid_input(OP, "rail has fewer than 2 knots"));
             }
             let start_knot_mid = (knot(0)? + knot(1)?) / 2.0;
-            ignore_status(rail1.insert_one_knot(start_knot_mid, 1))?;
-            ignore_status(rail2.insert_one_knot(start_knot_mid, 1))?;
+            // fork 66b02de passes this on (SER)
+            ignore_status(crate::error::passed_on(
+                rail1.insert_one_knot(start_knot_mid, 1),
+                k.fixes.fillet_statuses_pass_on,
+            )?)?;
+            // fork 66b02de passes this on (SER)
+            ignore_status(crate::error::passed_on(
+                rail2.insert_one_knot(start_knot_mid, 1),
+                k.fixes.fillet_statuses_pass_on,
+            )?)?;
             let end_knot_mid = (knot(n - 2)? + knot(n - 1)?) / 2.0;
-            ignore_status(rail1.insert_one_knot(end_knot_mid, 1))?;
-            ignore_status(rail2.insert_one_knot(end_knot_mid, 1))?;
+            // fork 66b02de passes this on (SER)
+            ignore_status(crate::error::passed_on(
+                rail1.insert_one_knot(end_knot_mid, 1),
+                k.fixes.fillet_statuses_pass_on,
+            )?)?;
+            // fork 66b02de passes this on (SER)
+            ignore_status(crate::error::passed_on(
+                rail2.insert_one_knot(end_knot_mid, 1),
+                k.fixes.fillet_statuses_pass_on,
+            )?)?;
         }
         let [d0, d1] = &deriv_surfs;
         let opts = SkinnedSurfaceOptions {
