@@ -107,6 +107,92 @@ fn a_face_picked_in_the_viewport_opens_the_browser_to_its_placements_body() {
     assert!(!h.app.tree.order.contains(&format!("b:{first}")), "the other placement's row stays closed away");
 }
 
+/// #8768: by default the Browser's rows start open, as before: a placement lists its body at
+/// once. Browser rows start closed (Preferences › Interface) closes the rows nobody opened, and
+/// turning it off again opens them.
+#[test]
+fn browser_rows_start_open_by_default_and_close_only_with_the_preference() {
+    let (mut h, _, occurrence) = fixture();
+    assert!(!h.app.preferences.browser_rows_start_closed, "off by default");
+    let body = super::model_placement(&mut h.app, &[occurrence]).unwrap().bodies[0].world.clone();
+    let row = format!("b:{body}");
+    h.app.ui.show_browser = true;
+    h.frames(2);
+    assert!(h.app.tree.order.contains(&row), "the placement starts open and lists its body");
+    assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": true}))["ok"], true);
+    h.frames(2);
+    assert!(!h.app.tree.order.contains(&row), "with the preference on, the placement starts closed");
+    assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": false}))["ok"], true);
+    h.frames(2);
+    assert!(h.app.tree.order.contains(&row), "off again, it is open again");
+}
+
+/// #8768: while the Browser's rows start closed (Preferences › Interface), a pick in the 3D view
+/// opens, closes and scrolls nothing, and neither the pick nor a body under the pointer has its
+/// placement looked up to mark the rows above it: on a large assembly that lookup names every
+/// placement again after each edit. With the preference off again, both are marked (#3009).
+#[test]
+fn a_pick_in_the_viewport_leaves_the_browser_alone_while_its_rows_start_closed() {
+    let (mut h, _, occurrence) = fixture();
+    assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": true}))["ok"], true);
+    let copy = h.app.run("occurrence.copy", json!({"occurrence":occurrence,"translate":[50,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+    let second = super::model_placement(&mut h.app, &[copy]).unwrap().bodies[0].world.clone();
+    h.app.ui.show_browser = true;
+    // Both placements open by hand, their Bodies folders closed as they start.
+    h.app.tree.expanded.extend([super::occurrence_key(&[occurrence]), super::occurrence_key(&[copy])]);
+    h.frames(2);
+    let (collapsed, expanded, order) = (h.app.tree.collapsed.clone(), h.app.tree.expanded.clone(), h.app.tree.order.clone());
+    let point = solidcraft_engine::geom::Vec3::new(55.0, 5.0, 10.0);
+    crate::viewport::select(&mut h.app, Some(Sel::Face { body: second.clone(), index: 0, point }), false, false);
+    assert!(h.app.tree.reveal.is_none(), "nothing to scroll to");
+    h.frames(3);
+    assert!(!h.app.session.selection.is_empty(), "the face is picked");
+    assert_eq!((&h.app.tree.collapsed, &h.app.tree.expanded), (&collapsed, &expanded), "every row stays open or closed as it was");
+    assert_eq!(h.app.tree.order, order, "the same rows are drawn");
+    h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: second.clone(), index: 0, point });
+    let lit = super::Lit::of(&mut h.app);
+    assert!(lit.paths.is_empty(), "no row above the picked or hovered body is marked: {:?}", lit.paths);
+    assert!(!h.app.tree.model.as_ref().unwrap().body_paths_walked(), "the placements were not walked for the pick or the pointer");
+    assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": false}))["ok"], true);
+    // The call's frames took the hover from the pointer, which is elsewhere.
+    h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: second.clone(), index: 0, point });
+    let lit = super::Lit::of(&mut h.app);
+    assert_eq!(lit.paths, [vec![copy], vec![copy]], "the placement above the picked and the hovered body");
+}
+
+/// #8768: while the Browser's rows start closed, a new design's Bodies and Sketches folders list
+/// nothing until their arrow opens them, and Find in Browser opens the Bodies folder that holds
+/// the body it finds.
+#[test]
+fn with_rows_starting_closed_a_designs_folders_open_with_their_arrow_or_find_in_browser() {
+    let mut h = crate::scenario::Harness::new();
+    assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": true}))["ok"], true);
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Sketch1"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Block"})).unwrap();
+    h.app.ui.show_browser = true;
+    h.frames(2);
+    let drawn = |label: &str| super::drawn_rows().iter().any(|row| row.0 == label);
+    let body_row = "b:Block".to_string();
+    assert!(drawn("Bodies") && drawn("Sketches"), "the folders are listed");
+    assert!(!super::is_open(&h.app, "c0/bodies", false) && !super::is_open(&h.app, "c0/sketches", false));
+    assert!(!h.app.tree.order.contains(&body_row), "the body's row is closed away");
+    assert!(!drawn("Sketch1"), "so is the sketch's");
+    click(&mut h, "fold:Sketches");
+    h.frames(1);
+    assert!(drawn("Sketch1"), "the arrow opens the Sketches folder");
+    assert!(!h.app.tree.order.contains(&body_row), "the Bodies folder stays closed");
+
+    crate::context_menu::run_item(
+        &mut h.app,
+        &crate::context_menu::Item::action("ui.findBrowser", "", "").with(json!({"body":"Block"})),
+        egui::Pos2::ZERO,
+    );
+    h.frames(2);
+    assert!(super::is_open(&h.app, "c0/bodies", false), "Find in Browser opens the Bodies folder");
+    assert!(h.app.tree.order.contains(&body_row) && h.app.tree.reveal.is_none(), "and scrolls to the body's row");
+}
+
 /// Hovering a placement row lights its whole subtree: the subtree is walked once per model, not
 /// on every frame the pointer stays on the row (#3892: a nested STEP assembly cost a frame per
 /// thousand placements while the pointer was over the tree, even with the rows collapsed).

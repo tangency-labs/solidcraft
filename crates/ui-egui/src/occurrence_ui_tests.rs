@@ -423,6 +423,38 @@ fn bodies_folders_fold_by_the_preference_but_never_the_designs_or_a_hidden_one()
 /// deep, with no Bodies row, even when that folder was closed while it was still drawn (nothing
 /// could open it again). Always draws the folder, closed as it was left, then open with the body
 /// two levels under the placement.
+/// #8768: while the Browser's rows start closed (Preferences › Interface), a placement's contents
+/// stay hidden until its arrow opens it, Find in Browser opens the placements holding its body,
+/// and Collapse All and Expand All close and open them.
+#[test]
+fn placements_start_closed_with_the_preference_and_find_in_browser_opens_the_path_to_its_body() {
+    let mut h = Harness::new();
+    assert_eq!(h.call("ui.prefs", json!({"browser_rows_start_closed": true}))["ok"], true);
+    let outer = h.app.run("component.create", json!({"name":"Frame"})).unwrap()["occurrence"].as_u64().unwrap();
+    let inner = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Deep"})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.frames(3);
+    let row = |path: &str| crate::scenario::handle_at(&format!("row:occurrence:{path}"));
+    assert!(row(&outer.to_string()).is_some(), "the top-level placement shows");
+    assert!(row(&format!("{outer}/{inner}")).is_none(), "a placement's contents stay hidden until it is opened");
+    click(&mut h, &[outer], "fold");
+    assert!(row(&format!("{outer}/{inner}")).is_some(), "opening a placement shows its children");
+    click(&mut h, &[outer], "fold");
+    assert!(row(&format!("{outer}/{inner}")).is_none(), "closing it hides them again");
+    let deep = h.app.session.occurrence_bodies(&[outer, inner], false).unwrap()[0].clone();
+    crate::browser::reveal_body(&mut h.app, &deep);
+    h.frames(3);
+    assert!(h.app.tree.expanded.contains(&format!("o:{outer}")) && h.app.tree.expanded.contains(&format!("o:{outer}/{inner}")));
+    assert!(row(&format!("{outer}/{inner}")).is_some(), "Find in Browser opened the placements holding the body");
+    h.app.run("browser.collapse_all", json!({})).unwrap();
+    h.frames(3);
+    assert!(row(&format!("{outer}/{inner}")).is_none(), "Collapse All closes the placements");
+    h.app.run("browser.expand_all", json!({})).unwrap();
+    h.frames(3);
+    assert!(row(&format!("{outer}/{inner}")).is_some(), "Expand All opens them");
+}
+
 #[test]
 fn a_folded_body_sits_one_level_under_its_nested_placement() {
     use crate::prefs::BodiesFolders;

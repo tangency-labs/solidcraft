@@ -1144,12 +1144,23 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
     });
 }
 
-/// Select what a feature made, so the browser shows it.
-fn find_in_browser(app: &mut SolveApp, id: u64) {
+/// Select what a feature made, so the browser shows it. While the browser's rows start closed
+/// (Preferences › Interface), its first body is also found there, as Find in Browser on a body
+/// does: the rows down to it open.
+pub(crate) fn find_in_browser(app: &mut SolveApp, id: u64) {
     let st = app.session.world_state();
-    let bodies: Vec<serde_json::Value> = st.bodies.iter().filter(|b| b.feature == id).map(|b| json!({"type": "body", "name": b.name})).collect();
-    let items = if bodies.is_empty() { vec![json!({"type": "feature", "id": id})] } else { bodies };
+    let bodies: Vec<String> = st.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
+    let items: Vec<serde_json::Value> = if bodies.is_empty() {
+        vec![json!({"type": "feature", "id": id})]
+    } else {
+        bodies.iter().map(|name| json!({"type": "body", "name": name})).collect()
+    };
     let _ = app.run("select.set", json!({ "items": items }));
+    if !crate::browser::rows_start_open(app)
+        && let Some(first) = bodies.first()
+    {
+        crate::browser::reveal_body(app, first);
+    }
 }
 
 #[cfg(test)]

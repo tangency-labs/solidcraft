@@ -107,4 +107,10 @@ impl Model {
         }
         self.body_paths.as_ref()?.get(body).cloned()
     }
+
+    /// Whether [`Model::body_path`] has walked the placements for this model.
+    #[cfg(test)]
+    pub fn body_paths_walked(&self) -> bool {
+        self.body_paths.is_some()
+    }
 }

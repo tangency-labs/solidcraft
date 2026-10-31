@@ -1499,8 +1499,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.findBrowser" => {
             if let Some(b) = p.get("body").and_then(Value::as_str) {
-                crate::browser::reveal_body(app, b);
+                // Selected first: the rows above the body stay marked until the selection changes.
                 let _ = app.run("select.set", json!({"items": [{"type": "body", "name": b}]}));
+                crate::browser::reveal_body(app, b);
             }
         }
         "ui.findTimeline" => {
