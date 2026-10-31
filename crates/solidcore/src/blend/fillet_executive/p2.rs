@@ -603,6 +603,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             trimming: true,
             classification: true,
         };
+        // the fork's (WR-631): no cliff overflow, no open ends yet
+        self.cliff_overflow = false;
+        self.open_ends.clear();
 
         let num_filleted_edges = params.edges.len();
         if num_filleted_edges < 1 {

@@ -40,6 +40,7 @@ mod recovery;
 
 #[path = "p5/rails_fit.rs"]
 mod rails_fit;
+pub use rails_fit::{inside_material, is_concave_edge, RailsFit};
 
 const OP: &str = "blend::fillet_solver::p5";
 

@@ -314,6 +314,13 @@ pub enum FilletErrorType {
     /// no mapping here. Only `fixes.fillet_vertex_error_diagnostics` records it (#1469); with
     /// it off the port reports pin codes only.
     CornerUnsupported = 9,
+    /// `SM_FILERR_NOT_EXACT` (SolidCraft change, tangency-labs/smlib@8ba4667, WR-631): a cliff
+    /// overflow whose removal region cannot be closed exactly (a boundary edge on no single
+    /// face's surface, a side edge that is not a line). The fork numbers it 9 (and
+    /// `SM_FILERR_CORNER_UNSUPPORTED` 10); this port, whose code 9 is already
+    /// [`FilletErrorType::CornerUnsupported`], gives it 10. Only `fixes.fillet_cliff_overflow`
+    /// records it.
+    NotExact = 10,
 }
 
 /// `SmFilletCornerType`: the kind of corner where fillets meet.

@@ -750,6 +750,8 @@ fn state() -> FilletExecutive<Handle> {
         self_intersection_handler: None,
         blend_curve_at_thirds: false,
         mark_corner_patches: false,
+        cliff_overflow: false,
+        open_ends: Vec::new(),
     }
 }
 

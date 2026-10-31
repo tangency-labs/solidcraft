@@ -3462,6 +3462,59 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             &mut context,
         )
     }
+    fn geometry_rails_fit_judged(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+        executive: &FilletExecutive<FilletObject>,
+    ) -> Result<crate::blend::fillet_solver::p5::RailsFit> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let solver = self
+            .solvers
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        let mut context = SessionRollOver {
+            corners: &mut self.corners,
+            executive,
+        };
+        FilletSolver::rails_fit_their_faces_judged_with_ops(
+            live_solver_ops(solver),
+            k,
+            self.target,
+            &mut self.pseudo,
+            &mut context,
+            true,
+        )
+    }
+    fn geometry_blend_adds_material(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+    ) -> Result<bool> {
+        // sm_BlendAddsMaterial: IsConcaveEdge of the solver's edge
+        let FilletObject::Topology(FilletBody::Target, EntityRef::Edge(edge)) =
+            self.geometry_edge(solver)?
+        else {
+            return Err(invalid("solver edge is not a target edge"));
+        };
+        crate::blend::fillet_solver::p5::is_concave_edge(k, self.target, edge)
+    }
+    fn geometry_generator_is_linear(&self, solver: FilletObject) -> Result<bool> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let solver = self
+            .solvers
+            .get(id.0 as usize)
+            .and_then(Option::as_ref)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        Ok(solver.base().fsg.as_ref().is_some_and(|fsg| {
+            fsg.fillet_surface_generator_type() == FilletSurfaceGeneratorType::Linear
+        }))
+    }
     fn geometry_faces_outlast(&mut self, k: &mut Kernel, solvers: &[FilletObject]) -> Result<bool> {
         use crate::blend::fillet_geom::p1::FilletGeomType;
         use crate::topology::{edgeuse::p1 as eu, loopuse};
