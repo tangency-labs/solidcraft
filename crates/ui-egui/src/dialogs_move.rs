@@ -15,7 +15,7 @@ use solidcraft_engine::geom::Vec3;
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::gizmo::{self, Change, Drag};
-use crate::selection::{AXIS_PICKS, BODIES, EDGES, FACES, ORIGIN, SelInput, VERTICES};
+use crate::selection::{AXIS_PICKS, BODIES, EDGES, FACES, ORIGIN, SNAP_POINTS, SelInput, VERTICES};
 
 pub const TYPES: [&str; 5] = ["Free Move", "Translate", "Rotate", "Point to Point", "Point to Position"];
 pub const FREE: usize = 0;
@@ -23,7 +23,7 @@ pub const TRANSLATE: usize = 1;
 pub const ROTATE: usize = 2;
 pub const POINT_TO_POINT: usize = 3;
 pub const POINT_TO_POSITION: usize = 4;
-const POINTS: u16 = VERTICES | FACES | EDGES | ORIGIN;
+const POINTS: u16 = VERTICES | FACES | EDGES | ORIGIN | SNAP_POINTS;
 
 /// A fresh Move dialog of a type (all values zero).
 pub fn kind(mode: usize, doc: &solidcraft_engine::doc::Document) -> Kind {

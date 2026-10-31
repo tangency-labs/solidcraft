@@ -121,6 +121,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     ui_kit::settings_section(ui, "placement", app.tr("prefs.placement"), |ui| {
         setting::placement_handles(app, ui);
+        setting::hover_pick_points(app, ui);
     });
     ui_kit::settings_section(ui, "linked_designs", app.tr("prefs.linked_designs"), |ui| {
         setting::update_changed_links(app, ui);

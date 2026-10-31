@@ -541,6 +541,98 @@ fn a_pick_on_the_moved_body_is_taken_back_by_the_current_move() {
     assert_eq!(from_shown(&h.app, elsewhere.clone()), elsewhere, "a pick on another body stays where it was made");
 }
 
+/// A 60 × 40 × 10 plate with a Ø8 hole at (45, 20), Point to Point picking From.
+fn holed_plate_picking_from() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.preferences.hover_pick_points = true;
+    h.app.run("solid.box", json!({"length": 60, "width": 40, "height": 10})).unwrap();
+    h.app.run("solid.cylinder", json!({"radius": 4, "height": 12, "base": [45, 20, -1], "operation": "cut"})).unwrap();
+    h.app.cam.distance = 160.0;
+    h.settle();
+    h.app.start("solid.move");
+    let d = h.app.dialog.as_mut().unwrap();
+    d.kind = kind(POINT_TO_POINT, &h.app.session.doc);
+    d.inputs = inputs(POINT_TO_POINT);
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.active = 1;
+    h
+}
+
+/// Hovering a hole's rim wakes its centre (#5912): a click there, in the hole's empty middle,
+/// picks the centre exactly.
+#[test]
+fn hovering_a_rim_wakes_its_centre_for_a_click() {
+    let mut h = holed_plate_picking_from();
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    let centre = Vec3::new(45.0, 20.0, 10.0);
+    assert!(h.app.viewport.woken.points.iter().any(|p| p.at.dist(centre) < 1e-6), "{:?}", h.app.viewport.woken);
+    h.step(&json!({ "click": { "world": [45, 20, 10] } })).unwrap();
+    let from = &h.app.dialog.as_ref().unwrap().inputs[1].items;
+    assert!(matches!(from.as_slice(), [Sel::Vertex { body, point }] if body == "Body1" && point.dist(centre) < 1e-6), "{from:?}");
+}
+
+/// Hovering another edge puts the woken points to sleep and wakes its own: a straight edge's
+/// middle is picked from further away than the edge itself is.
+#[test]
+fn another_edge_wakes_its_own_points_and_the_rest_sleep() {
+    let mut h = holed_plate_picking_from();
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    h.step(&json!({ "move": { "world": [20, 0, 10] } })).unwrap();
+    let woken: Vec<Vec3> = h.app.viewport.woken.points.iter().map(|p| p.at).collect();
+    assert!(!woken.iter().any(|p| p.dist(Vec3::new(45.0, 20.0, 10.0)) < 1e-6), "the rim's centre sleeps: {woken:?}");
+    let middle = Vec3::new(30.0, 0.0, 10.0);
+    assert!(woken.iter().any(|p| p.dist(middle) < 1e-6), "{woken:?}");
+    // 12 points below the middle: past an edge's reach, within a woken point's.
+    let at = h.call("ui.at", json!({ "world": [30, 0, 10] }))["result"].clone();
+    let below = json!([at[0].as_f64().unwrap(), at[1].as_f64().unwrap() + 12.0]);
+    h.step(&json!({ "click": below })).unwrap();
+    let from = &h.app.dialog.as_ref().unwrap().inputs[1].items;
+    assert!(matches!(from.as_slice(), [Sel::Vertex { point, .. }] if point.dist(middle) < 1e-6), "{from:?}");
+}
+
+/// Crossing a face on the way from a rim to its centre keeps the centre awake: only another
+/// edge or curve puts a rim's points to sleep.
+#[test]
+fn crossing_a_face_keeps_a_rims_centre_awake() {
+    let mut h = holed_plate_picking_from();
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    h.step(&json!({ "move": { "world": [53, 24, 10] } })).unwrap();
+    assert!(matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })), "{:?}", h.app.viewport.hover);
+    let centre = Vec3::new(45.0, 20.0, 10.0);
+    assert!(h.app.viewport.woken.points.iter().any(|p| p.at.dist(centre) < 1e-6), "{:?}", h.app.viewport.woken);
+    h.step(&json!({ "click": { "world": [45, 20, 10] } })).unwrap();
+    let from = &h.app.dialog.as_ref().unwrap().inputs[1].items;
+    assert!(matches!(from.as_slice(), [Sel::Vertex { point, .. }] if point.dist(centre) < 1e-6), "{from:?}");
+}
+
+/// With the hover pick points preference off (the default), hovering a rim wakes nothing and
+/// a click in the hole's middle picks nothing there, as before (#5912).
+#[test]
+fn hover_pick_points_stay_asleep_with_the_preference_off() {
+    assert!(!crate::prefs::Prefs::default().hover_pick_points, "off by default");
+    let mut h = holed_plate_picking_from();
+    h.app.preferences.hover_pick_points = false;
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    assert!(h.app.viewport.woken.points.is_empty(), "{:?}", h.app.viewport.woken);
+    h.step(&json!({ "click": { "world": [45, 20, 10] } })).unwrap();
+    let from = &h.app.dialog.as_ref().unwrap().inputs[1].items;
+    let centre = Vec3::new(45.0, 20.0, 10.0);
+    assert!(!from.iter().any(|s| matches!(s, Sel::Vertex { point, .. } if point.dist(centre) < 1e-6)), "{from:?}");
+}
+
+/// An input that doesn't take hover pick points (Rotate's axis) wakes none.
+#[test]
+fn an_axis_input_wakes_no_points() {
+    let mut h = holed_plate_picking_from();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.kind = kind(ROTATE, &h.app.session.doc);
+    d.inputs = inputs(ROTATE);
+    d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+    d.active = 1;
+    h.step(&json!({ "move": { "world": [49, 20, 10] } })).unwrap();
+    assert!(h.app.viewport.woken.points.is_empty(), "{:?}", h.app.viewport.woken);
+}
+
 /// The prefilled Free Move angles must re-make the turn the feature stored, whatever the axis:
 /// recomposing them the way `step` does (Z, then Y, then X) gives the same rotation matrix.
 #[test]
