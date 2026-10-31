@@ -566,6 +566,10 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             s.visibility.hidden_folders.retain(|k| !k.ends_with(&own) && !groups.iter().any(|g| k.ends_with(g.as_str())));
         }
     }
+    // Only a sketch a feature uses is kept shown on its own: one nothing uses yet is shown anyway,
+    // and marking it would keep it shown once an Extrude uses it (#9954).
+    let used: Vec<u64> =
+        items.iter().filter_map(|it| if let Shown::Sketch(id) = it { crate::view::sketch_consumed(s, *id).then_some(*id) } else { None }).collect();
     let v = &mut s.visibility;
     match str_(p, "folder") {
         Some("bodies" | "all") if visible => {
@@ -584,7 +588,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             Shown::Sketch(id) => {
                 if visible {
                     v.hidden_sketches.retain(|x| x != id);
-                    if !v.shown_sketches.contains(id) {
+                    if used.contains(id) && !v.shown_sketches.contains(id) {
                         v.shown_sketches.push(*id);
                     }
                 } else {
@@ -1932,6 +1936,23 @@ mod tests {
         assert!(s.visibility.hidden_bodies.is_empty());
     }
 
+    /// #9954: a sketch hidden and shown again before an Extrude uses it hides itself once the
+    /// Extrude uses it, as a sketch never hidden does; shown after the Extrude, it stays shown.
+    #[test]
+    fn a_sketch_shown_before_an_extrude_hides_itself_once_the_extrude_uses_it() {
+        let mut s = Session::default();
+        let sketch = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "browser.visibility", json!({"items": [sketch], "visible": false}));
+        run(&mut s, "browser.visibility", json!({"items": [sketch], "visible": true}));
+        assert!(crate::view::sketch_shown(&s, sketch));
+        run(&mut s, "solid.extrude", json!({"sketch": sketch, "distance": 10}));
+        assert!(!crate::view::sketch_shown(&s, sketch), "the Extrude uses it: it hides itself");
+        run(&mut s, "browser.visibility", json!({"items": [sketch], "visible": true}));
+        assert!(crate::view::sketch_shown(&s, sketch), "shown on its own, it stays shown");
+    }
+
     #[test]
     fn a_sheet_metal_flange_hides_its_sketch_as_an_extrude_does() {
         // #6804: the base flange's sketch stayed shown; its line on the plate's bottom edge then
@@ -2029,7 +2050,7 @@ mod tests {
         assert_eq!(lines(&s), n0);
         // The browser's Sketches folder hidden: sketches shown one by one aren't drawn either,
         // only the sketch being edited.
-        assert!(s.visibility.shown_sketches.contains(&floor));
+        assert!(crate::view::sketch_shown(&s, floor));
         run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/sketches"], "visible": false}));
         assert!([floor, drain].iter().all(|id| !crate::view::sketch_shown(&s, *id)));
         s.active_sketch = Some(floor);
@@ -2093,7 +2114,8 @@ mod tests {
         assert!(s.visibility.hidden_bodies.is_empty());
         run(&mut s, "browser.visibility", json!({"items": ["BACK LID"], "visible": true}));
         assert!(s.visibility.hidden_sketches.is_empty());
-        assert_eq!(s.visibility.shown_sketches, vec![sketch]);
+        // Nothing uses the sketch: shown again, it is on neither list (#9954).
+        assert!(s.visibility.shown_sketches.is_empty() && crate::view::sketch_shown(&s, sketch));
     }
 
     /// #2219: hiding is a step of its own, so Ctrl+Z brings the body back instead of undoing the
