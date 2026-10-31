@@ -11,8 +11,8 @@ const BUDGET: u64 = 256 * 1024 * 1024;
 const MAX_MARKERS: usize = 256;
 type Params = [f32; 24];
 
-fn capability(adapter: &wgpu::Adapter, format: wgpu::TextureFormat, split: bool, msaa: u32) -> Capability {
-    if solidcraft_gpu::select::tier_of(adapter.get_info().device_type) == solidcraft_gpu::select::Tier::Software {
+fn capability(adapter: &wgpu::Adapter, device_type: wgpu::DeviceType, format: wgpu::TextureFormat, split: bool, msaa: u32) -> Capability {
+    if device_type == wgpu::DeviceType::Cpu {
         return Capability::Unavailable("software adapter (gpu-software)");
     }
     rendering_capability(adapter, format, split, msaa)
@@ -38,6 +38,7 @@ fn rendering_capability(adapter: &wgpu::Adapter, format: wgpu::TextureFormat, sp
 #[derive(Clone)]
 struct Host {
     adapter: wgpu::Adapter,
+    device_type: wgpu::DeviceType,
     device: wgpu::Device,
     queue: wgpu::Queue,
     renderer: std::sync::Weak<egui::epaint::mutex::RwLock<egui_wgpu::Renderer>>,
@@ -49,12 +50,14 @@ struct Host {
 }
 impl Host {
     fn capability(&self) -> Capability {
-        *self.capability.get_or_init(|| capability(&self.adapter, self.format, self.split, self.msaa))
+        *self.capability.get_or_init(|| capability(&self.adapter, self.device_type, self.format, self.split, self.msaa))
     }
 }
 
 pub struct State {
     radius: f32,
+    available: bool,
+    tier_cap: usize,
     host: Option<Host>,
     active: Option<Arc<Shared>>,
     retired: Counters,
@@ -69,6 +72,8 @@ impl Default for State {
     fn default() -> Self {
         Self {
             radius: 0.0,
+            available: true,
+            tier_cap: 5,
             host: None,
             active: None,
             retired: Counters::default(),
@@ -87,6 +92,7 @@ impl State {
         self.failure = None;
         self.host = Some(Host {
             adapter: rs.adapter.clone(),
+            device_type: rs.adapter.get_info().device_type,
             device: rs.device.clone(),
             queue: rs.queue.clone(),
             renderer: Arc::downgrade(&rs.renderer),
@@ -123,6 +129,25 @@ impl State {
     }
     pub fn radius(&self) -> f32 {
         self.radius
+    }
+    pub fn software_adapter(&self) -> bool {
+        self.host.as_ref().is_some_and(|h| h.device_type == wgpu::DeviceType::Cpu)
+    }
+    pub fn set_available(&mut self, available: bool) {
+        self.available = available;
+        if !available {
+            self.retire();
+        }
+    }
+    pub fn set_tier_cap(&mut self, cap: usize) {
+        let cap = cap.clamp(2, 5);
+        if self.tier_cap != cap {
+            self.retire();
+            self.tier_cap = cap;
+        }
+    }
+    pub fn painted_frame(&self) -> Option<PaintedFrame> {
+        self.active.as_ref()?.inner.lock().ok()?.painted
     }
     pub fn capability(&self) -> Capability {
         let base = self.base_capability();
@@ -207,7 +232,7 @@ impl State {
                 self.last_size = Some(size_key);
             }
         }
-        if self.base_capability() != Capability::Available || !size.is_finite() || size.x <= 0.0 || size.y <= 0.0 {
+        if !self.available || self.base_capability() != Capability::Available || !size.is_finite() || size.x <= 0.0 || size.y <= 0.0 {
             self.retire();
             return Scope { previous, alpha };
         }
@@ -216,6 +241,7 @@ impl State {
             Arc::new(Shared {
                 host: host.clone(),
                 radius: self.radius,
+                tier_cap: self.tier_cap,
                 painting_owner: std::sync::atomic::AtomicBool::new(true),
                 inner: Mutex::new(Inner { counts: self.retired, ..Inner::default() }),
             })
@@ -225,6 +251,12 @@ impl State {
             inner.serial = inner.serial.wrapping_add(1);
             inner.source_seen = false;
             inner.source_count = 0;
+            if inner.frame != ctx.cumulative_frame_nr() {
+                inner.frame = ctx.cumulative_frame_nr();
+                inner.continuous = ctx.requested_repaint_last_pass();
+            }
+            inner.rendered = false;
+            inner.drawn_before = inner.counts.markers_drawn;
         }
         if let Some(renderer) = host.renderer.upgrade() {
             renderer.write().frame_compositor = Some(shared.clone());
@@ -253,8 +285,11 @@ pub(crate) fn fixture_state(
 ) -> State {
     State {
         radius: 0.0,
+        available: true,
+        tier_cap: 5,
         host: Some(Host {
             adapter: adapter.clone(),
+            device_type: adapter.get_info().device_type,
             device: device.clone(),
             queue: queue.clone(),
             renderer: Arc::downgrade(renderer),
@@ -317,11 +352,18 @@ pub fn panel_fill(fill: Color32) -> Color32 {
 struct Shared {
     host: Host,
     radius: f32,
+    tier_cap: usize,
     inner: Mutex<Inner>,
     painting_owner: std::sync::atomic::AtomicBool,
 }
 #[derive(Default)]
 struct Inner {
+    frame: u64,
+    continuous: bool,
+    rendered: bool,
+    drawn_before: u64,
+    painted: Option<PaintedFrame>,
+    submitted_at: Option<std::time::Instant>,
     gpu: Option<Gpu>,
     markers: Vec<Marker>,
     counts: Counters,
@@ -477,7 +519,7 @@ impl CallbackTrait for Source {
             return Vec::new();
         }
         inner.source_seen = true;
-        let Some((steps, offset)) = schedule(self.shared.radius) else { return Vec::new() };
+        let Some((steps, offset)) = schedule_capped(self.shared.radius, self.shared.tier_cap) else { return Vec::new() };
         let Some(bytes) = target_bytes(screen.size_in_pixels, steps, self.shared.host.device.limits().max_texture_dimension_2d) else {
             inner.failure = Some("blur target is empty, exceeds device limits or memory budget");
             inner.gpu = None;
@@ -575,6 +617,7 @@ impl Source {
         screen.size_in_pixels.hash(&mut h);
         screen.pixels_per_point.to_bits().hash(&mut h);
         self.shared.radius.to_bits().hash(&mut h);
+        self.shared.tier_cap.hash(&mut h);
         self.shared.host.format.hash(&mut h);
         h.finish()
     }
@@ -705,6 +748,7 @@ impl FrameCompositor for Shared {
         }
         if let Ok(mut inner) = self.inner.lock() {
             inner.counts.present_passes += 1;
+            inner.rendered = true;
         }
         true
     }
@@ -713,6 +757,19 @@ impl FrameCompositor for Shared {
             return;
         }
         if let Ok(mut inner) = self.inner.lock() {
+            if inner.rendered && inner.counts.markers_drawn > inner.drawn_before && !self.host.lost.is_lost() {
+                let now = std::time::Instant::now();
+                inner.painted = Some(PaintedFrame {
+                    frame: inner.frame,
+                    interval_ms: inner.submitted_at.map(|at| now.duration_since(at).as_secs_f64() * 1000.0),
+                    continuous: inner.continuous,
+                });
+                inner.submitted_at = Some(now);
+                inner.rendered = false;
+            } else {
+                inner.painted = None;
+                inner.submitted_at = None;
+            }
             if self.host.lost.is_lost() {
                 inner.gpu = None;
                 inner.counts.clear_live();

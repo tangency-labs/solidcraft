@@ -9,7 +9,6 @@ use std::collections::BTreeMap;
 pub(crate) enum Availability {
     Available,
     /// Message-catalog id, translated at the presentation boundary.
-    #[allow(dead_code)] // Hardware-dependent registrations arrive with blur and tab providers.
     Unavailable(&'static str),
 }
 
@@ -23,6 +22,13 @@ pub(crate) struct Provider {
 
 pub(crate) const PROVIDERS: &[Provider] = &[
     Provider {
+        id: "blur",
+        label: "prefs.theme_option_blur",
+        help: "prefs.theme_option_blur_help",
+        availability: || Availability::Available,
+        apply: apply_runtime_setting,
+    },
+    Provider {
         id: "opacity",
         label: "prefs.theme_option_opacity",
         help: "prefs.theme_option_opacity_help",
@@ -34,16 +40,61 @@ pub(crate) const PROVIDERS: &[Provider] = &[
         label: "prefs.theme_option_tab_colours",
         help: "prefs.theme_option_tab_colours_help",
         availability: || Availability::Available,
-        apply: apply_tab_setting,
+        apply: apply_runtime_setting,
     },
     Provider {
         id: "tab_fade_ms",
         label: "prefs.theme_option_tab_fade_ms",
         help: "prefs.theme_option_tab_fade_ms_help",
         availability: || Availability::Available,
-        apply: apply_tab_setting,
+        apply: apply_runtime_setting,
     },
 ];
+
+/// Hardware/OS state is resolved per app, outside the theme token cache. An unavailable
+/// ancestor disables its descendants in both the API and the UI.
+pub(crate) fn availability(file: &ThemeFile, id: &str, providers: &[Provider], blur: Availability) -> Availability {
+    let mut current = Some(id);
+    for _ in 0..=crate::theme_files::MAX_OPTIONS {
+        let Some(id) = current else { return Availability::Available };
+        if let Some(p) = provider(id, providers) {
+            let state = if id == "blur" && (p.availability)() == Availability::Available { blur } else { (p.availability)() };
+            if state != Availability::Available {
+                return state;
+            }
+        } else if standard(id) {
+            return Availability::Unavailable("prefs.theme_options_unavailable");
+        }
+        current = file.options.iter().find(|o| o.id == id).and_then(|o| o.parent.as_deref());
+    }
+    Availability::Unavailable("prefs.theme_options_unavailable")
+}
+
+pub(crate) fn blur_radius(file: &ThemeFile, values: &BTreeMap<String, OptionValue>, blur: Availability) -> f32 {
+    let definitions = offered(file, PROVIDERS);
+    let Some(def) = definitions.iter().find(|o| o.id == "blur") else { return 0.0 };
+    if availability(file, "blur", PROVIDERS, blur) != Availability::Available {
+        return 0.0;
+    }
+    let mut parent = def.parent.as_deref();
+    for _ in 0..crate::theme_files::MAX_OPTIONS {
+        let Some(id) = parent else { break };
+        if values.get(id) != Some(&OptionValue::Bool(true)) {
+            return 0.0;
+        }
+        parent = definitions.iter().find(|o| o.id == id).and_then(|o| o.parent.as_deref());
+    }
+    match values.get("blur") {
+        Some(OptionValue::Num(n)) if n.is_finite() && (0.0..=40.0).contains(n) => *n,
+        _ => 0.0,
+    }
+}
+
+/// All standard providers are registered; normalized declarations have validated ancestry.
+/// This query is also used by cold UI/API compositions and does not order/allocate a table.
+pub(crate) fn declares_blur(file: &ThemeFile) -> bool {
+    !file.needs_newer() && file.options.iter().any(|o| o.id == "blur")
+}
 
 /// Tab providers affect resolution/animation rather than the base palette. Undeclared values
 /// and inactive parents cannot enable them, even for a directly supplied theme.
@@ -61,8 +112,8 @@ pub(crate) fn tab_settings(file: &ThemeFile, values: &BTreeMap<String, OptionVal
     (enabled, duration)
 }
 
-// Consumed by tab_settings at the per-tab resolution boundary; never mutate base tokens.
-fn apply_tab_setting(_: &mut Tokens, _: &OptionValue) {}
+// Consumed by tab_settings or the blur-intent boundary; never store runtime state in tokens.
+fn apply_runtime_setting(_: &mut Tokens, _: &OptionValue) {}
 
 pub(crate) fn standard(id: &str) -> bool {
     matches!(id, "opacity" | "blur" | "tab_colours" | "tab_fade_ms")
