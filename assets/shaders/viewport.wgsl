@@ -16,11 +16,24 @@ struct U {
     ana_c: array<vec4<f32>, 8>,
     ana_f: vec4<f32>,  // x = 1: stripe the negative draft and blocked faces
     depth: vec4<f32>,  // x = 1: reversed depth (1 near, 0 far); y, z: the faces' push (`FACE_BIAS`)
+    // Where the scene's geometry is drawn in the world: the identity, or a rigid move of a layer
+    // a drag moves from where its scene was built (`MovingLayer`)
+    model: mat4x4<f32>,
     tint: vec4<f32>,   // xyz added to a whole hovered body's colour before lighting
     sel: vec4<f32>,    // xyz a whole selected body's colour before lighting
     product_lights_meta: vec4<f32>, // explicit preview flag and bounded count
     product_lights: array<vec4<f32>,84>, // position/kind, radiance, axis/cone, attenuation
 };
+
+/// A scene's point where it is drawn in the world (see `U.model`).
+fn placed(p: vec3<f32>) -> vec3<f32> {
+    return (u.model * vec4<f32>(p, 1.0)).xyz;
+}
+
+/// A scene's direction where it is drawn in the world (see `placed`; the move is rigid).
+fn turned(n: vec3<f32>) -> vec3<f32> {
+    return (u.model * vec4<f32>(n, 0.0)).xyz;
+}
 
 fn reversed() -> bool {
     return u.depth.x > 0.5;
@@ -68,18 +81,19 @@ struct TOut {
 };
 
 @vertex
-fn vs_tri(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> TOut {
+fn vs_tri(@location(0) local: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> TOut {
     var o: TOut;
+    let p = placed(local);
     o.pos = u.vp * vec4<f32>(p, 1.0);
-    o.n = n;
+    o.n = turned(n);
     o.c = palette(c);
     o.wp = p;
     return o;
 }
 
 /// Shared triangles (in their part's own frame) drawn at one placement: the rows of its rigid
-/// move (`r0`..`r2`, a point's coordinates are their dot products with (p, 1)) and its colour.
-/// The vertex colour (location 2) is not read.
+/// move (`r0`..`r2`, a point's coordinates are their dot products with (p, 1)) and its colour,
+/// then moved with the rest of its scene (`placed`). The vertex colour (location 2) is not read.
 @vertex
 fn vs_tri_inst(
     @location(0) p: vec3<f32>,
@@ -90,10 +104,10 @@ fn vs_tri_inst(
     @location(6) c: u32,
 ) -> TOut {
     let q = vec4<f32>(p, 1.0);
-    let wp = vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q));
+    let wp = placed(vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
     var o: TOut;
     o.pos = u.vp * vec4<f32>(wp, 1.0);
-    o.n = vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n));
+    o.n = turned(vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n)));
     o.c = palette(c);
     o.wp = wp;
     return o;
@@ -120,7 +134,7 @@ fn vs_tri_inst_flat(
     @location(6) c: u32,
 ) -> FOut {
     let q = vec4<f32>(p, 1.0);
-    let wp = vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q));
+    let wp = placed(vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
     var o: FOut;
     o.pos = u.vp * vec4<f32>(wp, 1.0);
     o.rp = wp - u.eye.xyz;
@@ -644,7 +658,9 @@ fn lifted_z(p: vec3<f32>, c: vec4<f32>, px: f32, half: vec2<f32>) -> f32 {
 }
 
 @vertex
-fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(1) b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> LOut {
+fn vs_line(@builtin(vertex_index) vi: u32, @location(0) local_a: vec3<f32>, @location(1) local_b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> LOut {
+    let a = placed(local_a);
+    let b = placed(local_b);
     var pa = a;
     var pb = b;
     var ca = u.vp * vec4<f32>(a, 1.0);
@@ -689,7 +705,7 @@ fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(
     var z = base.z;
     if (lifted && base.w > 1e-6) {
         let p = select(pa, pb, t > 0.5);
-        let g = grazing(p, octahedral(wbits & 4095u), octahedral((wbits >> 12u) & 4095u));
+        let g = grazing(p, turned(octahedral(wbits & 4095u)), turned(octahedral((wbits >> 12u) & 4095u)));
         z = lifted_z(p, base, wd * 0.5 * g + 1.0, half);
     }
     var o: LOut;

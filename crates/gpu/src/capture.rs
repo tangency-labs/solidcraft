@@ -408,6 +408,7 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         ssaa: 1.0,
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
+        layers: Vec::new(),
     }
 }
 

@@ -1743,20 +1743,29 @@ thread_local! {
 
 /// Named joint origins in the world: on their occurrence's component, so they move with it
 /// (joint drives, free moves not captured yet, Capture Position).
+/// Where the view shows the occurrences moved from where the design has them (in their parents):
+/// moves not captured yet, and a joint drag's frame over them (#6325).
+fn shown_moves(s: &Session) -> std::collections::BTreeMap<u64, solidcraft_engine::doc::Mat> {
+    let mut moves = s.pending_moves.clone();
+    moves.extend(s.drag_moves().iter().map(|(o, m)| (*o, *m)));
+    moves
+}
+
 pub fn origins_world(s: &Session) -> Vec<(String, solidcraft_engine::doc::Mat)> {
     if s.doc.assembly.origins.is_empty() {
         return Vec::new();
     }
-    let key = format!("{}:{:?}", s.revision, s.pending_moves);
+    let moves = shown_moves(s);
+    let key = format!("{}:{:?}", s.revision, moves);
     if let Some(v) = ORIGINS.with(|o| o.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
         return v;
     }
-    let doc: std::borrow::Cow<solidcraft_engine::doc::Document> = if s.pending_moves.is_empty() {
+    let doc: std::borrow::Cow<solidcraft_engine::doc::Document> = if moves.is_empty() {
         std::borrow::Cow::Borrowed(&*s.doc)
     } else {
         let mut d = (*s.doc).clone();
         for o in &mut d.occurrences {
-            if let Some(m) = s.pending_moves.get(&o.id) {
+            if let Some(m) = moves.get(&o.id) {
                 o.transform = *m;
             }
         }
@@ -1795,16 +1804,17 @@ pub fn joint_frames_world(s: &Session) -> Vec<(u64, solidcraft_engine::doc::Mat)
     if s.doc.assembly.joints.is_empty() {
         return Vec::new();
     }
-    let key = format!("{}:{:?}", s.revision, s.pending_moves);
+    let moves = shown_moves(s);
+    let key = format!("{}:{:?}", s.revision, moves);
     if let Some(v) = JOINT_FRAMES.with(|o| o.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
         return v;
     }
-    let doc: std::borrow::Cow<solidcraft_engine::doc::Document> = if s.pending_moves.is_empty() {
+    let doc: std::borrow::Cow<solidcraft_engine::doc::Document> = if moves.is_empty() {
         std::borrow::Cow::Borrowed(&*s.doc)
     } else {
         let mut d = (*s.doc).clone();
         for o in &mut d.occurrences {
-            if let Some(m) = s.pending_moves.get(&o.id) {
+            if let Some(m) = moves.get(&o.id) {
                 o.transform = *m;
             }
         }

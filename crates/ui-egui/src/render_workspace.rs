@@ -2122,6 +2122,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let c = Tokens::get().body_selected;
                 [f32::from(c.r()) / 255.0, f32::from(c.g()) / 255.0, f32::from(c.b()) / 255.0]
             },
+            layers: Vec::new(),
         });
         ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, callback));
         Ok(())

@@ -331,6 +331,12 @@ impl Document {
     /// Every placement of each component: (component, occurrence path ids, world transform).
     /// A branch stops past [`MAX_PLACEMENT_DEPTH`] levels, the walk past [`MAX_PLACEMENTS`] placements.
     pub fn placements(&self) -> Vec<(u64, Vec<u64>, Mat)> {
+        self.placements_moved(&std::collections::BTreeMap::new())
+    }
+
+    /// [`Document::placements`] with some occurrences' transforms (in their parents) replaced:
+    /// moves not captured yet, or a joint drag's frame, drawn without copying the design.
+    pub fn placements_moved(&self, moves: &std::collections::BTreeMap<u64, Mat>) -> Vec<(u64, Vec<u64>, Mat)> {
         let mut out = vec![(0, Vec::new(), IDENTITY)];
         let mut stack: Vec<(u64, Vec<u64>, Mat)> = vec![(0, Vec::new(), IDENTITY)];
         while let Some((comp, path, m)) = stack.pop() {
@@ -344,7 +350,7 @@ impl Document {
             for o in self.occurrences.iter().filter(|o| o.parent == comp) {
                 let mut p = path.clone();
                 p.push(o.id);
-                let w = mat_mul(&m, &o.transform);
+                let w = mat_mul(&m, moves.get(&o.id).unwrap_or(&o.transform));
                 out.push((o.component, p.clone(), w));
                 stack.push((o.component, p, w));
             }
