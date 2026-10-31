@@ -2852,7 +2852,7 @@ impl SolveApp {
             self.shell.history = None;
         }
         // The model draws next: a dialog the toolbar closed last frame no longer shows its sketch.
-        dialogs::sync_feature_edit_sketch(self);
+        dialogs::sync_feature_edit(self);
         let full = ui.available_rect_before_wrap();
         if floating {
             let cards = toolbar::shell_cards(self, full);

@@ -3074,10 +3074,28 @@ fn picked_side(app: &SolveApp, d: &Dialog, first: &Sel) -> Option<usize> {
     Some(crate::smart_extrude::picked_direction(crate::smart_extrude::view_ray(&app.cam, at), normal, false))
 }
 
-/// Show the sketch of the Extrude, Revolve, sheet metal base or contour flange, or Hole at sketch
+/// Discard an editor whose target was removed, before its preview can draw again. Show the sketch
+/// of the Extrude, Revolve, sheet metal base or contour flange, or Hole at sketch
 /// points the open dialog edits, and only while it is open: whichever way the dialog closed (OK,
 /// Cancel, another tool, another design), the sketch returns to its own visibility.
-pub(crate) fn sync_feature_edit_sketch(app: &mut SolveApp) {
+pub(crate) fn sync_feature_edit(app: &mut SolveApp) {
+    if app.dialog.as_ref().and_then(|d| d.editing).is_some_and(|(id, _)| app.session.doc.feature(id).is_none()) {
+        // Undo or deletion already chose the current document and history. Cancel's rollback
+        // would try to restore the obsolete editing session; just discard its work instead.
+        app.dialog = None;
+        app.applying = None;
+        if let Some(state) = app.editing_state.take() {
+            // Undo can save the editor's temporary rollback in Redo (deletion saves it in
+            // Undo). Those exact snapshots belong to the complete design, with its old marker.
+            for snapshot in app.session.undo.iter_mut().chain(&mut app.session.redo) {
+                if std::sync::Arc::ptr_eq(&snapshot.doc, &state.source.doc) {
+                    snapshot.doc = state.original.doc.clone();
+                }
+            }
+        }
+        app.preview.reset();
+        app.op_check.abandon();
+    }
     app.session.feature_edit_sketch = app.dialog.as_ref().and_then(|d| d.editing).and_then(|(id, _)| match &app.session.doc.feature(id)?.kind {
         FeatureKind::Extrude { sketch, .. }
         | FeatureKind::Revolve { sketch, .. }
@@ -3133,7 +3151,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // A click in the view's corner is for the dialog open this frame, or for none.
     let corner = app.viewport.corner.take();
     app.viewport.corner_ok = false;
-    sync_feature_edit_sketch(app);
+    sync_feature_edit(app);
     app.op_check.poll();
     if app.tree.redefine.is_none() {
         app.viewport.dialog_rect = None;
