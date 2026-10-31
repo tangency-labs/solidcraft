@@ -4,7 +4,7 @@
 use crate::ui_kit::{Container, Surface};
 use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::{Value, json};
-use solidcraft_engine::command_specs;
+use solidcraft_engine::{CommandSpec, command_specs};
 
 use crate::theme::Tokens;
 use crate::{SolveApp, ui_kit};
@@ -190,8 +190,22 @@ fn keyword_score(q: &str, keywords: &str) -> u32 {
 /// (tab, panel; `None` off the toolbar), in the current language.
 pub type Row = (&'static str, &'static str, &'static str, Option<(&'static str, &'static str)>);
 
+/// Whether a command can be run from the search box (#9734): it has a place on the ribbon,
+/// opens a dialog or a tool, or runs with no parameters. Commands that take their input as
+/// parameters (the script and agent commands) are left out: picking one would run it with no
+/// parameters and end in a "`name` is required" error. They stay reachable by typing the id
+/// with a JSON object, as the hint under the field describes.
+fn runnable_from_search(app: &SolveApp, c: &CommandSpec) -> bool {
+    crate::workspace::destination(c).is_some()
+        // Needs no parameters: its contract accepts `{}`, or it documents none of its own.
+        || c.contract.map_or(c.params.is_empty(), |k| k.check(&json!({})).is_empty())
+        || app.interactive(c.id)
+}
+
 /// Commands matching `q`, best first. With an empty query, recent commands come first, then
 /// everything by name.
+///
+/// Only commands that can be run from the box are listed (see [`runnable_from_search`], #9734).
 ///
 /// The query matches the label, tab and panel in the current language and in English, and the
 /// id, so a name typed in either language, or an id, finds the command in every language.
@@ -199,7 +213,7 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
     let q = q.trim().to_lowercase();
     let mut v: Vec<(u32, Row)> = command_specs()
         .into_iter()
-        .filter(|c| !crate::workspace::AGENT_ONLY.contains(&c.id))
+        .filter(|c| !crate::workspace::AGENT_ONLY.contains(&c.id) && runnable_from_search(app, c))
         .filter_map(|c| {
             let (home_tab, home_panel) = crate::workspace::destination(c).unwrap_or(("", ""));
             let info = crate::render_workspace::interactive_command_info(app, c);
@@ -885,6 +899,41 @@ mod tests {
             assert!(!search(&app, q).iter().any(|x| x.0 == "sketch.solve"), "{q:?}");
         }
         assert!(solidcraft_engine::find_command("sketch.solve").is_some(), "agents and MCP keep it");
+    }
+
+    /// Commands that take their input as parameters, have no place on the ribbon and open no
+    /// dialog or tool are not listed: Enter would run them with no parameters and fail with
+    /// "`name` is required" (#9734). Ribbon commands, dialog and tool openers, and commands
+    /// that run with no parameters stay listed.
+    #[test]
+    fn search_lists_only_commands_that_can_run_from_it() {
+        let app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let listed = |id: &str| search(&app, "").iter().any(|r| r.0 == id);
+        for id in [
+            "parameters.add",
+            "parameters.rename",
+            "parameters.delete",
+            "config.row",
+            "timeline.rename",
+            "component.delete",
+            "joint.edit",
+            "material.create",
+            "browser.group",
+        ] {
+            assert!(!listed(id), "{id} takes parameters and has no place, dialog or tool");
+        }
+        for id in ["solid.extrude", "parameters.change", "timeline.play", "edit.repeat", "view.list"] {
+            assert!(listed(id), "{id} can be run from the search box");
+        }
+    }
+
+    /// A command the list leaves out still runs when its id is typed with a JSON object,
+    /// as the hint under the field describes (#9734).
+    #[test]
+    fn a_command_left_out_of_the_list_still_runs_when_typed_with_values() {
+        let (id, result) = typed(r#"parameters.rename {"name": "L", "new_name": "W"}"#).unwrap();
+        assert_eq!(id, "parameters.rename");
+        assert!(result.is_ok());
     }
 
     /// The box shows each command's label and place in the current language, and finds a name
