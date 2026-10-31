@@ -665,7 +665,7 @@ mod history {
 
     /// Two overlapping squares combined as regions of one plane.
     #[test]
-    #[ignore = "solidcore's boolean_2d carries no attributes through its merge (#1462's scope; write-up review-1031/bugs/boolean2d-drops-history.md, not filed yet)"]
+    #[ignore = "solidcore#1462 (PR #1977): boolean_2d carries no attributes through its merge"]
     fn a_boolean2d_has_the_cpp_history() {
         let _cpp = crate::route::on_cpp();
         use crate::sweeps::Curve;
@@ -728,4 +728,41 @@ fn object_names_stay_distinct_past_a_million() {
     }
     assert_eq!(keys.len(), total);
     assert_ne!(named(EntityRef::Face(FaceId::from_index(1_000_000)), 0).key, named(EntityRef::Loop(LoopId::from_index(0)), 0).key);
+}
+
+/// Rig case booleans/2928, reduced (fork c2e3d9d): a ring, r 3..5 about (0, 10), z 0..2, unioned
+/// with a half annulus prism, r 4..5 about (e, 10), z 2..20, whose cap sits on the ring's top. Two
+/// equal circles a little apart cross; they do not coincide over a tiny edge. The stack's volume
+/// is 113 pi whatever e is.
+/// This path passes with `simple_coincidence_crossing_is_point` off too, so the test holds the
+/// result here and does not single out that flag (solidcore's own test does).
+#[test]
+fn a_ring_and_a_lip_with_walls_nearly_together() {
+    use super::sweep::extrude;
+    use crate::sweeps::Curve;
+    use crate::sweeps::DraftCorner;
+    const Z: [f64; 3] = [0.0, 0.0, 1.0];
+    let up = |p: &[Curve], d| extrude(p, Z, d, 0.0, DraftCorner::default(), true).unwrap();
+    let arc = |c: [f64; 3], radius, start, end| Curve::Arc { center: c, axis: Z, reference: [1.0, 0.0, 0.0], radius, start, end };
+    let disc = |r| up(&[arc([0.0, 10.0, 0.0], r, 0.0, 2.0 * PI)], 2.0);
+    let ring = boolean(&disc(5.0), &disc(3.0), BooleanOp::Subtract).unwrap().unwrap();
+    for e in [0.0, 1e-4, 1e-3, 1e-2] {
+        let c = [e, 10.0, 2.0];
+        let lip = up(
+            &[
+                arc(c, 5.0, 0.0, PI),
+                Curve::Line { start: [e - 5.0, 10.0, 2.0], end: [e - 4.0, 10.0, 2.0] },
+                Curve::Arc { center: c, axis: [0.0, 0.0, -1.0], reference: [-1.0, 0.0, 0.0], radius: 4.0, start: 0.0, end: PI },
+                Curve::Line { start: [e + 4.0, 10.0, 2.0], end: [e + 5.0, 10.0, 2.0] },
+            ],
+            18.0,
+        );
+        let u = boolean(&ring, &lip, BooleanOp::Union).unwrap().unwrap();
+        let v = volume(&u, 1e-8).unwrap();
+        let report = super::check(&u, crate::check::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "e {e}: {report}");
+        assert_eq!(solid_count(&u).unwrap(), 1, "e {e}");
+        assert!(super::is_manifold_solid(&u).unwrap(), "e {e}");
+        assert!((v - 113.0 * PI).abs() < 1e-3, "e {e}: {v}");
+    }
 }

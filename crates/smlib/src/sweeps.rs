@@ -99,13 +99,13 @@ pub const MAX_CURVES: usize = ffi::sweeps::CURVE_MAX_CURVES;
 
 /// The curves as the C API's curve list.
 #[derive(Default)]
-struct List {
+pub(crate) struct List {
     kinds: Vec<i64>,
     reals: Vec<f64>,
 }
 
 impl List {
-    fn of<'a>(curves: impl IntoIterator<Item = &'a Curve>) -> Result<List> {
+    pub(crate) fn of<'a>(curves: impl IntoIterator<Item = &'a Curve>) -> Result<List> {
         let mut l = List::default();
         for c in curves {
             l.push(c)?;
@@ -150,7 +150,7 @@ impl List {
         Ok(())
     }
 
-    fn raw(&self) -> ffi::sweeps::List<'_> {
+    pub(crate) fn raw(&self) -> ffi::sweeps::List<'_> {
         ffi::sweeps::List::new(&self.kinds, &self.reals)
     }
 }

@@ -18,10 +18,9 @@
 
 use solidcore::EntityRef;
 use solidcore::SolidError;
-use solidcore::curve::curve::Curve;
-use solidcore::geom::attribute::{Attribute, AttributeStore, Behavior, ObjectKey, ids};
+use solidcore::geom::attribute::{Attribute, Behavior, ids};
 use solidcore::geom::axis2_placement::Axis2Placement;
-use solidcore::geom::object::{ObjectRef, Shape};
+use solidcore::geom::object::Shape;
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::intersect::point_class::PointClassType;
 use solidcore::kernel::Kernel;
@@ -30,23 +29,17 @@ use solidcore::nurbs::b_spline_curve::ControlPointForm;
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::nurbs::knots::Side;
-use solidcore::offset::offset_executive::p2::{
-    OffsetNotifications, OffsetOptions, ShellCopyIdentities, ShellOptions, api_offset_brep_full, api_shell_brep_full,
-};
+use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions, local_operation_simple, offset_brep_simple, shell_brep_simple};
 use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
-use solidcore::query::api_queries::{BrepRef, face_bounding_box, face_classify_uv, face_closest_point_in_shape, face_internal_point};
+use solidcore::query::api_queries::{face_bounding_box, face_classify_uv, face_closest_point_in_shape, face_internal_point};
 use solidcore::query::brep::{BrepIdentity, BrepQuery, LiveBrepObjects};
 use solidcore::surface::cone::Cone;
 use solidcore::surface::surface::{Surface, SurfaceKind};
-use solidcore::sweep::topology_sweep::store::SweepIdentities;
-use solidcore::topology::brep::local_operation::local_operation;
 use solidcore::topology::brep::{p1 as brep_p1, p2 as brep_p2};
 use solidcore::topology::face::p2 as face_p2;
-use solidcore::topology::topology::{NotifyRecords, Topology};
-use solidcore::topology::{Brep, BrepId, EdgeId, FaceId, FaceuseId, RegionId};
+use solidcore::topology::{Brep, BrepId, FaceId, FaceuseId};
 
 use super::blend::{Miss, on_copy, p3, pick, points_ok, status as blend_status, tolerance_ok};
-use super::boolean::{domain, named};
 use super::{Body, answer};
 use crate::{Error, Result};
 
@@ -279,149 +272,21 @@ fn leaves_cavity(k: &mut Kernel, b: &mut Brep, open: &[FaceId], wall: f64) -> so
     Ok(false)
 }
 
-// Each B-rep the offset executive touches (the source, its working copy, the result, the merge's
-// bodies) names its objects in its own key domain ([`named`]), as solidcore's offset fixture does,
-// so their notification records never collide. Curves and lists have domains of their own.
-const SOURCE: u64 = domain(1);
-const RESULT: u64 = domain(2);
-const WORKING: u64 = domain(3);
-/// The merge's B-rep `brep`: the domains of its objects, its curves and its lists.
-fn merge_domain(brep: BrepId, which: u64) -> u64 {
-    domain(16 + u64::from(brep.index()) * 3 + which)
-}
-
-fn source_key(e: EntityRef) -> ObjectRef {
-    named(e, SOURCE)
-}
-
-fn result_key(e: EntityRef) -> ObjectRef {
-    named(e, RESULT)
-}
-
-fn working_key(e: EntityRef) -> ObjectRef {
-    named(e, WORKING)
-}
-
-fn curve_in(domain: u64, edge: EdgeId, type_code: i64) -> ObjectRef {
-    ObjectRef { key: ObjectKey(domain + u64::from(edge.index())), type_code }
-}
-
-fn result_curve(edge: EdgeId, type_code: i64) -> ObjectRef {
-    curve_in(domain(4), edge, type_code)
-}
-
-fn source_curve(edge: EdgeId, type_code: i64) -> ObjectRef {
-    curve_in(domain(5), edge, type_code)
-}
-
-fn working_curve(edge: EdgeId, type_code: i64) -> ObjectRef {
-    curve_in(domain(6), edge, type_code)
-}
-
-fn lists_in(domain: u64, region: RegionId) -> [ObjectRef; 2] {
-    [0, 1].map(|list| ObjectRef { key: ObjectKey(domain + u64::from(region.index()) * 2 + list), type_code: 0 })
-}
-
-fn source_lists(result: bool, region: RegionId) -> [ObjectRef; 2] {
-    lists_in(domain(if result { 8 } else { 7 }), region)
-}
-
-fn working_lists(region: RegionId) -> [ObjectRef; 2] {
-    lists_in(domain(9), region)
-}
-
-fn merge_curve(brep: BrepId, edge: EdgeId, type_code: i64) -> ObjectRef {
-    ObjectRef { key: ObjectKey(merge_domain(brep, 1) + u64::from(edge.index())), type_code }
-}
-
-/// Identities of the B-reps the merge makes, disjoint from the keys above.
-struct MergeBodies;
-
-impl SweepIdentities for MergeBodies {
-    fn topology(&self, brep: BrepId, entity: EntityRef) -> ObjectRef {
-        named(entity, merge_domain(brep, 0))
-    }
-    fn owned_auxiliary_objects(&self, brep: BrepId, model: &Brep) -> Vec<ObjectKey> {
-        model.edges().iter().filter(|(_, e)| e.curve.is_some()).map(|(edge, _)| merge_curve(brep, edge, 0).key).collect()
-    }
-    fn curve(&self, brep: BrepId, edge: EdgeId, curve: &Curve) -> ObjectRef {
-        merge_curve(brep, edge, curve.type_code())
-    }
-    fn new_curve(&self, brep: BrepId, edge: EdgeId, type_code: i64) -> solidcore::Result<ObjectRef> {
-        Ok(merge_curve(brep, edge, type_code))
-    }
-    fn source_lists(&self, brep: BrepId, region: RegionId) -> solidcore::Result<[ObjectRef; 2]> {
-        Ok(lists_in(merge_domain(brep, 2), region))
-    }
-}
-
-/// The notification stores of one offset call on `source` (SM_API's context keeps them for the
-/// process; each call here has its own).
-struct Notifications {
-    records: NotifyRecords,
-    attributes: AttributeStore,
-}
-
-impl Notifications {
-    /// Registers `source` (B-rep 0 of the source domain), its objects and the reserved result.
-    fn new(source: &mut Brep) -> Notifications {
-        source.set_key(source_key(EntityRef::Brep(ONE)).key);
-        let mut records = NotifyRecords::new();
-        records.insert(source.key(), Topology::new());
-        records.insert(result_key(EntityRef::Brep(ONE)).key, Topology::new());
-        let entities = source
-            .shells()
-            .iter()
-            .map(|(id, _)| EntityRef::Shell(id))
-            .chain(source.faces().iter().map(|(id, _)| EntityRef::Face(id)))
-            .chain(source.faceuses().iter().map(|(id, _)| EntityRef::Faceuse(id)))
-            .chain(source.edges().iter().map(|(id, _)| EntityRef::Edge(id)))
-            .chain(source.edgeuses().iter().map(|(id, _)| EntityRef::Edgeuse(id)))
-            .chain(source.vertices().iter().map(|(id, _)| EntityRef::Vertex(id)))
-            .chain(source.vertexuses().iter().map(|(id, _)| EntityRef::Vertexuse(id)))
-            .chain(source.loopuses().iter().map(|(id, _)| EntityRef::Loopuse(id)))
-            .chain(source.regions().iter().map(|(id, _)| EntityRef::Region(id)));
-        for e in entities {
-            records.insert(source_key(e).key, Topology::new());
-        }
-        Notifications { records, attributes: AttributeStore::default() }
-    }
-
-    fn context(&mut self) -> OffsetNotifications<'_> {
-        OffsetNotifications {
-            records: &mut self.records,
-            attributes: &mut self.attributes,
-            original_key_of: &source_key,
-            result_key_of: &result_key,
-            original_curve_ref: &source_curve,
-            result_curve_ref: &result_curve,
-            boolean_source_lists: &source_lists,
-            result_brep: result_key(EntityRef::Brep(ONE)),
-            merge_identities: Some(&MergeBodies),
-        }
-    }
-}
-
 /// `SmApiShellBrepFull(b, distance, TRUE, TRUE, TRUE, open, r)`: convex edges extended, results
 /// merged, side walls made at a sheet's edges, and (as the fork does, 5448b9a) a thickened
 /// sheet's coplanar side walls one face.
-fn shell_brep_full(k: &mut Kernel, mut b: Brep, distance: f64, open: &[FaceId]) -> solidcore::Result<Brep> {
-    let mut n = Notifications::new(&mut b);
+fn shell_brep_full(k: &mut Kernel, b: &Brep, distance: f64, open: &[FaceId]) -> solidcore::Result<Brep> {
     let options = ShellOptions {
         offset: OffsetOptions { distance, extend_convex_edges: true, merge_results: true },
         create_offset_solid: true,
         merge_sheet_side_walls: true,
     };
-    let faces: Vec<_> = open.iter().map(|&f| Some((ONE, f))).collect();
-    let copy = ShellCopyIdentities { key_of: &working_key, curve_ref: &working_curve, boolean_source_lists: &working_lists };
-    api_shell_brep_full(k, Some(BrepRef { brep: &b, handle: ONE }), options, &faces, &copy, &mut n.context())
+    shell_brep_simple(k, b, options, open)
 }
 
 /// `SmApiOffsetBrepFull(b, distance, TRUE, TRUE, r)`.
 fn offset_brep_full(k: &mut Kernel, b: &mut Brep, distance: f64) -> solidcore::Result<Brep> {
-    let mut n = Notifications::new(b);
-    let options = OffsetOptions { distance, extend_convex_edges: true, merge_results: true };
-    api_offset_brep_full(k, Some(b), options, &mut n.context())
+    offset_brep_simple(k, b, OffsetOptions { distance, extend_convex_edges: true, merge_results: true })
 }
 
 /// `finish`: the result must have faces, and a solid input must give a closed manifold solid.
@@ -459,7 +324,7 @@ pub(crate) fn shell(body: &Body, points: &[[f64; 3]], tolerance: f64, thickness:
         if thickness < 0.0 && solid_in && !leaves_cavity(k, &mut w, &picked, -thickness)? {
             return Ok(Err(Error::NoRoom));
         }
-        match called(shell_brep_full(k, w, thickness, &picked))? {
+        match called(shell_brep_full(k, &w, thickness, &picked))? {
             Ok(r) => finish(r, solid_in),
             Err(e) => Ok(Err(e)),
         }
@@ -528,7 +393,7 @@ pub(crate) fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Bo
                 Err(e) => return Ok(Err(e)),
             };
         }
-        match called(shell_brep_full(k, w, thickness, &[]))? {
+        match called(shell_brep_full(k, &w, thickness, &[]))? {
             Ok(r) => finish(r, true),
             Err(e) => Ok(Err(e)),
         }
@@ -787,8 +652,7 @@ pub(crate) fn draft(
         // `moved_faces(b, status(b->LocalOperation(faces, surfaces)))`, its marks on the picked
         // faces (`mark_moved`).
         mark_moved(&mut w, &picked)?;
-        let mut notes = Notifications::new(&mut w);
-        if let Err(e) = called(local_operation(k, &mut w, &picked, surfaces, &mut notes.context()))? {
+        if let Err(e) = called(local_operation_simple(k, &mut w, &picked, surfaces))? {
             return Ok(Err(e));
         }
         if !moved_faces(&mut w)? {
