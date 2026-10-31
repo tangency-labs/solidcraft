@@ -1,0 +1,32 @@
+[package]
+name = "mesh-plugin-actual-host-ui-probe"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[workspace]
+
+[dev-dependencies]
+serde_json = "1"
+solidcraft-ui-egui = { git = "https://github.com/crono2250/solidcraft.git", rev = "505eb41b9aad90bcc190cfa77e1159a4941f677d" }
+solidcraft-engine = { git = "https://github.com/crono2250/solidcraft.git", rev = "505eb41b9aad90bcc190cfa77e1159a4941f677d", features = ["plugins"] }
+
+[patch.crates-io]
+truck-geometry = { git = "https://github.com/crono2250/solidcraft.git", rev = "505eb41b9aad90bcc190cfa77e1159a4941f677d" }
+truck-shapeops = { git = "https://github.com/crono2250/solidcraft.git", rev = "505eb41b9aad90bcc190cfa77e1159a4941f677d" }
+truck-stepio = { git = "https://github.com/crono2250/solidcraft.git", rev = "505eb41b9aad90bcc190cfa77e1159a4941f677d" }
+truck-meshalgo = { git = "https://github.com/crono2250/solidcraft.git", rev = "505eb41b9aad90bcc190cfa77e1159a4941f677d" }
+matext4cgmath = { git = "https://github.com/crono2250/solidcraft.git", rev = "505eb41b9aad90bcc190cfa77e1159a4941f677d" }
+egui-wgpu = { git = "https://github.com/crono2250/solidcraft.git", rev = "505eb41b9aad90bcc190cfa77e1159a4941f677d" }
+winit = { git = "https://github.com/crono2250/solidcraft.git", rev = "505eb41b9aad90bcc190cfa77e1159a4941f677d" }
+
+[profile.ci]
+inherits = "dev"
+opt-level = 1
+debug = 1
+debug-assertions = false
+
+[profile.ci.package."*"]
+opt-level = 2
+debug = false
