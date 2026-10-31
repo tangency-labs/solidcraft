@@ -493,8 +493,12 @@ mod tests {
     fn the_rotation_arrows_and_home_follow_their_settings_and_turn_the_view() {
         let mut h = boxed();
         custom(&mut h);
-        assert!(crate::scenario::handle_at("navigation_cube:control:left").is_none(), "no arrows by default");
-        assert!(crate::scenario::handle_at("navigation_cube:control:home").is_none(), "no Home by default");
+        assert!(crate::scenario::handle_at("navigation_cube:control:left").is_some(), "arrows by default");
+        assert!(crate::scenario::handle_at("navigation_cube:control:home").is_some(), "Home by default");
+        h.app.run("view.navigator", json!({"arrows": false, "home": false})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::handle_at("navigation_cube:control:left").is_none(), "arrows off");
+        assert!(crate::scenario::handle_at("navigation_cube:control:home").is_none(), "Home off");
         h.app.run("view.navigator", json!({"arrows": true, "home": true})).unwrap();
         h.frames(2);
         let p = crate::scenario::handle_at("navigation_cube:control:clockwise").expect("the roll arrows are there");

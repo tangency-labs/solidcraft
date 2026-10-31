@@ -703,12 +703,13 @@ mod tests {
             assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::ViewNavigator(_))), "the Custom View Navigator panel");
             assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Cube, "nothing changes before OK");
         };
-        // Pick the body as a click in the view would, and turn Home on.
+        // Pick the body as a click in the view would, and turn Home off (it starts on).
         let fill = |h: &mut crate::scenario::Harness| {
             let d = h.app.dialog.as_mut().unwrap();
             d.inputs[0].items = vec![Sel::Body { name: body.clone() }];
             if let Kind::ViewNavigator(form) = &mut d.kind {
-                form.home = true;
+                assert!(form.home && form.arrows, "Home and the arrows start on");
+                form.home = false;
                 form.texture = NavigatorTexture::Modeled;
             }
             h.frames(2);
@@ -716,12 +717,13 @@ mod tests {
         open(&mut h);
         fill(&mut h);
         assert!(crate::scenario::count_of("body_gizmo:faces").is_some_and(|n| n >= 3.0), "the navigator previews the picked body");
-        assert!(crate::scenario::handle_at("navigation_cube:control:home").is_some(), "and the panel's Home");
+        assert!(crate::scenario::handle_at("navigation_cube:control:home").is_none(), "and the panel's Home, off");
+        assert!(crate::scenario::handle_at("navigation_cube:control:left").is_some(), "with its arrows");
         h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
         h.frames(2);
         assert!(h.app.dialog.is_none());
         assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Cube, "Cancel keeps the cube");
-        assert!(h.app.view_gizmo.shape.is_none() && !h.app.preferences.navigator_home);
+        assert!(h.app.view_gizmo.shape.is_none() && h.app.preferences.navigator_home, "Cancel keeps Home on");
 
         open(&mut h);
         fill(&mut h);
@@ -730,7 +732,7 @@ mod tests {
         assert!(h.app.dialog.is_none());
         assert_eq!(h.app.preferences.navigator_style, NavigatorStyle::Custom);
         assert_eq!(h.app.view_gizmo.shape.as_ref().map(|s| s.name.as_str()), Some(body.as_str()));
-        assert!(h.app.preferences.navigator_home);
+        assert!(!h.app.preferences.navigator_home && h.app.preferences.navigator_arrows);
         assert_eq!(h.app.preferences.navigator_texture, NavigatorTexture::Modeled);
         assert!(h.app.session.undo.is_empty(), "the navigator is never part of the design");
 
@@ -738,7 +740,7 @@ mod tests {
         open(&mut h);
         let d = h.app.dialog.as_ref().unwrap();
         assert_eq!(d.inputs[0].items, vec![Sel::Body { name: body.clone() }]);
-        assert!(matches!(&d.kind, Kind::ViewNavigator(f) if f.home && f.texture == NavigatorTexture::Modeled));
+        assert!(matches!(&d.kind, Kind::ViewNavigator(f) if !f.home && f.texture == NavigatorTexture::Modeled));
     }
 
     #[test]
