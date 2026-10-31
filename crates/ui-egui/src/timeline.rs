@@ -686,6 +686,26 @@ pub(crate) fn floating_rect(available: Rect) -> Rect {
     Container::floating_card(Surface::Panel).bottom_strip_rect(available, 40.0)
 }
 
+/// The features that affect the active component (#5854), `None` with the root active or with
+/// Preferences' "Dim unrelated features" off (the default), so
+/// nothing is dimmed then: worked out once for each revision, active component and model state,
+/// and kept for the frames after.
+pub(crate) fn affecting(app: &mut SolveApp) -> Option<std::sync::Arc<std::collections::BTreeSet<u64>>> {
+    if !app.preferences.history_dim_unrelated {
+        return None;
+    }
+    let key = (app.session.revision, app.session.active_component, app.session.model.state());
+    if let Some(((revision, component, state), set)) = &app.tree.affecting
+        && (*revision, *component) == (key.0, key.1)
+        && std::sync::Arc::ptr_eq(state, &key.2)
+    {
+        return set.clone();
+    }
+    let set = app.session.doc.features_affecting(&app.session.model, key.1).map(std::sync::Arc::new);
+    app.tree.affecting = Some((key, set.clone()));
+    set
+}
+
 #[derive(Clone, Debug)]
 enum FolderTile {
     Feature(usize),
@@ -870,6 +890,8 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             let order: Vec<u64> = feats.iter().map(|f| f.0).collect();
             // Find in Timeline: scroll the found feature into the strip on this frame (#5850).
             let reveal = app.tree.timeline_reveal.take();
+            // With a component active, the features that don't affect it are dimmed (#5854).
+            let affecting = affecting(app);
             // The feature that made what is under the cursor or picked in the viewport.
             let from_view = [hovered_feature(app), picked_feature(app)];
             let drag_id = ui.id().with("tl_drag");
@@ -961,7 +983,8 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     kind: ty,
                     selected: sel,
                     hovered: resp.hovered() || from_view.contains(&Some(*id)),
-                    dim: rolled,
+                    // A selected feature stays full strength, so its highlight shows.
+                    dim: rolled || (!sel && affecting.as_ref().is_some_and(|a| !a.contains(id))),
                     suppressed: *suppressed,
                     error: err.is_some(),
                     warning: warn.is_some(),
@@ -2258,5 +2281,54 @@ mod tests {
                     if marker.contains(c.center) && c.fill == t.timeline && c.stroke == egui::Stroke::new(t.space_2, accent.color))));
             }
         }
+    }
+
+    /// #5854: dimming is behind a preference, off by default. With a component active and the
+    /// preference off, nothing is left to dim, so both timelines look as they did; turned on in
+    /// Preferences, the features that don't affect the component are the ones dimmed.
+    #[test]
+    fn nothing_is_dimmed_with_the_preference_off() {
+        let mut h = Harness::new();
+        for (cmd, p) in [
+            ("component.create", json!({"name": "Part"})),
+            ("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Own"})),
+            ("component.activate", json!({"component": "root"})),
+            ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 0], "name": "Other"})),
+            ("component.activate", json!({"component": "Part"})),
+        ] {
+            h.app.run(cmd, p).unwrap();
+        }
+        assert!(!h.app.preferences.history_dim_unrelated, "off by default");
+        assert!(super::affecting(&mut h.app).is_none(), "nothing is dimmed with the preference off");
+        h.frames(3);
+        h.call("ui.prefs", json!({"history_dim_unrelated": true}));
+        let id = |h: &Harness, n: &str| h.app.session.doc.find_feature(n).map(|f| f.id).unwrap();
+        let on = super::affecting(&mut h.app).expect("turned on, with a component active");
+        assert!(on.contains(&id(&h, "Own")) && !on.contains(&id(&h, "Other")), "Other is dimmed, Own is not");
+        h.call("ui.prefs", json!({"history_dim_unrelated": false}));
+        assert!(super::affecting(&mut h.app).is_none(), "turned off again");
+    }
+
+    /// #5854: the features affecting the active component are worked out once for a model
+    /// state, not every frame, and again once the model changes.
+    #[test]
+    fn features_affecting_the_component_are_kept_until_the_model_changes() {
+        let mut h = Harness::new();
+        for (cmd, p) in [
+            ("component.create", json!({"name": "Part"})),
+            ("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Own"})),
+            ("component.activate", json!({"component": "root"})),
+            ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 0], "name": "Other"})),
+            ("component.activate", json!({"component": "Part"})),
+        ] {
+            h.app.run(cmd, p).unwrap();
+        }
+        h.app.preferences.history_dim_unrelated = true;
+        let first = super::affecting(&mut h.app).expect("a component is active");
+        assert!(std::sync::Arc::ptr_eq(&first, &super::affecting(&mut h.app).unwrap()), "kept for the same model");
+        let id = |h: &Harness, n: &str| h.app.session.doc.find_feature(n).map(|f| f.id).unwrap();
+        assert!(first.contains(&id(&h, "Own")) && !first.contains(&id(&h, "Other")));
+        h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [0, 20, 0], "name": "Later"})).unwrap();
+        assert!(super::affecting(&mut h.app).unwrap().contains(&id(&h, "Later")), "worked out again after a change");
     }
 }

@@ -138,6 +138,10 @@ pub struct TreeState {
     pub picked_joints: Vec<u64>,
     /// Folders picked in the feature history (features use the engine selection).
     pub picked_timeline_groups: Vec<u64>,
+    /// The features that affect the active component, for one revision, active component and
+    /// model state ([`crate::timeline::affecting`]): working them out compares every feature's
+    /// bodies with the ones before it, too much for every frame.
+    pub(crate) affecting: Option<((u64, u64, std::sync::Arc<solidcraft_engine::doc::ModelState>), Option<std::sync::Arc<BTreeSet<u64>>>)>,
     /// Last feature-history item clicked, for Shift ranges (`f:<id>` or `g:<id>`).
     pub timeline_anchor: Option<String>,
     /// Find in Timeline: the feature the history scrolls to the next time it draws its items, in
