@@ -1009,7 +1009,11 @@ pub(crate) fn counted(f: &solidcraft_doc::Feature, i: usize) -> bool {
 
 fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "body.rename";
-    let old = str_(p, "body").ok_or_else(|| bad(cmd, "`body` must be a body name"))?.to_string();
+    let given = str_(p, "body").ok_or_else(|| bad(cmd, "`body` must be a body name"))?;
+    // A placed copy's name (`KB (K:2)`, the name the browser lists a pasted placement's body by)
+    // means the body it shows, as appearance.assign takes it (#9740): renaming it renames that body,
+    // in every placement of its component (#10017).
+    let old = s.own_body_name(given).ok_or_else(|| bad(cmd, format!("no body `{given}`")))?;
     let name =
         str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
     if name == old {
