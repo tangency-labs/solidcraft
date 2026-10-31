@@ -508,6 +508,67 @@ fn isolate_nested_child_hides_ancestor_material_and_sibling() {
     }
 }
 
+/// #7896: isolating a body hides its own component's other bodies one by one and every other
+/// placement as a placement, so the Browser row of a component shows it is off and its eye
+/// brings it back. A second placement of the body's own component is another placement.
+#[test]
+fn isolate_bodies_hides_other_components_as_components() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[-20,0,0],"body_name":"Root"}));
+    let comp = |s: &mut Session, name: &str| {
+        let c = run(s, "component.create", json!({"name": name, "parent": "root", "grounded": false}));
+        c["occurrence"].as_u64().unwrap()
+    };
+    let a = comp(&mut s, "CompA");
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"BoxA"}));
+    run(&mut s, "solid.box", json!({"length":2,"width":2,"height":2,"corner":[0,0,20],"body_name":"BoxA2"}));
+    let b = comp(&mut s, "CompB");
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[20,0,0],"body_name":"BoxB1"}));
+    run(&mut s, "solid.box", json!({"length":5,"width":5,"height":5,"corner":[40,0,0],"body_name":"BoxB2"}));
+    let a2 = run(&mut s, "occurrence.copy", json!({"occurrence":a,"translate":[0,40,0]}))["occurrence"].as_u64().unwrap();
+    let in_a = s.occurrence_bodies(&[a], false).unwrap();
+    let (box_a, box_a2) = (in_a.iter().find(|n| !n.contains("BoxA2")).unwrap().clone(), in_a.iter().find(|n| n.contains("BoxA2")).unwrap().clone());
+
+    let out = run(&mut s, "browser.visibility", json!({"visible":true,"items":[box_a],"isolate":true}));
+    assert_eq!(out["isolated"], json!([box_a]));
+    let mut occurrences = s.visibility.hidden_occurrences.clone();
+    occurrences.sort();
+    let mut others = vec![vec![b], vec![a2]];
+    others.sort();
+    assert_eq!(occurrences, others, "CompB and CompA's other placement go as placements");
+    let mut bodies = s.visibility.hidden_bodies.clone();
+    bodies.sort();
+    assert_eq!(bodies, vec![box_a2.clone(), "Root".to_string()], "only bodies beside BoxA go one by one");
+    assert!(s.body_visible(&box_a) && !s.body_visible(&box_a2) && !s.body_visible("Root"));
+    for name in s.occurrence_bodies(&[b], false).unwrap().iter().chain(&s.occurrence_bodies(&[a2], false).unwrap()) {
+        assert!(!s.body_visible(name), "{name}");
+    }
+    // CompB's eye brings it back whole.
+    run(&mut s, "browser.visibility", json!({"visible":true,"paths":[[b]]}));
+    assert!(s.occurrence_bodies(&[b], false).unwrap().iter().all(|n| s.body_visible(n)));
+
+    // Isolating a root body hides every placement as a placement and no body one by one.
+    run(&mut s, "browser.visibility", json!({"visible":true,"items":["Root"],"isolate":true}));
+    let mut occurrences = s.visibility.hidden_occurrences.clone();
+    occurrences.sort();
+    let mut all = vec![vec![a], vec![b], vec![a2]];
+    all.sort();
+    assert_eq!(occurrences, all);
+    assert!(s.visibility.hidden_bodies.is_empty() && s.body_visible("Root"), "{:?}", s.visibility.hidden_bodies);
+
+    // Only bodies isolate, and only shown; a refusal changes nothing.
+    let before = s.visibility.clone();
+    for p in [
+        json!({"visible":false,"items":["Root"],"isolate":true}),
+        json!({"visible":true,"items":["XY"],"isolate":true}),
+        json!({"visible":true,"items":["Nope"],"isolate":true}),
+        json!({"visible":true,"folder":"bodies","isolate":true}),
+    ] {
+        assert!(s.execute("browser.visibility", &p).is_err(), "{p}");
+    }
+    assert_eq!(s.visibility, before);
+}
+
 #[test]
 fn context_new_child_uses_inactive_parent_placement() {
     let mut s = Session::default();
