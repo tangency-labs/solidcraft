@@ -1,0 +1,10 @@
+{
+  "en": { "ui.delete_select_first": "Select what to delete first: features, bodies, components or sketch geometry" },
+  "ar": { "ui.delete_select_first": "حدّد أولاً ما تريد حذفه: الميزات أو الأجسام أو المكونات أو هندسة الرسم" },
+  "de": { "ui.delete_select_first": "Wählen Sie zuerst aus, was gelöscht werden soll: Features, Körper, Komponenten oder Skizzengeometrie" },
+  "he": { "ui.delete_select_first": "בחרו קודם מה למחוק: תכונות, גופים, רכיבים או גאומטריית סקיצה" },
+  "ja": { "ui.delete_select_first": "先に削除するものを選択してください: フィーチャ、ボディ、コンポーネント、スケッチ ジオメトリ" },
+  "ko": { "ui.delete_select_first": "먼저 삭제할 항목을 선택하세요: 피처, 바디, 컴포넌트 또는 스케치 형상" },
+  "vi": { "ui.delete_select_first": "Hãy chọn trước những gì cần xóa: tính năng, khối, thành phần hoặc hình học phác thảo" },
+  "zh": { "ui.delete_select_first": "请先选择要删除的内容：特征、实体、组件或草图几何" }
+}

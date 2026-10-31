@@ -71,6 +71,11 @@ pub fn delete_selection(app: &mut SolveApp) {
     request(app, params);
 }
 
+/// Whether Delete has nothing to act on: nothing selected, and no joint open in Edit Joint.
+pub fn nothing_to_delete(app: &SolveApp) -> bool {
+    is_empty(&selection_params(app)) && edited_joint(app).is_none()
+}
+
 /// The joint the open Edit Joint dialog edits.
 fn edited_joint(app: &SolveApp) -> Option<u64> {
     match app.dialog.as_ref().map(|d| &d.kind) {
