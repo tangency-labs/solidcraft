@@ -340,11 +340,7 @@ pub fn blend_seams(b: &ModelBody) -> Vec<BlendSeam> {
         all(j).into_iter().any(|name| {
             let (core, instance) = split_instance(name);
             let face = crate::piece_names::strip_qualifiers(core);
-            edges.iter().any(|(edge, at)| {
-                at == instance
-                    && (edge.strip_prefix(face.as_str()).is_some_and(|r| r.starts_with('|'))
-                        || edge.strip_suffix(face.as_str()).is_some_and(|r| r.ends_with('|')))
-            })
+            edges.iter().any(|(edge, at)| at == instance && edge_sides(edge).is_some_and(|(a, b)| a == face || b == face))
         })
     };
     let mut out = Vec::new();
@@ -361,6 +357,44 @@ pub fn blend_seams(b: &ModelBody) -> Vec<BlendSeam> {
         out.push(BlendSeam { edge, kind, corner: corner(f) || corner(g) });
     }
     out
+}
+
+/// The two faces an edge name `<face A>|<face B>` joins. A blend face's own name holds the edge it
+/// replaced (`F<feature>:blend:<face>|<face>`), so a side's name can hold `|` too: the split is the
+/// one `|` outside every blend face's edge (`F1:+y` and `F3:blend:F1:+z|F2:side` for
+/// `F1:+y|F3:blend:F1:+z|F2:side`). `None` for a name that is not two faces.
+fn edge_sides(edge: &str) -> Option<(&str, &str)> {
+    let first = face_name_end(edge, 0)?;
+    if edge.as_bytes().get(first) != Some(&b'|') || face_name_end(edge, first + 1)? != edge.len() {
+        return None;
+    }
+    Some((edge.get(..first)?, edge.get(first + 1..)?))
+}
+
+/// Where the face name starting at byte `from` of `s` ends: at the next `|`, or for a blend face
+/// past the two faces of the edge its name holds (and theirs, for blends of blends).
+fn face_name_end(s: &str, from: usize) -> Option<usize> {
+    const MARK: &str = ":blend:";
+    // The faces still to read: a blend face's name is read as the two of its edge.
+    let (mut pending, mut at) = (1usize, from);
+    loop {
+        let rest = s.get(at..)?;
+        let bar = rest.find('|').unwrap_or(rest.len());
+        if let Some(m) = rest.get(..bar)?.find(MARK) {
+            pending += 1;
+            at += m + MARK.len();
+            continue;
+        }
+        pending -= 1;
+        at += bar;
+        if pending == 0 {
+            return Some(at);
+        }
+        if s.as_bytes().get(at) != Some(&b'|') {
+            return None;
+        }
+        at += 1;
+    }
 }
 
 /// A name and the copy it names (`@F<feature>.<instance>`, a pattern's or a paste's copy of a

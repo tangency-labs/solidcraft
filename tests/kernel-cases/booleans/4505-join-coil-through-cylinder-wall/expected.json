@@ -4,7 +4,21 @@
   "tangency-labs/solidcraft#3636"
  ],
  "what": "a coil (diameter 151, pitch 10, 80 high, 5 mm round section) whose section runs through a diameter-152 cylinder's wall, joined to it: truck ground for 125-296 s, then 'boolean Union: no result'",
- "source": "invariants",
- "method": "the coil's section crosses the wall along its whole length, so the union is one connected solid: one valid closed body. The helical sweep's part outside r 76 has no closed-form volume (the triage's script)",
- "body_count": 1
+ "source": "analytic",
+ "method": "the coil is a screw sweep of its axial section, a 5 mm circle centred at r 75.5 (section_position center), 80 / 10 = 8 turns from z 10, so the wire spans r 73..78, z 7.5..92.5: inside r 76 it lies in the cylinder (r 76, z 0..100), and what the join adds is the screw sweep of the section's segment beyond r 76 (chord 0.5 from the centre). Segment: A = 2.5^2 acos(0.2) - 0.5 sqrt(6) = 7.33425, int r dA = 75.5 A + (2/3) 6^(3/2) = 563.5335; a screw motion sweeps 2 pi * turns * int r dA: 16 pi * 563.5335 = 28326.28. V = pi 76^2 100 + 28326.28 = 1842910.2 (the cylinder alone, 1814583.9, is far outside the tolerance). Area: the cylinder's 2 pi 76^2 + 2 pi 76 100, less the band the wire covers on r 76 (2 sqrt(6) * 2 pi 76 * 8 = 18714.97), plus the screw sweep of the wire's outer arc (16 pi int R sqrt(r^2 + (10/2pi)^2 sin^2 phi) dphi over |phi| < acos(0.2), r = 75.5 + 2.5 cos phi: 26603.45) and the two end segments (2 A): 91947.04. Box: r 78 in x and y (8 whole turns reach every direction), z 0..100",
+ "body_count": 1,
+ "volume_mm3": 1842910.2,
+ "area_mm2": 91947.04,
+ "bbox": {
+  "min": [
+   -78.0,
+   -78.0,
+   0.0
+  ],
+  "max": [
+   78.0,
+   78.0,
+   100.0
+  ]
+ }
 }

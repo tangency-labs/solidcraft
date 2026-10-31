@@ -72,9 +72,13 @@ fn sketches_and_planes_move_with_the_component() {
 fn world_picks_map_into_the_component() {
     let mut s = moved_part();
     let v0 = volume(&mut s);
+    assert!((v0 - 6000.0).abs() < 1e-6, "{v0}"); // 30 x 20 x 10
     // The edge along X at the top front: world (65, 0, 10).
     run(&mut s, "solid.fillet", json!({"edges": [[65, 0, 10]], "radius": 2}));
-    assert!(volume(&mut s) < v0 - 1.0, "the fillet cut material");
+    let filleted = volume(&mut s);
+    // A round of radius 2 along the 30 mm edge removes r²(1 − π/4) of section along its length.
+    let round = 4.0 * (1.0 - std::f64::consts::PI / 4.0) * 30.0;
+    assert!((v0 - filleted - round).abs() < 4e-7 * v0, "the fillet cut {} against {round}", v0 - filleted);
     // The modified face has no certified lineage; explicitly freeze its picked plane.
     // Its world pick still maps into the moved component exactly once.
     run(&mut s, "sketch.create", json!({"plane": {"face": [70, 10, 10],"fixed":true}, "name": "Pad"}));
@@ -88,7 +92,10 @@ fn world_picks_map_into_the_component() {
     assert!(near(pad, Vec3::new(70.0, 10.0, 10.0)), "{pad:?}");
     let v1 = volume(&mut s);
     let h = run(&mut s, "solid.hole", json!({"position": [60, 10, 10], "diameter": 4, "depth": 5}));
-    assert!(volume(&mut s) < v1 - 1.0, "the hole cut material: {h}");
+    // A simple (flat-bottomed) hole: a cylinder of radius 2, 5 deep, clear of the round at y < 2.
+    let bore = std::f64::consts::PI * 4.0 * 5.0;
+    let v2 = volume(&mut s);
+    assert!((v1 - v2 - bore).abs() < 4e-7 * v1, "the hole cut {} against {bore}: {h}", v1 - v2);
     // A box made at world (100, 0, 0) in the active (moved) component shows there.
     run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0], "operation": "new"}));
     let last = s.model.state().bodies.last().map(|b| b.name.clone()).unwrap();
@@ -108,7 +115,11 @@ fn picks_on_an_instance_map_through_its_placement() {
     // An edge of the second instance only (world y = 40).
     run(&mut s, "solid.fillet", json!({"edges": [[5, 40, 10]], "radius": 2}));
     let v1 = volume(&mut s);
-    assert!(v1 < v0 - 1.0, "{v0} {v1}");
+    // Two 10 mm cubes; the round of radius 2 along one 10 mm edge of the component removes
+    // r²(1 − π/4)·10 from every instance, the picked one and the other.
+    assert!((v0 - 2000.0).abs() < 1e-6, "{v0}");
+    let round = 4.0 * (1.0 - std::f64::consts::PI / 4.0) * 10.0;
+    assert!((v0 - v1 - 2.0 * round).abs() < 4e-7 * v0, "{v0} {v1}");
 }
 
 /// (c) Moving a body into a moved component keeps it where it is in the world.

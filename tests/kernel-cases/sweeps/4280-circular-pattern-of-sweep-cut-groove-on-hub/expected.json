@@ -3,7 +3,8 @@
   "tangency-labs/solidcraft#4280"
  ],
  "what": "a round groove (r2) swept as a cut along the curved profile of a revolved hub, then circular-patterned 6 times about the hub's axis: 'boolean Cut: no result' in the pattern",
- "source": "invariants",
- "method": "the six grooves run down the hub's curved face 60 deg apart and don't meet, so the hub stays one valid closed body. The groove follows the surface (its centre on it), which has no closed-form removed volume",
- "body_count": 1
+ "source": "analytic",
+ "method": "the hub: the profile x 0..30 at z 0, up x = 30 to z 5, the arc through (30, 5), (18, 11), (10, 20) (centre (38.75, 37.5), R 33.657280, the side away from it, x(z) = 38.75 - sqrt(R^2 - (z - 37.5)^2)), then z = 20 to the axis, revolved about z: V_hub = pi (30^2 x 5 + Int_5^20 x(z)^2 dz) = 29625.699466. Each groove takes the r2 tube about that arc (length 25.613619, flat ends square to it at both ends, its centre on the hub's surface) where it lies in the hub: Int_0^L ds Int_0^2 rho drho Int (1 - rho cos psi / R) [in the hub] dpsi, psi from the arc's normal toward its centre, integrated numerically from that exact geometry (Gauss-Legendre in s and rho, each inside run of psi to its crossings): 162.452357, steady to 3e-6 relative when the grid is doubled (half the tube is 160.935; the turn round the hub's axis and the end wedges move it). The six grooves, 60 deg apart at x >= 8, don't meet: V = V_hub - 6 x 162.452357 = 28650.985325; one valid closed body",
+ "body_count": 1,
+ "volume_mm3": 28650.98532494651
 }

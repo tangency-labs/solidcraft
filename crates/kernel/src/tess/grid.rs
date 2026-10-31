@@ -323,8 +323,15 @@ mod tests {
         // A triangle-like patch whose top side is a pole (two copies of one point in 3D).
         let b = vec![[0.0, 0.0], [0.5, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
         let Some(q) = quad(&b) else { panic!("a quad") };
-        let Some((_, tris)) = structured(&b, &q, &[0.5], &[0.5]) else { panic!("meshes") };
-        assert!(!tris.is_empty());
+        let Some((extra, tris)) = structured(&b, &q, &[0.5], &[0.5]) else { panic!("meshes") };
+        // One grid node, (0.5, 0.5), fanned to each of the five boundary segments: one triangle
+        // each, the pole's single segment among them, every one of positive area, tiling the box.
+        assert_eq!(extra, [[0.5, 0.5]]);
+        assert_eq!(tris.len(), 5);
+        let mut uv = b.clone();
+        uv.extend(extra);
+        assert!(tris.iter().all(|t| signed_area(&uv, *t).is_some_and(|a| a > 0.0)));
+        assert!((area(&uv, &tris) - 1.0).abs() < 1e-12);
     }
 
     #[test]

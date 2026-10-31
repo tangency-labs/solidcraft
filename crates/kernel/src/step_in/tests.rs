@@ -135,11 +135,13 @@ fn a_void_reads_as_a_cavity_whichever_way_its_shell_flag_points() {
     }
 }
 
+/// A ball whose one face is bounded by a meridian edge from the north pole that stops short of
+/// the south pole (at 2.5 rad), run out and back: the face is the whole sphere less a slit of no
+/// area, so it is the same 2 mm ball as when the seam runs pole to pole.
 #[test]
-fn non_antipodal_seam_sphere_does_not_panic() {
+fn non_antipodal_seam_sphere_imports_as_a_whole_ball() {
     let text = seam_sphere_step(Vec3::ZERO, 2.0, Vec3::Z, Vec3::X, 0.0, false, 2.5);
-    let result = std::panic::catch_unwind(|| step_import(&text));
-    assert!(result.is_ok());
+    assert_seam_sphere(&text, 2.0);
 }
 
 #[test]
@@ -1543,60 +1545,6 @@ fn faces_with_too_many_bounds_are_refused() {
     let imp = step_import(&text).unwrap();
     assert!(imp.warnings.iter().any(|w| w.contains("face #900000 with 100000 bounds")), "{:?}", imp.warnings);
     assert!(start.elapsed() < std::time::Duration::from_secs(10), "took {:?}", start.elapsed());
-}
-
-/// A board-like assembly for issue #883: `SOLIDCRAFT_STEP_PCB_FIXTURE=path` writes it (with
-/// `SOLIDCRAFT_STEP_PCB_COMPONENTS` and `SOLIDCRAFT_STEP_PCB_PINS`; 600 and 15 give 52 MB). Every component is
-/// its own product with a package body and its own pins (nothing shared), the worst case for
-/// a large import.
-#[test]
-#[ignore = "manual fixture generator for large STEP imports"]
-fn generate_board_assembly_fixture() {
-    use crate::step_out::{ExportBody, ExportProduct, StepHeader, step_export_products};
-    let count: usize = solidcraft_geom::env::var("STEP_PCB_COMPONENTS").map(|s| s.parse().unwrap()).unwrap_or(500);
-    let pins: usize = solidcraft_geom::env::var("STEP_PCB_PINS").map(|s| s.parse().unwrap()).unwrap_or(16);
-    let mut owned: Vec<Vec<Body>> = Vec::new();
-    for c in 0..count {
-        let w = 4.0 + (c % 7) as f64 * 0.37;
-        let d = 3.0 + (c % 5) as f64 * 0.29;
-        let mut bodies = vec![fillet_box(w, d, 1.2 + (c % 3) as f64 * 0.1)];
-        for p in 0..pins {
-            let side = if p % 2 == 0 { -0.6 } else { d + 0.6 };
-            let x = 0.3 + (p / 2) as f64 * (w - 0.6) / (pins / 2).max(1) as f64 + c as f64 * 1e-4;
-            bodies.push(cylinder(Vec3::new(x, side, -1.5), Vec3::Z, 0.25, 2.0 + (p % 3) as f64 * 0.01).unwrap());
-        }
-        owned.push(bodies);
-    }
-    let mut products: Vec<ExportProduct> = owned
-        .iter()
-        .enumerate()
-        .map(|(c, bodies)| ExportProduct {
-            name: format!("U{c}"),
-            bodies: bodies.iter().enumerate().map(|(k, b)| ExportBody { name: format!("U{c}_{k}"), body: b, color: Some([0.2, 0.2, 0.2]) }).collect(),
-            children: Vec::new(),
-        })
-        .collect();
-    let side = (count as f64).sqrt().ceil() as usize;
-    let children = (0..count)
-        .map(|c| {
-            let (x, y) = ((c % side) as f64 * 12.0, (c / side) as f64 * 10.0);
-            (c, [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [x, y, 1.6, 1.0]], format!("U{c}"))
-        })
-        .collect();
-    products.push(ExportProduct { name: "Board".into(), bodies: Vec::new(), children });
-    let root = products.len() - 1;
-    let text = step_export_products(&products, root, &StepHeader { file_name: "board.step".into(), ..Default::default() }).unwrap();
-    let path = solidcraft_geom::env::var("STEP_PCB_FIXTURE").unwrap_or_else(|| "board.step".into());
-    std::fs::write(&path, &text).unwrap();
-    println!("wrote {path}: {} bytes, {} components", text.len(), count);
-}
-
-fn fillet_box(w: f64, d: f64, h: f64) -> Body {
-    let b = box_solid(Vec3::ZERO, Vec3::new(w, d, h)).unwrap();
-    let vertical = [Vec3::new(0.0, 0.0, h / 2.0), Vec3::new(w, 0.0, h / 2.0), Vec3::new(w, d, h / 2.0), Vec3::new(0.0, d, h / 2.0)];
-    let top = [Vec3::new(w / 2.0, 0.0, h), Vec3::new(w, d / 2.0, h), Vec3::new(w / 2.0, d, h), Vec3::new(0.0, d / 2.0, h)];
-    let b = fillet(&b, &vertical, 0.3).unwrap_or(b);
-    fillet(&b, &top, 0.1).unwrap_or(b)
 }
 
 /// Independent boxes as one STEP file (about 3 KB a box).

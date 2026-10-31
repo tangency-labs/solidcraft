@@ -375,6 +375,34 @@ fn blend_seams_are_a_rounds_contacts_and_the_blends_beside_it() {
     assert!(corner.iter().all(|x| x.kind == BlendSeamKind::Blend), "{seams:?}");
 }
 
+/// A round along a chain onto an earlier round's end has that round for one of its faces, and
+/// that round's own faces are not its own: where it runs into the cylinder the earlier round
+/// rolls on, its end face, is no seam of it (a block's arc at a cylinder rounded r2, then the
+/// block's top edge with the round's end curve on its side face rounded r1; the earlier round's
+/// name holds a `|` of its own, `F3:blend:F1:+z|F2:side`).
+#[test]
+fn a_round_of_a_round_s_end_has_no_seam_with_that_round_s_faces() {
+    use solidcraft_doc::naming::{blend_seams, face_names};
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 10, "height": 15, "corner": [0, -5, 0], "body_name": "Block"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 30, "base": [0, 0, 0], "operation": "join", "targets": ["Block"]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[10, 0, 15]], "radius": 2}));
+    run(&mut s, "solid.fillet", json!({"edges": [[30, 5, 15]], "radius": 1}));
+    let state = s.model.state();
+    let body = &state.bodies[0];
+    let names = face_names(body);
+    let mesh = body.mesh();
+    let sides = |edge: usize| -> Vec<&str> { mesh.edge_faces[edge].iter().filter_map(|f| names.get(*f as usize).map(String::as_str)).collect() };
+    let seams = blend_seams(body);
+    assert!(!seams.is_empty());
+    for seam in &seams {
+        let faces = sides(seam.edge);
+        if faces.iter().any(|n| n.starts_with("F2:side")) {
+            assert!(faces.iter().any(|n| n.starts_with("F3:blend:")), "a seam of the r2 round only: {faces:?}");
+        }
+    }
+}
+
 /// A fillet of a shell's inner corners names those edges. Thinning the wall past the outer
 /// round removes them. The fillet must say the names are gone, not blend the seam nearest
 /// the old pick, which now sits on the axis of the inner round (#775).
