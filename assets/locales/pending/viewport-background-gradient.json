@@ -1,0 +1,9 @@
+{
+  "en": { "prefs.viewport_background_gradient": "Gradient", "prefs.viewport_background_middle": "Middle colour" },
+  "de": { "prefs.viewport_background_gradient": "Farbverlauf", "prefs.viewport_background_middle": "Mittelfarbe" },
+  "ar": { "prefs.viewport_background_gradient": "تدرّج لوني", "prefs.viewport_background_middle": "لون أوسط" },
+  "he": { "prefs.viewport_background_gradient": "מעבר צבעים", "prefs.viewport_background_middle": "צבע אמצעי" },
+  "ja": { "prefs.viewport_background_gradient": "グラデーション", "prefs.viewport_background_middle": "中間色" },
+  "vi": { "prefs.viewport_background_gradient": "Chuyển màu", "prefs.viewport_background_middle": "Màu giữa" },
+  "zh": { "prefs.viewport_background_gradient": "渐变", "prefs.viewport_background_middle": "中间色" }
+}

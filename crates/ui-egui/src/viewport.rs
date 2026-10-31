@@ -6266,6 +6266,7 @@ pub(crate) fn scene_palette(dark: bool, mode: crate::theme::ColorVision) -> soli
     let rgb = |c: Color32| Rgb(c.r(), c.g(), c.b());
     solidcraft_engine::view::Palette {
         background: (rgb(t.viewport_top), rgb(t.viewport_bottom)),
+        background_middle: t.viewport_middle.map(rgb),
         grid: rgb(t.grid),
         grid_major: rgb(t.grid_major),
         edge: rgb(t.body_edge),

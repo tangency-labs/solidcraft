@@ -231,7 +231,7 @@ impl Capturer {
         let (resolved_view, depth_view) = (resolved.create_view(&Default::default()), depth.create_view(&Default::default()));
         let multisampled_view = multisampled.as_ref().map(|t| t.create_view(&Default::default()));
         let (top, bottom) = scene.background.unwrap_or(BACKGROUND);
-        let background = background_vertices(device, top, bottom);
+        let (background, background_count) = background_vertices(device, top, scene.background_middle, bottom);
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_capture") });
         state.renderer.prepare(device, queue, &mut encoder, &frame);
         {
@@ -264,7 +264,7 @@ impl Capturer {
             // The background first, as the viewport paints it before the model.
             pass.set_pipeline(&state.background);
             pass.set_vertex_buffer(0, background.slice(..));
-            pass.draw(0..6, 0..1);
+            pass.draw(0..background_count, 0..1);
             state.renderer.paint(&frame, &mut pass, [0.0, 0.0, width as f32, height as f32]);
         }
         let row = width * 4;
@@ -499,19 +499,29 @@ fn fs(i: O) -> @location(0) vec4<f32> {
 /// Background vertex: NDC position (2 × f32) and sRGB colour (4 × u8).
 const BACKGROUND_VERTEX: u64 = 12;
 
-fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> wgpu::Buffer {
-    let mut bytes = Vec::with_capacity(6 * BACKGROUND_VERTEX as usize);
-    let corner = |x: f32, y: f32| (x, y, if y > 0.0 { top } else { bottom });
-    for (x, y, c) in [corner(-1.0, 1.0), corner(1.0, 1.0), corner(1.0, -1.0), corner(-1.0, 1.0), corner(1.0, -1.0), corner(-1.0, -1.0)] {
-        bytes.extend_from_slice(&x.to_le_bytes());
-        bytes.extend_from_slice(&y.to_le_bytes());
-        bytes.extend_from_slice(&[c.0, c.1, c.2, 255]);
+/// The background's vertices and how many there are: one band of two triangles from top to
+/// bottom, or with a colour halfway (#9230) two, top → middle and middle → bottom.
+fn background_vertices(device: &wgpu::Device, top: Rgb, middle: Option<Rgb>, bottom: Rgb) -> (wgpu::Buffer, u32) {
+    let bands = match middle {
+        Some(m) => vec![(1.0, top, 0.0, m), (0.0, m, -1.0, bottom)],
+        None => vec![(1.0, top, -1.0, bottom)],
+    };
+    let count = 6 * bands.len() as u32;
+    let mut bytes = Vec::with_capacity(count as usize * BACKGROUND_VERTEX as usize);
+    for (y0, c0, y1, c1) in bands {
+        let quad = [(-1.0, y0, c0), (1.0, y0, c0), (1.0, y1, c1), (-1.0, y0, c0), (1.0, y1, c1), (-1.0, y1, c1)];
+        for (x, y, c) in quad {
+            bytes.extend_from_slice(&f32::to_le_bytes(x));
+            bytes.extend_from_slice(&f32::to_le_bytes(y));
+            bytes.extend_from_slice(&[c.0, c.1, c.2, 255]);
+        }
     }
-    device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("sc_capture_background"),
         contents: &bytes,
         usage: wgpu::BufferUsages::VERTEX,
-    })
+    });
+    (buffer, count)
 }
 
 fn background_pipeline(device: &wgpu::Device, samples: u32, depth: wgpu::TextureFormat) -> wgpu::RenderPipeline {

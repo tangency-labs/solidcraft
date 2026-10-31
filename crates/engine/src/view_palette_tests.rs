@@ -78,6 +78,7 @@ fn the_grid_reaches_further_as_its_plane_is_seen_at_a_slant() {
 /// No colour here is one of [`colors`] or an appearance below, and each field has its own.
 const MARK: Palette = Palette {
     background: (Rgb(1, 2, 3), Rgb(4, 5, 6)),
+    background_middle: None,
     grid: Rgb(7, 8, 9),
     grid_major: Rgb(10, 11, 12),
     edge: Rgb(13, 14, 15),

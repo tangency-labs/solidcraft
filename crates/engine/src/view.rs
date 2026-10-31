@@ -49,6 +49,8 @@ pub mod colors {
 pub struct Palette {
     /// The background gradient, top and bottom.
     pub background: (Rgb, Rgb),
+    /// A colour halfway down the background gradient (the user's own, #9230), or `None`.
+    pub background_middle: Option<Rgb>,
     pub grid: Rgb,
     pub grid_major: Rgb,
     /// Body edges, and the outline where the section cuts a body.
@@ -78,6 +80,7 @@ impl Palette {
     /// [`colors`].
     pub const DEFAULT: Palette = Palette {
         background: (colors::BG_TOP, colors::BG_BOTTOM),
+        background_middle: None,
         grid: colors::GRID,
         grid_major: colors::GRID_MAJOR,
         edge: colors::EDGE,
@@ -593,6 +596,7 @@ fn build_scene(
     let section = section.filter(|(o, n)| o.is_finite() && n.is_finite() && n.len() > 1e-9);
     let mut sc = Scene {
         background: Some(p.background),
+        background_middle: p.background_middle,
         clip: section.map(|(o, n)| (n, n.dot(o))),
         cap: Some(p.cap),
         plain_cap: !s.section_hatch,

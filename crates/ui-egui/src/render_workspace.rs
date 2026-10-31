@@ -1961,7 +1961,7 @@ fn preview_background(app: &SolveApp) -> Tokens {
         // Includes the current fade and explicit viewport palette/flat-colour preferences.
         tokens
     } else {
-        tokens.with_background(Some(view.draft.background))
+        tokens.with_background(Some(crate::theme::ViewBackground::flat(view.draft.background)))
     }
 }
 

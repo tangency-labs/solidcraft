@@ -187,6 +187,7 @@ impl Tokens {
             cube_hover: Color32::from_rgb(190, 220, 252),
             viewport_top: Color32::from_rgb(240, 243, 247),
             viewport_bottom: Color32::from_rgb(203, 210, 221),
+            viewport_middle: None,
             grid: Color32::from_rgb(196, 202, 212),
             grid_major: Color32::from_rgb(170, 178, 190),
             body_selected: Color32::from_rgb(110, 170, 235),
