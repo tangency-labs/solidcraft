@@ -7493,7 +7493,7 @@ mod tests {
         h.app.dialog = None;
         assert_eq!(preview, pixels(&mut h, cam), "preview and committed section must draw identically");
 
-        h.app.session.section = None;
+        h.app.run("inspect.section", json!({"clear": true})).unwrap();
         h.app.run("sketch.create", json!({"plane":{"origin":[0,0,10],"x_dir":[1,0,0],"y_dir":[0,1,0]}})).unwrap();
         let whole = pixels(&mut h, cam);
         h.app.run("sketch.options", json!({"slice":true})).unwrap();

@@ -98,8 +98,10 @@ pub enum Target {
     PointCloud {
         id: u64,
     },
-    /// The Section Analysis in the browser's Analysis folder.
-    Section,
+    /// A Section Analysis in the browser's Analysis folder.
+    Section {
+        id: u64,
+    },
     /// A component's Bodies, Sketches or Construction folder, under the design (`scope` `c0`)
     /// or a placement (`o:<path>`).
     Folder {
@@ -270,6 +272,7 @@ pub enum RenameWhat {
     Canvas(u64),
     View(String),
     Joint(u64),
+    Section(u64),
 }
 
 #[derive(Clone, Debug)]
@@ -400,7 +403,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::PointCloud { id } => crate::browser::point_cloud_items(app, *id),
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
-        Target::Section => crate::browser::section_items(app),
+        Target::Section { id } => crate::browser::section_items(app, *id),
         Target::Joint { id } => joint_items(app, *id),
         Target::ToolbarCommand { id } => crate::toolbar_custom::command_items(app, id),
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
@@ -1460,6 +1463,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 RenameWhat::View(v.to_string())
             } else if let Some(j) = id_of(&p, "joint") {
                 RenameWhat::Joint(j)
+            } else if let Some(id) = id_of(&p, "section") {
+                RenameWhat::Section(id)
             } else {
                 return;
             };
@@ -1525,12 +1530,14 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.tangentChain" => tangent_chain(app),
         "ui.origin" => app.set_origin_shown(!app.origin_shown()),
         "ui.clear" => drop(app.run("select.clear", json!({}))),
-        "ui.unsection" => {
-            app.tree.hidden_section = None;
-            drop(app.run("inspect.section", json!({"clear": true})));
+        // Hides the section shown; it stays in the Analysis folder. With the "replaces the cut"
+        // preference it is deleted instead, as the one cut was before several were kept (#3977).
+        "ui.unsection" => drop(app.run("inspect.section", json!({"clear": true, "replace": app.preferences.section_replaces_cut}))),
+        "ui.editSection" => {
+            if let Some(id) = id_of(&p, "section") {
+                crate::dialogs::edit_section(app, id);
+            }
         }
-        "ui.editSection" => crate::dialogs::edit_section(app),
-        "ui.sectionVisible" => crate::browser::set_section_shown(app, p.get("visible").and_then(Value::as_bool).unwrap_or(true)),
         "ui.fit" => app.animate_view("fit"),
         "ui.home" => app.animate_view("home"),
         // One command for the whole selection: all fixed unless all already are.
@@ -1920,6 +1927,7 @@ pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
         RenameWhat::Canvas(c) => doc.canvases.iter().find(|x| x.id == *c).map(|x| x.name.clone()).unwrap_or_default(),
         RenameWhat::View(v) => v.clone(),
         RenameWhat::Joint(j) => doc.assembly.joints.iter().find(|x| x.id == *j).map(|x| x.name.clone()).unwrap_or_default(),
+        RenameWhat::Section(id) => doc.section_analyses.get(*id).map(|x| x.name.clone()).unwrap_or_default(),
     };
     app.menu.rename = Some(Rename { what, text, at, focused: false, inline: false });
 }
@@ -1941,6 +1949,7 @@ pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) {
         RenameWhat::Canvas(c) => drop(app.run("canvas.edit", json!({ "canvas": c, "name": name }))),
         RenameWhat::View(v) => drop(app.run("view.rename", json!({ "view": v, "name": name }))),
         RenameWhat::Joint(j) => drop(app.run("joint.edit", json!({ "joint": j, "name": name }))),
+        RenameWhat::Section(id) => drop(app.run("inspect.section.rename", json!({ "section": id, "name": name }))),
     }
 }
 

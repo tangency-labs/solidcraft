@@ -270,8 +270,10 @@ pub(crate) fn dispatch(app: &mut SolveApp, actions: Vec<StatusAction>) {
                         app.viewport_status.focus_field = Some(crate::viewport_details::primary(effect).into());
                         app.viewport_status.open_key = Some(id);
                     }
-                } else if effects.iter().any(|effect| effect.id == StatusId::Section && identity(effect) == id) {
-                    crate::dialogs::edit_section(app);
+                } else if effects.iter().any(|effect| effect.id == StatusId::Section && identity(effect) == id)
+                    && let Some(shown) = app.session.doc.section_analyses.shown
+                {
+                    crate::dialogs::edit_section(app, shown);
                 }
             }
         }

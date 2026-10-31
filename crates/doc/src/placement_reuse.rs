@@ -136,6 +136,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         timeline_groups,
         browser_order,
         named_views,
+        // Section Analyses cut only the view.
+        section_analyses: _,
         visibility,
         point_clouds,
     } = a;

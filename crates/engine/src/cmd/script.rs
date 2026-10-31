@@ -199,6 +199,7 @@ pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> 
         (doc.canvases.is_empty(), "canvases (reference images)"),
         (doc.point_clouds.is_empty(), "point clouds"),
         (doc.named_views.is_empty(), "named views"),
+        (doc.section_analyses.is_empty(), "section analyses"),
         (doc.browser_groups.is_empty() && doc.browser_order.is_empty(), "Browser folders and order"),
         (doc.timeline_groups.is_empty(), "timeline folders"),
         (doc.visibility.is_empty(), "hidden items"),
