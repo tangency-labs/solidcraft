@@ -38,13 +38,14 @@ fn primitive_len(kind: f64) -> Option<usize> {
 /// `SmApiFilletEdges`, `SmApiShellBrepFull`) of the B-rep built from `block` (a
 /// `sc_edgeuse_graph.h` source or a primitive), after mutation `args[2]` (kinds 1-10 of
 /// `topology_brep_validation`). Arguments: level (0-4), walk, mutation kind, index,
-/// value. Op 2 refuses the null-pointer mutations 8-10: the tests dereference the face
-/// surface, edge curve and edge use links without the `ValidatePointers` guard
-/// `AssertValid` runs first.
+/// value. Op 2 refuses the null-pointer mutations 8 and 9: the tests dereference the face
+/// surface and edge curve without the `ValidatePointers` guard `AssertValid` runs first
+/// (UB-281, `SmEdgeuse::CalcMaxEdgeFaceGap`); a null edge use link (mutation 10) is
+/// defined there.
 pub fn eval(op: u8, path: &str, block: &[f64], args: [f64; 5]) -> Result<Vec<f64>, FfiError> {
     let bad = || FfiError::InvalidArgument("invalid AssertValid arguments".into());
     if op > 4
-        || (op == 2 && args[2] >= 8.0)
+        || (op == 2 && (args[2] == 8.0 || args[2] == 9.0))
         || (op == 3 && args[2] != 0.0)
         || (op == 4 && !(1.0..=4.0).contains(&args[2]))
         || (op == 4 && args[2] >= 3.0 && args[4] == 0.0)

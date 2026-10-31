@@ -543,8 +543,8 @@ fn level2_tests(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<Vec<f64>> {
     Ok(out)
 }
 
-/// Why op 2 refuses mutations 8-10 (null face surface, edge curve, edge use link): the
-/// level-2 tests dereference them unguarded in C++.
+/// Why op 2 refuses mutations 8 and 9 (null face surface, edge curve): the level-2 tests
+/// dereference them unguarded in C++ (UB-281); a null edge use link (10) is compared.
 /// The capi check level of a case (levels 0 to 2).
 fn capi_level(i: &Inputs) -> Result<validation::CheckLevel, HarnessError> {
     Ok(match i.level {
@@ -724,7 +724,8 @@ fn shell_copy(k: &mut Kernel, mut copy: Brep, i: &Inputs) -> solidcore::Result<B
         b
     })
 }
-const NULL_LINK_TESTS: &str = "the level-2 tests dereference the nulled link (crash in C++)";
+const NULL_LINK_TESTS: &str =
+    "the level-2 tests dereference the nulled surface or curve (crash in C++, UB-281)";
 
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
@@ -732,7 +733,7 @@ impl UnitDiff for Runner {
     }
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
-        if i.tests && i.mutation >= 8 {
+        if i.tests && (i.mutation == 8 || i.mutation == 9) {
             return Ok(Output::rejected(NULL_LINK_TESTS));
         }
         let (path, block) = block(&i.brep)?;

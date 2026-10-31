@@ -3761,7 +3761,7 @@
    }
   },
   {
-   "name": "l2_box_tests_m10_rejected",
+   "name": "l2_box_tests_m10_null_edgeuse_link",
    "upstream_ref": "source/SMLib/src/SmFace.cpp:sm_AssertTestFace32",
    "inputs": {
     "brep": {
