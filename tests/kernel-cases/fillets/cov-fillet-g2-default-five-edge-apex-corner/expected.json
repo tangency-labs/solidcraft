@@ -1,9 +1,0 @@
-{
- "what": "the 5 slant edges of a 5-sided pyramid filleted 2 with the default type: a convex corner of 5 edges at the apex",
- "source": "invariants",
- "method": "a regular 5-gon of circumradius 20 lofted to the apex (0, 0, 30); its 5 slant edges; the fillet's default section and corner are curvature-continuous (owner, 2026-10-31: G2 by default, tangent rounds an option): every seam of a round and of the corner patch with its neighbours G2, one valid body",
- "body_count": 1,
- "continuity": {
-  "order": "g2"
- }
-}

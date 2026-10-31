@@ -47,7 +47,8 @@
       7.5
      ]
     ],
-    "radius": 2
+    "radius": 2,
+    "type": "curvature"
    }
   }
  ]

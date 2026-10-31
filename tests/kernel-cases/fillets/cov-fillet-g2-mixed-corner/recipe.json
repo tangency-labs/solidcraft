@@ -48,7 +48,8 @@
       15
      ]
     ],
-    "radius": 2
+    "radius": 2,
+    "type": "curvature"
    }
   }
  ]
