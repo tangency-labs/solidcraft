@@ -2940,11 +2940,95 @@ fn clear_tools_as_one(tools: Vec<Traced>) -> Vec<Traced> {
         return tools;
     }
     let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
-    match kernel::union_apart(&bodies) {
+    let one = match kernel::union_apart(&bodies) {
+        Ok(Some(one)) => Some(one),
+        // The kernel's box test grows each box by a share of its tool's size, so copies of a
+        // through hole (a tool twice the body's length) always seem to meet (#9007). Measured
+        // on finer meshes they may still be clearly apart.
+        _ if tools_clearly_apart(&bodies) => kernel::join_apart(&bodies).ok().flatten(),
+        _ => None,
+    };
+    #[cfg(test)]
+    cost_tests::count(|c| c.cut_tools += one.as_ref().map_or(tools.len(), |_| 1));
+    match one {
         // Each piece's faces keep the names of the tool it is.
-        Ok(Some(one)) => vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())],
-        _ => tools,
+        Some(one) => vec![Traced::step(one, &tools.iter().collect::<Vec<_>>())],
+        None => tools,
     }
+}
+
+/// Most pairs of tools whose boxes come close that [`tools_clearly_apart`] measures.
+const MAX_CLOSE_TOOL_PAIRS: usize = 4096;
+/// Most triangles of all tools' meshes [`tools_clearly_apart`] takes on.
+const MAX_APART_TRIANGLES: usize = 2_000_000;
+
+/// Whether no two of `bodies` meet, touch or come within [`APART_GAP`] of each other, judged on
+/// meshes whose chord tolerance is a small share of each body's size: two bodies are apart when
+/// their meshes keep a gap larger than twice both tolerances (so the true surfaces, within the
+/// tolerance of their meshes, keep one too) and neither lies inside the other. Only pairs whose
+/// boxes come that close are measured. `false` whenever that cannot be shown: a mesh body, a face
+/// without triangles, too many close pairs or triangles.
+fn tools_clearly_apart(bodies: &[Body]) -> bool {
+    if bodies.len() < 2 || bodies.len() > 10_000 {
+        return false;
+    }
+    let Some(meshes) = bodies.iter().map(|b| solid_probe_mesh(b, 2e-4)).collect::<Option<Vec<_>>>() else { return false };
+    if meshes.iter().map(|(m, _)| m.triangles.len()).sum::<usize>() > MAX_APART_TRIANGLES {
+        return false;
+    }
+    let boxes: Vec<solidcraft_geom::Aabb3> = meshes.iter().map(|(m, _)| m.bounds()).collect();
+    if boxes.iter().any(solidcraft_geom::Aabb3::is_empty) {
+        return false;
+    }
+    let reach = meshes.iter().map(|(_, tol)| *tol).fold(0.0, f64::max) * 4.0 + APART_GAP;
+    let mut order: Vec<usize> = (0..boxes.len()).collect();
+    order.sort_by(|&i, &j| boxes.get(i).map_or(0.0, |b| b.min.x).total_cmp(&boxes.get(j).map_or(0.0, |b| b.min.x)));
+    let mut close = Vec::new();
+    for (k, &i) in order.iter().enumerate() {
+        let (Some(a), Some((_, ta))) = (boxes.get(i), meshes.get(i)) else { return false };
+        for &j in order.iter().skip(k + 1) {
+            let (Some(b), Some((_, tb))) = (boxes.get(j), meshes.get(j)) else { return false };
+            if b.min.x > a.max.x + reach {
+                break;
+            }
+            let gap = 2.0 * (ta + tb) + APART_GAP;
+            if solidcraft_geom::mesh_distance::box_gap(a, b) > gap {
+                continue;
+            }
+            if close.len() == MAX_CLOSE_TOOL_PAIRS {
+                return false;
+            }
+            close.push((i, j, gap));
+        }
+    }
+    if close.is_empty() {
+        return true;
+    }
+    let sets: Vec<_> = meshes.iter().map(|(m, _)| solidcraft_geom::mesh_distance::TriangleSet::new(m)).collect();
+    let inside: Vec<_> = meshes.iter().map(|(m, _)| m.inside_index()).collect();
+    // A point of each face of a mesh: a body inside another without touching it has all of them
+    // inside the other's mesh, far from its surface (the meshes keep their gap).
+    let face_points: Vec<Vec<Vec3>> = meshes
+        .iter()
+        .map(|(m, _)| {
+            let mut seen = std::collections::BTreeSet::new();
+            m.triangles
+                .iter()
+                .zip(&m.tri_face)
+                .filter(|(_, face)| seen.insert(**face))
+                .filter_map(|(t, _)| m.positions.get(t[0] as usize).copied())
+                .collect()
+        })
+        .collect();
+    close.into_iter().all(|(i, j, gap)| {
+        let (Some(a), Some(b)) = (sets.get(i), sets.get(j)) else { return false };
+        if a.is_empty() || b.is_empty() || a.closest(b, gap).is_some() {
+            return false;
+        }
+        let within = |p: &[Vec3], index: Option<&solidcraft_geom::InsideIndex<'_>>| index.is_none_or(|index| p.iter().any(|p| index.contains(*p)));
+        !within(face_points.get(j).map_or(&[][..], Vec::as_slice), inside.get(i))
+            && !within(face_points.get(i).map_or(&[][..], Vec::as_slice), inside.get(j))
+    })
 }
 
 /// An intersect never deletes a body by accident (#5295): it is refused when nothing of a named
@@ -6459,21 +6543,169 @@ fn path_at(segs: &[kernel::PathSeg], d: f64) -> (Vec3, Vec3) {
     (Vec3::ZERO, Vec3::X)
 }
 
-/// Whether a copy has no material to cut in any of its eligible targets.
-fn copy_misses(st: &ModelState, f: &Feature, targets: &[String], tools: &[Traced]) -> bool {
+/// The bodies a pattern's cut copies are checked against for missing them ([`copy_misses`]).
+fn miss_scope<'a>(st: &'a ModelState, f: &'a Feature, targets: &'a [String]) -> impl Iterator<Item = &'a ModelBody> + 'a {
     let targets = if targets.is_empty() { &f.participants } else { targets };
     let all = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
     st.bodies
         .iter()
-        .filter(|b| all || if targets.is_empty() { b.component == f.component || b.feature == f.id } else { targets.contains(&b.name) })
-        .all(|b| {
-            tools.iter().all(|t| {
-                // A diagnostic must neither reject an otherwise valid cut nor add its own
-                // retries to the feature's report. An inconclusive probe is not a miss.
-                let (intersection, _) = kernel::capture_boolean_diagnostics(|| kernel::boolean(&b.body, &t.body, BoolOp::Intersect));
-                matches!(intersection, Ok(None))
+        .filter(move |b| all || if targets.is_empty() { b.component == f.component || b.feature == f.id } else { targets.contains(&b.name) })
+}
+
+/// Whether a copy has no material to cut in any of its eligible targets.
+fn copy_misses(st: &ModelState, f: &Feature, targets: &[String], tools: &[Traced]) -> bool {
+    miss_scope(st, f, targets).all(|b| {
+        tools.iter().all(|t| {
+            #[cfg(test)]
+            cost_tests::count(|c| c.miss_intersects += 1);
+            // A diagnostic must neither reject an otherwise valid cut nor add its own
+            // retries to the feature's report. An inconclusive probe is not a miss.
+            let (intersection, _) = kernel::capture_boolean_diagnostics(|| kernel::boolean(&b.body, &t.body, BoolOp::Intersect));
+            matches!(intersection, Ok(None))
+        })
+    })
+}
+
+/// How many of a pattern's cut copies (`instances`, ranges of `copies`) remove no material, and
+/// how many copies there are. [`copy_misses`] intersects a copy with every target, which on a
+/// body with many holes costs far more than cutting the copy (#9007). A copy that a point test
+/// shows takes material from a target is not a miss, and skips it; only copies the test cannot
+/// place (in an earlier hole, on the edge, thinner than the meshes' error) are intersected.
+fn count_copy_misses(
+    st: &ModelState,
+    f: &Feature,
+    targets: &[String],
+    copies: &[Traced],
+    instances: &[std::ops::Range<usize>],
+    axes: &[Vec<(Vec3, Vec3)>],
+) -> (usize, usize) {
+    let meshes: Vec<(Mesh, f64)> = miss_scope(st, f, targets).filter_map(|b| solid_probe_mesh(&b.body, 5e-4)).collect();
+    let targets_inside: Vec<SolidProbe> = meshes.iter().map(|(m, tol)| SolidProbe::new(m, *tol)).collect();
+    let (mut missed, mut total) = (0, 0);
+    for (k, tools) in instances.iter().enumerate().filter_map(|(k, i)| Some((k, copies.get(i.clone())?))) {
+        total += 1;
+        let lines = axes.get(k).map_or(&[][..], Vec::as_slice);
+        let takes = !targets_inside.is_empty()
+            && tools.iter().any(|t| {
+                solid_probe_mesh(&t.body, 2e-4).is_some_and(|(m, tol)| {
+                    let tool = SolidProbe::new(&m, tol);
+                    // Besides a hole's axis, the lines along the axes through the middle of each
+                    // face's box: the axis of each of the tool's cylinders, the middle of a slot.
+                    let mut lines = lines.to_vec();
+                    for c in face_box_centres(&m, MAX_PROBED_FACES) {
+                        lines.extend([(c, Vec3::X), (c, Vec3::Y), (c, Vec3::Z)]);
+                    }
+                    targets_inside.iter().any(|target| target.shares_material(&tool, &lines))
+                })
+            });
+        if !takes && copy_misses(st, f, targets, tools) {
+            missed += 1;
+        }
+    }
+    (missed, total)
+}
+
+/// A B-rep body's mesh at chord tolerance `rel` times its size, with that tolerance: the body's
+/// surface lies within it of the mesh. `None` for a mesh body (which may not be closed), or when
+/// some face has no triangles (the mesh then has a gap, and inside tests through it are wrong).
+fn solid_probe_mesh(body: &Body, rel: f64) -> Option<(Mesh, f64)> {
+    let tol = (body.size() * rel).max(1e-5);
+    if body.is_mesh() || !tol.is_finite() || body.face_count() == 0 {
+        return None;
+    }
+    let mesh = body.tessellate(tol).ok()?;
+    let mut meshed = vec![false; body.face_count()];
+    for &face in &mesh.tri_face {
+        if let Some(slot) = meshed.get_mut(face as usize) {
+            *slot = true;
+        }
+    }
+    meshed.iter().all(|m| *m).then_some((mesh, tol))
+}
+
+/// Inside tests on a closed body's mesh that hold for the body itself: a point counts as inside
+/// only when it is inside the mesh and further from it than twice the mesh's chord tolerance,
+/// so the true surface (within the tolerance of the mesh) cannot pass between them.
+struct SolidProbe<'a> {
+    inside: solidcraft_geom::InsideIndex<'a>,
+    surface: solidcraft_geom::compare::TriangleTree,
+    bounds: solidcraft_geom::Aabb3,
+    margin: f64,
+}
+
+impl<'a> SolidProbe<'a> {
+    fn new(mesh: &'a Mesh, tol: f64) -> SolidProbe<'a> {
+        SolidProbe {
+            inside: mesh.inside_index(),
+            surface: solidcraft_geom::compare::TriangleTree::new(mesh),
+            bounds: mesh.bounds(),
+            margin: 2.0 * tol,
+        }
+    }
+
+    fn holds(&self, p: Vec3) -> bool {
+        self.surface.nearest(p).is_some_and(|(d, _)| d > self.margin) && self.inside.contains(p)
+    }
+
+    /// Whether some point lies well inside both bodies, so they share material. Tried along
+    /// `lines` (a hole's axis: through the wall it drills into, however thin and slanted) and
+    /// along the three lines parallel to the axes through the middle of the box both meshes'
+    /// boxes hold (the axis of a straight hole through a plate), within that box. `false` says
+    /// nothing.
+    fn shares_material(&self, other: &SolidProbe<'_>, lines: &[(Vec3, Vec3)]) -> bool {
+        let both = self.bounds.intersection(&other.bounds);
+        if both.is_empty() {
+            return false;
+        }
+        let c = both.center();
+        let through = [(c, Vec3::X), (c, Vec3::Y), (c, Vec3::Z)];
+        lines.iter().chain(&through).any(|&(o, d)| {
+            let Some((lo, hi)) = line_in_box(&both, o, d) else { return false };
+            (0..SAMPLES_PER_LINE).any(|k| {
+                let p = o + d * (lo + (hi - lo) * (k as f64 + 0.5) / SAMPLES_PER_LINE as f64);
+                other.holds(p) && self.holds(p)
             })
         })
+    }
+}
+
+/// Points tried on each line by [`SolidProbe::shares_material`].
+const SAMPLES_PER_LINE: usize = 16;
+/// Most faces of a tool whose boxes [`count_copy_misses`] looks through.
+const MAX_PROBED_FACES: usize = 32;
+
+/// The middle of the box around each of the first `max` faces of `mesh`.
+fn face_box_centres(mesh: &Mesh, max: usize) -> Vec<Vec3> {
+    let mut boxes: BTreeMap<u32, solidcraft_geom::Aabb3> = BTreeMap::new();
+    for (t, face) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        if boxes.len() == max && !boxes.contains_key(face) {
+            continue;
+        }
+        if let Some(corners) = mesh.tri(t) {
+            let b = boxes.entry(*face).or_insert(solidcraft_geom::Aabb3::EMPTY);
+            for p in corners {
+                b.add(p);
+            }
+        }
+    }
+    boxes.values().filter(|b| !b.is_empty()).map(solidcraft_geom::Aabb3::center).collect()
+}
+
+/// The stretch of the line `o + t d` inside `b`, as the range of `t`; `None` when it misses.
+fn line_in_box(b: &solidcraft_geom::Aabb3, o: Vec3, d: Vec3) -> Option<(f64, f64)> {
+    let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
+    for (o, d, min, max) in [(o.x, d.x, b.min.x, b.max.x), (o.y, d.y, b.min.y, b.max.y), (o.z, d.z, b.min.z, b.max.z)] {
+        if d.abs() < 1e-12 {
+            if o < min || o > max {
+                return None;
+            }
+        } else {
+            let (a, c) = ((min - o) / d, (max - o) / d);
+            lo = lo.max(a.min(c));
+            hi = hi.min(a.max(c));
+        }
+    }
+    (lo.is_finite() && hi.is_finite() && lo <= hi).then_some((lo, hi))
 }
 
 /// The deepest a pattern or mirror reaches through patterns and mirrors of features (#395).
@@ -6714,6 +6946,9 @@ fn replay(
         let targets = if present.is_empty() { targets } else { present };
         let mut copies = Vec::new();
         let mut instances = Vec::with_capacity(mats.len());
+        // Each hole copy's axes (spot and direction), where the check for copies that miss looks
+        // for material first.
+        let mut axes: Vec<Vec<(Vec3, Vec3)>> = Vec::new();
         if let FeatureKind::Hole { diameter, depth, hole, to, .. } = &src.kind {
             // A hole is drilled again at each copy of its spot (found on the surface there), so
             // a blind hole's depth counts from the face at the copy, not from the bottom of the
@@ -6722,8 +6957,10 @@ fn replay(
             for (k, m) in mats.iter().enumerate() {
                 let d = crate::apply_vector(m, dir).normalized().ok_or_else(|| DocError::Invalid("hole direction".into()))?;
                 let start = copies.len();
+                let mut on = Vec::with_capacity(spots.len());
                 for p in &spots {
                     let at = hole_on_surface(st, crate::apply_point(m, *p), d, hole_scope(src));
+                    on.push((at, d));
                     let to = to.map(|t| crate::apply_point(m, t.0));
                     let depth = hole_depth_to(st, &at, d, &to, depth)?;
                     // Each copy's faces are named as the hole's, with the instance.
@@ -6734,6 +6971,7 @@ fn replay(
                     );
                 }
                 instances.push(start..copies.len());
+                axes.push(on);
             }
         } else if let FeatureKind::Rib { .. } = &src.kind {
             // A rib is built again at each copy of its sketch, against the bodies there (#4593):
@@ -6760,12 +6998,9 @@ fn replay(
             }
         }
         if op == Operation::Cut {
-            for instance in &instances {
-                if let Some(tools) = copies.get(instance.clone()) {
-                    total += 1;
-                    missed += usize::from(copy_misses(st, f, &targets, tools));
-                }
-            }
+            let (m, t) = count_copy_misses(st, f, &targets, &copies, &instances, &axes);
+            missed += m;
+            total += t;
         }
         // Copies of a cut through sheet metal are cut-outs of its flat pattern, as the cut is
         // (#6841): each machined into the sheets in turn, then cut from the other targets.
