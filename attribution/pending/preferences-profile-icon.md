@@ -1,0 +1,1 @@
+| assets/icons/ui/design/svg/flat/settings_profile.svg | SolidCraft contributors | single-colour application/navigation icon master (64 grid), original analytic head and shoulder geometry for settings profiles | MIT OR Apache-2.0 |
