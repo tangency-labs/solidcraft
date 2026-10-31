@@ -15,9 +15,10 @@ mod dxf;
 mod dxf_out;
 pub mod formats;
 pub use design::{
-    DesignCompression, DesignContainerReader, DesignPreview, THUMBNAIL_SIZE, is_design_container, read_design_file, read_design_geometry,
-    read_design_preview, read_design_thumbnail, read_design_thumbnail_file, write_design_container, write_design_container_with_cache,
-    write_design_container_with_compression, write_design_container_with_preview, write_design_container_with_thumbnail,
+    DesignCompression, DesignContainerReader, DesignPreview, MAX_PACK_BYTES, MAX_PACK_DESIGNS, MAX_PACK_ENTRIES, PACK_DESIGNS, PackWriter,
+    THUMBNAIL_SIZE, fits_pack, is_design_container, is_pack_path, read_design_file, read_design_geometry, read_design_preview, read_design_thumbnail,
+    read_design_thumbnail_file, write_design_container, write_design_container_with_cache, write_design_container_with_compression,
+    write_design_container_with_preview, write_design_container_with_thumbnail,
 };
 mod legacy_dir;
 pub mod limits;

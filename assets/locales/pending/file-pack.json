@@ -1,0 +1,13 @@
+{
+  "en": { "cmd.file_pack": "Pack Design" },
+  "ar": { "cmd.file_pack": "حزم التصميم" },
+  "de": { "cmd.file_pack": "Konstruktion packen" },
+  "es": { "cmd.file_pack": "Empaquetar diseño" },
+  "fr": { "cmd.file_pack": "Empaqueter la conception" },
+  "he": { "cmd.file_pack": "אריזת תכן" },
+  "ja": { "cmd.file_pack": "デザインをパック" },
+  "ko": { "cmd.file_pack": "설계 묶기" },
+  "vi": { "cmd.file_pack": "Đóng gói thiết kế" },
+  "zh": { "cmd.file_pack": "打包设计" },
+  "zh-TW": { "cmd.file_pack": "打包設計" }
+}
