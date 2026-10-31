@@ -1767,7 +1767,15 @@ fn run_rust_op(
                 marks.mark(k, Entity::Face(f), mark);
             }
             let swaps = !marks.is_marked(k, Entity::Face(f), mark);
-            match bp1::swap_face_uv(k, b, &mut marks, f, mark) {
+            let mut records = solidcore::topology::topology::NotifyRecords::new();
+            let mut attrs = AttributeStore::default();
+            let mut env = solidcore::topology::edge::NotifyEnv {
+                records: &mut records,
+                attributes: &mut attrs,
+                context: None,
+                key_of: &key_of,
+            };
+            match bp1::swap_face_uv(k, b, &mut marks, f, mark, &mut env) {
                 Err(e) if !e.is_unported() => return Ok(Ok(vec![status_of(&e)])),
                 r => r?,
             }

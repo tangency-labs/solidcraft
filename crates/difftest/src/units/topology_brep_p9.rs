@@ -6,6 +6,10 @@
 //! ([`own_setup`]) on either, so no C++ state reaches it. Split refusals compare
 //! their retained endpoint as well as the complete semantic topology/geometry
 //! snapshot. Successful native mutations on deferred paths are not parity passes.
+//! `OrientSheetSurfaces` (op 1) runs under a topology change tracker on both sides
+//! (`harness/cpp/shim/sc_tracked.h`, `topology_brep_p3::run_tracked`): its record is
+//! the status, then the tracker's lists and events, so the face and surface
+//! `SwapUV` notifications are compared.
 use super::boolean_merge_p1::{graph_reachable, Canon};
 use super::topology_edgeuse_p1::{self as spec, BrepIn};
 use super::topology_vertexuse::import_raw;
@@ -324,6 +328,9 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
     // As the shim, after setup and export: `b->m_bEditingEnabled = editing`.
     b.set_editing_enabled(i.editing);
     let mut k = Kernel::default();
+    if i.op == 1 {
+        return rust_orient(i, b, &mut k);
+    }
     let mut record = Vec::new();
     let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = solidcore::geom::attribute::AttributeStore::default();
@@ -344,14 +351,6 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
                     None,
                 )?));
                 Ok(0)
-            }
-            1 => {
-                let face = if i.variant == 1 {
-                    None
-                } else {
-                    target::<FaceId>(b.faces().len(), i.selector)
-                };
-                ordinary(port::orient_sheet_surfaces(&mut k, &mut b, face, i.same))
             }
             2 => {
                 let region = if i.variant == 1 {
@@ -592,6 +591,44 @@ fn rust(i: &Inputs, mut b: Brep, initial: [f64; 2]) -> Result<Output, HarnessErr
         Err(e) => status(&e),
     }
 }
+/// Op 1 (`OrientSheetSurfaces`) under a topology change tracker
+/// ([`super::topology_brep_p3::run_tracked`], the shim's `TrackedEdit`): its record is
+/// the status, then the tracker's lists and events.
+fn rust_orient(i: &Inputs, mut b: Brep, k: &mut Kernel) -> Result<Output, HarnessError> {
+    use super::topology_brep_p3 as p3;
+    let face = if i.variant == 1 {
+        None
+    } else {
+        target::<FaceId>(b.faces().len(), i.selector)
+    };
+    let mut result = Ok(0);
+    let run = p3::run_tracked(&mut b, |b, ctx| {
+        let mut records = solidcore::topology::topology::NotifyRecords::new();
+        let mut attributes = solidcore::geom::attribute::AttributeStore::default();
+        let mut env = solidcore::topology::edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: Some(ctx),
+            key_of: &p3::tracked_key_of,
+        };
+        result = ordinary(port::orient_sheet_surfaces(k, b, face, i.same, &mut env));
+        Ok(Vec::new())
+    });
+    let run = match run {
+        Ok(run) => run,
+        Err(p3::Fail::Deferred(o)) => return Ok(*o),
+        Err(p3::Fail::Harness(e)) => return Err(e),
+    };
+    let code = match result {
+        Ok(code) => code,
+        Err(e) => return status(&e),
+    };
+    let mut record = vec![f64::from(code)];
+    record.extend(run.out);
+    skeleton_caches(&mut b);
+    Ok(graph_reachable(&b, record))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Handle(solidcore::EntityRef);
 impl solidcore::intersect::point_class::ClassObject for Handle {

@@ -15,7 +15,10 @@
 //! (`no target`). The B-rep cache does not exist on either side (fresh B-reps), so
 //! `Notify` is compared without it. `DeleteStaleCaches` first seeds trimmed-surface
 //! caches by face-index masks on both sides (C++: `SmCacheMgr`; Rust: the caller-held
-//! map) and compares which survive.
+//! map) and compares which survive. `SwapUV` runs under a topology change tracker on
+//! both sides (`harness/cpp/shim/sc_tracked.h`, `topology_brep_p3::run_tracked`), and
+//! its lists and events are compared as `tracker`, so each face's and surface's
+//! `SwapUV` notifications are.
 
 use std::collections::BTreeMap;
 
@@ -54,6 +57,7 @@ use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::topology_brep_p2::{self as ffi, Op};
 use solidcore_ffi::units::topology_vertexuse::counts;
 
+use super::topology_brep_p3 as p3;
 use super::topology_vertexuse::{
     gen_brep, gen_curve, gen_surface, path_of, push_curve, push_surface, BrepIn, CrvIn,
     SrfIn,
@@ -403,7 +407,25 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
     };
     input.extend(args);
     let out = ffi::eval(op, &path, &input).map_err(|e| ffi_err(&e))?;
+    if op == Op::Swap {
+        return Ok(split_swap(out));
+    }
     Ok(Output::new().values("out", out))
+}
+
+/// A `Swap` output (either side) from its trailer: `out` (built, status) and `tracker`
+/// (the tracker's lists and events, as `topology.brep_p3`'s). An output without a
+/// trailer (a B-rep that did not build) stays whole in `out`.
+fn split_swap(v: Vec<f64>) -> Output {
+    // (a build failure is `-1 status`)
+    let at = match v.as_slice() {
+        [built, .., at] if *built >= 0.0 && *at >= 1.0 && (*at as usize) < v.len() => *at as usize,
+        _ => return Output::new().values("out", v),
+    };
+    let mut v = v;
+    v.pop();
+    let tracker = v.split_off(at);
+    Output::new().values("out", v).values("tracker", tracker)
 }
 
 // ---- Rust side ----------------------------------------------------------------------------
@@ -516,6 +538,22 @@ fn status<T>(r: Result<T, SolidError>) -> Result<(f64, Option<T>), Fail> {
                 other => Err(Fail::Harness(harness(format!("rust: {other}")))),
             },
         },
+    }
+}
+
+/// A [`p3::Fail`] of a tracked edit as this runner's.
+fn from_p3(f: p3::Fail) -> Fail {
+    match f {
+        p3::Fail::Deferred(o) => Fail::Deferred(o),
+        p3::Fail::Harness(e) => Fail::Harness(e),
+    }
+}
+
+/// This runner's [`Fail`] inside a tracked edit ([`p3::run_tracked`]).
+fn to_p3(f: Fail) -> p3::Fail {
+    match f {
+        Fail::Deferred(o) => p3::Fail::Deferred(o),
+        Fail::Harness(e) => p3::Fail::Harness(e),
     }
 }
 
@@ -720,9 +758,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: Op, a: &[f64]) -> Result<Vec<f6
             out.push(s);
             out.push(idx(r.flatten(), RegionId::index));
         }
-        Op::Merge | Op::MergeSsi => {
-            return Err(Fail::Harness(harness("merge runs in merge_rust")))
-        }
+        Op::Merge | Op::MergeSsi => return Err(Fail::Harness(harness("merge runs in merge_rust"))),
         Op::Mate => {
             let e = EdgeId::from_index(arg(0)? as u32);
             let surf = surface_arg(a, 1)?;
@@ -804,9 +840,25 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: Op, a: &[f64]) -> Result<Vec<f6
             }
         }
         Op::Swap => {
-            let mut marks = Marks::default();
-            let (s, _) = status(bp2::swap_uv(k, b, &mut marks))?;
-            out.push(s);
+            // under a topology change tracker, as topology.brep_p3's Orient: the status,
+            // the tracker's values, then where they start (see split_swap)
+            let run = p3::run_tracked(b, |b, ctx| {
+                let mut marks = Marks::default();
+                let mut records = solidcore::topology::topology::NotifyRecords::new();
+                let mut attrs = AttributeStore::default();
+                let mut env = NotifyEnv {
+                    records: &mut records,
+                    attributes: &mut attrs,
+                    context: Some(ctx),
+                    key_of: &p3::tracked_key_of,
+                };
+                let (s, _) = status(bp2::swap_uv(k, b, &mut marks, &mut env)).map_err(to_p3)?;
+                Ok(vec![s])
+            })
+            .map_err(from_p3)?;
+            let at = out.len() + run.tracker_at;
+            out.extend(run.out);
+            out.push(at as f64);
         }
         Op::Replace => {
             let f = FaceId::from_index(arg(0)? as u32);
@@ -974,7 +1026,10 @@ const CONVENTIONS: crate::own_builder::Conventions<'static> = crate::own_builder
 /// shim-built sources built by the Rust kernel and `.smb` files read by the Rust
 /// reader, both in the shim's walk order ([`crate::own_reader::brep_in_order`]), the
 /// shim's `editing` flag applied after.
-fn own_brep(k: &mut Kernel, i: &Inputs) -> Result<Result<(Brep, [usize; 10]), Output>, HarnessError> {
+fn own_brep(
+    k: &mut Kernel,
+    i: &Inputs,
+) -> Result<Result<(Brep, [usize; 10]), Output>, HarnessError> {
     use crate::own_builder::{build_status, counts, Built};
     let src: super::topology_edgeuse_p1::BrepIn = serde_json::to_value(&i.brep)
         .and_then(serde_json::from_value)
@@ -992,7 +1047,9 @@ fn own_brep(k: &mut Kernel, i: &Inputs) -> Result<Result<(Brep, [usize; 10]), Ou
         }
         Built::Failed(e) => match Output::unported(&e) {
             Some(o) => Ok(Err(o)),
-            None => Ok(Err(Output::new().values("out", vec![-1.0, build_status(&e)]))),
+            None => Ok(Err(
+                Output::new().values("out", vec![-1.0, build_status(&e)])
+            )),
         },
     }
 }
@@ -1030,6 +1087,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         );
     }
     match run_rust_op(&mut k, &mut b, op, &args) {
+        Ok(out) if op == Op::Swap => Ok(split_swap(out)),
         Ok(out) => Ok(Output::new().values("out", out)),
         Err(Fail::Deferred(o)) => Ok(*o),
         Err(Fail::Harness(e)) => Err(e),

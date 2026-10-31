@@ -1171,7 +1171,10 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
             let r = if *api {
                 st::api_unify_normals(k, Some(b), Some(*face), *n)
             } else {
-                st::Stitch::new(&mut cb, *tol, true, true).unify_normals(k, b, *face, *n)
+                // (as SmApiUnifyNormals: through the kernel context's callbacks)
+                solidcore::topology::brep::p3::with_kernel_callbacks(k, b, |k, b, env| {
+                    st::Stitch::new(&mut cb, *tol, true, true).unify_normals(k, b, *face, *n, env)
+                })
             };
             match r {
                 Ok(flipped) => {

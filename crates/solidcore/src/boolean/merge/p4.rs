@@ -1269,6 +1269,12 @@ fn is_oriented_sheet(kernels: &mut BooleanKernels<'_>, other: &Brep) -> Result<b
     crate::topology::brep::p2::is_oriented_sheet(k, other)
 }
 
+/// `m_pOther->OrientSheetSurfaces(face, same)` (`topology.brep_p9`), in the other
+/// B-rep's context. Its UV swaps notify on records and attributes local to the call,
+/// under the type code and arena index of each entity (`loopuse::notify_ref`, as the
+/// slit-loop removal below), and without a context: the boolean holds no notification
+/// state for the other B-rep, so its attributes and the context's callbacks see none
+/// of these edits (upstream's do).
 fn orient_sheet_surfaces(
     kernels: &mut BooleanKernels<'_>,
     other: &mut Brep,
@@ -1276,7 +1282,15 @@ fn orient_sheet_surfaces(
     same: bool,
 ) -> Result<()> {
     let k = kernels.other.as_deref_mut().unwrap_or(kernels.primary);
-    crate::topology::brep::p9::orient_sheet_surfaces(k, other, Some(face), same)
+    let mut records = crate::topology::topology::NotifyRecords::new();
+    let mut attributes = AttributeStore::default();
+    let mut env = edge::NotifyEnv {
+        records: &mut records,
+        attributes: &mut attributes,
+        context: None,
+        key_of: &crate::topology::loopuse::notify_ref,
+    };
+    crate::topology::brep::p9::orient_sheet_surfaces(k, other, Some(face), same, &mut env)
 }
 
 /// `new SmBrep(dSize, dRatio, pOptContextForStack)` for a component: the B-rep and its

@@ -24,7 +24,7 @@
 //! | `Mate`     | `edge surface ext_factor uv_factor` | `status` (`MateLaminaEdgeToSurface`) |
 //! | `Notify`   | `operation ref ref ref` | `0` |
 //! | `Stale`    | `create modified` (face `i` gets an `SM_OC_TRIMSRF` cache when bit `i % 8` of `create` is set, `m_bFaceWasModified` from that bit of `modified`) | `status`, per face whether its cache survived (`DeleteStaleCaches`) |
-//! | `Swap`     |            | `status` (`SwapUV`) |
+//! | `Swap`     |            | `status tracker* tracker_at` (`SwapUV` under a topology change tracker, `sc_tracked.h`; `tracker_at` is where its values start) |
 //! | `Replace`  | `face surface keep create` (`keep`: `0` delete, `1` deleted list, `2` keep) | `status modified` (`ReplaceSurface`) |
 //! | `RayFire`  | `P V tol has_limit limit` | `status region class` (`RayFire`) |
 //! | `MergeSsi` | `face tol n curve* has_uv uv_curve{n if has_uv} has_surface surface?` | `status new_faces edges`, per curve (after the merge) `n_ctrl` and 9 points over its natural interval, `n_edges` and per edge (`GetEdges`) `tol t0 t1` and 3 points over its interval (`tol -1` for no curve), `n_vertices` and per vertex (`GetVertices`) `x y z tol` (`MergeCurvesOnSurface` with UV curves and an intersection surface) |

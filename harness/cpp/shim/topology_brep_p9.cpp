@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Real SmBrep member calls. Shared fixtures only construct/export the oracle graph.
 #include "sc_topology_fixture.h"
+#include "sc_tracked.h"
 #include <SmPointClass.h>
 
 SC_EXPORT int32_t sc_topology_brep_p9_eval(int32_t op, int32_t export_only,
@@ -103,7 +104,11 @@ SC_EXPORT int32_t sc_topology_brep_p9_eval(int32_t op, int32_t export_only,
         record.push_back(g.find(0,result));
     } else if (op == 1) {
         SmFace* face = variant == 1 || g.faces.empty() ? nullptr : g.faces[selector % g.faces.size()];
+        // under a topology change tracker (sc_tracked.h): the record is its lists and events
+        TrackedEdit te; // (after built: goes before it)
+        te.begin(b,g);
         status=b->OrientSheetSurfaces(face,same ? TRUE : FALSE);
+        te.finish(record);
     } else if (op == 2) {
         if (g.regions.empty()) return SC_ERR_ARG;
         SmRegion* region=variant == 1 ? nullptr : g.regions[selector % g.regions.size()];

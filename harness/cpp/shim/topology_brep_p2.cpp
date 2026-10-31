@@ -13,10 +13,12 @@
 // the vertex lists) of the B-rep before the op. Ops that may change the topology (Make,
 // Merge, Mate, Replace, RayFire, Notify) output only statuses and counts after the call
 // (Make: its topology summary, read through fresh list queries)
-// (Stale: whether each face's seeded trimmed-surface cache survived);
+// (Stale: whether each face's seeded trimmed-surface cache survived; Swap: its status,
+// then the topology change tracker of the swap, sc_tracked.h, by identity only);
 // SetTol / Rebuild only read the entities they cannot delete (tolerances, UV curve
 // presence), so no pointer captured before a mutation is followed after it.
 #include "sc_topology_fixture.h"
+#include "sc_tracked.h"
 
 #include <SmCacheMgr.h>
 #include <SmPointClass.h>
@@ -528,7 +530,17 @@ void run(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         }
         break;
     }
-    case P2_SWAP: o.push_back(st(brep->SwapUV())); break;
+    case P2_SWAP:
+    {
+        // under a topology change tracker (sc_tracked.h, as topology.brep_p3's Orient):
+        // the status, the tracker's lists and events, then where those start
+        TrackedEdit te; // (after b: goes before it)
+        te.begin(brep, g);
+        o.push_back(st(brep->SwapUV()));
+        const size_t at = te.finish(o);
+        o.push_back((double)at);
+        break;
+    }
     case P2_REPLACE:
     {
         SmFace* f = at(g.faces, rd.idx());

@@ -1569,7 +1569,8 @@ impl<'c> Stitch<'c> {
     /// it, across manifold edges by their face uses and across lamina edges found
     /// within the stitch tolerance of `num_samples` points of each edge use (opposite
     /// tangents within 5 degrees, binormals more than 90 degrees apart). Flipped faces
-    /// are swapped ([`fp1::swap_uv`]) and returned in flip order. Increments an
+    /// are swapped ([`fp1::swap_uv_with_notifications`], each face's and surface's
+    /// edit notifications through `env`) and returned in flip order. Increments an
     /// unlocked mark value.
     ///
     /// # Errors
@@ -1583,6 +1584,7 @@ impl<'c> Stitch<'c> {
         b: &mut Brep,
         start_face: FaceId,
         num_samples: u64,
+        env: &mut edge::NotifyEnv<'_>,
     ) -> Result<Vec<FaceId>> {
         let stitch_tol_3d = self.tol_3d;
         with_mark_lock(k, ALL_MARKS, |k, mark| -> Result<Vec<FaceId>> {
@@ -1635,7 +1637,7 @@ impl<'c> Stitch<'c> {
                         }
                         if eu1::faceuse_orientation(b, fuse)? == OrientType::Opposite {
                             flipped.push(rad_f);
-                            fp1::swap_uv(k, b, rad_f)?;
+                            fp1::swap_uv_with_notifications(k, b, rad_f, env)?;
                         }
                         // Only oriented faces get onto stack and get marked
                         marks.mark(k, Entity::Face(rad_f), mark);
@@ -1735,7 +1737,7 @@ impl<'c> Stitch<'c> {
                                 .ok_or_else(|| deref("faceuse without face"))?;
                             if eu1::faceuse_orientation(b, prim_fu)? == OrientType::Opposite {
                                 flipped.push(f_other);
-                                fp1::swap_uv(k, b, f_other)?;
+                                fp1::swap_uv_with_notifications(k, b, f_other, env)?;
                             }
                             marks.mark(k, Entity::Face(f_other), mark);
                             f_stack.push(f_other);
@@ -2726,12 +2728,14 @@ pub fn api_stitch_into_shell(
 }
 
 /// `SmApiUnifyNormals`: [`Stitch::unify_normals`] with the default callback and the
-/// B-rep tolerance as stitch tolerance.
+/// B-rep tolerance as stitch tolerance, notifying through the kernel context's
+/// callbacks under the kernel's identities
+/// ([`crate::topology::brep::p3::with_kernel_callbacks`]).
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] for a null B-rep or start face; those of
-/// [`Stitch::unify_normals`].
+/// [`SolidError::InvalidInput`] for a null B-rep or start face, and (before anything
+/// changes) inside another kernel-callback edit; those of [`Stitch::unify_normals`].
 pub fn api_unify_normals(
     k: &mut Kernel,
     b: Option<&mut Brep>,
@@ -2747,7 +2751,9 @@ pub fn api_unify_normals(
     let tol = b.tolerance();
     let mut callback = DefaultStitchCallback::new();
     let mut stitch = Stitch::new(&mut callback, tol, true, true);
-    stitch.unify_normals(k, b, start_face, num_samples)
+    crate::topology::brep::p3::with_kernel_callbacks(k, b, |k, b, env| {
+        stitch.unify_normals(k, b, start_face, num_samples, env)
+    })
 }
 
 /// `SmApiSimpleFaceStitch`: [`Stitch::do_simple_face_stitch`] with the default

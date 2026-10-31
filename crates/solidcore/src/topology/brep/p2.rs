@@ -461,13 +461,19 @@ pub fn check_and_fix_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
 }
 
 /// `SwapUV`: claims an unlocked mark and swaps the UV parameterisation of every face
-/// (`sm_SwapFaceUV`, which skips faces already marked).
+/// (`sm_SwapFaceUV`, which skips faces already marked). Each face's and surface's
+/// edit notifications go through `env` ([`p1::swap_face_uv`]).
 ///
 /// # Errors
 ///
 /// [`SolidError::Unported`] from `sm_SwapFaceUV` (`SmFace::SwapUV`,
 /// `topology.face_p1`).
-pub fn swap_uv(k: &mut Kernel, b: &mut Brep, marks: &mut Marks) -> Result<()> {
+pub fn swap_uv(
+    k: &mut Kernel,
+    b: &mut Brep,
+    marks: &mut Marks,
+    env: &mut NotifyEnv<'_>,
+) -> Result<()> {
     let faces = brep_faces(b)?;
 
     // increment and lock an unlocked mark
@@ -479,7 +485,7 @@ pub fn swap_uv(k: &mut Kernel, b: &mut Brep, marks: &mut Marks) -> Result<()> {
     for f in faces {
         // swap the face's orientation - watch for composites (sm_SwapFaceUV is void:
         // only an unported callee stops the loop)
-        if let Err(e) = p1::swap_face_uv(k, b, marks, f, mark) {
+        if let Err(e) = p1::swap_face_uv(k, b, marks, f, mark, env) {
             if e.is_unported() {
                 res = Err(e);
                 break;

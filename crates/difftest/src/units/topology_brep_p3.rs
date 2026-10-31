@@ -1203,6 +1203,59 @@ fn run_rust_op(
     if !tracked {
         return run_rust_op_in(k, b, second, op, a, None);
     }
+    let run = run_tracked(b, |b, ctx| run_rust_op_in(k, b, second, op, a, Some(ctx)))?;
+    let mut out = run.out;
+    if matches!(op, OpIn::DeleteFace { .. }) {
+        // the shim's trailer: the edges, edge uses, faces and shells destroyed (their
+        // destructors' SM_NO_DESTRUCTION)
+        out.extend(run.destroyed.iter().map(|&n| n as f64));
+    }
+    if matches!(op, OpIn::Orient { .. }) {
+        // the shim's trailer: each pre-op face's SmFace::SwapUV POST_EDIT count, the
+        // face count and where the tracker's values start (see split_orient)
+        for i in 0..run.faces_before {
+            let face = key_of(EntityRef::Face(FaceId::from_index(i as u32))).key;
+            let swaps = run
+                .lists
+                .notify_events
+                .iter()
+                .filter(|e| {
+                    e.operation == solidcore::geom::object::NotifyOperation::PostEdit
+                        && e.caller.is_some_and(|c| c.key == face)
+                })
+                .count();
+            out.push(swaps as f64);
+        }
+        out.push(run.faces_before as f64);
+        out.push(run.tracker_at as f64);
+    }
+    Ok(out)
+}
+
+/// A tracked edit's results ([`run_tracked`]): the edit's outputs followed by the
+/// tracker's values, where those start, the tracker's lists, the face count before
+/// the edit and the destructions the recorder counted (edges, edge uses, faces,
+/// shells).
+pub(crate) struct TrackedRun {
+    pub(crate) out: Vec<f64>,
+    pub(crate) tracker_at: usize,
+    pub(crate) lists: solidcore::topology::topology::TopologyChangeLists,
+    pub(crate) faces_before: usize,
+    pub(crate) destroyed: [u64; 4],
+}
+
+/// Runs `edit` of `b` as the shims' `TrackedEdit` (`harness/cpp/shim/sc_tracked.h`):
+/// under a topology change tracker on a context of its own, which issues the
+/// identities of each edge's curve and each face's surface before the edit (their
+/// owners the edge and the face, for the tracker's owner walk) and holds a recorder of
+/// the geometry the notifications name. The edit notifies through that context, its
+/// entities named by [`tracked_key_of`]; the tracker's lists and events
+/// ([`put_tracker`]) follow the edit's outputs. `b` must be an import whose arena ids
+/// are the shim's walk indices.
+pub(crate) fn run_tracked(
+    b: &mut Brep,
+    edit: impl FnOnce(&mut Brep, &mut Context) -> Result<Vec<f64>, Fail>,
+) -> Result<TrackedRun, Fail> {
     // the op's notifications go through a context of their own, which issues the
     // curves' identities: each edge's curve before the op (the shim's pre_curves)
     let mut ctx = Context::default();
@@ -1247,7 +1300,7 @@ fn run_rust_op(
     // Execute's owner walk: each pre-op curve's GetOwner() is its edge, each pre-op
     // surface's its face
     tracker.set_owner_metadata(owners.into_iter().map(|(c, e)| (c.key, Some(e))).collect());
-    let r = run_rust_op_in(k, b, second, op, a, Some(&mut ctx));
+    let r = edit(b, &mut ctx);
     // the shim's StopTracking before put_tracker: 1.0.1 records the completed edit's
     // dependencies (RecordDependencies) on the tracker's lists
     let recorded =
@@ -1285,33 +1338,21 @@ fn run_rust_op(
     };
     let tracker_at = out.len();
     put_tracker(&mut out, &lists, &mut t);
-    if matches!(op, OpIn::DeleteFace { .. }) {
-        // the shim's trailer: the edges, edge uses, faces and shells destroyed (their
-        // destructors' SM_NO_DESTRUCTION)
-        let destroyed = *edges_destroyed
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        out.extend(destroyed.iter().map(|&n| n as f64));
-    }
-    if matches!(op, OpIn::Orient { .. }) {
-        // the shim's trailer: each pre-op face's SmFace::SwapUV POST_EDIT count, the
-        // face count and where the tracker's values start (see split_orient)
-        for i in 0..pre[3] {
-            let face = key_of(EntityRef::Face(FaceId::from_index(i as u32))).key;
-            let swaps = lists
-                .notify_events
-                .iter()
-                .filter(|e| {
-                    e.operation == solidcore::geom::object::NotifyOperation::PostEdit
-                        && e.caller.is_some_and(|c| c.key == face)
-                })
-                .count();
-            out.push(swaps as f64);
-        }
-        out.push(pre[3] as f64);
-        out.push(tracker_at as f64);
-    }
-    Ok(out)
+    let destroyed = *edges_destroyed
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    Ok(TrackedRun {
+        out,
+        tracker_at,
+        lists,
+        faces_before: pre[3],
+        destroyed,
+    })
+}
+
+/// The identity a tracked edit ([`run_tracked`]) names each entity under.
+pub(crate) fn tracked_key_of(e: EntityRef) -> ObjectRef {
+    key_of(e)
 }
 
 /// An `Orient` output (either side) from its trailer: `out` before the tracker,

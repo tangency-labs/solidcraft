@@ -455,7 +455,8 @@ fn is_intersector_approx(curve: &Curve) -> Result<bool> {
     }
 }
 
-/// `OrientSheetSurfaces`. `same=true` is upstream's default orientation policy.
+/// `OrientSheetSurfaces`. `same=true` is upstream's default orientation policy. The
+/// face UV swaps' edit notifications (each face's and its surface's) go through `env`.
 ///
 /// # Errors
 /// `SM_ERR` for a face not in the B-rep or a B-rep that is not a sheet; those of the
@@ -466,6 +467,7 @@ pub fn orient_sheet_surfaces(
     b: &mut Brep,
     face: Option<FaceId>,
     same: bool,
+    env: &mut edge::NotifyEnv<'_>,
 ) -> Result<()> {
     let faces = brep_faces(b)?;
     let Some(face) = face.filter(|face| faces.contains(face)) else {
@@ -478,7 +480,7 @@ pub fn orient_sheet_surfaces(
         if !same {
             // Status ignored upstream (SmBrep.cpp:11644).
             ignore_status(crate::error::passed_on(
-                swap_brep_uv(k, b),
+                swap_brep_uv(k, b, env),
                 k.fixes.brep_edit_statuses_pass_on,
             )?)?;
         }
@@ -489,7 +491,7 @@ pub fn orient_sheet_surfaces(
         let mut marks = Marks::default();
         if !same {
             // Status ignored upstream (SmBrep.cpp:11659).
-            ignore_status(swap_face_uv(k, b, &mut marks, face))?;
+            ignore_status(swap_face_uv(k, b, &mut marks, face, env))?;
         }
         let upward = required(
             crate::topology::face::p2::upward_faceuse(b, face)?,
@@ -508,7 +510,7 @@ pub fn orient_sheet_surfaces(
                 let f = required(b.faceuse(neighbor)?.face, "neighbor without face")?;
                 if crate::topology::face::p2::upward_faceuse(b, f)? != Some(neighbor) {
                     // Status ignored upstream (SmBrep.cpp:11690).
-                    ignore_status(swap_face_uv(k, b, &mut marks, f))?;
+                    ignore_status(swap_face_uv(k, b, &mut marks, f, env))?;
                 }
                 pending.push(neighbor);
             }
@@ -537,9 +539,9 @@ fn is_oriented_sheet(k: &mut Kernel, b: &Brep) -> Result<bool> {
 }
 
 /// `SwapUV()` ([`crate::topology::brep::p2::swap_uv`], which claims its own mark).
-fn swap_brep_uv(k: &mut Kernel, b: &mut Brep) -> Result<()> {
+fn swap_brep_uv(k: &mut Kernel, b: &mut Brep, env: &mut edge::NotifyEnv<'_>) -> Result<()> {
     let mut marks = crate::topology::topology_traverser::Marks::default();
-    crate::topology::brep::p2::swap_uv(k, b, &mut marks)
+    crate::topology::brep::p2::swap_uv(k, b, &mut marks, env)
 }
 
 /// `sm_SwapFaceUV(pFace, SM_MT_NOMARK)`: swap without marking the face.
@@ -548,6 +550,7 @@ fn swap_face_uv(
     b: &mut Brep,
     marks: &mut crate::topology::topology_traverser::Marks,
     face: FaceId,
+    env: &mut edge::NotifyEnv<'_>,
 ) -> Result<()> {
     crate::topology::brep::p1::swap_face_uv(
         k,
@@ -555,6 +558,7 @@ fn swap_face_uv(
         marks,
         face,
         crate::geom::context::MarkType::NoMark,
+        env,
     )
 }
 
