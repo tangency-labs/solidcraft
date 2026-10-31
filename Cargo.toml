@@ -75,9 +75,9 @@ gethostname = "1"
 # Pinned: its IR and codec APIs change between minor versions. Open formats only: no default
 # features, so cadmpeg's codecs for commercial formats (f3d, sldprt, inventor, catia, creo, nx)
 # and its ShapeManager/ACIS `sat` codec are not compiled in. `step` is the writer we restate through.
-cadmpeg-core = "=0.6.3"
-cadmpeg-ir = "=0.6.3"
-cadmpeg-registry = { version = "=0.6.3", default-features = false, features = ["fcstd", "rhino", "step"] }
+cadmpeg-core = "=0.6.7"
+cadmpeg-ir = "=0.6.7"
+cadmpeg-registry = { version = "=0.6.7", default-features = false, features = ["fcstd", "rhino", "step"] }
 
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "variable-fonts"] }
