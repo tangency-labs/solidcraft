@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use serde_json::{Map, Value, json};
 
+use super::MODEL_LIST_CAP;
 use super::acp::ModelInfo;
 use super::agents::Protocol;
 use super::backend::{ChatBackend, Event, HttpFn, HttpRequest, PromptPart, StartContext, ToolStatus};
@@ -22,8 +23,6 @@ use super::process::{AgentProcess, FromAgent, ProcessHandle};
 
 /// Longest tool result handed back to the model.
 const MAX_TOOL_TEXT: usize = 20_000;
-/// Most models kept from an endpoint's listing.
-const MODEL_LIST_CAP: usize = 2000;
 /// Longest name kept for a listed model.
 const MODEL_NAME_CAP: usize = 256;
 /// Messages kept in the conversation (the system note stays).

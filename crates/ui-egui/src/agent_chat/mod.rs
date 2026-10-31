@@ -316,6 +316,15 @@ impl Loading {
     }
 }
 
+/// The model before an ACP agent was sent another, for when it refuses that one.
+struct ModelRevert {
+    model: String,
+    /// The one sent was not listed, so it leaves the list again.
+    unlisted: bool,
+    /// The model remembered for this agent.
+    saved: Option<String>,
+}
+
 #[derive(Default)]
 pub struct AgentChat {
     /// The panel is shown (View menu, the application bar's chat button, Ctrl+Shift+A).
@@ -404,6 +413,8 @@ pub struct AgentChat {
     pub model_provider: Option<String>,
     /// Why the running endpoint's models could not be listed, for the picker.
     pub models_note: Option<String>,
+    /// What to put back if the running ACP agent refuses the model it was last sent.
+    model_revert: Option<ModelRevert>,
     pub config_options: Option<Vec<acp::ConfigOption>>,
     pub config_pending: bool,
     /// An API endpoint's models, kept per endpoint (its base URL) for the next connection.
@@ -720,6 +731,7 @@ impl AgentChat {
                 }
             }
             Event::Models { current, available } => {
+                self.model_revert = None;
                 if self.config_options.is_none() && !available.is_empty() {
                     if self.models_note.is_some() {
                         // The listing failed: last time's list stays, with the configured model in it.
@@ -746,6 +758,18 @@ impl AgentChat {
             Event::ModelsNote(error) => {
                 self.models_note =
                     error.map(|error| trf("ui.agent_chat_models_failed", &[("error", &error)]).chars().take(MODELS_NOTE_CAP).collect());
+            }
+            Event::ModelRejected(message) => {
+                let text = trf("ui.agent_chat_model_rejected", &[("model", &self.model), ("error", &message)]);
+                self.notice(text.chars().take(MODELS_NOTE_CAP).collect::<String>(), true);
+                if let Some(revert) = self.model_revert.take() {
+                    if revert.unlisted {
+                        let refused = std::mem::take(&mut self.model);
+                        self.models.retain(|m| m.id != refused);
+                    }
+                    self.model = revert.model;
+                    self.model_provider = None;
+                }
             }
             Event::ConfigOptions(options) => {
                 self.apply_config_snapshot(options);
@@ -1003,6 +1027,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
             chat.models.clear();
             chat.model.clear();
             chat.models_note = None;
+            chat.model_revert = None;
             chat.running_endpoint = if entry.kind.is_api() { entry.base_url.clone() } else { String::new() };
             // An endpoint's models from the last time, until the new list arrives.
             if let Some(list) = chat.models_cache.get(&chat.running_endpoint) {
@@ -1369,6 +1394,7 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.stopped = false;
     chat.ended = None;
     chat.discard_end = running;
+    chat.model_revert = None;
     if matches!(chat.state(), State::Ready | State::Busy) {
         chat.restore_mode = Some(chat.mode.clone()).filter(|m| !m.is_empty());
         chat.state = Some(State::Starting);
@@ -1897,6 +1923,7 @@ pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
             }
             _ => None,
         };
+        let refused = if matches!(e, Event::ModelRejected(_)) { app.agent_chat.model_revert.as_ref().map(|r| r.saved.clone()) } else { None };
         match app.agent_chat.on_event(e) {
             Some(Outcome::TurnEnd) => {
                 end_turn(app);
@@ -1912,9 +1939,18 @@ pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
         }
         if let Some(model) = confirmed_model {
             app.preferences.agent_models.insert(app.agent_chat.running_id.clone(), model.clone());
-            if let Some(a) = app.preferences.agents.iter_mut().find(|a| a.id == app.agent_chat.running_id && a.kind == agents::Kind::Api) {
+            if let Some(a) = app.preferences.agents.iter_mut().find(|a| a.id == app.agent_chat.running_id && a.kind.is_api()) {
                 a.model = model;
             }
+        }
+        match refused {
+            Some(Some(saved)) => {
+                app.preferences.agent_models.insert(app.agent_chat.running_id.clone(), saved);
+            }
+            Some(None) => {
+                app.preferences.agent_models.remove(&app.agent_chat.running_id);
+            }
+            None => {}
         }
         if ready {
             apply_saved_model(app);
@@ -1970,15 +2006,62 @@ pub fn set_model(app: &mut SolveApp, model: &str) {
         set_config_option(app, &id, model);
         return;
     }
-    if !app.agent_chat.models.iter().any(|m| m.id == model) {
-        return;
+    if app.agent_chat.models.iter().any(|m| m.id == model) {
+        send_model(app, model);
     }
-    if let Some(b) = app.agent_chat.backend.as_mut() {
+}
+
+/// Whether a model the agent did not list can be sent: an endpoint, an ACP agent with a model
+/// option, or a legacy ACP agent that listed models.
+pub fn custom_models_accepted(app: &SolveApp) -> bool {
+    let chat = &app.agent_chat;
+    if chat.backend.is_none() || !chat.state().running() {
+        return false;
+    }
+    match chat.config_options.as_ref() {
+        Some(options) => options.iter().any(|o| o.category == "model"),
+        None => !chat.running_endpoint.is_empty() || !chat.models.is_empty(),
+    }
+}
+
+/// A typed model (the pickers' custom row). A listed id goes the usual way, others by the agent's
+/// kind; an agent that refuses it keeps its model and the chat says so. Returns whether it was sent.
+pub fn set_custom_model(app: &mut SolveApp, text: &str) -> bool {
+    let model = text.trim();
+    if !model_id_valid(model) || !custom_models_accepted(app) {
+        return false;
+    }
+    let option = app.agent_chat.config_options.as_ref().and_then(|options| options.iter().find(|o| o.category == "model"));
+    if let Some(id) = option.map(|o| o.id.clone()) {
+        return set_config_option_checked(app, &id, model, false);
+    }
+    send_model(app, model);
+    true
+}
+
+/// Switch a legacy ACP agent or an endpoint to `model`: it shows as current at once and is
+/// remembered for this agent; an endpoint also keeps it as its default model.
+fn send_model(app: &mut SolveApp, model: &str) {
+    let agent = app.agent_chat.running_id.clone();
+    let chat = &mut app.agent_chat;
+    let unlisted = !chat.models.iter().any(|m| m.id == model);
+    let entry = || acp::ModelInfo { id: model.to_string(), name: model.to_string(), description: String::new() };
+    if unlisted {
+        chat.models.insert(0, entry());
+        chat.models.truncate(MODEL_LIST_CAP);
+    }
+    if chat.running_endpoint.is_empty() {
+        chat.model_revert = Some(ModelRevert { model: chat.model.clone(), unlisted, saved: app.preferences.agent_models.get(&agent).cloned() });
+    } else if unlisted {
+        let cached = chat.models_cache.entry(chat.running_endpoint.clone()).or_default();
+        cached.insert(0, entry());
+        cached.truncate(MODEL_LIST_CAP);
+    }
+    if let Some(b) = chat.backend.as_mut() {
         b.set_model(model);
     }
-    app.agent_chat.model = model.to_string();
-    app.agent_chat.model_provider = None;
-    let agent = app.agent_chat.running_id.clone();
+    chat.model = model.to_string();
+    chat.model_provider = None;
     if let Some(a) = app.preferences.agents.iter_mut().find(|a| a.id == agent && a.kind.is_api()) {
         a.model = model.to_string();
     }
@@ -2001,9 +2084,11 @@ pub fn models_shown(app: &SolveApp) -> bool {
 
 /// Longest provider name kept from an agent's model list.
 const PROVIDER_NAME_CAP: usize = 128;
+/// Most models kept for a picker, whether listed or typed.
+const MODEL_LIST_CAP: usize = 2000;
 /// Longest model id kept from a listing or sent to an agent.
 pub const MODEL_ID_CAP: usize = 256;
-/// Longest note about a listing that failed.
+/// Longest note about a listing that failed or a model the agent refused.
 const MODELS_NOTE_CAP: usize = 1024;
 
 /// Whether a model id can go to an agent: not empty, not too long, no control characters.
@@ -2105,19 +2190,25 @@ pub fn set_mode(app: &mut SolveApp, mode: &str) {
 
 /// Change a reported modern ACP configuration option; only acknowledged snapshots change state.
 pub fn set_config_option(app: &mut SolveApp, id: &str, value: &str) {
+    set_config_option_checked(app, id, value, true);
+}
+
+/// [`set_config_option`], with a choice the agent did not list (`listed_only` false: a typed
+/// model, which the agent may refuse). Returns whether it was sent.
+fn set_config_option_checked(app: &mut SolveApp, id: &str, value: &str, listed_only: bool) -> bool {
     let Some(option) = app.agent_chat.config_options.as_ref().and_then(|xs| xs.iter().find(|x| x.id == id)) else {
-        return;
+        return false;
     };
     if app.agent_chat.config_pending
         || !matches!(app.agent_chat.state(), State::Ready | State::Busy)
-        || !option.options.iter().any(|x| x.value == value)
+        || (listed_only && !option.options.iter().any(|x| x.value == value))
     {
-        return;
+        return false;
     }
-    if let Some(b) = app.agent_chat.backend.as_mut() {
-        b.set_config_option(id, value);
-        app.agent_chat.config_pending = true;
-    }
+    let Some(b) = app.agent_chat.backend.as_mut() else { return false };
+    b.set_config_option(id, value);
+    app.agent_chat.config_pending = true;
+    true
 }
 
 /// `ui.agent_chat` on the control channel (tests and screenshots): `enabled`, `command`,
@@ -2212,7 +2303,11 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
         set_model_provider(app, m);
     }
     if let Some(m) = p.get("model").and_then(Value::as_str) {
-        set_model(app, m);
+        if app.agent_chat.models.iter().any(|x| x.id == m) {
+            set_model(app, m);
+        } else {
+            set_custom_model(app, m);
+        }
     }
     if let Some(option) = p.get("config_option") {
         let id = option.get("id").and_then(Value::as_str).ok_or("config_option.id must be a string")?;
@@ -2339,7 +2434,7 @@ pub fn status(app: &SolveApp) -> Value {
     #[cfg(target_arch = "wasm32")]
     let detection: Option<Value> = None;
     let pid = c.backend.as_ref().and_then(|b| b.pid());
-    json!({
+    let mut state = json!({
         "features": app.preferences.ai_features,
         "configOptions": c.config_options,
         "configPending": c.config_pending,
@@ -2381,7 +2476,13 @@ pub fn status(app: &SolveApp) -> Value {
         "turnWarning": c.turn_warning,
         "detection": detection,
         "items": items,
-    })
+    });
+    // Added apart: `json!` has reached the compiler's recursion limit above.
+    if let Some(state) = state.as_object_mut() {
+        state.insert("modelsNote".into(), json!(c.models_note));
+        state.insert("customModels".into(), json!(custom_models_accepted(app)));
+    }
+    state
 }
 
 #[cfg(test)]

@@ -1423,6 +1423,183 @@ fn choosing_a_model_sets_it_and_remembers_it() {
     assert_eq!(app.agent_chat.models.len(), 2, "the list stays");
 }
 
+/// A scripted endpoint: its agent is configured, and it is running with these models.
+#[cfg(not(target_arch = "wasm32"))]
+fn endpoint_with_script() -> (SolveApp, Script, egui::Context) {
+    let (mut app, script, ctx) = app_with_script();
+    let endpoint = "http://localhost:11434/v1";
+    app.agent_chat.running_id = "api-1".into();
+    app.agent_chat.running_endpoint = endpoint.into();
+    app.preferences.agents.push(agents::AgentConfig {
+        id: "api-1".into(),
+        kind: agents::Kind::Api,
+        base_url: endpoint.into(),
+        model: "fast".into(),
+        ..Default::default()
+    });
+    script.report(models_reply("fast"));
+    poll(&mut app, &ctx);
+    (app, script, ctx)
+}
+
+/// A typed model goes straight to an endpoint, joins the list for the next connection and becomes
+/// the agent's default.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_typed_model_goes_to_an_endpoint_and_is_remembered() {
+    let (mut app, script, _ctx) = endpoint_with_script();
+    assert!(custom_models_accepted(&app));
+    assert!(set_custom_model(&mut app, "  openai/gpt-x "));
+    assert_eq!(script.calls(), ["set_model: openai/gpt-x"]);
+    assert_eq!(app.agent_chat.models.first().map(|m| m.id.as_str()), Some("openai/gpt-x"));
+    assert_eq!(app.agent_chat.models_cache.get("http://localhost:11434/v1").and_then(|l| l.first()).map(|m| m.id.as_str()), Some("openai/gpt-x"));
+    assert_eq!(app.preferences.agents.iter().find(|a| a.id == "api-1").unwrap().model, "openai/gpt-x");
+    assert_eq!(app.preferences.agent_models.get("api-1").map(String::as_str), Some("openai/gpt-x"));
+    assert_eq!(status(&app)["model"], "openai/gpt-x");
+    assert_eq!(status(&app)["customModels"], true);
+    let listed = app.agent_chat.models.len();
+    assert!(set_custom_model(&mut app, "smart"));
+    assert_eq!(app.agent_chat.models.len(), listed, "a listed id goes the usual way");
+    assert_eq!(app.agent_chat.model, "smart");
+}
+
+/// A typed model is only sent when it could be a model at all, and the list stays within its cap.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_typed_model_that_cannot_be_one_is_not_sent() {
+    let (mut app, script, _ctx) = endpoint_with_script();
+    for text in ["", "   ", "x".repeat(MODEL_ID_CAP + 1).as_str(), "bell\u{7}", "two\nlines"] {
+        assert!(!set_custom_model(&mut app, text), "{text:?}");
+    }
+    assert!(script.calls().is_empty());
+    assert!(set_custom_model(&mut app, &"x".repeat(MODEL_ID_CAP)));
+    app.agent_chat.models =
+        (0..MODEL_LIST_CAP).map(|i| acp::ModelInfo { id: format!("m{i}"), name: String::new(), description: String::new() }).collect();
+    assert!(set_custom_model(&mut app, "one-more"));
+    assert_eq!(app.agent_chat.models.len(), MODEL_LIST_CAP);
+    assert_eq!(app.agent_chat.models.first().map(|m| m.id.as_str()), Some("one-more"));
+}
+
+/// An agent with a model option gets a typed model through it. Nothing changes until it answers,
+/// and a refusal leaves the old model with the agent's reason in the chat.
+#[test]
+fn a_typed_model_is_sent_to_a_modern_agent_and_a_rejection_keeps_the_old_one() {
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.running_id = "modern".into();
+    script.report(Event::ConfigOptions(modern_options("fast")));
+    poll(&mut app, &ctx);
+    assert!(custom_models_accepted(&app));
+    assert!(set_custom_model(&mut app, "claude-x"));
+    assert_eq!(script.calls(), ["set_config_option: some.provider.model=claude-x"]);
+    assert!(app.agent_chat.config_pending);
+    assert_eq!(app.agent_chat.model, "fast");
+    assert!(!set_custom_model(&mut app, "claude-y"), "one request at a time");
+
+    script.report(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Err("no such model".into()) });
+    poll(&mut app, &ctx);
+    assert!(!app.agent_chat.config_pending);
+    assert_eq!(app.agent_chat.model, "fast");
+    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, error: true } if text.contains("no such model"))));
+    assert!(!app.preferences.agent_models.contains_key("modern"));
+
+    // An agent that takes it says so in its snapshot, and that is what is remembered.
+    assert!(set_custom_model(&mut app, "claude-x"));
+    script.report(Event::ConfigOptionFinished { id: "some.provider.model".into(), result: Ok(modern_options("claude-x")) });
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.model, "claude-x");
+    assert_eq!(app.preferences.agent_models.get("modern").map(String::as_str), Some("claude-x"));
+}
+
+/// A legacy agent shows a typed model at once; a refusal puts everything back and says why.
+#[test]
+fn a_typed_model_is_sent_to_a_legacy_agent_and_a_rejection_reverts_it() {
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.running_id = "claude".into();
+    app.preferences.agent_models.insert("claude".into(), "fast".into());
+    script.report(models_reply("fast"));
+    poll(&mut app, &ctx);
+    assert!(set_custom_model(&mut app, "zzz"));
+    assert_eq!(script.calls(), ["set_model: zzz"]);
+    assert_eq!(app.agent_chat.model, "zzz");
+    assert_eq!(app.preferences.agent_models.get("claude").map(String::as_str), Some("zzz"));
+
+    script.report(Event::ModelRejected("no such model".into()));
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.model, "fast");
+    assert_eq!(app.agent_chat.models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["fast", "smart"]);
+    assert_eq!(app.preferences.agent_models.get("claude").map(String::as_str), Some("fast"));
+    assert!(
+        app.agent_chat
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Notice { text, error: true } if text.contains("zzz") && text.contains("no such model"))),
+        "the notice names the model and the reason"
+    );
+
+    // A listed model the agent refuses goes back too, and nothing was remembered before it here.
+    app.preferences.agent_models.remove("claude");
+    set_model(&mut app, "smart");
+    script.report(Event::ModelRejected("x".repeat(MODELS_NOTE_CAP * 2)));
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.model, "fast");
+    assert_eq!(app.agent_chat.models.len(), 2);
+    assert!(!app.preferences.agent_models.contains_key("claude"));
+    let Some(Item::Notice { text, .. }) = app.agent_chat.items.last() else { panic!("no notice") };
+    assert_eq!(text.chars().count(), MODELS_NOTE_CAP);
+
+    // The agent confirming its model ends the wait: a later refusal has nothing to put back.
+    assert!(set_custom_model(&mut app, "zzz"));
+    script.report(Event::Models { current: "zzz".into(), available: vec![] });
+    script.report(Event::ModelRejected("late".into()));
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.model, "zzz");
+}
+
+/// An agent that lists no models and has no model option cannot be sent one; a stopped one neither.
+#[test]
+fn an_agent_without_models_takes_no_typed_model() {
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.running_id = "other".into();
+    script.report(Event::Ready { agent: "fake".into(), images: false });
+    poll(&mut app, &ctx);
+    assert!(!custom_models_accepted(&app));
+    assert_eq!(status(&app)["customModels"], false);
+    assert!(!set_custom_model(&mut app, "zzz"));
+    assert!(script.calls().is_empty());
+    script.report(Event::ConfigOptions(vec![]));
+    poll(&mut app, &ctx);
+    assert!(!custom_models_accepted(&app), "its options name no model");
+
+    let (mut app, script, ctx) = app_with_script();
+    script.report(models_reply("fast"));
+    poll(&mut app, &ctx);
+    assert!(custom_models_accepted(&app));
+    app.agent_chat.backend = None;
+    assert!(!custom_models_accepted(&app));
+    assert!(!set_custom_model(&mut app, "zzz"));
+}
+
+/// The control channel's `model`: a listed one as before, an unlisted one when the agent takes
+/// typed models, otherwise ignored as before.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_control_channel_sends_an_unlisted_model_where_it_can_go() {
+    let (mut app, script, ctx) = endpoint_with_script();
+    let reply = control(&mut app, &ctx, &json!({"model": "smart"})).unwrap();
+    assert_eq!(reply["model"], "smart");
+    let reply = control(&mut app, &ctx, &json!({"model": "unlisted"})).unwrap();
+    assert_eq!(reply["model"], "unlisted");
+    assert_eq!(reply["customModels"], true);
+    assert_eq!(reply["modelsNote"], Value::Null);
+    assert_eq!(script.calls(), ["set_model: smart", "set_model: unlisted"]);
+
+    let (mut app, script, ctx) = app_with_script();
+    let reply = control(&mut app, &ctx, &json!({"model": "unlisted"})).unwrap();
+    assert_eq!(reply["model"], "");
+    assert_eq!(reply["customModels"], false);
+    assert!(script.calls().is_empty());
+}
+
 /// A listing that fails says why and leaves last time's list, with the configured model in it; the
 /// next connection starts without the note.
 #[cfg(not(target_arch = "wasm32"))]
