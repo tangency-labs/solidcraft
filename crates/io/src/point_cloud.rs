@@ -34,7 +34,7 @@ pub struct CloudFile {
     pub colors: Vec<u8>,
     /// Points in the file.
     pub source_points: u64,
-    /// The file's other properties of the points (PLY).
+    /// Segments, triangles and the file's other properties (PLY).
     pub complex: solidcraft_doc::point_cloud::Complex,
     pub warnings: Vec<String>,
 }
@@ -86,9 +86,12 @@ pub fn read_point_cloud(bytes: &[u8], file: &str, scale: f64, max_points: usize)
         for (i, p) in r.positions.iter().enumerate() {
             keep.push(*p, colors.get(i).copied());
         }
-        // A point left out would shift every number after it.
+        // A point left out would shift every index and number after it.
         if keep.bad > 0 && !r.complex.is_empty() {
             return Err(IoError::Invalid(format!("{} point(s) are not finite numbers within range", keep.bad)));
+        }
+        if r.bad_faces > 0 {
+            keep.out.warnings.push(format!("{} face(s) could not be read and were left out", r.bad_faces));
         }
         keep.out.source_points = r.vertices;
         keep.out.complex = r.complex;
