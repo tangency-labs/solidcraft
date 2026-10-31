@@ -1,0 +1,29 @@
+{
+  "en": {
+    "settings.hover_pick_points": "Show center, middle and end points to pick while hovering in Move, Align and Measure"
+  },
+  "en-GB": {
+    "settings.hover_pick_points": "Show centre, middle and end points to pick while hovering in Move, Align and Measure"
+  },
+  "de": {
+    "settings.hover_pick_points": "Beim Überfahren in Verschieben, Ausrichten und Messen Mittel- und Endpunkte zum Auswählen anzeigen"
+  },
+  "ja": {
+    "settings.hover_pick_points": "移動、位置合わせ、計測でホバー時に中心点、中点、端点を選択できるように表示"
+  },
+  "ko": {
+    "settings.hover_pick_points": "이동, 정렬, 측정에서 마우스를 올리면 선택할 중심점, 중간점, 끝점 표시"
+  },
+  "zh": {
+    "settings.hover_pick_points": "在移动、对齐和测量中悬停时显示可拾取的中心点、中点和端点"
+  },
+  "ar": {
+    "settings.hover_pick_points": "إظهار نقاط المركز والمنتصف والنهاية للاختيار عند التمرير في النقل والمحاذاة والقياس"
+  },
+  "he": {
+    "settings.hover_pick_points": "הצגת נקודות מרכז, אמצע וקצה לבחירה בעת ריחוף בהזזה, יישור ומדידה"
+  },
+  "vi": {
+    "settings.hover_pick_points": "Hiện điểm tâm, điểm giữa và điểm đầu mút để chọn khi di chuột trong Di chuyển, Căn chỉnh và Đo"
+  }
+}

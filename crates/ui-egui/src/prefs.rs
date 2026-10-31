@@ -1051,6 +1051,10 @@ preference_settings! {
     /// a double-click in the browser activates every component and one in the view does nothing,
     /// as before.
     double_click_components: bool = true, PAGE_DESIGN => check_id("settings.double_click_components");
+    /// Hover pick points (#5912): in Move, Align and Measure, hovering an edge, face or sketch
+    /// curve shows its centre, middle and end points to pick. Off by default: hovering picks only
+    /// what is under the pointer, as before.
+    hover_pick_points: bool = false, PAGE_DESIGN => check_id("settings.hover_pick_points");
     /// Insert Design lists the designs open in other tabs, each inserted with one click, then
     /// Browse… for a file (#8570). Off: it opens the file picker at once, as before.
     insert_lists_open_designs: bool = true, PAGE_DESIGN => check_id("settings.insert_lists_open_designs");

@@ -162,6 +162,9 @@ pub struct ViewportState {
     pub woken_centre: Option<(u64, String)>,
     /// The centre or midpoint most recently hovered for visual H/V tracking.
     pub(crate) tracking: crate::inference::Tracking,
+
+    /// Hover pick points woken by the last edge or face hovered (`snap_wake`).
+    pub woken: crate::snap_wake::Woken,
     pub mouse: Option<Pos2>,
     /// Box selection being dragged.
     pub boxsel: Option<BoxSel>,
@@ -2260,6 +2263,9 @@ pub(crate) fn pick_cached(app: &mut SolveApp, proj: &Proj, pos: Pos2) -> Vec<Hit
     app.dialog.as_ref().map(|d| &d.edit_source_bodies).hash(&mut h);
     app.session.visibility.hidden_occurrences.hash(&mut h);
     origin_point_shown(app).hash(&mut h);
+    for p in &app.viewport.woken.points {
+        [p.at.x, p.at.y, p.at.z].map(f64::to_bits).hash(&mut h);
+    }
     app.view_fov().to_bits().hash(&mut h);
     (proj.rect.width().to_bits(), proj.rect.height().to_bits()).hash(&mut h);
     crate::sketch_display::projection_key(proj, app.viewport.pixels_per_point()).hash(&mut h);
@@ -2529,6 +2535,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         }
     }
     let before_curves = hits.len();
+    let curve_near = bestc.v.iter().map(|x| x.0.1).fold(f32::INFINITY, f32::min);
     hits.extend(bestc.hits());
     if let Some((_, far)) = woken_far
         && hits.len() == before_curves
@@ -2672,6 +2679,13 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             bestv.offer(dd, Hit::Vertex { body: String::new(), point: Vec3::ZERO });
         }
     }
+    // Woken hover pick points (a hole's centre, a line's middle) come first: right under the
+    // pointer over anything (a line's middle lies on the line), further out unless an edge or a
+    // sketch curve under the pointer is nearer (a small hole's rim stays pickable).
+    let edge_near = beste.v.iter().map(|x| x.0).fold(curve_near, f32::min);
+    let woken: Vec<Hit> =
+        crate::snap_wake::hits(app, proj, pos).into_iter().filter(|(dd, _)| *dd < crate::snap_wake::ON || *dd < edge_near).map(|x| x.1).collect();
+    hits.splice(0..0, woken);
     hits.extend(bestv.hits());
     hits.extend(beste.hits());
     // Origin axes.
@@ -4320,6 +4334,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     };
     app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
     wake_centre(app, &hits);
+
+    crate::snap_wake::update(app);
     // Select Other: a press held still opens the list of everything under it; while the list is
     // open its row under the pointer is what lights up. A mode lit in the navigation bar or a
     // held Space owns drags, not a still press, so only a navigation that has started cancels
@@ -6112,6 +6128,7 @@ fn origin_hidden_by_body(app: &SolveApp, proj: &Proj) -> bool {
 
 /// Screen-space dots: the origin point, and hovered or selected body vertices.
 fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    crate::snap_wake::draw(app, painter, proj);
     let t = Tokens::get();
     if origin_point_shown(app)
         && !origin_hidden_by_body(app, proj)
