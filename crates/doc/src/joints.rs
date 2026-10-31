@@ -134,7 +134,7 @@ pub enum Snap {
     /// x along the plane's x axis (or `x` if given). Origin at `pick` projected onto the plane,
     /// or the plane's own origin when `pick` is omitted.
     Plane {
-        plane: PlaneRef,
+        plane: Box<PlaneRef>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pick: Option<Vec3>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -144,7 +144,7 @@ pub enum Snap {
     /// axis, x square to z (or `x` if given). Origin at `pick` projected onto the axis line,
     /// or the axis origin when `pick` is None.
     Axis {
-        axis: AxisRef,
+        axis: Box<AxisRef>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pick: Option<Vec3>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -908,15 +908,9 @@ pub fn resolve_axis_ref(doc: &Document, st: &ModelState, component: u64, axis: &
             };
             Ok((Vec3::ZERO, d))
         }
-        AxisRef::Name(axis) if matches!(axis.to_ascii_uppercase().as_str(), "X" | "Y" | "Z") => {
-            let d = match axis.to_ascii_uppercase().as_str() {
-                "X" => Vec3::X,
-                "Y" => Vec3::Y,
-                "Z" => Vec3::Z,
-                _ => unreachable!(),
-            };
-            Ok((Vec3::ZERO, d))
-        }
+        AxisRef::Name(axis) if axis.eq_ignore_ascii_case("X") => Ok((Vec3::ZERO, Vec3::X)),
+        AxisRef::Name(axis) if axis.eq_ignore_ascii_case("Y") => Ok((Vec3::ZERO, Vec3::Y)),
+        AxisRef::Name(axis) if axis.eq_ignore_ascii_case("Z") => Ok((Vec3::ZERO, Vec3::Z)),
         AxisRef::Target(AxisTarget::Construction { name }) | AxisRef::Name(name) => {
             let mut match_comp = None;
             let mut match_any = None;
@@ -977,7 +971,7 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
             let pl = doc
                 .resolve_plane_in(&vals, plane, 0, Some(st))
                 .or_else(|err| {
-                    if let PlaneRef::Origin { name } = plane {
+                    if let PlaneRef::Origin { name } = plane.as_ref() {
                         let mut match_comp = None;
                         let mut match_any = None;
                         for c in &st.construct {
@@ -2666,7 +2660,7 @@ mod tests {
         });
 
         // 1. Origin plane XY
-        let o_xy = JointOrigin { occurrence: 0, snap: Snap::Plane { plane: PlaneRef::Origin { name: "XY".into() }, pick: None, x: None } };
+        let o_xy = JointOrigin { occurrence: 0, snap: Snap::Plane { plane: Box::new(PlaneRef::Origin { name: "XY".into() }), pick: None, x: None } };
         let m = resolve_origin(&doc, &st, &o_xy).unwrap();
         assert_eq!(apply_point(&m, Vec3::ZERO), Vec3::ZERO);
         assert_eq!(apply_vector(&m, Vec3::Z), Vec3::Z);
@@ -2674,25 +2668,26 @@ mod tests {
         // 2. Origin plane XY with pick projected
         let o_xy_pick = JointOrigin {
             occurrence: 0,
-            snap: Snap::Plane { plane: PlaneRef::Origin { name: "XY".into() }, pick: Some(Vec3::new(12.0, 34.0, 56.0)), x: None },
+            snap: Snap::Plane { plane: Box::new(PlaneRef::Origin { name: "XY".into() }), pick: Some(Vec3::new(12.0, 34.0, 56.0)), x: None },
         };
         let m_pick = resolve_origin(&doc, &st, &o_xy_pick).unwrap();
         assert_eq!(apply_point(&m_pick, Vec3::ZERO), Vec3::new(12.0, 34.0, 0.0));
 
         // 3. Construction plane by name
-        let o_wp = JointOrigin { occurrence: 0, snap: Snap::Plane { plane: PlaneRef::Origin { name: "WorkPlane".into() }, pick: None, x: None } };
+        let o_wp =
+            JointOrigin { occurrence: 0, snap: Snap::Plane { plane: Box::new(PlaneRef::Origin { name: "WorkPlane".into() }), pick: None, x: None } };
         let m_wp = resolve_origin(&doc, &st, &o_wp).unwrap();
         assert_eq!(apply_point(&m_wp, Vec3::ZERO), Vec3::new(0.0, 0.0, 15.0));
         assert_eq!(apply_vector(&m_wp, Vec3::Z), Vec3::Z);
 
         // 4. Origin axis Z
-        let o_z = JointOrigin { occurrence: 0, snap: Snap::Axis { axis: AxisRef::origin("Z"), pick: None, x: None } };
+        let o_z = JointOrigin { occurrence: 0, snap: Snap::Axis { axis: Box::new(AxisRef::origin("Z")), pick: None, x: None } };
         let m_z = resolve_origin(&doc, &st, &o_z).unwrap();
         assert_eq!(apply_point(&m_z, Vec3::ZERO), Vec3::ZERO);
         assert_eq!(apply_vector(&m_z, Vec3::Z), Vec3::Z);
 
         // 5. Construction axis
-        let o_spine = JointOrigin { occurrence: 0, snap: Snap::Axis { axis: AxisRef::Name("Spine".into()), pick: None, x: None } };
+        let o_spine = JointOrigin { occurrence: 0, snap: Snap::Axis { axis: Box::new(AxisRef::Name("Spine".into())), pick: None, x: None } };
         let m_spine = resolve_origin(&doc, &st, &o_spine).unwrap();
         assert_eq!(apply_point(&m_spine, Vec3::ZERO), Vec3::new(10.0, 5.0, 0.0));
         assert_eq!(apply_vector(&m_spine, Vec3::Z), Vec3::Z);

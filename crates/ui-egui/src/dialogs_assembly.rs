@@ -340,42 +340,51 @@ fn side_inputs() -> Vec<SelInput> {
 /// or edge nearest the pick. A point or frame side names no face: None.
 fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
     let s = &app.session;
+    match &o.snap {
+        Snap::Plane { plane, .. } => {
+            let name = match plane.as_ref() {
+                solidcraft_engine::doc::PlaneRef::Origin { name } => Some(name.clone()),
+                solidcraft_engine::doc::PlaneRef::Construction { feature } => {
+                    let id = **feature;
+                    s.doc
+                        .feature(id)
+                        .map(|f| f.name.clone())
+                        .or_else(|| s.model.state().construct.iter().find(|c| c.feature == id).map(|c| c.name.clone()))
+                }
+                _ => None,
+            }?;
+            let name = if o.occurrence == 0 {
+                name
+            } else {
+                let occ_name = s.doc.occurrences.iter().find(|occ| occ.id == o.occurrence).map(|occ| occ.name.as_str()).unwrap_or("");
+                if occ_name.is_empty() { name } else { format!("{occ_name}/{name}") }
+            };
+            return Some(Sel::Plane { name });
+        }
+        Snap::Axis { axis, .. } => {
+            let name = match axis.as_ref() {
+                solidcraft_engine::doc::joints::AxisRef::Name(name) => Some(name.clone()),
+                solidcraft_engine::doc::joints::AxisRef::Target(solidcraft_engine::doc::joints::AxisTarget::Origin { axis }) => Some(axis.clone()),
+                solidcraft_engine::doc::joints::AxisRef::Target(solidcraft_engine::doc::joints::AxisTarget::Construction { name }) => {
+                    Some(name.clone())
+                }
+                _ => None,
+            }?;
+            let name = if o.occurrence == 0 {
+                name
+            } else {
+                let occ_name = s.doc.occurrences.iter().find(|occ| occ.id == o.occurrence).map(|occ| occ.name.as_str()).unwrap_or("");
+                if occ_name.is_empty() { name } else { format!("{occ_name}/{name}") }
+            };
+            return Some(Sel::Axis { name });
+        }
+        _ => {}
+    }
+
     let (pick, face, edge) = match &o.snap {
         Snap::FaceCenter { pick, face, .. } | Snap::CircleCenter { pick, face, .. } => (*pick, face.as_deref(), None),
         Snap::Edge { pick, edge, .. } => (*pick, None, edge.as_deref()),
-        Snap::Plane { plane, .. } => {
-            let name = match plane {
-                solidcraft_engine::doc::PlaneRef::Origin { name } => name.as_str(),
-                solidcraft_engine::doc::PlaneRef::Construction { feature } => {
-                    let f = s.doc.feature(**feature)?;
-                    f.name.as_str()
-                }
-                _ => return None,
-            };
-            let occ_name =
-                (o.occurrence != 0).then(|| s.doc.occurrences.iter().find(|occ| occ.id == o.occurrence).map(|occ| occ.name.as_str())).flatten();
-            let sel_name = match occ_name {
-                Some(prefix) => format!("{prefix}/{name}"),
-                None => name.to_string(),
-            };
-            return Some(Sel::Plane { name: sel_name });
-        }
-        Snap::Axis { axis, .. } => {
-            let name = match axis {
-                solidcraft_engine::doc::joints::AxisRef::Target(solidcraft_engine::doc::joints::AxisTarget::Origin { axis }) => axis.as_str(),
-                solidcraft_engine::doc::joints::AxisRef::Target(solidcraft_engine::doc::joints::AxisTarget::Construction { name })
-                | solidcraft_engine::doc::joints::AxisRef::Name(name) => name.as_str(),
-                _ => return None,
-            };
-            let occ_name =
-                (o.occurrence != 0).then(|| s.doc.occurrences.iter().find(|occ| occ.id == o.occurrence).map(|occ| occ.name.as_str())).flatten();
-            let sel_name = match occ_name {
-                Some(prefix) => format!("{prefix}/{name}"),
-                None => name.to_string(),
-            };
-            return Some(Sel::Axis { name: sel_name });
-        }
-        Snap::Point { .. } | Snap::Frame { .. } => return None,
+        _ => return None,
     };
     // The pick is in the component's coordinates; the placed bodies are in the world.
     let at =
@@ -656,13 +665,12 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
                 (Vec3::ZERO, Vec3::new(0.0, -1.0, 0.0))
             } else if upper == "YZ" {
                 (Vec3::ZERO, Vec3::X)
-            } else if let Some(c) = model_st.construct.iter().find(|c| c.name == plane_name) {
+            } else {
+                let c = model_st.construct.iter().find(|c| c.name == plane_name)?;
                 match &c.geom {
                     solidcraft_engine::doc::construct::ConstructGeom::Plane(p) => (p.origin, p.normal().normalized().unwrap_or(Vec3::Z)),
                     _ => return None,
                 }
-            } else {
-                return None;
             };
             let t = if occ == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, occ) };
             let at = solidcraft_engine::doc::apply_point(&t, local_origin);
@@ -700,13 +708,12 @@ pub fn snap_of(s: &Session, sel: &Sel) -> Option<SnapPt> {
                     _ => Vec3::Z,
                 };
                 (Vec3::ZERO, d)
-            } else if let Some(c) = model_st.construct.iter().find(|c| c.name == axis_name) {
+            } else {
+                let c = model_st.construct.iter().find(|c| c.name == axis_name)?;
                 match &c.geom {
                     solidcraft_engine::doc::construct::ConstructGeom::Axis { origin, dir } => (*origin, dir.normalized().unwrap_or(Vec3::Z)),
                     _ => return None,
                 }
-            } else {
-                return None;
             };
             let t = if occ == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, occ) };
             let at = solidcraft_engine::doc::apply_point(&t, local_origin);

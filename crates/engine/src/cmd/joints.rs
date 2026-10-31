@@ -361,11 +361,11 @@ fn origin_from_name(s: &Session, name: &str, occurrence: Option<u64>, cmd: &str)
     let st = s.model.state();
     let occ = occurrence.unwrap_or(0);
     if matches!(upper.as_str(), "XY" | "XZ" | "YZ") {
-        let snap = Snap::Plane { plane: solidcraft_doc::PlaneRef::Origin { name: upper }, pick: None, x: None };
+        let snap = Snap::Plane { plane: Box::new(solidcraft_doc::PlaneRef::Origin { name: upper }), pick: None, x: None };
         return settle(s, JointOrigin { occurrence: occ, snap }, &json!({}), cmd).map(Some);
     }
     if matches!(upper.as_str(), "X" | "Y" | "Z") {
-        let snap = Snap::Axis { axis: solidcraft_doc::joints::AxisRef::origin(upper), pick: None, x: None };
+        let snap = Snap::Axis { axis: Box::new(solidcraft_doc::joints::AxisRef::origin(upper)), pick: None, x: None };
         return settle(s, JointOrigin { occurrence: occ, snap }, &json!({}), cmd).map(Some);
     }
     if let Some(c) = st.construct.iter().find(|c| c.name == name_trim) {
@@ -375,10 +375,10 @@ fn origin_from_name(s: &Session, name: &str, occurrence: Option<u64>, cmd: &str)
         });
         let snap = match &c.geom {
             solidcraft_doc::construct::ConstructGeom::Plane(_) => {
-                Snap::Plane { plane: solidcraft_doc::PlaneRef::Origin { name: name_trim.to_string() }, pick: None, x: None }
+                Snap::Plane { plane: Box::new(solidcraft_doc::PlaneRef::Origin { name: name_trim.to_string() }), pick: None, x: None }
             }
             solidcraft_doc::construct::ConstructGeom::Axis { .. } => {
-                Snap::Axis { axis: solidcraft_doc::joints::AxisRef::construction(name_trim.to_string()), pick: None, x: None }
+                Snap::Axis { axis: Box::new(solidcraft_doc::joints::AxisRef::construction(name_trim.to_string())), pick: None, x: None }
             }
             _ => return Ok(None),
         };
@@ -437,7 +437,7 @@ fn plane_origin(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
 
     let pick = world_pick.map(local);
     let x = x_param(s, v, component, &inv, cmd)?;
-    let snap = Snap::Plane { plane: plane_ref, pick, x };
+    let snap = Snap::Plane { plane: Box::new(plane_ref), pick, x };
     settle(s, JointOrigin { occurrence, snap }, v, cmd)
 }
 
@@ -491,7 +491,7 @@ fn axis_origin(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
 
     let pick = world_pick.map(local);
     let x = x_param(s, v, component, &inv, cmd)?;
-    let snap = Snap::Axis { axis: axis_ref, pick, x };
+    let snap = Snap::Axis { axis: Box::new(axis_ref), pick, x };
     settle(s, JointOrigin { occurrence, snap }, v, cmd)
 }
 
