@@ -31,8 +31,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&FLANGE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-        "base: sketch + profiles? (rule?, flip?) | contour: sketch + curves (open chain of lines) + distance (rule?, flip?, reverse?) | \
-         edge: edges: [[x,y,z] on top/bottom edges, or {point: [x,y,z], angle?, height?} for an edge with its own angle and height] + \
+        "base: sketch + profiles? (rule?, flip?) | contour: sketch + curves (open chain of lines) + distance; radius? (default: rule);          orientation?: center|side1|side2 (where the contour lies across the sheet thickness; default side1);          symmetric?: bool (the distance each way across the sketch plane; total width is twice the distance); rule?, flip?, reverse? (legacy) |          edge: edges: [[x,y,z] on top/bottom edges, or {point: [x,y,z], angle?, height?} for an edge with its own angle and height] + \
          height (along the flange, to its far edge), angle? (default 90 deg), radius? (default: rule), \
          height_from?: outer|inner|tangent (where the height is measured from: the outer virtual sharp (default), \
          the inner virtual sharp, or past 90 deg the line square to the flange touching the bend's outside (tangent; up to 90 deg the outer sharp)), \
@@ -318,6 +317,24 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             }
             let distance = req_expr(cmd, p, "distance")?;
             check_expr(s, &distance, Kind::Length, cmd, "distance")?;
+            let radius = expr(p, "radius");
+            if let Some(r) = &radius {
+                check_expr(s, r, Kind::Length, cmd, "radius")?;
+            }
+            let raw_orientation = str_(p, "orientation");
+            if p.get("orientation").is_some() && raw_orientation.is_none() {
+                return Err(bad(cmd, "`orientation` must be center, side1 or side2"));
+            }
+            let orientation = match raw_orientation {
+                Some(orientation @ ("center" | "side1" | "side2")) => Some(orientation.to_string()),
+                Some(other) => return Err(bad(cmd, format!("`orientation` must be center, side1 or side2, not `{other}`"))),
+                None => None,
+            };
+            let symmetric = match p.get("symmetric") {
+                None => false,
+                Some(Value::Bool(value)) => *value,
+                Some(_) => return Err(bad(cmd, "`symmetric` must be a boolean")),
+            };
             let rule = rule_param(s, p, cmd)?;
             add_feature(
                 s,
@@ -326,7 +343,10 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     sketch: SketchId(sketch),
                     curves,
                     distance,
+                    radius,
                     rule,
+                    orientation,
+                    symmetric,
                     flip: bool_(p, "flip").unwrap_or(false),
                     reverse: bool_(p, "reverse").unwrap_or(false),
                 },
