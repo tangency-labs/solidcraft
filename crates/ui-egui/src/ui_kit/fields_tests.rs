@@ -1123,8 +1123,7 @@ fn dragging_a_value_rows_label_changes_its_literal_and_leaves_expressions_alone(
         scenario::clear_handles();
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0))),
-            events,
-            modifiers,
+            events: std::iter::once(egui::Event::ModifiersChanged(modifiers)).chain(events).collect(),
             focused: true,
             ..Default::default()
         };

@@ -89,7 +89,7 @@ rules. Its compass is 110 pt; the 48 pt Shots strip clears the docks by 8 pt.
   `hint_row` for a value the form checks before it runs: with a warning, the field is outlined in
   the warning colour and the message sits under it (`warning_caption`), so colour is never the
   only cue.
-  The label of an `expr_row` or `hint_row` scrubs (`scrub`): dragging it sideways changes a
+  The label of an `expr_row` or `hint_row` scrubs: dragging it sideways changes a
   literal value (`20 mm`, `45°`) by about a hundredth of its size per point, on that step's
   grid, Shift ten times finer and Ctrl/Cmd ten times coarser. It keeps the unit and decimal
   mark as typed, never makes a size negative, and leaves expressions and parameters alone.

@@ -136,10 +136,12 @@ struct Literal {
     comma: bool,
 }
 
+/// The largest value a label drag reads or writes.
+const LITERAL_CAP: f64 = 1e12;
+
 /// `text` as a [`Literal`], or None for anything else: a parameter, a formula, an empty field.
 /// Dragging never rewrites an expression, so a driving parameter stays driving.
 fn literal(text: &str) -> Option<Literal> {
-    const SAFE: f64 = 1e12;
     let text = text.trim();
     if !solidcraft_engine::doc::expr::is_literal(text) {
         return None;
@@ -150,7 +152,7 @@ fn literal(text: &str) -> Option<Literal> {
     // An exponent ("1e3") or anything else that is not a unit is left alone.
     solidcraft_engine::doc::expr::unit_info(unit)?;
     let comma = number.contains(',');
-    let number: f64 = number.replace(',', ".").parse().ok().filter(|n: &f64| n.is_finite() && n.abs() < SAFE)?;
+    let number: f64 = number.replace(',', ".").parse().ok().filter(|n: &f64| n.is_finite() && n.abs() < LITERAL_CAP)?;
     Some(Literal { number, unit: unit.to_owned(), comma })
 }
 
@@ -166,7 +168,8 @@ fn scrub_step(number: f64) -> f64 {
 fn scrubbed(anchor: f64, points: f32, step: f64) -> f64 {
     let moved = ((anchor + f64::from(points) * step) / step).round() * step;
     let moved = if anchor >= 0.0 { moved.max(0.0) } else { moved };
-    if moved.is_finite() { moved } else { anchor }
+    // Literal values are capped where `literal` reads them; a drag never leaves that range.
+    if moved.is_finite() && moved.abs() < LITERAL_CAP { moved } else { anchor }
 }
 
 /// The scrubbed text: as many decimals as the step needs, the unit and decimal mark as typed.
@@ -182,11 +185,11 @@ fn scrub_text(number: f64, step: f64, literal: &Literal) -> String {
     text + &literal.unit
 }
 
-/// An ongoing label drag: where it started, the points dragged since, and the speed in use.
+/// An ongoing label drag: the value and pointer x it is measured from, and the speed in use.
 #[derive(Clone)]
 struct Scrub {
     anchor: f64,
-    points: f32,
+    origin: f32,
     step: f64,
 }
 
@@ -194,7 +197,7 @@ struct Scrub {
 /// the speed, Ctrl (Cmd on a Mac) for ten times. The text changes as if typed, so previews
 /// follow, and the dialog's OK still makes the one command (and the one undo step). A field
 /// holding an expression or a parameter is left alone. Returns whether the text changed.
-pub(crate) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
+pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
     let id = label.id.with("sc_scrub");
     let Some(now) = literal(value).filter(|_| ui.is_enabled()) else {
         ui.ctx().data_mut(|data| data.remove::<Scrub>(id));
@@ -216,15 +219,19 @@ pub(crate) fn scrub(ui: &Ui, label: &Response, value: &mut String) -> bool {
             1.0
         }
     });
-    let base = ui.ctx().data(|data| data.get_temp::<Scrub>(id));
-    // A new drag, or a changed modifier, starts over from the value as it is now.
-    let mut state = match base {
-        Some(state) if (state.step - scrub_step(state.anchor) * factor).abs() <= state.step * 1e-9 => state,
-        _ => Scrub { anchor: now.number, points: 0.0, step: scrub_step(now.number) * factor },
+    // Measured from where the pointer is, not summed per frame, so no frame's jump is lost or doubled.
+    let (Some(x), Some(pressed)) = ui.input(|i| (i.pointer.latest_pos().map(|p| p.x), i.pointer.press_origin().map(|p| p.x))) else {
+        return false;
     };
-    let dx = label.drag_delta().x;
-    state.points += if dx.is_finite() { dx } else { 0.0 };
-    let text = scrub_text(scrubbed(state.anchor, state.points, state.step), state.step, &now);
+    let base = ui.ctx().data(|data| data.get_temp::<Scrub>(id));
+    // A new drag starts from where it was pressed; a changed modifier starts over from here.
+    let state = match base {
+        Some(state) if (state.step - scrub_step(state.anchor) * factor).abs() <= state.step * 1e-9 => state,
+        Some(_) => Scrub { anchor: now.number, origin: x, step: scrub_step(now.number) * factor },
+        None => Scrub { anchor: now.number, origin: pressed, step: scrub_step(now.number) * factor },
+    };
+    let points = x - state.origin;
+    let text = scrub_text(scrubbed(state.anchor, if points.is_finite() { points } else { 0.0 }, state.step), state.step, &now);
     ui.ctx().data_mut(|data| data.insert_temp(id, state));
     if text == *value {
         return false;
