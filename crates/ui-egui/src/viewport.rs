@@ -673,6 +673,18 @@ fn supersampling(app: &mut SolveApp, ctx: &egui::Context, view_proj: [[f32; 4]; 
 
 /// Ambient occlusion samples per pixel this frame (#7165): the full count once the view has held
 /// still for a moment, fewer while it moves, so orbiting with AO on stays quick.
+/// The shader's sky (#7974): the world's up direction, and 1 to shade in linear light with a sky
+/// fill (Preferences › Graphics), else zero.
+pub(crate) fn sky_uniform(on: bool, up: solidcraft_engine::render::UpAxis) -> [f32; 4] {
+    if !on {
+        return [0.0; 4];
+    }
+    match up {
+        solidcraft_engine::render::UpAxis::Z => [0.0, 0.0, 1.0, 1.0],
+        solidcraft_engine::render::UpAxis::Y => [0.0, 1.0, 0.0, 1.0],
+    }
+}
+
 fn ao_samples(app: &mut SolveApp, ctx: &egui::Context, view_proj: [[f32; 4]; 4], size_px: [f32; 2]) -> u32 {
     // Without AO (off, or wireframe) the count is unused: no repaint is asked for it.
     if !app.preferences.ambient_occlusion || app.ui.visual_style == 2 || view_settled(app, ctx, view_proj, size_px) {
@@ -4322,6 +4334,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let c = t.body_selected;
                 [f32::from(c.r()) / 255.0, f32::from(c.g()) / 255.0, f32::from(c.b()) / 255.0]
             },
+            sky: sky_uniform(app.preferences.dark_parts_shading, proj.cam.up),
         });
         painter.add(egui_wgpu::Callback::new_paint_callback(rect, cb));
         // The graphics card had no memory for the view's frame (#7296): say once why it looks
@@ -7946,6 +7959,7 @@ mod tests {
                     eye: [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
                     ao_radius: 0.0,
                     ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+                    sky: [0.0; 4],
                     ssaa: 1.0,
                     hover_tint: [0.0; 3],
                     selection_tint: [0.0; 3],

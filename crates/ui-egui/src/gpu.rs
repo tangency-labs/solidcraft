@@ -476,6 +476,7 @@ fn offscreen(
         ao_radius,
         ao_samples,
         ssaa,
+        sky: [0.0; 4],
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
     });

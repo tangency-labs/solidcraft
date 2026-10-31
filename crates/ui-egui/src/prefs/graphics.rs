@@ -149,6 +149,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         });
         ui_kit::text(ui, app.tr("prefs.contact_shading_note"), ui_kit::Text::Hint("ao"));
+        let response = setting::dark_parts_shading(app, ui).on_hover_text(app.tr("prefs.dark_parts_shading_help"));
+        crate::scenario::publish_handle("prefs:dark_parts_shading", response.rect.center());
     });
     ui_kit::settings_section(ui, "viewport", app.tr("prefs.viewport"), |ui| {
         let analysis_policy = setting::single_surface_analysis(app, ui).on_hover_text(app.tr("prefs.single_surface_analysis_help"));

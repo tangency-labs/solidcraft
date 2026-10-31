@@ -976,6 +976,9 @@ preference_settings! {
     graphics_adapter: String = String::new(), PAGE_GRAPHICS;
     /// Soft contact shading in the GPU viewport; optional and applied immediately.
     ambient_occlusion: bool = false, PAGE_GRAPHICS;
+    /// Shade the viewport in linear light with a sky fill, so dark parts keep their shape
+    /// (#7974). Off by default: the viewport shades as it always has.
+    dark_parts_shading: bool = false, PAGE_GRAPHICS => check_id("prefs.dark_parts_shading");
     /// Optional schematic markings on threaded cylindrical walls; off for new and older preferences.
     cosmetic_threads: bool = false, PAGE_GRAPHICS;
     /// The grid turns to the upright origin plane facing a side view (#1470). Off by default: the
@@ -8670,6 +8673,31 @@ mod ambient_occlusion_tests {
         assert_eq!(h.app.cam, camera);
         assert_eq!(h.app.session.doc.to_json(), design);
         assert!(h.app.session.undo.is_empty());
+    }
+
+    /// #7974: shading dark parts in linear light with a sky fill is off for older and new
+    /// preferences, turned on from the Graphics page, kept, and sent to the shader with the world's
+    /// up direction; Restore Defaults turns it off again.
+    #[test]
+    fn dark_parts_shading_is_optional_persistent_and_follows_the_up_axis() {
+        use solidcraft_engine::render::UpAxis;
+        let old: Prefs = serde_json::from_value(json!({"msaa": 4})).unwrap();
+        assert!(!old.dark_parts_shading && !Prefs::default().dark_parts_shading);
+        assert_eq!(crate::viewport::sky_uniform(false, UpAxis::Z), [0.0; 4], "off: shaded as before");
+        assert_eq!(crate::viewport::sky_uniform(true, UpAxis::Z), [0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(crate::viewport::sky_uniform(true, UpAxis::Y), [0.0, 1.0, 0.0, 1.0]);
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Graphics"}));
+        super::reveal_preference(&mut h, "prefs:dark_parts_shading");
+        let checkbox = crate::scenario::handle_at("prefs:dark_parts_shading").unwrap();
+        h.call("ui.click", json!({"x":checkbox.x,"y":checkbox.y}));
+        assert!(h.app.preferences.dark_parts_shading);
+        h.call("ui.prefs", json!({"button":"apply"}));
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.dark_parts_shading);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(!h.app.preferences.dark_parts_shading);
     }
 }
 
