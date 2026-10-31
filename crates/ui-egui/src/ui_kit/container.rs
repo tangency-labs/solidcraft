@@ -5,6 +5,61 @@ use crate::frame::Side;
 use crate::{shell::LayoutMode, theme::Tokens};
 use egui::{Color32, Context, Frame, Id, Stroke, WidgetText};
 
+pub(super) type Background = fn(&egui::Painter, Frame, egui::Rect, egui::Shape) -> egui::Shape;
+
+/// The feature sheet's deliberately restricted stock Window (no title, scrolling or fades).
+/// Keep its builder private: the marker's layer and host clip are owned here.
+pub(crate) struct FeatureWindow<'a> {
+    window: egui::Window<'a>,
+    id: Id,
+    frame: Frame,
+}
+
+impl<'a> FeatureWindow<'a> {
+    pub(super) fn new(window: egui::Window<'a>, id: Id, frame: Frame) -> Self {
+        Self { window, id, frame }
+    }
+
+    pub(crate) fn fixed_size(mut self, size: egui::Vec2) -> Self {
+        self.window = self.window.fixed_size(size);
+        self
+    }
+
+    pub(crate) fn show<R>(self, ctx: &Context, body: impl FnOnce(&mut egui::Ui) -> R) -> Option<egui::InnerResponse<Option<R>>> {
+        let background = Container::floating_card(Surface::Feature).background(ctx, self.frame);
+        self.show_background(ctx, background, body)
+    }
+
+    pub(super) fn show_background<R>(
+        self,
+        ctx: &Context,
+        background: Option<Background>,
+        body: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> Option<egui::InnerResponse<Option<R>>> {
+        let Some(background) = background else { return self.window.show(ctx, body) };
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Middle, self.id));
+        let slot = painter.add(egui::Shape::Noop);
+        let mut host_painter = None;
+        let shown = self.window.show(ctx, |ui| {
+            // Resize's content clip omits the frame border/padding. This bounded Window
+            // uses Area's default viewport clip, with no fades or native title bar.
+            let mut painter = ui.painter().clone();
+            painter.set_clip_rect(ctx.content_rect());
+            host_painter = Some(painter);
+            body(ui)
+        });
+        if let (Some(shown), Some(painter)) = (&shown, host_painter) {
+            // Window relocates inner_margin into an internal content Frame. Its final
+            // Area response still includes all margins and the original stroke width.
+            let content = shown.response.rect - self.frame.total_margin();
+            if painter.is_visible() && painter.clip_rect().intersects(self.frame.widget_rect(content)) {
+                painter.set(slot, background(&painter, self.frame, content, egui::Shape::Noop));
+            }
+        }
+        shown
+    }
+}
+
 /// Persistent panels adapt to the layout; transient UI retains its anchoring and modality.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Surface {
@@ -263,6 +318,28 @@ impl Container {
         bounds: egui::Rect,
         body: impl FnOnce(&mut egui::Ui) -> R,
     ) -> egui::InnerResponse<R> {
+        let background = self.background(ui.ctx(), frame);
+        self.show_frame_background(ui, frame, bounds, background, body)
+    }
+
+    fn background(self, ctx: &Context, frame: Frame) -> Option<Background> {
+        // Keep the off path to boundary checks only: no painter, shape slot or allocation.
+        if self.adaptive() && crate::blur::enabled() && ctx.viewport_id() == egui::ViewportId::ROOT && (1..255).contains(&frame.fill.a()) {
+            Some(crate::blur::decorate)
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn show_frame_background<R>(
+        self,
+        ui: &mut egui::Ui,
+        frame: Frame,
+        bounds: egui::Rect,
+        background: Option<Background>,
+        body: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> egui::InnerResponse<R> {
+        let slot = background.map(|_| ui.painter().add(egui::Shape::Noop));
         let mut prepared = frame.begin(ui);
         let inner = body(&mut prepared.content_ui);
         if self.adaptive() && !self.floating() {
@@ -275,8 +352,13 @@ impl Container {
             prepared.frame.corner_radius = Self::compact_rounding(edges);
         }
         let frame = prepared.frame;
-        let response =
-            if self.adaptive() && crate::blur::enabled() { prepared.end_with_background(ui, crate::blur::decorate) } else { prepared.end(ui) };
+        if let (Some(background), Some(slot)) = (background, slot)
+            && ui.is_rect_visible(frame.widget_rect(prepared.content_ui.min_rect()))
+        {
+            let painter = ui.painter();
+            painter.set(slot, background(painter, frame, prepared.content_ui.min_rect(), egui::Shape::Noop));
+        }
+        let response = prepared.end(ui);
         Self::paint_inset(ui.painter(), response.rect - frame.outer_margin, frame);
         egui::InnerResponse { inner, response }
     }
@@ -351,13 +433,52 @@ impl Container {
             Edge::Top => egui::Panel::top(id),
             Edge::Bottom => egui::Panel::bottom(id),
         };
-        let panel = if self.adaptive() && crate::blur::enabled() { panel.background_painter(crate::blur::decorate) } else { panel };
         if self.adaptive() && !self.floating() { panel.show_separator_line(false) } else { panel }
     }
 
+    /// Stock Panel owns layout, persistence, interaction and its unmodified semantic Frame.
+    /// Only ordinary `show` is exposed; animated hosts need their own clip contract.
+    pub(crate) fn show_edge<R>(
+        self,
+        ui: &mut egui::Ui,
+        panel: egui::Panel,
+        frame: Frame,
+        body: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> egui::InnerResponse<R> {
+        let background = self.background(ui.ctx(), frame);
+        Self::show_edge_background(ui, panel, frame, background, body)
+    }
+
+    pub(super) fn show_edge_background<R>(
+        ui: &mut egui::Ui,
+        panel: egui::Panel,
+        frame: Frame,
+        background: Option<Background>,
+        body: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> egui::InnerResponse<R> {
+        let Some(background) = background else { return panel.frame(frame).show(ui, body) };
+        let slot = ui.painter().add(egui::Shape::Noop);
+        let mut host = None;
+        let shown = panel.frame(frame).show(ui, |ui| {
+            // Capture before the body can narrow the clip or change opacity. Frame adds
+            // no content clip, so this is the host/slide clip including its padding.
+            let painter = ui.painter().clone();
+            let inner = body(ui);
+            host = Some((painter, ui.min_rect()));
+            inner
+        });
+        if let Some((painter, content)) = host
+            && painter.is_visible()
+            && painter.clip_rect().intersects(frame.widget_rect(content))
+        {
+            // min_rect is the actual Frame content, even if Panel clamps its response.
+            painter.set(slot, background(&painter, frame, content, egui::Shape::Noop));
+        }
+        shown
+    }
+
     pub(super) fn window<'a>(self, title: impl Into<WidgetText>) -> egui::Window<'a> {
-        let window = egui::Window::new(title).enabled(self.input_enabled());
-        if self.adaptive() && crate::blur::enabled() { window.background_painter(crate::blur::decorate) } else { window }
+        egui::Window::new(title).enabled(self.input_enabled())
     }
 
     /// Anchored editors inherit their containing widget's local style. Their host stays a

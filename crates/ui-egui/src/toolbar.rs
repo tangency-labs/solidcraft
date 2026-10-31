@@ -1362,7 +1362,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let host = Container::for_layout(layout, Surface::Chrome);
     let ribbon = host.edge("sc_toolbar", Edge::Top);
     let frame = host.edge_frame(fill);
-    let chrome = ribbon.exact_size(height).show_separator_line(false).frame(frame).show(ui, |ui| {
+    let chrome = host.show_edge(ui, ribbon.exact_size(height).show_separator_line(false), frame, |ui| {
         let r = if floating { Rect::from_min_max(cards.workspace.min, cards.ribbon.max) } else { frame.outer_rect(ui.max_rect()) };
         let ws = if floating { cards.workspace } else { Rect::from_min_size(r.left_top(), vec2(WORKSPACE_WIDTH, ribbon_height - 1.0)) };
         let ribbon_left = if floating { cards.ribbon.left() } else { ws.right() };

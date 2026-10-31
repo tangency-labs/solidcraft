@@ -31,7 +31,8 @@ at zero; leave `surface_alpha` null for comparisons against main.
 ## Actual frame path and insertion points
 
 The pinned dependencies are egui/egui-wgpu/eframe 0.36.2 and wgpu 30.0.1.
-eframe remains a registry dependency; egui and egui-wgpu are locally patched.
+eframe and egui remain registry dependencies; only egui-wgpu has local compositor
+changes for blur. The egui dependency is the published 0.36.2 crate.
 
 | Stage | Actual path |
 | --- | --- |
@@ -99,20 +100,42 @@ translucent outer fill. `Container` owns eligibility; alpha alone does not selec
 arbitrary UI. Opaque fills have no marker. Viewport, native application bar,
 Canvas, InputShield, HUDs, Toast, Window and Popup are outside the initial policy.
 
-The egui patch preserves `Frame`'s existing fields/size. `Prepared::end_with_background`
-decorates its original reserved slot after layout. `Frame::show_with_background`
-uses that path only when requested and otherwise calls the original `show`.
-Window and edge Panel expose an optional `background_painter` function pointer.
-Their frame resolves in its own Area/layer, before content. This covers feature
-sheets/palettes which do not pass through `Container::show_frame`.
+The app uses stock egui 0.36.2 public APIs. In the positive eligible path,
+`Container::show_frame`, `show_edge` and the bounded `FeatureWindow::show`
+reserve an early painter slot before invoking the original host. Once geometry
+is known they populate that slot with a marker; the original shadow, fill,
+stroke and contents remain in their original slots. The zero path reserves
+nothing and calls the existing `Prepared::end`, `Panel::show` or `Window::show`.
+No host becomes transparent, and child `UiStack` frame/background metadata,
+styles, margins, stroke widths, IDs and interactions remain stock.
 
-`Container::show_frame` decorates after final joined-edge rounding is known.
-`Container::edge` and `window` install eligible host hooks. Manual workspace
-ribbon cards and History use semantic background painting; the existing manual
-HUD painting remains plain. No search for matching colors/rectangles is used.
+`show_frame` owns `Frame::begin` and uses the final content rectangle and
+joined-edge corner rounding. `show_edge` captures the panel painter before the
+body can narrow its clip or change opacity, then measures the actual frame
+content (the response may be clamped on overflow). Its marker uses the original
+host clip, including padding/borders and any host clipping. Current adaptive
+edge callers use ordinary `show`; the helper deliberately exposes no animated
+panel entry point.
 
-A marker wraps the ordinary frame shape in its reserved slot, ahead of shadow,
-fill, border and content. It retains all four final corner radii and painter
+Only `Panel::window_placed` creates an adaptive stock Window. Its small
+`FeatureWindow` wrapper keeps the existing builder private and forwards only
+`fixed_size` and `show`. These sheets explicitly disable native title bars,
+collapse, resize, scrolling and fades, and use an explicit persistent ID and
+Middle layer. The early slot is on that exact layer. The final Area response
+includes the outer margins; subtracting the original total margins reconstructs
+the content rectangle for marker geometry even though stock Window relocates
+`inner_margin` into an internal Frame. The marker inherits the host painter's
+visibility/opacity and Area's viewport clip, rather than Resize's content-only
+clip. System windows (`Surface::Window`) remain outside blur eligibility.
+
+Manual workspace ribbon cards and History retain semantic background painting;
+manual HUD painting remains plain. No private storage access, extra outer
+visual container, duplicate frame or search for matching colors/rectangles is
+used. The tests inject a marker function into these same helpers without a GPU
+to compare stock and decorated output, geometry, IDs and semantic metadata.
+
+A marker precedes the ordinary shadow, fill, border and content on the same
+layer. It retains all four final corner radii and painter
 opacity. At paint it uses the final transformed callback rectangle and actual
 physical scale, matching egui rectangle snapping when enabled. It changes the
 GPU viewport to the full target, retains the renderer's inherited scissor, and
@@ -225,13 +248,23 @@ no unsafe counting allocator was added. Timing alone cannot prove zero allocatio
 No commands below were run by this worker. Manager's minimal focused checks:
 
 ```powershell
+cargo test --locked --profile ci -p solidcraft-ui-egui --lib blur_stock_ -- --nocapture
 cargo test --locked --profile ci -p solidcraft-ui-egui --lib blur_ -- --nocapture
 cargo build --locked --profile ci -p solidcraft
 ```
 
-Cargo.lock was updated as text for the local egui 0.36.2 patch: only that package's
-registry source/checksum were removed; dependency versions are unchanged. No
-cargo execution was used. Set `SOLIDCRAFT_REQUIRE_GPU=1` to require an adapter
+The four `blur_stock_` tests compare stock and app-owned hosts without a GPU:
+zero output includes identical Noop counts; positive output preserves chrome,
+semantic fill/frame information and persistent IDs; asymmetric margins, stroke
+width, host clipping, final joined corners and late layer transforms are covered.
+They replace the old test of the vendored Window hook. They are authored only,
+not executed by this worker. The existing seven GPU/radius/budget tests and
+zero marker/tint test remain; the broader `blur_` filter selects twelve tests.
+
+Cargo.lock was restored as text to the egui 0.36.2 registry source and checksum
+from the matching local crates.io index entry; dependency versions are unchanged.
+The full vendored egui copy and its path patch were removed; the egui-wgpu patch
+and licences remain. No cargo execution was used. Set `SOLIDCRAFT_REQUIRE_GPU=1` to require an adapter
 (hardware or software); a missing adapter/device fails every blur fixture consumer.
 The explicit `cfg(test)` rendering fixture runs all positive compositor, cache,
 pixel and suspension assertions on CI software adapters independently of production

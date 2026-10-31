@@ -670,18 +670,18 @@ impl<'a> Panel<'a> {
         self.joined.map_or(container, |edges| container.joined(edges)).tool_frame(self.frame, right >= self.viewport.right() - 0.5)
     }
 
-    pub(crate) fn window(&self, ctx: &egui::Context) -> egui::Window<'a> {
+    pub(crate) fn window(&self, ctx: &egui::Context) -> super::container::FeatureWindow<'a> {
         self.window_placed(ctx, None)
     }
 
     /// The same window for contents the caller holds to `size` (egui's `fixed_size`); the card
     /// is that plus its frame.
-    pub(crate) fn fixed_window(&self, ctx: &egui::Context, size: egui::Vec2) -> egui::Window<'a> {
+    pub(crate) fn fixed_window(&self, ctx: &egui::Context, size: egui::Vec2) -> super::container::FeatureWindow<'a> {
         let outer = size.x + self.positioned_frame(ctx).total_margin().sum().x;
         self.window_placed(ctx, Some(outer)).fixed_size(size)
     }
 
-    fn window_placed(&self, ctx: &egui::Context, outer_width: Option<f32>) -> egui::Window<'a> {
+    fn window_placed(&self, ctx: &egui::Context, outer_width: Option<f32>) -> super::container::FeatureWindow<'a> {
         let gap = super::Container::new(ctx, super::Surface::Feature).gap();
         let viewport = self.viewport;
         let anchor = self.bounded_anchor(ctx);
@@ -701,7 +701,7 @@ impl<'a> Panel<'a> {
         };
         // Keep drawing safe when even the header/footer cannot fit. egui clips the contents to
         // the remaining viewport; the normal small-height case still keeps both actions visible.
-        super::Container::new(ctx, super::Surface::Feature)
+        let window = super::Container::new(ctx, super::Surface::Feature)
             .window(self.title)
             .id(self.id)
             .title_bar(false)
@@ -720,7 +720,8 @@ impl<'a> Panel<'a> {
             .default_height(0.0)
             .fade_in(false)
             .fade_out(false)
-            .order(egui::Order::Middle)
+            .order(egui::Order::Middle);
+        super::container::FeatureWindow::new(window, self.id, frame)
     }
 
     /// Feature header, scrolling padded body, pinned actions, drag target and compute status.

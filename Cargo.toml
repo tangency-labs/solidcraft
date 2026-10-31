@@ -160,7 +160,6 @@ matext4cgmath = { path = "vendor/matext4cgmath" }
 
 # Keep OpenGL pipelines, resolve textures and CAD callbacks at the same safe sample count.
 egui-wgpu = { path = "vendor/egui-wgpu" }
-egui = { path = "vendor/egui" }
 
 # Deliver trackpad pinch and rotation gestures on Wayland (zwp_pointer_gestures_v1), which
 # winit 0.30 never binds and eframe 0.36 still requires winit 0.30.
