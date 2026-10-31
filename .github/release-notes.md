@@ -24,7 +24,7 @@ macOS, replace `SolveCraft.app` with `SolidCraft.app`. Details:
 Documentation, the browser app and the Flatpak feed use the SolidCraft project Pages URLs.
 
 **Which file?**
-- **Windows:** `SolidCraft-{version}-windows-x64.exe` runs as is. Or install the `.msi`, or unzip the
+- **Windows:** `solidcraft-{version}-windows-x64.exe` runs as is. Or install the `.msi`, or unzip the
   `-portable.zip` (x64, x86 and arm64).
 - **macOS 11+** (Apple silicon and Intel): open the `.dmg` and drag `SolidCraft.app` onto Applications.
   The CLI is in `solidcraft-cli-{version}-macos-universal.zip`.

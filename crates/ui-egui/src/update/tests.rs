@@ -74,7 +74,7 @@ fn install_kinds_are_told_apart() {
     if cfg!(windows) {
         assert_eq!(probe("windows", true, &pf, portable, &[cli]), InstallKind::WindowsPortable);
     }
-    assert_eq!(probe("windows", true, &pf, "C:\\Users\\me\\Downloads\\SolidCraft-0.10.0-windows-x64.exe", &[]), InstallKind::WindowsExe);
+    assert_eq!(probe("windows", true, &pf, "C:\\Users\\me\\Downloads\\solidcraft-0.10.0-windows-x64.exe", &[]), InstallKind::WindowsExe);
 
     assert_eq!(
         probe("macos", true, &[], "/Applications/SolidCraft.app/Contents/MacOS/solidcraft", &[]),
@@ -130,7 +130,7 @@ fn release() -> Release {
         "solidcraft-0.10.0-linux-x86_64.AppImage.zsync",
         "solidcraft-0.10.0-linux-x86_64.tar.gz",
         "solidcraft-0.10.0-linux-aarch64.tar.gz",
-        "SolidCraft-0.10.0-windows-x64.exe",
+        "solidcraft-0.10.0-windows-x64.exe",
         "solidcraft-linux-aarch64.AppImage",
         "solidcraft-linux-aarch64.deb",
         "solidcraft-linux-x86_64.AppImage",
@@ -170,7 +170,7 @@ fn each_installation_gets_its_own_file() {
     assert_eq!(name(InstallKind::WindowsMsi, "aarch64").as_deref(), Some("solidcraft-windows-arm64.msi"));
     assert_eq!(name(InstallKind::WindowsMsi, "x86").as_deref(), Some("solidcraft-windows-x86.msi"));
     assert_eq!(name(InstallKind::WindowsPortable, "x86_64").as_deref(), Some("solidcraft-windows-x64-portable.zip"));
-    assert_eq!(name(InstallKind::WindowsExe, "x86_64").as_deref(), Some("SolidCraft-0.10.0-windows-x64.exe"));
+    assert_eq!(name(InstallKind::WindowsExe, "x86_64").as_deref(), Some("solidcraft-0.10.0-windows-x64.exe"));
     assert_eq!(name(InstallKind::WindowsExe, "aarch64").as_deref(), Some("solidcraft-windows-arm64-portable.zip"));
     assert_eq!(name(InstallKind::MacApp("/A.app".into()), "aarch64").as_deref(), Some("solidcraft-macos-universal.dmg"));
     assert_eq!(name(InstallKind::Other, "x86_64"), None);
@@ -197,6 +197,26 @@ fn each_installation_gets_its_own_file() {
         Some("sudo apt install ./solidcraft-linux-x86_64.deb")
     );
     assert_eq!(InstallKind::WindowsMsi.update_command(None), None);
+}
+
+/// Releases before #6769 named the lone Windows .exe with a capital S; still resolve them.
+#[test]
+fn windows_exe_asset_accepts_legacy_capitalised_name() {
+    let body = json!({
+        "tag_name": "v0.10.0", "name": "SolidCraft v0.10.0", "body": "",
+        "html_url": "https://github.com/bherbruck/solidcraft/releases/tag/v0.10.0",
+        "draft": false, "prerelease": false,
+        "assets": [{
+            "name": "SolidCraft-0.10.0-windows-x64.exe",
+            "size": 10,
+            "browser_download_url": "https://github.com/bherbruck/solidcraft/releases/download/v0.10.0/SolidCraft-0.10.0-windows-x64.exe",
+        }],
+    });
+    let r = Release::parse(body.to_string().as_bytes()).unwrap();
+    assert_eq!(
+        r.asset_for(&InstallKind::WindowsExe, "x86_64").map(|a| a.name.as_str()),
+        Some("SolidCraft-0.10.0-windows-x64.exe")
+    );
 }
 
 #[test]

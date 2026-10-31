@@ -163,7 +163,7 @@ pub enum InstallKind {
     WindowsMsi,
     /// The portable `.zip`, unpacked somewhere.
     WindowsPortable,
-    /// The lone `SolidCraft-<version>-windows-x64.exe`.
+    /// The lone `solidcraft-<version>-windows-x64.exe`.
     WindowsExe,
     /// `SolidCraft.app`, at this path (the bundle).
     MacApp(PathBuf),
@@ -462,7 +462,7 @@ pub fn asset_name(kind: &InstallKind, arch: &str, version: &str) -> Option<Strin
         InstallKind::WindowsMsi => format!("solidcraft-windows-{}.msi", windows?),
         InstallKind::WindowsPortable => format!("solidcraft-windows-{}-portable.zip", windows?),
         // Only x64 has the lone .exe; elsewhere the portable zip is the same thing.
-        InstallKind::WindowsExe if windows == Some("x64") => format!("SolidCraft-{version}-windows-x64.exe"),
+        InstallKind::WindowsExe if windows == Some("x64") => format!("solidcraft-{version}-windows-x64.exe"),
         InstallKind::WindowsExe => format!("solidcraft-windows-{}-portable.zip", windows?),
         InstallKind::MacApp(_) => "solidcraft-macos-universal.dmg".into(),
         InstallKind::Dev | InstallKind::Web | InstallKind::Other => return None,
@@ -545,7 +545,15 @@ impl Release {
     /// The asset that fits `kind` on `arch`, if this release has it.
     pub fn asset_for(&self, kind: &InstallKind, arch: &str) -> Option<&Asset> {
         let name = asset_name(kind, arch, self.version())?;
-        self.assets.iter().find(|a| a.name == name)
+        self.assets.iter().find(|a| a.name == name).or_else(|| {
+            // Releases before #6769 published the lone Windows .exe as `SolidCraft-…`.
+            if matches!(kind, InstallKind::WindowsExe) {
+                let legacy = format!("SolidCraft{}", name.strip_prefix("solidcraft").unwrap_or(&name));
+                self.assets.iter().find(|a| a.name == legacy)
+            } else {
+                None
+            }
+        })
     }
 
     /// What Download opens: the fitting file, else the release page. Package-managed
