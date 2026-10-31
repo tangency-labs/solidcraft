@@ -1,0 +1,22 @@
+{
+  "de": {
+    "prefs.window_file_menu": "Dateimenü zusätzlich im App-Fenster anzeigen",
+    "prefs.window_file_menu_note": "Zeigt das Dateimenü auch in der App-Leiste an. Alle Dateiaktionen bleiben in der macOS-Menüleiste verfügbar."
+  },
+  "en": {
+    "prefs.window_file_menu": "Also show the File menu in the app window",
+    "prefs.window_file_menu_note": "Show the File menu in the application bar as well. All file actions remain available in the macOS menu bar."
+  },
+  "ja": {
+    "prefs.window_file_menu": "アプリのウィンドウにもファイルメニューを表示",
+    "prefs.window_file_menu_note": "アプリケーションバーにもファイルメニューを表示します。すべてのファイル操作は macOS のメニューバーから引き続き利用できます。"
+  },
+  "ko": {
+    "prefs.window_file_menu": "앱 창에도 파일 메뉴 표시",
+    "prefs.window_file_menu_note": "앱 표시줄에도 파일 메뉴를 표시합니다. 모든 파일 작업은 macOS 메뉴 막대에서 계속 사용할 수 있습니다."
+  },
+  "zh": {
+    "prefs.window_file_menu": "同时在应用窗口中显示文件菜单",
+    "prefs.window_file_menu_note": "在应用栏中也显示文件菜单。所有文件操作仍可通过 macOS 菜单栏使用。"
+  }
+}
