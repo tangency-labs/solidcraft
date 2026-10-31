@@ -597,7 +597,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
         Inputs::Preds { p, a, b, .. } => {
             let v = need()?;
             let in_point = tri!(o, v.is_point_in_param_domain_simple(v3(*p)));
-            let in_line = tri!(o, v.is_line_in_param_domain_simple(v3(*a), v3(*b)));
+            let in_line = tri!(o, v.is_line_in_param_domain_simple(k, v3(*a), v3(*b)));
             let bounded = tri!(o, v.is_bounded_simple());
             o.push(0.0);
             o.extend([fl(in_point), fl(in_line), fl(bounded)]);

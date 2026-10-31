@@ -57,6 +57,8 @@
 //! | [`concat_evals`]                                       | `smvol_ConcatEvals`                              |
 //!
 //! Deviations:
+//! - **WR-3.** The bounded rectilinear line-domain check requires both endpoints
+//!   with `Kernel::fixes.extent3d_contains_both_segment_endpoints`; default is upstream OR.
 //! - **Nesting.** `with_maps` and `add_next_map` return `InvalidInput` when the next-map chain would nest
 //!   deeper than [`MAX_GEOMETRY_NESTING`]
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
@@ -803,7 +805,7 @@ impl Volume {
         with_compounding: bool,
     ) -> Result<bool> {
         // pass the call along
-        let mut is_in = self.is_line_in_param_domain_simple(start, end)?;
+        let mut is_in = self.is_line_in_param_domain_simple(k, start, end)?;
 
         // when asked - check compounded volumes as well
         if let (true, true, Some(next)) = (is_in, with_compounding, self.next_map.as_deref()) {
@@ -1368,21 +1370,30 @@ impl Volume {
 
     /// Whether the parameter segment is in the natural domain (always, unbounded;
     /// upstream's `ContainsLineSeg3d` tests either end) (`IsLineInParamDomainSimple`,
-    /// virtual).
+    /// virtual). With `extent3d_contains_both_segment_endpoints` (WR-3), bounded
+    /// rectilinear domains require both endpoints inside instead.
     ///
     /// # Errors
     ///
     /// [`SolidError::Unported`] for the unported kinds.
-    pub fn is_line_in_param_domain_simple(&self, start: Point3, end: Point3) -> Result<bool> {
+    pub fn is_line_in_param_domain_simple(
+        &self,
+        k: &Kernel,
+        start: Point3,
+        end: Point3,
+    ) -> Result<bool> {
         match &self.kind {
             VolumeKind::Twist(t) => Ok(t.is_line_in_param_domain_simple()),
             VolumeKind::Unbend(u) => Ok(u.is_line_in_param_domain_simple(start, end)),
             VolumeKind::Bend(b) => Ok(b.is_line_in_param_domain_simple(start, end)),
             _ => {
                 if self.is_bounded_simple()? {
-                    return Ok(self
-                        .natural_param_domain()?
-                        .contains_line_seg(start, end, 0.0));
+                    let domain = self.natural_param_domain()?;
+                    return Ok(if k.fixes.extent3d_contains_both_segment_endpoints {
+                        domain.contains_point(start, 0.0) && domain.contains_point(end, 0.0)
+                    } else {
+                        domain.contains_line_seg(start, end, 0.0)
+                    });
                 }
                 Ok(true)
             }

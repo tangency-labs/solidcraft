@@ -271,6 +271,9 @@ pub struct UpstreamFixes {
     pub torus_check_reads_v_interval: bool,
     /// `SmTorus::AssertValid` reports a spindle torus whose V interval runs through an apex (`V = ±(90 + asin(R/r))`) as test 5, "Self Intersection", where upstream clears its result with no report and tests the U interval against `90 + acos(R/r)`, failing every spindle torus with a whole turn of U (WR-539; the fork's tangency-labs/smlib@daba678).
     pub torus_check_spindle_apex: bool,
+    /// Volume line-domain checks using `SmExtent3d::ContainsLineSeg3d` require
+    /// both endpoints inside the natural parameter box instead of either (WR-3).
+    pub extent3d_contains_both_segment_endpoints: bool,
     /// Perspective culling projects each sphere's own radius offsets about its center (WR-608, #525).
     pub perspective_sphere_offsets: bool,
     /// `SmCone::RebuildSTEPFromNURBParameters` gives a cylinder the mean of near-equal radii (semi-angle 0) (WR-385, #713).

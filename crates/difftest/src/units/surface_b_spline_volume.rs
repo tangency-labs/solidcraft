@@ -29,6 +29,7 @@ use solidcore::geom::extent3d::Extent3d;
 use solidcore::geom::pseudo_box::PseudoBox;
 use solidcore::geom::transform::Transform;
 use solidcore::geom::vector3d::Vec3;
+use solidcore::kernel::Kernel;
 use solidcore::nurbs::math::CPoint;
 use solidcore::nurbs::spiral::allocate_nurb_volume;
 use solidcore::surface::b_spline_volume::{BSplineVolume, VolumeParam, VolumeParams};
@@ -591,7 +592,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         } => {
             let v = build(vol)?;
             let in_pt = tri!(o, v.is_point_in_param_domain_simple(v3(*p)));
-            let in_line = tri!(o, v.is_line_in_param_domain_simple(v3(*a), v3(*e)));
+            let in_line = tri!(o, v.is_line_in_param_domain_simple(&Kernel::default(), v3(*a), v3(*e)));
             let pbox = Extent3d::from_points(v3(*a), v3(*e));
             let mut trim = Extent3d::from_points(v3(*c), v3(*d));
             let r = v.trim_param_bounding_box_simple(&pbox, &mut trim);
