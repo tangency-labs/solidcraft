@@ -92,7 +92,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_move")
         .enabled(in_sketch)
-        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text", created_doc!())),
+        .params(concat!("entities: [ids], translate?: [dx,dy], angle?: deg, center?: [x,y], copy?: bool, rotate_constraints?: bool (default true; false keeps constraints unchanged); a rotation turns the constraints tied to the sketch axes when all their geometry moves (horizontal and vertical relations and dimensions swap at odd quarter turns and stay at half turns, line angles turn with the line) and removes the horizontal and vertical ones that cannot hold at other angles; picking a text outline or linked point transforms its whole text source once, and copies remain editable text; returns `released`: the constraints tying the moved geometry to what stays that the move let go, as {id, kind}", created_doc!())),
     CommandSpec::new("sketch.mirror", "Mirror", mirror)
         .at("SKETCH", "PATTERN")
         .icon("sketch_mirror")
@@ -2869,6 +2869,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
     let ang = if p.get("angle").is_some() { num(p, "angle").ok_or_else(|| bad(cmd, "`angle` must be finite"))? } else { 0.0 }.to_radians();
     let copy = bool_(p, "copy").unwrap_or(false);
     let rotate_constraints = bool_(p, "rotate_constraints").unwrap_or(true);
+    let mut released = Vec::new();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let (mut cs, mut ps) = entities(sk, p, cmd)?;
         let c = if p.get("center").is_some() { point_or_ref(sk, p, "center", cmd)? } else { Vec2::ZERO };
@@ -2893,16 +2894,18 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
             m.extend(text_curves);
             return Ok(ids_of(sk, &m));
         }
+        let held = holding(sk, &involved_points(sk, &cs, &ps));
         transform_in_place(sk, &cs, &ps, &f, 1.0, cmd)?;
         if rotate_constraints {
             let moved = involved_points(sk, &cs, &ps);
             rotate_axis_constraints(sk, doc, &moved, ang)?;
         }
+        released = release_broken(sk, &held);
         cs.extend(text_curves);
         Ok(ids_of(sk, &cs))
     })?;
     s.doc_mut().prune_model_params();
-    Ok(json!({"curves": out, "sketch": info}))
+    Ok(json!({"curves": out, "released": released, "sketch": info}))
 }
 
 /// Scale, turn and move the entities in one step: scaled about `center`, then turned about it,
@@ -2927,6 +2930,45 @@ fn transform(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(ids_of(sk, &cs))
     })?;
     Ok(json!({"curves": out, "sketch": info}))
+}
+
+/// The constraints that tie the points about to move to points that stay (a corner on the
+/// origin, a distance to a line left behind) and hold now: their ids and type names. Constraints
+/// among the moved points alone (a rectangle's sides, a line's typed angle) move with them and
+/// are kept.
+fn holding(sk: &Sketch, moved: &[usize]) -> Vec<(String, &'static str)> {
+    sk.constraints
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| {
+            let touched = sk.constraint_points(&c.kind);
+            touched.iter().any(|q| moved.contains(q)) && touched.iter().any(|q| !moved.contains(q))
+        })
+        .filter(|(ci, _)| solidcraft_sketch::constraint_residual(sk, *ci).is_some_and(|r| r <= broken_at(sk)))
+        .map(|(_, c)| (c.id.clone(), c.kind.name()))
+        .collect()
+}
+
+/// After a move: the constraints of `held` that no longer hold are let go. Kept, the solve
+/// would pull the moved geometry back to what stays and bend it (#2980). Returns every
+/// constraint of `held` the move let go, these and the origin holds the move itself dropped
+/// (#5034), as `{id, kind}` for the status line to name them.
+fn release_broken(sk: &mut Sketch, held: &[(String, &'static str)]) -> Vec<Value> {
+    let broken: Vec<String> = sk
+        .constraints
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| held.iter().any(|(id, _)| *id == c.id))
+        .filter(|(ci, _)| solidcraft_sketch::constraint_residual(sk, *ci).is_some_and(|r| r > broken_at(sk)))
+        .map(|(_, c)| c.id.clone())
+        .collect();
+    sk.constraints.retain(|c| !broken.contains(&c.id));
+    held.iter().filter(|(id, _)| !sk.constraints.iter().any(|c| c.id == *id)).map(|(id, kind)| json!({"id": id, "kind": kind})).collect()
+}
+
+/// A residual above this (mm, or radians) is a constraint that doesn't hold.
+fn broken_at(sk: &Sketch) -> f64 {
+    1e-7 * sk.points.iter().map(|p| p.pos.len()).fold(1.0, f64::max)
 }
 
 fn scale(s: &mut Session, p: &Value) -> Result<Value> {

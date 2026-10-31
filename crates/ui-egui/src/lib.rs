@@ -1390,6 +1390,9 @@ impl SolveApp {
                 if v.get("continuous").and_then(Value::as_bool) != Some(true) {
                     self.session.echo(language.format("ui.command_done", &[("command", label)]));
                 }
+                if id == "sketch.move" {
+                    released_status(self, language, v);
+                }
                 if id == "file.new" {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
@@ -3057,6 +3060,24 @@ impl SolveApp {
             false
         });
     }
+}
+
+/// After a sketch Move that let go of constraints tying the moved geometry to what stays (a
+/// corner on the origin; #2980): the status line names them, and a click on it undoes the move.
+fn released_status(app: &mut SolveApp, language: i18n::Locale, v: &Value) {
+    let Some(released) = v.get("released").and_then(Value::as_array).filter(|r| !r.is_empty()) else { return };
+    let mut names: Vec<&str> = Vec::new();
+    for kind in released.iter().filter_map(|c| c.get("kind").and_then(Value::as_str)).take(64) {
+        let name = language.label(if kind.ends_with("Dimension") { "Dimension" } else { kind });
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    let count = released.len().to_string();
+    let id = if released.len() == 1 { "sketch.move_released_one" } else { "sketch.move_released" };
+    let msg = language.format(id, &[("count", &count), ("names", &names.join(", "))]);
+    app.set_status(msg, false);
+    app.status_undo = true;
 }
 
 /// The window is minimised or fully covered, so it presents no frames (#1677). Unknown counts as

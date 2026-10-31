@@ -3456,3 +3456,29 @@ fn corner_tools_refuse_all_spatial_curves_with_an_unsupported_message() {
         }
     }
 }
+
+/// #2980: a rectangle drawn from the origin and a circle, all moved: they move as drawn. The
+/// corner's coincidence with the origin is let go instead of pulling that corner back and
+/// bending the rectangle; its own horizontals and verticals stay.
+#[test]
+fn moving_shapes_held_to_the_origin_moves_them_whole() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, -30]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [-5, 20], "radius": 12}));
+    let sk = sketch(&s);
+    let at_origin = sk.constraints.iter().find(|c| matches!(c.kind, ConstraintKind::Coincident { .. })).map(|c| c.id.clone());
+    assert!(at_origin.is_some(), "the rectangle's corner is held on the origin");
+    let before: Vec<(String, Vec2)> = sk.points.iter().filter(|p| p.id != "origin").map(|p| (p.id.clone(), p.pos)).collect();
+    let ids: Vec<String> = sk.curves.iter().map(|c| c.id.clone()).collect();
+    let r = run(&mut s, "sketch.move", json!({"entities": ids, "translate": [15.5, 0]}));
+    assert_eq!(r["released"], json!([{"id": at_origin.clone().unwrap(), "kind": "Coincident"}]), "{r}");
+    let after = sketch(&s);
+    for (id, p) in &before {
+        let q = after.points.iter().find(|q| &q.id == id).map(|q| q.pos).unwrap();
+        assert!(q.dist(*p + Vec2::new(15.5, 0.0)) < 1e-9, "{id} went from {p:?} to {q:?}");
+    }
+    assert_eq!(after.constraints.len(), sk.constraints.len() - 1, "only the origin's coincidence is let go");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(sketch(&s).constraints.len(), sk.constraints.len(), "undo brings it back");
+}

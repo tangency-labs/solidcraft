@@ -401,6 +401,31 @@ fn a_plain_move_takes_the_geometry_with_it() {
     let ys: Vec<f64> = sk.points.iter().filter(|p| corners.contains(&p.id)).map(|p| p.pos.y).collect();
     assert_eq!(ys.len(), 4, "{ys:?}");
     assert!(ys.iter().all(|y| (*y - 15.0).abs() < 1e-6 || (*y - 25.0).abs() < 1e-6), "the rectangle moved up by 5 mm: {ys:?}");
+    assert!(!h.app.status_undo, "nothing tied it to what stays, so nothing is let go: {:?}", h.app.status);
+}
+
+/// #2980: a rectangle drawn from the origin moves whole, and the status line says its corner's
+/// coincidence with the origin was let go; a click on it undoes the move.
+#[test]
+fn a_move_that_lets_go_of_the_origin_says_so_and_offers_undo() {
+    let mut h = rectangle();
+    let sid = h.app.session.active_sketch.unwrap();
+    h.step(&json!({"start": "sketch.move"})).unwrap();
+    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = picks;
+        d.kind = Kind::SketchModify(Mod::Move { x: "15 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: false });
+    }
+    h.frames(2);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    let (msg, _, error) = h.app.status.clone().expect("the move says what it let go");
+    assert!(!error, "{msg}");
+    assert!(msg.contains("1 constraint") && msg.contains("Coincident") && msg.contains("Click to undo"), "{msg}");
+    assert!(h.app.status_undo, "a click on the message undoes the move");
+    let xs: Vec<f64> = h.app.session.model.state().sketch(sid).unwrap().sketch.points.iter().filter(|p| p.id != "origin").map(|p| p.pos.x).collect();
+    assert!(xs.iter().all(|x| (*x - 15.0).abs() < 1e-6 || (*x - 35.0).abs() < 1e-6), "the rectangle moved whole: {xs:?}");
 }
 
 #[test]
