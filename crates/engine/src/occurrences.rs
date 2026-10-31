@@ -1,5 +1,5 @@
 //! Exact placement identity and session view/authoring state.
-use crate::{EngineError, Result, Sel, Session};
+use crate::{EngineError, Result, Sel, Session, Visibility};
 use solidcraft_doc::{FeatureKind, IDENTITY, Mat, PlaneRef, mat_mul};
 
 #[derive(Clone, Debug)]
@@ -30,6 +30,139 @@ pub(crate) struct VisibilityCache {
     paths: Vec<Vec<u64>>,
     folders: Vec<String>,
     bodies: std::collections::BTreeSet<String>,
+}
+
+/// The hidden joints and folders of the view, as sets: the browser asks about every joint
+/// and every folder of the design on every frame, and an answer that walked the hidden
+/// lists made a frame cost grow with the size of the design (#3892). The sets are built
+/// when the view changes and are kept until it changes again.
+pub(crate) struct VisibilityIndex {
+    /// The revision of the design the sets were built for.
+    revision: u64,
+    /// Where the hidden joints were when the sets were built: the list is replaced (the
+    /// whole view is replaced) or written in place (a joint is hidden or shown), and this
+    /// says whether the list the sets were built from is still the list of the view.
+    joints_at: ListId,
+    /// The hidden joint ids.
+    joint_ids: std::collections::HashSet<u64>,
+    /// Where the hidden folders were when the sets were built.
+    folders_at: ListId,
+    /// The hidden folder keys.
+    folder_keys: std::collections::HashSet<String>,
+    /// The hidden joints and folders, as they were when the sets were built: they are
+    /// compared with these to tell a change of the view from a change of the design alone
+    /// (the design changes far more often than the view does).
+    joints: Vec<u64>,
+    folders: Vec<String>,
+}
+
+/// Where a list of hidden items was: the address of its buffer and how many items it held.
+/// A list that is replaced gets a buffer of its own (the old one is still alive while the
+/// new one is allocated, so the addresses differ), and a list that is written in place keeps
+/// its buffer; the length then says how much of it is written.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct ListId {
+    address: usize,
+    length: usize,
+}
+
+impl ListId {
+    fn of<T>(list: &[T]) -> ListId {
+        ListId { address: list.as_ptr() as usize, length: list.len() }
+    }
+}
+
+impl VisibilityIndex {
+    /// The sets of the hidden joints and folders of a view.
+    fn new(revision: u64, v: &Visibility) -> VisibilityIndex {
+        let joint_ids: std::collections::HashSet<u64> = v.hidden_joints.iter().copied().collect();
+        let folder_keys: std::collections::HashSet<String> = v.hidden_folders.iter().cloned().collect();
+        visibility_work::built(joint_ids.len() as u64 + folder_keys.len() as u64);
+        VisibilityIndex {
+            revision,
+            joints_at: ListId::of(&v.hidden_joints),
+            joint_ids,
+            folders_at: ListId::of(&v.hidden_folders),
+            folder_keys,
+            joints: v.hidden_joints.clone(),
+            folders: v.hidden_folders.clone(),
+        }
+    }
+
+    /// Do the sets still answer for this design and this view? The revision says the design
+    /// changed; the lists say the view changed under it (the view is replaced outside the
+    /// engine too, without a revision of its own).
+    ///
+    /// The first and last entries of each list are part of the answer: a buffer that was freed
+    /// and handed out again holds another list, and the entries say so.
+    fn matches(&self, revision: u64, v: &Visibility) -> bool {
+        self.revision == revision
+            && self.joints_at == ListId::of(&v.hidden_joints)
+            && self.folders_at == ListId::of(&v.hidden_folders)
+            && self.joints.first() == v.hidden_joints.first()
+            && self.joints.last() == v.hidden_joints.last()
+            && self.folders.first() == v.hidden_folders.first()
+            && self.folders.last() == v.hidden_folders.last()
+    }
+
+    /// Are the hidden joints and folders the ones the sets were built from? A design that
+    /// changed without touching the view leaves the sets alone.
+    fn same_lists(&self, v: &Visibility) -> bool {
+        self.joints == v.hidden_joints && self.folders == v.hidden_folders
+    }
+
+    /// The lists are the ones the sets were built from, at another revision.
+    fn restamp(&mut self, revision: u64, v: &Visibility) {
+        self.revision = revision;
+        self.joints_at = ListId::of(&v.hidden_joints);
+        self.folders_at = ListId::of(&v.hidden_folders);
+    }
+}
+
+/// How many entries of the hidden lists a visibility answer had to walk, and how many the
+/// index was built from. The browser asks about every joint of the design on every frame, so
+/// the answer must not cost more as the design grows (#3892); the counters make that cost
+/// visible to a test.
+pub(crate) mod visibility_work {
+    #[cfg(test)]
+    use std::cell::Cell;
+
+    // The counter of the thread that asks: the tests run beside each other, and each counts
+    // its own work.
+    #[cfg(test)]
+    thread_local! {
+        static WALKED: Cell<u64> = const { Cell::new(0) };
+        static BUILT: Cell<u64> = const { Cell::new(0) };
+    }
+
+    /// The entries the answers of this thread walked since the last [`take`].
+    #[cfg(test)]
+    pub(crate) fn take() -> u64 {
+        WALKED.with(|walked| walked.replace(0))
+    }
+
+    /// Count the entries an answer walked.
+    pub(crate) fn add(walked: u64) {
+        #[cfg(test)]
+        WALKED.with(|count| count.set(count.get() + walked));
+        #[cfg(not(test))]
+        let _ = walked;
+    }
+
+    /// Count the entries the index was built from: the index is built once per change of the
+    /// view, not once per answer, so this work is apart from the answers' own.
+    pub(crate) fn built(built: u64) {
+        #[cfg(test)]
+        BUILT.with(|count| count.set(count.get() + built));
+        #[cfg(not(test))]
+        let _ = built;
+    }
+
+    /// The entries the index was built from since the last [`built_take`].
+    #[cfg(test)]
+    pub(crate) fn built_take() -> u64 {
+        BUILT.with(|count| count.replace(0))
+    }
 }
 
 /// [`Session::occurrence_bodies`] answers for one document, evaluated model and set of pending
@@ -549,10 +682,36 @@ impl Session {
         Ok(count)
     }
 
+    /// The hidden joints and folders of the view, as sets: the browser asks about every joint
+    /// of the design on every frame, and an answer that walked the hidden lists made a frame
+    /// cost grow with the size of the design (#3892). The sets are built when the view changes
+    /// and are kept until it changes again.
+    fn visibility_index(&self) -> Option<std::sync::MutexGuard<'_, Option<VisibilityIndex>>> {
+        let mut cache = self.visibility_index_cache.lock().ok()?;
+        let v = &self.visibility;
+        if cache.as_ref().is_none_or(|c| !c.matches(self.revision, v)) {
+            // The design or the view changed. The sets are rebuilt only when the hidden lists
+            // themselves changed: a change of the design alone leaves them alone.
+            if cache.as_ref().is_some_and(|c| c.same_lists(v)) {
+                if let Some(c) = cache.as_mut() {
+                    c.restamp(self.revision, v);
+                }
+            } else {
+                *cache = Some(VisibilityIndex::new(self.revision, v));
+            }
+        }
+        Some(cache)
+    }
+
     /// Whether a joint's glyph is drawn (`browser.visibility`). Hiding a joint only hides its
     /// drawing: it still constrains and drives the parts.
     /// Is the joint shown itself (its own eye; the Joints folder may still hide it)?
     pub fn joint_visible(&self, id: u64) -> bool {
+        if let Some(cache) = self.visibility_index() {
+            return cache.as_ref().is_none_or(|c| !c.joint_ids.contains(&id));
+        }
+        // The lock is poisoned: answer from the list itself.
+        visibility_work::add(self.visibility.hidden_joints.len() as u64);
         !self.visibility.hidden_joints.contains(&id)
     }
 
@@ -569,6 +728,11 @@ impl Session {
 
     /// Is a browser folder or group hidden itself (by tree key, see `Visibility::hidden_folders`)?
     pub fn folder_hidden(&self, key: &str) -> bool {
+        if let Some(cache) = self.visibility_index() {
+            return cache.as_ref().is_none_or(|c| c.folder_keys.contains(key));
+        }
+        // The lock is poisoned: answer from the list itself.
+        visibility_work::add(self.visibility.hidden_folders.len() as u64);
         self.visibility.hidden_folders.iter().any(|k| k == key)
     }
 

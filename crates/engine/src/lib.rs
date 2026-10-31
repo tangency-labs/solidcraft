@@ -459,6 +459,10 @@ pub struct Session {
     /// (see [`Session::solve_joints`]).
     joints_settled: Option<(Arc<Document>, std::sync::Weak<solidcraft_doc::ModelState>)>,
     occurrence_visibility_cache: std::sync::Mutex<Option<occurrences::VisibilityCache>>,
+    /// The hidden joints and folders of the view, as sets: the browser asks about every joint
+    /// of the design on every frame (#3892), and an answer that walked the hidden lists made a
+    /// frame cost grow with the size of the design.
+    visibility_index_cache: std::sync::Mutex<Option<occurrences::VisibilityIndex>>,
     removed_later_cache: std::sync::Mutex<Option<occurrences::RemovedLaterCache>>,
     occurrence_bodies_cache: std::sync::Mutex<Option<occurrences::OccurrenceBodiesCache>>,
     placement_index_cache: std::sync::Mutex<Option<occurrences::PlacementIndex>>,
@@ -661,6 +665,7 @@ impl Session {
             world_cache: Default::default(),
             joints_settled: None,
             occurrence_visibility_cache: Default::default(),
+            visibility_index_cache: Default::default(),
             removed_later_cache: Default::default(),
             occurrence_bodies_cache: Default::default(),
             placement_index_cache: Default::default(),
@@ -1512,6 +1517,7 @@ impl Session {
             world_cache: std::sync::Mutex::new(self.world_cache.lock().ok().and_then(|cache| cache.clone())),
             joints_settled: self.joints_settled.clone(),
             occurrence_visibility_cache: Default::default(),
+            visibility_index_cache: Default::default(),
             removed_later_cache: Default::default(),
             occurrence_bodies_cache: Default::default(),
             placement_index_cache: Default::default(),
