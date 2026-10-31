@@ -86,6 +86,7 @@ impl NativeMenu {
         ] {
             add(&file, app.tr_label(label), action, None)?;
         }
+        add(&file, app.tr("osd.export"), FileAction::Export("osd"), None)?;
         file.append(&PredefinedMenuItem::separator())?;
         add(&file, app.tr_label("Design Properties"), FileAction::Command("document.metadata"), None)?;
         add(&edit, app.tr("ui.undo"), FileAction::Undo, Some(Accelerator::new(Modifiers::META, Code::KeyZ)))?;
