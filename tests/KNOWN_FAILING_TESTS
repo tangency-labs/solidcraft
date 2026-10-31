@@ -22,8 +22,8 @@ solidcraft-kernel::blend_variable::tests::variable_radius_through_a_middle_point
 solidcraft-kernel::blend_wrong_way_tests::a_chamfer_that_would_grow_the_part_on_a_convex_edge_is_refused solidcore builds the chamfer that C++ refuses as too large
 solidcraft-kernel::corner_g2::tests::a_long_setback_keeps_the_g2_patch_inside_the_box at set backs 11 to 15 the G2 corner patch bulges past the box, as on C++
 solidcraft-kernel::corner_g2::tests::the_box_corner_g2_patch_is_a_closed_solid_curvature_continuous_to_its_neighbours the fitted G2 corner patch bulges 1.7e-5 past the box, as on C++
-solidcraft-kernel::surface_offset::tests::a_bspline_patch_is_offset_within_the_tolerance solidcore has not ported smlib_brep_check's SmFace handle of a surface's face (topology.face_p2)
-solidcraft-kernel::surfaces::tests::thicken_a_bspline_patch_by_its_sampled_offsets solidcore has not ported smlib_brep_check's SmFace handle of a surface's face (topology.face_p2)
+solidcraft-kernel::surface_offset::tests::a_bspline_patch_is_offset_within_the_tolerance check_brep is Unported on OffsetSurface faces (solidcore#2048)
+solidcraft-kernel::surfaces::tests::thicken_a_bspline_patch_by_its_sampled_offsets check_brep is Unported on OffsetSurface faces (solidcore#2048)
 solidcraft-kernel::surfaces::tests::thicken_curved_faces_onto_fitted_surfaces thickening a spherical cap gives an open result on solidcore
 solidcraft-kernel::tests::a_corner_round_wider_than_its_faces_overflows_and_takes_the_corners_other_edges R21 wider than its faces beside another edge fails on solidcore with status 1001
 solidcraft-kernel::tests::fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole not a closed solid on one tab round on solidcore (on C++ the rounds together miss by 3.8e-4)
