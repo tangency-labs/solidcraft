@@ -53,10 +53,10 @@ pub(crate) fn reveal_body(app: &mut SolveApp, body: &str) {
     };
     app.tree.collapsed.remove("c0");
     for depth in 1..=path.len() {
-        app.tree.collapsed.remove(&occurrence_key(&path[..depth]));
+        app.tree.open_row(&occurrence_key(&path[..depth]));
     }
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
-    app.tree.collapsed.remove(&scope);
+    app.tree.open_row(&scope);
     app.tree.collapsed.remove(&format!("{scope}/bodies"));
     open_group_chain(app, &scope, component, "bodies", &source);
 }
@@ -195,6 +195,25 @@ impl FolderPick {
 impl TreeState {
     pub(crate) fn clear_folder_pick(&mut self) {
         self.picked_folder = None;
+    }
+
+    /// Open a row. A placement's row is noted open in `expanded` as well, because it starts
+    /// closed unless the "Components start open" preference is on (#9274).
+    pub(crate) fn open_row(&mut self, key: &str) {
+        self.collapsed.remove(key);
+        if is_placement_key(key) && !self.expanded.contains(key) {
+            self.expanded.insert(key.to_owned());
+        }
+    }
+
+    /// Close a row, whichever way its placement starts.
+    pub(crate) fn close_row(&mut self, key: &str) {
+        if !self.collapsed.contains(key) {
+            self.collapsed.insert(key.to_owned());
+        }
+        if is_placement_key(key) {
+            self.expanded.remove(key);
+        }
     }
 
     fn remember(&mut self, key: &str) {
@@ -673,12 +692,32 @@ fn reveal_path(app: &mut SolveApp) -> Option<Vec<u64>> {
     app.tree.model.as_mut()?.body_path(&app.session, &body)
 }
 
+/// A placement's own row (`o:1/2`), not a folder under it (`o:1/2/bodies`).
+pub(crate) fn is_placement_key(key: &str) -> bool {
+    key.strip_prefix("o:").is_some_and(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit() || b == b'/'))
+}
+
+/// Whether a placement's row is open. Placements start closed, so a large assembly opens as a
+/// short list (#9274); the "Components start open" preference keeps them open as before.
+pub(crate) fn placement_open(app: &SolveApp, key: &str) -> bool {
+    !app.tree.collapsed.contains(key) && (app.preferences.browser_components_open || app.tree.expanded.contains(key))
+}
+
 pub(crate) fn is_open(app: &SolveApp, key: &str, default: bool) -> bool {
+    if is_placement_key(key) {
+        return placement_open(app, key);
+    }
     if default { !app.tree.collapsed.contains(key) } else { app.tree.expanded.contains(key) }
 }
 
 pub(crate) fn toggle(app: &mut SolveApp, key: &str, default: bool) {
-    if default {
+    if is_placement_key(key) {
+        if placement_open(app, key) {
+            app.tree.close_row(key);
+        } else {
+            app.tree.open_row(key);
+        }
+    } else if default {
         if !app.tree.collapsed.remove(key) {
             app.tree.collapsed.insert(key.to_string());
         }
@@ -688,18 +727,19 @@ pub(crate) fn toggle(app: &mut SolveApp, key: &str, default: bool) {
 }
 
 /// Apply Expand All / Collapse All: open-by-default keys live in `collapsed` when closed;
-/// closed-by-default keys live in `expanded` when open.
+/// closed-by-default keys live in `expanded` when open. Placements, whichever way they start,
+/// are noted in both.
 pub fn apply_fold(app: &mut SolveApp, open: bool, open_by_default: &[String], closed_by_default: &[String]) {
     if open {
         for key in open_by_default {
-            app.tree.collapsed.remove(key);
+            app.tree.open_row(key);
         }
         for key in closed_by_default {
             app.tree.expanded.insert(key.clone());
         }
     } else {
         for key in open_by_default {
-            app.tree.collapsed.insert(key.clone());
+            app.tree.close_row(key);
         }
         for key in closed_by_default {
             app.tree.expanded.remove(key);
@@ -1572,7 +1612,7 @@ fn occurrence_key(path: &[u64]) -> String {
 /// Show a placement's row closed: a pasted (or moved) component arrives folded, whatever a row
 /// at that path showed before.
 pub(crate) fn close_placement(app: &mut SolveApp, path: &[u64]) {
-    app.tree.collapsed.insert(occurrence_key(path));
+    app.tree.close_row(&occurrence_key(path));
 }
 
 /// A placement, rather than a component definition: repeated child IDs remain distinct
@@ -1595,7 +1635,7 @@ fn occurrence_rows_inner(
 ) {
     let key = &placement.key;
     if reveal_path(app).is_some_and(|rp| rp.starts_with(path)) {
-        app.tree.collapsed.remove(key);
+        app.tree.open_row(key);
     }
     let open = is_open(app, key, true);
     let on_screen = ui.is_rect_visible(row_rect(ui));

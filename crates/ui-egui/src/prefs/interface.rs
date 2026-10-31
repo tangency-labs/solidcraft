@@ -281,6 +281,11 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                             app.preferences.browser_bodies_folders = *mode;
                         }
                     });
+                    // Placements open in the browser from the start, as before #9274.
+                    ui_kit::row(ui, "", |ui| {
+                        let check = setting::browser_components_open(app, ui).on_hover_text(app.tr("prefs.browser_components_open_note"));
+                        crate::scenario::publish_target("prefs:browser_components_open", check.rect);
+                    });
                     // The eye beside the fold arrow, where it was before #8718.
                     ui_kit::row(ui, "", |ui| {
                         let check = setting::browser_eye_left(app, ui).on_hover_text(app.tr("prefs.browser_eye_left_note"));
