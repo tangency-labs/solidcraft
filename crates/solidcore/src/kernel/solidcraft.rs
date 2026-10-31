@@ -231,6 +231,7 @@ solidcraft_preset! {
     off: [
         fillet_rails_meet_at_one_end_point, // WR-594: smlib 5fdefb9 is not on the fork's main yet
         delete_vertex_joins_seam_iso_curve, // WR-598: smlib 829b982 is not on the fork's main yet
+        revolve_splits_curves_on_axis, // WR-590: smlib e4f1377 is not on the fork's main yet
         fillet_trim_status, // WR-604: own design (#674), not a SolidCraft report; the fork has upstream's
         boolean_lists_virtual_surface_copies, // WR-196: a source audit's, not SolidCraft's; the fork has upstream's
     ],

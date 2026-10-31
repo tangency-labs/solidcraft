@@ -178,6 +178,10 @@ const FORK_RECORDS_WITHOUT_FIX: &[(&str, &str)] = &[
         "a change to the fork's C API (blends take exactly the given edges), not to SMLib",
     ),
     (
+        "WR-590",
+        "the fork's fix (smlib e4f1377) is not on the fork's main yet; its field `revolve_splits_curves_on_axis` is in `off` until it lands",
+    ),
+    (
         "WR-594",
         "the fork's fix (smlib 5fdefb9) is not on the fork's main yet; its field `fillet_rails_meet_at_one_end_point` is in `off` until it lands",
     ),
