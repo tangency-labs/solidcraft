@@ -40,6 +40,15 @@ fn close(a: f64, b: f64) -> bool {
     (a - b).abs() < 1e-6
 }
 
+fn assert_closed_offset(sk: &solidcraft_sketch::Sketch, curves: &[String]) {
+    let ends: Vec<_> = curves.iter().map(|id| sk.curves[sk.curve_index(id).unwrap()].kind.ends().unwrap()).collect();
+    for &(a, b) in &ends {
+        for point in [a, b] {
+            assert_eq!(ends.iter().filter(|&&(x, y)| x == point || y == point).count(), 2, "offset corner {point} must be shared by two curves");
+        }
+    }
+}
+
 #[test]
 fn explicit_freeform_break_preserves_exact_geometry_and_undo() {
     for (command, params) in [
@@ -722,10 +731,10 @@ fn offset_of_lines_drawn_one_by_one_stays_a_closed_shape() {
     let made: Vec<String> = r["curves"].as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_string()).collect();
     assert_eq!(made.len(), 4, "{r}");
     let sk = sketch(&s);
-    let ends: Vec<(Vec2, Vec2, usize, usize)> = made
+    let ends: Vec<(Vec2, Vec2)> = made
         .iter()
         .map(|id| match sk.curves[sk.curve_index(id).unwrap()].kind {
-            CurveKind::Line { a, b } => (sk.points[a].pos, sk.points[b].pos, a, b),
+            CurveKind::Line { a, b } => (sk.points[a].pos, sk.points[b].pos),
             _ => panic!("{id} is not a line"),
         })
         .collect();
@@ -736,12 +745,64 @@ fn offset_of_lines_drawn_one_by_one_stays_a_closed_shape() {
     xs.sort_by(f64::total_cmp);
     assert!(ys.len() == 2 && (ys[0] - 2.0).abs() < 1e-9 && (ys[1] - 8.0).abs() < 1e-9, "{ys:?}");
     assert!(xs.len() == 2 && (xs[0] - 2.0).abs() < 1e-9 && (xs[1] - 18.0).abs() < 1e-9, "{xs:?}");
-    // Closed: each corner point is shared by two of the new lines.
-    for (_, _, a, b) in &ends {
-        for p in [a, b] {
-            assert_eq!(ends.iter().filter(|e| e.2 == *p || e.3 == *p).count(), 2, "corner {p} is shared");
-        }
+    assert_closed_offset(&sk, &made);
+}
+
+#[test]
+fn offset_of_trimmed_circle_and_fillet_chains_coincident_ends() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
+    run(&mut s, "sketch.line", json!({"points": [[-20, 0], [20, 0]]}));
+    run(&mut s, "sketch.trim", json!({"curve": "c1", "at": [0, -10]}));
+    run(&mut s, "sketch.trim", json!({"curve": "l1", "at": [-15, 0]}));
+    run(&mut s, "sketch.trim", json!({"curve": "l1", "at": [15, 0]}));
+    // A point on the line alone is a different case: #5019 explicitly joins these ends
+    // with Coincident, while the fillet makes its own two shared ends.
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "c1.end", "b": "l1.start"}));
+    let fillet = run(&mut s, "sketch.fillet", json!({"a": "c1", "b": "l1", "radius": 1}));
+    let arc = ids(&fillet["curves"])[0].clone();
+    assert_eq!(profiles(&s).len(), 1);
+    let r = run(&mut s, "sketch.offset", json!({"curves": ["c1", "l1", arc], "distance": -0.5}));
+    assert_eq!(r["sides"].as_array().unwrap().len(), 1, "{r}");
+    let made = ids(&r["curves"]);
+    assert_eq!(made.len(), 3, "{r}");
+    let sk = sketch(&s);
+    assert_closed_offset(&sk, &made);
+    let mut radii: Vec<_> = made
+        .iter()
+        .filter_map(|id| match sk.curves[sk.curve_index(id).unwrap()].kind {
+            CurveKind::Arc { c, a, .. } => Some(sk.points[c].pos.dist(sk.points[a].pos)),
+            _ => None,
+        })
+        .collect();
+    radii.sort_by(f64::total_cmp);
+    assert!(radii.len() == 2 && close(radii[0], 1.5) && close(radii[1], 10.5), "{radii:?}");
+}
+
+#[test]
+fn offset_of_separately_drawn_fillet_and_chamfer_stays_closed() {
+    let mut s = new_sketch();
+    for points in [[[0, 0], [20, 0]], [[20, 0], [20, 10]], [[0, 10], [20, 10]], [[0, 0], [0, 10]]] {
+        run(&mut s, "sketch.line", json!({"points": points}));
     }
+    run(&mut s, "sketch.fillet", json!({"a": "l1", "b": "l2", "radius": 2}));
+    run(&mut s, "sketch.chamfer.equal_distance", json!({"a": "l3", "b": "l4", "distance": 1}));
+    let sources: Vec<_> = sketch(&s).curves.iter().map(|c| c.id.clone()).collect();
+    assert_eq!(profiles(&s).len(), 1);
+    let r = run(&mut s, "sketch.offset", json!({"curves": sources, "distance": 1}));
+    assert_eq!(r["sides"].as_array().unwrap().len(), 1, "{r}");
+    let made = ids(&r["curves"]);
+    assert_eq!(made.len(), 6, "{r}");
+    let sk = sketch(&s);
+    assert_closed_offset(&sk, &made);
+    let radii: Vec<_> = made
+        .iter()
+        .filter_map(|id| match sk.curves[sk.curve_index(id).unwrap()].kind {
+            CurveKind::Arc { c, a, .. } => Some(sk.points[c].pos.dist(sk.points[a].pos)),
+            _ => None,
+        })
+        .collect();
+    assert!(radii.len() == 1 && close(radii[0], 1.0), "{radii:?}");
 }
 
 #[test]
