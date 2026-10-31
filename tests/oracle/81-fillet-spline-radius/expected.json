@@ -1,5 +1,6 @@
 {
   "source": "analytic",
+  "known_failure": "SMLib variable fillet: STEP export finds edges 4.6e-5 to 6.1e-5 off their surfaces against 2e-5",
   "method": "box 40x30x20 with its top front edge (y=0, z=20) rounded at a radius that is a clamped cubic B-spline in u = x/40, knots 0,0,0,0,0.25,0.6,1,1,1,1, control radii 2, 5, 1.5, 4, 1, 3 (r(0) = 2, r(40) = 3). Sections are quarter rounds; V, moments and areas integrated along the edge, exactly per knot span",
   "body_count": 1,
   "volume_mm3": 23933.601078437176,

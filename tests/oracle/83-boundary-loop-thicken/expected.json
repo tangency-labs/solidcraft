@@ -1,5 +1,6 @@
 {
   "source": "analytic",
+  "known_failure": "SMLib thicken fails (status 1001)",
   "method": "region = 10 x 10 square + half disc r 5 on its top side: A = 100 + 12.5 pi, centroid by moments (half disc's at 4r / (3 pi) above its diameter); slab of thickness 2 over it (symmetric about z = 0): V = 2A, area = 2A + 2 (30 + 5 pi)",
   "body_count": 1,
   "volume_mm3": 278.53981633974485,

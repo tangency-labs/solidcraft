@@ -527,8 +527,15 @@ jobs:
           if [ "$FULL" != true ]; then scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done; fi
           # The GPU path tracer's tests run in their own job (GPU path tests): one at a time, they
           # took about 36 of this job's 45 minutes.
+          # A failed test does not fail the step by itself: the tests known to fail today
+          # (tests/KNOWN_FAILING_TESTS) may fail, any other fails it, and so does a listed test
+          # that passes. nextest's exit code 100 is "tests failed"; any other is its own error
+          # (a build error, a bad filter) and fails the step at once.
+          status=0
           cargo nextest run "${scope[@]}" --cargo-profile ci --locked --profile ci --no-tests=pass \
-            --ignore-default-filter -E "($base) & not (package(=solidcraft-gpu) & test(/^path::/))"
+            --ignore-default-filter -E "($base) & not (package(=solidcraft-gpu) & test(/^path::/))" || status=$?
+          if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
+          cargo xtask known-failing --junit "$junit"
       - name: Compiler cache statistics
         if: always()
         run: sccache --show-stats
@@ -620,8 +627,14 @@ jobs:
           # None of these is in the default filter (the heavy tests), so pull requests, the merge
           # queue, main and nightly all run every one of them, as before. `count` deals the tests
           # out in turn (27 each); `hash` split them 41/40/27 across three shards.
+          # Graded against tests/KNOWN_FAILING_TESTS, as in Native Linux tests.
+          junit=${CARGO_TARGET_DIR:-target}/nextest/ci/junit.xml
+          rm -f "$junit"
+          status=0
           cargo nextest run -p solidcraft-gpu --cargo-profile ci --locked --profile ci --no-tests=pass \
-            --ignore-default-filter -E 'test(/^path::/)' --partition "count:$SHARD/4"
+            --ignore-default-filter -E 'test(/^path::/)' --partition "count:$SHARD/4" || status=$?
+          if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
+          cargo xtask known-failing --junit "$junit"
       - name: Compiler cache statistics
         if: always()
         run: sccache --show-stats
