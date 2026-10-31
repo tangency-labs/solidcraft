@@ -58,6 +58,14 @@ fn null() -> SolidError {
 /// keeping a copy of its surface (as an analytic one when possible), and the faces are
 /// rebuilt by an extended offset that extends the surfaces to intersect.
 ///
+/// To find where `surfaces[i]` went, mark `faces[i]` before the call
+/// ([`Brep::add_attribute`], [`Behavior::Copy`](crate::geom::attribute::Behavior::Copy))
+/// and look for the mark on the result's faces: upstream callers mark the `SmSurface`
+/// itself, but the port names a surface by its owning face, and `faces[i]`'s offset face
+/// takes `surfaces[i]`, so the mark travels with it as upstream's does with the surface
+/// (tangency-labs/solidcore#1875; the one difference, a merge keeping an unpicked
+/// survivor, is `plan/findings/topology.brep_local_operation--1875-face-mark-for-surface-mark.md`).
+///
 /// # Errors
 ///
 /// `SM_ERR` when the extended offset fails (its own status with
