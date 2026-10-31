@@ -1764,7 +1764,7 @@ fn offset_side(sk: &mut Sketch, cmd: &str, order: &[(usize, bool)], sources: &[(
                 idx.push(pb);
                 idx.dedup();
                 if idx.len() >= 2 {
-                    made.push(sk.add_curve(CurveKind::Spline { pts: idx, control: false, degree: 3, periodic: false }, None)?);
+                    made.push(sk.add_curve(CurveKind::Spline { pts: idx, control: false, degree: 3, periodic: false, nurbs: None }, None)?);
                 }
             }
             Piece::Line(..) => {

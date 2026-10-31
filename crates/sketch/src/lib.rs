@@ -27,6 +27,7 @@ pub mod linalg;
 mod link;
 mod loci;
 mod model;
+mod nurbs;
 mod offset;
 mod offset_topology;
 mod pattern;
@@ -55,6 +56,7 @@ pub use model::{
     Constraint, ConstraintKind, Curve, CurveKind, MAX_CONSTRAINTS, MAX_COORD, MAX_CURVES, MAX_POINTS, PointExprs, SPoint, Sketch, SketchError,
     SketchView, TwoCircles,
 };
+pub use nurbs::Nurbs;
 pub use offset::OffsetChain;
 pub use offset_topology::{OffsetCreated, OffsetRole, OffsetRoleFlags, OffsetRoleKind, OffsetTopology};
 pub use pattern::{PatternAlignment, PatternInstance, SketchPattern, SketchPatternKind};

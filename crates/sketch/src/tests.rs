@@ -657,7 +657,7 @@ fn near_overlaps_that_are_not_one_path_keep_their_regions() {
         .iter()
         .map(|p| sk.add_point(*p, None).unwrap())
         .collect();
-    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: true, degree: 3, periodic: false }, None).unwrap();
+    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: true, degree: 3, periodic: false, nurbs: None }, None).unwrap();
     sk.add_line_pts(ids[3], ids[0], None).unwrap();
     let ps = find_profiles(&sk);
     assert_eq!(ps.len(), 1, "{:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
@@ -953,7 +953,7 @@ fn exact_profiles_for_high_degree_and_cut_free_form_curves() {
         .iter()
         .map(|p| sk.add_point(*p, None).unwrap())
         .collect();
-    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: true, degree: 5, periodic: false }, None).unwrap();
+    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: true, degree: 5, periodic: false, nurbs: None }, None).unwrap();
     sk.add_line_pts(ids[5], ids[0], None).unwrap();
     let pr = find_profiles(&sk);
     assert_eq!(pr.len(), 1);
@@ -962,7 +962,7 @@ fn exact_profiles_for_high_degree_and_cut_free_form_curves() {
     // A fit spline arch over a base line, cut by a vertical line at x = 10.
     let mut sk = Sketch::default();
     let ids: Vec<usize> = [v(0.0, 0.0), v(6.0, 9.0), v(14.0, 9.0), v(20.0, 0.0)].iter().map(|p| sk.add_point(*p, None).unwrap()).collect();
-    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: false, degree: 3, periodic: false }, None).unwrap();
+    sk.add_curve(CurveKind::Spline { pts: ids.clone(), control: false, degree: 3, periodic: false, nurbs: None }, None).unwrap();
     sk.add_line_pts(ids[3], ids[0], None).unwrap();
     let (a, b) = (sk.add_point(v(10.0, -5.0), None).unwrap(), sk.add_point(v(10.0, 20.0), None).unwrap());
     sk.add_line_pts(a, b, None).unwrap();
@@ -1033,7 +1033,7 @@ fn a_degree_nine_control_spline_stays_exact_and_closes_a_profile_exactly() {
     let bump =
         [v(0.0, 0.0), v(1.5, 4.0), v(3.0, 7.0), v(5.0, 9.5), v(7.5, 11.0), v(12.5, 11.0), v(15.0, 9.5), v(17.0, 7.0), v(18.5, 4.0), v(20.0, 0.0)];
     let pts: Vec<usize> = bump.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
-    let s = sk.add_curve(CurveKind::Spline { pts: pts.clone(), control: true, degree: 9, periodic: false }, None).unwrap();
+    let s = sk.add_curve(CurveKind::Spline { pts: pts.clone(), control: true, degree: 9, periodic: false, nurbs: None }, None).unwrap();
     let pieces = sk.exact_pieces(s);
     assert_eq!(pieces.len(), 1, "{pieces:?}");
     let Seg2::Bezier { n, p } = pieces[0] else { panic!("{:?}", pieces[0]) };
@@ -1068,7 +1068,7 @@ fn a_degree_nine_control_spline_stays_exact_and_closes_a_profile_exactly() {
     // A degree above the cap is still refused.
     let mut high: Vec<usize> = pts.clone();
     high.push(sk.add_point(v(21.0, -2.0), None).unwrap());
-    assert!(sk.add_curve(CurveKind::Spline { pts: high, control: true, degree: 10, periodic: false }, None).is_err());
+    assert!(sk.add_curve(CurveKind::Spline { pts: high, control: true, degree: 10, periodic: false, nurbs: None }, None).is_err());
 }
 
 /// #755: a line drawn through a junction of a loop, but 2e-5 off it, still splits the loop. The
@@ -1294,4 +1294,68 @@ fn bounds_reach_the_extremes_of_circles_and_arcs() {
     sk.add_arc(v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0), [None; 3], None).unwrap();
     let (lo, hi) = sk.bounds().unwrap();
     assert!(lo.dist(v(0.0, 0.0)) < 1e-9 && hi.dist(v(10.0, 10.0)) < 1e-9, "{lo:?} {hi:?}");
+}
+
+/// A control spline with its own knots and weights (a projected free-form edge): its exact pieces
+/// are its knot spans, a rational quadratic's are conics, its points follow its knots, it reads
+/// back from a saved design the same, and knots that don't fit it are refused.
+#[test]
+fn a_spline_with_its_own_knots_is_its_spans_exactly() {
+    let mut sk = Sketch::new();
+    // Two cubic Béziers end to end (the joint knot three times), the second twice as long in
+    // parameter: (0,0) (1,2) (2,2) (3,0) then (3,0) (4,-2) (5,-2) (6,0).
+    let ctrl = [v(0.0, 0.0), v(1.0, 2.0), v(2.0, 2.0), v(3.0, 0.0), v(4.0, -2.0), v(5.0, -2.0), v(6.0, 0.0)];
+    let nurbs = Nurbs { knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 3.0], weights: Vec::new() };
+    let pts: Vec<usize> = ctrl.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
+    let kind = CurveKind::Spline { pts: pts.clone(), control: true, degree: 3, periodic: false, nurbs: Some(nurbs.clone()) };
+    let s = sk.add_curve(kind.clone(), None).unwrap();
+    let pieces = sk.exact_pieces(s);
+    assert_eq!(pieces.len(), 2, "{pieces:?}");
+    let Seg2::Cubic { p0, p1, p2, p3 } = pieces[1] else { panic!("{:?}", pieces[1]) };
+    for (got, want) in [(p0, ctrl[3]), (p1, ctrl[4]), (p2, ctrl[5]), (p3, ctrl[6])] {
+        assert!(got.dist(want) < 1e-12, "{got:?} {want:?}");
+    }
+    // t runs over the knots: a third of the way is the joint, where the uniform spline over the
+    // same points would not be.
+    assert!(nurbs.point(&ctrl, 3, 1.0 / 3.0).unwrap().dist(ctrl[3]) < 1e-12);
+    assert!(crate::curves::spline_point(&ctrl, true, 3, 1.0 / 3.0).dist(ctrl[3]) > 1e-3);
+    let back = nurbs.reversed();
+    let rev: Vec<Vec2> = ctrl.iter().rev().copied().collect();
+    for k in 0..=12 {
+        let t = k as f64 / 12.0;
+        assert!(nurbs.point(&ctrl, 3, t).unwrap().dist(back.point(&rev, 3, 1.0 - t).unwrap()) < 1e-12, "t={t}");
+    }
+    let poly = sk.polyline(s);
+    assert!(poly.first().unwrap().dist(ctrl[0]) < 1e-12 && poly.last().unwrap().dist(ctrl[6]) < 1e-12);
+    // Saved and read back: the same curve.
+    let json = serde_json::to_string(&kind).unwrap();
+    assert_eq!(serde_json::from_str::<CurveKind>(&json).unwrap(), kind);
+    // A quarter circle of radius 2 as a rational quadratic: one conic, its middle point on the circle.
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let quarter = Nurbs { knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], weights: vec![1.0, w, 1.0] };
+    let arc = [v(2.0, 0.0), v(2.0, 2.0), v(0.0, 2.0)];
+    let [Seg2::Conic { w: cw, .. }] = quarter.segs(&arc, 2).unwrap()[..] else { panic!("conic") };
+    assert!((cw - w).abs() < 1e-12);
+    assert!((quarter.point(&arc, 2, 0.5).unwrap().len() - 2.0).abs() < 1e-12);
+    // Knots that don't fit: the wrong count, not clamped, decreasing, not finite, an interior knot
+    // past the degree, a weight that isn't positive; and knots on a fit spline.
+    let bad = [
+        Nurbs { knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0], weights: Vec::new() },
+        Nurbs { knots: vec![0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 3.0], weights: Vec::new() },
+        Nurbs { knots: vec![0.0, 0.0, 0.0, 0.0, 2.0, 1.0, 1.0, 3.0, 3.0, 3.0, 3.0], weights: Vec::new() },
+        Nurbs { knots: vec![0.0, 0.0, 0.0, 0.0, f64::NAN, 1.0, 1.0, 3.0, 3.0, 3.0, 3.0], weights: Vec::new() },
+        Nurbs { knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 3.0], weights: Vec::new() },
+        Nurbs { knots: nurbs.knots.clone(), weights: vec![1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0] },
+    ];
+    for (i, k) in bad.iter().enumerate() {
+        assert!(k.check(ctrl.len(), 3).is_err(), "{i}");
+        assert!(
+            sk.add_curve(CurveKind::Spline { pts: pts.clone(), control: true, degree: 3, periodic: false, nurbs: Some(k.clone()) }, None).is_err(),
+            "{i}"
+        );
+        assert!(k.point(&ctrl, 3, 0.5).is_none() && k.segs(&ctrl, 3).is_none() && k.polyline(&ctrl, 3).is_empty(), "{i}");
+    }
+    let fourfold = Nurbs { knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 3.0], weights: Vec::new() };
+    assert!(fourfold.check(8, 3).is_err());
+    assert!(sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: false, nurbs: Some(nurbs) }, None).is_err());
 }

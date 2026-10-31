@@ -299,12 +299,144 @@ pub(crate) fn segment(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> O
     read(run, plane, tol, work, false)
 }
 
-/// `run` in `plane` exactly, for a sketch to project it: as [`segment`], and a curve of several
-/// Bézier spans (a chain of a font's curves, a spline through points) as one segment per span,
-/// each the line, conic or Bézier it is. `None` when the edge doesn't lie in a plane parallel to
-/// `plane` or isn't read exactly.
+/// `run` in `plane` exactly as segments: as [`segment`], and a curve of several Bézier spans
+/// (a chain of a font's curves, a spline through points) as one segment per span, each the
+/// line, conic or Bézier it is, for a planar region's outline. `None` when the edge doesn't lie
+/// in a plane parallel to `plane` or isn't read exactly.
 pub(crate) fn projected(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<Vec<Seg2>> {
     read(run, plane, tol, work, true)
+}
+
+/// A free-form curve of several Bézier spans in a plane, as the one B-spline it is: its degree,
+/// clamped knots, control points in the plane's coordinates and weights (none: a polynomial
+/// B-spline). Its first and last control points are its ends.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlanarSpline {
+    pub degree: usize,
+    pub knots: Vec<f64>,
+    pub points: Vec<Vec2>,
+    pub weights: Vec<f64>,
+}
+
+/// One piece of an edge read exactly in a plane: a line, arc or single free-form segment, or a
+/// free-form curve of several spans as one [`PlanarSpline`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum PlanarPiece {
+    Seg(Seg2),
+    Spline(PlanarSpline),
+}
+
+/// `run` in `plane` exactly, for a sketch to project it: as [`segment`], and a curve of several
+/// Bézier spans (a spline edge, an elliptical arc past a quarter turn, a chain of a font's
+/// curves) as the one B-spline it is, its knots and weights its own. `None` when the edge
+/// doesn't lie in a plane parallel to `plane` or isn't read exactly.
+pub(crate) fn projected_curves(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<Vec<PlanarPiece>> {
+    if let Some(segs) = read(run, plane, tol, work, false) {
+        return Some(segs.into_iter().map(PlanarPiece::Seg).collect());
+    }
+    one_spline(run, plane, tol, work).map(|s| vec![PlanarPiece::Spline(s)])
+}
+
+/// `run`'s spline (or ellipse) over its interval, in the direction it runs, as one clamped
+/// B-spline in `plane`: the piece of the curve between the interval's ends (Boehm insertion,
+/// exact up to rounding), its control points read in the plane. `None` when a control point lies
+/// off the level of the curve's start (the curve is not in a plane parallel to `plane`), the
+/// ends miss the run's ends, or the work budget runs out.
+fn one_spline(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<PlanarSpline> {
+    if !tol.is_finite() || tol <= 0. || run.interval[1] <= run.interval[0] {
+        return None;
+    }
+    charge(work, 1)?;
+    let [t0, t1] = run.interval;
+    let clamped = |knots: &[f64], ctrl: Vec<HPoint>, work: &mut usize| -> Option<(usize, Vec<f64>, Vec<HPoint>)> {
+        let degree = knots.len().checked_sub(ctrl.len() + 1)?;
+        if !(1..=MAX_DEGREE).contains(&degree) || ctrl.len() > MAX_CONTROLS || knots.len() > 8192 {
+            return None;
+        }
+        if knots.iter().any(|t| !t.is_finite()) || knots.windows(2).any(|w| w[1] < w[0]) || ctrl.iter().any(|p| !p.is_finite()) {
+            return None;
+        }
+        charge(work, ctrl.len().checked_mul(degree + 1)?.checked_mul(2)?)?;
+        let (k, c) = bspline::segment(degree, knots, &ctrl, t0, t1).ok()?;
+        Some((degree, k, c))
+    };
+    // In the curve's own direction, then the way the run goes.
+    let (degree, knots, ctrl) = match run.curve {
+        Curve::Spline { knots, points } => along(run, clamped(knots, points.iter().map(|p| HPoint::weighted(v3(*p), 1.0)).collect(), work)?)?,
+        Curve::RationalSpline { knots, homogeneous } => {
+            along(run, clamped(knots, homogeneous.iter().map(|p| HPoint { x: p[0], y: p[1], z: p[2], w: p[3] }).collect(), work)?)?
+        }
+        // Rational quadratic spans, already the way the run goes, joined: each joint knot twice.
+        Curve::Ellipse { .. } => {
+            let spans = spans_of(run, work)?;
+            let mut knots = vec![0.0; 3];
+            let mut ctrl: Vec<HPoint> = Vec::new();
+            for (i, span) in spans.iter().enumerate() {
+                let [p0, p1, p2] = span.as_slice() else { return None };
+                if let Some(last) = ctrl.last() {
+                    if (last.w - p0.w).abs() > 1e-12 * last.w.abs().max(p0.w.abs()) {
+                        return None;
+                    }
+                } else {
+                    ctrl.push(*p0);
+                }
+                ctrl.extend([*p1, *p2]);
+                knots.extend([(i + 1) as f64; 2]);
+            }
+            knots.push(spans.len() as f64);
+            (2, knots, ctrl)
+        }
+        _ => return None,
+    };
+    let max_w = ctrl.iter().map(|p| p.w).fold(0., f64::max);
+    if !(max_w.is_finite() && max_w > 0.) {
+        return None;
+    }
+    let (Some(first), Some(last)) = (ctrl.first().and_then(|p| p.project()), ctrl.last().and_then(|p| p.project())) else { return None };
+    let level = plane.height(first);
+    let (a, b) = (plane.to_local(first), plane.to_local(last));
+    if first.dist(run.ends[0]) > tol || last.dist(run.ends[1]) > tol {
+        return None;
+    }
+    let mut points = Vec::with_capacity(ctrl.len());
+    let mut weights = Vec::with_capacity(ctrl.len());
+    for p in &ctrl {
+        if p.w / max_w < 1e-12 {
+            return None;
+        }
+        let v = p.project()?;
+        let error = (v.x.abs() + v.y.abs() + v.z.abs() + plane.origin.len()) * f64::EPSILON * 256.;
+        if (plane.height(v) - level).abs() + error > tol || error > tol * 0.1 {
+            return None;
+        }
+        let local = plane.to_local(v);
+        if !(local.x.is_finite() && local.y.is_finite()) {
+            return None;
+        }
+        points.push(local);
+        weights.push(p.w / max_w);
+    }
+    // The ends exactly where the curve ends.
+    if let Some(p) = points.first_mut() {
+        *p = a;
+    }
+    if let Some(p) = points.last_mut() {
+        *p = b;
+    }
+    if weights.iter().all(|w| (w - 1.).abs() <= 1e-12) {
+        weights.clear();
+    }
+    Some(PlanarSpline { degree, knots, points, weights })
+}
+
+/// A clamped B-spline `(degree, knots, control points)` run the way `run` goes: as it is
+/// forward, its knots mirrored and its control points reversed back.
+fn along(run: &Run, (degree, knots, ctrl): (usize, Vec<f64>, Vec<HPoint>)) -> Option<(usize, Vec<f64>, Vec<HPoint>)> {
+    if run.forward {
+        return Some((degree, knots, ctrl));
+    }
+    let sum = knots.first()? + knots.last()?;
+    Some((degree, knots.iter().rev().map(|k| sum - k).collect(), ctrl.into_iter().rev().collect()))
 }
 
 fn read(run: &Run, plane: &Plane, tol: f64, work: &mut usize, each_span: bool) -> Option<Vec<Seg2>> {

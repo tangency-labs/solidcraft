@@ -503,11 +503,33 @@ fn sketch_curves(ss: &crate::eval::SolvedSketch, ci: usize) -> Vec<WireCurve> {
 }
 
 /// Edges `edges` of `body` (indices into its mesh's `edges`) on `plane` as their exact curves:
-/// lines, circles and arcs, and the Bézier pieces of a free-form curve. `None` for an edge that
-/// doesn't lie in a plane parallel to `plane` or isn't read exactly (a mesh body's): it is
+/// lines, circles and arcs, and a free-form curve as the one spline it is, its knots and weights
+/// its own. `None` for an edge that doesn't lie in a plane parallel to `plane`, isn't read
+/// exactly (a mesh body's) or is a spline no sketch holds (past degree 9 or 500 points): it is
 /// fitted to its polyline instead.
 fn exact_edges(body: &crate::ModelBody, plane: &Plane, edges: &[usize]) -> Vec<Option<Vec<LinkGeom>>> {
-    body.body.planar_edges(plane, edges).into_iter().map(|segs| segs?.iter().map(link_geom).collect()).collect()
+    body.body
+        .planar_edges(plane, edges)
+        .into_iter()
+        .map(|pieces| {
+            pieces?
+                .iter()
+                .map(|piece| match piece {
+                    crate::kernel::PlanarPiece::Seg(s) => link_geom(s),
+                    crate::kernel::PlanarPiece::Spline(s) => link_spline(s),
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// A free-form edge's B-spline as the control spline that is the same curve, with its own knots
+/// and weights. `None` for one a sketch can't hold.
+fn link_spline(s: &crate::kernel::PlanarSpline) -> Option<LinkGeom> {
+    let degree = u8::try_from(s.degree).ok()?;
+    let nurbs = solidcraft_sketch::Nurbs { knots: s.knots.clone(), weights: s.weights.clone() };
+    nurbs.check(s.points.len(), degree).ok()?;
+    Some(LinkGeom::Spline { pts: s.points.clone(), control: true, degree, periodic: false, nurbs: Some(nurbs) })
 }
 
 /// `edges` of `body` projected on `plane`: each exactly ([`exact_edges`]) or fitted to its
@@ -549,7 +571,16 @@ fn at_vertices(body: &crate::ModelBody, mesh: &Mesh, plane: &Plane, e: usize, g:
     for v in [plane.to_local(*first), plane.to_local(*last)] {
         let mut best: Option<(f64, &mut Vec2)> = None;
         for piece in g.iter_mut() {
-            if let LinkGeom::Line(a, b) | LinkGeom::Arc { a, b, .. } | LinkGeom::Conic { a, b, .. } = piece {
+            let ends = match piece {
+                LinkGeom::Line(a, b) | LinkGeom::Arc { a, b, .. } | LinkGeom::Conic { a, b, .. } => Some((a, b)),
+                // A control spline's end points are its ends.
+                LinkGeom::Spline { pts, control: true, periodic: false, .. } => match pts.as_mut_slice() {
+                    [a, .., b] => Some((a, b)),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some((a, b)) = ends {
                 for p in [a, b] {
                     let d = p.dist(v);
                     if d <= tol && best.as_ref().is_none_or(|(bd, _)| d < *bd) {
@@ -587,8 +618,8 @@ fn link_geom(s: &Seg2) -> Option<LinkGeom> {
             LinkGeom::Arc { c: center, a, b }
         }
         Seg2::Conic { a, apex, b, w } => LinkGeom::Conic { a, apex, b, rho: w / (1. + w) },
-        Seg2::Cubic { p0, p1, p2, p3 } => LinkGeom::Spline { pts: vec![p0, p1, p2, p3], control: true, degree: 3, periodic: false },
-        Seg2::Bezier { n, p } => LinkGeom::Spline { pts: p.get(..=usize::from(n))?.to_vec(), control: true, degree: n, periodic: false },
+        Seg2::Cubic { p0, p1, p2, p3 } => LinkGeom::Spline { pts: vec![p0, p1, p2, p3], control: true, degree: 3, periodic: false, nurbs: None },
+        Seg2::Bezier { n, p } => LinkGeom::Spline { pts: p.get(..=usize::from(n))?.to_vec(), control: true, degree: n, periodic: false, nurbs: None },
     })
 }
 
@@ -1088,9 +1119,10 @@ fn project_sketch_curve(sk: &Sketch, from: &Plane, ci: usize, to: &Plane) -> Vec
             (Some(c), Some(m)) => vec![LinkGeom::Ellipse { c: map(c), major: map(m), minor: *r }],
             _ => Vec::new(),
         },
-        Some(CurveKind::Spline { pts, control, degree, periodic }) if parallel => {
+        Some(CurveKind::Spline { pts, control, degree, periodic, nurbs }) if parallel => {
             let p: Option<Vec<Vec2>> = pts.iter().map(|q| sk.point(*q).map(map)).collect();
-            p.map(|pts| vec![LinkGeom::Spline { pts, control: *control, degree: *degree, periodic: *periodic }]).unwrap_or_default()
+            p.map(|pts| vec![LinkGeom::Spline { pts, control: *control, degree: *degree, periodic: *periodic, nurbs: nurbs.clone() }])
+                .unwrap_or_default()
         }
         Some(CurveKind::Conic { a, b, apex, rho }) if parallel => match (sk.point(*a), sk.point(*apex), sk.point(*b)) {
             (Some(a), Some(x), Some(b)) => vec![LinkGeom::Conic { a: map(a), apex: map(x), b: map(b), rho: *rho }],
@@ -1206,7 +1238,7 @@ fn as_spline(pts: &[Vec2], tol: f64) -> Option<LinkGeom> {
                 <= tol
         });
         if ok {
-            return Some(LinkGeom::Spline { pts: fit, control: false, degree: 3, periodic: false });
+            return Some(LinkGeom::Spline { pts: fit, control: false, degree: 3, periodic: false, nurbs: None });
         }
     }
     None

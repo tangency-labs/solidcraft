@@ -676,6 +676,7 @@ pub fn read(s: &str) -> Result<Document> {
             sketch.validate_wires().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_patterns().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_periodic_splines().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+            sketch.validate_spline_knots().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
         }
         if let crate::FeatureKind::BodyTransfer { from, to, .. } = &feature.kind
             && [from, to].into_iter().any(|id| !component_ids.contains(id))
@@ -1811,7 +1812,7 @@ mod tests {
         let first = pts[0];
         let neighbor = pts[1];
         let closing = pts[3];
-        sketch.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true }, None).unwrap();
+        sketch.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, nurbs: None }, None).unwrap();
         let mut document = Document::new("periodic file validation");
         document.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
         assert_eq!(read(&document.to_json()).unwrap(), document);

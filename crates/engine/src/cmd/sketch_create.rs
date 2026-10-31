@@ -505,7 +505,7 @@ fn blend(s: &mut Session, p: &Value) -> Result<Value> {
         let (sp, cons) = if order <= 1 {
             let c1 = sk.add_point(qa + ta * (l / 3.0), None)?;
             let c2 = sk.add_point(qb + tb * (l / 3.0), None)?;
-            let sp = sk.add_curve(CurveKind::Spline { pts: vec![pa, c1, c2, pb], control: true, degree: 3, periodic: false }, None)?;
+            let sp = sk.add_curve(CurveKind::Spline { pts: vec![pa, c1, c2, pb], control: true, degree: 3, periodic: false, nurbs: None }, None)?;
             let cons = vec![add_c(sk, ConstraintKind::Tangent { a: ca, b: sp })?, add_c(sk, ConstraintKind::Tangent { a: cb, b: sp })?];
             (sp, cons)
         } else {
@@ -527,7 +527,7 @@ fn blend(s: &mut Session, p: &Value) -> Result<Value> {
                 });
             }
             let degree = u8::try_from(cps.len().saturating_sub(1)).map_err(|_| bad(cmd, "the blend curve needs too many control points"))?;
-            let sp = sk.add_curve(CurveKind::Spline { pts, control: true, degree, periodic: false }, None)?;
+            let sp = sk.add_curve(CurveKind::Spline { pts, control: true, degree, periodic: false, nurbs: None }, None)?;
             (sp, Vec::new())
         };
         solve_new_only(sk, first_new);
@@ -655,7 +655,7 @@ fn spline(s: &mut Session, p: &Value, cmd: &str, control: bool, degree: u8) -> R
         {
             pts.push(*pts.first().ok_or_else(|| bad(cmd, "missing first point"))?);
         }
-        let c = sk.add_curve(CurveKind::Spline { pts, control, degree, periodic }, None)?;
+        let c = sk.add_curve(CurveKind::Spline { pts, control, degree, periodic, nurbs: None }, None)?;
         mark_construction(sk, &[c], p);
         Ok((ids_of(sk, &[c]), Vec::new()))
     })?;
@@ -1344,13 +1344,13 @@ mod blend_tests {
         let mut broken = solidcraft_sketch::Sketch::new();
         let p0 = broken.add_point(Vec2::new(1.0, 1.0), None).unwrap();
         let p1 = broken.add_point(Vec2::ZERO, None).unwrap();
-        let l = broken.add_curve(CurveKind::Spline { pts: vec![p1, p0], control: true, degree: 1, periodic: false }, None).unwrap();
+        let l = broken.add_curve(CurveKind::Spline { pts: vec![p1, p0], control: true, degree: 1, periodic: false, nurbs: None }, None).unwrap();
         broken.points[p0].pos = Vec2::new(f64::NAN, 4.0);
         assert!(super::joint_derivatives(&broken, l, p1, 2, true, "a", "sketch.blend_curve").is_err(), "non-finite geometry");
         let mut flat = solidcraft_sketch::Sketch::new();
         let q0 = flat.add_point(Vec2::new(3.0, 3.0), None).unwrap();
         let q1 = flat.add_point(Vec2::new(3.0, 3.0), None).unwrap();
-        let d = flat.add_curve(CurveKind::Spline { pts: vec![q0, q1], control: true, degree: 1, periodic: false }, None).unwrap();
+        let d = flat.add_curve(CurveKind::Spline { pts: vec![q0, q1], control: true, degree: 1, periodic: false, nurbs: None }, None).unwrap();
         let e = super::joint_derivatives(&flat, d, q0, 2, true, "a", "sketch.blend_curve").unwrap_err().to_string();
         assert!(e.contains("no tangent"), "{e}");
         assert!(solidcraft_geom::hermite_bezier(Vec2::ZERO, Vec2::X, &[Vec2::Y; 5], &[Vec2::Y; 5]).is_none(), "no order above g4");

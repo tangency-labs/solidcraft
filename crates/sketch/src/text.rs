@@ -53,7 +53,7 @@ impl Outline {
             self.line(to);
             return;
         }
-        self.out.push(LinkGeom::Spline { pts: vec![a, c1, c2, b], control: true, degree: 3, periodic: false });
+        self.out.push(LinkGeom::Spline { pts: vec![a, c1, c2, b], control: true, degree: 3, periodic: false, nurbs: None });
         self.cur = to;
     }
 }
