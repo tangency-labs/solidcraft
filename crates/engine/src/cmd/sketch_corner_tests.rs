@@ -297,3 +297,37 @@ fn a_fillet_of_a_nearly_straight_or_folded_corner_with_dimensions_does_not_panic
         assert!(sk(&s).points.iter().all(|p| p.pos.is_finite()));
     }
 }
+
+/// Two rectangles drawn apart, each with a corner point of its own at one place (both held on the
+/// origin): the two lines meeting there make one corner, and rounding it joins the two outlines
+/// into one instead of refusing that the lines share no corner point.
+#[test]
+fn a_fillet_joins_two_profiles_that_have_a_corner_point_each_at_one_place() {
+    use std::f64::consts::PI;
+    let rectangles = || {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-26.2, -18.8], "p1": [0, 0]}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [24.8, 27.8]}));
+        run(&mut s, "sketch.constraint.coincident", json!({"a": "p3", "b": "origin"}));
+        run(&mut s, "sketch.constraint.coincident", json!({"a": "p5", "b": "origin"}));
+        s
+    };
+    let mut s = rectangles();
+    let k = sk(&s);
+    let at_origin = k.points.iter().filter(|p| p.pos.dist(solidcraft_geom::Vec2::ZERO) < 1e-9).count();
+    assert_eq!(at_origin, 3, "the origin and a corner point of each rectangle: {:?}", k.points.iter().map(|p| &p.id).collect::<Vec<_>>());
+    let union = 26.2 * 18.8 + 24.8 * 27.8;
+    let r = 5.0;
+    let f = run(&mut s, "sketch.fillet", json!({"a": "l2", "b": "l5", "radius": r}));
+    assert!(solved(&s), "{f}");
+    assert_eq!(s.model.state().sketch(s.active_sketch.unwrap()).unwrap().profiles.len(), 1, "one outline round both rectangles: {f}");
+    // The round fills the neck between the two rectangles, so the outline gains that sliver.
+    let expected = union + r * r * (1.0 - PI / 4.0);
+    assert!((area(&s) - expected).abs() < 1e-6, "{} != {expected}", area(&s));
+    // A chamfer joins them the same way.
+    let mut s = rectangles();
+    run(&mut s, "sketch.chamfer.equal_distance", json!({"a": "l2", "b": "l5", "distance": 4}));
+    assert!(solved(&s));
+    assert_eq!(s.model.state().sketch(s.active_sketch.unwrap()).unwrap().profiles.len(), 1);
+    assert!((area(&s) - (union + 8.0)).abs() < 1e-6, "{} != {}", area(&s), union + 8.0);
+}

@@ -138,7 +138,7 @@ pub enum Mod {
     /// angle). `size` is the radius or the first distance, `distance2` the second distance and
     /// `angle` the angle from the first line. `flip` names the two lines in the other order, so
     /// the first distance lands on the other leg of the corner.
-    Corner { chamfer: bool, ctype: usize, size: String, distance2: String, angle: String, flip: bool },
+    Corner { chamfer: bool, ctype: usize, size: String, distance2: String, angle: String },
     /// `sketch.equation_curve` (or `.edit` on the curve the window's `curve` extra names): the
     /// form (an index into [`EQUATION_FORMS`]), x(t) and y(t) (or y(x)), the variable's range and
     /// how far the curve may stray from the formulas.
@@ -221,7 +221,6 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         size: crate::dialogs::length_default(&app.session, "2"),
         distance2: crate::dialogs::length_default(&app.session, "2"),
         angle: "45 deg".into(),
-        flip: false,
     };
     let k = match id {
         "sketch.scale" => Mod::Scale { factor: "2".into() },
@@ -324,6 +323,15 @@ pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) ->
         }
         _ => d.active_input()?.accepts(hit, Some(active), |_, _| false),
     }
+}
+
+/// The corner rows the Fillet or Chamfer window shows, from the picks in its input: the pairs of
+/// lines that make a corner, the lines still waiting for one, and points picked on their own.
+pub(crate) fn dialog_rows(s: &solidcraft_engine::Session, d: &Dialog) -> Vec<crate::sketch_corner_rows::Row> {
+    let Some(sid) = s.active_sketch else { return Vec::new() };
+    let state = s.world_state();
+    let Some(ss) = state.sketch(sid) else { return Vec::new() };
+    crate::sketch_corner_rows::rows(&ss.sketch, items(&d.inputs, 0), &d.extra)
 }
 
 /// Reopen the same pattern window with its stored parameters. OK reaches the same engine
@@ -597,7 +605,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             enter |= number(ui, "Tolerance", tolerance);
             ui_kit::text(ui, crate::i18n::tr("ui.equation_note"), ui_kit::Text::Note("equation"));
         }
-        Mod::Corner { chamfer, ctype, size, distance2, angle, flip } => {
+        Mod::Corner { chamfer, ctype, size, distance2, angle } => {
             if *chamfer {
                 icons(ui, "Chamfer Type", &CHAMFER_TYPES, &CHAMFER_TYPE_ICONS, ctype);
             }
@@ -607,9 +615,6 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             }
             if *chamfer && *ctype == 2 {
                 enter |= number(ui, "Angle", angle);
-            }
-            if *chamfer && *ctype > 0 {
-                ui_kit::options(ui, "corner_options", &mut [("Flip", flip)]);
             }
         }
     }
@@ -804,22 +809,6 @@ fn length(app: &SolveApp, label: &str, text: &str) -> Result<f64, String> {
     }
     Ok(v)
 }
-/// The curve ids picked in input `i` (a corner's two lines, #1824).
-fn line_ids(inputs: &[SelInput], i: usize) -> Vec<String> {
-    items(inputs, i)
-        .iter()
-        .filter_map(|x| match x {
-            Sel::SketchCurve { id, .. } => Some(id.clone()),
-            _ => None,
-        })
-        .collect()
-}
-
-/// Corner point ids within the active sketch, including qualified script selections.
-fn corner_ids(app: &SolveApp, inputs: &[SelInput], i: usize) -> Vec<String> {
-    items(inputs, i).iter().filter_map(|sel| point_id(&app.session, sel).map(str::to_string)).collect()
-}
-
 /// A corner size evaluated against the document's parameters, which every corner command needs
 /// to be strictly positive. A bare number means the design's units for a length and degrees for
 /// an angle, as every other typed sketch value does. `value` above is the Move window's reading
@@ -833,23 +822,6 @@ fn corner_size(app: &SolveApp, label: &str, text: &str, kind: ValueKind) -> Resu
         return Err(format!("{label} must be a positive number"));
     }
     Ok(v)
-}
-
-/// The corner as a chamfer command takes it. Unflipped it is the point itself, and the command
-/// resolves the two lines in curve order. Flipped it names those two lines in the other order,
-/// so `distance` applies to the other leg.
-fn corner_ref(app: &SolveApp, point: &str, flip: bool) -> Result<Value, String> {
-    if !flip {
-        return Ok(json!({ "point": point }));
-    }
-    let gone = || "that corner is no longer in the sketch".to_string();
-    let sketch = app.session.active_sketch.ok_or("open a sketch first")?;
-    let state = app.session.world_state();
-    let sk = &state.sketch(sketch).ok_or_else(gone)?.sketch;
-    let index = sk.resolve_point(point).ok_or_else(gone)?;
-    let (a, b) = crate::sketch_tools::corner_curves(sk, index, false).ok_or("a chamfer needs a corner of exactly two lines")?;
-    let id = |c: usize| sk.curves.get(c).map(|x| x.id.clone()).ok_or_else(gone);
-    Ok(json!({"a": id(b)?, "b": id(a)?}))
 }
 
 /// A typed total angle as the command wants it, in degrees. A bare number means degrees, as a
@@ -1029,42 +1001,61 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             )
         }
         Mod::Corner { chamfer: false, size, .. } => {
-            let corners = corner_ids(app, inputs, 0);
-            let lines = line_ids(inputs, 0);
+            let Some(sid) = app.session.active_sketch else { return Err("open a sketch first".into()) };
+            let state = app.session.world_state();
+            let Some(ss) = state.sketch(sid) else { return Err("the sketch no longer exists".into()) };
+            let rows = crate::sketch_corner_rows::rows(&ss.sketch, items(inputs, 0), extra);
+            let mut points = Vec::new();
+            for row in rows.iter().filter(|row| row.enabled) {
+                let corner = crate::sketch_corner_rows::params(&ss.sketch, row);
+                if corner.as_object().is_some_and(|params| params.is_empty()) {
+                    return Err(format!("line `{}` needs a second line to make a corner", row.label()));
+                }
+                points.push(corner);
+            }
+            if points.is_empty() {
+                return Err("select the corners to round first".into());
+            }
             // The engine keeps its millimetre API; bare UI values use the design unit.
             // Keep expressions intact so the radius remains a driving dimension.
             let radius = crate::length_input::expression(&app.session.doc, size, ValueKind::Length);
-            match (corners.is_empty(), lines.as_slice()) {
-                (true, []) => return Err("select the corners to round first".into()),
-                (false, []) => ("sketch.fillet", json!({"points": corners, "radius": radius})),
-                // Two lines name their corner even where other lines end at its point (#1824).
-                (true, [a, b]) => ("sketch.fillet", json!({"a": a, "b": b, "radius": radius})),
-                _ => return Err("select corner points, or the two lines of one corner".into()),
-            }
+            return Ok(vec![("sketch.fillet".into(), json!({"points": points, "radius": radius}))]);
         }
-        Mod::Corner { ctype, size, distance2, angle, flip, .. } => {
-            let flipped = *flip && *ctype > 0;
-            let mut p = match (corner_ids(app, inputs, 0).as_slice(), line_ids(inputs, 0).as_slice()) {
-                ([point], []) => corner_ref(app, point, flipped)?,
-                // Flip swaps the lines, so `distance` applies to the other leg.
-                ([], [a, b]) if flipped => json!({"a": b, "b": a}),
-                ([], [a, b]) => json!({"a": a, "b": b}),
-                ([], []) => return Err("select the corner to cut first".into()),
-                _ => return Err("select one corner point, or the two lines of one corner".into()),
-            };
-            p["distance"] = json!(corner_size(app, size_label(true, *ctype), size, ValueKind::Length)?);
-            match ctype {
-                1 => {
-                    p["distance2"] = json!(corner_size(app, "Distance 2", distance2, ValueKind::Length)?);
-                    ("sketch.chamfer.two_distance", p)
-                }
-                2 => {
-                    // The command takes degrees; an evaluated angle is in radians.
-                    p["angle"] = json!(corner_size(app, "Angle", angle, ValueKind::Angle)?.to_degrees());
-                    ("sketch.chamfer.distance_angle", p)
-                }
-                _ => ("sketch.chamfer.equal_distance", p),
+        Mod::Corner { ctype, size, distance2, angle, .. } => {
+            let Some(sid) = app.session.active_sketch else { return Err("open a sketch first".into()) };
+            let state = app.session.world_state();
+            let Some(ss) = state.sketch(sid) else { return Err("the sketch no longer exists".into()) };
+            let rows = crate::sketch_corner_rows::rows(&ss.sketch, items(inputs, 0), extra);
+            if !rows.iter().any(|row| row.enabled) {
+                return Err("select the corner to cut first".into());
             }
+            let distance = corner_size(app, size_label(true, *ctype), size, ValueKind::Length)?;
+            let distance2 = if *ctype == 1 { Some(corner_size(app, "Distance 2", distance2, ValueKind::Length)?) } else { None };
+            // The command takes degrees; an evaluated angle is in radians.
+            let angle = if *ctype == 2 { Some(corner_size(app, "Angle", angle, ValueKind::Angle)?.to_degrees()) } else { None };
+            let cmd = match *ctype {
+                1 => "sketch.chamfer.two_distance",
+                2 => "sketch.chamfer.distance_angle",
+                _ => "sketch.chamfer.equal_distance",
+            };
+            // Each corner is its own command, with its own flip: the legs of one corner move
+            // without touching the others.
+            let mut commands = Vec::new();
+            for row in rows.iter().filter(|row| row.enabled) {
+                let mut p = crate::sketch_corner_rows::params(&ss.sketch, row);
+                if p.as_object().is_some_and(|params| params.is_empty()) {
+                    return Err(format!("line `{}` needs a second line to make a corner", row.label()));
+                }
+                p["distance"] = json!(distance);
+                if let Some(distance2) = distance2 {
+                    p["distance2"] = json!(distance2);
+                }
+                if let Some(angle) = angle {
+                    p["angle"] = json!(angle);
+                }
+                commands.push((cmd.to_string(), p));
+            }
+            return Ok(commands);
         }
         Mod::Equation { form, x, y, start, end, tolerance } => {
             let filled = |label: &str, text: &str| -> Result<String, String> {
@@ -1085,7 +1076,8 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
         }
     };
     if let Value::Object(m) = &mut params {
-        for (key, value) in extra {
+        // The corner rows keep their own state in the extras; it is not a command parameter.
+        for (key, value) in extra.iter().filter(|(key, _)| !key.starts_with("corner.")) {
             m.entry(key.clone()).or_insert_with(|| value.clone());
         }
     }

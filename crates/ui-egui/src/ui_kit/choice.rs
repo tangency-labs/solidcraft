@@ -413,6 +413,29 @@ pub(crate) fn toggle_icon(ui: &mut Ui, row: &str, label: &str, selected: &mut bo
     response
 }
 
+/// An on/off icon button inside a rectangle the caller placed, so rows keep their columns: the
+/// same state, hit target and accessible name as [`toggle_icon`].
+/// Tokens: `space_3, icon/fill, selected_bg, hover; inherited control surface tokens`.
+pub(crate) fn toggle_icon_at(ui: &mut Ui, rect: egui::Rect, row: &str, icon: &str, label: &str, selected: bool) -> egui::Response {
+    let t = Tokens::get();
+    let response = ui.interact(rect, ui.make_persistent_id(("toggle_icon", icon, label)), egui::Sense::click());
+    if response.clicked() {
+        response.request_focus();
+    }
+    // The state is drawn under the icon: a filled field while on, a hover wash while pointed at.
+    if selected {
+        ui.painter().rect_filled(rect, t.control_radius, t.selected_bg);
+        ui.painter().rect_stroke(rect, t.control_radius, egui::Stroke::new(1.0, t.accent), egui::StrokeKind::Inside);
+    } else if response.hovered() || response.has_focus() {
+        ui.painter().rect_filled(rect, t.control_radius, t.hover);
+    }
+    crate::icons::paint_icon(ui.painter(), rect.shrink(t.space_3), icon, f32::from(t.icon.a()) / 255.0);
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, crate::i18n::tr_label(label)));
+    crate::scenario::publish_handle(&format!("dialog:{row}:{label}"), rect.center());
+    crate::scenario::publish_rect(&format!("dialog:{row}:{label}"), rect);
+    response.on_hover_text(crate::i18n::tr_label(label))
+}
+
 #[cfg(test)]
 #[path = "choice_tests.rs"]
 mod tests;

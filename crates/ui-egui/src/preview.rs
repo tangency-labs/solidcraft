@@ -725,8 +725,10 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         .iter()
         .filter_map(|sketch| {
             let old = before.sketch(sketch.feature);
-            let old_curves =
-                old.into_iter().flat_map(|s| s.sketch.curves.iter().map(|c| (c.id.as_str(), c))).collect::<std::collections::HashMap<_, _>>();
+            let old_curves = old
+                .into_iter()
+                .flat_map(|s| s.sketch.curves.iter().map(|c| (c.id.as_str(), signature(&s.sketch, c))))
+                .collect::<std::collections::HashMap<_, _>>();
             let old_points =
                 old.into_iter().flat_map(|s| s.sketch.points.iter().map(|p| (p.id.as_str(), p.pos))).collect::<std::collections::HashMap<_, _>>();
             let indices = sketch
@@ -735,10 +737,7 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
                 .iter()
                 .enumerate()
                 .filter_map(|(index, curve)| {
-                    let unchanged = old_curves.get(curve.id.as_str()).is_some_and(|previous| {
-                        previous.kind == curve.kind
-                            && curve.kind.point_ids().iter().all(|i| old.and_then(|s| s.sketch.point(*i)) == sketch.sketch.point(*i))
-                    });
+                    let unchanged = old_curves.get(curve.id.as_str()).is_some_and(|previous| *previous == signature(&sketch.sketch, curve));
                     if unchanged { None } else { Some(index) }
                 })
                 .collect::<Vec<_>>();
@@ -753,6 +752,38 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
         })
         .collect();
     Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None }
+}
+
+/// A point's place, on a grid fine enough that only a moved point changes cell. The corner
+/// commands take points closer than a millionth of a millimetre as one place, and the preview
+/// compares where points are the same way.
+fn place(p: solidcraft_engine::geom::Vec2) -> (i64, i64) {
+    ((p.x * 1e6).round() as i64, (p.y * 1e6).round() as i64)
+}
+
+/// A curve as the preview compares it: its kind and shape, with where its points are rather than
+/// what they are called or numbered. A corner cut drops the sharp corner point unless something
+/// measures it, which renames every later point; the curves themselves are unchanged, and are not
+/// drawn as changed.
+fn signature(sketch: &solidcraft_engine::sketch::Sketch, curve: &solidcraft_engine::sketch::Curve) -> (&'static str, Vec<(i64, i64)>, Vec<String>) {
+    use solidcraft_engine::sketch::CurveKind;
+    let kind = match curve.kind {
+        CurveKind::Line { .. } => "line",
+        CurveKind::Circle { .. } => "circle",
+        CurveKind::Arc { .. } => "arc",
+        CurveKind::Ellipse { .. } => "ellipse",
+        CurveKind::Spline { .. } => "spline",
+        CurveKind::Conic { .. } => "conic",
+    };
+    let points = curve.kind.point_ids().into_iter().map(|i| sketch.points.get(i).map_or((i64::MIN, i64::MIN), |p| place(p.pos))).collect();
+    let shape = match &curve.kind {
+        CurveKind::Circle { r, .. } => vec![r.to_bits().to_string()],
+        CurveKind::Ellipse { r, .. } => vec![r.to_bits().to_string()],
+        CurveKind::Conic { rho, .. } => vec![rho.to_bits().to_string()],
+        CurveKind::Spline { control, degree, periodic, .. } => vec![control.to_string(), degree.to_string(), periodic.to_string()],
+        _ => Vec::new(),
+    };
+    (kind, points, shape)
 }
 
 /// Which of the `nf` faces of `m` are new surface, i.e. not on the old mesh? Each is decided by
@@ -871,6 +902,27 @@ pub fn point_triangle_dist(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
     if inside { h.abs() } else { [(a, b), (b, c), (c, a)].iter().map(|(u, v)| p.dist_to_segment(*u, *v)).fold(f64::INFINITY, f64::min) }
 }
 
+/// The lines the corner window holds in its rows: the feature of the sketch being edited and the
+/// ids it picked. A picked line stays shown as selected even when the corner it makes is turned
+/// off, so the row's Remove takes the cut away and not the selection.
+fn corner_picks(app: &SolveApp) -> Option<(u64, Vec<String>)> {
+    let d = app.dialog.as_ref()?;
+    if !matches!(d.kind, crate::dialogs::Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. })) {
+        return None;
+    }
+    let sid = app.session.active_sketch?;
+    let state = app.session.world_state();
+    let feature = state.sketch(sid)?.feature;
+    let ids = crate::selection::items(&d.inputs, 0)
+        .iter()
+        .filter_map(|item| match item {
+            solidcraft_engine::Sel::SketchCurve { id, .. } => Some(id.clone()),
+            _ => None,
+        })
+        .collect();
+    Some((feature, ids))
+}
+
 /// The same computed sketch preview is drawn over both native GPU and CPU viewports.
 pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewport::Proj) {
     if app.preview.rolled_back {
@@ -884,17 +936,41 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
         return;
     }
     let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);
+    let picked = corner_picks(app);
     let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
     let mut curves = 0;
+    let mut drawn: std::collections::HashSet<(u64, String)> = std::collections::HashSet::new();
     for preview in &app.preview.sketches {
         let sketch = &preview.sketch;
         for index in &preview.curves {
+            if let Some(curve) = sketch.sketch.curves.get(*index) {
+                drawn.insert((sketch.feature, curve.id.clone()));
+            }
             crate::tools::paint_curve(&sketch.sketch, *index, &sketch.plane, painter, proj, stroke, &mut budget);
             curves += 1;
         }
         for index in &preview.points {
             if let Some(point) = sketch.sketch.point(*index).and_then(|p| proj.to_screen(sketch.plane.to_world(p))) {
                 painter.circle_filled(point, 3.0, stroke.color);
+            }
+        }
+    }
+    // A line the corner window picked stays drawn as selected whether or not its corner is
+    // cut: turning a row off takes the cut away, not the selection. Painted from the model, so
+    // it shows even while no preview does (every row off draws nothing).
+    if let Some((feature, ids)) = &picked {
+        let state = app.session.world_state();
+        if let Some(ss) = app.session.active_sketch.and_then(|sid| state.sketch(sid))
+            && ss.feature == *feature
+        {
+            for id in ids {
+                if drawn.contains(&(*feature, id.clone())) {
+                    continue;
+                }
+                if let Some(index) = ss.sketch.curve_index(id) {
+                    crate::tools::paint_curve(&ss.sketch, index, &ss.plane, painter, proj, stroke, &mut budget);
+                    curves += 1;
+                }
             }
         }
     }
@@ -1145,6 +1221,26 @@ mod tests {
             assert_eq!(preview.curves, vec![0, 1]);
             assert!(preview.points.is_empty());
         }
+        Ok(())
+    }
+
+    /// A corner cut drops the sharp corner point unless something measures it, which renumbers
+    /// every later point. The preview names its points instead of numbering them, so a curve the
+    /// command left alone is not drawn as changed (the whole sketch used to turn green).
+    #[test]
+    fn a_corner_cut_previews_only_the_curves_it_changes() -> Result<(), Box<dyn std::error::Error>> {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"}))?;
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [0, 0], "p1": [20, 30]}))?;
+        let before = s.model.state();
+        let mut cut = Session::new(solidcraft_engine::doc::Document::from_json(&s.doc.to_json())?);
+        cut.active_sketch = s.active_sketch;
+        cut.execute("sketch.fillet", &json!({"a": "l1", "b": "l2", "radius": 5}))?;
+        let after = cut.model.state();
+        let built = build(&before, &after, colors());
+        assert_eq!(built.sketches.len(), 1);
+        // The arc and the two lines it shortened, and nothing else.
+        assert_eq!(built.sketches[0].curves.len(), 3, "{:?}", built.sketches[0].curves);
         Ok(())
     }
 
