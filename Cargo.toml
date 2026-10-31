@@ -31,6 +31,11 @@ solidcraft-space-mouse = { path = "crates/space-mouse" }
 solidcraft-mcp = { path = "crates/mcp" }
 solidcraft-derive = { path = "crates/derive" }
 solidcraft-3dx-client = { path = "crates/threedx-client" }
+# The Rust port of NVIDIA's SMLib (Apache-2.0), the kernel crates/smlib routes operations to once
+# they reach parity (crates/smlib/src/route.rs). Pinned; move the rev on its own commit. For a
+# local checkout, add `[patch."https://github.com/tangency-labs/solidcore"] solidcore = { path =
+# "../solidcore/crates/solidcore" }` to a `.cargo/config.toml` outside the repository.
+solidcore = { git = "https://github.com/tangency-labs/solidcore", rev = "9dde25e97b05dd986b2ba49b8a03622b3ed572f9" }
 
 # foundation
 thiserror = "2"

@@ -587,6 +587,15 @@ in THIRD-PARTY-LICENSES.txt; no images or artwork from that project are copied.
 The glTF test files are built by the tests themselves (crates/io/src/gltf_in_tests.rs,
 crates/engine/src/tests/gltf_import.rs); no third-party models are committed.
 
+## Geometry kernel crates
+
+| Crate | Used for | Licence |
+|---|---|---|
+| solidcore (https://github.com/tangency-labs/solidcore, pinned by rev in Cargo.toml) | the Rust port of NVIDIA's SMLib: the second backend behind crates/smlib, which routes an operation to it once it matches the C++ kernel on the kernel-case rig (crates/smlib/src/route.rs) | Apache-2.0 (its NOTICE credits NVIDIA's USD BRep) |
+
+Linked as a crate; no code from it is copied into SolidCraft. Its licence text and NOTICE go
+into THIRD-PARTY-LICENSES.txt when `main` regenerates it.
+
 ## FreeCAD and Rhino import library
 
 FreeCAD `.FCStd` and Rhino `.3dm` files are read with [cadmpeg](https://github.com/cadmpeg/cadmpeg)
@@ -602,6 +611,7 @@ copied into SolidCraft.
 | SolidCraft file | Original contribution | Licence |
 |---|---|---|
 | crates/ui-egui/src/viewport.rs (`nearest_quarter_turn`, `axis_view_orbit`) | N3MI-DG's [PR #101](https://github.com/bherbruck/solidcraft/pull/101): [minimal TOP/BOTTOM turns](https://github.com/bherbruck/solidcraft/commit/c28e780f52490784ef5886f094b9d3f6d10c3e3f) and [drag-to-orbit](https://github.com/bherbruck/solidcraft/commit/f30b30be6ecc4e2e6544a851243137c01a354934), adapted to the axis gizmo | MIT OR Apache-2.0 |
+| crates/smlib/src/core/offset.rs (`draft`: the tilted planes and `SmBrep::LocalOperation`, the tail of the capi's `draft_faces`) | ablasik's `draft` in `crates/smlib/src/ffi/rs_ops2.rs` on [ablasik/solidcraft `app/solidcore-backend-on-develop`](https://github.com/ablasik/solidcraft/blob/9c7e8e31565e1823f0591b58e2967351c32af13f/crates/smlib/src/ffi/rs_ops2.rs), adapted to `core::offset`'s errors and checks | MIT OR Apache-2.0 |
 
 ## Vendored third-party code
 

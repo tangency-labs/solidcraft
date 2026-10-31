@@ -17,6 +17,12 @@ fn box_end_to_end() {
 fn bad_arguments_are_errors() {
     assert_eq!(Brep::make_box([0.0; 3], [1.0, -1.0, 1.0]).unwrap_err(), Error::Argument);
     assert_eq!(Brep::make_box([f64::NAN, 0.0, 0.0], [1.0; 3]).unwrap_err(), Error::Argument);
+    // each kernel refuses a bad box the same way, whichever one `Op::Primitive` routes to
+    init().unwrap();
+    for size in [[1.0, -1.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, f64::NAN]] {
+        assert_eq!(core::make_box([0.0; 3], size).err(), Some(Error::Argument), "solidcore: {size:?}");
+        assert_eq!(ffi::make_box(&[0.0; 3], &size).map_err(error).err(), Some(Error::Argument), "C++: {size:?}");
+    }
     let b = Brep::make_box([0.0; 3], [1.0; 3]).unwrap();
     assert_eq!(b.volume(f64::INFINITY).unwrap_err(), Error::Argument);
 }
@@ -65,7 +71,11 @@ fn calls_from_many_threads_are_serialised() {
 #[test]
 fn without_native_every_call_says_so() {
     assert_eq!(init(), Err(Error::NotBuilt));
-    assert_eq!(Brep::make_box([0.0; 3], [1.0; 3]).unwrap_err(), Error::NotBuilt);
+    // the C API's own box, whatever `Op::Primitive` routes to
+    assert_eq!(ffi::make_box(&[0.0; 3], &[1.0; 3]).map_err(error).err(), Some(Error::NotBuilt));
+    // solidcore builds a box without SMLib; asking the C++ kernel about it says there is none
+    let b = core::make_box([0.0; 3], [1.0; 3]).map(Brep::made_core).unwrap();
+    assert_eq!(b.cpp().err(), Some(Error::NotBuilt));
     assert_eq!(current_call(), None);
 }
 
@@ -84,7 +94,9 @@ fn call_lines_give_the_function_and_the_c_api_time() {
 fn every_call_is_a_profiler_span_timed_by_the_c_api() {
     solidcraft_profile::set_enabled(true);
     let mark = solidcraft_profile::mark();
-    let b = Brep::make_box([0.0; 3], [1.0; 3]).unwrap();
+    // the C API's own box, whatever `Op::Primitive` routes to
+    crate::init().unwrap();
+    let b = ffi::make_box(&[0.0; 3], &[1.0; 3]).map(Brep::made).unwrap();
     let _ = b.volume(1e-7).unwrap();
     let r = mark.report();
     let names: Vec<&str> = r.rows.iter().filter(|r| r.category == "smlib").map(|r| r.name).collect();

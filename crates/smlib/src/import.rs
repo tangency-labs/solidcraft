@@ -650,15 +650,23 @@ mod analytic;
 mod tests;
 
 impl crate::Brep {
+    /// A body of the kernel [`crate::route::Op::Convert`] routes to, from flat arrays.
+    fn from_arrays(a: &Arrays) -> crate::Result<crate::Brep> {
+        match crate::route::Op::Convert.backend() {
+            crate::route::Backend::Smlib => crate::flat::Flat::from_arrays(a)?.import(),
+            crate::route::Backend::Solidcore => crate::core::from_arrays(a).map(crate::Brep::made_core),
+        }
+    }
+
     /// The SMLib B-rep of a schema 4 record. `trusted` as in [`arrays`].
     pub fn from_record(brep: &b::Brep, trusted: bool) -> crate::Result<crate::Brep> {
         let a = arrays(brep, trusted).map_err(crate::Error::Record)?;
-        crate::flat::Flat::from_arrays(&a)?.import()
+        crate::Brep::from_arrays(&a)
     }
 
     /// [`crate::Brep::from_record`] through [`arrays_keeping_splines`].
     pub fn from_record_keeping_splines(brep: &b::Brep, trusted: bool) -> crate::Result<crate::Brep> {
         let a = arrays_keeping_splines(brep, trusted).map_err(crate::Error::Record)?;
-        crate::flat::Flat::from_arrays(&a)?.import()
+        crate::Brep::from_arrays(&a)
     }
 }

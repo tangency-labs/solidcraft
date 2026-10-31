@@ -38,6 +38,13 @@ pub static COMMANDS: &[CommandSpec] = &[
              inside it; total counts its outermost run only. Recording also starts with SOLIDCRAFT_PROFILE=1, the CLI's \
              --profile and the app's preference; off, it costs nothing measurable. Read-only",
         ),
+    CommandSpec::new("diagnostics.kernel", "Geometry Kernel", kernel).icon("bug_report").noundo().params(
+        "choice?: routed | smlib | solidcore (sets which kernel answers: routed = each operation on the kernel the routing \
+         table gives it, smlib = the C++ SMLib kernel for all, solidcore = its Rust port for all; bodies already computed \
+         keep their results). SOLIDCRAFT_KERNEL, when set, wins over it, and SOLIDCRAFT_KERNEL_ROUTES (op=backend,...) \
+         moves single operations on top of both. Returns {choice, environment, overrides: {op: backend}, routes: [{op, \
+         route, backend}]}: route is the table's kernel for the operation, backend the one it runs on now",
+    ),
     CommandSpec::new("diagnostics.validation", "Validation", crate::checked!("diagnostics.validation", validation))
         .icon("bug_report")
         .noundo()
@@ -56,6 +63,19 @@ pub static COMMANDS: &[CommandSpec] = &[
          at the next start). Only when the SOLIDCRAFT_CRASH_TEST environment variable is set",
     ),
 ];
+
+fn kernel(_: &mut Session, p: &Value) -> Result<Value> {
+    use solidcraft_kernel::kernel_route as route;
+    // A choice of the wrong type is refused like an unknown one, not read as no choice.
+    if let Some(v) = p.get("choice").filter(|v| !v.is_null()) {
+        let c = v.as_str().and_then(route::Choice::from_id).ok_or_else(|| bad("diagnostics.kernel", "`choice` is routed, smlib or solidcore"))?;
+        route::set_choice(c);
+    }
+    let routes: Vec<Value> =
+        route::Op::ALL.iter().map(|op| json!({ "op": op.id(), "route": op.route().id(), "backend": op.backend().id() })).collect();
+    let overrides: serde_json::Map<String, Value> = route::overrides().iter().map(|(op, b)| (op.id().to_string(), json!(b.id()))).collect();
+    Ok(json!({ "choice": route::choice().id(), "environment": route::overridden(), "overrides": overrides, "routes": routes }))
+}
 
 fn dir(cmd: &str) -> Result<std::path::PathBuf> {
     crash::default_dir().ok_or_else(|| bad(cmd, "no crash folder on this system"))

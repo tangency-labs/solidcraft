@@ -50,37 +50,59 @@ use crate::{Brep, Result, error, ffi, init};
 impl Brep {
     /// A cylinder about +Z: base centre, radius and height (mm, > 0).
     pub fn make_cylinder(origin: [f64; 3], radius: f64, height: f64) -> Result<Brep> {
+        if crate::route::Op::Primitive.backend() == crate::route::Backend::Solidcore {
+            return crate::core::make_cylinder(origin, radius, height).map(Brep::made_core);
+        }
         init()?;
-        ffi::make_cylinder(&origin, radius, height).map(Brep).map_err(error)
+        ffi::make_cylinder(&origin, radius, height).map(Brep::made).map_err(error)
     }
 
     /// A sphere: centre and radius (mm, > 0).
     pub fn make_sphere(center: [f64; 3], radius: f64) -> Result<Brep> {
+        if crate::route::Op::Primitive.backend() == crate::route::Backend::Solidcore {
+            return crate::core::make_sphere(center, radius).map(Brep::made_core);
+        }
         init()?;
-        ffi::make_sphere(&center, radius).map(Brep).map_err(error)
+        ffi::make_sphere(&center, radius).map(Brep::made).map_err(error)
     }
 
     /// A cone or frustum about +Z: base centre, base radius (> 0), top radius (≥ 0, not the base
     /// radius) and height (> 0), in mm.
     pub fn make_cone(origin: [f64; 3], base_radius: f64, top_radius: f64, height: f64) -> Result<Brep> {
+        if crate::route::Op::Primitive.backend() == crate::route::Backend::Solidcore {
+            return crate::core::make_cone(origin, base_radius, top_radius, height).map(Brep::made_core);
+        }
         init()?;
-        ffi::make_cone(&origin, base_radius, top_radius, height).map(Brep).map_err(error)
+        ffi::make_cone(&origin, base_radius, top_radius, height).map(Brep::made).map_err(error)
     }
 
     /// A ring torus about +Z: centre, major radius > minor radius > 0 (mm).
     pub fn make_torus(center: [f64; 3], major_radius: f64, minor_radius: f64) -> Result<Brep> {
+        if crate::route::Op::Primitive.backend() == crate::route::Backend::Solidcore {
+            return crate::core::make_torus(center, major_radius, minor_radius).map(Brep::made_core);
+        }
         init()?;
-        ffi::make_torus(&center, major_radius, minor_radius).map(Brep).map_err(error)
+        ffi::make_torus(&center, major_radius, minor_radius).map(Brep::made).map_err(error)
     }
 
-    /// The flat arrays of this body that the mapping reads ([`Brep::export`]), copied out.
+    /// The flat arrays of this body that the mapping reads, from the kernel [`route::Op::Convert`]
+    /// routes to.
     pub fn arrays(&self) -> Result<Arrays> {
+        match crate::route::Op::Convert.backend() {
+            crate::route::Backend::Smlib => self.cpp_arrays(),
+            crate::route::Backend::Solidcore => crate::core::to_arrays(self.core()?),
+        }
+    }
+
+    /// The flat arrays of the C++ kernel's body ([`Brep::export`]), every one copied out: the
+    /// mapping reads some, solidcore's import ([`crate::core::from_arrays`]) all of them.
+    pub(crate) fn cpp_arrays(&self) -> Result<Arrays> {
         let f = self.export()?;
         let mut out = Arrays::default();
-        for &id in I64_IDS {
+        for id in REGION_SHELL_COUNT..=WIRE_EDGE_NURBS_FORM {
             out.ints.insert(id, f.get_i64(id)?);
         }
-        for &id in F64_IDS {
+        for id in TOLERANCE..=VERTEX_TOLERANCE {
             out.reals.insert(id, f.get_f64(id)?);
         }
         Ok(out)
@@ -149,90 +171,6 @@ fn unsupported(what: impl std::fmt::Display) -> ExportError {
 }
 
 // ---- The arrays (ids and kinds from `crate::flat`, as in capi/include/smlib.h) ------------
-
-/// The int64 arrays this mapping reads.
-const I64_IDS: &[i32] = &[
-    REGION_SHELL_COUNT,
-    REGION_TYPE,
-    SHELL_FACEUSE_COUNT,
-    SHELL_WIRE_EDGE_COUNT,
-    SHELL_POINT_TYPE,
-    FACEUSE_FACE,
-    FACEUSE_ORIENTATION,
-    FACE_LOOP_COUNT,
-    FACE_SURFACE_TYPE,
-    LOOP_EDGEUSE_COUNT,
-    LOOP_VERTEX,
-    EDGEUSE_EDGE,
-    EDGEUSE_ORIENTATION,
-    EDGEUSE_NEXT_RADIAL,
-    EDGEUSE_RADIAL_ENTRY,
-    EDGEUSE_NURBS_VERTEX_COUNT,
-    EDGEUSE_NURBS_ORDER,
-    EDGE_CURVE_TYPE,
-    EDGE_VERTICES,
-    EDGE_NURBS_VERTEX_COUNT,
-    EDGE_NURBS_ORDER,
-    FACE_NURBS_U_VERTEX_COUNT,
-    FACE_NURBS_V_VERTEX_COUNT,
-    FACE_NURBS_U_ORDER,
-    FACE_NURBS_V_ORDER,
-    FACE_NURBS_FORM,
-    EDGE_NURBS_FORM,
-];
-
-/// The double arrays this mapping reads.
-const F64_IDS: &[i32] = &[
-    TOLERANCE,
-    EXTENT,
-    FACE_RANGE,
-    EDGE_RANGE,
-    VERTEX_POSITION,
-    EDGE_NURBS_CVS,
-    EDGE_NURBS_KNOTS,
-    EDGE_NURBS_WEIGHTS,
-    EDGE_CIRCLE_CENTER,
-    EDGE_CIRCLE_AXIS,
-    EDGE_CIRCLE_REF_DIRECTION,
-    EDGE_CIRCLE_RADIUS,
-    EDGE_LINE_ORIGIN,
-    EDGE_LINE_DIRECTION,
-    EDGE_ELLIPSE_CENTER,
-    EDGE_ELLIPSE_AXIS,
-    EDGE_ELLIPSE_REF_DIRECTION,
-    EDGE_ELLIPSE_X_RADIUS,
-    EDGE_ELLIPSE_Y_RADIUS,
-    EDGEUSE_NURBS_CVS,
-    EDGEUSE_NURBS_KNOTS,
-    EDGEUSE_NURBS_WEIGHTS,
-    FACE_NURBS_CVS,
-    FACE_NURBS_U_KNOTS,
-    FACE_NURBS_V_KNOTS,
-    FACE_NURBS_WEIGHTS,
-    FACE_SPHERE_CENTER,
-    FACE_SPHERE_AXIS,
-    FACE_SPHERE_REF_DIRECTION,
-    FACE_SPHERE_RADIUS,
-    FACE_PLANE_ORIGIN,
-    FACE_PLANE_AXIS,
-    FACE_PLANE_REF_DIRECTION,
-    FACE_CYLINDER_ORIGIN,
-    FACE_CYLINDER_AXIS,
-    FACE_CYLINDER_REF_DIRECTION,
-    FACE_CYLINDER_RADIUS,
-    FACE_CONE_ORIGIN,
-    FACE_CONE_AXIS,
-    FACE_CONE_REF_DIRECTION,
-    FACE_CONE_RADIUS,
-    FACE_CONE_SEMI_ANGLE,
-    FACE_TORUS_ORIGIN,
-    FACE_TORUS_AXIS,
-    FACE_TORUS_REF_DIRECTION,
-    FACE_TORUS_MAJOR_RADIUS,
-    FACE_TORUS_MINOR_RADIUS,
-    EDGE_TOLERANCE,
-    VERTEX_TOLERANCE,
-];
 
 // The kind values as the arrays hold them (int64); a local item shadows the glob import.
 const SURFACE_NURBS: i64 = flat::SURFACE_NURBS as i64;
@@ -377,8 +315,9 @@ fn surfaces(flat: View, n_faces: usize) -> Res<Vec<(b::Surface, Option<b::Surfac
                     v3(flat.f(FACE_CONE_REF_DIRECTION), i, "cone")?,
                 );
                 let (radius, half) = (at(flat.f(FACE_CONE_RADIUS), i, "cone")?, at(flat.f(FACE_CONE_SEMI_ANGLE), i, "cone")?);
-                // SMLib's cone of semi-angle 0 is its cylinder.
-                if half == 0.0 {
+                // SMLib's cone of semi-angle 0 is its cylinder, and one within rounding of it (a thread's
+                // cone of 1e-13 comes out of the trims) is too: the portable record refuses it as a cone.
+                if half.abs() < 1e-12 {
                     b::Surface::Cylinder { frame: f, radius }
                 } else {
                     b::Surface::Cone { frame: f, radius_at_origin: radius, half_angle: half }

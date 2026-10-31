@@ -39,6 +39,7 @@ pub const FACE_NURBS_V_ORDER: i32 = 31;
 pub const SOURCE: i32 = 32;
 pub const FACE_NURBS_FORM: i32 = 33;
 pub const EDGE_NURBS_FORM: i32 = 34;
+pub const WIRE_EDGE_NURBS_FORM: i32 = 35;
 pub const TOLERANCE: i32 = 101;
 pub const EXTENT: i32 = 102;
 pub const FACE_RANGE: i32 = 103;
@@ -163,18 +164,21 @@ impl Flat {
     /// The SMLib B-rep these arrays describe (checked on the C side before SMLib sees them).
     pub fn import(&self) -> Result<Brep> {
         init()?;
-        ffi::flat::import(&self.0).map(Brep).map_err(error)
+        ffi::flat::import(&self.0).map(Brep::made).map_err(error)
     }
 }
 
 impl Brep {
     /// This body as flat arrays.
     pub fn export(&self) -> Result<Flat> {
-        ffi::flat::export(&self.0).map(Flat).map_err(error)
+        ffi::flat::export(self.cpp()?).map(Flat).map_err(error)
     }
 
     /// Whether SMLib finds this body one closed, manifold solid.
     pub fn is_manifold_solid(&self) -> Result<bool> {
-        ffi::flat::is_manifold_solid(&self.0).map_err(error)
+        if crate::route::Op::Measure.backend() == crate::route::Backend::Solidcore {
+            return crate::core::is_manifold_solid(self.core()?);
+        }
+        ffi::flat::is_manifold_solid(self.cpp()?).map_err(error)
     }
 }

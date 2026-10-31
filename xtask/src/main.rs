@@ -48,15 +48,25 @@ commands:
                   replay the reference tests (tests/oracle/*/recipe.json), compare with each
                   case's expected.json and write docs/oracle.md (--cli: a solidcraft-cli
                   already built, instead of cargo run --release)
-  kernel-cases [--area AREA] [--cli BIN] [--timeout S] [--jobs N] [--out DIR] [--known-failing FILE] [--validation MODE] [--coverage]
+  kernel-cases [--area AREA] [--cli BIN] [--timeout S] [--jobs N] [--out DIR] [--kernel K] [--route R] [--known-failing FILE] [--validation MODE] [--coverage]
                   the kernel regression rig: run every case in tests/kernel-cases/<area>/<id>/ on
                   SMLib (one process each, killed after --timeout, default 180 s), grade it against
                   the case's own answer and write docs/kernel-cases.md; DIR (default
                   target/kernel-cases) gets results.json and dumps/<area>-<case>/, the inputs of
-                  each failing SMLib call (--cli: a solidcraft-cli built with --features smlib)
+                  each failing SMLib call (--cli: a solidcraft-cli built with --features smlib);
+                  --kernel smlib|solidcore|both (default smlib) sets SOLIDCRAFT_KERNEL per case:
+                  solidcore keeps results.json, dumps/ and report.md in DIR/solidcore/ (not
+                  docs/kernel-cases.md); both runs each case on each, and also writes the side by
+                  side to docs/kernel-cases-backends.md and DIR/backends.json
+                  --route OP=solidcore[,...] (with --kernel solidcore|both): the solidcore side is
+                  SMLib with only those families on solidcore (SOLIDCRAFT_KERNEL=smlib plus
+                  SOLIDCRAFT_KERNEL_ROUTES), labelled solidcore[OP,...], into
+                  DIR/solidcore-OP[-OP...]/ with its backends.json and backends.md
                   --known-failing FILE: a regression gate instead of the report: fails on a case
                   that fails and FILE does not list, and on a listed case that passes
-                  (tests/kernel-cases/<area>/KNOWN_FAILING, CI's Kernel rig workflow)
+                  (tests/kernel-cases/<area>/KNOWN_FAILING, CI's Kernel rig workflow); it grades
+                  the SMLib side, so it needs --kernel smlib or both (with both, every side's
+                  results.json is saved, and no report or side by side is written)
                   --validation MODE: when SMLib's full check runs on the cases' features:
                   each_step, each_feature (the default) or off (solidcraft-cli kernel-cases
                   --validation=MODE); with --ladder too

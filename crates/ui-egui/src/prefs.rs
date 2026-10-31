@@ -33,6 +33,8 @@ use crate::ui_kit;
 use crate::viewport::NavMode;
 
 pub const UNITS: [&str; 5] = ["mm", "cm", "m", "in", "ft"];
+/// The Geometry kernel preference's choices, as `diagnostics.kernel` spells them.
+pub const KERNELS: [&str; 3] = ["routed", "smlib", "solidcore"];
 pub const OPENSCAD_NAV: &str = "openscad";
 pub const TOUCHPAD_NAV: &str = "touchpad";
 /// A mouse button that can drag the camera.
@@ -633,6 +635,10 @@ preference_settings! {
     /// Up/Down and the wheel over a focused value field step its plain number (`value_step`,
     /// #2320). Off by default: the keys move the text cursor and the wheel scrolls, as before.
     step_values: bool = false, PAGE_DESIGN => check_id("ui.step_values");
+    /// Which geometry kernel answers (one of [`KERNELS`]): `routed` (each operation on the
+    /// kernel the routing table gives it), `smlib` or `solidcore` for all. Applied through
+    /// `diagnostics.kernel`; `SOLIDCRAFT_KERNEL`, when set, wins.
+    geometry_kernel: String = "routed".into(), PAGE_DESIGN;
     /// When SMLib's full check runs while features are computed (`diagnostics.validation`):
     /// `each_feature` (the default) checks the bodies each feature keeps once; `each_step`, as
     /// before, checks after every sweep, boolean and blend; `off` (experimental) never does.
@@ -856,6 +862,12 @@ pub struct PrefsWindow {
     /// The Profile operations preference the profiler last followed: applied when it changes,
     /// so `diagnostics.profile` (an agent) and SOLIDCRAFT_PROFILE can switch it in between.
     applied_profile: Option<bool>,
+    /// The Geometry kernel preference `diagnostics.kernel` last applied: applied when it changes
+    /// (and at startup), so an agent's `diagnostics.kernel` in between stands.
+    applied_kernel: Option<String>,
+    /// The choice `SOLIDCRAFT_KERNEL` forces when it overrides the preference (the command's
+    /// `environment` and `choice`).
+    pub(crate) kernel_environment: Option<String>,
     /// The search text of the interface font list.
     font_filter: String,
     /// Search text on the Plugins page.
@@ -1132,6 +1144,19 @@ pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
             solidcraft_engine::profile::set_enabled(profile);
         }
         app.prefs_window.applied_profile = Some(profile);
+    }
+    // The geometry kernel, through its command (an unknown saved value is Routed).
+    let kernel = KERNELS.iter().copied().find(|k| *k == app.preferences.geometry_kernel).unwrap_or("routed");
+    if app.prefs_window.applied_kernel.as_deref() != Some(kernel) {
+        match app.session.execute("diagnostics.kernel", &json!({ "choice": kernel })) {
+            Ok(v) => {
+                let environment = v.get("environment").and_then(serde_json::Value::as_bool).unwrap_or(false);
+                app.prefs_window.kernel_environment =
+                    environment.then(|| v.get("choice").and_then(serde_json::Value::as_str).unwrap_or_default().to_string());
+            }
+            Err(e) => log::warn!("geometry kernel preference `{kernel}`: {e}"),
+        }
+        app.prefs_window.applied_kernel = Some(kernel.into());
     }
     // The viewport's display quality (an unknown saved value draws at Normal).
     solidcraft_engine::doc::display_quality::set_current(
@@ -2344,6 +2369,9 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     if !UNITS.contains(&new.default_units.as_str()) {
         return Err(format!("units must be one of {}", UNITS.join(", ")));
     }
+    if !KERNELS.contains(&new.geometry_kernel.as_str()) {
+        return Err(format!("`geometry_kernel` must be one of {}", KERNELS.join(", ")));
+    }
     if !WINDOW_SYSTEMS.contains(&new.window_system.as_str()) {
         return Err(format!("`window_system` must be one of {}", WINDOW_SYSTEMS.join(", ")));
     }
@@ -2447,6 +2475,32 @@ mod tests {
         h.call("ui.prefs", json!({"profile_operations": false}));
         h.frames(2);
         assert!(!solidcraft_engine::profile::enabled());
+    }
+
+    /// The Geometry kernel preference reaches the kernel through diagnostics.kernel, at startup
+    /// and when it changes, and only a choice the command knows is accepted. (The kernel choice
+    /// is process-wide and other tests start harnesses meanwhile, so this reads what was applied,
+    /// and only `smlib`, which runs every family where Routed does today.)
+    #[test]
+    fn the_geometry_kernel_preference_applies_through_its_command() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.frames(1);
+        assert_eq!(h.app.prefs_window.applied_kernel.as_deref(), Some("routed"), "applied at startup");
+        let r = h.app.session.execute("diagnostics.kernel", &json!({})).unwrap();
+        let environment = (r["environment"] == json!(true)).then(|| r["choice"].as_str().unwrap_or_default().to_string());
+        assert_eq!(h.app.prefs_window.kernel_environment, environment);
+        assert!(h.call("ui.prefs", json!({"geometry_kernel": "truck"}))["error"].as_str().is_some_and(|e| e.contains("geometry_kernel")));
+        assert_eq!(h.app.preferences.geometry_kernel, "routed");
+        h.call("ui.prefs", json!({"geometry_kernel": "smlib"}));
+        h.frames(2);
+        assert_eq!(h.app.prefs_window.applied_kernel.as_deref(), Some("smlib"));
+        h.call("ui.prefs", json!({"geometry_kernel": "routed"}));
+        h.frames(2);
+        assert_eq!(h.app.prefs_window.applied_kernel.as_deref(), Some("routed"));
+        // Saved with the other preferences.
+        let saved = serde_json::to_value(&h.app.preferences).unwrap();
+        assert_eq!(saved["geometry_kernel"], json!("routed"));
     }
 
     /// Preferences saved with a setting this version no longer has still load, every other

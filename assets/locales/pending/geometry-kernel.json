@@ -1,0 +1,51 @@
+{
+  "en": {
+    "cmd.diagnostics_kernel": "Geometry Kernel",
+    "prefs.geometry_kernel": "Geometry kernel",
+    "prefs.geometry_kernel_environment": "The SOLIDCRAFT_KERNEL environment variable is set; it wins over this setting.",
+    "prefs.geometry_kernel_note": "Routed uses solidcore only for operations that match SMLib on the kernel test rig; a solidcore failure is reported, never retried on SMLib.",
+    "prefs.geometry_kernel_routed": "Routed"
+  },
+  "ar": {
+    "cmd.diagnostics_kernel": "نواة الهندسة",
+    "prefs.geometry_kernel": "نواة الهندسة",
+    "prefs.geometry_kernel_environment": "متغير البيئة SOLIDCRAFT_KERNEL مضبوط، وله الأولوية على هذا الإعداد.",
+    "prefs.geometry_kernel_note": "يستخدم الوضع الموجَّه solidcore فقط للعمليات التي تطابق SMLib على منصة اختبار النواة؛ ويُبلَّغ عن إخفاق solidcore ولا تُعاد المحاولة أبدًا على SMLib.",
+    "prefs.geometry_kernel_routed": "موجَّه"
+  },
+  "de": {
+    "cmd.diagnostics_kernel": "Geometriekernel",
+    "prefs.geometry_kernel": "Geometriekernel",
+    "prefs.geometry_kernel_environment": "Die Umgebungsvariable SOLIDCRAFT_KERNEL ist gesetzt; sie hat Vorrang vor dieser Einstellung.",
+    "prefs.geometry_kernel_note": "Geroutet nutzt solidcore nur für Vorgänge, die auf dem Kernel-Prüfstand mit SMLib übereinstimmen; ein Fehler in solidcore wird gemeldet, nie mit SMLib wiederholt.",
+    "prefs.geometry_kernel_routed": "Geroutet"
+  },
+  "fr": {
+    "cmd.diagnostics_kernel": "Noyau géométrique",
+    "prefs.geometry_kernel": "Noyau géométrique",
+    "prefs.geometry_kernel_environment": "La variable d’environnement SOLIDCRAFT_KERNEL est définie ; elle l’emporte sur ce réglage.",
+    "prefs.geometry_kernel_note": "Routé n’utilise solidcore que pour les opérations qui concordent avec SMLib sur le banc d’essai du noyau ; un échec de solidcore est signalé, jamais réessayé avec SMLib.",
+    "prefs.geometry_kernel_routed": "Routé"
+  },
+  "he": {
+    "cmd.diagnostics_kernel": "ליבת גאומטריה",
+    "prefs.geometry_kernel": "ליבת גאומטריה",
+    "prefs.geometry_kernel_environment": "משתנה הסביבה SOLIDCRAFT_KERNEL מוגדר, והוא גובר על הגדרה זו.",
+    "prefs.geometry_kernel_note": "מנותב משתמש ב-solidcore רק לפעולות שתואמות את SMLib במתקן הבדיקה של הליבה; כשל של solidcore מדווח, ולעולם אינו מנוסה שוב ב-SMLib.",
+    "prefs.geometry_kernel_routed": "מנותב"
+  },
+  "ja": {
+    "cmd.diagnostics_kernel": "ジオメトリ カーネル",
+    "prefs.geometry_kernel": "ジオメトリ カーネル",
+    "prefs.geometry_kernel_environment": "環境変数 SOLIDCRAFT_KERNEL が設定されているため、この設定より優先されます。",
+    "prefs.geometry_kernel_note": "ルーティングでは、カーネルのテスト環境で SMLib と一致した処理にのみ solidcore を使います。solidcore の失敗は報告され、SMLib で再試行されることはありません。",
+    "prefs.geometry_kernel_routed": "ルーティング"
+  },
+  "zh": {
+    "cmd.diagnostics_kernel": "几何内核",
+    "prefs.geometry_kernel": "几何内核",
+    "prefs.geometry_kernel_environment": "已设置环境变量 SOLIDCRAFT_KERNEL，它优先于此设置。",
+    "prefs.geometry_kernel_note": "路由模式仅对在内核测试台上与 SMLib 结果一致的操作使用 solidcore；solidcore 失败时会报告，绝不会改用 SMLib 重试。",
+    "prefs.geometry_kernel_routed": "路由"
+  }
+}

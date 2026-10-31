@@ -12,6 +12,14 @@ fn wedge() -> Body {
     fillet_variable_spline(&body, at, t.start, &t.spline).unwrap()
 }
 
+/// The wedge's variable round: V 5223.0386, on whichever kernel the test runs (the fork's variable
+/// round follows the fillet between its traced points, 4438859, and solidcore's with it).
+#[test]
+fn the_wedge_round_keeps_its_volume() {
+    let v = crate::measure(&wedge()).unwrap().volume;
+    assert!((v - 5223.0386).abs() < 1e-3, "{v}");
+}
+
 /// The display mesh of a fillet tapering to zero at a wedge's tip converges to the B-rep: each
 /// mesh lies within its chord tolerance of the faces, so its volume is within the body's area
 /// times that tolerance of the exact one (SMLib's, integrated on the surfaces, to 1e-8). Only

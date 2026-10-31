@@ -10,8 +10,23 @@ use solidcraft_geom::brep as b;
 
 use crate::{Error, Result, error, ffi, init};
 
-/// A surface with its UV domain, owned on the C side.
-pub struct Surface(ffi::ssi::SurfaceHandle);
+/// A surface with its UV domain, owned on the C side; with the description it was made from, from
+/// which solidcore makes its own ([`crate::core::split`]).
+pub struct Surface {
+    handle: ffi::ssi::SurfaceHandle,
+    spec: Spec,
+}
+
+/// What a [`Surface`] was made from: its constructor's arguments, which the C API has checked.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Spec {
+    Plane { origin: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], u: [f64; 2], v: [f64; 2] },
+    Cylinder { origin: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], radius: f64, angle_deg: [f64; 2], height: [f64; 2] },
+    Cone { apex: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], half_angle_deg: f64, height: [f64; 2] },
+    Sphere { center: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], radius: f64, lon_deg: [f64; 2], lat_deg: [f64; 2] },
+    Torus { center: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], major_radius: f64, minor_radius: f64, major_deg: [f64; 2], minor_deg: [f64; 2] },
+    Nurbs { degree: [usize; 2], nu: usize, nv: usize, knots_u: Vec<f64>, knots_v: Vec<f64>, points: Vec<[f64; 3]>, weights: Option<Vec<f64>> },
+}
 
 impl std::fmt::Debug for Surface {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -25,33 +40,47 @@ fn int(n: usize) -> Result<i32> {
 
 impl Surface {
     pub(crate) fn handle(&self) -> &ffi::ssi::SurfaceHandle {
-        &self.0
+        &self.handle
+    }
+
+    pub(crate) fn spec(&self) -> &Spec {
+        &self.spec
+    }
+
+    fn made(handle: ffi::ssi::SurfaceHandle, spec: Spec) -> Surface {
+        Surface { handle, spec }
     }
 
     /// `origin + u*x + v*y` (x, y the axes made unit), for u in `u`, v in `v`.
     pub fn plane(origin: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], u: [f64; 2], v: [f64; 2]) -> Result<Surface> {
         init()?;
-        ffi::ssi::plane(&origin, &xaxis, &yaxis, &u, &v).map(Surface).map_err(error)
+        ffi::ssi::plane(&origin, &xaxis, &yaxis, &u, &v).map(|h| Surface::made(h, Spec::Plane { origin, xaxis, yaxis, u, v })).map_err(error)
     }
 
     /// A cylinder of `radius` about the axis through `origin` along `xaxis × yaxis`, angle
     /// `angle_deg` from `xaxis` towards `yaxis`, for heights `height` measured from `origin`.
     pub fn cylinder(origin: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], radius: f64, angle_deg: [f64; 2], height: [f64; 2]) -> Result<Surface> {
         init()?;
-        ffi::ssi::cylinder(&origin, &xaxis, &yaxis, radius, &angle_deg, &height).map(Surface).map_err(error)
+        ffi::ssi::cylinder(&origin, &xaxis, &yaxis, radius, &angle_deg, &height)
+            .map(|h| Surface::made(h, Spec::Cylinder { origin, xaxis, yaxis, radius, angle_deg, height }))
+            .map_err(error)
     }
 
     /// A full cone with its apex at `apex` along `xaxis × yaxis`, radius `h * tan(half_angle_deg)`
     /// at distance h along the axis, for h in `height` (from 0: through the apex).
     pub fn cone(apex: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], half_angle_deg: f64, height: [f64; 2]) -> Result<Surface> {
         init()?;
-        ffi::ssi::cone(&apex, &xaxis, &yaxis, half_angle_deg, &height).map(Surface).map_err(error)
+        ffi::ssi::cone(&apex, &xaxis, &yaxis, half_angle_deg, &height)
+            .map(|h| Surface::made(h, Spec::Cone { apex, xaxis, yaxis, half_angle_deg, height }))
+            .map_err(error)
     }
 
     /// A sphere of `radius` at `center`, over longitudes `lon_deg` and latitudes `lat_deg`.
     pub fn sphere(center: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], radius: f64, lon_deg: [f64; 2], lat_deg: [f64; 2]) -> Result<Surface> {
         init()?;
-        ffi::ssi::sphere(&center, &xaxis, &yaxis, radius, &lon_deg, &lat_deg).map(Surface).map_err(error)
+        ffi::ssi::sphere(&center, &xaxis, &yaxis, radius, &lon_deg, &lat_deg)
+            .map(|h| Surface::made(h, Spec::Sphere { center, xaxis, yaxis, radius, lon_deg, lat_deg }))
+            .map_err(error)
     }
 
     /// A ring torus at `center` about `xaxis × yaxis`, `major_deg` round the axis and `minor_deg`
@@ -66,7 +95,9 @@ impl Surface {
         minor_deg: [f64; 2],
     ) -> Result<Surface> {
         init()?;
-        ffi::ssi::torus(&center, &xaxis, &yaxis, major_radius, minor_radius, &major_deg, &minor_deg).map(Surface).map_err(error)
+        ffi::ssi::torus(&center, &xaxis, &yaxis, major_radius, minor_radius, &major_deg, &minor_deg)
+            .map(|h| Surface::made(h, Spec::Torus { center, xaxis, yaxis, major_radius, minor_radius, major_deg, minor_deg }))
+            .map_err(error)
     }
 
     /// A (rational) B-spline surface: `nu × nv` control points, point (i, j) (i along u) at
@@ -82,7 +113,20 @@ impl Surface {
     ) -> Result<Surface> {
         init()?;
         let flat: Vec<f64> = points.iter().flatten().copied().collect();
-        ffi::ssi::nurbs([int(degree[0])?, int(degree[1])?], int(nu)?, int(nv)?, knots_u, knots_v, &flat, weights).map(Surface).map_err(error)
+        ffi::ssi::nurbs([int(degree[0])?, int(degree[1])?], int(nu)?, int(nv)?, knots_u, knots_v, &flat, weights)
+            .map(|h| {
+                let spec = Spec::Nurbs {
+                    degree,
+                    nu,
+                    nv,
+                    knots_u: knots_u.to_vec(),
+                    knots_v: knots_v.to_vec(),
+                    points: points.to_vec(),
+                    weights: weights.map(<[f64]>::to_vec),
+                };
+                Surface::made(h, spec)
+            })
+            .map_err(error)
     }
 
     /// A schema 4 record surface over the parameter box `domain` (`[[u0, u1], [v0, v1]]`, the
@@ -141,12 +185,12 @@ impl Surface {
 
     /// The UV domain the intersection runs within, as `[u0, u1, v0, v1]`.
     pub fn domain(&self) -> Result<[f64; 4]> {
-        ffi::ssi::domain(&self.0).map_err(error)
+        ffi::ssi::domain(&self.handle).map_err(error)
     }
 
     /// The surface's point at (u, v).
     pub fn evaluate(&self, u: f64, v: f64) -> Result<[f64; 3]> {
-        ffi::ssi::evaluate(&self.0, u, v).map_err(error)
+        ffi::ssi::evaluate(&self.handle, u, v).map_err(error)
     }
 }
 
@@ -278,7 +322,7 @@ fn uv(r: &ffi::ssi::ResultHandle, i: i32, which: i32) -> Result<Option<b::Curve2
 /// `approx_tol` (<= 0: SMLib's default, 1/1000 of the surfaces' size). An intersector failure is
 /// SMLib's status; a curve SMLib does not hold as a B-spline is [`Error::Unsupported`].
 pub fn intersect(a: &Surface, b: &Surface, method: Method, approx_tol: f64) -> Result<SsiResult> {
-    let r = ffi::ssi::ssi(&a.0, &b.0, method.code(), approx_tol).map_err(error)?;
+    let r = ffi::ssi::ssi(&a.handle, &b.handle, method.code(), approx_tol).map_err(error)?;
     let n = ffi::ssi::curve_count(&r).map_err(error)?;
     let mut curves = Vec::new();
     for i in 0..n {

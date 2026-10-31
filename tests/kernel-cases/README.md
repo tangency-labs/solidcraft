@@ -7,6 +7,7 @@ them. `cargo xtask kernel-cases` runs them and writes [`docs/kernel-cases.md`](.
 ```sh
 cargo xtask kernel-cases                                    # every case
 cargo xtask kernel-cases --cli target/release/solidcraft-cli --out /tmp/run   # with a CLI already built
+cargo xtask kernel-cases --kernel both --cli target/release/solidcraft-cli  # SMLib and solidcore side by side
 cargo run -p solidcraft-cli --features smlib -- kernel-cases tests/kernel-cases/booleans/<id>   # one case
 ```
 
@@ -18,6 +19,25 @@ SMLib call a case failed in, for replay (the CLI's `--dumps=DIR`, which the rig 
 (`diagnostics.validation`): `each_feature` (the default: the bodies each feature keeps are checked
 once), `each_step` (after every sweep, boolean and blend, as before) or `off`; the
 `KNOWN_FAILING` lists are each_feature's.
+
+`--kernel smlib|solidcore|both` (default `smlib`) picks the backend each case's process runs on,
+through `SOLIDCRAFT_KERNEL`. A `solidcore` run keeps its `results.json`, `dumps/` and `report.md`
+in `<out>/solidcore/` and leaves `docs/kernel-cases.md` alone. `both` runs every case on each
+backend, keeps `docs/kernel-cases.md` as the SMLib report and writes the two side by side to
+[`docs/kernel-cases-backends.md`](../../docs/kernel-cases-backends.md) (cases that differ first)
+and `<out>/backends.json`.
+
+`--route <op>=solidcore[,…]` (with `--kernel both` or `solidcore`) scores single operation
+families: the solidcore side runs on SMLib (`SOLIDCRAFT_KERNEL=smlib`) with only the families
+named moved to solidcore (`SOLIDCRAFT_KERNEL_ROUTES`), so an unported family (the body check, say)
+doesn't hide the others' score. The smlib side stays plain SMLib. The report labels the side
+`solidcore[boolean,measure]`, and its `results.json`, `dumps/`, `report.md`, `backends.json` and
+`backends.md` go to `<out>/solidcore-boolean-measure/`, so runs don't overwrite each other. The
+families are the lower-case names `diagnostics.kernel` prints (`file` stays on SMLib):
+
+```sh
+cargo xtask kernel-cases --kernel both --route boolean=solidcore --cli target/release/solidcraft-cli
+```
 
 ## Rules
 

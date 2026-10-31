@@ -14,7 +14,7 @@ use std::collections::BTreeSet;
 
 use solidcraft_geom::brep::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, Failed, History, Side};
 
-use crate::{Brep, Error, Result, error, ffi};
+use crate::{Brep, Error, Result, core, error, ffi, route};
 
 /// A result face as SMLib reports it: how it relates to its origins, and the (operand, face)
 /// pairs it came from, sorted.
@@ -67,20 +67,62 @@ impl Brep {
     /// A copy whose face i and edge i are tagged as face i and edge i of operand `operand` (in
     /// SMLib's order, which the copy keeps). Run an operation on tagged copies, then read its
     /// result's [`Brep::history`].
+    ///
+    /// The tags are made in the kernel the body is in (solidcore's when it has its body,
+    /// [`crate::core::history`]); converted for the other, the body is tagged there the same way.
     pub fn tagged(&self, operand: usize) -> Result<Brep> {
-        let operand = i32::try_from(operand).map_err(|_| Error::Argument)?;
-        ffi::history::tag(&self.0, operand).map(Brep).map_err(error)
+        let mut t = match self.core.get() {
+            Some(Ok(b)) => Brep::made_core(core::history::tag(b, operand)?),
+            _ => {
+                let k = i32::try_from(operand).map_err(|_| Error::Argument)?;
+                Brep::made(ffi::history::tag(self.cpp()?, k).map_err(error)?)
+            }
+        };
+        t.operand = Some(operand);
+        Ok(t)
     }
 
     /// The history of this body, made by an operation from tagged operands: each face's and
-    /// edge's origins among them. Faces and edges no tag reached have none.
+    /// edge's origins among them. Faces and edges no tag reached have none. Read in the kernel
+    /// that made the body: the tags never cross between them.
     pub fn history(&self) -> Result<Raw> {
-        let v = ffi::history::read(&self.0).map_err(error)?;
+        if self.maker == route::Backend::Solidcore {
+            return core::history::read(self.core()?);
+        }
+        let v = ffi::history::read(self.cpp()?).map_err(error)?;
         Raw::decode(&v).ok_or(Error::Exception)
     }
 }
 
 impl Raw {
+    /// This history with its faces in a canonical order (by origins, then change) and each edge
+    /// naming its faces by that order, the edges sorted: two kernels' histories of one result
+    /// compare equal whatever order each lists its faces and edges in.
+    #[cfg(all(test, feature = "native"))]
+    pub(crate) fn canonical(&self) -> Raw {
+        let mut order: Vec<usize> = (0..self.faces.len()).collect();
+        order.sort_by(|a, b| {
+            let (fa, fb) = (&self.faces[*a], &self.faces[*b]);
+            (&fa.origins, fa.change as u8).cmp(&(&fb.origins, fb.change as u8))
+        });
+        let mut at = vec![0; order.len()];
+        for (new, old) in order.iter().enumerate() {
+            at[*old] = new;
+        }
+        let faces = order.iter().map(|i| self.faces[*i].clone()).collect();
+        let mut edges: Vec<RawEdge> = self
+            .edges
+            .iter()
+            .map(|e| {
+                let mut f: Vec<usize> = e.faces.iter().map(|i| at[*i]).collect();
+                f.sort();
+                RawEdge { faces: f, origins: e.origins.clone() }
+            })
+            .collect();
+        edges.sort_by(|a, b| (&a.origins, &a.faces).cmp(&(&b.origins, &b.faces)));
+        Raw { faces, edges }
+    }
+
     /// Decodes `smlib_history_read`'s records; `None` where they don't read as its layout.
     fn decode(v: &[i64]) -> Option<Raw> {
         let mut r = Reader(v.iter());
