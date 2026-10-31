@@ -1,6 +1,9 @@
 {
   "en": { "cmd.inspect_section_curves": "Section Curves" },
+  "ar": { "cmd.inspect_section_curves": "منحنيات المقطع" },
   "cs": { "cmd.inspect_section_curves": "Křivky řezu" },
+  "he": { "cmd.inspect_section_curves": "עקומות חתך" },
   "ja": { "cmd.inspect_section_curves": "断面曲線" },
+  "vi": { "cmd.inspect_section_curves": "Đường cong mặt cắt" },
   "zh": { "cmd.inspect_section_curves": "截面曲线" }
 }
