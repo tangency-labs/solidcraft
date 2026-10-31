@@ -3666,9 +3666,19 @@ mod tests {
             records: &mut records,
             next_key: 1,
         };
-        // an empty file reads as an empty B-rep, whose (absent) UV trim curves
-        // sm_CheckAndFixUVTrimCurves finds nothing to fix in
+        // an empty file is refused: it has no shell count, and upstream goes on with
+        // its uninitialised lCount (#2058)
         let r = read_from_file(&mut k, &mut b, Vec::new(), FileType::Ascii, false, &mut env);
+        assert!(
+            matches!(r, Err(SolidError::InvalidInput { .. })),
+            "read: {r:?}"
+        );
+        // the file of an empty B-rep reads as one, whose (absent) UV trim curves
+        // sm_CheckAndFixUVTrimCurves finds nothing to fix in
+        let empty = crate::topology::brep_data::EMPTY_ASCII_BODY
+            .as_bytes()
+            .to_vec();
+        let r = read_from_file(&mut k, &mut b, empty, FileType::Ascii, false, &mut env);
         assert!(r.is_ok(), "read: {r:?}");
         let mut src = Brep::new();
         let mut dest = Brep::new();
