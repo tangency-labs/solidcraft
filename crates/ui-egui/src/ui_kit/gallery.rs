@@ -1156,6 +1156,9 @@ const ELEMENTS: &[Element] = &[
     element!("text", "dialog:report:gallery", Some("dialog:report:gallery"), |ui, _| {
         text(ui, "Validation report with retained units: 10 mm", Text::Report("gallery", false));
     }),
+    element!("name_cell_with_hint", "dialog:cell:Width", Some("dialog:cell:Width"), |ui, _| {
+        name_cell_with_hint(ui, "Width", false, "Double-click to rename");
+    }),
     element!("search_field", |ui, s| {
         search_field(ui, ui.id().with("search"), &mut s.value, "Search");
     }),
@@ -1289,7 +1292,7 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("text_emphasis", "dialog:row:Gallery", Some("dialog:Bold"), |ui, s| {
         row(ui, "Gallery", |ui| {
-            text_emphasis(ui, &mut s.checked, &mut false);
+            text_emphasis(ui, &mut s.checked, &mut false, true);
         });
     }),
     element!("value_pair_named", "dialog:row:Position", Some("dialog:Distance X"), |ui, s| {
@@ -1771,7 +1774,7 @@ fn emphasis_and_compact_modes_keep_independent_actions_in_both_themes() {
         let mut italic = false;
         let mut selected = 0;
         let mut draw = |ui: &mut Ui| {
-            row(ui, "Style", |ui| text_emphasis(ui, &mut bold, &mut italic));
+            row(ui, "Style", |ui| text_emphasis(ui, &mut bold, &mut italic, true));
             row(ui, "Alignment", |ui| {
                 segmented(
                     ui,
@@ -1939,8 +1942,8 @@ fn gallery_covers_every_inline_element() {
                 && matches!(&item.vis, syn::Visibility::Restricted(v) if v.path.is_ident("crate"))
             {
                 let name = item.sig.ident.to_string();
-                // The inherited row label is metadata, not a renderable element.
-                if name != "label" {
+                // Inherited labels, state keys and size measurements do not render elements.
+                if !matches!(name.as_str(), "eye_drag_id" | "label" | "placement_field_content_size") {
                     assert!(names.contains(name.as_str()), "{file}: {name} needs a gallery entry");
                 }
             }

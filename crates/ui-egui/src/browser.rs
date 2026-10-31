@@ -166,6 +166,9 @@ pub struct TreeState {
     pub section_hidden: bool,
     /// What waits for the Capture Position question: a command id, or [`SAVE`].
     pub capture_prompt: Option<String>,
+    /// The design, undo depth and visibility when the button last went down: a drag over the eyes
+    /// merges the steps it made into one (`eye_drag_frame`).
+    eye_press: Option<(Arc<Document>, usize, solidcraft_engine::Visibility)>,
     /// The last row clicked (for Shift ranges).
     anchor: Option<String>,
     /// Row keys in drawing order this frame (for Shift ranges).
@@ -435,6 +438,35 @@ pub fn toggle_folder(app: &mut SolveApp, key: &str) {
     let _ = app.run("browser.visibility", json!({ "tree_folders": [key], "visible": app.session.folder_hidden(key) }));
 }
 
+/// A drag over the eyes is one undo step (#9680). When the button goes down the undo depth and the
+/// hidden items are noted; when it comes up, the steps the drag made are merged into the first of
+/// them. Runs every frame, whatever else is open, so a release is never missed.
+pub(crate) fn eye_drag_frame(app: &mut SolveApp, ctx: &egui::Context) {
+    let (pressed, down) = ctx.input(|i| (i.pointer.primary_pressed(), i.pointer.primary_down()));
+    if pressed {
+        app.tree.eye_press = Some((app.session.doc.clone(), app.session.undo.len(), without_origin(app.session.visibility.clone())));
+    }
+    if down {
+        return;
+    }
+    let dragged = ctx.data_mut(|d| d.remove_temp::<bool>(crate::ui_kit::eye_drag_id())).is_some();
+    let Some((doc, depth, visibility)) = app.tree.eye_press.take().filter(|_| dragged) else { return };
+    // shortcut: once the history is full (200 steps) its length stops growing, so the drag is left as
+    // separate steps, like the point-cloud and canvas drags; the visibility test keeps a trimmed front
+    // from being merged wrongly.
+    let undo = &mut app.session.undo;
+    if undo.len() > depth + 1 && undo.get(depth).is_some_and(|s| Arc::ptr_eq(&s.doc, &doc) && without_origin(s.visibility.clone()) == visibility) {
+        undo.truncate(depth + 1);
+    }
+}
+
+/// The Origin's own eye is not an undo step (`set_origin_shown`), so the drag's steps do not hold it:
+/// it is left out of the comparison.
+fn without_origin(mut visibility: solidcraft_engine::Visibility) -> solidcraft_engine::Visibility {
+    visibility.origin_hidden = None;
+    visibility
+}
+
 /// A folder shortcut target lasts until another click, Escape, or a change of design/model.
 /// Visibility changes keep the document snapshot, so V can toggle the same folder again.
 pub(crate) fn update_folder_pick(app: &mut SolveApp, ctx: &egui::Context) {
@@ -447,6 +479,14 @@ pub(crate) fn update_folder_pick(app: &mut SolveApp, ctx: &egui::Context) {
 
 fn pick_folder(app: &mut SolveApp, key: &str) {
     app.tree.picked_folder = Some(FolderPick { key: key.into(), session: app.session.uid, doc: Arc::downgrade(&app.session.doc) });
+}
+
+/// The group whose row was clicked last (its key ends in `/g<id>`), while that pick still holds
+/// and the group exists: F2 renames it (#10005).
+pub(crate) fn picked_group(app: &SolveApp) -> Option<u64> {
+    let pick = app.tree.picked_folder.as_ref().filter(|pick| pick.current(app))?;
+    let id = pick.key.rsplit_once("/g")?.1.parse().ok()?;
+    find_group(app, id).map(|g| g.id)
 }
 
 pub(crate) fn toggle_picked_folder(app: &mut SolveApp) -> bool {
@@ -725,10 +765,11 @@ impl Lit {
         // which does not rewrite the browser selection.
         let dialog_picks = app.dialog.as_ref().map(|d| d.items()).unwrap_or_default();
         for s in app.session.selection.iter().chain(&dialog_picks) {
-            selected.insert(match s {
-                Sel::Body { name } | Sel::Face { body: name, .. } | Sel::Edge { body: name, .. } | Sel::Vertex { body: name, .. } => {
-                    Thing::Body(name.clone())
-                }
+            let thing = match s {
+                Sel::Body { name } => Thing::Body(name.clone()),
+                // A picked face, edge or vertex lights the feature it belongs to (see
+                // `browser::features`), not the whole body as if the body were selected.
+                Sel::Face { .. } | Sel::Edge { .. } | Sel::Vertex { .. } => continue,
                 Sel::Feature { id } => Thing::Sketch(*id),
                 Sel::Profile { sketch, .. } | Sel::ExternalSketchCurve { sketch, .. } | Sel::ExternalSketchPoint { sketch, .. } => {
                     Thing::Sketch(*sketch)
@@ -743,7 +784,8 @@ impl Lit {
                 Sel::Axis { name } => Thing::Axis(name.clone()),
                 Sel::ConstructionPoint { name } => Thing::Point(name.clone()),
                 Sel::Occurrence { .. } => continue,
-            });
+            };
+            selected.insert(thing);
         }
         let hovered = match &app.viewport.hover {
             Some(Hit::Face { body, .. } | Hit::Edge { body, .. } | Hit::Vertex { body, .. }) => Some(Thing::Body(body.clone())),
@@ -1712,6 +1754,8 @@ fn occurrence_rows_inner(
     }
     if !render {
         features::rows(app, ui, placement.component, path, depth + 1, acts);
+        // The joints that attach this placement, as the root's Joints folder lists them (#9130).
+        crate::dialogs_assembly::component_joints(app, ui, path, key, depth + 1);
     }
     if path.len() < 64 {
         for child in &placement.children {

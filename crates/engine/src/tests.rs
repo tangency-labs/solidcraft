@@ -1930,6 +1930,24 @@ fn checkpoint_restores_with_a_full_undo_history() {
     assert!(s.execute("edit.restore_checkpoint", &json!({"checkpoint": id})).is_err());
 }
 
+/// Regression (#9746): a checkpoint restored already, or one of more than the 16 kept, was
+/// refused with only "no checkpoint N", so a script that restores twice could not tell why.
+#[test]
+fn a_used_up_or_dropped_checkpoint_says_why() {
+    let mut s = Session::default();
+    let id = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": id}));
+    let used = s.execute("edit.restore_checkpoint", &json!({"checkpoint": id})).unwrap_err().to_string();
+    assert!(used.contains("used up") && used.contains("16"), "{used}");
+    let first = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    for _ in 0..MAX_CHECKPOINTS {
+        run(&mut s, "edit.checkpoint", json!({}));
+    }
+    let dropped = s.execute("edit.restore_checkpoint", &json!({"checkpoint": first})).unwrap_err().to_string();
+    assert!(dropped.contains("16"), "{dropped}");
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": first + 1}));
+}
+
 /// Regression (#3242): `file.new` replaced the session and its checkpoints with it, so a
 /// batch that failed after `file.new` could not go back to the design it began in.
 #[test]
@@ -3417,6 +3435,48 @@ fn computed_import_preserves_file_and_earlier_undo_history() {
     assert!(!s.is_dirty());
     run(&mut s, "edit.undo", json!({}));
     assert!(s.model.state().bodies.is_empty());
+}
+
+/// The unsaved-changes answer is worked out once per pair of documents and revision, and stays
+/// right through every way the design changes: an edit in place (`doc_mut`, which stays in
+/// place), one that bypasses it, a new document equal to the saved one, Save, a change of what
+/// is hidden, and undo back to the saved design. Each answer is checked against the plain
+/// comparison it stands for.
+#[test]
+fn the_unsaved_changes_answer_follows_every_change() {
+    let plain = |s: &Session| (!std::sync::Arc::ptr_eq(&s.doc, &s.saved) && *s.doc != *s.saved) || s.visibility != s.saved_visibility;
+    let check = |s: &Session, want: bool, why: &str| {
+        for _ in 0..2 {
+            assert_eq!(s.is_dirty(), want, "{why}");
+            assert_eq!(plain(s), want, "{why}: the plain comparison");
+        }
+    };
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    s.mark_saved();
+    check(&s, false, "saved");
+    // An edit in place: the cached answer holds the document, yet the edit is not a copy.
+    s.doc = std::sync::Arc::new((*s.doc).clone());
+    check(&s, false, "an equal copy of the saved design");
+    let at = std::sync::Arc::as_ptr(&s.doc);
+    s.doc_mut().name = "Renamed".into();
+    assert_eq!(std::sync::Arc::as_ptr(&s.doc), at, "doc_mut edits in place");
+    check(&s, true, "renamed in place, same revision");
+    s.doc_mut().name = s.saved.name.clone();
+    check(&s, false, "named back in place");
+    // An edit that goes around doc_mut while the answer holds the document copies it.
+    std::sync::Arc::make_mut(&mut s.doc).name = "Elsewhere".into();
+    check(&s, true, "edited past doc_mut");
+    s.mark_saved();
+    check(&s, false, "saved again");
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]}));
+    check(&s, true, "a command");
+    run(&mut s, "edit.undo", json!({}));
+    check(&s, false, "undone back to the saved design");
+    s.visibility.hidden_bodies.push("Body1".into());
+    check(&s, true, "a body hidden");
+    s.visibility.hidden_bodies.clear();
+    check(&s, false, "shown again");
 }
 
 /// Commands evaluated ahead (off the window thread) and then run for real take what was

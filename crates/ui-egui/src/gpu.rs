@@ -16,6 +16,20 @@ pub use solidcraft_gpu::view::{
 /// A frame of the viewport as an egui paint callback.
 pub struct ViewportCallback(pub Frame);
 
+/// The viewport callback composites transparently onto this egui GPU mesh. Both its clear
+/// surface and gradient therefore use the same published/animated tokens as the panels; no
+/// background colour belongs to a cached model scene or GPU upload.
+pub(crate) fn paint_background(painter: &egui::Painter, rect: egui::Rect, tokens: &crate::theme::Tokens) {
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(rect.left_top(), tokens.viewport_top);
+    mesh.colored_vertex(rect.right_top(), tokens.viewport_top);
+    mesh.colored_vertex(rect.right_bottom(), tokens.viewport_bottom);
+    mesh.colored_vertex(rect.left_bottom(), tokens.viewport_bottom);
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    painter.add(egui::Shape::mesh(mesh));
+}
+
 /// The GPU plan evaluation compiling beside the window: there once it is ready ([`tick_tessellation`]).
 pub type TessReady = std::sync::Arc<std::sync::OnceLock<solidcraft_gpu::TessGpu>>;
 
@@ -462,6 +476,7 @@ fn offscreen(
         ao_radius,
         ao_samples,
         ssaa,
+        sky: [0.0; 4],
         hover_tint: [0.0; 3],
         selection_tint: [0.0; 3],
     });

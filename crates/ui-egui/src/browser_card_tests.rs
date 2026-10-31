@@ -43,6 +43,48 @@ fn clicked_browser_folders_toggle_visibility_with_v() {
     }
 }
 
+/// #10005: F2 on a group picked in the Browser opens its Rename box, as for other rows, and the
+/// typed name renames the group, at the top level and inside a component; a body selected
+/// alongside does not take the rename from the clicked group.
+#[test]
+fn f2_on_a_clicked_browser_group_renames_the_group() {
+    for inside_component in [false, true] {
+        let (mut h, component) = if inside_component {
+            let (h, component, _) = crate::test_support::component_box();
+            (h, component)
+        } else {
+            let mut h = Harness::new();
+            h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Body1"})).unwrap();
+            (h, 0)
+        };
+        let body = h.app.session.model.state().bodies[0].name.clone();
+        let group = h.app.run("browser.group", json!({"component":component,"folder":"bodies","items":[body],"name":"Group"})).unwrap()["group"]
+            .as_u64()
+            .unwrap();
+        h.app.preferences.browser_bodies_folders = crate::prefs::BodiesFolders::Always;
+        h.settle();
+        let world_body = h.app.session.world_state().bodies[0].name.clone();
+        h.app.run("select.set", json!({"items":[Sel::Body { name: world_body.clone() }]})).unwrap();
+        h.step(&json!({"click":{"handle":"row:Group (1)"}})).unwrap();
+        h.step(&json!({"key":"F2"})).unwrap();
+        h.frames(2);
+        let what = h.app.menu.rename.as_ref().map(|r| (r.what.clone(), r.text.clone()));
+        assert_eq!(
+            what,
+            Some((crate::context_menu::RenameWhat::Group(group), "Group".to_string())),
+            "component {inside_component}: F2 renames the group"
+        );
+        h.step(&json!({"text":"Fasteners"})).unwrap();
+        h.frames(1);
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(2);
+        assert!(h.app.menu.rename.is_none());
+        let names: Vec<&str> = h.app.session.doc.browser_groups.iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(names, ["Fasteners"], "component {inside_component}: Enter renames the group; status {:?}", h.app.status);
+        assert!(h.app.session.world_state().body(&world_body).is_some(), "the body keeps its name");
+    }
+}
+
 #[test]
 fn folder_visibility_target_clears_when_the_user_moves_on() {
     for action in ["body click", "selection command", "empty click", "escape", "design tab", "model edit", "tool"] {
@@ -680,7 +722,7 @@ fn browser_occurrence_clicks_fill_align_components_input() {
     h.app.start("solid.align");
     {
         let d = h.app.dialog.as_mut().unwrap();
-        d.kind = crate::dialogs::Kind::Align { flip: false, components: true };
+        d.kind = crate::dialogs::Kind::Align { flip: false, components: true, axes: [true; 3] };
         d.inputs[0].label = "Components";
         d.active = 0;
     }
@@ -825,4 +867,118 @@ fn a_group_dragged_onto_another_group_nests_in_it_or_goes_before_it() {
     assert_eq!(parent(&h, beta), None, "a group does not go into its own group");
     drag(&mut h, "row:Gamma (1)", "row:Beta (2)", -10.0);
     assert_eq!(h.app.session.doc.ordered_entries(0, "bodies", None), [BrowserEntry::Group(gamma), BrowserEntry::Group(beta)]);
+}
+
+/// Three bodies with their eyes in the Browser, the first one's eye hidden or shown per the test.
+fn three_bodies(h: &mut Harness) {
+    for (name, x) in [("One", 0), ("Two", 20), ("Three", 40)] {
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name})).unwrap();
+    }
+    h.settle();
+}
+
+fn body_hidden(h: &Harness, name: &str) -> bool {
+    h.app.session.visibility.hidden_bodies.iter().any(|b| b == name)
+}
+
+/// #9680: a press on an eye that drags over other eyes sets each eye it passes to the first eye's
+/// new state, and the whole drag is one undo step.
+#[test]
+fn eye_drag_sets_every_eye_it_passes_in_one_undo_step() {
+    for eye_left in [false, true] {
+        let mut h = Harness::new();
+        three_bodies(&mut h);
+        if eye_left {
+            h.call("ui.prefs", json!({"browser_eye_left": true}));
+            h.settle();
+        }
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"drag":[{"handle":"eye:One"},{"handle":"eye:Three"}],"steps":40})).unwrap();
+        h.settle();
+        for name in ["One", "Two", "Three"] {
+            assert!(body_hidden(&h, name), "eye_left {eye_left}: {name} is hidden by the drag");
+        }
+        assert_eq!(h.app.session.undo.len(), undo + 1, "eye_left {eye_left}: the drag is one undo step");
+        h.app.run("edit.undo", json!({})).unwrap();
+        for name in ["One", "Two", "Three"] {
+            assert!(!body_hidden(&h, name), "eye_left {eye_left}: one undo shows {name} again");
+        }
+    }
+}
+
+/// #9680: an eye already in the target state stays as it is: a drag from a shown eye over a hidden
+/// one hides both, and undo brings back the hidden one as it was.
+#[test]
+fn eye_drag_leaves_an_eye_already_in_the_target_state_alone() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    h.app.run("browser.visibility", json!({"items":["Two"],"visible":false})).unwrap();
+    h.settle();
+    h.step(&json!({"drag":[{"handle":"eye:One"},{"handle":"eye:Three"}],"steps":40})).unwrap();
+    h.settle();
+    for name in ["One", "Two", "Three"] {
+        assert!(body_hidden(&h, name), "{name} is hidden: the hidden eye is not flipped back");
+    }
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!(!body_hidden(&h, "One") && !body_hidden(&h, "Three"), "undo shows the two the drag hid");
+    assert!(body_hidden(&h, "Two"), "undo keeps the eye hidden before the drag");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!(!body_hidden(&h, "Two"), "the hide before the drag is its own undo step");
+}
+
+/// #9680: a plain click on an eye still toggles that one row, as one undo step.
+#[test]
+fn a_plain_eye_click_still_toggles_one_row_as_one_undo_step() {
+    let mut h = Harness::new();
+    three_bodies(&mut h);
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"click":{"handle":"eye:Two"}})).unwrap();
+    h.settle();
+    assert!(body_hidden(&h, "Two") && !body_hidden(&h, "One") && !body_hidden(&h, "Three"), "only Two is hidden");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "the click is one undo step");
+}
+
+/// #9680: a drag over the eyes that rests near the rows' bottom edge scrolls them, and the eyes
+/// the rows bring under the pointer take the drag's state too.
+#[test]
+fn eye_drag_near_the_rows_bottom_edge_scrolls_them() {
+    let mut h = Harness::new();
+    h.call("ui.resize", json!({"width":1400,"height":900}));
+    for i in 0..35 {
+        h.app.run("sketch.create", json!({"plane":"XY", "name":format!("Sketch{i}")})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+    }
+    h.settle();
+    assert!(handle_at("row:Sketch34").is_none(), "the rows overflow the card");
+    let card = rect_of("browser:card").unwrap();
+    let eye = handle_at("eye:Sketch0").unwrap();
+    h.call("ui.drag", json!({"x0": eye.x, "y0": eye.y, "x1": eye.x, "y1": card.bottom() - 10.0, "steps": 20, "hold_end": 240}));
+    h.settle();
+    assert!(handle_at("row:Sketch34").is_some(), "the drag scrolled the list down to its last row");
+    assert!(h.app.session.visibility.hidden_sketches.len() > 10, "the eyes the drag reached are hidden");
+}
+
+/// #9680: a drag from the Origin's eye over the plane eyes is one undo step of its own, and the show
+/// before it stays a step: one undo takes back only the drag. The Origin's eye is not an undo step (a
+/// click on it is not either), so that one undo leaves it as the drag set it.
+#[test]
+fn eye_drag_from_the_origin_is_its_own_undo_step_and_leaves_an_earlier_show_alone() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"One"})).unwrap();
+    h.app.run("browser.visibility", json!({"items":["One"],"visible":false})).unwrap();
+    h.app.run("browser.visibility", json!({"items":["One"],"visible":true})).unwrap();
+    h.app.run("browser.expand_all", json!({})).unwrap();
+    h.settle();
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"drag":[{"handle":"eye:Origin"},{"handle":"eye:YZ"}],"steps":40})).unwrap();
+    h.settle();
+    let origin_hidden = |h: &Harness| h.app.session.visibility.origin_hidden == Some(true);
+    assert!(origin_hidden(&h) && h.app.session.visibility.hidden_origin.iter().any(|k| k == "YZ"), "the drag hid the Origin and its planes");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "the drag is one undo step");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!(!body_hidden(&h, "One"), "one undo takes back only the drag: the show before it stays");
+    assert!(h.app.session.visibility.hidden_origin.is_empty(), "the planes the drag hid are shown again");
+    assert!(origin_hidden(&h), "the Origin's eye is not an undo step: it keeps what the drag set");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!(body_hidden(&h, "One"), "the show is its own undo step: undoing it hides One again");
 }

@@ -130,6 +130,10 @@ fn navigate(app: &mut SolveApp, action: Option<&str>, dir: Option<Vec3>) {
     if let Some(d) = dir {
         params["direction"] = json!([d.x, d.y, d.z]);
     }
+    // Preferences › Navigation: a view chosen on the cube also frames the whole model (#10091).
+    if app.preferences.navigator_fit {
+        params["fit"] = json!(true);
+    }
     let _ = app.run("view.navigate", params);
 }
 
@@ -141,6 +145,21 @@ fn control(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect, action: &str, to
         navigate(app, Some(action), None);
     }
     hover
+}
+
+/// Preferences › Navigation: "Invert the view cube rotation arrows" (#10254). With it on, an
+/// arrow orbits the camera the way the arrow points (camera-centric, as in Fusion and Inventor)
+/// instead of rotating the cube toward the side the arrow sits on, so left and right, and up and
+/// down, trade places. The tooltip names the action actually performed. The curved roll arrows
+/// are not inverted: they name the rotation they perform, not a direction.
+fn inverted_arrow(action: &str) -> Option<&'static str> {
+    match action {
+        "left" => Some("right"),
+        "right" => Some("left"),
+        "up" => Some("down"),
+        "down" => Some("up"),
+        _ => None,
+    }
 }
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
@@ -201,6 +220,18 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         ("up", vec2(0.0, -distance), vec2(0.0, 1.0), "Orbit up 90°"),
         ("down", vec2(0.0, distance), vec2(0.0, -1.0), "Orbit down 90°"),
     ] {
+        let (action, tooltip) = match app.preferences.invert_navigator_arrows.then(|| inverted_arrow(action)).flatten() {
+            Some(swapped) => (
+                swapped,
+                match swapped {
+                    "right" => "Orbit right 90°",
+                    "left" => "Orbit left 90°",
+                    "down" => "Orbit down 90°",
+                    _ => "Orbit up 90°",
+                },
+            ),
+            None => (action, tooltip),
+        };
         let at = c + offset * scale;
         let hovered = control(app, ui, Rect::from_center_size(at, vec2(button_size, button_size) * scale), action, tooltip);
         if active {
@@ -510,6 +541,107 @@ mod tests {
         assert!(h.app.cam.back().dist(Vec3::Z) < 1e-6, "automatic model fitting must not cancel the navigation command");
         assert_eq!(h.app.cam.target, cam.target);
         assert_eq!(h.app.cam.distance, cam.distance);
+    }
+
+    /// #10091: with Preferences › Navigation "Fit the model after a navigator view change" on, a
+    /// cube face, corner or arrow frames the whole model from the new direction, as Home does;
+    /// off (the default) the view turns in place, keeping its target and zoom.
+    #[test]
+    fn cube_views_frame_the_model_when_the_navigation_preference_asks() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube", "look_at_anim":false}));
+        assert!(!h.app.preferences.navigator_fit, "off by default");
+        h.app.run("solid.box", json!({"corner":[100,0,0],"length":20,"width":20,"height":20})).unwrap();
+        h.settle();
+        let undo = h.app.session.undo.len();
+        let away = |h: &mut crate::scenario::Harness| {
+            h.call("ui.view", json!({"view":"iso"}));
+            h.app.cam.pan(600.0, 400.0, 500.0);
+            h.app.cam.distance *= 4.0;
+            h.frames(2);
+            h.app.cam
+        };
+        let from = away(&mut h);
+        let p = crate::scenario::handle_at("navigation_cube:front").unwrap();
+        h.call("ui.click", json!({"x":p.x,"y":p.y}));
+        h.frames(2);
+        assert!(h.app.cam.back().dist(-Vec3::Y) < 1e-6);
+        assert_eq!(h.app.cam.target, from.target, "off: the target stays");
+        assert_eq!(h.app.cam.distance, from.distance, "off: the zoom stays");
+        h.call("ui.prefs", json!({"navigator_fit":true}));
+        for handle in ["navigation_cube:front", "navigation_cube:top_front_right", "navigation_cube:control:right"] {
+            let from = away(&mut h);
+            let p = crate::scenario::handle_at(handle).unwrap();
+            h.call("ui.click", json!({"x":p.x,"y":p.y}));
+            h.frames(2);
+            if handle == "navigation_cube:front" {
+                assert!(h.app.cam.back().dist(-Vec3::Y) < 1e-6);
+            }
+            assert!(h.app.cam.target.dist(Vec3::new(110.0, 10.0, 10.0)) < 1e-6, "{handle}: looks at the middle of the model, {:?}", h.app.cam.target);
+            assert!(h.app.cam.distance < from.distance / 2.0, "{handle}: {} vs {}", h.app.cam.distance, from.distance);
+        }
+        // Home, then a face, a corner or an arrow: the zoom and the centre stay; only the
+        // direction changes.
+        let click = |h: &mut crate::scenario::Harness, handle: &str| {
+            let p = crate::scenario::handle_at(handle).unwrap_or_else(|| panic!("{handle} is not on the cube"));
+            h.call("ui.click", json!({"x":p.x,"y":p.y}));
+            h.frames(2);
+        };
+        click(&mut h, "navigation_cube:control:home");
+        let home = h.app.cam;
+        for handle in ["navigation_cube:front", "navigation_cube:top", "navigation_cube:top_front_right", "navigation_cube:control:right"] {
+            click(&mut h, "navigation_cube:control:home");
+            click(&mut h, handle);
+            assert!((h.app.cam.distance - home.distance).abs() < 1e-6, "{handle}: {} vs Home's {}", h.app.cam.distance, home.distance);
+            assert!(h.app.cam.target.dist(home.target) < 1e-6, "{handle}: {:?} vs Home's {:?}", h.app.cam.target, home.target);
+        }
+        assert_eq!(h.app.session.undo.len(), undo, "a view change edits nothing");
+    }
+
+    /// #10254: with Preferences › Navigation "Invert the view cube rotation arrows" on, the
+    /// arrow on the left orbits the camera the way it points (right), and the other arrows swap
+    /// the same way; the curved roll arrows keep their action.
+    #[test]
+    fn inverted_arrows_orbit_the_way_they_point() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube", "look_at_anim":false}));
+        assert!(!h.app.preferences.invert_navigator_arrows, "off by default");
+        let turn = |h: &mut crate::scenario::Harness, action: &str| -> Camera {
+            h.call("ui.view", json!({"view":"front"}));
+            h.frames(2);
+            serde_json::from_value(h.app.session.execute("view.navigate", &json!({"camera": h.app.cam, "action": action})).unwrap()["camera"].clone())
+                .unwrap()
+        };
+        let click = |h: &mut crate::scenario::Harness, handle: &str| {
+            h.call("ui.view", json!({"view":"front"}));
+            h.frames(2);
+            let p = crate::scenario::handle_at(&format!("navigation_cube:control:{handle}")).unwrap();
+            h.call("ui.click", json!({"x":p.x,"y":p.y}));
+            h.frames(2);
+            h.app.cam
+        };
+        let on_the_left = |handle: &str| {
+            let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
+            crate::scenario::handle_at(&format!("navigation_cube:control:{handle}")).unwrap().x < outer.center().x
+        };
+        // Off (the default): the arrow on the left runs the "left" orbit, as before.
+        assert!(on_the_left("left"), "off: the left action sits on the cube's left side");
+        assert_eq!(click(&mut h, "left"), turn(&mut h, "left"));
+        assert_eq!(click(&mut h, "up"), turn(&mut h, "up"));
+        h.call("ui.prefs", json!({"invert_navigator_arrows":true}));
+        h.frames(2);
+        // On: the arrow on the left now runs the "right" orbit, and the sides trade places.
+        assert!(on_the_left("right"), "on: the arrow on the left runs the right orbit");
+        assert_eq!(click(&mut h, "right"), turn(&mut h, "right"));
+        assert_eq!(click(&mut h, "left"), turn(&mut h, "left"));
+        assert_eq!(click(&mut h, "down"), turn(&mut h, "down"));
+        // The curved roll arrows are not inverted.
+        h.call("ui.view", json!({"view":"front"}));
+        h.frames(2);
+        let camera = h.app.cam;
+        let p = crate::scenario::handle_at("navigation_cube:control:clockwise").unwrap();
+        h.call("ui.click", json!({"x":p.x,"y":p.y}));
+        assert!((h.app.cam.roll - camera.roll - std::f64::consts::FRAC_PI_2).abs() < 1e-6, "clockwise still rolls clockwise");
     }
 
     #[test]

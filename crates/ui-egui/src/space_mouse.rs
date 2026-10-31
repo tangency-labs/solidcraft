@@ -307,7 +307,7 @@ pub fn buttons_hook(app: &mut SolveApp, ctx: &egui::Context, seen: Buttons, raw:
 fn run_button_job(app: &mut SolveApp, job: &ButtonJob, modifiers: egui::Modifiers, raw: &mut egui::RawInput) {
     match job {
         // Navigation, where the 3D mouse's section is.
-        ButtonJob::Settings => crate::prefs::open_at(app, crate::prefs::PAGE_NAVIGATION),
+        ButtonJob::Settings => crate::prefs::open_at(app, crate::prefs::PAGE_MOUSE3D),
         ButtonJob::View(view) => app.animate_view(view),
         ButtonJob::Key(ButtonKey::Esc) => {
             for pressed in [true, false] {

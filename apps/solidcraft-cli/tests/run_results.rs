@@ -229,7 +229,9 @@ fn known_pending_concepts_and_released_files_round_trip_with_inert_metadata() {
             assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
             let reopened = io::read_design(&std::fs::read(&destination).unwrap()).unwrap();
             assert_eq!(reopened.metadata, document.metadata);
-            assert_eq!(reopened.name, document.name);
+            // #4907: `run --save` maps to Save As, and a borrowed design name
+            // follows the destination file's stem instead of keeping the old name.
+            assert_eq!(reopened.name, format!("resaved-{index}"));
             assert_eq!(reopened.features, document.features);
             assert_eq!(std::fs::read(&source).unwrap(), bytes);
         }

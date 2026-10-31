@@ -12,6 +12,16 @@ an edited one goes back to how it was, as one step that Undo brings back.
 
 Opening a sketch turns the view to face it; to keep the view as it is and face the sketch only with **Look At**, turn off Preferences › Sketch › **Turn to face a sketch when it opens**. When the sketch ends, the view stays where it is by default. Preferences › Sketch › **When a sketch ends** changes that: **Return to the previous view** goes back to the view from before the sketch, and **Return unless rotated** goes back only when you panned or zoomed the sketch view but didn't turn it.
 
+In an assembly a new sketch belongs to the active component and is listed in its Sketches
+folder. Turn on Preferences › Sketch › **Sketching on a part's face makes that part active** to
+keep sketches with the part they are drawn on: a sketch started on a face of another component's
+body first activates that component, at the placement you picked, and is made there, as if you had
+activated the part yourself. The part stays active afterwards, so an extrude or cut made from the
+sketch lands in the same part; activate the design or another part again as usual. Off (the
+default), the sketch belongs to the active component. In scripts the same is
+`sketch.create {"plane": {"face": …}, "activate_part": true}`; the reply's `activated` names the
+component and placement it activated.
+
 In scripts, `XY`, `XZ`, `YZ` and their `Top`, `Front`, `Right` aliases name origin planes.
 Preferences › Interface › **Origin plane names** shows them as Top, Front and Right in the
 browser, dialogs and lists; scripts and saved designs keep XY, XZ and YZ.
@@ -33,8 +43,11 @@ Hover over a circle or arc centre, or the midpoint of a straight sketch edge, th
 horizontally or vertically to see a dotted alignment guide. The guide connects that reference
 to the cursor's projection on the sketch axis, within the viewport; it disappears when you
 move away from the axis. SolidCraft keeps the two most recent of these references and can
-draw both guides. One guide on its own does not move the cursor, and endpoints are ordinary
-point snaps rather than remembered references. Preferences › Sketch › **Auto snap to recent
+draw both guides. One guide on its own does not move the cursor. While a drawing tool (Line,
+Rectangle, Circle, Arc, Polygon, Slot, Point…) waits for a point, any sketch point is a
+reference too: the end of a line or arc, a rectangle's corner, or a free point. Preferences ›
+Sketch › **Alignment guides from end points and corners while drawing** turns that off and
+keeps only centres and midpoints. Preferences › Sketch › **Auto snap to recent
 centers and midpoints** is off until you turn it on. With it on, a drawing tool snaps the
 cursor where the horizontal through one reference meets the vertical through the other. On a
 rectangle, the top midpoint and a side midpoint then meet at the rectangle's centre, so that
@@ -57,13 +70,22 @@ fit-point and control-point splines, conics, points and text. **Construction** (
 into reference geometry that doesn't form profiles. Modify tools include trim (T), extend, break,
 fillet, chamfer, offset (O), mirror, patterns, move/copy and scale. With trim on, click a
 piece to remove it, or press and drag a path across several pieces: the ones it crosses light up
-and all go when you let go, in one undo step (`sketch.trim.path`).
+and all go when you let go, in one undo step (`sketch.trim.path`). Fillet and chamfer take
+several corners at once: pick the corners, set the size once, and every corner is rounded or
+cut alike in one undo step.
 
 Line draws a chain: each click adds a segment from the last point, and a right-click or Esc
 ends the chain. To draw one separate line with a press, a drag and the release instead, turn on
 **Preferences › Sketch › Press and drag draws one line**: the line runs from where you press to
 where you let go, snapping and lining up as clicks do, and ends there; clicks still draw a
 chain, and a drag shorter than about 24 points is still a click.
+
+To round corners without changing tool, turn on **Preferences › Sketch › Rest on a line's last
+point to switch to a tangent arc**. With a segment drawn, move the pointer away from the chain's
+last point, bring it back and hold it still for about a third of a second: a label next to the
+pointer says Tangent Arc, and the next click ends an arc tangent to the last segment. The same
+gesture goes back to lines. Arcs and lines join into one chain, each click is one undo step, and a
+right-click or Esc ends the chain as usual.
 
 Tools with several variants (line and midpoint line; two-point, three-point, centre and rounded
 rectangle; the circle, arc, slot, polygon and spline variants) share one toolbar button with a
@@ -419,6 +441,9 @@ Measure shows the currently selected distance (centre, minimum or maximum) and s
 distances on the canvas. The component dimensions follow the world axes and remain visible
 until the Measure dialog closes. To hide these extra lines and labels, turn off
 **Preferences > Graphics > Show X/Y/Z distances**. The choice is saved between runs.
+Drag the distance or an X, Y or Z label to move it away from the part; a moved label keeps a
+line to what it measures. Double-click a label to put it back. Measuring other items starts the
+labels in their own places again.
 
 ### Reviewing mirror, pattern, and offset results
 

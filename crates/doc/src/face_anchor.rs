@@ -211,8 +211,16 @@ impl Document {
                 let indices = self.configuration_face_indices(body, &target)?;
                 // A copy a pattern or mirror made on the same body carries its seed's certificate,
                 // which finds the seed's face: the copy is attached by its own history name below.
+                // A face that is no copy, on the plane of the pieces the certificate finds, is
+                // another piece of that face (a piece a later join left bordering another body,
+                // and named after it): the certificate stands for it too (#9465).
                 if !indices.contains(&index) {
-                    return Err(DocError::Invalid("this face has no supported construction certificate; choose a fixed plane instead".into()));
+                    let names = crate::naming::names(body);
+                    let copy = names.faces.get(index).is_none_or(|name| crate::persistent_name::is_copy(name));
+                    let all: Vec<usize> = indices.iter().copied().chain([index]).collect();
+                    if copy || self.coplanar_pieces(body, &all, |_| true).is_err() {
+                        return Err(DocError::Invalid("this face has no supported construction certificate; choose a fixed plane instead".into()));
+                    }
                 }
                 self.coplanar_pieces(body, &indices, |_| true)?;
                 Ok(target)

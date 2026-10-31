@@ -506,8 +506,25 @@ pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
     }
 }
 
+/// The Free Move angles (X, Y, Z) that make the same turn as a turn of `angle` about `axis`,
+/// in the dialog's order (Z applied last, then Y, then X — the same composition `step` uses),
+/// so an edited move shows angles that re-make the turn the feature stored.
+pub(crate) fn euler_from_axis_angle(axis: Vec3, angle: f64) -> (f64, f64, f64) {
+    let axis = axis.normalized().unwrap_or(Vec3::Z);
+    let m = gizmo::rotation(axis, angle);
+    // R = Rz(rz) * Ry(ry) * Rx(rx): row 2 is (-sin ry, cos ry sin rx, cos ry cos rx).
+    let ry = (-m[2][0]).clamp(-1.0, 1.0).asin();
+    if m[2][1].abs() + m[2][2].abs() < 1e-9 {
+        // Half a turn about X or Y: only rx + rz shows; keep rz at zero.
+        ((-m[1][2]).atan2(m[1][1]), ry, 0.0)
+    } else {
+        (m[2][1].atan2(m[2][2]), ry, m[1][0].atan2(m[0][0]))
+    }
+}
+
 /// The dialog for editing a move: Free Move with its translation and, about a world axis
-/// through the origin, its angle (another axis is kept as it is).
+/// through the origin, its angle (another axis is shown as the Free Move angles that make
+/// the same turn, or kept as it is when the angle does not evaluate to a number).
 pub fn for_feature(
     doc: &solidcraft_engine::doc::Document,
     d: &mut Dialog,
@@ -528,10 +545,16 @@ pub fn for_feature(
                 Some(0) => *rx = a.to_string(),
                 Some(1) => *ry = a.to_string(),
                 Some(_) => *rz = a.to_string(),
-                None => {
-                    d.extra.insert("axis".into(), json!([dir.x, dir.y, dir.z]));
-                    d.extra.insert("angle".into(), json!(a));
-                }
+                None => match doc.eval(a, ValueKind::Angle) {
+                    Ok(th) if th.is_finite() => {
+                        let (ax, ay, az) = euler_from_axis_angle(dir, th);
+                        (*rx, *ry, *rz) = (deg(ax), deg(ay), deg(az));
+                    }
+                    _ => {
+                        d.extra.insert("axis".into(), json!([dir.x, dir.y, dir.z]));
+                        d.extra.insert("angle".into(), json!(a));
+                    }
+                },
             }
             // The stored move turns about the origin.
             d.extra.insert("pivot".into(), json!([0.0, 0.0, 0.0]));

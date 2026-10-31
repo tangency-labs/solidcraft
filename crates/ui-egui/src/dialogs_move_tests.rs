@@ -540,3 +540,106 @@ fn a_pick_on_the_moved_body_is_taken_back_by_the_current_move() {
     let elsewhere = Sel::Vertex { body: "Other".into(), point: Vec3::new(30.0, 30.0, 10.0) };
     assert_eq!(from_shown(&h.app, elsewhere.clone()), elsewhere, "a pick on another body stays where it was made");
 }
+
+/// The prefilled Free Move angles must re-make the turn the feature stored, whatever the axis:
+/// recomposing them the way `step` does (Z, then Y, then X) gives the same rotation matrix.
+#[test]
+fn the_prefilled_angles_remake_the_stored_turn() {
+    let cases = [
+        // #9696: the turn a Free Move of 10 deg on each axis stores.
+        (Vec3::new(0.5407162030609368, 0.6444004775717719, 0.5407162030609368), 16.7865_f64.to_radians()),
+        (Vec3::X, std::f64::consts::PI),
+        (Vec3::Y, std::f64::consts::FRAC_PI_2),
+        (Vec3::new(0.0, 0.0, -1.0), 0.5),
+        (Vec3::new(1.0, 2.0, 3.0).normalized().unwrap(), 0.7),
+        (Vec3::new(-0.3, 0.8, -0.5).normalized().unwrap(), -1.2),
+    ];
+    for (axis, th) in cases {
+        let (rx, ry, rz) = euler_from_axis_angle(axis, th);
+        let r = gizmo::mul(&gizmo::mul(&gizmo::rotation(Vec3::Z, rz), &gizmo::rotation(Vec3::Y, ry)), &gizmo::rotation(Vec3::X, rx));
+        let o = gizmo::rotation(axis, th);
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!((r[i][j] - o[i][j]).abs() < 1e-9, "axis {axis:?} angle {th}: {r:?} != {o:?}");
+            }
+        }
+    }
+}
+
+/// The #9696 repro: a Free Move of 10 mm and 10 deg on each axis stores one turn about a
+/// slanted axis; editing shows the stored translation and angles that make that turn again,
+/// re-saving unchanged does not move the body, and zeroing every value brings it back.
+#[test]
+fn editing_a_free_move_shows_the_values_it_was_made_with() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    let id = h
+        .app
+        .run(
+            "solid.move",
+            json!({
+                "bodies": ["Body1"],
+                "translate": ["9.729024 mm", "9.95222 mm", "10.327918 mm"],
+                "axis": [0.5407162030609368, 0.6444004775717719, 0.5407162030609368],
+                "angle": "16.7865 deg",
+            }),
+        )
+        .unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let bounds = |h: &crate::scenario::Harness| h.app.session.world_state().body("Body1").unwrap().mesh().bounds();
+    let before = bounds(&h);
+    let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let Kind::Move { x, y, z, rx, ry, rz, .. } = &d.kind else { panic!("not a move") };
+    let shown = [len(&h.app, x).unwrap(), len(&h.app, y).unwrap(), len(&h.app, z).unwrap()];
+    let want = [9.729024, 9.95222, 10.327918];
+    assert!((Vec3::new(shown[0], shown[1], shown[2]) - Vec3::new(want[0], want[1], want[2])).len() < 1e-6, "translation {shown:?}");
+    let angles = [ang(&h.app, rx).unwrap().to_degrees(), ang(&h.app, ry).unwrap().to_degrees(), ang(&h.app, rz).unwrap().to_degrees()];
+    for a in angles {
+        assert!((a - 10.0).abs() < 1e-3, "the stored turn shows as the angles it was made with, not {angles:?}");
+    }
+    assert!(d.extra.get("axis").is_none() && d.extra.get("angle").is_none(), "the turn is shown, not hidden in extra");
+    // Re-saving the dialog unchanged must not move the body.
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    let after = bounds(&h);
+    assert!(
+        (after.min - before.min).len() < 1e-4 && (after.max - before.max).len() < 1e-4,
+        "re-saving unchanged must not move: {before:?} -> {after:?}"
+    );
+    // Zeroing every value brings the body back where it was before the move.
+    let mut d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    if let Kind::Move { x, y, z, rx, ry, rz, .. } = &mut d.kind {
+        *x = "0".into();
+        *y = "0".into();
+        *z = "0".into();
+        *rx = "0 deg".into();
+        *ry = "0 deg".into();
+        *rz = "0 deg".into();
+    }
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    let back = bounds(&h);
+    assert!(
+        (back.min - Vec3::ZERO).len() < 1e-6 && (back.max - Vec3::new(20.0, 20.0, 20.0)).len() < 1e-6,
+        "zeroed values must undo the move: {back:?}"
+    );
+}
+
+/// A move about a world axis keeps its angle expression in that axis's field.
+#[test]
+fn editing_a_move_about_a_world_axis_keeps_the_angle_expression() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20})).unwrap();
+    let id = h
+        .app
+        .run("solid.move", json!({"bodies": ["Body1"], "translate": ["0", "0", "5 mm"], "axis": [0.0, 0.0, 1.0], "angle": "45 deg"}))
+        .unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let d = crate::dialogs::for_feature(&h.app, id, None).unwrap();
+    let Kind::Move { rx, ry, rz, .. } = &d.kind else { panic!("not a move") };
+    assert_eq!((rx.as_str(), ry.as_str(), rz.as_str()), ("0 deg", "0 deg", "45 deg"));
+}

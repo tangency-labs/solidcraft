@@ -58,6 +58,17 @@ impl DockEdges {
     pub const ALL: Self = Self { left: true, right: true, top: true, bottom: true };
 }
 
+thread_local! {
+    /// The areas built as [`Surface::Canvas`]: a value box, a dimension's editor, a readout.
+    static CANVAS_AREAS: std::cell::RefCell<std::collections::HashSet<Id>> = std::cell::RefCell::default();
+}
+
+/// Is `layer` a model-anchored editor or readout ([`Surface::Canvas`])? Such an area sits on the
+/// model and scrolls nothing, so the model's wheel and trackpad navigation go on under it (#10061).
+pub(crate) fn is_canvas(layer: egui::LayerId) -> bool {
+    CANVAS_AREAS.with(|areas| areas.borrow().contains(&layer.id))
+}
+
 /// Universal outer host and surface policy. Both host geometry and frame construction must go
 /// through this API, including code in nested modules and platform apps.
 #[derive(Clone, Copy)]
@@ -310,6 +321,9 @@ impl Container {
     }
 
     pub fn area(self, id: Id) -> egui::Area {
+        if self.surface == Surface::Canvas {
+            CANVAS_AREAS.with(|areas| areas.borrow_mut().insert(id));
+        }
         // Workspace cards and viewport status stay below tool/system windows even when
         // clicked. Other areas keep the normal window layer; popups choose their order.
         let order = if matches!(self.surface, Surface::Panel | Surface::ViewportStatus) { egui::Order::Background } else { egui::Order::Middle };

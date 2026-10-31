@@ -682,6 +682,42 @@ fn a_measure_reads_a_copy_off_the_window_thread_preference_or_not() {
     assert_eq!(h.app.session.log.len(), log, "a reading leaves no echo: {:?}", h.app.session.log);
 }
 
+/// #9624: an inspection read on a copy reports the design's undo and redo counts and its file,
+/// as one run here does; the copy has no history and no file, and it said undo 0, redo 0, path
+/// none, so an agent could not tell how far to roll back a failed batch.
+#[test]
+fn an_inspection_on_a_copy_reports_the_history_and_the_file() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.control_rx = Some(rx);
+    let inspect = |h: &mut Harness| {
+        let reply = ask(&tx, "document.inspect", json!({}));
+        h.frames(1);
+        assert_eq!(h.app.control_answering.len(), 1, "read a copy");
+        let r = reply_to(h, &reply);
+        assert_eq!(r["ok"], true, "{r}");
+        let here = h.app.run("document.inspect", json!({})).unwrap();
+        for key in ["undo", "redo", "path"] {
+            assert_eq!(r["result"][key], here[key], "{key}: {r}");
+        }
+        (r["result"]["undo"].clone(), r["result"]["redo"].clone(), r["result"]["path"].clone())
+    };
+    for corner in [[0, 0, 0], [20, 0, 0]] {
+        h.app.run("solid.box", json!({"corner": corner, "length": 10, "width": 10, "height": 10})).unwrap();
+    }
+    assert_eq!(inspect(&mut h), (json!(2), json!(0), json!(null)));
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(inspect(&mut h), (json!(1), json!(1), json!(null)));
+    let path = h.dir.join("boxes.solidcraft");
+    h.app.run("file.save_as", json!({"path": path})).unwrap();
+    let (undo, redo, saved) = inspect(&mut h);
+    assert_eq!((undo, redo), (json!(1), json!(1)));
+    assert_eq!(saved, json!(h.app.session.path), "the file it was saved to");
+    assert!(saved.as_str().is_some_and(|p| p.ends_with("boxes.solidcraft")), "{saved}");
+}
+
 /// A reading on a copy keeps the request's own `param_check` (#9184), as one run here does: its
 /// reply says the level, and a word that is no level is refused.
 #[test]
@@ -884,6 +920,40 @@ fn delete_on_the_selection_checks_off_the_window_thread() {
     assert!(h.app.session.doc.feature(boss).is_none());
     assert!(h.app.menu.confirm.is_none());
     assert!((volume(&mut h) - block_with_hole()).abs() < 1.0);
+}
+
+/// #9917: with the history rolled back, the check builds the features after the marker off the
+/// window thread and keeps them; the confirmation carries them to the delete, which runs with
+/// them instead of building that history again on the window thread.
+#[test]
+fn a_confirmed_delete_runs_with_what_its_check_kept() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    let sk = h.app.run("sketch.create", json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap();
+    let side = h.app.run("sketch.line", json!({"points": [[0, 0], [40, 0], [30, 20], [10, 20]], "closed": true})).unwrap()["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"distance": 5, "name": "Plate"})).unwrap();
+    for i in 0..3 {
+        h.app.run("solid.cylinder", json!({"base": [12 + 6 * i, 8, -1], "radius": 1, "height": 10, "operation": "cut"})).unwrap();
+    }
+    h.app.run("timeline.roll_to", json!({"position": 1})).unwrap();
+    h.app.run("sketch.edit", json!({"sketch": sk})).unwrap();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    crate::delete::request(&mut h.app, json!({"items": [{"type": "sketch_curve", "id": side}]}));
+    assert!(h.app.computing_since().is_some(), "checking");
+    until_settled(&mut h);
+    let pending = h.app.menu.confirm.clone().expect("what the delete breaks after the marker is confirmed first");
+    assert!(pending.report["would_fail"].as_array().is_some_and(|a| !a.is_empty()), "{}", pending.report);
+    let kept = pending.kept.expect("the check's results go with the confirmation");
+    let built = kept.len();
+    assert!(built > 0, "the check kept the features after the marker it built");
+    assert!(crate::delete::confirm(&mut h.app, true));
+    let curves = |h: &Harness| h.app.session.model.state().sketch(sk).map(|s| s.sketch.curves.len()).unwrap_or(0);
+    assert_eq!(curves(&h), 3, "deleted");
+    assert_eq!(kept.len(), built, "the delete built nothing the check had not kept");
 }
 
 /// A design changed while its delete is checked is checked again before anything is deleted, and

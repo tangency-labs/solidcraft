@@ -20,6 +20,7 @@ struct U {
     sel: vec4<f32>,    // xyz a whole selected body's colour before lighting
     product_lights_meta: vec4<f32>, // explicit preview flag and bounded count
     product_lights: array<vec4<f32>,84>, // position/kind, radiance, axis/cone, attenuation
+    sky: vec4<f32>,    // xyz = world up; w = 1: shade in linear light with a sky fill (#7974)
 };
 
 fn reversed() -> bool {
@@ -423,8 +424,13 @@ fn analysis(i: TOut, k: f32) -> vec4<f32> {
         let r = reflect(-v, n);
         var side = cross(v, vec3<f32>(0.0, 0.0, 1.0));
         if (length(side) < 1e-3) { side = vec3<f32>(1.0, 0.0, 0.0); }
-        let s = sin(dot(r, normalize(side)) * u.ana.y * 3.14159265);
-        let c = select(0.08, 0.95, s > 0.0);
+        let x = dot(r, normalize(side));
+        let s = sin(x * u.ana.y * 3.14159265);
+        // A face whose normal lies in the upright plane through the view (every horizontal
+        // face) reflects straight ahead: its sideways part is zero, on the edge between a black
+        // and a white stripe, and rounding picked one or the other from frame to frame while
+        // the view turned (#2153). Straight ahead is white.
+        let c = select(0.08, 0.95, s > 0.0 || abs(x) < 1e-4);
         return out_color(vec4<f32>(vec3<f32>(c), 1.0));
     }
     if (u.ana.x > 4.5) {
@@ -545,6 +551,31 @@ fn lit(i: TOut, visibility: f32) -> vec4<f32> {
     return lit_color(i, visibility, i.c);
 }
 
+/// sRGB to linear light, exact (the straight segment too, which `to_linear` leaves out).
+fn srgb_decode(c: vec3<f32>) -> vec3<f32> {
+    return select(c / 12.92, pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4)), c > vec3<f32>(0.04045));
+}
+
+fn srgb_encode(c: vec3<f32>) -> vec3<f32> {
+    let l = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+    return select(l * 12.92, 1.055 * pow(l, vec3<f32>(1.0 / 2.4)) - vec3<f32>(0.055), l > vec3<f32>(0.0031308));
+}
+
+/// The studio light summed in linear light, encoded once (#7974): the key and the eye fill as in
+/// [`lit_color`], over a sky fill that grows as the face turns up, and the 4% every dielectric
+/// reflects of that sky (a little more toward grazing), so a near-black face keeps a gradient. The sky
+/// and the fill are what ambient occlusion (`visibility`) takes away. sRGB out.
+fn sky_lit(base: vec3<f32>, n: vec3<f32>, diff: f32, fill: f32, visibility: f32) -> vec3<f32> {
+    let up = dot(n, normalize(u.sky.xyz)) * 0.5 + 0.5;
+    let sky = mix(0.18, 0.42, up);
+    // Schlick's rise toward grazing, tempered so mid-tones only gain a soft rim.
+    let fresnel = 0.04 + 0.2 * pow(1.0 - fill, 5.0);
+    let albedo = srgb_decode(base);
+    // Scaled so light and mid-grey faces land near where the sRGB shading puts them.
+    let light = albedo * (0.41 * diff + (0.66 * sky + 0.2 * fill) * visibility) + vec3<f32>(fresnel * sky * visibility);
+    return srgb_encode(light);
+}
+
 /// [`lit`] in a colour of its own: a whole highlighted body is lit in its colour lifted by the
 /// hover amount, or in the selection colour, from the model's own plan triangles.
 fn lit_color(i: TOut, visibility: f32, base: vec4<f32>) -> vec4<f32> {
@@ -571,6 +602,9 @@ fn lit_color(i: TOut, visibility: f32, base: vec4<f32>) -> vec4<f32> {
     let fill = max(dot(n, v), 0.0);
     let h = normalize(key + v);
     let spec = pow(max(dot(n, h), 0.0), 40.0) * 0.25;
+    if u.sky.w > 0.5 {
+        return out_color(vec4<f32>(min(sky_lit(base.rgb, n, diff, fill, visibility) + vec3<f32>(spec), vec3<f32>(1.0)), base.a));
+    }
     let k = 0.42 + 0.38 * diff + 0.25 * fill - (0.42 + 0.25 * fill) * (1.0 - visibility);
     return out_color(vec4<f32>(min(base.rgb * k + vec3<f32>(spec), vec3<f32>(1.0)), base.a));
 }

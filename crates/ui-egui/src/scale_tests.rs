@@ -291,6 +291,7 @@ pub(crate) fn view_frame(
         eye: [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
         ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+        sky: [0.0; 4],
         ssaa: 1.0,
         hover_tint: [f32::from(t.hover_face_lift) / 255.0; 3],
         selection_tint: [0.4, 0.6, 0.9],
@@ -405,6 +406,39 @@ fn frame_cost_of_a_design_file() {
     while t.elapsed().as_secs() < std::env::var("SOLIDCRAFT_SCALE_LOOP").ok().and_then(|v| v.parse().ok()).unwrap_or(0) {
         h.frame();
     }
+}
+
+/// A design from a file (`SOLIDCRAFT_SCALE_DESIGN`) open in two tabs, both with an unsaved change
+/// the comparison with the saved design finds only at its end (a favourite, as a changed
+/// appearance is): the time of an idle frame, and of one unsaved-changes check
+/// (`Session::is_dirty`, which the tab strip and the autosave ask every frame).
+#[test]
+#[ignore = "manual measurement on a design file"]
+fn idle_frame_cost_of_two_unsaved_tabs() {
+    let Some(path) = std::env::var_os("SOLIDCRAFT_SCALE_DESIGN") else { return };
+    let path = path.to_string_lossy().to_string();
+    let open = || {
+        let (doc, saved) = solidcraft_engine::io::read_design_file(&path, None::<fn(solidcraft_engine::io::DesignPreview)>).unwrap();
+        let mut s = solidcraft_engine::Session::opened(doc, saved.as_ref());
+        s.doc_mut().favorites.insert("idle-measurement".into());
+        s.revision += 1;
+        s
+    };
+    let mut h = Harness::new();
+    h.app.session = open();
+    crate::documents::open_tab(&mut h.app, open()).unwrap();
+    assert!(h.app.session.is_dirty());
+    h.frames(5);
+    let median = |mut v: Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        (v[v.len() / 2], v[0], v[v.len() - 1])
+    };
+    let (frame, frame_min, frame_max) = median((0..30).map(|_| ms(|| h.frame())).collect());
+    let (dirty, dirty_min, dirty_max) = median((0..30).map(|_| ms(|| assert!(std::hint::black_box(h.app.session.is_dirty())))).collect());
+    let bodies = h.app.session.model.state().bodies.len();
+    println!(
+        "IDLE2TABS bodies={bodies} idle_frame_ms={frame:.3} ({frame_min:.3}-{frame_max:.3}) is_dirty_ms={dirty:.4} ({dirty_min:.4}-{dirty_max:.4})"
+    );
 }
 
 /// A whole assembly's hover highlight: the model's own triangles (its display plans on the GPU)

@@ -215,7 +215,7 @@ fn edit_joint_runs_edit_and_limits() {
         .unwrap();
     let id = app.session.doc.assembly.joints[0].id;
     let mut d = edit_joint(&app, id).unwrap();
-    assert!(d.inputs.is_empty());
+    assert_eq!(d.inputs.len(), 2, "the two sides show as in the Joint dialog");
     if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
         assert_eq!(TYPES[f.kind], "slider");
         f.limits[0] = (true, "0 mm".into(), "15 mm".into());
@@ -279,6 +279,75 @@ fn edit_joint_keeps_an_offset_typed_as_an_expression() {
     let j = &app.session.doc.assembly.joints[0];
     assert!(j.flip);
     assert_eq!((j.exprs.offset.as_deref(), j.exprs.angle.as_deref()), (Some("gap"), None));
+}
+
+/// Edit Joint shows both sides pre-filled, each on its own component. OK sends no side while
+/// they are as they were; picking one side again sends only that side, and the joint keeps its
+/// other side.
+#[test]
+fn edit_joint_shows_both_sides_and_a_repick_sends_only_that_side() {
+    let mut app = two_boxes();
+    let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+    app.run("joint.create", json!({"type": "rigid", "a": {"occurrence": a, "face": [10, 10, 10]}, "b": {"occurrence": b, "face": [40, 10, 0]}}))
+        .unwrap();
+    let before = app.session.doc.assembly.joints[0].clone();
+    let mut d = edit_joint(&app, before.id).unwrap();
+    assert_eq!(d.inputs.len(), 2);
+    for (input, occurrence) in d.inputs.iter().zip([a, b]) {
+        let Some(Sel::Face { body, .. }) = input.items.first() else { panic!("no side pick: {:?}", input.items) };
+        assert_eq!(occurrence_of_body(&app.session, body), Some(occurrence), "{body}");
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert!(c[0].1.get("a").is_none() && c[0].1.get("b").is_none(), "{}", c[0].1);
+    // B's top face, where B now sits on A: side b alone is picked again, and the angle the
+    // dialog opened on is not sent (a side moved turns B as joint.create would).
+    d.active = 1;
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 20.0)).unwrap());
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].0, "joint.edit");
+    assert!(c[0].1.get("a").is_none() && c[0].1.get("angle").is_none(), "{}", c[0].1);
+    assert_eq!(c[0].1["b"]["occurrence"], json!(b));
+    // An angle the user types is sent.
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.angle = "45 deg".into();
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["angle"], json!("45 deg"), "{}", c[0].1);
+    for (id, p) in c {
+        app.run(&id, p).unwrap();
+    }
+    assert!((app.session.doc.assembly.joints[0].angle.to_degrees() - 45.0).abs() < 1e-9);
+    let after = app.session.doc.assembly.joints[0].clone();
+    assert_eq!(after.a, before.a);
+    assert_eq!(after.b.occurrence, b);
+    assert_ne!(after.b, before.b);
+}
+
+/// A side on a hole's wall shows the wall, a cylinder, not the plate's face beside the hole: the
+/// face its snap names is the one the pre-fill takes, however near the other face's plane lies.
+#[test]
+fn a_hole_side_shows_its_wall_not_the_plate_beside_it() {
+    let mut s = Session::default();
+    s.execute("component.create", &json!({"name": "Plate"})).unwrap();
+    s.execute("solid.box", &json!({"length": 40, "width": 40, "height": 10, "corner": [0, 0, 0]})).unwrap();
+    s.execute("solid.cylinder", &json!({"diameter": 10, "height": 20, "base": [20, 20, -5], "operation": "cut"})).unwrap();
+    s.execute("component.create", &json!({"name": "Peg"})).unwrap();
+    s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "corner": [60, 0, 0]})).unwrap();
+    s.execute("component.activate", &json!({"component": "root"})).unwrap();
+    let mut app = SolveApp::new(s, Services::default());
+    let (plate, peg) = (occ(&app, "Plate"), occ(&app, "Peg"));
+    app.run("occurrence.ground", json!({"occurrence": plate, "grounded": true})).unwrap();
+    app.run(
+        "joint.create",
+        json!({"type": "rigid", "a": {"occurrence": plate, "circle": [25, 20, 8]}, "b": {"occurrence": peg, "face": [65, 5, 0]}}),
+    )
+    .unwrap();
+    let joint = app.session.doc.assembly.joints[0].clone();
+    assert!(matches!(joint.a.snap, solidcraft_engine::doc::joints::Snap::CircleCenter { face: Some(_), .. }), "{:?}", joint.a.snap);
+    let d = edit_joint(&app, joint.id).unwrap();
+    let item = d.inputs[0].items.first().unwrap_or_else(|| panic!("no pre-fill for the hole side"));
+    let snap = snap_of(&app.session, item).unwrap();
+    assert_eq!(snap.kind, SnapKind::CircleCenter, "the pre-fill is the plate's face, not the hole's wall: {item:?}");
 }
 
 #[test]

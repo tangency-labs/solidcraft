@@ -456,6 +456,27 @@ fn drawing_at_a_curve_crossing_keeps_the_point_on_both() {
 }
 
 #[test]
+fn drawing_at_an_infinite_line_crossing_keeps_the_point_on_both() {
+    let mut s = new_sketch();
+    let a = ids(&run(&mut s, "sketch.construction_line.vertical", json!({"at": [20, 40]}))["curves"])[0].clone();
+    let b = ids(&run(&mut s, "sketch.construction_line.horizontal", json!({"at": [40, 15]}))["curves"])[0].clone();
+    let r = run(&mut s, "sketch.line", json!({"points": [format!("x:{a}+{b}:20.4,15.4"), [30, 25]], "infer": false, "connect": false}));
+    let line = ids(&r["curves"])[0].clone();
+    let sk = sketch(&s);
+    let start = sk.resolve_point(&format!("{line}.start")).unwrap();
+    assert!(sk.point(start).unwrap().dist(Vec2::new(20.0, 15.0)) < 1e-9);
+    for name in [a, b] {
+        let curve = sk.curve_index(&name).unwrap();
+        assert!(sk.constraints.iter().any(|k| matches!(k.kind, crate::sketch::ConstraintKind::PointOnCurve { p, c } if p == start && c == curve)));
+    }
+    let before_undo = s.doc.to_json();
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(sketch(&s).curves.len(), 2);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.doc.to_json(), before_undo);
+}
+
+#[test]
 fn drawing_at_a_curve_crossing_refuses_hostile_arguments() {
     let mut s = new_sketch();
     let a = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "infer": false}))["curves"])[0].clone();
@@ -1640,4 +1661,53 @@ fn inward_bulging_arc_pairs_keep_the_gap_dimension() {
         "{:?}",
         sk.constraints.iter().map(|c| &c.kind).collect::<Vec<_>>()
     );
+}
+
+/// #9735: the over-constrain conflict list named the refused dimension's own id — the trial
+/// sketch already holds the new constraint under the id it would get, and the next constraint
+/// added takes that id. The list names only constraints the sketch already has.
+#[test]
+fn over_constrain_message_leaves_out_the_refused_dimensions_own_id() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l1"], "value": 50}));
+    // The sketch holds k1..k6: the refused dimension would take k7, which is not yet one of them.
+    let e = s.execute("sketch.dimension", &json!({"entities": ["l3"], "value": 30})).unwrap_err().to_string();
+    assert!(e.contains("would over-constrain the sketch (conflicts with"), "{e}");
+    assert!(e.contains("k3") && e.contains("k4") && e.contains("k6"), "{e}");
+    assert!(!e.contains("k7"), "{e}: the refused dimension's own id must not be listed");
+    // The next constraint takes k7: the id the message must not have burned.
+    run(&mut s, "sketch.dimension", json!({"entities": ["l2"], "value": 25}));
+    assert_eq!(sketch(&s).constraints.last().unwrap().id, "k7");
+}
+
+/// #9735: "neither entity can move … (they are fixed or fully constrained)" fired for sketches
+/// with free degrees of freedom. The refusal now lists the constraints the new one conflicts
+/// with by id, as the over-constrain message does.
+#[test]
+fn conflict_lists_the_constraints_instead_of_claiming_the_entities_are_fixed() {
+    // A rectangle from (10,10): 4 degrees of freedom, nothing fixed; its bottom side cannot be
+    // made parallel to its right side — the conflict is with the rectangle's own constraints.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [50, 30]}));
+    let before = serde_json::to_value(sketch(&s)).unwrap();
+    let e = s.execute("sketch.constraint.parallel", &json!({"a": "l1", "b": "l2"})).unwrap_err().to_string();
+    assert!(!e.contains("fixed or fully constrained"), "{e}");
+    // The horizontal on l1 (k1) and the vertical on l2 (k3) are what the parallel conflicts with.
+    assert!(e.contains("conflicts with k1, k3"), "{e}");
+    assert!(!e.contains("k5"), "{e}: the refused constraint's own id must not be listed");
+    assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before, "the sketch does not change");
+    // A rectangle drawn from the origin (2 degrees of freedom): the same refusals name the
+    // constraints they conflict with, not fixed entities.
+    for (cmd, params) in [
+        ("sketch.constraint.parallel", json!({"a": "l1", "b": "l2"})),
+        ("sketch.constraint.coincident", json!({"a": "p1", "b": "p3"})),
+        ("sketch.constraint.perpendicular", json!({"a": "l1", "b": "l3"})),
+    ] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+        let e = s.execute(cmd, &params).unwrap_err().to_string();
+        assert!(!e.contains("fixed or fully constrained"), "{cmd} {params}: {e}");
+        assert!(e.contains("conflicts with"), "{cmd} {params}: {e}");
+    }
 }

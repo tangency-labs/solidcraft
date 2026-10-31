@@ -1283,6 +1283,9 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
                     }
                     if response.clicked() {
                         app.ui.tab = tab.to_string();
+                        // Floating ribbons draw after the viewport. An instant surface switch
+                        // needs one more pass too; settled tabs never schedule their own frames.
+                        ui.ctx().request_repaint();
                     }
                     if response.secondary_clicked() {
                         crate::context_menu::open_for(
@@ -1713,7 +1716,9 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         resp.request_focus();
                     }
                     let id = selected.id;
-                    app.start_pinned(id, Some(whole));
+                    if !end_running_tool(app, id) {
+                        app.start_pinned(id, Some(whole));
+                    }
                 }
                 if persistent {
                     let label = persistent_button_name(app, selected);
@@ -1828,7 +1833,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     if resp.secondary_clicked() {
                         menu = Some((resp.interact_pointer_pos().unwrap_or(cell.left_bottom()), c.id));
                     }
-                    if ribbon_tooltip(app, resp, c, info.disabled_reason.as_deref()).clicked() && info.enabled {
+                    if ribbon_tooltip(app, resp, c, info.disabled_reason.as_deref()).clicked() && info.enabled && !end_running_tool(app, c.id) {
                         app.start_at(c.id, Some(cell));
                     }
                 }
@@ -2908,10 +2913,53 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     }
+    // The selection shape (#4376): a drag draws a freehand lasso instead of the rectangle.
+    let label = app.tr("ui.lasso_select").to_string();
+    ui_kit::checkbox(ui, &label, &mut app.ui.lasso_select);
+}
+
+/// A click on the lit button of the sketch tool that is running ends the tool, as a toggle does,
+/// so clicks in the view select again (#10151). With Preferences › Sketch "Clicking the running
+/// tool's button ends it" off, the click starts the tool again, as it did before. Returns whether
+/// the tool was ended. A persistent analysis button already turns its analysis off its own way.
+fn end_running_tool(app: &mut SolveApp, id: &str) -> bool {
+    if !app.preferences.ribbon_click_ends_tool || persistent_available(app, id) || !app.tool.as_ref().is_some_and(|t| t.cmd == id) {
+        return false;
+    }
+    crate::dim_view::cancel();
+    app.tool = None;
+    true
 }
 
 /// Two Esc presses within this many seconds finish the open sketch.
 pub const ESCAPE_TWICE_S: f64 = 0.4;
+
+/// Whether `cancel_unfinished` has something to cancel.
+pub(crate) fn unfinished(app: &SolveApp) -> bool {
+    app.tool.is_some()
+        || crate::select_other::is_open(app)
+        || app.menu.joint_move_warning.is_some()
+        || app.viewport.joint_handles.is_some()
+        || app.viewport.text_drag.is_some()
+        || crate::occurrence_drag::active(app)
+}
+
+/// Cancels what one Esc cancels before it reaches the dialog, the selection or the sketch:
+/// a drag, the Select Other list, or the active tool's points and then the tool. The view's
+/// corner Cancel (#6709) takes this step first too. Returns whether anything was cancelled.
+pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
+    if crate::joint_handles::cancel(app) || crate::sketch_text_move::cancel_drag(app) || crate::occurrence_drag::cancel(app) {
+        return true;
+    }
+    if crate::select_other::is_open(app) {
+        crate::select_other::close(app);
+    } else if app.tool.is_some() {
+        crate::tools::finish(app);
+    } else {
+        return false;
+    }
+    true
+}
 
 /// Global keyboard shortcuts (when no text field has focus).
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
@@ -2977,6 +3025,20 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         || crate::hole_presets::name_prompt_open(ctx, app.dialog.as_ref())
         || crate::personal_sheet_rules::name_prompt_open(ctx, app.dialog.as_ref());
     let inline_editor = crate::dim_view::editing();
+    if !popup_owner
+        && app.viewport_status.open_key.is_some()
+        && crate::ui_kit::details_field_owned_escape(ctx)
+        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        ctx.memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
+        app.esc_handled = true;
+        app.escape_owner = Some(crate::EscapeOwner::Overlay);
+        return;
+    }
     if popup_owner
         || inline_editor
         || (crate::viewport_status::enabled(app) && app.ui.palette_open)
@@ -3089,19 +3151,15 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     let blank = app.session.doc.sketch(sketch).is_ok_and(crate::sketch_palette::is_blank);
                     let depth = app.session.undo.len();
                     app.finish_sketch();
-                    if blank && app.session.active_sketch.is_none() && app.run("timeline.delete", json!({ "feature": sketch.to_string() })).is_ok() {
+                    if blank && app.session.active_sketch.is_none() && app.run("timeline.delete", json!({ "feature": sketch })).is_ok() {
                         app.session.undo.truncate(depth + 1);
                     }
                     continue;
                 }
-                if crate::joint_handles::cancel(app) || crate::sketch_text_move::cancel_drag(app) || crate::occurrence_drag::cancel(app) {
+                if cancel_unfinished(app) {
                     continue;
                 }
-                if crate::select_other::is_open(app) {
-                    crate::select_other::close(app);
-                } else if app.tool.is_some() {
-                    crate::tools::finish(app);
-                } else if app.dialog.is_some() || app.pending_feature_edit.is_some() {
+                if app.dialog.is_some() || app.pending_feature_edit.is_some() {
                     crate::dialogs::cancel(app);
                 } else if crate::viewport_status::enabled(app) && crate::viewport_status::escape(app, repeat) {
                     app.last_escape = None;
@@ -4532,6 +4590,45 @@ mod dropdown_toggle_tests {
         h.step(&json!({"click": {"handle": "panel:MODEL:CREATE"}})).unwrap();
         h.frames(2);
         assert!(rect_of("toolbar_dropdown").is_none(), "the second click closes it");
+    }
+
+    /// A click on the lit button of the sketch tool in use ends it, so clicks in the view select
+    /// again and Ctrl+click adds lines to the selection (#10151); a constraint in the ribbon's
+    /// grid ends the same way. With the preference off, the click starts the tool again.
+    #[test]
+    fn a_second_click_on_a_running_tools_button_ends_it() {
+        use solidcraft_engine::Sel;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.set_origin_shown(false);
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[-20,-20],"p1":[20,20]})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[-10,-10],"p1":[10,10]})).unwrap();
+        h.app.cam.distance = 100.0;
+        h.settle();
+        let grid = format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[0]);
+        for handle in ["button:sketch.line", "button:sketch.dimension", grid.as_str()] {
+            h.step(&json!({"click": {"handle": handle}})).unwrap();
+            let running = h.app.tool.as_ref().map(|t| t.cmd);
+            assert!(running.is_some(), "{handle}: the first click starts the tool");
+            h.frames(30);
+            h.step(&json!({"click": {"handle": handle}})).unwrap();
+            assert!(h.app.tool.is_none(), "{handle}: the second click ends {running:?}");
+            h.frames(30);
+        }
+        // With no tool running, clicks select, and Ctrl+click adds lines of both rectangles.
+        for (i, p) in [[-15.0, 20.0], [20.0, 15.0], [-5.0, 10.0], [10.0, 5.0]].iter().enumerate() {
+            let at = h.call("ui.at", json!({"sketch": p}))["result"].clone();
+            h.step(&json!({"click": at, "ctrl": i > 0})).unwrap();
+        }
+        let curves = h.app.session.selection.iter().filter(|s| matches!(s, Sel::SketchCurve { .. })).count();
+        assert_eq!(curves, 4, "{:?}", h.app.session.selection);
+        // The old way, behind the preference: the click starts the tool again.
+        h.app.preferences.ribbon_click_ends_tool = false;
+        h.step(&json!({"click": {"handle": "button:sketch.line"}})).unwrap();
+        h.frames(30);
+        h.step(&json!({"click": {"handle": "button:sketch.line"}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.line"));
     }
 
     /// A drop-down row's help tooltip names the key the command runs from now, not its default.

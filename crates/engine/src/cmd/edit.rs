@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::{Feature, FeatureKind};
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, name_or_id_list, num, str_};
+use crate::params::{bad, bool_, name_or_id_values, num, str_};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -23,11 +23,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("edit.checkpoint", "Checkpoint", checkpoint).icon("checkpoint")
         .noundo()
         .doc_only()
-        .params("→ {checkpoint: id}: remember the design, active sketch and undo history (restore with edit.restore_checkpoint)"),
+        .params("→ {checkpoint: id}: remember the design, active sketch and undo history (restore with edit.restore_checkpoint; the last 16 are kept, the oldest dropped first)"),
     CommandSpec::new("edit.restore_checkpoint", "Restore Checkpoint", restore_checkpoint).icon("restore")
         .noundo()
         .doc_only()
-        .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included"),
+        .params("checkpoint: id; forget?: bool (true = drop it without going back). Goes back to it, undo history included. Restoring or forgetting uses it and every later checkpoint up: take a new one to go back again"),
     CommandSpec::new("timeline.compute_all", "Compute All", compute_all).at("SOLID", "MODIFY").icon("compute").noundo(),
     CommandSpec::new("timeline.play", "Play History", crate::checked!("timeline.play", play))
         .at("INSPECT", "HISTORY")
@@ -88,7 +88,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("select.set", "Select", select_set).icon("select")
         .noundo()
-        .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool"),
+        .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool; face/edge: body plus point [x,y,z] in world mm or index (both also accepted); a point uses Measure's pick tolerance, an index supplies a point on the item; invalid partial picks leave the selection unchanged"),
     CommandSpec::new("select.filter", "Selection filter", select_filter).icon("select").noundo().doc_only()
         .params("mode: body|face|component → validated UI pick granularity; headless echo only, no document edits or undo"),
     CommandSpec::new("select.clear", "Clear Selection", select_clear).icon("select").noundo(),
@@ -179,47 +179,37 @@ fn compute_all(s: &mut Session, _p: &Value) -> Result<Value> {
     Ok(json!({"features": s.model.results.len(), "errors": errors}))
 }
 
-fn feature_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {
-    let key = match v {
-        Some(Value::Number(n)) => n.to_string(),
-        Some(Value::String(x)) => x.clone(),
-        _ => return Err(bad(cmd, "`feature` must be an id or name")),
-    };
-    s.doc.find_feature(&key).map(|f| f.id).ok_or_else(|| bad(cmd, format!("no feature `{key}`")))
+pub(super) fn feature_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {
+    match v {
+        Some(Value::Number(n)) => n.as_u64().and_then(|id| s.doc.feature(id)).map(|f| f.id).ok_or_else(|| bad(cmd, format!("no feature `{n}`"))),
+        Some(Value::String(name)) => s.doc.resolve_feature_name(name).map(|f| f.id).map_err(|e| bad(cmd, e.to_string())),
+        _ => Err(bad(cmd, "`feature` must be an id or name")),
+    }
 }
 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.delete";
-    // The features are named or numbered, and both kinds can sit in one list.
-    let mut keys = name_or_id_list(cmd, p, "features")?;
-    if let Some(f) = p.get("feature") {
-        keys.push(match f {
-            Value::Number(n) => n.to_string(),
-            Value::String(x) => x.clone(),
-            _ => String::new(),
-        });
-    }
+    // Resolve every key against the same timeline. A cascade or a repeated key must never
+    // redirect a later delete to another feature that happens to match after the first one.
+    let keys = name_or_id_values(cmd, p, "features")?;
+    let mut ids = keys.iter().chain(p.get("feature")).map(|v| feature_id(s, Some(v), cmd)).collect::<Result<Vec<_>>>()?;
     let groups = group_ids(s, p, false, cmd)?;
-    if keys.is_empty() && groups.is_empty() {
+    if ids.is_empty() && groups.is_empty() {
         return Err(bad(cmd, "`features` must list features, or `groups` timeline folders"));
     }
     // A folder goes with its features and nested folders, its features in timeline order.
     let (folders, contents) = group_tree(&s.doc, &groups);
     let joints = group_joint_ids(&s.doc, &groups);
-    keys.extend(s.doc.features.iter().filter(|f| contents.contains(&f.id)).map(|f| f.id.to_string()));
+    ids.extend(s.doc.features.iter().filter(|f| contents.contains(&f.id)).map(|f| f.id));
     // Features that work now; any of them failing after the delete is reported (a later
     // feature that names a deleted body, #267).
     let worked: std::collections::BTreeSet<u64> = s.model.results.iter().filter(|r| r.error.is_none() && !r.skipped).map(|r| r.id).collect();
     super::joints::delete_joints(s.doc_mut(), &joints);
     let mut gone = Vec::new();
-    for k in keys {
-        let Some(id) = s.doc.find_feature(&k).map(|f| f.id) else {
-            if gone.is_empty() {
-                return Err(bad(cmd, format!("no feature `{k}`")));
-            }
-            continue;
-        };
-        gone.extend(s.doc_mut().delete_feature(id)?);
+    for id in ids {
+        if s.doc.feature(id).is_some() {
+            gone.extend(s.doc_mut().delete_feature(id)?);
+        }
     }
     if !folders.is_empty() {
         s.doc_mut().timeline_groups.retain(|group| !folders.contains(&group.id));
@@ -1235,6 +1225,65 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"feature": id, "recomputed": s.model.last_recomputed, "restored": s.model.last_restored}))
 }
 
+/// Complete a partial script pick without changing the stored selection type or reinterpreting
+/// an existing index-and-point pair. Unlike Measure, selection keeps the exact face/edge index:
+/// it must not merge a cylinder's patches or a circular rim's arcs into a different item.
+fn selection_item(s: &Session, value: Value) -> Result<Sel> {
+    use solidcraft_geom::Vec3;
+
+    let kind = value.get("type").and_then(Value::as_str);
+    if !matches!(kind, Some("face" | "edge")) || (value.get("index").is_some() && value.get("point").is_some()) {
+        return serde_json::from_value(value).map_err(|e| bad("select.set", e.to_string()));
+    }
+    let face = kind == Some("face");
+    #[derive(serde::Deserialize)]
+    struct Pick {
+        body: String,
+        index: Option<usize>,
+        point: Option<Vec3>,
+    }
+    let Pick { body, index, point } = serde_json::from_value(value).map_err(|e| bad("select.set", e.to_string()))?;
+    let state = s.world_state();
+    let b = state.body(&body).ok_or_else(|| bad("select.set", format!("no body `{body}`")))?;
+    let missing = || bad("select.set", format!("no {} of `{body}` at the given index or point", if face { "face" } else { "edge" }));
+    let (index, point) = match (index, point) {
+        (Some(index), None) => {
+            let point = if face {
+                solidcraft_doc::naming::face_spot(b, index).map(|spot| spot.point)
+            } else {
+                let mesh = b.mesh();
+                mesh.edges.get(index).and_then(|edge| match edge.as_slice() {
+                    [a, b] => Some(a.lerp(*b, 0.5)),
+                    // Use a sample on the curve, not the midpoint of a chord inside it.
+                    points if points.len() > 2 => points.get(points.len() / 2).copied(),
+                    _ => None,
+                })
+            };
+            (index, point.filter(|p| p.is_finite()).ok_or_else(missing)?)
+        }
+        (None, Some(point)) if point.is_finite() => {
+            let index = if face {
+                solidcraft_doc::appearance::face_index_at(b, point)
+            } else {
+                let mesh = b.mesh();
+                mesh.edges
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, edge)| {
+                        let distance =
+                            edge.windows(2).filter_map(|w| Some(point.dist_to_segment(*w.first()?, *w.get(1)?))).fold(f64::INFINITY, f64::min);
+                        (distance <= solidcraft_doc::appearance::pick_tolerance(b)).then_some((index, distance))
+                    })
+                    .min_by(|(_, a), (_, b)| a.total_cmp(b))
+                    .map(|(index, _)| index)
+            };
+            (index.ok_or_else(missing)?, point)
+        }
+        _ => return Err(bad("select.set", "a face or edge needs an index or a finite point")),
+    };
+    Ok(if face { Sel::Face { body, index, point } } else { Sel::Edge { body, index, point } })
+}
+
 fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
     let items = p.get("items").and_then(Value::as_array).cloned().unwrap_or_default();
     if items.len() > 10_000 {
@@ -1242,9 +1291,20 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut sel: Vec<Sel> = Vec::new();
     for it in items {
-        let one: Sel = serde_json::from_value(it).map_err(|e| bad("select.set", e.to_string()))?;
-        if let Sel::Occurrence { path } = &one {
-            s.occurrence_bodies(path, true).map_err(|e| bad("select.set", e.to_string()))?;
+        let one = selection_item(s, it)?;
+        match &one {
+            Sel::Occurrence { path } => {
+                s.occurrence_bodies(path, true).map_err(|e| bad("select.set", e.to_string()))?;
+            }
+            // A selection may not name a body that isn't there: left selected it would delete
+            // nothing, or the next body to take that name (#9737).
+            other => {
+                if let Some(name) = other.body_name()
+                    && s.world_state().body(name).is_none()
+                {
+                    return Err(bad("select.set", format!("no body `{name}`")));
+                }
+            }
         }
         sel.push(one);
     }
@@ -1348,11 +1408,21 @@ pub(super) fn newly_broken_in_history(
     let whole = |doc: &solidcraft_doc::Document, model: &solidcraft_doc::Model| {
         let mut doc = doc.clone();
         doc.marker = None;
-        let mut model = model.clone();
-        model.evaluate(&doc);
-        model
+        // A copy keeps nothing on its own: it keeps what the model keeps, so a delete checked
+        // ahead finds this build there when it runs (#9917).
+        let mut copy = model.clone();
+        copy.keep(model.kept());
+        copy.evaluate(&doc);
+        copy
     };
-    newly_broken(&whole(before_doc, before), &whole(after_doc, after))
+    // Only a feature that fails after the change can be newly broken: when none does, the
+    // history before it needn't be built again (#9917: each build ran every boolean after the
+    // marker, half a minute on a large design).
+    let after = whole(after_doc, after);
+    if after.results.iter().all(|r| r.error.is_none()) {
+        return Vec::new();
+    }
+    newly_broken(&whole(before_doc, before), &after)
 }
 
 /// Whether `after_doc` differs from `before_doc` only in sketch constraints and dimensions (and

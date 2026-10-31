@@ -287,6 +287,7 @@ pub(crate) fn owns_pointer(app: &SolveApp, proj: &Proj, p: Pos2) -> bool {
             && app.tool.is_none()
             && crate::browser::occurrence_triad_model(app).is_some_and(|t| crate::gizmo::contains_pointer(proj, &t, p)))
         || crate::place_gizmo::contains_pointer(app, p)
+        || app.dialog.as_ref().is_some_and(|d| matches!(&d.kind, Kind::Measure { labels, .. } if labels.contains(p)))
 }
 
 /// Draw the manipulator and the value box (called by the viewport after the model is drawn).
@@ -308,10 +309,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
         app.dialog = Some(d);
         return;
     }
-    if let Kind::Measure { result: Some(r), show, .. } = &d.kind {
-        measure_line(app, painter, proj, r, *show);
-        app.dialog = Some(d);
-        return;
+    if let Kind::Measure { result, show, labels, .. } = &mut d.kind {
+        labels.drawn = Default::default();
+        if !ui.input(|i| i.pointer.primary_down()) {
+            labels.grab = None;
+        }
+        if let Some(r) = result {
+            measure_line(app, ui, painter, proj, r, *show, labels);
+            app.dialog = Some(d);
+            return;
+        }
     }
     // Move: the triad at the pivot; dragging it sets the distances and angles. Its value box
     // sits beside it and reads the move's main value, so a drag shows its number and typing
@@ -1300,9 +1307,85 @@ fn radius_spline_handles(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Pain
     true
 }
 
+/// The Measure labels in the view the user dragged away from the part (#8510): the distance's,
+/// then X, Y and Z's. They last while the measurement does; another one starts them over.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct MeasureLabels {
+    /// How far each label was dragged from its own place, in points.
+    offset: [egui::Vec2; 4],
+    /// Where each was drawn in the last frame, so a press on one drags it instead of picking
+    /// under it or navigating.
+    drawn: [Option<egui::Rect>; 4],
+    /// The dragged label's offset when the button went down (while it is held).
+    grab: Option<egui::Vec2>,
+}
+
+impl MeasureLabels {
+    /// Whether `p` is on one of the labels drawn in the last frame.
+    pub(crate) fn contains(&self, p: Pos2) -> bool {
+        self.drawn.iter().flatten().any(|r| r.contains(p))
+    }
+
+    /// How far label `i` was dragged (zero: in its own place).
+    pub(crate) fn offset(&self, i: usize) -> egui::Vec2 {
+        self.offset.get(i).copied().unwrap_or(egui::Vec2::ZERO)
+    }
+}
+
+/// Label `i`, drawn at `rect`, follows a drag of the pointer; a double-click puts it back.
+fn drag_label(ui: &mut egui::Ui, labels: &mut MeasureLabels, i: usize, rect: egui::Rect) {
+    if let Some(drawn) = labels.drawn.get_mut(i) {
+        *drawn = Some(rect);
+    }
+    let r = ui.interact(rect, egui::Id::new(("sc_measure_label", i)), egui::Sense::click_and_drag());
+    if r.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    } else if r.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+    let Some(offset) = labels.offset.get_mut(i) else { return };
+    if r.double_clicked() {
+        *offset = egui::Vec2::ZERO;
+    } else if r.dragged()
+        && let (Some(from), Some(to)) = (ui.input(|i| i.pointer.press_origin()), r.interact_pointer_pos())
+    {
+        // Where it was at the press, plus how far the pointer went since: the label stays under
+        // the pointer where it was grabbed.
+        let start = *labels.grab.get_or_insert(*offset);
+        let moved = start + (to - from);
+        // Far enough to leave any view, finite whatever the pointer reports.
+        if moved.is_finite() {
+            *offset = moved.clamp(egui::Vec2::splat(-10_000.0), egui::Vec2::splat(10_000.0));
+        }
+    }
+}
+
+/// `rect` moved by a dragged label's `offset`, kept inside the view so it can be dragged back.
+fn moved_label(proj: &Proj, rect: egui::Rect, offset: egui::Vec2) -> egui::Rect {
+    if offset == egui::Vec2::ZERO {
+        return rect;
+    }
+    let bounds = proj.rect.shrink(4.0);
+    let moved = rect.translate(offset);
+    let min = egui::pos2(
+        moved.left().clamp(bounds.left(), (bounds.right() - rect.width()).max(bounds.left())),
+        moved.top().clamp(bounds.top(), (bounds.bottom() - rect.height()).max(bounds.top())),
+    );
+    egui::Rect::from_min_size(min, rect.size())
+}
+
 /// The measured distance: a line between the ends of the shown measure (the centres for
-/// centre to centre, the closest or farthest points) with its length.
-fn measure_line(app: &SolveApp, painter: &egui::Painter, proj: &Proj, r: &serde_json::Value, show: Option<crate::dialogs::Shown>) {
+/// centre to centre, the closest or farthest points) with its length. Its labels can be dragged
+/// away from the part; a moved one keeps a leader to what it measures.
+fn measure_line(
+    app: &SolveApp,
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    proj: &Proj,
+    r: &serde_json::Value,
+    show: Option<crate::dialogs::Shown>,
+    labels: &mut MeasureLabels,
+) {
     let t = Tokens::get();
     let Some((_, d, a, b)) = crate::dialogs::shown_distance(r, show) else { return };
     if !a.is_finite() || !b.is_finite() || !d.is_finite() {
@@ -1317,15 +1400,20 @@ fn measure_line(app: &SolveApp, painter: &egui::Painter, proj: &Proj, r: &serde_
         painter.circle(s, 3.5, t.manipulator, Stroke::new(1.0, Color32::WHITE));
     }
     pick_numbers(painter, sa, sb);
-    let mid = sa + (sb - sa) * 0.5 + vec2(10.0, -14.0);
+    let mid = sa + (sb - sa) * 0.5;
     let galley = painter.layout_no_wrap(crate::prefs::show_mm(app, d, 1), egui::FontId::proportional(crate::theme::Tokens::get().font_label), t.text);
-    let rect = egui::Rect::from_min_size(mid, galley.size() + vec2(10.0, 6.0));
+    let own = egui::Rect::from_min_size(mid + vec2(10.0, -14.0), galley.size() + vec2(10.0, 6.0));
+    let rect = moved_label(proj, own, labels.offset(0));
     crate::scenario::publish_target("measure:label", rect);
     if app.preferences.measure_axis_distances {
-        measure_components(app, painter, proj, a, b, rect);
+        measure_components(app, ui, painter, proj, a, b, rect, labels);
+    }
+    if rect != own {
+        painter.line_segment([mid, rect.clamp(mid)], Stroke::new(1.0, t.manipulator));
     }
     painter.rect(rect, t.radius_sm.saturating_sub(1), t.overlay, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
     painter.galley(rect.min + vec2(5.0, 3.0), galley, t.text);
+    drag_label(ui, labels, 0, rect);
 }
 
 /// "1" and "2" beside the measured line's ends (#6020), as the panel lists the picks: each just
@@ -1347,13 +1435,24 @@ fn pick_numbers(painter: &egui::Painter, sa: Pos2, sb: Pos2) {
 }
 
 /// A world-axis-aligned chain between the same two measured points. Zero-length and
-/// view-aligned legs still get a label; labels move apart when their projections coincide.
-fn measure_components(app: &SolveApp, painter: &egui::Painter, proj: &Proj, a: Vec3, b: Vec3, total: egui::Rect) {
+/// view-aligned legs still get a label; labels move apart when their projections coincide, and
+/// the user can drag each away (`labels` 1 to 3).
+#[allow(clippy::too_many_arguments)]
+fn measure_components(
+    app: &SolveApp,
+    ui: &mut egui::Ui,
+    painter: &egui::Painter,
+    proj: &Proj,
+    a: Vec3,
+    b: Vec3,
+    total: egui::Rect,
+    labels: &mut MeasureLabels,
+) {
     let t = Tokens::get();
     let x = Vec3::new(b.x, a.y, a.z);
     let y = Vec3::new(b.x, b.y, a.z);
     let mut occupied = vec![total];
-    for (axis, start, end, color) in [("x", a, x, t.axis_x), ("y", x, y, t.axis_y), ("z", y, b, t.axis_z)] {
+    for (i, (axis, start, end, color)) in [("x", a, x, t.axis_x), ("y", x, y, t.axis_y), ("z", y, b, t.axis_z)].into_iter().enumerate() {
         let color = color.lerp_to_gamma(t.text, 0.25);
         let distance = start.dist(end);
         if !distance.is_finite() {
@@ -1401,12 +1500,14 @@ fn measure_components(app: &SolveApp, painter: &egui::Painter, proj: &Proj, a: V
                 }
             }
         }
+        let rect = moved_label(proj, rect, labels.offset(i + 1));
         painter.line_segment([at, rect.center()], Stroke::new(0.8, color));
         painter.rect(rect, t.radius_sm.saturating_sub(1), t.overlay, Stroke::new(1.0, color), egui::StrokeKind::Inside);
         painter.galley(rect.min + vec2(5.0, 3.0), galley, t.text);
         let handle = format!("measure:label:{axis}");
         crate::scenario::publish_target(&handle, rect);
         occupied.push(rect);
+        drag_label(ui, labels, i + 1, rect);
     }
 }
 

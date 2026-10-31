@@ -15,7 +15,7 @@ use crate::ui_kit::{Container, Surface};
 use egui::{Color32, Pos2, Rect, Sense, Vec2, pos2, vec2};
 use serde::Serialize;
 use serde_json::{Value, json};
-use solidcraft_engine::Sel;
+use solidcraft_engine::{Sel, doc::FeatureKind};
 
 use crate::SolveApp;
 
@@ -65,6 +65,8 @@ pub enum Target {
     Units,
     /// Insert › Insert Design: the designs open in other tabs, and Browse… (#8570).
     InsertDesign,
+    /// Model › Edit Sketch: choose an existing sketch when none is uniquely selected.
+    EditSketch,
     /// View › Visual style: the four styles, the current one marked (#8868).
     VisualStyle,
     /// View › Navigation tool: Orbit, Pan, Zoom; the latched one marked (#8868).
@@ -435,6 +437,17 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             .collect(),
         Target::NamedView { name } => crate::browser::view_items(app, name),
         Target::InsertDesign => insert_design_items(app),
+        Target::EditSketch => {
+            let items: Vec<Item> = app
+                .session
+                .doc
+                .features
+                .iter()
+                .filter(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
+                .map(|f| act("ui.editSketch", &f.name, "sketch").with(json!({"sketch": f.id})))
+                .collect();
+            if items.is_empty() { vec![act("ui.editSketch", app.tr("ui.edit_sketch_empty"), "sketch").on(false)] } else { items }
+        }
         Target::VisualStyle => crate::navigation_bar::VISUAL_STYLES
             .iter()
             .enumerate()
@@ -1155,7 +1168,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "sketch.circle.center", "Circle"));
         v.push(cmd(app, "sketch.dimension", "Sketch Dimension"));
         v.push(Item::sep());
-        v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(app.session.sketch_clipboard.is_some()));
+        v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste_sketch(app)));
         return v;
     }
     let ents: Vec<String> = curves.iter().chain(points.iter()).cloned().collect();
@@ -1220,7 +1233,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     // The clipboard beside Delete, as in every menu.
     v.push(act("ui.cut", "Cut", "cut").key("Ctrl+X"));
     v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C"));
-    v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(app.session.sketch_clipboard.is_some()));
+    v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste_sketch(app)));
     v.push(act("ui.delete", "Delete", "delete").key("Del"));
     v.push(cmd(app, "sketch.dimension", "Sketch Dimension").with(json!({ "entities": ents })).on(ents.len() <= 2));
     // One arc alone: Sketch Dimension gives its radius, this its length along the curve (#6039).
@@ -1865,8 +1878,13 @@ pub fn toggle_visibility(app: &mut SolveApp) {
 }
 
 /// Rename what is selected (F2): one body, sketch or feature, construction plane, component
-/// picked in the browser, or canvas.
+/// picked in the browser, canvas, or a group whose Browser row was clicked.
 pub fn rename_selection(app: &mut SolveApp, at: Pos2) -> bool {
+    // A clicked group row takes precedence, as it does for V: groups have no selection of their own.
+    if let Some(g) = crate::browser::picked_group(app) {
+        start_rename(app, RenameWhat::Group(g), at);
+        return true;
+    }
     let what = match (app.session.selection.as_slice(), app.tree.picked_components.as_slice(), app.tree.picked_canvases.as_slice()) {
         ([Sel::Body { name }], [], []) => RenameWhat::Body(name.clone()),
         ([Sel::Feature { id }], [], []) => RenameWhat::Feature(*id),

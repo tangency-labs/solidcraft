@@ -320,6 +320,9 @@ impl Loading {
 pub struct AgentChat {
     /// The panel is shown (View menu, the application bar's chat button, Ctrl+Shift+A).
     pub open: bool,
+    /// Only while dispatching this conversation's own admitted tool request. Window state:
+    /// creating/opening a design may carry the conversation, but a person's tab switch may not.
+    pub(crate) following_document: bool,
     pub items: Vec<Item>,
     pub input: String,
     /// The viewer, open on one message's pictures.
@@ -419,6 +422,7 @@ pub struct AgentChat {
     /// Settings → AI: the Add agent dialog and connection tests.
     pub settings: settings::State,
     /// Latest authentication evidence from a connection test or a chat, per agent; never saved.
+    /// It belongs to the window, not to one tab's conversation.
     login_results: std::collections::HashMap<String, bool>,
     /// Desktop host hook: start the endpoint on demand.
     pub control_starter: Option<ControlStarter>,
@@ -443,11 +447,14 @@ impl AgentChat {
     pub(crate) fn swap_document(&mut self, other: &mut Self) {
         std::mem::swap(self, other);
         std::mem::swap(&mut self.open, &mut other.open);
+        std::mem::swap(&mut self.following_document, &mut other.following_document);
         std::mem::swap(&mut self.settings, &mut other.settings);
         std::mem::swap(&mut self.control_starter, &mut other.control_starter);
         std::mem::swap(&mut self.models_cache, &mut other.models_cache);
         std::mem::swap(&mut self.window_placed, &mut other.window_placed);
         std::mem::swap(&mut self.connect_at_start, &mut other.connect_at_start);
+        // A sign-in proven in one tab holds for that agent in every tab (#9293).
+        std::mem::swap(&mut self.login_results, &mut other.login_results);
         #[cfg(not(target_arch = "wasm32"))]
         {
             std::mem::swap(&mut self.detection, &mut other.detection);
@@ -936,6 +943,11 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     } else if cli.is_none() {
         chat.notice(tr("ui.agent_chat_no_cli"), true);
     }
+    // Found, but it failed when asked its version (#9034): say why and how to reinstall it before
+    // the system's own message arrives. It is still started, in case it only lacks `--version`.
+    if let Some(hint) = entry.problem_hint() {
+        chat.notice(hint, true);
+    }
     let bridge = cli.zip(chat.tools_port).map(|(cli, port)| acp::McpBridge { cli, port });
     chat.tools_available = Some(bridge.is_some());
     let wake = ctx.clone();
@@ -955,6 +967,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
                         key,
                         http,
                         request_timeout_s: entry.request_timeout_s,
+                        reasoning_effort: entry.reasoning_effort.clone(),
                     },
                     start,
                 )
@@ -1042,6 +1055,66 @@ pub fn disconnect(app: &mut SolveApp) {
 pub fn shutdown(app: &mut SolveApp) {
     app.agent_chat.disconnect_document(&mut app.session, true);
     crate::documents::disconnect_background_chats(app, true);
+}
+
+/// Mark the origin only for this synchronous dispatch. Deferred work carries the same trusted
+/// turn flag and enters here when it applies; JSON parameters cannot opt into continuation.
+pub(crate) fn with_tool_request<T>(
+    app: &mut SolveApp,
+    active: Option<&Arc<std::sync::atomic::AtomicBool>>,
+    run: impl FnOnce(&mut SolveApp) -> T,
+) -> T {
+    let own = active.is_some_and(|active| {
+        active.load(std::sync::atomic::Ordering::Relaxed) && app.agent_chat.turn.as_ref().is_some_and(|turn| Arc::ptr_eq(active, &turn.active))
+    });
+    // A batch may replace the design and then roll back to its checkpoint. Keep the turn's
+    // original undo boundary when that happens, including edits made before the batch.
+    let before = app.agent_chat.turn.as_ref().filter(|_| own).map(|t| (app.session.doc.clone(), t.start_doc.clone(), t.start_undo));
+    let previous = std::mem::replace(&mut app.agent_chat.following_document, own);
+    let result = run(app);
+    app.agent_chat.following_document = previous;
+    if let Some((doc, start_doc, start_undo)) = before
+        && Arc::ptr_eq(&doc, &app.session.doc)
+        && let Some(turn) = app.agent_chat.turn.as_mut()
+        && active.is_some_and(|active| Arc::ptr_eq(active, &turn.active))
+    {
+        turn.start_doc = start_doc;
+        turn.start_undo = start_undo;
+    }
+    result
+}
+
+/// The agent's replacement succeeded. Keep its backend, transcript, queue, limits and validity
+/// flag; subsequent edits undo in this design and picked geometry belongs to the old one.
+pub(crate) fn continue_in_document(app: &mut SolveApp) {
+    if let Some(turn) = app.agent_chat.turn.as_mut() {
+        turn.start_doc = app.session.doc.clone();
+        turn.start_undo = app.session.undo.len();
+    }
+    app.agent_chat.picked.clear();
+    app.agent_chat.picked_context = Context::default();
+    app.agent_chat.selected_count = None;
+}
+
+/// A newly opened tab has no conversation to displace. Move the initiating chat into it,
+/// grouping the previous design's completed edits before its session is parked.
+pub(crate) fn follow_new_tab(app: &mut SolveApp, switch: impl FnOnce(&mut SolveApp)) {
+    if !app.agent_chat.following_document {
+        switch(app);
+        return;
+    }
+    if let Some(turn) = app.agent_chat.turn.as_ref() {
+        let steps =
+            merge_undo(&mut app.session.undo, &turn.start_doc, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]));
+        if steps > 0 {
+            app.agent_chat.push(Item::Changes { steps, doc: app.session.doc.clone(), undone: false });
+        }
+    }
+    let mut chat = AgentChat::default();
+    app.agent_chat.swap_document(&mut chat);
+    switch(app);
+    app.agent_chat.swap_document(&mut chat);
+    continue_in_document(app);
 }
 
 /// A tab switch stops this turn before its session leaves the app. Keep the backend's own
@@ -2096,6 +2169,13 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
             None => app.agent_chat.settings.add = None,
         }
     }
+    // The same dialog on an agent you added (by id), filled with what it holds; its key stays hidden.
+    if let Some(id) = p.get("edit_dialog") {
+        let id = id.as_str().ok_or("edit_dialog must be the id of an agent you added")?;
+        if !settings::open_edit(app, id) {
+            return Err(format!("edit_dialog: no added agent `{id}`"));
+        }
+    }
     if let Some(id) = p.get("default_agent").and_then(Value::as_str) {
         app.preferences.agent_default = id.to_string();
     }
@@ -2225,7 +2305,7 @@ pub fn status(app: &SolveApp) -> Value {
     #[cfg(not(target_arch = "wasm32"))]
     let detection = c.detection.as_ref().map(|d| {
         json!({
-            "found": d.found.iter().map(|f| json!({"id": f.id, "name": f.name, "argv": f.argv, "version": f.version, "login": f.login.id()})).collect::<Vec<_>>(),
+            "found": d.found.iter().map(|f| json!({"id": f.id, "name": f.name, "argv": f.argv, "version": f.version, "login": f.login.id(), "problem": f.problem})).collect::<Vec<_>>(),
             "missing": d.missing.iter().map(|m| json!({"id": m.id, "install": m.install})).collect::<Vec<_>>(),
             "ms": d.took_ms,
         })
@@ -2242,7 +2322,7 @@ pub fn status(app: &SolveApp) -> Value {
         "openAtStart": app.preferences.agent_chat_open_at_start,
         "lastAgent": app.preferences.agent_last,
         "permissions": app.preferences.ai_permissions.id(),
-        "agents": agents::entries(app).iter().map(|e| json!({"id": e.id, "name": e.name, "kind": e.kind.id(), "found": e.found, "version": e.version, "login": e.login, "request_timeout_s": e.kind.is_api().then_some(e.request_timeout_s)})).collect::<Vec<_>>(),
+        "agents": agents::entries(app).iter().map(|e| json!({"id": e.id, "name": e.name, "kind": e.kind.id(), "found": e.found, "version": e.version, "login": e.login, "problem": e.problem, "request_timeout_s": e.kind.is_api().then_some(e.request_timeout_s)})).collect::<Vec<_>>(),
         "currentAgent": agents::current(app).map(|e| e.id),
         "models": c.models.iter().map(|m| json!({"id": m.id, "name": m.name, "description": m.description})).collect::<Vec<_>>(),
         "model": c.model,

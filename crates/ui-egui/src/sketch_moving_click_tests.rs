@@ -184,3 +184,320 @@ fn the_line_drag_preference_saves_and_follows_the_sketch_page() {
     control(&mut h.app, &json!({"button": "cancel"})).unwrap();
     assert!(h.app.preferences.line_drag_draws_one);
 }
+
+// ---- The Line tool's switch to tangent arcs and back (#9489) ----
+
+/// The Line tool in a sketch with one segment drawn, (-20, 0) to (0, 0), the pointer on its end.
+fn chain_with_a_line(on: bool) -> Harness {
+    let mut h = harness("sketch.line");
+    h.app.preferences.line_hover_tangent_arc = on;
+    click_at(&mut h, [-20.0, 0.0]);
+    click_at(&mut h, [0.0, 0.0]);
+    assert_eq!(curves(&h), 1, "{:?}", h.app.status);
+    h
+}
+
+fn click_at(h: &mut Harness, at: [f64; 2]) {
+    h.step(&json!({"move":{"sketch":at}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click":{"sketch":at}})).unwrap();
+    h.frames(2);
+}
+
+fn tool(h: &Harness) -> Option<&'static str> {
+    h.app.tool.as_ref().map(|t| t.cmd)
+}
+
+/// Move off the point, back onto it, and rest there for `frames` frames at 60 Hz.
+fn leave_and_rest(h: &mut Harness, on: [f64; 2], frames: usize) {
+    h.step(&json!({"move":{"sketch":[on[0] + 15.0, on[1] + 15.0]}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"move":{"sketch":on}})).unwrap();
+    h.frames(frames);
+}
+
+/// A rest long enough for the switch: about half a second (it takes 0.35 s).
+const REST: usize = 30;
+
+fn sketch(h: &Harness) -> solidcraft_engine::sketch::Sketch {
+    let sid = h.app.session.active_sketch.unwrap();
+    h.app.session.model.state().sketch(sid).unwrap().sketch.clone()
+}
+
+/// The arc last drawn: centre, radius and where it starts and ends as drawn.
+fn last_arc(
+    sk: &solidcraft_engine::sketch::Sketch,
+) -> (solidcraft_engine::geom::Vec2, f64, solidcraft_engine::geom::Vec2, solidcraft_engine::geom::Vec2) {
+    let (index, curve) = sk.curves.iter().enumerate().rfind(|(_, c)| matches!(c.kind, CurveKind::Arc { .. })).expect("an arc");
+    let CurveKind::Arc { c, a, b } = curve.kind else { panic!("not an arc: {curve:?}") };
+    let centre = sk.point(c).unwrap();
+    // As drawn: a clockwise arc is stored the other way round.
+    let (from, to) = if curve.reversed { (b, a) } else { (a, b) };
+    let (start, end) = (sk.point(from).unwrap(), sk.point(to).unwrap());
+    assert!(index > 0, "the arc follows a line");
+    (centre, centre.dist(start), start, end)
+}
+
+#[test]
+fn off_by_default_resting_on_the_last_point_does_nothing() {
+    assert!(!crate::prefs::Prefs::default().line_hover_tangent_arc, "off by default");
+    let mut h = chain_with_a_line(false);
+    leave_and_rest(&mut h, [0.0, 0.0], REST * 2);
+    assert_eq!(tool(&h), Some("sketch.line"), "the tool stays the Line tool");
+    assert_eq!(crate::scenario::count_of("line_arc_mode_chip"), None, "and nothing shows at the cursor");
+    // The next click is a line, as ever.
+    click_at(&mut h, [0.0, 20.0]);
+    assert_eq!(curves(&h), 2);
+    assert!(sketch(&h).curves.iter().all(|c| matches!(c.kind, CurveKind::Line { .. })));
+}
+
+#[test]
+fn a_rest_on_the_last_point_makes_the_next_click_a_tangent_arc_and_back_to_a_line() {
+    let mut h = chain_with_a_line(true);
+    leave_and_rest(&mut h, [0.0, 0.0], REST);
+    assert_eq!(tool(&h), Some("sketch.arc.tangent"), "{:?}", h.app.status);
+    assert_eq!(crate::scenario::count_of("line_arc_mode_chip"), Some(1.0), "the cursor says Tangent Arc");
+    assert_eq!(h.app.tool.as_ref().and_then(crate::sketch_line_arc::shown_label), Some("Tangent Arc"), "in words, not a message id");
+
+    // The line runs along +X into (0, 0): the tangent arc to (10, 10) has its centre on the
+    // normal there, (0, 10), at radius 10, and leaves running along +X.
+    click_at(&mut h, [10.0, 10.0]);
+    assert_eq!(curves(&h), 2, "{:?}", h.app.status);
+    let sk = sketch(&h);
+    let (centre, radius, start, end) = last_arc(&sk);
+    assert!(centre.dist(solidcraft_engine::geom::Vec2::new(0.0, 10.0)) < 1e-6, "centre {centre:?}");
+    assert!((radius - 10.0).abs() < 1e-6, "radius {radius}");
+    assert!(start.dist(solidcraft_engine::geom::Vec2::ZERO) < 1e-6 && end.dist(solidcraft_engine::geom::Vec2::new(10.0, 10.0)) < 1e-6);
+    let (line, arc) = (sk.curves.first().unwrap(), sk.curves.get(1).unwrap());
+    let shared = sk.resolve_point(&format!("{}.end", line.id)) == sk.resolve_point(&format!("{}.start", arc.id));
+    assert!(shared, "the arc starts on the line's own end");
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Tangent { a: 0, b: 1 })),
+        "tangent to the line: {:?}",
+        sk.constraints
+    );
+    assert_eq!(tool(&h), Some("sketch.arc.tangent"), "it keeps drawing arcs until switched back");
+
+    // The arc's end is the chain's point; the same gesture goes back to lines.
+    leave_and_rest(&mut h, [10.0, 10.0], REST);
+    assert_eq!(tool(&h), Some("sketch.line"), "{:?}", h.app.status);
+    assert_eq!(crate::scenario::count_of("line_arc_mode_chip"), Some(2.0), "the cursor says Line");
+    assert_eq!(h.app.tool.as_ref().and_then(crate::sketch_line_arc::shown_label), Some("Line"));
+    click_at(&mut h, [10.0, 30.0]);
+    assert_eq!(curves(&h), 3, "{:?}", h.app.status);
+    let sk = sketch(&h);
+    let (arc, line) = (sk.curves.get(1).unwrap(), sk.curves.get(2).unwrap());
+    assert!(matches!(line.kind, CurveKind::Line { .. }));
+    let shared = sk.resolve_point(&format!("{}.end", arc.id)) == sk.resolve_point(&format!("{}.start", line.id));
+    assert!(shared, "the line starts on the arc's end");
+    // And the chain goes on from there as lines.
+    click_at(&mut h, [30.0, 30.0]);
+    assert_eq!(curves(&h), 4);
+    assert_eq!(tool(&h), Some("sketch.line"));
+}
+
+#[test]
+fn a_rounded_corner_outline_closes_in_one_line_session() {
+    let mut h = harness("sketch.line");
+    h.app.preferences.line_hover_tangent_arc = true;
+    click_at(&mut h, [-20.0, -20.0]);
+    click_at(&mut h, [10.0, -20.0]);
+    leave_and_rest(&mut h, [10.0, -20.0], REST);
+    click_at(&mut h, [20.0, -10.0]);
+    leave_and_rest(&mut h, [20.0, -10.0], REST);
+    click_at(&mut h, [20.0, 20.0]);
+    leave_and_rest(&mut h, [20.0, 20.0], REST);
+    click_at(&mut h, [10.0, 30.0]);
+    leave_and_rest(&mut h, [10.0, 30.0], REST);
+    click_at(&mut h, [-20.0, 30.0]);
+    leave_and_rest(&mut h, [-20.0, 30.0], REST);
+    click_at(&mut h, [-30.0, 20.0]);
+    leave_and_rest(&mut h, [-30.0, 20.0], REST);
+    click_at(&mut h, [-30.0, -10.0]);
+    leave_and_rest(&mut h, [-30.0, -10.0], REST);
+    // The last arc ends on the first line's start: the outline is closed.
+    click_at(&mut h, [-20.0, -20.0]);
+    let sk = sketch(&h);
+    assert_eq!(sk.curves.len(), 8, "{:?}", h.app.status);
+    let tangents = sk.constraints.iter().filter(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Tangent { .. })).count();
+    assert!(tangents >= 4, "every arc is tangent to the line before it: {tangents}");
+    let first = sk.resolve_point(&format!("{}.start", sk.curves[0].id));
+    let last = sk.resolve_point(&format!("{}.end", sk.curves[7].id));
+    assert_eq!(first, last, "the last arc ends on the first point");
+}
+
+#[test]
+fn a_pointer_that_never_left_or_keeps_moving_or_rests_elsewhere_does_not_switch() {
+    // A pause straight after the click, on the point it placed.
+    let mut h = chain_with_a_line(true);
+    h.frames(REST * 3);
+    assert_eq!(tool(&h), Some("sketch.line"), "a pause on the placed point switches nothing");
+
+    // A little jitter there isn't leaving it either.
+    h.step(&json!({"move":{"sketch":[0.5, 0.5]}})).unwrap();
+    h.frames(REST * 2);
+    assert_eq!(tool(&h), Some("sketch.line"), "a small wobble is not leaving");
+
+    // Resting somewhere else.
+    h.step(&json!({"move":{"sketch":[20.0, 20.0]}})).unwrap();
+    h.frames(REST * 2);
+    assert_eq!(tool(&h), Some("sketch.line"), "a rest elsewhere");
+    h.step(&json!({"move":{"sketch":[-20.0, 0.0]}})).unwrap();
+    h.frames(REST * 2);
+    assert_eq!(tool(&h), Some("sketch.line"), "a rest on the line's other end");
+
+    // Over the point, never still: each move restarts the wait.
+    let p = h.call("ui.at", json!({"sketch":[0.0, 0.0]}))["result"].clone();
+    let (x, y) = (p[0].as_f64().unwrap(), p[1].as_f64().unwrap());
+    for i in 0..80 {
+        let d = if i % 2 == 0 { 3.0 } else { -3.0 };
+        h.call("ui.move", json!({"x": x + d, "y": y}));
+        h.frames(1);
+    }
+    assert_eq!(tool(&h), Some("sketch.line"), "a moving pointer never switches");
+
+    // Too short a rest.
+    leave_and_rest(&mut h, [0.0, 0.0], 5);
+    assert_eq!(tool(&h), Some("sketch.line"), "a tenth of a second is not a rest");
+
+    // Before any segment there is no chain to switch.
+    let mut h = harness("sketch.line");
+    h.app.preferences.line_hover_tangent_arc = true;
+    click_at(&mut h, [-20.0, 0.0]);
+    leave_and_rest(&mut h, [-20.0, 0.0], REST * 2);
+    assert_eq!(tool(&h), Some("sketch.line"), "the first point alone switches nothing");
+
+    // Nor is the Tangent Arc tool itself switched by resting on its start.
+    let mut h = harness("sketch.line");
+    h.app.preferences.line_hover_tangent_arc = true;
+    click_at(&mut h, [-20.0, 0.0]);
+    click_at(&mut h, [0.0, 0.0]);
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.step(&json!({"start":"sketch.arc.tangent"})).unwrap();
+    click_at(&mut h, [0.0, 0.0]);
+    leave_and_rest(&mut h, [0.0, 0.0], REST * 2);
+    assert_eq!(tool(&h), Some("sketch.arc.tangent"));
+    assert!(h.app.tool.as_ref().is_some_and(|t| !crate::sketch_line_arc::in_arc_mode(t)), "that tool is no chain");
+}
+
+#[test]
+fn staying_on_the_point_after_a_switch_does_not_switch_back() {
+    let mut h = chain_with_a_line(true);
+    leave_and_rest(&mut h, [0.0, 0.0], REST);
+    assert_eq!(tool(&h), Some("sketch.arc.tangent"));
+    h.frames(REST * 4);
+    assert_eq!(tool(&h), Some("sketch.arc.tangent"), "the pointer has to leave first");
+}
+
+#[test]
+fn esc_and_right_click_end_a_chain_drawing_arcs_as_they_end_a_line_chain() {
+    for right_click in [false, true] {
+        let mut h = chain_with_a_line(true);
+        leave_and_rest(&mut h, [0.0, 0.0], REST);
+        click_at(&mut h, [10.0, 10.0]);
+        assert_eq!(tool(&h), Some("sketch.arc.tangent"));
+        if right_click {
+            let p = h.call("ui.at", json!({"sketch":[20.0, 20.0]}))["result"].clone();
+            h.call("ui.click", json!({"x":p[0],"y":p[1],"button":"right"}));
+        } else {
+            h.step(&json!({"key":"Escape"})).unwrap();
+        }
+        h.frames(2);
+        // The chain has ended and the Line tool is out, with no point placed.
+        let t = h.app.tool.as_ref().expect("the Line tool stays out");
+        assert_eq!((t.cmd, t.pts.len()), ("sketch.line", 0), "right click: {right_click}");
+        // A click starts a new chain: a separate line, and a rest needs a segment again.
+        click_at(&mut h, [30.0, 0.0]);
+        click_at(&mut h, [40.0, 0.0]);
+        assert_eq!(curves(&h), 3);
+        // Esc twice leaves the tool, as ever.
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert_eq!(tool(&h), None);
+    }
+}
+
+#[test]
+fn undo_takes_back_one_arc_as_it_takes_back_one_segment() {
+    let mut h = chain_with_a_line(true);
+    let undo_before = h.app.session.undo.len();
+    leave_and_rest(&mut h, [0.0, 0.0], REST);
+    assert_eq!(h.app.session.undo.len(), undo_before, "switching changes nothing in the design");
+    click_at(&mut h, [10.0, 10.0]);
+    assert_eq!(curves(&h), 2);
+    assert_eq!(h.app.session.undo.len(), undo_before + 1, "the arc is one undo step");
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.frames(2);
+    assert_eq!(curves(&h), 1, "only the arc goes");
+    assert_eq!(sketch(&h).curves.first().map(|c| matches!(c.kind, CurveKind::Line { .. })), Some(true));
+    // As with a line undone mid-chain, the chain's point went with it: the next click is refused
+    // and changes nothing, and Esc ends the chain, leaving the Line tool ready for a new one.
+    click_at(&mut h, [20.0, 20.0]);
+    assert_eq!(curves(&h), 1, "{:?}", h.app.status);
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.tool.as_ref().map(|t| (t.cmd, t.pts.len())), Some(("sketch.line", 0)));
+    click_at(&mut h, [30.0, 0.0]);
+    click_at(&mut h, [40.0, 0.0]);
+    assert_eq!(curves(&h), 2, "{:?}", h.app.status);
+}
+
+/// The preference saves, and the Sketch page's checkbox, Restore Defaults and Cancel treat it as
+/// the page's own.
+#[test]
+fn the_tangent_arc_preference_saves_and_follows_the_sketch_page() {
+    use crate::prefs::control;
+    let mut h = Harness::new();
+    h.call("ui.prefs", json!({"open": "Sketch"}));
+    h.frames(4);
+    crate::prefs::reveal_preference(&mut h, "prefs:line_hover_tangent_arc");
+    h.step(&json!({"click":{"handle":"prefs:line_hover_tangent_arc"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.preferences.line_hover_tangent_arc, "the checkbox turns it on");
+    control(&mut h.app, &json!({"button": "apply"})).unwrap();
+    let mut other = crate::SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    other.load_prefs(&h.app.prefs());
+    assert!(other.preferences.line_hover_tangent_arc, "saved");
+    control(&mut h.app, &json!({"button": "defaults"})).unwrap();
+    assert!(!h.app.preferences.line_hover_tangent_arc);
+    control(&mut h.app, &json!({"button": "cancel"})).unwrap();
+    assert!(h.app.preferences.line_hover_tangent_arc);
+}
+
+#[test]
+fn arcs_follow_one_another_each_tangent_to_the_last_and_a_pause_after_one_switches_nothing() {
+    let mut h = chain_with_a_line(true);
+    leave_and_rest(&mut h, [0.0, 0.0], REST);
+    click_at(&mut h, [10.0, 10.0]);
+    // The pointer is on the arc's end, where it was clicked: thinking there switches nothing.
+    h.frames(REST * 3);
+    assert_eq!(tool(&h), Some("sketch.arc.tangent"), "a pause on the placed point switches nothing");
+    // The first arc arrives at (10, 10) running along +Y, so the next one, to (20, 20), turns the
+    // other way about (20, 10) at radius 10: an S.
+    click_at(&mut h, [20.0, 20.0]);
+    assert_eq!(curves(&h), 3, "{:?}", h.app.status);
+    let sk = sketch(&h);
+    let (centre, radius, start, end) = last_arc(&sk);
+    assert!(centre.dist(solidcraft_engine::geom::Vec2::new(20.0, 10.0)) < 1e-6, "centre {centre:?}");
+    assert!((radius - 10.0).abs() < 1e-6, "radius {radius}");
+    assert!(
+        start.dist(solidcraft_engine::geom::Vec2::new(10.0, 10.0)) < 1e-6 && end.dist(solidcraft_engine::geom::Vec2::new(20.0, 20.0)) < 1e-6,
+        "from {start:?} to {end:?}"
+    );
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Tangent { a: 1, b: 2 })),
+        "tangent to the arc before it: {:?}",
+        sk.constraints
+    );
+    // After a clockwise arc the chain still goes on from its drawn end, as a line.
+    leave_and_rest(&mut h, [20.0, 20.0], REST);
+    assert_eq!(tool(&h), Some("sketch.line"), "{:?}", h.app.status);
+    click_at(&mut h, [20.0, 40.0]);
+    assert_eq!(curves(&h), 4, "{:?}", h.app.status);
+    let sk = sketch(&h);
+    let CurveKind::Line { a: line_start, .. } = sk.curves[3].kind else { panic!("a line: {:?}", sk.curves[3]) };
+    let CurveKind::Arc { a: arc_end, .. } = sk.curves[2].kind else { panic!("an arc: {:?}", sk.curves[2]) };
+    let joined = line_start == arc_end || sk.point(line_start).unwrap().dist(sk.point(arc_end).unwrap()) < 1e-6;
+    assert!(joined, "the line starts where the arc ends");
+}

@@ -817,6 +817,7 @@
   "cmd.appearance_pick_up": "Pobierz wygląd",
   "cmd.appearance_replace": "Zastąp wygląd",
   "cmd.assembly_bom": "Zestawienie materiałowe",
+  "cmd.assembly_mass_properties": "Właściwości masowe",
   "cmd.body.print_face": "Powierzchnia druku",
   "cmd.body_rename": "Zmień nazwę bryły",
   "cmd.browser_collapse_all": "Zwiń wszystko",

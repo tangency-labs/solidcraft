@@ -37,7 +37,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .params(concat!("mid: [x,y], point ref or snap (\"mid:<line>\", \"on:<curve>:x,y\", model vertex/edge); end: [x,y]; construction?", created_doc!())),
     CommandSpec::new("sketch.arc.tangent", "Tangent Arc", arc_tangent).at("SKETCH", "CREATE").icon("arc_tangent").enabled(in_sketch).params(concat!(
-        "start: end point of a line or arc (\"l1.end\"), end: [x,y]; curve?: the curve to be tangent to (default: the one ending at start)",
+        "start: end point of a line or arc (\"l1.end\"), end: [x,y] or an existing point's id (\"l2.start\": the arc ends on that point); curve?: the curve to be tangent to (default: the one ending at start)",
         created_doc!()
     )),
     CommandSpec::new("sketch.circle.two_tangent", "2-Tangent Circle", circle_tan_tan)
@@ -819,10 +819,51 @@ pub(super) fn leaving_dir(sk: &Sketch, ci: usize, pi: usize) -> Option<Vec2> {
     }
 }
 
+/// The centre of the arc that leaves `start` in direction `dir` and ends at `end`, and whether it
+/// runs counter-clockwise. `None` straight ahead (or back), where no arc does.
+fn tangent_arc_centre(dir: Vec2, start: Vec2, end: Vec2) -> Option<(Vec2, bool)> {
+    let n = dir.perp();
+    let d = end - start;
+    let den = 2.0 * n.dot(d);
+    if den.abs() < 1e-9 * d.len().max(1e-9) || d.len() < 1e-9 {
+        return None;
+    }
+    Some((start + n * (d.len2() / den), den > 0.0))
+}
+
+/// The arc `sketch.arc.tangent` would draw from point `start` on `curve` to `end`, alone in a
+/// sketch of its own for a preview. `None` where the command would refuse.
+pub fn tangent_arc_preview(sk: &Sketch, curve: &str, start: &str, end: Vec2) -> Option<Sketch> {
+    let pi = sk.resolve_point(start)?;
+    let s0 = sk.point(pi)?;
+    let (center, ccw) = tangent_arc_centre(leaving_dir(sk, sk.curve_index(curve)?, pi)?, s0, end)?;
+    if !center.is_finite() {
+        return None;
+    }
+    let mut out = Sketch::new();
+    if ccw {
+        out.add_arc(center, s0, end, [None; 3], None).ok()?;
+    } else {
+        out.add_arc(center, end, s0, [None; 3], None).ok()?;
+        out.curves.first_mut()?.reversed = true;
+    }
+    Some(out)
+}
+
 fn arc_tangent(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.arc.tangent";
-    let end = req_vec2(cmd, p, "end")?;
+    // An id ends the arc on that point, so a chain can close; coordinates make a new point.
+    let end_ref = p.get("end").and_then(Value::as_str);
+    let at = if end_ref.is_some() { None } else { Some(req_vec2(cmd, p, "end")?) };
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
+        let (end, end_point) = match (end_ref, at) {
+            (Some(r), _) => {
+                let q = sk.resolve_point(r).ok_or_else(|| bad(cmd, format!("unknown sketch point `{r}`")))?;
+                (sk.point(q).ok_or_else(|| bad(cmd, format!("unknown sketch point `{r}`")))?, Some(q))
+            }
+            (None, Some(at)) => (at, None),
+            (None, None) => return Err(bad(cmd, "missing `end`")),
+        };
         let st = req_parg(sk, doc, p, "start", cmd)?;
         let picked = st.idx().ok_or_else(|| bad(cmd, "`start` must be the end point of a line or arc"))?;
         // The picked point, then any other point at the same place: a trimmed arc's end is its own
@@ -848,17 +889,11 @@ fn arc_tangent(s: &mut Session, p: &Value) -> Result<Value> {
         };
         let t = leaving_dir(sk, ci, pi).ok_or_else(|| bad(cmd, "`start` is not an end of that curve"))?;
         let s0 = st.pos();
-        let n = t.perp();
-        let d = end - s0;
-        let den = 2.0 * n.dot(d);
-        if den.abs() < 1e-9 * d.len().max(1e-9) || d.len() < 1e-9 {
-            return Err(bad(cmd, "the end is straight ahead: draw a line instead"));
-        }
-        let center = s0 + n * (d.len2() / den);
-        let a = if den > 0.0 {
-            sk.add_arc(center, s0, end, [None, Some(pi), None], None)?
+        let (center, ccw) = tangent_arc_centre(t, s0, end).ok_or_else(|| bad(cmd, "the end is straight ahead: draw a line instead"))?;
+        let a = if ccw {
+            sk.add_arc(center, s0, end, [None, Some(pi), end_point], None)?
         } else {
-            let a = sk.add_arc(center, end, s0, [None, None, Some(pi)], None)?;
+            let a = sk.add_arc(center, end, s0, [None, end_point, Some(pi)], None)?;
             if let Some(c) = sk.curves.get_mut(a) {
                 c.reversed = true;
             }
@@ -959,6 +994,8 @@ fn tangent_circle(s: &mut Session, p: &Value, cmd: &str, n: usize, radius: Optio
 fn circle_tan_tan(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.circle.two_tangent";
     let r = match (crate::params::expr(p, "radius"), num(p, "diameter")) {
+        // A bare number typed as text reads in the design's unit, as in `sketch.dimension`.
+        (Some(r), _) if p.get("radius").is_some_and(Value::is_string) => s.doc.with_design_unit(r.as_str(), solidcraft_doc::expr::Kind::Length),
         (Some(r), _) => r.into_string(),
         (None, Some(d)) => format!("{}", d / 2.0),
         _ => return Err(bad(cmd, "needs `radius` or `diameter`")),

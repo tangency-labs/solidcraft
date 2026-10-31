@@ -212,10 +212,12 @@ mod print_face_ui;
 pub(crate) mod quick_measure;
 #[cfg(test)]
 mod quick_measure_tests;
+pub(crate) mod recent_colors;
 pub mod recovery_ui;
 pub mod ref_images;
 mod render_ui;
 pub mod render_workspace;
+pub mod resume_ui;
 #[cfg(test)]
 mod revolve_edit_tests;
 #[cfg(test)]
@@ -255,6 +257,7 @@ mod sketch_edit_tests;
 mod sketch_families;
 #[cfg(test)]
 mod sketch_guidance_ui_tests;
+pub(crate) mod sketch_line_arc;
 pub mod sketch_modify_ui;
 #[cfg(test)]
 mod sketch_modify_ui_tests;
@@ -285,6 +288,7 @@ mod sweep_dialog_tests;
 pub(crate) mod test_boat;
 pub mod theme;
 pub mod theme_files;
+mod theme_options;
 #[cfg(test)]
 mod thin_extrude_tests;
 pub mod timeline;
@@ -304,6 +308,7 @@ pub(crate) mod view_angles;
 mod view_confirm;
 pub mod view_pick;
 pub mod viewport;
+mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
@@ -355,6 +360,9 @@ pub struct UiState {
     pub pick_bodies: bool,
     /// A face picks its exact component occurrence in Design and Render.
     pub pick_components: bool,
+    /// The selection shape (#4376): a drag in the view draws a freehand lasso that takes what is
+    /// wholly inside it, instead of the window/crossing rectangle. Off by default.
+    pub lasso_select: bool,
     /// 0: shaded with edges, 1: shaded, 2: wireframe, 3: shaded with hidden edges.
     pub visual_style: u8,
     /// A soft shadow on the ground under the model (seen from above).
@@ -366,6 +374,8 @@ pub struct UiState {
     /// The running tool's icon rides beside the pointer in the viewport (View settings; off by
     /// default).
     pub tool_cursor: bool,
+    /// The colours picked last in any colour picker, newest first (#9234); kept between runs.
+    pub recent_colors: Vec<[u8; 3]>,
 }
 
 impl UiState {
@@ -398,11 +408,13 @@ impl Default for UiState {
             pick_off: Vec::new(),
             pick_bodies: false,
             pick_components: false,
+            lasso_select: false,
             visual_style: 0,
             ground_shadow: true,
             up_axis: Default::default(),
             agent_cursor: Default::default(),
             tool_cursor: false,
+            recent_colors: Vec::new(),
         }
     }
 }
@@ -503,6 +515,9 @@ pub struct SolveApp {
     /// The views around opening the open sketch. Leaving it goes back to the earlier one as the
     /// "When a sketch ends" preference says (#7038).
     pub pre_sketch_cam: Option<PreSketchView>,
+    /// The view from before Extrude turned it to isometric (#9176); the view goes back to it when
+    /// the dialog closes, as the "and back when it closes" preference says.
+    pub pre_extrude_cam: Option<Camera>,
     /// The component active before Edit Sketch activated the one the sketch is in (#8127);
     /// leaving the sketch makes it active again.
     pub pre_sketch_component: Option<PreSketchComponent>,
@@ -607,6 +622,9 @@ pub struct SolveApp {
     /// The bodies (or components) the last copy or cut took, with the design they were in, to
     /// paste into another design (`component.paste_from_design`).
     pub foreign_copy: Option<std::sync::Arc<solidcraft_engine::ForeignCopy>>,
+    /// The sketch geometry the last copy or cut took, when it was sketch geometry: a sketch of
+    /// another design pastes it (#9258).
+    pub foreign_sketch_clip: Option<solidcraft_engine::cmd::sketch_clipboard::SketchClip>,
     /// Esc was already acted on this frame (by the shortcuts), so later handlers skip it.
     pub esc_handled: bool,
     pub(crate) escape_owner: Option<EscapeOwner>,
@@ -697,7 +715,9 @@ pub struct SolveApp {
     shot_token: u64,
     styled: bool,
     fitted: bool,
-    pending_fit: Option<(Camera, solidcraft_engine::geom::Aabb3, bool)>,
+    /// A framing to settle once the viewport's layout is known: the camera to frame from, the
+    /// bounds, whether to glide there, and whether it is the navigators' shared-zoom framing.
+    pending_fit: Option<(Camera, solidcraft_engine::geom::Aabb3, bool, bool)>,
     /// Frames a pending fit has waited for a layout that can frame it (`resolve_fit`).
     fit_waits: u32,
     /// The sheet metal flat pattern's own pan and zoom.
@@ -757,6 +777,7 @@ impl SolveApp {
             now: 0.0,
             pre_sketch_marker: None,
             pre_sketch_cam: None,
+            pre_extrude_cam: None,
             pre_sketch_component: None,
             services,
             file_picker: None,
@@ -811,6 +832,7 @@ impl SolveApp {
             clipboard_stamp: 0,
             own_clipboard_stamp: 0,
             foreign_copy: None,
+            foreign_sketch_clip: None,
             esc_handled: false,
             escape_owner: None,
             last_escape: None,
@@ -974,10 +996,11 @@ impl SolveApp {
 
     /// Preferences kept between runs (JSON), for the host to store.
     pub fn prefs(&self) -> String {
-        json!({
+        let mut v = json!({
             "dark": self.ui.dark,
             "grid": self.ui.show_grid,
             "navigation_bar": self.ui.show_navigation_bar,
+            "tool_cursor": self.ui.tool_cursor,
             "perspective": self.ui.perspective,
             "auto_ortho_faces": self.ui.auto_ortho_faces,
             "pick_bodies": self.ui.pick_bodies,
@@ -995,10 +1018,22 @@ impl SolveApp {
             "autosave_minutes": self.autosave_minutes,
             "ground_shadow": self.ui.ground_shadow,
             "agent_cursor": self.ui.agent_cursor,
+            "recent_colors": self.ui.recent_colors,
             "preferences": self.preferences,
             "gpu_path_setup_seconds": self.render_workspace.setup_seconds,
-        })
-        .to_string()
+        });
+        // While the Preferences dialog is open the file holds what Cancel would restore: a change
+        // that was never applied must not reach disk through the periodic save, a quit or a
+        // window close (#9730). One change covers every writer — desktop save and on_exit, the
+        // web app's save, and the control channel.
+        if let Some(held) = prefs::held_overlay(self)
+            && let Some(obj) = v.as_object_mut()
+        {
+            for (key, value) in held {
+                obj.insert(key, value);
+            }
+        }
+        v.to_string()
     }
 
     /// Restore preferences saved with [`SolveApp::prefs`].
@@ -1017,6 +1052,9 @@ impl SolveApp {
         }
         if let Some(visible) = flag("navigation_bar") {
             self.ui.show_navigation_bar = visible;
+        }
+        if let Some(visible) = flag("tool_cursor") {
+            self.ui.tool_cursor = visible;
         }
         if let Some(p) = flag("perspective") {
             self.ui.perspective = p;
@@ -1085,6 +1123,12 @@ impl SolveApp {
         if let Some(a) = v.get("agent_cursor").and_then(|a| serde_json::from_value(a.clone()).ok()) {
             self.ui.agent_cursor = a;
         }
+        // Colours that do not read (not three bytes) are left out; the list is capped.
+        self.ui.recent_colors = v
+            .get("recent_colors")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(|c| serde_json::from_value::<[u8; 3]>(c.clone()).ok()).take(recent_colors::MAX_RECENT_COLORS).collect())
+            .unwrap_or_default();
     }
 
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {
@@ -1331,9 +1375,7 @@ impl SolveApp {
                     self.cancel_view_animation();
                     self.cam = to;
                 } else if v.get("fit").and_then(Value::as_bool).unwrap_or(false) {
-                    let bounds = solidcraft_engine::view::bounds(&self.session);
-                    self.animate_to(self.fitted(to));
-                    self.pending_fit = Some((to, bounds, true));
+                    self.animate_to_fitted(to);
                 } else {
                     self.animate_to(to);
                 }
@@ -1508,6 +1550,16 @@ impl SolveApp {
         // Repeat Last Command starts the tool it names; it is never the one repeated itself.
         if id == "edit.repeat" {
             self.repeat_last();
+            return;
+        }
+        // Modify ▸ Delete deletes what is selected, as the Delete key does (#9079); with nothing
+        // selected it says what to pick instead of running with no features.
+        if id == "timeline.delete" {
+            if delete::nothing_to_delete(self) && self.tree.picked_timeline_groups.is_empty() {
+                self.set_status(self.tr("ui.delete_select_first"), false);
+            } else if !timeline_left::delete_selected_folders(self) {
+                delete::delete_selection(self);
+            }
             return;
         }
         // Front … Isometric (Ctrl+1…7 by default) turn the view as the view cube's faces do. The
@@ -1771,6 +1823,10 @@ impl SolveApp {
             design_properties::open_selected(self);
             return;
         }
+        if id == "sketch.edit" {
+            self.start_sketch_edit(opener);
+            return;
+        }
         if id == "sketch.finish" {
             self.finish_sketch();
             return;
@@ -1921,7 +1977,11 @@ impl SolveApp {
             if d.wants_picks() && !self.session.selection.is_empty() {
                 let _ = self.session.execute("select.clear", &json!({}));
             }
+            let extrude = matches!(d.kind, dialogs::Kind::Extrude { .. });
             self.dialog = Some(d);
+            if extrude {
+                self.turn_for_extrude();
+            }
             return;
         }
         // Undo and redo can recompute much of the history: off the window thread when slow.
@@ -1940,6 +2000,37 @@ impl SolveApp {
     /// Does starting `id` open a tool or a dialog?
     fn interactive(&self, id: &str) -> bool {
         tools::Tool::for_command(id).is_some() || dialogs::Dialog::for_command(self, id).is_some()
+    }
+
+    /// The ribbon has no sketch argument: use one unambiguous sketch pick, otherwise ask.
+    fn start_sketch_edit(&mut self, opener: Option<egui::Rect>) {
+        use solidcraft_engine::{Sel, doc::FeatureKind};
+        let mut sketches: Vec<u64> = self
+            .session
+            .selection
+            .iter()
+            .filter_map(|s| match s {
+                Sel::Feature { id } => Some(*id),
+                Sel::Profile { sketch, .. } | Sel::ExternalSketchCurve { sketch, .. } | Sel::ExternalSketchPoint { sketch, .. } => Some(*sketch),
+                Sel::SketchCurve { sketch, .. } => *sketch,
+                _ => None,
+            })
+            .filter(|id| self.session.doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })))
+            .collect();
+        sketches.sort_unstable();
+        sketches.dedup();
+        let sketch = match sketches.as_slice() {
+            [id] => Some(*id),
+            [] => self.session.active_sketch,
+            _ => None,
+        };
+        if let Some(id) = sketch {
+            self.edit_feature(id);
+        } else {
+            dialogs::cancel(self);
+            self.tool = None;
+            self.open_choice_menu(opener, context_menu::Target::EditSketch);
+        }
     }
 
     /// Edit a feature: sketches open in sketch mode; other features roll the
@@ -2057,6 +2148,30 @@ impl SolveApp {
         }
         self.pre_sketch_cam = self.session.active_sketch.map(|sketch| PreSketchView { sketch, before, facing: self.settled_cam() });
         turn
+    }
+
+    /// Extrude opened: turn the view to isometric when Preferences say so, and remember the view
+    /// from before for when the dialog closes (#9176).
+    fn turn_for_extrude(&mut self) {
+        if !self.preferences.extrude_view_isometric {
+            return;
+        }
+        let before = self.settled_cam();
+        let mut to = before;
+        to.set_view(StandardView::Iso);
+        self.pre_extrude_cam = self.preferences.extrude_view_return.then_some(before);
+        self.animate_to(to);
+    }
+
+    /// Once Extrude has closed, however it closed, the view goes back to where it was before
+    /// Extrude turned it (#9176). Going back keeps the projection, as at the end of a sketch.
+    fn return_from_extrude_view(&mut self) {
+        if self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::Extrude { .. })) {
+            return;
+        }
+        if let Some(before) = self.pre_extrude_cam.take() {
+            self.animate_to(Camera { fov: self.settled_cam().fov, ..before });
+        }
     }
 
     /// Where the camera is going: the end of the running camera animation, else where it is.
@@ -2287,16 +2402,19 @@ impl SolveApp {
         self.cam_anim = None;
         self.viewport.orbit_free = None;
         let bounds = viewport::view_bounds(self);
-        self.pending_fit = Some((self.cam, bounds, false));
+        // Framed as the Home button frames: with the navigators' Fit on, that is their shared
+        // zoom and centre, so a design opens the way Home shows it (#10091).
+        let shared = self.preferences.navigator_fit;
+        self.pending_fit = Some((self.cam, bounds, false, shared));
         self.fit_waits = 0;
-        self.cam = self.fitted(self.cam);
+        self.cam = if shared { self.navigator_fitted(self.cam) } else { self.fitted(self.cam) };
     }
 
     /// Frame `bounds` at once, keeping the view direction (programmatic use).
     pub fn fit_bounds(&mut self, bounds: solidcraft_engine::geom::Aabb3) {
         self.cancel_view_animation();
         self.viewport.orbit_free = None;
-        self.pending_fit = Some((self.cam, bounds, false));
+        self.pending_fit = Some((self.cam, bounds, false, false));
         self.fit_waits = 0;
         self.cam = self.fitted_bounds(self.cam, &bounds);
     }
@@ -2321,7 +2439,36 @@ impl SolveApp {
         if render_workspace::active(self) {
             return viewport_layout::fit_product_bounds(cam, bounds, &render_workspace::picture_layout(self, layout));
         }
-        viewport_layout::fit_bounds(cam, bounds, layout, self.view_fov())
+        viewport_layout::fit_bounds_sized(cam, bounds, layout, self.view_fov(), f64::from(self.preferences.home_fit_size))
+    }
+
+    /// `cam` framing the whole model the navigators' way (#10091): looking at the middle of the
+    /// model from the distance that fits its bounding sphere in the free part of the view, at
+    /// the Fit size. The sphere looks the same from every side, so Home and every face,
+    /// corner, arrow or axis clicked after it keep one zoom and one centre; only the direction
+    /// changes.
+    fn navigator_fitted(&self, cam: Camera) -> Camera {
+        let bounds = viewport::view_bounds(self);
+        self.navigator_fitted_bounds(cam, &bounds).unwrap_or_else(|| self.fitted(cam))
+    }
+
+    /// [`Self::navigator_fitted`] for `bounds`, or `None` when the layout can't frame it yet.
+    fn navigator_fitted_bounds(&self, mut cam: Camera, bounds: &solidcraft_engine::geom::Aabb3) -> Option<Camera> {
+        if bounds.is_empty() || !bounds.min.is_finite() || !bounds.max.is_finite() {
+            return None;
+        }
+        let centre = bounds.center();
+        let radius = (bounds.diagonal() * 0.5).max(0.5);
+        // A cube around the sphere, seen square-on from any axis, projects to the sphere's own
+        // square, so the layout fit of that cube is the sphere's.
+        let offset = solidcraft_engine::geom::Vec3::new(radius, radius, radius);
+        let sphere = solidcraft_engine::geom::Aabb3 { min: centre - offset, max: centre + offset };
+        let mut probe = Camera::default();
+        probe.set_view(StandardView::Front);
+        let framed = self.try_fitted_bounds(probe, &sphere)?;
+        cam.target = centre;
+        cam.distance = framed.distance;
+        cam.is_valid().then_some(cam)
     }
 
     fn fitted_bounds(&self, mut cam: Camera, bounds: &solidcraft_engine::geom::Aabb3) -> Camera {
@@ -2339,11 +2486,17 @@ impl SolveApp {
     fn resolve_fit(&mut self, ctx: &egui::Context) {
         viewport::refresh_layout(self, ctx);
         if self.viewport.layout.is_some()
-            && let Some((cam, bounds, animate)) = self.pending_fit.take()
+            && let Some((cam, bounds, animate, shared)) = self.pending_fit.take()
         {
             // Nothing to frame: the camera goes to the empty design's own distance.
             let want = if bounds.is_empty() { viewport::view_bounds(self) } else { bounds };
-            let to = if want.is_empty() { Some(self.fitted(cam)) } else { self.try_fitted_bounds(cam, &want) };
+            let to = if want.is_empty() {
+                Some(self.fitted(cam))
+            } else if shared {
+                self.navigator_fitted_bounds(cam, &want)
+            } else {
+                self.try_fitted_bounds(cam, &want)
+            };
             let Some(to) = to else {
                 // The viewport hasn't been drawn since the fit was asked for (the Home screen was
                 // over it, as when a sample or a file is opened from it), so framing it now would
@@ -2352,7 +2505,7 @@ impl SolveApp {
                 // viewport is drawn; give up only if that never comes.
                 if self.fit_waits < Self::FIT_WAITS {
                     self.fit_waits += 1;
-                    self.pending_fit = Some((cam, bounds, animate));
+                    self.pending_fit = Some((cam, bounds, animate, shared));
                 } else {
                     self.fit_waits = 0;
                     self.cam = self.fitted_bounds(cam, &want);
@@ -2408,10 +2561,31 @@ impl SolveApp {
             return;
         }
         self.pending_fit = None;
-        let request = Some((self.cam, viewport::view_bounds(self), true));
+        let request = Some((self.cam, viewport::view_bounds(self), true, false));
         let to = self.fitted(self.cam);
         self.animate_to(to);
         self.pending_fit = request;
+    }
+
+    /// Move to `to` and frame the whole model from there at Home's zoom (animated): the
+    /// navigators' Home, faces, corners, arrows and axes (`navigator_fitted`).
+    pub fn animate_to_fitted(&mut self, to: Camera) {
+        let bounds = solidcraft_engine::view::bounds(&self.session);
+        let shared = self.preferences.navigator_fit;
+        let framed = if shared { self.navigator_fitted(to) } else { self.fitted(to) };
+        self.animate_to(framed);
+        self.pending_fit = Some((to, bounds, true, shared));
+    }
+
+    /// A view chosen on a navigator (a cube face, corner or arrow, an axis tip): the view turns
+    /// in place, or frames the whole model from the new direction when Preferences › Navigation
+    /// asks for it (`navigator_fit`, #10091).
+    pub fn animate_turn(&mut self, to: Camera) {
+        if self.preferences.navigator_fit {
+            self.animate_to_fitted(to);
+        } else {
+            self.animate_to(to);
+        }
     }
 
     /// Animated view changes for the axis view and navigation bar.
@@ -2448,17 +2622,20 @@ impl SolveApp {
         let mut to = self.cam;
         if home {
             to.set_view(StandardView::Iso);
-            self.pending_fit = Some((to, viewport::view_bounds(self), true));
-            to = self.fitted(to);
+            // With the navigators' Fit on, Home shares their zoom, so a face clicked after it
+            // keeps the zoom (#10091).
+            let shared = self.preferences.navigator_fit;
+            self.pending_fit = Some((to, viewport::view_bounds(self), true, shared));
+            to = if shared { self.navigator_fitted(to) } else { self.fitted(to) };
         } else {
             // With something selected, Fit frames the selection.
             match viewport::selection_bounds(self) {
                 Some(bounds) => {
-                    self.pending_fit = Some((to, bounds, true));
+                    self.pending_fit = Some((to, bounds, true, false));
                     to = self.fitted_bounds(to, &bounds);
                 }
                 None => {
-                    self.pending_fit = Some((to, viewport::view_bounds(self), true));
+                    self.pending_fit = Some((to, viewport::view_bounds(self), true, false));
                     to = self.fitted(to);
                 }
             }
@@ -2518,6 +2695,12 @@ impl SolveApp {
 
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        // Sleep/wake often skips frames without a device-lost signal; refresh egui GPU textures
+        // when the frame clock jumps so the chrome is not stuck blank (#8749).
+        let frame_time = ctx.input(|i| i.time);
+        if resume_ui::is_long_pause(self.now, frame_time) {
+            resume_ui::after_long_pause(ctx);
+        }
         frame_watch::begin(self);
         gpu::tick_tessellation(self);
         file_picker::tick(self, ctx);
@@ -2556,6 +2739,7 @@ impl SolveApp {
             theme::apply(ctx);
             self.styled = true;
         }
+        theme::TabAccent::publish(self, ctx);
         if !self.fitted {
             self.fit_view();
             self.fitted = true;
@@ -2568,7 +2752,9 @@ impl SolveApp {
         self.poll_control_jobs(ctx);
         self.drain_control(ctx);
         self.follow_view_request(true);
+        self.return_from_extrude_view();
         agent_cursor::step(self, ctx);
+        browser::eye_drag_frame(self, ctx);
         if !self.synthetic.is_empty() {
             ctx.request_repaint();
         }
@@ -2657,6 +2843,7 @@ impl SolveApp {
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         value_step::set_enabled(ui.ctx(), self.preferences.step_values);
         canvas::set_boxes_shown(ui.ctx(), self.preferences.value_boxes_in_view);
+        recent_colors::share(ui.ctx(), &mut self.ui.recent_colors);
         let t0 = now_ms();
         // The first frames draw with the bundled faces while the system's CJK, Hangul and Thai
         // faces are read on a thread; the fonts are installed again once they are there.
@@ -2669,7 +2856,11 @@ impl SolveApp {
             self.applied_fonts_language.clone_from(&self.preferences.language);
             self.applied_ui_font.clone_from(&self.preferences.ui_font);
             self.applied_system_fonts = system_fonts;
-            crate::fonts::setup_fonts_without_waiting(ui.ctx(), &self.preferences.language, &self.preferences.ui_font);
+            crate::fonts::setup_fonts_without_waiting(
+                ui.ctx(),
+                crate::i18n::effective_language(&self.preferences.language),
+                &self.preferences.ui_font,
+            );
         }
         let _language = crate::i18n::scope(&self.preferences.language);
         let mut report_input = None;
@@ -2765,7 +2956,7 @@ impl SolveApp {
             self.shell.history = None;
         }
         // The model draws next: a dialog the toolbar closed last frame no longer shows its sketch.
-        dialogs::sync_feature_edit_sketch(self);
+        dialogs::sync_feature_edit(self);
         let full = ui.available_rect_before_wrap();
         if floating {
             let cards = toolbar::shell_cards(self, full);

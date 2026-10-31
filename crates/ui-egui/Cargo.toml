@@ -25,6 +25,9 @@ ttf-parser = { workspace = true }
 # Right-to-left interface text (Hebrew): the Unicode Bidirectional Algorithm puts translated
 # strings in display order, which egui does not do itself (MIT OR Apache-2.0).
 unicode-bidi = "0.3"
+# The system's preferred languages on a first start (MIT OR Apache-2.0, maintained by
+# 1Password): the OS locale on desktop and, with `js`, `navigator.languages` in the browser (#10138).
+sys-locale = { version = "0.3.2", features = ["js"] }
 semver = { workspace = true }
 # Updates: the downloaded package's SHA-256 (against the release's SHA256SUMS.txt), its optional
 # minisign signature (MIT), and the portable .zip's executables.

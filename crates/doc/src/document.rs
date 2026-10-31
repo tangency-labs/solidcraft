@@ -1083,6 +1083,11 @@ pub enum FeatureKind {
         /// bodies follow. Replaces `to`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to_plane: Option<PlaneRef>,
+        /// Point-to-point alignment: the directions the offset moves along (the chosen world
+        /// X/Y/Z axes in the frame of the bodies being moved). `None`: all three axes, the
+        /// offset in full.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axes: Option<Vec<Dir>>,
     },
     /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
     /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).
@@ -2628,6 +2633,19 @@ pub struct DesignLink {
     /// local overrides and survive a source update. Older links start with no baseline.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub inherited: Vec<LinkedBodyProperties>,
+    /// SHA-256 of the design file's bytes as this design last read them ([`Self::file_digest`]):
+    /// opened again, this design tells which linked files changed meanwhile (#9739). Links made
+    /// before it was kept have none and are taken as up to date.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_sha256: Option<String>,
+}
+
+impl DesignLink {
+    /// What [`Self::file_sha256`] keeps for a design file's `bytes`.
+    pub fn file_digest(bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(bytes))
+    }
 }
 
 /// The values last inherited by a linked body, not another editable material library.
@@ -3471,15 +3489,35 @@ impl Document {
         self.features.iter().find(|f| f.name.eq_ignore_ascii_case(r))
     }
 
+    /// Resolve a textual timeline reference. An exact name wins even when it looks like an id.
+    /// Older scripts also pass ids as strings or use a different case for a unique name.
+    pub fn resolve_feature_name(&self, name: &str) -> Result<&Feature> {
+        if let Some(feature) = self.features.iter().find(|f| f.name == name) {
+            return Ok(feature);
+        }
+        if let Ok(id) = name.parse::<u64>()
+            && let Some(feature) = self.feature(id)
+        {
+            return Ok(feature);
+        }
+        let mut matches = self.features.iter().filter(|f| f.name.eq_ignore_ascii_case(name));
+        let feature = matches.next().ok_or_else(|| DocError::Invalid(format!("no feature `{name}`")))?;
+        if matches.next().is_some() {
+            return Err(DocError::Invalid(format!("ambiguous feature `{name}`. Use its exact name or numeric id")));
+        }
+        Ok(feature)
+    }
+
     /// The feature a pattern or mirror seed names, resolved the way `replay()` resolved seed
     /// names before seeds were keyed by id (#1134): an exact name match on a feature that is
     /// not a sketch or a construction plane wins — a sketch and its extrude often share a
-    /// name, and the feature that makes geometry is the one to copy — else [`find_feature`].
+    /// name, and the feature that makes geometry is the one to copy. Other references use
+    /// the timeline lookup.
     pub fn seed_feature(&self, name: &str) -> Option<&Feature> {
         self.features
             .iter()
             .find(|x| x.name == name && !matches!(x.kind, FeatureKind::Sketch { .. } | FeatureKind::ConstructionPlane { .. }))
-            .or_else(|| self.find_feature(name))
+            .or_else(|| self.resolve_feature_name(name).ok())
     }
 
     fn unique_name(&self, base: &str) -> String {
@@ -4173,6 +4211,14 @@ impl Document {
             } else {
                 solidcraft_sketch::solve_after_edit_with_analysis(sk, stored, was(sk).as_deref(), analysis)
             };
+            // An attachment to the old offset can prevent the source from moving at all.
+            // Retry from a source-only seed, adopting it only if every constraint still holds.
+            if !report.ok()
+                && report.oversized.is_none()
+                && let Some(retried) = sk.solve_after_offset_edit(stored, was(sk).as_deref(), analysis)
+            {
+                report = retried;
+            }
         }
         Ok(report)
     }

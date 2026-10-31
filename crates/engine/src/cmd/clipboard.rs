@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::{FeatureKind, PlaneRef};
 
 use super::CommandSpec;
-use crate::params::{bad, name_or_id_list, vec3};
+use crate::params::{bad, name_or_id_values, vec3};
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -24,14 +24,11 @@ pub static COMMANDS: &[CommandSpec] = &[
 fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.copy";
     // The features are named or numbered, and both kinds can sit in one list.
-    let keys = name_or_id_list(cmd, p, "features")?;
+    let keys = name_or_id_values(cmd, p, "features")?;
     if keys.is_empty() || keys.len() > 1000 {
         return Err(bad(cmd, "`features` must list 1…1000 features"));
     }
-    let mut ids = Vec::new();
-    for k in &keys {
-        ids.push(s.doc.find_feature(k).map(|f| f.id).ok_or_else(|| bad(cmd, format!("no feature `{k}`")))?);
-    }
+    let ids = keys.iter().map(|key| super::edit::feature_id(s, Some(key), cmd)).collect::<Result<Vec<_>>>()?;
     // Keep timeline order so sketches come before the features that use them.
     let copied: Vec<solidcraft_doc::Feature> = s.doc.features.iter().filter(|f| ids.contains(&f.id)).cloned().collect();
     let names: Vec<String> = copied.iter().map(|f| f.name.clone()).collect();
