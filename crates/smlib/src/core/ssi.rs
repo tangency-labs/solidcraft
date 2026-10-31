@@ -1,8 +1,7 @@
 //! Surface/surface intersection on solidcore (`smlib_ssi.cpp`'s `smlib_ssi`, `smlib_surface_domain`,
 //! `smlib_surface_evaluate`), on the surfaces [`crate::core::split`] makes from a [`Spec`]:
 //! `SmSurface::GlobalSurfaceIntersect` and `SmAdvSurfaceIntersector`, whose results are read as the
-//! capi reads them. The basic `SmSurfaceIntersector` has no public entry in solidcore, so
-//! [`Method::Basic`] says it is not supported.
+//! capi reads them.
 
 use std::borrow::Cow;
 
@@ -109,7 +108,6 @@ pub(crate) fn intersect(a: &Tool, b: &Tool, method: Method, approx_tol: f64) -> 
         let found = match method {
             Method::Global => a.surface.global_surface_intersect(k, &a.domain, &b.surface, &b.domain, edges, tol, None),
             Method::Advanced => do_intersection(k, &a.surface, &a.domain, &b.surface, &b.domain, edges, tol, None),
-            Method::Basic => return Ok(Err(Error::NotOnSolidcore("the basic surface intersector"))),
         };
         // An SMLib status is an answer, as the C API returns it.
         match found {

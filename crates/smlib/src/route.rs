@@ -183,6 +183,13 @@ pub(crate) fn reached_core() {
     REACHED.with(|r| r.set((r.get().0, r.get().1 + 1)));
 }
 
+/// Tests: how many times this thread has touched a C++ body and called solidcore since the last
+/// time this was asked.
+#[cfg(test)]
+pub(crate) fn take_reached() -> (u64, u64) {
+    REACHED.with(|r| r.replace((0, 0)))
+}
+
 /// Tests that exercise the C++ kernel opt in: until the guard drops, this thread's operations run
 /// on it. Thread by thread, so that the other tests in the binary stay on the table's kernel. The
 /// guard fails a test that never touched a C++ body, so a parity test can't quietly compare

@@ -319,8 +319,6 @@ pub enum Method {
     Global,
     /// `SmAdvSurfaceIntersector`, the general NURBS path.
     Advanced,
-    /// `SmSurfaceIntersector`, the basic intersector.
-    Basic,
 }
 
 impl Method {
@@ -328,7 +326,6 @@ impl Method {
         match self {
             Method::Global => 0,
             Method::Advanced => 1,
-            Method::Basic => 2,
         }
     }
 }
@@ -543,6 +540,5 @@ mod tests {
                 }
             }
         }
-        assert!(matches!(intersect(&plane, &sphere, Method::Basic, 1e-6), Err(Error::NotOnSolidcore(_))));
     }
 }

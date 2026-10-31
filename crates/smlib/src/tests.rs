@@ -259,8 +259,8 @@ fn every_entry_point_is_in_the_guard() {
 }
 
 /// With no C++ kernel, each entry point answers with something other than "not built": its result
-/// or its own refusal, on a body of the right kind or the wrong one.
-#[cfg(not(feature = "native"))]
+/// or its own refusal, on a body of the right kind or the wrong one. Built with the C++ kernel, the
+/// same calls with nothing chosen never touch a C++ body: nothing on the default path reaches it.
 #[test]
 fn without_the_cpp_kernel_every_entry_point_answers() {
     use crate::sweeps::{Affine, Curve, DraftCorner, Ends, SweepFrame};
@@ -282,6 +282,7 @@ fn without_the_cpp_kernel_every_entry_point_answers() {
         says("set_dump_dir", set_dump_dir(None));
     }
     let _ = current_call();
+    route::take_reached();
     let a = says("make_box", Brep::make_box([0.0; 3], [10.0; 3])).unwrap();
     let t = says("make_box", Brep::make_box([5.0; 3], [10.0; 3])).unwrap();
     let p = |x: f64, y: f64, z: f64| [x, y, z];
@@ -357,6 +358,8 @@ fn without_the_cpp_kernel_every_entry_point_answers() {
     says("loft_to_point", Brep::loft_to_point(&lines, p(5.0, 5.0, 12.0)));
     says("screw_sweep", Brep::screw_sweep(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, 0.01));
     says("screw_sweep_radial", Brep::screw_sweep_radial(&lines, p(30.0, 0.0, 0.0), p(0.0, 0.0, 1.0), 12.0, 1.0, &[(0.0, 0.0), (1.0, 0.0)], 0.01));
+    let (cpp, core) = route::take_reached();
+    assert!(cpp == 0 && core > 0, "the default path touched a C++ body {cpp} times ({core} solidcore calls)");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
