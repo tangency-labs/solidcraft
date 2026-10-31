@@ -62,7 +62,10 @@ and the preview follows each step. An expression such as `width / 2` is left as 
 Expressions are unit-aware: `2 * width + 5 mm`, `angle / 2`, `sqrt(area)`, `1 in + 3 mm`, using
 `+ - * / ^ %`, parentheses, `sin cos tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh sqrt
 abs sign min max floor ceil round trunc mod exp ln log log10 pow hypot` (`log` is base 10) and unit
-conversion. A number and the unit after it are one value: `10 mm / 2 mm` is 5
+conversion. Comparisons (`> < >= <= == !=`) need operands of the same kind and give a unit-less 1
+or 0, and a conditional `cond ? a : b` picks one of its two results: a nonzero unit-less condition
+is true, and both results must share units, as `min` and `max` require — for a width that depends
+on a shelf count, `shelves > 5 ? 440 : length / shelves`. A number and the unit after it are one value: `10 mm / 2 mm` is 5
 and `90 deg / 1 rad` is π/2, and a fraction of numbers before a unit is one value too (`1/2 in`
 is half an inch; after a `/` only written without spaces: `1 in / 1/2 in` is 2, while
 `width / 10 / 2 mm` divides by 10 and then by 2 mm). A decimal comma works too: `2,5 mm` is
