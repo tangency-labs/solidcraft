@@ -411,14 +411,28 @@ pub fn sketch_grid_step(half_height: f64) -> (f64, f64) {
     (minor, minor / 10.0)
 }
 
-/// The crossing of the drawn grid's lines nearest `p`, when `p` is within a quarter of a cell of
-/// it: the point the user can see and means (#7114).
+/// The crossing of the drawn grid's lines nearest `p`, when the pointer means that crossing:
+/// the point the user can see and means (#7114).
 ///
-/// A quarter of a cell is close enough that the crossing is what the pointer meant, and far
-/// enough that the finer lattice still holds the points between the crossings.
-pub fn sketch_grid_crossing(p: Vec2, minor: f64) -> Option<Vec2> {
+/// The crossing takes the pointer when it is within a fine step of it, or when the finer
+/// lattice cannot hold the pointer and the crossing is within a quarter of a cell of it.
+pub fn sketch_grid_crossing(p: Vec2, minor: f64, fine: f64) -> Option<Vec2> {
     let crossing = Vec2::new((p.x / minor).round() * minor, (p.y / minor).round() * minor);
-    (crossing.dist(p) <= minor / 4.0).then_some(crossing)
+    let taken = sketch_grid_takes_crossing(crossing.dist(p), sketch_grid_lattice(p, fine).dist(p), minor, fine);
+    taken.then_some(crossing)
+}
+
+/// Whether the crossing of the drawn grid's lines takes the pointer that is `d` away from it,
+/// when the finer lattice's point is `l` away from it.
+///
+/// The crossing takes the pointer when it is within a fine step of it: that is the crossing's
+/// own place on the finer lattice, and the one right beside it. Further out the crossing still
+/// takes the pointer, but only when the finer lattice cannot hold it: a pointer that sits on
+/// one of the finer lattice's points holds that exact value, and the drawn grid does not move
+/// it, so a value the user placed (`14`, an exact radius) is not carried off to the crossing
+/// beside it.
+fn sketch_grid_takes_crossing(d: f64, l: f64, minor: f64, fine: f64) -> bool {
+    d <= fine || (l > fine / 4.0 && d <= minor / 4.0)
 }
 
 /// The point of the finer lattice between the crossings nearest `p`.
@@ -432,9 +446,9 @@ pub fn sketch_grid_lattice_axis(v: f64, fine: f64) -> f64 {
 }
 
 /// The point of the grid a sketch's point lands on: the crossing of the drawn grid's lines when
-/// the pointer is near one, and the finer lattice between the crossings otherwise (#7114).
+/// the pointer means one, and the finer lattice between the crossings otherwise (#7114).
 pub fn sketch_grid_point(p: Vec2, minor: f64, fine: f64) -> Vec2 {
-    match sketch_grid_crossing(p, minor) {
+    match sketch_grid_crossing(p, minor, fine) {
         Some(crossing) => crossing,
         None => sketch_grid_lattice(p, fine),
     }
@@ -453,7 +467,9 @@ pub fn sketch_grid_free(free: f64, fixed: f64, minor: f64, fine: f64) -> f64 {
         return sketch_grid_lattice_axis(free, fine);
     }
     let crossing = (free / minor).round() * minor;
-    if (crossing - free).abs() <= minor / 4.0 { crossing } else { sketch_grid_lattice_axis(free, fine) }
+    let lattice = sketch_grid_lattice_axis(free, fine);
+    let taken = sketch_grid_takes_crossing((crossing - free).abs(), (lattice - free).abs(), minor, fine);
+    if taken { crossing } else { lattice }
 }
 
 /// How the grid fades out with the distance from the middle of the view (#4214).
@@ -1426,6 +1442,25 @@ mod tests {
         s.doc_mut().features.retain(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::Extrude { .. }));
         assert_eq!(Arc::as_ptr(&s.doc), address, "doc_mut still edits in place");
         assert_eq!(shown(&s), [true; 4], "an edit through doc_mut is read again");
+    }
+
+    /// The crossing of the drawn grid's lines takes the pointer when the pointer means it, and
+    /// the finer lattice holds the pointer otherwise (#7114).
+    ///
+    /// The pointer means the crossing when it is within a fine step of it: that is the
+    /// crossing's own place on the finer lattice and the one right beside it. A pointer that
+    /// sits on a point of the finer lattice holds that exact value, so a value the user
+    /// placed (`14`, an exact radius) is not carried off to the crossing beside it.
+    #[test]
+    fn the_crossing_of_the_drawn_grid_takes_the_pointer_that_means_it() {
+        let point = |p: Vec2, minor: f64| sketch_grid_point(p, minor, minor / 10.0);
+        let near = |a: Vec2, b: Vec2| (a.x - b.x).abs() < 1e-9 && (a.y - b.y).abs() < 1e-9;
+        // A pointer near a crossing lands on it, and a pointer a little further off still does.
+        assert!(near(point(Vec2::new(20.3125, 20.0), 5.0), Vec2::new(20.0, 20.0)));
+        assert!(near(point(Vec2::new(20.5, 20.0), 5.0), Vec2::new(20.0, 20.0)));
+        // A pointer on a point of the finer lattice keeps that exact value.
+        assert!(near(point(Vec2::new(14.0, 10.0), 5.0), Vec2::new(14.0, 10.0)));
+        assert!(near(point(Vec2::new(20.5, 20.0), 1.0), Vec2::new(20.5, 20.0)));
     }
 }
 
