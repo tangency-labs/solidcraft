@@ -455,7 +455,8 @@ fn as_drawn_keeps_typed_values_alternatives_and_leaves_out_determined_sizes() {
 #[test]
 fn an_ellipse_takes_a_typed_major_and_minor_radius() {
     let mut s = session();
-    let out = draw(&mut s, "sketch.ellipse", json!({"center":[0,0],"major":[10,0],"minor_radius":4}), json!({"major_radius":"12 mm","minor_radius":5}));
+    let out =
+        draw(&mut s, "sketch.ellipse", json!({"center":[0,0],"major":[10,0],"minor_radius":4}), json!({"major_radius":"12 mm","minor_radius":5}));
     let mut placed: Vec<&String> = out["dimensions"].as_object().unwrap().keys().collect();
     placed.sort();
     assert_eq!(placed, ["major_radius", "minor_radius"]);
