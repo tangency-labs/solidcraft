@@ -2,7 +2,7 @@
 //! cube, made the way the cube is: the same size, each face shaded by how squarely it meets the
 //! eye. Its texture is the cube's face and border colours, the hovered face in the cube's hover
 //! colour and accent (themed), or the body's own appearance with the view's edge colour, the
-//! hovered face in the colours the view selects a face with (modeled); the cube's orbit and roll
+//! hovered face lit as the view lights a face under the pointer (modeled); the cube's orbit and roll
 //! arrows and its Home button go around it when the `navigator_arrows` and `navigator_home`
 //! preferences say so. While the Custom View Navigator panel is open it shows the panel's choices.
 //! A click on a face looks straight at it; a drag orbits.
@@ -191,28 +191,34 @@ struct Look {
     active: bool,
     /// Cube face, cube hover, the theme's body colour and the view's background.
     colours: [Color32; 4],
+    /// How much lighter the view draws a face under the pointer (grey levels; modeled).
+    lift: u8,
 }
 
-/// The hovered face's fill and outline: the cube's hover colour and accent (themed), or the
-/// colours the view selects a face of the model with (modeled).
-fn hover_colours(texture: NavigatorTexture, cube: &Tokens, view: &Tokens) -> (Color32, Color32) {
+/// The hovered face's outline: the cube's accent (themed), or the view's mouse-over edge colour
+/// (modeled).
+fn hover_outline(texture: NavigatorTexture, cube: &Tokens, view: &Tokens) -> Color32 {
     match texture {
-        NavigatorTexture::Themed => (cube.cube_hover, cube.accent),
-        NavigatorTexture::Modeled => (view.sel_face, view.sel_edge),
+        NavigatorTexture::Themed => cube.accent,
+        NavigatorTexture::Modeled => view.hover_edge,
     }
 }
 
 /// The colour face `face` is painted before shading.
 fn face_colour(shape: &Shape, face: Option<u32>, look: &Look) -> Color32 {
     let [cube_face, hover, body, background] = look.colours;
-    if face.is_some() && face == look.hovered {
-        // As on the cube, the hovered target is one flat colour.
-        return hover;
-    }
+    let hovered = face.is_some() && face == look.hovered;
     match look.texture {
+        // As on the cube, the hovered target is one flat colour.
+        NavigatorTexture::Themed if hovered => hover,
         NavigatorTexture::Themed => cube_face,
         NavigatorTexture::Modeled => {
             let own = shape.colour_of(face).map_or(body, |[r, g, b]| Color32::from_rgb(r, g, b));
+            if hovered {
+                // As the view shows a face under the pointer: its own colour, a little lighter.
+                let k = look.lift;
+                return Color32::from_rgb(own.r().saturating_add(k), own.g().saturating_add(k), own.b().saturating_add(k));
+            }
             // Idle, it fades into the view as the cube does.
             if look.active { own } else { own.lerp_to_gamma(background, 0.55) }
         }
@@ -236,7 +242,8 @@ fn compose(r: &Raster, shape: &Shape, look: &Look) -> egui::ColorImage {
                     let Some(&tri) = r.tri.get(i).filter(|t| **t != NONE) else { continue };
                     let face = mesh.tri_face.get(tri as usize).copied();
                     let base = *colours.entry(face).or_insert_with(|| face_colour(shape, face, look));
-                    let colour = if face.is_some() && face == look.hovered { base } else { dim(base, r.shade.get(i).copied().unwrap_or(1.0)) };
+                    let flat = face.is_some() && face == look.hovered && look.texture == NavigatorTexture::Themed;
+                    let colour = if flat { base } else { dim(base, r.shade.get(i).copied().unwrap_or(1.0)) };
                     for (acc, v) in sum.iter_mut().zip([colour.r(), colour.g(), colour.b(), 255]) {
                         *acc += f32::from(v);
                     }
@@ -337,8 +344,14 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, shown: cra
                 (s.x >= 0.0 && s.y >= 0.0).then(|| cache.raster.at(s.x as usize, s.y as usize)).flatten()
             });
             let face = tri.and_then(|t| mesh.tri_face.get(t).copied());
-            let (hover_fill, hover_outline) = hover_colours(texture, &t, &view);
-            let look = Look { hovered: face, texture, active, colours: [t.cube_face, hover_fill, view.body, view.viewport_top] };
+            let hover_outline = hover_outline(texture, &t, &view);
+            let look = Look {
+                hovered: face,
+                texture,
+                active,
+                colours: [t.cube_face, t.cube_hover, view.body, view.viewport_top],
+                lift: view.hover_face_lift,
+            };
             if cache.look != Some(look) || cache.texture.is_none() {
                 let img = compose(&cache.raster, &shape, &look);
                 match cache.texture.as_mut() {
@@ -441,7 +454,7 @@ mod tests {
     fn hostile_raster_sizes_and_cameras_never_panic() {
         let h = boxed();
         let shape = Shape::of_body(&h.app.session, &body_name(&h)).unwrap();
-        let look = Look { hovered: Some(0), texture: NavigatorTexture::Modeled, active: false, colours: [Color32::WHITE; 4] };
+        let look = Look { hovered: Some(0), texture: NavigatorTexture::Modeled, active: false, colours: [Color32::WHITE; 4], lift: u8::MAX };
         for side in [0, 1, 2, 3, usize::MAX] {
             let r = raster(&shape.mesh, &Camera::default(), side);
             assert!(r.side >= 1 && r.side <= MAX_PIXELS * SS);
@@ -502,16 +515,28 @@ mod tests {
         shape.colour = Some([200, 30, 40]);
         let r = raster(&shape.mesh, &Camera::default(), 64);
         let t = Tokens::light();
-        let look = |texture| Look { hovered: None, texture, active: true, colours: [t.cube_face, t.cube_hover, t.body, t.viewport_top] };
+        let look = |texture| Look {
+            hovered: None,
+            texture,
+            active: true,
+            colours: [t.cube_face, t.cube_hover, t.body, t.viewport_top],
+            lift: t.hover_face_lift,
+        };
         assert_ne!(t.body_edge, t.cube_border, "the two textures' edges can be told apart");
-        // A hovered face: the cube's hover colours when themed, the view's selection when modeled.
-        assert_eq!(hover_colours(NavigatorTexture::Themed, &t, &t), (t.cube_hover, t.accent));
-        assert_eq!(hover_colours(NavigatorTexture::Modeled, &t, &t), (t.sel_face, t.sel_edge));
+        // A hovered face: the cube's hover colours when themed, the view's mouse-over when modeled.
+        assert_eq!(hover_outline(NavigatorTexture::Themed, &t, &t), t.accent);
+        assert_eq!(hover_outline(NavigatorTexture::Modeled, &t, &t), t.hover_edge);
+        assert!(t.hover_face_lift > 0);
         // The pixel over the middle of one face seen, hovered.
         let (face, sample) = face_samples(&r, &shape.mesh)[0];
         let at = (sample / r.side / SS) * (r.side / SS) + sample % r.side / SS;
-        let hovered = Look { hovered: Some(face), colours: [t.cube_face, t.sel_face, t.body, t.viewport_top], ..look(NavigatorTexture::Modeled) };
-        assert_eq!(compose(&r, &shape, &hovered).pixels[at], t.sel_face, "the hovered face is the view's selection colour, flat");
+        let modeled = look(NavigatorTexture::Modeled);
+        let (plain, lit) = (compose(&r, &shape, &modeled).pixels[at], compose(&r, &shape, &Look { hovered: Some(face), ..modeled }).pixels[at]);
+        assert!(
+            lit.r() > plain.r() && lit.g() > plain.g() && lit.b() > plain.b(),
+            "the hovered face is lifted as the view lifts it: {plain:?} → {lit:?}"
+        );
+        assert_ne!(lit, t.sel_face, "not the selection colour");
         let middle = |img: &egui::ColorImage| img.pixels[img.size[1] / 2 * img.size[0] + img.size[0] / 2];
         let red = middle(&compose(&r, &shape, &look(NavigatorTexture::Modeled)));
         assert!(red.r() > red.g() * 3 && red.r() > red.b() * 3, "the body's red: {red:?}");
