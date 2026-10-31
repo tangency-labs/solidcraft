@@ -97,6 +97,12 @@
 //!   ([`ProtoBrep::face_coincident_edge`], `SmTools::FindCoincidentEdge`) as the
 //!   definition's edge there instead of making a second one (the SMLib fork's
 //!   tangency-labs/smlib@81cd61a).
+//! - **Opt-in fix (WR-619, #1794; own design).** With `Kernel::fixes.imprint_skips_collapsed_definition`,
+//!   [`ProtoTopologyManager::imprint_edge_definition`] makes no edge for a definition whose ends
+//!   are one proto vertex and one vertex in each B-rep, along a speck within that vertex's
+//!   tolerance and the definition's own, when another definition of its proto edge is
+//!   imprinted between two distinct vertices in each B-rep (`collapsed_beside_sibling`);
+//!   upstream makes a closed edge on that vertex.
 //! - **Opt-in fixes (WR-452, WR-453, #435, #410).** With `Kernel::fixes.imprint_trims_edge_to_proto_vertex` and
 //!   `Kernel::fixes.imprint_extends_edge_to_proto_vertex`, [`ProtoTopologyManager::imprint_edge_definition`]
 //!   first fits each end of the definition's interval to its proto vertex (`imprint_ends`: the SMLib
@@ -130,7 +136,7 @@ use crate::intersect::point_class::{
     PointClassification,
 };
 use crate::kernel::Kernel;
-use crate::math::{max2, max3, max4, Point2, Point3, Vec3, EFF_ZERO};
+use crate::math::{max2, max3, max4, min2, Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::face::p2::proto_vertex_containment_radius;
@@ -488,6 +494,30 @@ fn xsect_tol_of<O: ClassObject>(
 }
 
 /// The curve behind `o` (a `NULL` dereference upstream for none).
+/// Not upstream (WR-619, condition 3 of `collapsed_beside_sibling`): whether every one of
+/// `SAMPLES` points of `curve` over `interval`, its ends included, lies within `tol` of
+/// `vertex`: the curve is a speck on that vertex (a real closed curve on it leaves it).
+///
+/// # Errors
+///
+/// Those of the curve evaluations.
+fn speck_on_vertex(
+    k: &Kernel,
+    curve: &Curve,
+    interval: Extent1d,
+    vertex: Point3,
+    tol: f64,
+) -> Result<bool> {
+    const SAMPLES: u32 = 9;
+    for i in 0..SAMPLES {
+        let t = interval.evaluate(f64::from(i) / f64::from(SAMPLES - 1));
+        if curve.evaluate_point(k, t)?.distance(vertex) > tol {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 fn curve_of<O: Copy>(brep: &impl ProtoBrep<O>, o: Option<O>) -> Result<&Curve> {
     o.and_then(|o| brep.curve(o))
         .ok_or(dangling("curve handle is null or unknown"))
@@ -851,6 +881,69 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         (result, edited)
     }
 
+    /// Not upstream (WR-619, opt-in `fixes.imprint_skips_collapsed_definition`): whether the
+    /// definition `ed`, with proto vertices `pvs` and final vertices `vertices` (start, end in
+    /// B-reps 1 and 2), is a collapsed speck. All must hold, else `false`: its ends are one
+    /// proto vertex; they are one vertex in each B-rep; its curve is a speck on those vertices
+    /// ([`speck_on_vertex`] in each B-rep, within both that vertex's tolerance and the
+    /// definition's own, the tolerance its edge would have); and another definition
+    /// of its proto edge is imprinted between two distinct final vertices in each B-rep (the
+    /// proto edge is not lost; the speck carries no geometry its vertex does not have).
+    ///
+    /// # Errors
+    ///
+    /// Those of the curve evaluations and of
+    /// [`ProtoTopologyManager::proto_vertex_final_vertex`].
+    fn collapsed_beside_sibling(
+        &self,
+        k: &Kernel,
+        brep: &impl ProtoBrep<O>,
+        ed: EdgeDefId,
+        pvs: (ProtoVertexId, ProtoVertexId),
+        vertices: [(O, O); 2],
+    ) -> Result<bool> {
+        let [(start1, end1), (start2, end2)] = vertices;
+        if pvs.0 != pvs.1 || start1 != end1 || start2 != end2 {
+            return Ok(false);
+        }
+        let def = self.ed_ref(ed)?;
+        let curve = curve_of(brep, def.xsect_curve_3d())?;
+        let interval = def.xsect_interval();
+        for v in [start1, start2] {
+            let (Some(point), Some(tol)) = (
+                brep.classification_vertex_point(v),
+                brep.topology_tolerance(v),
+            ) else {
+                return Ok(false);
+            };
+            if !speck_on_vertex(k, curve, interval, point, min2(tol, def.raw_tolerance()))? {
+                return Ok(false);
+            }
+        }
+        let Some(pe) = def.proto_edge() else {
+            return Ok(false);
+        };
+        let siblings = self
+            .proto_edge(pe)
+            .ok_or(dangling("proto edge is deleted"))?
+            .edge_definitions()
+            .to_vec();
+        for other in siblings.into_iter().filter(|&o| o != ed) {
+            let start_pv = self.pv_live(self.edge_def_start_proto_vertex(other)?)?;
+            let end_pv = self.pv_live(self.edge_def_end_proto_vertex(other)?)?;
+            let mut distinct = true;
+            for which in [1, 2] {
+                let s = self.proto_vertex_final_vertex(k, brep, start_pv, which, other, true)?;
+                let e = self.proto_vertex_final_vertex(k, brep, end_pv, which, other, false)?;
+                distinct &= matches!((s, e), (Some(s), Some(e)) if s != e);
+            }
+            if distinct {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     /// The body of [`ProtoTopologyManager::imprint_edge_definition`]; `edited` is set
     /// before the first B-rep edit.
     fn imprint_edge_definition_inner(
@@ -881,6 +974,21 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             .ok_or_else(null)?;
         let brep1 = self.which_brep(1);
         let brep2 = self.which_brep(2);
+
+        // Not upstream (WR-619, #1794; opt-in, own design): a definition that would be a closed
+        // edge on one vertex in each B-rep along a speck within that vertex's tolerance and its
+        // own, beside a sibling definition imprinted between distinct vertices, makes no edge.
+        if k.fixes.imprint_skips_collapsed_definition
+            && self.collapsed_beside_sibling(
+                k,
+                &*brep,
+                ed,
+                (start_pv, end_pv),
+                [(start_vtx1, end_vtx1), (start_vtx2, end_vtx2)],
+            )?
+        {
+            return Ok(());
+        }
 
         // not upstream (WR-452, WR-453, #435, #410; opt-in): fit the ends to the proto vertices
         if k.fixes.imprint_trims_edge_to_proto_vertex
