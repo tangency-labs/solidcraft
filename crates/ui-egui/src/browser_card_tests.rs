@@ -680,7 +680,7 @@ fn browser_occurrence_clicks_fill_align_components_input() {
     h.app.start("solid.align");
     {
         let d = h.app.dialog.as_mut().unwrap();
-        d.kind = crate::dialogs::Kind::Align { flip: false, components: true };
+        d.kind = crate::dialogs::Kind::Align { flip: false, components: true, axes: [true; 3] };
         d.inputs[0].label = "Components";
         d.active = 0;
     }

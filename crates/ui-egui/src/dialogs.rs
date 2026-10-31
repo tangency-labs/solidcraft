@@ -274,6 +274,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             Align {
                 flip: bool,
                 components: bool,
+                /// Point-to-point: which of the world X, Y and Z axes take the offset.
+                axes: [bool; 3],
             },
             /// Remove bodies from here on in the timeline.
             Remove,
@@ -878,7 +880,7 @@ impl Dialog {
             "solid.align" => {
                 let components = s.selection.iter().any(|x| matches!(x, Sel::Occurrence { .. }));
                 Dialog::new(
-                    Kind::Align { flip: false, components },
+                    Kind::Align { flip: false, components, axes: [true; 3] },
                     vec![
                         SelInput::new(if components { "Components" } else { "Bodies" }, BODIES, true),
                         SelInput::new("From", FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN, false),
@@ -4659,7 +4661,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "faces")?;
             ("face.delete", json!({"faces": face_points(0)}))
         }
-        Kind::Align { flip, components } => {
+        Kind::Align { flip, components, axes } => {
             need(0, if *components { "components" } else { "bodies" })?;
             need(1, "what to move from")?;
             need(2, "where to move it to")?;
@@ -4670,7 +4672,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 json!({"paths": paths, "flip": flip})
             } else {
-                json!({"bodies": sels(d, 0).body_names(), "flip": flip})
+                let mut p = json!({"bodies": sels(d, 0).body_names(), "flip": flip});
+                if *axes != [true; 3] {
+                    p["axes"] = json!(axes);
+                }
+                p
             };
             for (i, key) in [(1, "from"), (2, "to")] {
                 let snap = d.extra.get(&format!("{key}_snap")).and_then(Value::as_str).unwrap_or("picked");

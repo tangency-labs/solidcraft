@@ -1083,6 +1083,11 @@ pub enum FeatureKind {
         /// bodies follow. Replaces `to`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to_plane: Option<PlaneRef>,
+        /// Point-to-point alignment: the directions the offset moves along (the chosen world
+        /// X/Y/Z axes in the frame of the bodies being moved). `None`: all three axes, the
+        /// offset in full.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        axes: Option<Vec<Dir>>,
     },
     /// A helical coil: a circular or square section swept `turns` times about `axis`, rising
     /// `pitch` per turn, on a helix of `diameter` (the section's centre, or its inside or outside).
