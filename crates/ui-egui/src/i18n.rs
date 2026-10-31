@@ -155,7 +155,7 @@ pub fn match_system_tags(tags: &[String]) -> &'static str {
 /// (Windows, macOS, Linux/BSD) and `navigator.languages` in the browser.
 pub fn system_language() -> &'static str {
     static CACHED: OnceLock<&'static str> = OnceLock::new();
-    *CACHED.get_or_init(|| match_system_tags(&sys_locale::get_locales().collect::<Vec<_>>()))
+    CACHED.get_or_init(|| match_system_tags(&sys_locale::get_locales().collect::<Vec<_>>()))
 }
 
 /// The catalog id a `language` preference resolves to: the saved choice, or the system's for
