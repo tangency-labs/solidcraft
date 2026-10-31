@@ -86,12 +86,23 @@ fn glass_is_sorted_back_to_front_independently_of_body_order() {
     let far = square("Far", [240, 20, 20], 0.5, request.camera.back() * -5.0);
     let near = square("Near", [20, 20, 240], 0.5, request.camera.back() * 5.0);
     let a = finish(ImageTask::new(scene(vec![far.clone(), near.clone()]), request.clone(), CancelToken::default()).unwrap());
-    let b = finish(ImageTask::new(scene(vec![near, far]), request, CancelToken::default()).unwrap());
+    let b = finish(ImageTask::new(scene(vec![near.clone(), far.clone()]), request.clone(), CancelToken::default()).unwrap());
     assert_eq!(a, b);
     let image = image::load_from_memory(&a).unwrap().to_rgba8();
     let p = image.get_pixel(32, 32).0;
     assert!((i16::from(p[3]) - 192).abs() <= 1, "two half-transparent layers: {p:?}");
     assert!(p[2] > p[0] + 30, "the near blue layer contributes more: {p:?}");
+    // Each triangle is placed by its middle: the far square tilted so that both its triangles'
+    // first corners come in front of the near square while their middles, and its own middle,
+    // stay behind it.
+    let mut tilted = (*far.mesh).clone();
+    for p in &mut tilted.positions {
+        *p += request.camera.back() * (-2.0 * p.z);
+    }
+    let tilted = ProductMesh { mesh: Arc::new(tilted), ..far };
+    let png = finish(ImageTask::new(scene(vec![near, tilted]), request, CancelToken::default()).unwrap());
+    let p = image::load_from_memory(&png).unwrap().to_rgba8().get_pixel(32, 32).0;
+    assert!(p[2] > p[0] + 30, "the near blue layer is still drawn over the tilted one: {p:?}");
 }
 
 #[test]
@@ -511,6 +522,26 @@ fn an_orthographic_picture_lands_on_its_pixel_grid() {
     }
 }
 
+/// An orthographic picture lights its faces from its eye, as the product image does: a face
+/// square-on to the view is the same colour in both.
+#[test]
+fn an_orthographic_picture_is_lit_from_its_eye() {
+    let part = || scene(vec![square("Part", [200, 100, 50], 1.0, Vec3::ZERO)]);
+    let png = finish(ImageTask::new(part(), request(), CancelToken::default()).unwrap());
+    let product = image::load_from_memory(&png).unwrap().to_rgba8().get_pixel(32, 32).0;
+    let (frame, grid) = front_view();
+    let request = PictureRequest {
+        projection: Projection::Ortho { frame, grid },
+        tiles: tiles(100, 50, 1, 1),
+        supersample: Supersample::One,
+        roles: Vec::new(),
+        background: None,
+    };
+    // The square covers paper x 40..60 and y 15..35: pixel (50, 25) is its middle.
+    let rows = picture(part(), request);
+    assert_eq!(rows[(25 * 100 + 50) * 4..][..4], product);
+}
+
 /// The orthographic map puts a point where its frame says it lies on paper, to 1e-9 mm, for a
 /// turned frame, a scale and a shift: the guarantee that a picture and lines drawn from the same
 /// frame register.
@@ -646,6 +677,27 @@ fn hostile_pictures_are_refused() {
     assert_eq!(bad(&|r| (r.projection, r.tiles) = (a0, vec![PixelWindow { x0: 0, y0: 0, x1: 4096, y1: 64 }])), None);
     // As the product image refuses a size over the resolver's limits.
     assert_eq!(bad(&|r| (r.projection, r.tiles) = (a0, vec![PixelWindow { x0: 0, y0: 0, x1: 5000, y1: 5000 }])), invalid, "a tile over its limits");
+}
+
+/// A picture may test each of its samples as often as the largest product image may: a face
+/// across most of an A0 sheet at 1200 dpi, some 1.8e9 tests, more than a product image's
+/// whole budget, is prepared and goes on to be drawn.
+#[test]
+fn a_picture_tests_as_many_samples_as_its_size_needs() {
+    let (frame, _) = front_view();
+    let grid = PixelGrid::new(0.0, 0.0, 1189.0, 841.0, 1200.0).unwrap();
+    let face = scene(vec![block("Face", [200, 100, 50], Vec3::ZERO, Vec3::new(250.0, 2.0, 200.0))]);
+    let request = PictureRequest {
+        projection: Projection::Ortho { frame, grid },
+        tiles: vec![PixelWindow { x0: 0, y0: 0, x1: 4096, y1: 64 }],
+        supersample: Supersample::Two,
+        roles: Vec::new(),
+        background: None,
+    };
+    let mut task = PictureTask::new(face, request, CancelToken::default()).unwrap();
+    while matches!(task.raster.stage, Stage::Looks | Stage::Prepare | Stage::Sort) {
+        task.step(4096).unwrap();
+    }
 }
 
 /// A sphere of `bands` × `2 · bands` quads with smooth normals: `4 · bands²` triangles.
