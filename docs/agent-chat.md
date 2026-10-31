@@ -79,6 +79,15 @@ clicks and scrolling over the panel stay in the chat. The docked layout retains 
   comes first and the model drop-down lists only that provider's models, without the provider in
   front. It opens on the provider of the model in use; picking another provider changes nothing
   until one of its models is chosen. Models with no provider named are listed under *Other*.
+- **Picking a model.** Every model picker opens on a search box over the list the agent or endpoint
+  gave at this connection: SolidCraft has no list of its own. The search covers ids, names and
+  descriptions, and Enter takes the exact match or the first one shown. A model that isn't listed
+  can be typed: **Use custom: …** takes what is in the box, for an endpoint, an ACP agent with a
+  model option, or an older agent that listed models. An endpoint takes it as it is and keeps it as
+  its default model. An agent may refuse it: its model stays as it was and the chat says why. Only
+  an endpoint keeps a typed model for the next session; an agent gets it back only if it then
+  lists it. An endpoint that can't list its models (it has no such address, or refuses the key)
+  still shows its configured model, and the popup says why there are no others.
 - **Reasoning effort is not permissions.** The agent's thinking setting does not change
   SolidCraft's Ask / Edits / All approval policy. Reasoning options belong to the current session;
   changing them here does not rewrite OpenCode's configuration or another OpenCode session.
@@ -260,6 +269,13 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
 - **Anthropic-compatible API:** a preset (Anthropic) or a custom URL, for an endpoint that
   speaks the Anthropic Messages API (`{base}/v1/messages`). This covers Anthropic itself and
   providers that offer an Anthropic-compatible endpoint, such as DeepSeek and Qwen.
+- The **Model** picker lists the endpoint's models, without a key where the endpoint allows that
+  (OpenRouter does), once you leave the address and key fields; opening it asks again after a
+  failure. You can also type a model.
+- An endpoint's card under Preferences → AI → **Agents** has the same **Model** picker. While the
+  agent isn't running, opening the picker lists the models (just viewing the page asks nothing),
+  and a pick becomes the model for its next connection. While it runs, a pick changes the chat's
+  model at once.
 - The key goes into the system keychain (Keychain on macOS, Credential Manager on Windows, the
   Secret Service on Linux) and is only ever sent over HTTPS or to this computer. **Test** asks an
   OpenAI-compatible endpoint for its models; an Anthropic-compatible one gets a short message,

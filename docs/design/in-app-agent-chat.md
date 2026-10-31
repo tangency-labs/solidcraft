@@ -126,8 +126,10 @@ requests, for a backend that runs tools in process). Two backends exist:
   that speaks the Messages API), and runs the tool loop itself: it starts the same
   `solidcraft-cli mcp --connect` server an ACP agent would get and is its MCP client
   (`tools/list` becomes the endpoint's tools, `crash_reports` left out), so its calls pass the
-  same gate, limits, questions and undo as an ACP agent's. At most 24 model requests per
-  message. The HTTP request is the desktop host's (`Services::agent_http`, ureq with no
+  same gate, limits, questions and undo as an ACP agent's. There is no cap on model requests
+  per message; Stop ends it. It lists the endpoint's models at each connection (`Event::Models`),
+  and when it can't, `Event::ModelsNote` says why and only the configured model is offered. The
+  HTTP request is the desktop host's (`Services::agent_http`, ureq with no
   redirects); the key comes from the system keychain (`Services::secrets`, the keyring crate)
   for the connection only and is refused over plain HTTP to another computer. The two protocols
   differ only in their wire shape: OpenAI sends the system note as a message, function tools
@@ -264,7 +266,7 @@ returns the whole state, for tests and screenshots.
 | Area | Work |
 |---|---|
 | Conversation | Diffs, persisted conversation history, resume (`session/load`) |
-| Session controls | Model and mode pickers from `configOptions` / `modes`, slash commands |
+| Session controls | Slash commands |
 | Auth | An embedded terminal or "open a terminal here" for terminal logins on each OS; logout |
 | Discovery | Read the ACP registry; keychain-aware login check on macOS |
 | Packaging | Make sure every desktop package ships `solidcraft-cli` next to `solidcraft` (Flatpak, AppImage, macOS bundle, Windows zip), or serve MCP from the app binary itself |
