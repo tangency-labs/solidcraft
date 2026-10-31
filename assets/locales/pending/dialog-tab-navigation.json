@@ -1,0 +1,22 @@
+{
+  "en": {
+    "prefs.dialog_tab_navigation": "Keep Tab inside dialogs",
+    "prefs.dialog_tab_navigation_help": "Tab and Shift+Tab cycle through the open dialog. Turn off to use native Tab navigation and cycle the floating Move values instead."
+  },
+  "de": {
+    "prefs.dialog_tab_navigation": "Tab-Navigation auf Dialoge beschränken",
+    "prefs.dialog_tab_navigation_help": "Tab und Umschalt+Tab wechseln zwischen den Feldern des geöffneten Dialogs. Deaktivieren, um die native Tab-Navigation zu verwenden und stattdessen die schwebenden Verschiebewerte durchzugehen."
+  },
+  "ja": {
+    "prefs.dialog_tab_navigation": "Tabキーの移動をダイアログ内に限定",
+    "prefs.dialog_tab_navigation_help": "TabとShift+Tabで開いているダイアログ内を順に移動します。オフにすると通常のTab移動に戻り、移動ツールのフローティング入力欄では各値を切り替えます。"
+  },
+  "zh": {
+    "prefs.dialog_tab_navigation": "将 Tab 导航限制在对话框内",
+    "prefs.dialog_tab_navigation_help": "使用 Tab 和 Shift+Tab 在打开的对话框内循环移动。关闭后恢复原生 Tab 导航，并在移动工具的浮动输入框中循环切换各个数值。"
+  },
+  "ko": {
+    "prefs.dialog_tab_navigation": "Tab 탐색을 대화 상자로 제한",
+    "prefs.dialog_tab_navigation_help": "Tab과 Shift+Tab으로 열린 대화 상자 안을 순환합니다. 끄면 기본 Tab 탐색을 사용하며 이동 도구의 떠 있는 입력란에서 각 값을 순환합니다."
+  }
+}

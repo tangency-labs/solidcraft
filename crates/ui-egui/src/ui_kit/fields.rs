@@ -51,7 +51,7 @@ pub(crate) fn count_field(ui: &mut Ui, value: &mut String, limits: &Count<'_>) -
     let row = label(ui).to_owned();
     for (delta, half, name) in [(1, column.split_top_bottom_at_fraction(0.5).0, "up"), (-1, column.split_top_bottom_at_fraction(0.5).1, "down")] {
         let next = step_count(value, delta, limits);
-        let arrow = ui.interact(half, ui.id().with(("sc_count_step", &row, name)), egui::Sense::click());
+        let arrow = ui.interact(half, ui.id().with(("sc_count_step", &row, name)), egui::Sense::CLICK);
         let enabled = ui.is_enabled() && next.is_some();
         if enabled && arrow.hovered() {
             painter.rect_filled(half.shrink(1.0), t.control_radius, t.selected_bg);
@@ -190,6 +190,8 @@ fn searchable_dropdown_with(
     crate::prefs_search::note_current(ui, current);
     let mut chosen = None;
     let row = label(ui).to_owned();
+    let owner = ui.make_persistent_id(egui::IdSalt::new(id));
+    closed_dropdown_enter(ui, owner);
     let combo = egui::ComboBox::from_id_salt(id)
         .width(if icon.is_some() { Tokens::get().control_height } else { dimension(ui.available_width()) })
         .height(Tokens::get().space_24 * 14.0)
@@ -200,51 +202,51 @@ fn searchable_dropdown_with(
     } else {
         combo.icon(dropdown_arrow)
     };
-    let response = combo
-        .show_ui(ui, |ui| {
-            let search = ui.add(
-                text_input(egui::TextEdit::singleline(filter))
-                    .id_salt(format!("{id}_search"))
-                    .hint_text(crate::i18n::tr_label("Search"))
-                    .desired_width(f32::INFINITY),
-            );
-            // Preferences types into its own search only while no field has the keyboard.
-            if search.has_focus() {
-                crate::prefs_search::note_key_sink(ui.ctx());
+    let draw_menu = |ui: &mut Ui| {
+        let search = ui.add(
+            text_input(egui::TextEdit::singleline(filter))
+                .id_salt(format!("{id}_search"))
+                .hint_text(crate::i18n::tr_label("Search"))
+                .desired_width(f32::INFINITY),
+        );
+        // Preferences types into its own search only while no field has the keyboard.
+        if search.has_focus() {
+            crate::prefs_search::note_key_sink(ui.ctx());
+        }
+        scenario::publish_handle(&format!("dialog:{row} search"), search.rect.center());
+        if let Some(custom) = custom {
+            let response = ui.selectable_label(false, custom);
+            scenario::publish_handle(&format!("dialog:{row} file"), response.rect.center());
+            if response.clicked() {
+                chosen = Some(filter.trim().to_owned());
+                ui.close();
             }
-            scenario::publish_handle(&format!("dialog:{row} search"), search.rect.center());
-            if let Some(custom) = custom {
-                let response = ui.selectable_label(false, custom);
-                scenario::publish_handle(&format!("dialog:{row} file"), response.rect.center());
-                if response.clicked() {
-                    chosen = Some(filter.trim().to_owned());
-                    ui.close();
+            return;
+        }
+        let query = filter.to_lowercase();
+        egui::ScrollArea::vertical()
+            .id_salt(format!("{id}_list"))
+            .max_height(Tokens::get().space_24 * 10.0)
+            .min_scrolled_height(Tokens::get().space_24 * 10.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for option in options.iter().filter(|o| o.label.to_lowercase().contains(&query)) {
+                    let response = ui.selectable_label(current == option.label, option.label);
+                    if let Some(handle) = option.handle {
+                        scenario::publish_handle(handle, response.rect.center());
+                    }
+                    if response.clicked() {
+                        chosen = Some(option.value.to_owned());
+                        ui.close();
+                    }
                 }
-                return;
-            }
-            let query = filter.to_lowercase();
-            egui::ScrollArea::vertical()
-                .id_salt(format!("{id}_list"))
-                .max_height(Tokens::get().space_24 * 10.0)
-                .min_scrolled_height(Tokens::get().space_24 * 10.0)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    for option in options.iter().filter(|o| o.label.to_lowercase().contains(&query)) {
-                        let response = ui.selectable_label(current == option.label, option.label);
-                        if let Some(handle) = option.handle {
-                            scenario::publish_handle(handle, response.rect.center());
-                        }
-                        if response.clicked() {
-                            chosen = Some(option.value.to_owned());
-                            ui.close();
-                        }
-                    }
-                    if let Some(pending) = pending {
-                        ui.label(pending);
-                    }
-                });
-        })
-        .response;
+                if let Some(pending) = pending {
+                    ui.label(pending);
+                }
+            });
+    };
+    let response = combo.show_ui(ui, |ui| crate::dialog_focus::popup(ui, owner, egui::PopupCloseBehavior::CloseOnClickOutside, draw_menu)).response;
+    crate::dialog_focus::dropdown_response(&response);
     publish(ui, &response, egui::WidgetType::ComboBox);
     chosen
 }
@@ -269,6 +271,17 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
         ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("sc_focused_editor"), response.id));
     }
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
+    // Keyboard focus selects a plain number without its unit, or the whole expression.
+    if completion
+        && response.gained_focus()
+        && !ui.input(|i| i.pointer.any_down() || i.pointer.any_released())
+        && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), response.id)
+    {
+        let range = crate::value_step::number_range(value).unwrap_or(0..value.chars().count());
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(range.start), egui::text::CCursor::new(range.end))));
+        state.store(ui.ctx(), response.id);
+        ui.ctx().request_repaint();
+    }
     if completion && ui.is_enabled() {
         ui.ctx().data_mut(|data| {
             let id = egui::Id::new("sc_value_fields");
@@ -298,48 +311,146 @@ fn dropdown_arrow(ui: &Ui, rect: egui::Rect, _visuals: &egui::style::WidgetVisua
 
 /// Native dropdown with kit arrow and scenario option handles. Tokens: `text_dim; scope control/font tokens`.
 pub(crate) fn dropdown(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> Response {
-    let text = options.get(*selected).copied().map(crate::i18n::tr_label).unwrap_or("");
-    let row = label(ui).to_string();
-    dropdown_menu(ui, id, text, |ui| {
-        for (index, option) in options.iter().enumerate() {
-            let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
-            scenario::publish_target(&format!("dialog:{row}:{option}"), response.rect);
-        }
-    })
+    indexed_dropdown(ui, id, selected, options).0
 }
 
 /// [`dropdown`] whose options each show a picture beside them while hovered, painted by `preview`
 /// for that option's index, so a choice can be seen before it is picked. Tokens: dropdown tokens,
 /// the tooltip frame.
 pub(crate) fn dropdown_previews(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str], preview: impl Fn(&mut Ui, usize)) -> Response {
-    let text = options.get(*selected).copied().map(crate::i18n::tr_label).unwrap_or("");
     let row = label(ui).to_string();
-    dropdown_menu(ui, id, text, |ui| {
-        for (index, option) in options.iter().enumerate() {
-            let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
-            scenario::publish_target(&format!("dialog:{row}:{option}"), response.rect);
-            Container::tooltip_ui(&response, |ui| {
-                preview(ui, index);
+    indexed_dropdown_with_preview(ui, id, selected, options, |index, response| {
+        Container::tooltip_ui(response, |ui| {
+            preview(ui, index);
+            if let Some(option) = options.get(index) {
                 scenario::publish_rect(&format!("dialog:preview:{row}:{option}"), ui.min_rect());
-            });
-        }
+            }
+        });
     })
+    .0
 }
 
-/// [`dropdown`] that also says whether an option was clicked, the one already shown included (a
-/// pick of the shown option changes nothing, yet it is a choice).
+/// Also reports confirming the already selected choice, so automatic choices become manual.
 pub(crate) fn dropdown_picked(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> bool {
+    indexed_dropdown(ui, id, selected, options).1
+}
+
+fn indexed_dropdown(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str]) -> (Response, bool) {
+    indexed_dropdown_with_preview(ui, id, selected, options, |_, _| {})
+}
+
+fn indexed_dropdown_with_preview(
+    ui: &mut Ui,
+    id: &str,
+    selected: &mut usize,
+    options: &[&str],
+    preview: impl Fn(usize, &Response),
+) -> (Response, bool) {
+    let owner = ui.make_persistent_id(egui::IdSalt::new(id));
+    let cursor_id = owner.with("keyboard_option");
+    let open = egui::ComboBox::is_open(ui.ctx(), owner);
+    let before = *selected;
+    let mut cursor = if open { ui.data(|d| d.get_temp::<usize>(cursor_id)).unwrap_or(*selected) } else { *selected };
+    cursor = cursor.min(options.len().saturating_sub(1));
+    let mut picked = false;
+    if open {
+        let key = ui.input_mut(|i| {
+            [
+                egui::Key::ArrowDown,
+                egui::Key::ArrowUp,
+                egui::Key::ArrowLeft,
+                egui::Key::ArrowRight,
+                egui::Key::Space,
+                egui::Key::Enter,
+                egui::Key::Escape,
+            ]
+            .into_iter()
+            .find(|&key| i.consume_key(egui::Modifiers::NONE, key))
+        });
+        if let Some(key) = key {
+            ui.memory_mut(|m| {
+                m.move_focus(egui::FocusDirection::None);
+                m.request_focus(owner);
+            });
+            match key {
+                egui::Key::ArrowDown if !options.is_empty() => cursor = (cursor + 1) % options.len(),
+                egui::Key::ArrowUp if !options.is_empty() => cursor = if cursor == 0 { options.len() - 1 } else { cursor - 1 },
+                egui::Key::Space | egui::Key::Enter => {
+                    if options.get(cursor).is_some() {
+                        *selected = cursor;
+                        picked = true;
+                    }
+                    egui::Popup::close_id(ui.ctx(), owner.with("popup"));
+                }
+                egui::Key::Escape => egui::Popup::close_id(ui.ctx(), owner.with("popup")),
+                _ => {}
+            }
+            ui.ctx().request_repaint();
+        }
+    }
     let text = options.get(*selected).copied().map(crate::i18n::tr_label).unwrap_or("");
     let row = label(ui).to_string();
-    let mut picked = false;
-    dropdown_menu(ui, id, text, |ui| {
+    let mut response = dropdown_menu(ui, id, text, |ui| {
+        // Logical option highlight stays in the menu; keyboard focus stays with its owner.
+        // An outside pointer click may already have focused another form field.
+        if !open || !ui.input(|i| i.pointer.any_down() || i.pointer.any_released()) {
+            ui.memory_mut(|m| {
+                m.request_focus(owner);
+                m.set_focus_lock_filter(owner, egui::EventFilter { horizontal_arrows: true, vertical_arrows: true, ..Default::default() });
+            });
+        }
         for (index, option) in options.iter().enumerate() {
-            let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
-            picked |= response.clicked();
-            scenario::publish_handle(&format!("dialog:{row}:{option}"), response.rect.center());
+            let response = ui.selectable_label(index == cursor, crate::i18n::tr_label(option));
+            scenario::publish_target(&format!("dialog:{row}:{option}"), response.rect);
+            preview(index, &response);
+            if response.clicked() {
+                *selected = index;
+                picked = true;
+                ui.close();
+                ui.memory_mut(|m| m.request_focus(owner));
+            }
         }
     });
-    picked
+    if egui::ComboBox::is_open(ui.ctx(), owner) {
+        ui.data_mut(|d| d.insert_temp(cursor_id, cursor));
+    } else {
+        picked |= step_dropdown(ui, &mut response, selected, options.len());
+    }
+    if *selected != before {
+        response.mark_changed();
+    }
+    (response, picked)
+}
+
+/// A closed, focused choice owns Up/Down; open menus use the pending option cursor.
+fn step_dropdown(ui: &Ui, response: &mut Response, selected: &mut usize, count: usize) -> bool {
+    if !response.has_focus() || count == 0 {
+        return false;
+    }
+    let open = egui::Popup::is_any_open(ui.ctx());
+    ui.memory_mut(|m| m.set_focus_lock_filter(response.id, egui::EventFilter { vertical_arrows: !open, ..Default::default() }));
+    if open {
+        return false;
+    }
+    let step = ui.input_mut(|i| {
+        if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+            Some(1)
+        } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+            Some(-1)
+        } else {
+            None
+        }
+    });
+    let Some(step) = step else { return false };
+    ui.memory_mut(|m| m.move_focus(egui::FocusDirection::None));
+    let next = selected.saturating_add_signed(step).min(count.saturating_sub(1));
+    let changed = next != *selected;
+    if changed {
+        *selected = next;
+        response.mark_changed();
+        ui.ctx().request_repaint();
+    }
+    changed
 }
 
 /// Dropdown with caller-supplied kit choices/actions, including disabled entries and stable
@@ -365,6 +476,13 @@ pub(crate) fn compact_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, curren
     dropdown_menu_width(ui, id, current, true, egui::PopupCloseBehavior::CloseOnClick, add)
 }
 
+/// A closed value dropdown leaves Enter for OK; an open popup owns its own keys.
+fn closed_dropdown_enter(ui: &Ui, id: egui::Id) {
+    if ui.is_enabled() && ui.memory(|m| m.has_focus(id)) && !egui::Popup::is_any_open(ui.ctx()) && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+        ui.memory_mut(|m| m.surrender_focus(id));
+    }
+}
+
 fn dropdown_menu_width(
     ui: &mut Ui,
     id: impl egui::AsIdSalt,
@@ -387,14 +505,17 @@ fn dropdown_menu_width(
     } else {
         dimension(ui.available_width())
     };
+    let owner = ui.make_persistent_id(egui::IdSalt::new(&id));
+    closed_dropdown_enter(ui, owner);
     let response = egui::ComboBox::from_id_salt(id)
         .width(width)
         .height(Tokens::get().space_24 * 14.0)
         .selected_text(current)
         .icon(dropdown_arrow)
         .close_behavior(close_behavior)
-        .show_ui(ui, add)
+        .show_ui(ui, |ui| crate::dialog_focus::popup(ui, owner, close_behavior, add))
         .response;
+    crate::dialog_focus::dropdown_response(&response);
     publish(ui, &response, egui::WidgetType::ComboBox);
     response
 }
@@ -407,9 +528,14 @@ pub(crate) struct Selection {
 
 /// Three looks: the active input in accent, a filled one in a quiet neutral tint, an empty one plain.
 pub(crate) fn selection_field(ui: &mut Ui, text: &str, options: Selection) -> Response {
+    selection_field_with_sense(ui, text, options, egui::Sense::CLICK)
+}
+
+/// Selection target with explicit keyboard participation; uses the same visual and accessible state.
+pub(crate) fn selection_field_with_sense(ui: &mut Ui, text: &str, options: Selection, sense: egui::Sense) -> Response {
     let Selection { active, filled } = options;
     let t = Tokens::get();
-    let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::CLICK);
+    let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), sense);
     // A separate action fill lets two-colour palettes reserve the focus accent for inverted ink.
     let inverted = t.form_primary_fill != t.form_primary;
     if active && !filled && !inverted {
@@ -1173,7 +1299,8 @@ pub(crate) fn library_cell(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     scenario::publish_rect("dialog:menu:Library", button);
     let popup = Container::new(ui.ctx(), Surface::Popup).menu(&library);
     let open = popup.is_open();
-    popup.show(|ui| super::scope(ui, menu));
+    popup.show(|ui| crate::dialog_focus::popup(ui, library.id, egui::PopupCloseBehavior::CloseOnClick, |ui| super::scope(ui, menu)));
+    crate::dialog_focus::dropdown_response(&library);
     if open {
         ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     }

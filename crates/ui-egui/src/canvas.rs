@@ -345,16 +345,17 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
             place.handles = crate::gizmo::handles_region(proj, t);
         }
         let at = triad.map(|t| t.center).or_else(|| anchor(app, &d).map(|(base, _)| base));
-        // Tab and Shift+Tab in the box show the next or previous value (Y after X; #4776),
-        // keeping the keyboard in the box.
-        // egui moves the keyboard on with Tab before this runs: the box had it last frame.
-        let id = egui::Id::new("sc_canvas_value");
-        let boxed = ui.ctx().memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
-        let back = boxed && ui.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab));
-        let tab = boxed && !back && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab));
-        if tab || back {
-            crate::dialogs_move::step_value_field(&mut d, if back { -1 } else { 1 });
-            d.focus = true;
+        // Compatibility mode retains Tab/Shift+Tab cycling the floating Move axes (#4776).
+        let cycle_axes = !app.preferences.dialog_tab_navigation;
+        if cycle_axes {
+            let id = egui::Id::new("sc_canvas_value");
+            let boxed = ui.ctx().memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
+            let back = boxed && ui.input_mut(|i| i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab));
+            let tab = boxed && !back && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab));
+            if tab || back {
+                crate::dialogs_move::step_value_field(&mut d, if back { -1 } else { 1 });
+                d.focus = true;
+            }
         }
         let focus = take_focus(ui.ctx(), &mut d);
         if let Some(bs) = at.and_then(|base| proj.to_screen(base))
@@ -364,7 +365,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
             // beside the centre would cover the handles the user is reaching for.
             let off = if triad.is_some() { vec2(crate::gizmo::LEN_PX as f32 + 16.0, -12.0) } else { vec2(16.0, -30.0) };
             let box_at = rotation.map_or(bs + off, |(end, _)| end + vec2(16.0, -12.0));
-            value_box_with(ui, label, value, box_at, focus || dragging, true, place);
+            value_box_with(ui, label, value, box_at, focus || dragging, cycle_axes, place);
         }
         app.dialog = Some(d);
         return;
@@ -827,8 +828,7 @@ fn value_box(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, selec
     value_box_with(ui, label, value, at, select_all, false, place);
 }
 
-/// [`value_box`]; with `keep_tab` Tab stays in the box for the caller (the Move box steps
-/// through its values with it).
+/// [`value_box`] with explicit Tab ownership; feature dialogs leave Tab to their focus loop.
 fn value_box_with(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, keep_tab: bool, place: BoxPlace) {
     let ids = (egui::Id::new("sc_canvas_area"), egui::Id::new("sc_canvas_value"));
     value_box_in(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), select_all, keep_tab, place);

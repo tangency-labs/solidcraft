@@ -457,7 +457,7 @@ fn fields(mode: usize) -> usize {
     }
 }
 
-/// Show the next (`step` 1) or previous (`step` -1) value in the box, round the type's values.
+/// Cycle the floating Move value while compatibility navigation is enabled (#4776).
 pub fn step_value_field(d: &mut Dialog, step: i64) {
     let Kind::Move { mode, .. } = &d.kind else { return };
     let n = fields(*mode) as i64;

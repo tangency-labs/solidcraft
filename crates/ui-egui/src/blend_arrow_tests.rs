@@ -129,3 +129,46 @@ fn two_distances_chamfer_has_an_arrow_along_each_face() {
         h.app.dialog = None;
     }
 }
+
+#[test]
+fn dialog_tab_blends_from_floating_values_start_at_edges_and_wrap() {
+    for command in ["solid.fillet", "solid.chamfer"] {
+        for placement in [crate::ui_kit::DialogButtons::Bottom, crate::ui_kit::DialogButtons::Top] {
+            let mut h = l_step();
+            h.app.preferences.dialog_buttons = placement;
+            let selected = edge(&h, OUTSIDE);
+            h.app.session.selection = vec![selected];
+            h.app.start(command);
+            h.frames(8);
+            let canvas = egui::Id::new("sc_canvas_value");
+            assert_eq!(h.ctx.memory(|m| m.focused()), Some(canvas), "the blend starts in the floating value");
+            h.step(&json!({"key":"Tab"})).unwrap();
+            let response = h.ctx.read_response(h.ctx.memory(|m| m.focused()).unwrap()).unwrap();
+            assert!(
+                response.rect.contains(crate::scenario::handle_at("dialog:Edges").unwrap()),
+                "the next Tab must reach Edges, skipping Close: {placement:?}"
+            );
+            crate::test_support::dialog_tab_cycle(&mut h);
+        }
+    }
+}
+
+#[test]
+fn segmented_enter_applies_fillet_without_changing_continuity() {
+    let mut h = l_step();
+    h.app.session.selection = vec![edge(&h, OUTSIDE)];
+    h.app.start("solid.fillet");
+    h.frames(8);
+    let mut reached = false;
+    for _ in 0..20 {
+        h.step(&json!({"key":"Tab"})).unwrap();
+        let at = crate::scenario::handle_at("dialog:Continuity:G2").unwrap();
+        if h.ctx.memory(|m| m.focused()).and_then(|id| h.ctx.read_response(id)).is_some_and(|r| r.rect.contains(at)) {
+            reached = true;
+            break;
+        }
+    }
+    assert!(reached, "G2 must be reachable with Tab");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "Enter on G2 must apply the existing G1 fillet instead of changing continuity");
+}

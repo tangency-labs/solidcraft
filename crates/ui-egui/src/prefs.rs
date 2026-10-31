@@ -859,8 +859,9 @@ macro_rules! preference_settings {
     (@control $app:ident, $ui:ident, $field:ident, check_tr($label:literal)) => {
         ui_kit::checkbox($ui, crate::i18n::tr($label), &mut $app.preferences.$field)
     };
-    (@control $app:ident, $ui:ident, $field:ident, check_id($label:literal)) => {
+    (@control $app:ident, $ui:ident, $field:ident, check_id($label:literal $(, $help:literal)?)) => {
         ui_kit::checkbox($ui, $app.tr($label), &mut $app.preferences.$field)
+            $(.on_hover_text($app.tr($help)))?
     };
     (@control $app:ident, $ui:ident, $field:ident, number($label:literal, $range:expr)) => {
         ui_kit::row($ui, $app.tr($label), |ui| {
@@ -1023,6 +1024,8 @@ preference_settings! {
     /// Up/Down and the wheel over a focused value field step its plain number (`value_step`,
     /// #2320). Off by default: the keys move the text cursor and the wheel scrolls, as before.
     step_values: bool = false, PAGE_DESIGN => check_id("ui.step_values");
+    /// Tab stays in open forms. Off restores native traversal and Move's floating axis cycle.
+    dialog_tab_navigation: bool = true, PAGE_DESIGN => check_id("prefs.dialog_tab_navigation", "prefs.dialog_tab_navigation_help");
     /// A command's value (Extrude's Distance, Fillet's Radius…) in a box beside its handle in the
     /// view (`canvas::boxes_shown`). Off: it is typed in the command window only, which takes the
     /// keyboard after a pick instead, and nothing covers the model (#9479).
@@ -5520,6 +5523,7 @@ mod tests {
             ("line_hover_tangent_arc", json!(true), PAGE_SKETCH),
             ("msaa", json!(8), PAGE_GRAPHICS),
             ("single_surface_analysis", json!(false), PAGE_GRAPHICS),
+            ("dialog_tab_navigation", json!(false), PAGE_DESIGN),
         ];
         let defaults = serde_json::to_value(Prefs::default()).unwrap();
         for (field, value, owner) in fields {
@@ -7555,6 +7559,24 @@ mod tests {
         assert_eq!(h.app.preferences.history_sketches, HistorySketches::InOrder);
         h.call("ui.prefs", json!({"button": "cancel"}));
         assert_eq!(h.app.preferences.history_sketches, HistorySketches::UnderFeature);
+    }
+
+    #[test]
+    fn dialog_tab_preference_defaults_persists_and_cancels() {
+        let old: Prefs = serde_json::from_value(json!({})).unwrap();
+        assert!(old.dialog_tab_navigation);
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"open":"Design"}));
+        super::reveal_preference(&mut h, "prefs:dialog_tab_navigation");
+        h.step(&json!({"click":{"handle":"prefs:dialog_tab_navigation"}})).unwrap();
+        assert!(!h.app.preferences.dialog_tab_navigation);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.preferences.dialog_tab_navigation);
+        let reply = h.call("ui.prefs", json!({"dialog_tab_navigation":false}));
+        assert_eq!(reply["result"]["dialog_tab_navigation"], false);
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(!restored.preferences.dialog_tab_navigation);
     }
 
     #[test]

@@ -121,18 +121,23 @@ pub(crate) fn icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &
     icon_button_colored(ui, rect, icon, label, None)
 }
 
+/// Icon action with explicit keyboard participation.
+pub(crate) fn icon_button_at_with_sense(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str, sense: egui::Sense) -> Response {
+    icon_button_presentation(ui, rect, icon, label, None, (false, false, sense))
+}
+
 /// Quiet secondary action: a small, muted glyph with the normal full-size hit target.
 pub(crate) fn quiet_icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str) -> Response {
-    icon_button_presentation(ui, rect, icon, label, None, true, false)
+    icon_button_presentation(ui, rect, icon, label, None, (true, false, egui::Sense::click()))
 }
 
 /// Directional counterpart of an existing master, with the same hit target and accessibility.
 pub(crate) fn mirrored_icon_button_at(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str) -> Response {
-    icon_button_presentation(ui, rect, icon, label, None, false, true)
+    icon_button_presentation(ui, rect, icon, label, None, (false, true, egui::Sense::click()))
 }
 
 pub(super) fn icon_button_colored(ui: &mut Ui, rect: egui::Rect, icon: &str, label: &str, ink: Option<egui::Color32>) -> Response {
-    icon_button_presentation(ui, rect, icon, label, ink, false, false)
+    icon_button_presentation(ui, rect, icon, label, ink, (false, false, egui::Sense::click()))
 }
 
 fn icon_button_presentation(
@@ -141,12 +146,11 @@ fn icon_button_presentation(
     icon: &str,
     label: &str,
     ink: Option<egui::Color32>,
-    quiet: bool,
-    mirrored: bool,
+    (quiet, mirrored, sense): (bool, bool, egui::Sense),
 ) -> Response {
     let t = Tokens::get();
-    let response = ui.interact(rect, ui.make_persistent_id(("icon_button", icon, label)), egui::Sense::click());
-    if response.clicked() {
+    let response = ui.interact(rect, ui.make_persistent_id(("icon_button", icon, label)), sense);
+    if response.clicked() && sense.is_focusable() {
         response.request_focus();
     }
     if response.hovered() {
