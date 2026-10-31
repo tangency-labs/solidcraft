@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.joint_origin_frame": "Export Origin as Frame",
+    "Export as a robot frame": "Export as a robot frame"
+  },
+  "ar": {
+    "cmd.joint_origin_frame": "تصدير نقطة الأصل كإطار",
+    "Export as a robot frame": "تصدير كإطار روبوت"
+  },
+  "he": {
+    "cmd.joint_origin_frame": "ייצוא ראשית כמסגרת",
+    "Export as a robot frame": "ייצוא כמסגרת רובוט"
+  },
+  "ja": {
+    "cmd.joint_origin_frame": "原点をフレームとしてエクスポート",
+    "Export as a robot frame": "ロボットフレームとしてエクスポート"
+  },
+  "vi": {
+    "cmd.joint_origin_frame": "Xuất gốc thành khung",
+    "Export as a robot frame": "Xuất thành khung robot"
+  },
+  "zh": {
+    "cmd.joint_origin_frame": "将原点导出为坐标系",
+    "Export as a robot frame": "导出为机器人坐标系"
+  }
+}

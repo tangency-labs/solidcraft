@@ -57,7 +57,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.export", "Export", export)
         .icon("export")
         .noundo()
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10); quality?: standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts)"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10), mimic? (default true: motion links as <mimic>), collision?: mesh|convex_hull (default mesh: what a body with no shape of its own becomes); quality?: standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard); objects?: body|component (3MF only: one object per body, the default, or one object for each placed component with two or more bodies, with those bodies as its parts, so a slicer loads them as one object with parts)"),
     CommandSpec::new("file.save_mesh", "Save As Mesh", save_mesh)
         .at("INSERT", "FILES")
         .icon("mesh_export")
@@ -753,6 +753,37 @@ fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io
     Ok(json!({"path": path, "bytes": files.obj.len(), "format": format!("{:?}", Format::Obj), "files": written}))
 }
 
+/// Where the meshes go for a URDF in `dir` so that `mesh_prefix` finds them: the folder, and the
+/// start of their file names. A `package://<name>/` path is taken from the package when the URDF
+/// is in it (`<name>/` or `<name>/urdf/`), else from the URDF's folder. `None`: the prefix is a
+/// web or other address, with no folder on this computer.
+fn mesh_place(prefix: &str, dir: &std::path::Path) -> Option<(std::path::PathBuf, String)> {
+    let split = |text: &str| match text.rsplit_once('/') {
+        Some(("", start)) => ("/".to_string(), start.to_string()),
+        Some((folder, start)) => (folder.to_string(), start.to_string()),
+        None => (String::new(), text.to_string()),
+    };
+    if let Some(rest) = prefix.strip_prefix("package://") {
+        let (package, inner) = rest.split_once('/').unwrap_or((rest, ""));
+        let named = |d: &std::path::Path| d.file_name().is_some_and(|n| n == package);
+        let root = match dir.parent() {
+            Some(parent) if dir.file_name().is_some_and(|n| n == "urdf") && named(parent) => parent,
+            _ => dir,
+        };
+        let (folder, start) = split(inner);
+        return Some((root.join(folder), start));
+    }
+    if let Some(rest) = prefix.strip_prefix("file://") {
+        let (folder, start) = split(rest);
+        return Some((std::path::PathBuf::from(folder), start));
+    }
+    if prefix.contains("://") {
+        return None;
+    }
+    let (folder, start) = split(prefix);
+    Some((dir.join(folder), start))
+}
+
 /// The assembly as a URDF and its meshes next to it (docs/urdf.md). Every path is checked before
 /// anything is written; the meshes go first and the `.urdf` last.
 fn export_urdf(s: &Session, path: &str, p: &Value) -> Result<Value> {
@@ -766,7 +797,17 @@ fn export_urdf(s: &Session, path: &str, p: &Value) -> Result<Value> {
     };
     // `io::urdf` refuses a prefix XML cannot hold.
     let mesh_prefix = str_(p, "mesh_prefix").unwrap_or("").to_string();
-    let options = solidcraft_io::UrdfOptions { mesh_prefix, effort: positive("effort")?, velocity: positive("velocity")? };
+    let options = solidcraft_io::UrdfOptions {
+        mesh_prefix,
+        effort: positive("effort")?,
+        velocity: positive("velocity")?,
+        mimic: bool_(p, "mimic").unwrap_or(true),
+        collision: match str_(p, "collision") {
+            None | Some("mesh") => solidcraft_io::urdf::CollisionDefault::Mesh,
+            Some("convex_hull") => solidcraft_io::urdf::CollisionDefault::ConvexHull,
+            Some(_) => return Err(bad(cmd, "`collision` must be mesh or convex_hull")),
+        },
+    };
     let file = std::path::Path::new(path);
     let stem = file.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // Occurrences where they are shown, uncaptured moves included, except those the joint solver
@@ -793,10 +834,22 @@ fn export_urdf(s: &Session, path: &str, p: &Value) -> Result<Value> {
         pkg.warnings.push(format!("`{name}` was moved but the move is not captured: exported where its joints place it"));
     }
     let dir = file.parent().unwrap_or(std::path::Path::new(""));
-    let mut targets: Vec<(String, &[u8])> = pkg.meshes.iter().map(|(n, b)| (dir.join(n).to_string_lossy().to_string(), b.as_slice())).collect();
+    let (folder, name_start) = match mesh_place(&options.mesh_prefix, dir) {
+        Some(place) => place,
+        None => {
+            pkg.warnings.push(format!("`mesh_prefix` {} is not a place on this computer: the meshes are next to the URDF", options.mesh_prefix));
+            (dir.to_path_buf(), String::new())
+        }
+    };
+    let mut targets: Vec<(String, &[u8])> =
+        pkg.meshes.iter().map(|(n, b)| (folder.join(format!("{name_start}{n}")).to_string_lossy().to_string(), b.as_slice())).collect();
     targets.push((path.to_string(), pkg.xml.as_bytes()));
     for (t, _) in &targets {
         solidcraft_io::vfs::check(t).map_err(|e| EngineError::Other(format!("{t}: {e}")))?;
+    }
+    if folder != dir && !pkg.meshes.is_empty() {
+        let at = folder.to_string_lossy();
+        solidcraft_io::vfs::create_dir_all(&at).map_err(|e| EngineError::Other(format!("{at}: {e}")))?;
     }
     let mut written: Vec<String> = Vec::new();
     for (t, bytes) in &targets {

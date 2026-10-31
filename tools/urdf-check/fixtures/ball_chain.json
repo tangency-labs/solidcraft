@@ -1,0 +1,82 @@
+{
+ "commands": [
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "A"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     0,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "command": "component.activate",
+   "params": {
+    "component": "root"
+   }
+  },
+  {
+   "command": "component.create",
+   "params": {
+    "name": "B"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 10,
+    "corner": [
+     20,
+     0,
+     0
+    ]
+   }
+  },
+  {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "A:1",
+    "grounded": true
+   }
+  },
+  {
+   "command": "joint.create",
+   "params": {
+    "type": "ball",
+    "a": {
+     "face": [
+      5,
+      5,
+      10
+     ]
+    },
+    "b": {
+     "face": [
+      25,
+      5,
+      0
+     ]
+    },
+    "name": "Ball"
+   }
+  }
+ ]
+}

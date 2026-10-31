@@ -1,0 +1,46 @@
+{
+ "poses": [
+  {
+   "q": {
+    "Ball_dof1": 0.4
+   },
+   "links": {
+    "B": {
+     "xyz": [
+      0.005,
+      0.005,
+      0.01
+     ],
+     "turn": 0.4,
+     "about": [
+      0,
+      0,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "q": {
+    "Ball_dof2": 0.3
+   },
+   "links": {
+    "B": {
+     "xyz": [
+      0.005,
+      0.005,
+      0.01
+     ],
+     "turn": 0.3
+    }
+   }
+  }
+ ],
+ "pendulum": {
+  "joint": "Ball_dof2",
+  "gravity_sign_z": 1,
+  "start": 0.1,
+  "period": 0.1831,
+  "tolerance": 0.03
+ }
+}

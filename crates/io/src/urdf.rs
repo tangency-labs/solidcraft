@@ -11,8 +11,13 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 
-use solidcraft_doc::joints::{self, Joint, JointKind};
-use solidcraft_doc::{Document, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, ModelState, Occurrence, apply_point, mat_inverse, mat_mul};
+use solidcraft_doc::joints::{self, Joint, JointDynamics, JointKind};
+use solidcraft_doc::{
+    CollisionShape, Document, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, ModelState, Occurrence, PhysicalOverride, apply_point, mat_inverse,
+    mat_mul,
+};
+use solidcraft_geom::hull3::{convex_hull, fit_box, fit_cylinder, fit_sphere};
+use solidcraft_geom::inertia::principal;
 use solidcraft_geom::{Mesh, Vec3};
 
 use crate::{IoError, Result, export_mesh, stl_binary, weld, weld_eps};
@@ -24,6 +29,10 @@ const TOKEN_INERTIA: f64 = 1e-12;
 const UNLIMITED_TRAVEL_MM: f64 = 1e6;
 const DEFAULT_EFFORT: f64 = 1000.0;
 const DEFAULT_VELOCITY: f64 = 10.0;
+/// Thinnest collision primitive (mm): URDF has no use for one of no size, as a flat body's would be.
+const MIN_SHAPE: f64 = 1e-3;
+/// More triangles than this in a collision mesh gets a warning: simulators slow down a lot.
+const COLLISION_TRIANGLE_WARNING: usize = 50_000;
 
 /// Choices for [`urdf`] (`file.export` parameters).
 #[derive(Clone, Debug, Default)]
@@ -33,6 +42,10 @@ pub struct UrdfOptions {
     /// `<limit effort>` (N or N m) and `velocity` (m/s or rad/s); defaults with a warning.
     pub effort: Option<f64>,
     pub velocity: Option<f64>,
+    /// Write `<mimic>` for motion links. `file.export` sets it unless told not to.
+    pub mimic: bool,
+    /// What a body left on `Auto` becomes.
+    pub collision: CollisionDefault,
 }
 
 /// The URDF, its mesh files (name next to the `.urdf`, bytes) and what was approximated.
@@ -60,10 +73,54 @@ pub struct Link {
     /// Mesh coordinates (the component's frame) to the link frame.
     pub mesh_origin: Mat,
     pub visual: Option<String>,
-    pub collision: Option<String>,
+    pub collision: Vec<CollisionGeom>,
     /// sRGB and opacity, 0..1.
     pub color: Option<[f32; 4]>,
     pub inertial: Option<Inertial>,
+}
+
+/// One `<collision>` of a link: `origin` from the link frame, lengths in mm.
+#[derive(Clone, Debug, PartialEq)]
+pub enum CollisionGeom {
+    Mesh {
+        file: String,
+        origin: Mat,
+    },
+    Box {
+        origin: Mat,
+        size: Vec3,
+    },
+    /// Along the origin's z.
+    Cylinder {
+        origin: Mat,
+        radius: f64,
+        length: f64,
+    },
+    Sphere {
+        origin: Mat,
+        radius: f64,
+    },
+}
+
+impl CollisionGeom {
+    /// With `origin` read from `to_link` instead of the frame it is in.
+    fn in_frame(&self, to_link: &Mat) -> CollisionGeom {
+        let mut out = self.clone();
+        let (CollisionGeom::Mesh { origin, .. }
+        | CollisionGeom::Box { origin, .. }
+        | CollisionGeom::Cylinder { origin, .. }
+        | CollisionGeom::Sphere { origin, .. }) = &mut out;
+        *origin = mat_mul(to_link, origin);
+        out
+    }
+}
+
+/// What a body with no collision shape of its own (`Auto`) becomes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CollisionDefault {
+    #[default]
+    Mesh,
+    ConvexHull,
 }
 
 /// Mass (kg), centre of mass (mm, link frame) and inertia about it (kg m², link axes).
@@ -94,6 +151,18 @@ pub struct UrdfJoint {
     pub limit: Option<(f64, f64)>,
     /// The SolidCraft joint and the index of its value this step follows.
     pub source: Option<(u64, usize)>,
+    /// What the design saves for that value, without what a hand-edited file could hold.
+    pub dynamics: JointDynamics,
+    /// The joint whose value sets this one's (a motion link).
+    pub mimic: Option<Mimic>,
+}
+
+/// `value = multiplier · joints[joint]'s value + offset`, in URDF units (m, rad).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Mimic {
+    pub joint: usize,
+    pub multiplier: f64,
+    pub offset: f64,
 }
 
 impl UrdfModel {
@@ -209,20 +278,32 @@ type BodyMass = (f64, Vec3, [[f64; 3]; 3]);
 /// A component's meshes and masses.
 struct Part {
     visual: Option<String>,
-    collision: Option<String>,
+    /// In the component's frame.
+    collision: Vec<CollisionGeom>,
     color: Option<[f32; 4]>,
     masses: Vec<BodyMass>,
+    physical_override: Option<PhysicalOverride>,
 }
 
 /// Mesh files and masses per component (0: the root's bodies, named `base`).
-fn parts(doc: &Document, st: &ModelState, stem: &str, names: &mut Names, out: &mut UrdfPackage) -> Result<BTreeMap<u64, Part>> {
+fn parts(
+    doc: &Document,
+    st: &ModelState,
+    stem: &str,
+    options: &UrdfOptions,
+    names: &mut Names,
+    out: &mut UrdfPackage,
+) -> Result<BTreeMap<u64, Part>> {
     let mut used: BTreeSet<u64> = doc.occurrences.iter().map(|o| o.component).collect();
     used.insert(0);
     let mut parts = BTreeMap::new();
     for c in used {
         let label = if c == 0 { "base".to_string() } else { doc.components.iter().find(|x| x.id == c).map(|x| x.name.clone()).unwrap_or_default() };
         let (mut visual, mut collision) = (Mesh::default(), Mesh::default());
-        let (mut masses, mut color, mut open) = (Vec::new(), None, false);
+        let (mut masses, mut color) = (Vec::new(), None);
+        // Every body collides as drawn: the collision mesh is the visual one.
+        let mut shared = true;
+        let (mut hulls, mut fitted) = (Vec::new(), Vec::new());
         for b in st.bodies.iter().filter(|b| doc.model_body_component(b) == c) {
             let mut m = export_mesh(&b.body)?;
             if let Some(o) = doc.model_body_offset(b) {
@@ -235,32 +316,81 @@ fn parts(doc: &Document, st: &ModelState, stem: &str, names: &mut Names, out: &m
             let opacity = b.body.paint().map(|p| p.opacity).filter(|o| o.is_finite()).map_or(1.0, |o| o.clamp(0.0, 1.0));
             color = color.or(b.body.color().map(|[r, g, b]| [r, g, b, opacity]));
             append(&mut visual, &welded);
-            match welded.mass_properties() {
-                Some(mp) => {
-                    // g/cm³ to kg/mm³.
-                    let rho = doc.density(&b.name) * 1e-6;
-                    masses.push((rho * mp.volume, mp.centroid, mp.inertia.map(|r| r.map(|x| x * rho))));
-                    append(&mut collision, &welded);
-                }
-                None => {
-                    open = true;
-                    out.warnings.push(format!("body `{}` is not a closed solid: it is drawn but adds no mass or collision", b.name));
-                }
+            let closed = welded.mass_properties();
+            if let Some(mp) = closed {
+                // g/cm³ to kg/mm³.
+                let rho = doc.density(&b.name) * 1e-6;
+                masses.push((rho * mp.volume, mp.centroid, mp.inertia.map(|r| r.map(|x| x * rho))));
+            }
+            let shape = match doc.collision_shape(&b.name) {
+                CollisionShape::Auto if options.collision == CollisionDefault::ConvexHull => CollisionShape::ConvexHull,
+                CollisionShape::Auto => CollisionShape::Mesh,
+                shape => shape,
+            };
+            shared &= shape == CollisionShape::Mesh && closed.is_some();
+            if closed.is_none() {
+                let adds = if shape == CollisionShape::Mesh { "adds no mass or collision" } else { "adds no mass" };
+                out.warnings.push(format!("body `{}` is not a closed solid: it is drawn but {adds}", b.name));
+            }
+            let fit_failed = |out: &mut UrdfPackage, what: &str| {
+                out.warnings.push(format!("body `{}` has no {what} to collide with: it has no collision", b.name))
+            };
+            match shape {
+                CollisionShape::Mesh if closed.is_some() => append(&mut collision, &welded),
+                CollisionShape::Auto | CollisionShape::Mesh | CollisionShape::None => {}
+                CollisionShape::ConvexHull => match convex_hull(&welded.positions) {
+                    Some(hull) => hulls.push((b.name.clone(), hull)),
+                    None => fit_failed(out, "convex hull, since it spans no volume,"),
+                },
+                CollisionShape::Box => match fit_box(&welded) {
+                    Some(f) => fitted.push(CollisionGeom::Box {
+                        origin: f.frame,
+                        size: Vec3::new(f.size.x.max(MIN_SHAPE), f.size.y.max(MIN_SHAPE), f.size.z.max(MIN_SHAPE)),
+                    }),
+                    None => fit_failed(out, "box"),
+                },
+                CollisionShape::Cylinder => match fit_cylinder(&welded) {
+                    Some(f) => {
+                        fitted.push(CollisionGeom::Cylinder { origin: f.frame, radius: f.size.x.max(MIN_SHAPE), length: f.size.z.max(MIN_SHAPE) })
+                    }
+                    None => fit_failed(out, "cylinder"),
+                },
+                CollisionShape::Sphere => match fit_sphere(&welded) {
+                    Some(f) => fitted.push(CollisionGeom::Sphere { origin: f.frame, radius: f.size.x.max(MIN_SHAPE) }),
+                    None => fit_failed(out, "sphere"),
+                },
             }
         }
-        let mut part = Part { visual: None, collision: None, color, masses };
+        let saved = doc.components.iter().find(|x| x.id == c).and_then(|x| x.physical_override);
+        let physical_override = saved.filter(PhysicalOverride::is_sane);
+        if saved.is_some() && physical_override.is_none() {
+            out.warnings.push(format!("the physical override of `{label}` is not usable numbers: ignored"));
+        }
+        if physical_override.is_some_and(|o| o.inertia.is_none()) && masses.is_empty() {
+            out.warnings.push(format!("the physical override of `{label}` has no inertia and no closed body to work one out from: ignored"));
+        }
+        let mut part = Part { visual: None, collision: Vec::new(), color, masses, physical_override };
         if !visual.triangles.is_empty() {
             let file = names.file(&format!("{stem}-{label}"));
             out.meshes.push((file.clone(), stl_binary(&[metres(&visual)], &label)));
             part.visual = Some(file.clone());
-            if !open {
-                part.collision = Some(file);
-            } else if !collision.triangles.is_empty() {
-                let file = names.file(&format!("{stem}-{label}-collision"));
-                out.meshes.push((file.clone(), stl_binary(&[metres(&collision)], &label)));
-                part.collision = Some(file);
+            if shared {
+                out.warnings.extend(large_collision(visual.triangles.len(), &label));
+                part.collision.push(CollisionGeom::Mesh { file, origin: IDENTITY });
             }
         }
+        if !shared && !collision.triangles.is_empty() {
+            out.warnings.extend(large_collision(collision.triangles.len(), &label));
+            let file = names.file(&format!("{stem}-{label}-collision"));
+            out.meshes.push((file.clone(), stl_binary(&[metres(&collision)], &label)));
+            part.collision.push(CollisionGeom::Mesh { file, origin: IDENTITY });
+        }
+        for (body, hull) in hulls {
+            let file = names.file(&format!("{stem}-{label}-{body}-collision"));
+            out.meshes.push((file.clone(), stl_binary(&[metres(&hull)], &label)));
+            part.collision.push(CollisionGeom::Mesh { file, origin: IDENTITY });
+        }
+        part.collision.extend(fitted);
         parts.insert(c, part);
     }
     Ok(parts)
@@ -286,6 +416,7 @@ fn canonical(doc: &Document, occ: u64) -> Vec<u64> {
 /// The tree as it grows.
 struct Tree<'a> {
     doc: &'a Document,
+    st: &'a ModelState,
     parts: BTreeMap<u64, Part>,
     names: Names,
     model: UrdfModel,
@@ -322,9 +453,9 @@ impl<'a> Tree<'a> {
             path,
             mesh_origin,
             visual: part.and_then(|p| p.visual.clone()),
-            collision: part.and_then(|p| p.collision.clone()),
+            collision: part.map(|p| p.collision.iter().map(|g| g.in_frame(&mesh_origin)).collect()).unwrap_or_default(),
             color: part.and_then(|p| p.color),
-            inertial: part.and_then(|p| inertial(&p.masses, &mesh_origin)).or(Some(token())),
+            inertial: part.and_then(|p| link_inertial(p, &mesh_origin)).or(Some(token())),
         };
         self.model.links.push(link);
         Some(self.model.links.len() - 1)
@@ -334,7 +465,48 @@ impl<'a> Tree<'a> {
     fn fixed(&mut self, parent: usize, child: usize, origin: Mat) {
         let n = self.model.links.get(child).map(|l| format!("{}_fixed", l.name)).unwrap_or_default();
         let name = self.names.take(&n);
-        self.model.joints.push(UrdfJoint { name, parent, child, origin, step: Step::Fixed, axis: Vec3::Z, limit: None, source: None });
+        self.model.joints.push(UrdfJoint {
+            name,
+            parent,
+            child,
+            origin,
+            step: Step::Fixed,
+            axis: Vec3::Z,
+            limit: None,
+            source: None,
+            dynamics: JointDynamics::default(),
+            mimic: None,
+        });
+    }
+
+    /// Each origin flagged as a frame becomes an empty link fixed on its part's link: `fixed`
+    /// keeps it from needing mass of its own.
+    fn frames(&mut self) {
+        let doc = self.doc;
+        let st = self.st;
+        for o in doc.assembly.origins.iter().filter(|o| o.export_frame) {
+            let occ = o.origin.occurrence;
+            let frame = self.placed.get(&occ).copied().and_then(|(parent, at)| {
+                let local = joints::resolve_origin(doc, st, &o.origin).ok()?;
+                Some((parent, mat_mul(&mat_inverse(&at)?, &mat_mul(&self.world(occ), &local))))
+            });
+            let Some((parent, origin)) = frame else {
+                self.warnings.push(format!("frame `{}` is skipped: its origin doesn't resolve", o.name));
+                continue;
+            };
+            let name = self.names.take(&o.name);
+            let child = self.model.links.len();
+            self.model.links.push(Link {
+                name,
+                path: Vec::new(),
+                mesh_origin: IDENTITY,
+                visual: None,
+                collision: Vec::new(),
+                color: None,
+                inertial: None,
+            });
+            self.fixed(parent, child, origin);
+        }
     }
 
     /// The link an occurrence fixed in place hangs on, and its frame: `base_link` for the top
@@ -423,6 +595,8 @@ impl<'a> Tree<'a> {
                 axis: Vec3::Z,
                 limit: None,
                 source: None,
+                dynamics: JointDynamics::default(),
+                mimic: None,
             });
             return Some(());
         }
@@ -438,7 +612,7 @@ impl<'a> Tree<'a> {
                     path: Vec::new(),
                     mesh_origin: IDENTITY,
                     visual: None,
-                    collision: None,
+                    collision: Vec::new(),
                     color: None,
                     inertial: Some(token()),
                 });
@@ -455,6 +629,11 @@ impl<'a> Tree<'a> {
                 (_, l) => l,
             };
             let name = if k == last { joint_name.clone() } else { self.names.take(&format!("{}_dof{}", j.name, k + 1)) };
+            let saved = j.dynamics.get(dof).copied().flatten().unwrap_or_default();
+            let dynamics = saved.sane();
+            if dynamics != saved {
+                self.warnings.push(format!("joint `{}`: dynamics that are not usable numbers are ignored", j.name));
+            }
             self.model.joints.push(UrdfJoint {
                 name,
                 parent: from,
@@ -464,6 +643,8 @@ impl<'a> Tree<'a> {
                 axis,
                 limit,
                 source: Some((j.id, dof)),
+                dynamics,
+                mimic: None,
             });
             from = to;
         }
@@ -523,9 +704,10 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
     let mut out = UrdfPackage { xml: String::new(), meshes: Vec::new(), model: UrdfModel::default(), warnings: Vec::new() };
     let base = names.take("base_link");
     let robot = sanitise(stem, false);
-    let parts = parts(doc, st, stem, &mut names, &mut out)?;
+    let parts = parts(doc, st, stem, options, &mut names, &mut out)?;
     let mut tree = Tree {
         doc,
+        st,
         parts,
         names,
         model: UrdfModel::default(),
@@ -539,7 +721,7 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
         path: Vec::new(),
         mesh_origin: IDENTITY,
         visual: root.and_then(|p| p.visual.clone()),
-        collision: root.and_then(|p| p.collision.clone()),
+        collision: root.map(|p| p.collision.clone()).unwrap_or_default(),
         color: root.and_then(|p| p.color),
         inertial: root.and_then(|p| inertial(&p.masses, &IDENTITY)),
     };
@@ -602,17 +784,117 @@ pub fn urdf(doc: &Document, st: &ModelState, stem: &str, options: &UrdfOptions) 
         }
     }
     tree.copies(&jointed);
+    tree.frames();
+    plausibility(&tree.model, &mut tree.warnings);
+    if options.mimic {
+        resolve_mimics(&mut tree.model, doc, &mut tree.warnings);
+    }
 
-    let moving = tree.model.joints.iter().any(|j| j.step != Step::Fixed);
-    if moving && (options.effort.is_none() || options.velocity.is_none()) {
+    let on_fallback: Vec<&str> = tree
+        .model
+        .joints
+        .iter()
+        .filter(|j| {
+            j.step != Step::Fixed
+                && ((j.dynamics.effort.is_none() && options.effort.is_none()) || (j.dynamics.velocity.is_none() && options.velocity.is_none()))
+        })
+        .map(|j| j.name.as_str())
+        .collect();
+    if !on_fallback.is_empty() {
         tree.warnings.push(format!(
-            "joint effort and velocity limits are not given: written as {DEFAULT_EFFORT} and {DEFAULT_VELOCITY} (pass effort and velocity)"
+            "joint effort and velocity limits are not given for {}: written as {DEFAULT_EFFORT} and {DEFAULT_VELOCITY} (use joint.dynamics, or pass effort and velocity)",
+            on_fallback.join(", ")
         ));
     }
     out.xml = write_xml(&tree.model, &robot, options);
     out.model = tree.model;
     out.warnings = tree.warnings;
     Ok(out)
+}
+
+/// A motion link as `<mimic>`: the follower's URDF joint takes its value from the driver's. Tools
+/// accept a mimic only of a joint that is not one itself, so a chain of links is composed down to
+/// its first driver. Values stay in stored units (mm, rad) until the last step.
+fn resolve_mimics(model: &mut UrdfModel, doc: &Document, warnings: &mut Vec<String>) {
+    let name = |id: u64| doc.assembly.joints.iter().find(|j| j.id == id).map_or_else(|| id.to_string(), |j| j.name.clone());
+    let index: BTreeMap<(u64, usize), usize> = model.joints.iter().enumerate().filter_map(|(i, j)| Some((j.source?, i))).collect();
+    let links = &doc.assembly.links;
+    let linear: BTreeMap<(u64, usize), &joints::MotionLink> = links.iter().filter(|l| l.coupling_is_linear()).map(|l| ((l.b, l.ib), l)).collect();
+    for l in links {
+        let follower = name(l.b);
+        if !l.coupling_is_linear() {
+            warnings.push(format!("the cam driving `{follower}` is not linear: `{follower}` is left free in the URDF"));
+            continue;
+        }
+        let Some(&at) = index.get(&(l.b, l.ib)) else {
+            warnings.push(format!("the motion link to `{follower}` is left out: that joint is not in the URDF"));
+            continue;
+        };
+        // value of b = ratio · value of driver + offset, walking back to the first driver.
+        let (mut driver, mut ratio, mut offset) = ((l.a, l.ia), l.ratio, l.offset);
+        let mut seen = BTreeSet::from([(l.b, l.ib)]);
+        let mut cycle = false;
+        while let Some(prev) = linear.get(&driver) {
+            if !seen.insert(driver) {
+                cycle = true;
+                break;
+            }
+            offset += ratio * prev.offset;
+            ratio *= prev.ratio;
+            driver = (prev.a, prev.ia);
+        }
+        if cycle {
+            warnings.push(format!("motion links form a cycle through `{follower}`: it is left free in the URDF"));
+            continue;
+        }
+        let Some(&from) = index.get(&driver) else {
+            warnings.push(format!("the joint driving `{follower}` is not in the URDF: `{follower}` is left free"));
+            continue;
+        };
+        if !ratio.is_finite() || !offset.is_finite() {
+            warnings.push(format!("the motion link to `{follower}` is not usable numbers: `{follower}` is left free in the URDF"));
+            continue;
+        }
+        let (Some(d), Some(f)) = (model.joints.get(from), model.joints.get(at)) else { continue };
+        let unit = |step| if step == Step::Prismatic { 1e-3 } else { 1.0 };
+        let mimic = Mimic { joint: from, multiplier: ratio * unit(f.step) / unit(d.step), offset: offset * unit(f.step) };
+        if let Some((lo, hi)) = f.limit {
+            let reach = d.limit.map(|(a, b)| (ratio * a + offset, ratio * b + offset));
+            if !reach.is_some_and(|(a, b)| a.min(b) >= lo - 1e-9 && a.max(b) <= hi + 1e-9) {
+                warnings.push(format!("the range of `{}` can exceed the limit of `{follower}` it drives", d.name));
+            }
+        }
+        if let Some(f) = model.joints.get_mut(at) {
+            f.mimic = Some(mimic);
+        }
+    }
+}
+
+/// Warnings about values a simulator would take but that are unlikely to be meant.
+fn plausibility(model: &UrdfModel, warnings: &mut Vec<String>) {
+    for (at, l) in model.links.iter().enumerate() {
+        // A chain's in-between links and frames have an empty `path`: their values are ours.
+        let (false, Some(i)) = (l.path.is_empty(), l.inertial) else { continue };
+        if i.mass == TOKEN_MASS {
+            // A part with none of its own may only group others, which carry the mass.
+            let groups = model.joints.iter().any(|j| {
+                j.parent == at && j.step == Step::Fixed && model.links.get(j.child).is_some_and(|c| c.inertial.is_some_and(|i| i.mass > TOKEN_MASS))
+            });
+            if !groups && model.joints.iter().any(|j| j.child == at && j.step != Step::Fixed) {
+                warnings.push(format!("`{}` moves but has no mass: give it a closed body or a mass override", l.name));
+            }
+            continue;
+        }
+        let plausible = principal(&i.inertia, 0.0).is_some_and(|([a, b, c], _)| a > 0.0 && c <= (a + b) * (1.0 + 1e-6));
+        if !plausible {
+            warnings.push(format!("the inertia of `{}` is not physically possible: check its mass override", l.name));
+        }
+    }
+}
+
+fn large_collision(triangles: usize, name: &str) -> Option<String> {
+    (triangles > COLLISION_TRIANGLE_WARNING)
+        .then(|| format!("the collision mesh of `{name}` has {triangles} triangles, which slows a simulator: give it a simpler collision shape"))
 }
 
 fn token() -> Inertial {
@@ -649,6 +931,51 @@ fn inertial(masses: &[BodyMass], to_link: &Mat) -> Option<Inertial> {
     let inertia = total.map(|row| row.map(|x| x * 1e-6));
     let finite = mass.is_finite() && [com.x, com.y, com.z].iter().all(|x| x.is_finite()) && inertia.iter().flatten().all(|x| x.is_finite());
     finite.then_some(Inertial { mass, com, inertia })
+}
+
+/// What a part's link weighs: its bodies' values, or the override in their place.
+fn link_inertial(part: &Part, to_link: &Mat) -> Option<Inertial> {
+    let computed = inertial(&part.masses, to_link);
+    let Some(o) = part.physical_override else { return computed };
+    let com = match (o.com, computed) {
+        (Some([x, y, z]), _) => apply_point(to_link, Vec3::new(x, y, z)),
+        (None, Some(c)) => c.com,
+        (None, None) => apply_point(to_link, Vec3::ZERO),
+    };
+    let inertia = match (o.inertia, computed) {
+        (Some([xx, yy, zz, xy, xz, yz]), _) => turned([[xx, xy, xz], [xy, yy, yz], [xz, yz, zz]], to_link),
+        (None, Some(c)) => c.inertia.map(|row| row.map(|x| x * o.mass / c.mass)),
+        (None, None) => return None,
+    };
+    Some(Inertial { mass: o.mass, com, inertia })
+}
+
+/// `R I Rᵀ` for the turn of `m`.
+fn turned(inertia: [[f64; 3]; 3], m: &Mat) -> [[f64; 3]; 3] {
+    let r = |i: usize, j: usize| m.get(j).and_then(|c| c.get(i)).copied().unwrap_or(0.0);
+    let mut out = [[0.0; 3]; 3];
+    for (i, row_out) in out.iter_mut().enumerate() {
+        for (j, cell) in row_out.iter_mut().enumerate() {
+            for (a, row) in inertia.iter().enumerate() {
+                for (b, x) in row.iter().enumerate() {
+                    *cell += r(i, a) * x * r(j, b);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Whether a component has a closed body to work a mass out from.
+pub fn has_mass(doc: &Document, st: &ModelState, component: u64) -> Result<bool> {
+    for b in st.bodies.iter().filter(|b| doc.model_body_component(b) == component) {
+        let m = export_mesh(&b.body)?;
+        let (positions, triangles) = weld(&m.positions, &m.triangles, weld_eps(&b.body));
+        if (Mesh { positions, triangles, ..Mesh::default() }).mass_properties().is_some() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn append(into: &mut Mesh, m: &Mesh) {
@@ -703,8 +1030,8 @@ fn origin_xml(m: &Mat) -> String {
 }
 
 fn write_xml(model: &UrdfModel, name: &str, options: &UrdfOptions) -> String {
-    let effort = options.effort.filter(|x| x.is_finite() && *x > 0.0).unwrap_or(DEFAULT_EFFORT);
-    let velocity = options.velocity.filter(|x| x.is_finite() && *x > 0.0).unwrap_or(DEFAULT_VELOCITY);
+    let fallback_effort = options.effort.filter(|x| x.is_finite() && *x > 0.0).unwrap_or(DEFAULT_EFFORT);
+    let fallback_velocity = options.velocity.filter(|x| x.is_finite() && *x > 0.0).unwrap_or(DEFAULT_VELOCITY);
     let prefix = attr(&options.mesh_prefix);
     let mut s = String::from("<?xml version=\"1.0\"?>\n<!-- Exported by SolidCraft; units: m, kg, rad -->\n");
     s += &format!("<robot name=\"{}\">\n", attr(name));
@@ -743,12 +1070,16 @@ fn write_xml(model: &UrdfModel, name: &str, options: &UrdfOptions) -> String {
             }
             s += "    </visual>\n";
         }
-        if let Some(file) = &l.collision {
-            s += &format!(
-                "    <collision>\n      {}\n      <geometry><mesh filename=\"{prefix}{}\"/></geometry>\n    </collision>\n",
-                origin_xml(&l.mesh_origin),
-                attr(file)
-            );
+        for g in &l.collision {
+            let (origin, geometry) = match g {
+                CollisionGeom::Mesh { file, origin } => (origin, format!("<mesh filename=\"{prefix}{}\"/>", attr(file))),
+                CollisionGeom::Box { origin, size } => (origin, format!("<box size=\"{}\"/>", triple(*size * 1e-3))),
+                CollisionGeom::Cylinder { origin, radius, length } => {
+                    (origin, format!("<cylinder radius=\"{}\" length=\"{}\"/>", num(radius * 1e-3), num(length * 1e-3)))
+                }
+                CollisionGeom::Sphere { origin, radius } => (origin, format!("<sphere radius=\"{}\"/>", num(radius * 1e-3))),
+            };
+            s += &format!("    <collision>\n      {}\n      <geometry>{geometry}</geometry>\n    </collision>\n", origin_xml(origin));
         }
         s += "  </link>\n";
     }
@@ -765,6 +1096,8 @@ fn write_xml(model: &UrdfModel, name: &str, options: &UrdfOptions) -> String {
         if j.step != Step::Fixed {
             s += &format!("    <axis xyz=\"{}\"/>\n", triple(j.axis));
             let scale = if j.step == Step::Prismatic { 1e-3 } else { 1.0 };
+            let effort = j.dynamics.effort.unwrap_or(fallback_effort);
+            let velocity = j.dynamics.velocity.unwrap_or(fallback_velocity);
             match j.limit {
                 Some((lo, hi)) => {
                     s += &format!(
@@ -776,6 +1109,24 @@ fn write_xml(model: &UrdfModel, name: &str, options: &UrdfOptions) -> String {
                     );
                 }
                 None => s += &format!("    <limit effort=\"{}\" velocity=\"{}\"/>\n", num(effort), num(velocity)),
+            }
+            if let Some(driver) = j.mimic.and_then(|m| Some((model.joints.get(m.joint)?, m))) {
+                s += &format!(
+                    "    <mimic joint=\"{}\" multiplier=\"{}\" offset=\"{}\"/>\n",
+                    attr(&driver.0.name),
+                    num(driver.1.multiplier),
+                    num(driver.1.offset)
+                );
+            }
+            if j.dynamics.damping.is_some() || j.dynamics.friction.is_some() {
+                s += "    <dynamics";
+                if let Some(x) = j.dynamics.damping {
+                    s += &format!(" damping=\"{}\"", num(x));
+                }
+                if let Some(x) = j.dynamics.friction {
+                    s += &format!(" friction=\"{}\"", num(x));
+                }
+                s += "/>\n";
             }
         }
         s += "  </joint>\n";
@@ -832,7 +1183,7 @@ mod tests {
             path: Vec::new(),
             mesh_origin,
             visual: Some("m.stl".into()),
-            collision: Some("m.stl".into()),
+            collision: vec![CollisionGeom::Mesh { file: "m.stl".into(), origin: mesh_origin }],
             color: None,
             inertial: None,
         };
@@ -850,6 +1201,8 @@ mod tests {
                 axis: -Vec3::Y,
                 limit: Some((-1.0, 2.0)),
                 source: None,
+                dynamics: JointDynamics::default(),
+                mimic: None,
             });
         }
         let xml = write_xml(&model, "r", &UrdfOptions::default());
@@ -898,6 +1251,69 @@ mod tests {
             assert!(e.contains("mesh_prefix") && e.contains(why), "{e}");
         }
         assert!(urdf(&doc, &st, "t", &UrdfOptions { mesh_prefix: "package://r/m/".into(), ..UrdfOptions::default() }).is_ok());
+    }
+
+    /// `base_link` and a part with token mass on a joint of the given step.
+    fn token_part(step: Step, path: Vec<u64>) -> UrdfModel {
+        let link = |name: &str, path: Vec<u64>| Link {
+            name: name.into(),
+            path,
+            mesh_origin: IDENTITY,
+            visual: None,
+            collision: Vec::new(),
+            color: None,
+            inertial: Some(token()),
+        };
+        let joint = UrdfJoint {
+            name: "j".into(),
+            parent: 0,
+            child: 1,
+            origin: IDENTITY,
+            step,
+            axis: Vec3::Z,
+            limit: None,
+            source: None,
+            dynamics: JointDynamics::default(),
+            mimic: None,
+        };
+        UrdfModel { links: vec![link("base_link", Vec::new()), link("Sheet", path)], joints: vec![joint] }
+    }
+
+    #[test]
+    fn a_moving_link_with_token_mass_warns() {
+        let mut warnings = Vec::new();
+        plausibility(&token_part(Step::Revolute, vec![1]), &mut warnings);
+        assert!(warnings.iter().any(|w| w.contains("Sheet") && w.contains("no mass")), "{warnings:?}");
+    }
+
+    #[test]
+    fn a_fixed_or_in_between_link_with_token_mass_does_not_warn() {
+        let mut warnings = Vec::new();
+        plausibility(&token_part(Step::Fixed, vec![1]), &mut warnings);
+        plausibility(&token_part(Step::Revolute, Vec::new()), &mut warnings);
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn a_moving_group_with_a_massive_fixed_child_does_not_warn() {
+        let mut model = token_part(Step::Revolute, vec![1]);
+        let child = Link {
+            name: "Motor".into(),
+            path: vec![1, 2],
+            inertial: Some(Inertial { mass: 1.0, com: Vec3::ZERO, inertia: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]] }),
+            ..model.links[1].clone()
+        };
+        model.links.push(child);
+        model.joints.push(UrdfJoint { name: "f".into(), parent: 1, child: 2, step: Step::Fixed, ..model.joints[0].clone() });
+        let mut warnings = Vec::new();
+        plausibility(&model, &mut warnings);
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn a_large_collision_mesh_warns_naming_the_link() {
+        assert!(large_collision(COLLISION_TRIANGLE_WARNING, "Arm").is_none());
+        assert!(large_collision(COLLISION_TRIANGLE_WARNING + 1, "Arm").is_some_and(|w| w.contains("Arm") && w.contains("triangles")));
     }
 
     #[test]

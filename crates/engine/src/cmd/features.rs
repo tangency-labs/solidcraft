@@ -1912,6 +1912,9 @@ fn copy_keeps_appearance(s: &mut Session, reply: &Value, sources: &[String], cmd
         if let Some(material) = s.doc.materials.get(source).cloned() {
             s.doc_mut().materials.insert(copy.clone(), material);
         }
+        if let Some(shape) = s.doc.collision_shapes.get(source).copied() {
+            s.doc_mut().collision_shapes.insert(copy.clone(), shape);
+        }
     }
     Ok(())
 }

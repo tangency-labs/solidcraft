@@ -923,6 +923,37 @@ jobs:
           name: oracle-report
           path: docs/oracle.md
 
+  # Export fixtures and load them in real URDF tools, which run as separate programs
+  # (tools/urdf-check). Runs when the reference tests do: not on every pull request push.
+  urdf-check:
+    name: URDF check
+    needs: changes
+    if: needs.changes.outputs.oracle == 'true'
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Size parallel compiles to the job's memory
+        run: scripts/ci/build-jobs.sh
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: urdf-check
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build the command line
+        run: cargo build -p solidcraft-cli --profile ci --locked
+      - name: Install the URDF tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends liburdfdom-tools
+          python3 -m venv "$RUNNER_TEMP/urdf-check"
+          "$RUNNER_TEMP/urdf-check/bin/pip" install -r tools/urdf-check/requirements.txt
+      - name: Check the exports
+        env:
+          PYTHON: ${{ runner.temp }}/urdf-check/bin/python
+          SOLIDCRAFT_CLI: ${{ env.CARGO_TARGET_DIR || 'target' }}/ci/solidcraft-cli
+        run: tools/urdf-check/run.sh
+
   # D3D12's older shader compiler (FXC, used where dxcompiler.dll is absent) is stricter than
   # DXC, Vulkan and Metal: a shader it cannot compile once crashed the app at startup. Build the
   # GPU tessellation pipeline with FXC on the runner's WARP software adapter and compare its

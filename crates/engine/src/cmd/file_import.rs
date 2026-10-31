@@ -370,6 +370,7 @@ fn add_rigid_joints(s: &mut Session, pairs: &[(u64, u64, Mat)]) -> Result<Vec<u6
                 angle: 0.0,
                 suppressed: false,
                 exprs: Default::default(),
+                dynamics: Vec::new(),
             })
         })
         .collect::<Result<_>>()?;

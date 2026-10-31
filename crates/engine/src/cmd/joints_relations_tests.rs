@@ -218,6 +218,7 @@ fn a_panel_full_of_parts_placed_by_relations_stays_solved() {
                 angle: 0.0,
                 suppressed: false,
                 exprs: Default::default(),
+                dynamics: Vec::new(),
             };
             if let Some(q) = solidcraft_doc::joints::relation_values(&s.doc, &s.model.state(), &j) {
                 j.values = q;

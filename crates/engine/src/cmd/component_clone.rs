@@ -301,6 +301,7 @@ pub(super) fn build(
             added.metadata = c.metadata.clone();
             added.properties = c.properties.clone();
             added.identification_color = c.identification_color;
+            added.physical_override = c.physical_override;
         }
         components.insert(*old, new);
         if *old != component {
@@ -515,6 +516,9 @@ pub(super) fn build(
     for (old, new) in &bodies {
         if let Some(mat) = source.materials.get(old) {
             scratch.doc_mut().materials.insert(new.clone(), mat.clone());
+        }
+        if let Some(shape) = source.collision_shapes.get(old) {
+            scratch.doc_mut().collision_shapes.insert(new.clone(), *shape);
         }
         if let Some(look) = source.appearances.bodies.get(old) {
             scratch.doc_mut().appearances.bodies.insert(new.clone(), look.clone());

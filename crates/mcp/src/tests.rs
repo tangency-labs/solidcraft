@@ -239,7 +239,7 @@ fn export_tool_writes_a_urdf_package() {
     let r = tool(&mut s, "export", json!({"path": urdf.to_string_lossy(), "mesh_prefix": "package://robot/meshes/"}));
     assert_eq!(r["format"], "Urdf", "{r}");
     assert!(std::fs::read_to_string(&urdf).unwrap().contains(r#"filename="package://robot/meshes/robot-base.stl""#));
-    assert!(dir.join("robot-base.stl").exists());
+    assert!(dir.join("meshes/robot-base.stl").exists());
     // effort and velocity reach file.export, which refuses a bad one.
     let r = raw_tool(&mut s, "export", json!({"path": urdf.to_string_lossy(), "effort": -1}));
     assert_eq!(r["result"]["isError"], json!(true), "{r}");

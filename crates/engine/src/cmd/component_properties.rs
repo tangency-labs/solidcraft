@@ -2,7 +2,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
-use solidcraft_doc::{Document, Mat};
+use solidcraft_doc::{CollisionShape, Document, Mat, PhysicalOverride};
 use solidcraft_geom::inertia::{self, Tensor3};
 use solidcraft_geom::{Aabb3, Vec3};
 
@@ -81,6 +81,9 @@ pub(super) fn component(s: &mut Session, p: &Value) -> Result<Value> {
     let mut out = properties(s, &doc, &path, descendants(p, cmd)?, about(p, cmd)?, cmd)?;
     out["component"] = json!(id);
     out["name"] = json!(name);
+    if let Some(o) = doc.components.iter().find(|c| c.id == id).and_then(|c| c.physical_override) {
+        out["physical_override"] = json!(o);
+    }
     Ok(out)
 }
 
@@ -103,6 +106,91 @@ pub(super) fn occurrence(s: &mut Session, p: &Value) -> Result<Value> {
     out["occurrence"] = json!(id);
     out["name"] = json!(doc.occurrences.iter().find(|o| o.id == id).map(|o| o.name.as_str()));
     Ok(out)
+}
+
+pub(super) const BODY_COLLISION_CONTRACT: crate::schema::TypedContract<crate::schema::component::BodyCollisionParams> =
+    crate::schema::TypedContract::new();
+
+/// Set what a body, or every body of a component, looks like to a simulator.
+pub(super) fn body_collision(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "body.collision";
+    let text = crate::params::str_(p, "shape").ok_or_else(|| bad(cmd, "give `shape`"))?;
+    let shape = CollisionShape::parse(text).ok_or_else(|| bad(cmd, "`shape` must be auto, mesh, convex_hull, box, cylinder, sphere or none"))?;
+    let state = s.model.state();
+    let bodies: Vec<String> = match (crate::params::str_(p, "body"), p.get("component").filter(|v| !v.is_null())) {
+        (Some(_), Some(_)) => return Err(bad(cmd, "give `body` or `component`, not both")),
+        (None, None) => return Err(bad(cmd, "give `body` or `component`")),
+        (Some(name), None) => {
+            if !state.bodies.iter().any(|b| b.name == name) {
+                return Err(bad(cmd, format!("no body `{name}`")));
+            }
+            vec![name.to_string()]
+        }
+        (None, Some(_)) => {
+            let id = super::component(s, p, "component", cmd)?;
+            state.bodies.iter().filter(|b| s.doc.model_body_component(b) == id).map(|b| b.name.clone()).collect()
+        }
+    };
+    if bodies.is_empty() {
+        return Err(bad(cmd, "this component has no bodies of its own: set the shape on the components that hold them"));
+    }
+    let text = text.to_string();
+    let doc = s.doc_mut();
+    for b in &bodies {
+        if shape == CollisionShape::Auto {
+            doc.collision_shapes.remove(b);
+        } else {
+            doc.collision_shapes.insert(b.clone(), shape);
+        }
+    }
+    Ok(json!({"bodies": bodies, "shape": text}))
+}
+
+pub(super) const PHYSICAL_OVERRIDE_CONTRACT: crate::schema::TypedContract<crate::schema::component::PhysicalOverrideParams> =
+    crate::schema::TypedContract::new();
+
+/// Set or clear what robot exports use for a component's own bodies.
+pub(super) fn physical_override(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.physical_override";
+    let id = super::component(s, p, "component", cmd)?;
+    if id == 0 {
+        return Err(bad(cmd, "the root design is not a component: move its bodies into a component to give them a mass override"));
+    }
+    let numbers = |key: &str| -> Option<Vec<f64>> { p.get(key)?.as_array()?.iter().map(Value::as_f64).collect() };
+    let com = numbers("com").and_then(|v| <[f64; 3]>::try_from(v).ok());
+    let inertia = numbers("inertia").and_then(|v| <[f64; 6]>::try_from(v).ok());
+    if p.get("com").is_some_and(|v| !v.is_null()) && com.is_none() {
+        return Err(bad(cmd, "`com` must be [x, y, z]"));
+    }
+    if p.get("inertia").is_some_and(|v| !v.is_null()) && inertia.is_none() {
+        return Err(bad(cmd, "`inertia` must be [xx, yy, zz, xy, xz, yz]"));
+    }
+    if p.get("mass").is_some_and(|v| !v.is_null()) && crate::params::num(p, "mass").is_none() {
+        return Err(bad(cmd, "`mass` must be a usable number"));
+    }
+    let saved = match crate::params::num(p, "mass") {
+        Some(mass) => {
+            let o = PhysicalOverride { mass, com, inertia };
+            if !o.is_sane() {
+                return Err(bad(
+                    cmd,
+                    format!(
+                        "`mass` must be above 0 and at most {}, and `com` and `inertia` usable numbers, with the inertia's first three above 0",
+                        PhysicalOverride::MAX_MASS
+                    ),
+                ));
+            }
+            if inertia.is_none() && !solidcraft_io::urdf::has_mass(&s.doc, &s.model.state(), id).map_err(|e| bad(cmd, e.to_string()))? {
+                return Err(bad(cmd, "this component has no closed body to work the inertia out from: give `inertia` too"));
+            }
+            Some(o)
+        }
+        None if com.is_some() || inertia.is_some() => return Err(bad(cmd, "give `mass` with `com` or `inertia`")),
+        None => None,
+    };
+    let Some(c) = s.doc_mut().components.iter_mut().find(|c| c.id == id) else { return Err(bad(cmd, format!("no component `{id}`"))) };
+    c.physical_override = saved;
+    Ok(json!({"component": id, "mass": saved.map(|o| o.mass)}))
 }
 
 fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, about: Option<Vec3>, cmd: &str) -> Result<Value> {

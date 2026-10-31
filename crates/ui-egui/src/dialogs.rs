@@ -369,6 +369,7 @@ crate::dialog_descriptor::dialog_descriptors! {
             /// Surface tools and Split Face (`dialogs_surface`).
             Surface(crate::dialogs_surface::Surf),
             SaveMesh(crate::dialogs_save_mesh::SaveMesh),
+            UrdfExport(crate::dialogs_urdf::UrdfExport),
             ViewDxf {
                 dashed: bool,
                 tolerance: f64,
@@ -2301,6 +2302,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Sheet(k) => k.title(),
         Kind::Surface(k) => k.title(),
         Kind::SaveMesh(_) => "SAVE AS MESH",
+        Kind::UrdfExport(_) => "Export URDF",
         Kind::ViewDxf { .. } => "Export Current View as DXF",
         Kind::InsertDrawing(p) => crate::dialogs_insert_drawing::title(p),
         Kind::Plastic(k) => k.title(),
@@ -3100,6 +3102,7 @@ pub(crate) fn action_labels(kind: &Kind) -> (&'static str, &'static str) {
         Kind::Measure { .. } => ("", "Close"),
         Kind::ConfirmDelete { .. } => ("Delete", "Cancel"),
         Kind::SaveMesh(k) => (crate::dialogs_save_mesh::button(k), "Cancel"),
+        Kind::UrdfExport(_) => ("Export URDF…", "Cancel"),
         Kind::ViewDxf { .. } => ("Export DXF…", "Cancel"),
         _ => ("OK", "Cancel"),
     }
@@ -3988,6 +3991,9 @@ fn run_primed(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
 }
 
 pub(crate) fn run_dialog(app: &mut SolveApp, d: &Dialog) -> Result<(), String> {
+    if let Kind::UrdfExport(f) = &d.kind {
+        return crate::dialogs_urdf::run(app, f);
+    }
     if let Kind::ViewDxf { dashed, tolerance } = &d.kind {
         return crate::dialogs_view_dxf::run(app, *dashed, *tolerance);
     }
@@ -4983,7 +4989,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Surface(k) => return crate::dialogs_surface::commands(app, k, &d.inputs, &d.extra),
         Kind::SketchModify(k) => return crate::sketch_modify_ui::commands(app, k, &d.inputs, &d.extra),
         Kind::SaveMesh(k) => return crate::dialogs_save_mesh::commands(k, &d.inputs),
-        Kind::ViewDxf { .. } => return Ok(Vec::new()),
+        Kind::UrdfExport(_) | Kind::ViewDxf { .. } => return Ok(Vec::new()),
         Kind::InsertDrawing(p) => return crate::dialogs_insert_drawing::commands(p),
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),

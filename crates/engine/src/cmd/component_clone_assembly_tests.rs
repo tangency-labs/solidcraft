@@ -23,6 +23,7 @@ fn joint(id: u64, a: u64, b: u64) -> Joint {
         angle: 0.1,
         suppressed: false,
         exprs: Default::default(),
+        dynamics: Vec::new(),
     }
 }
 
@@ -44,12 +45,14 @@ fn documents() -> (Document, Document) {
                     x: Some(XRef::Face { face: "F10:side".into(), pick: None }),
                 },
             },
+            export_frame: false,
         },
         NamedOrigin {
             name: "Foreign geometry".into(),
             origin: JointOrigin { occurrence: 1, snap: Snap::CircleCenter { pick: Vec3::ZERO, face: Some("F99:end".into()), end: None, x: None } },
+            export_frame: false,
         },
-        NamedOrigin { name: "Outside".into(), origin: at(9) },
+        NamedOrigin { name: "Outside".into(), origin: at(9), export_frame: false },
     ];
     source.assembly.links = vec![
         MotionLink { a: 1, ia: 0, b: 2, ib: 0, ratio: -2.0, offset: 0.3, coupling: None, lift: Vec::new() },
@@ -258,6 +261,7 @@ fn an_edge_origin_is_copied_onto_the_copys_edges() {
                 axis: None,
             },
         },
+        export_frame: false,
     }];
     destination.assembly.origins.clear();
     clone_assembly(&mut destination, &source, &BTreeMap::from([(1, 101), (2, 102)]), &BTreeMap::from([(1, 11), (10, 110)]), &BTreeMap::new())

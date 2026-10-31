@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use serde_json::{Value, json};
 use solidcraft_doc::{Mat, joints, mat_mul};
-use solidcraft_io::urdf::{Step, UrdfModel, UrdfOptions, UrdfPackage};
+use solidcraft_io::urdf::{CollisionDefault, CollisionGeom, Step, UrdfModel, UrdfOptions, UrdfPackage};
 
 use crate::Session;
 
@@ -415,7 +415,7 @@ fn urdf_collision_skips_open_bodies() {
     run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["l1"], "distance": 10, "body_name": "Wall"}));
     let p = package(&s);
     let Some(l) = p.model.links.iter().find(|l| l.name == "Part") else { panic!("{:?}", names(&p.model)) };
-    let (Some(v), Some(c)) = (&l.visual, &l.collision) else { panic!("{l:?}") };
+    let (Some(v), [CollisionGeom::Mesh { file: c, .. }]) = (&l.visual, l.collision.as_slice()) else { panic!("{l:?}") };
     assert_ne!(v, c, "a separate collision mesh");
     let bytes = &p.meshes.iter().find(|(f, _)| f == c).unwrap().1;
     assert!(stl_volume(bytes).is_some(), "the collision mesh is closed");
@@ -435,7 +435,7 @@ fn urdf_open_only_component_is_drawn() {
     run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["l1"], "distance": 10, "body_name": "Wall"}));
     let p = package(&s);
     let Some(l) = p.model.links.iter().find(|l| l.name == "Sheet") else { panic!("{:?}", names(&p.model)) };
-    assert!(l.visual.is_some() && l.collision.is_none(), "{l:?}");
+    assert!(l.visual.is_some() && l.collision.is_empty(), "{l:?}");
     assert!(l.inertial.is_some_and(|i| i.mass == 1e-6), "{l:?}");
 }
 
@@ -649,4 +649,881 @@ fn urdf_files_stay_inside_allow_paths() {
     assert!(ok.is_ok(), "{ok:?}");
     let _ = std::fs::remove_dir_all(&inside);
     let _ = std::fs::remove_dir_all(&outside);
+}
+
+#[test]
+fn joint_dynamics_are_written_per_joint_and_the_export_value_is_only_a_fallback() {
+    let mut s = hinge();
+    run(&mut s, "joint.dynamics", json!({"joint": "Hinge", "effort": 12.5, "velocity": 2.0, "damping": 0.1}));
+    let options = solidcraft_io::UrdfOptions { effort: Some(77.0), velocity: Some(7.0), ..Default::default() };
+    let xml = solidcraft_io::urdf(&s.doc, &s.doc.painted(&s.model.state()), "robot", &options).map(|p| p.xml).unwrap_or_else(|e| panic!("{e}"));
+    assert!(xml.contains(r#"effort="12.5" velocity="2""#), "{xml}");
+    assert!(xml.contains(r#"<dynamics damping="0.1"/>"#), "{xml}");
+    assert!(!xml.contains(r#"effort="77""#), "{xml}");
+}
+
+#[test]
+fn a_joint_with_only_some_dynamics_takes_the_rest_from_the_fallback() {
+    let mut s = hinge();
+    run(&mut s, "joint.dynamics", json!({"joint": "Hinge", "effort": 12.5}));
+    let p = package(&s);
+    assert!(p.xml.contains(r#"effort="12.5" velocity="10""#), "{}", p.xml);
+    assert!(!p.xml.contains("<dynamics"), "{}", p.xml);
+    assert!(has_warning(&p, "Hinge"), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_joint_with_saved_limits_is_not_warned_about() {
+    let mut s = hinge();
+    run(&mut s, "joint.dynamics", json!({"joint": "Hinge", "effort": 12.5, "velocity": 2.0}));
+    let p = package(&s);
+    assert!(!has_warning(&p, "not given"), "{:?}", p.warnings);
+}
+
+#[test]
+fn urdf_without_dynamics_is_unchanged() {
+    let p = package(&hinge());
+    assert!(!p.xml.contains("<dynamics"), "{}", p.xml);
+    assert!(p.xml.contains(r#"effort="1000" velocity="10""#), "{}", p.xml);
+    assert!(has_warning(&p, "not given"), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_chain_reached_from_its_b_side_keeps_each_values_dynamics() {
+    let mut s = two_cubes();
+    ground(&mut s, "A", false);
+    ground(&mut s, "B", true);
+    joint(&mut s, "cylindrical", "Sleeve", json!([]));
+    run(&mut s, "joint.dynamics", json!({"joint": "Sleeve", "index": 0, "damping": 0.1}));
+    run(&mut s, "joint.dynamics", json!({"joint": "Sleeve", "index": 1, "damping": 0.2}));
+    let p = package(&s);
+    let damping = |step| p.model.joints.iter().find(|j| j.step == step).and_then(|j| j.dynamics.damping);
+    assert_eq!(damping(Step::Revolute), Some(0.1), "{}", p.xml);
+    assert_eq!(damping(Step::Prismatic), Some(0.2), "{}", p.xml);
+}
+
+#[test]
+fn hand_edited_dynamics_are_ignored_with_a_warning() {
+    let mut s = hinge();
+    let bad =
+        solidcraft_doc::joints::JointDynamics { effort: Some(f64::NAN), velocity: Some(-1.0), damping: Some(f64::INFINITY), friction: Some(-2.0) };
+    if let Some(j) = s.doc_mut().assembly.joints.first_mut() {
+        j.dynamics = vec![Some(bad); 5];
+    }
+    let p = package(&s);
+    assert!(!p.xml.contains("<dynamics"), "{}", p.xml);
+    assert!(p.xml.contains(r#"effort="1000" velocity="10""#), "{}", p.xml);
+    assert!(has_warning(&p, "dynamics"), "{:?}", p.warnings);
+}
+
+/// A grounded cube and `kinds.len()` more, each on a joint to it named `J0`, `J1`...
+fn fan(kinds: &[&str]) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Hub"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0]}));
+    ground(&mut s, "Hub", true);
+    for (i, kind) in kinds.iter().enumerate() {
+        let x = 20 * (i + 1);
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": format!("P{i}")}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+        run(&mut s, "joint.create", json!({"type": kind, "a": {"face": [5, 5, 10]}, "b": {"face": [x + 5, 5, 0]}, "name": format!("J{i}")}));
+    }
+    s
+}
+
+/// `b = ratio · a + offset` in stored units (rad, mm), between values 0 of two joints.
+fn link(s: &mut Session, a: &str, b: &str, ratio: f64, offset: f64) {
+    let id = |s: &Session, n: &str| s.doc.assembly.joints.iter().find(|j| j.name == n).map_or(0, |j| j.id);
+    let (a, b) = (id(s, a), id(s, b));
+    s.doc_mut().assembly.links.push(joints::MotionLink { a, ia: 0, b, ib: 0, ratio, offset, coupling: None, lift: Vec::new() });
+}
+
+fn mimic_package(s: &Session) -> UrdfPackage {
+    let options = UrdfOptions { mimic: true, ..Default::default() };
+    match solidcraft_io::urdf(&s.doc, &s.doc.painted(&s.model.state()), "t", &options) {
+        Ok(p) => p,
+        Err(e) => panic!("urdf: {e}"),
+    }
+}
+
+/// (driver's name, multiplier, offset) of a URDF joint.
+fn mimic_of(p: &UrdfPackage, joint: &str) -> Option<(String, f64, f64)> {
+    let m = p.model.joints.iter().find(|j| j.name == joint)?.mimic?;
+    Some((p.model.joints.get(m.joint)?.name.clone(), m.multiplier, m.offset))
+}
+
+#[test]
+fn a_gear_pair_writes_mimic() {
+    let mut s = fan(&["revolute", "revolute"]);
+    run(&mut s, "joint.gear", json!({"a": "J0", "b": "J1", "ra": 10, "rb": 20}));
+    let p = mimic_package(&s);
+    let (driver, multiplier, offset) = mimic_of(&p, "J1").unwrap_or_else(|| panic!("{}", p.xml));
+    assert_eq!(driver, "J0");
+    // A gear twice the size turns half as far, the other way.
+    assert!((multiplier + 0.5).abs() < 1e-12, "{multiplier}");
+    assert!(offset.abs() < 1e-12, "{offset}");
+    assert!(p.xml.contains(r#"<mimic joint="J0" multiplier="-0.5" offset="0"/>"#), "{}", p.xml);
+    assert!(mimic_of(&p, "J0").is_none());
+}
+
+#[test]
+fn a_rack_and_pinion_converts_mm_per_rad_to_m_per_rad() {
+    let mut s = fan(&["revolute", "slider"]);
+    run(&mut s, "joint.rack_pinion", json!({"a": "J0", "b": "J1", "radius": 5}));
+    let p = mimic_package(&s);
+    let (_, multiplier, _) = mimic_of(&p, "J1").unwrap_or_else(|| panic!("{}", p.xml));
+    assert!((multiplier.abs() - 0.005).abs() < 1e-12, "{multiplier}");
+}
+
+#[test]
+fn a_prismatic_driver_converts_rad_per_mm_to_rad_per_m() {
+    let mut s = fan(&["slider", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.25);
+    let p = mimic_package(&s);
+    assert_eq!(mimic_of(&p, "J1"), Some(("J0".into(), 2000.0, 0.25)), "{}", p.xml);
+}
+
+#[test]
+fn a_prismatic_follower_writes_its_offset_in_metres() {
+    let mut s = fan(&["slider", "slider"]);
+    link(&mut s, "J0", "J1", 3.0, 7.0);
+    let p = mimic_package(&s);
+    assert_eq!(mimic_of(&p, "J1"), Some(("J0".into(), 3.0, 0.007)), "{}", p.xml);
+}
+
+#[test]
+fn linked_links_are_flattened_to_the_first_driver() {
+    let mut s = fan(&["revolute", "revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    link(&mut s, "J1", "J2", 3.0, 0.1);
+    let p = mimic_package(&s);
+    assert_eq!(mimic_of(&p, "J1"), Some(("J0".into(), 2.0, 0.0)), "{}", p.xml);
+    assert_eq!(mimic_of(&p, "J2"), Some(("J0".into(), 6.0, 0.1)), "{}", p.xml);
+}
+
+#[test]
+fn flattening_scales_the_earlier_offset() {
+    let mut s = fan(&["revolute", "revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.5);
+    link(&mut s, "J1", "J2", 3.0, 0.1);
+    let p = mimic_package(&s);
+    let (_, m, o) = mimic_of(&p, "J2").unwrap_or_else(|| panic!("{}", p.xml));
+    assert_eq!(m, 6.0);
+    assert!((o - 1.6).abs() < 1e-12, "{o}");
+}
+
+#[test]
+fn a_cycle_of_links_writes_no_mimic_and_warns() {
+    let mut s = fan(&["revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    link(&mut s, "J1", "J0", 0.5, 0.0);
+    let p = mimic_package(&s);
+    assert!(!p.xml.contains("<mimic"), "{}", p.xml);
+    assert!(has_warning(&p, "cycle"), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_suppressed_driver_leaves_the_follower_free_and_warns() {
+    let mut s = fan(&["revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    run(&mut s, "joint.edit", json!({"joint": "J0", "suppressed": true}));
+    let p = mimic_package(&s);
+    assert!(!p.xml.contains("<mimic"), "{}", p.xml);
+    assert!(p.warnings.iter().any(|w| w.contains("J1") && w.contains("free")), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_driver_that_closes_a_loop_leaves_the_follower_free_and_warns() {
+    let mut s = fan(&["revolute", "revolute"]);
+    // P0 to P1 closes the loop Hub, P0, P1: the tree leaves this joint out.
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": "P0:1", "face": [25, 5, 10]}, "b": {"occurrence": "P1:1", "face": [45, 5, 0]}, "name": "Closing"}),
+    );
+    let id = s.doc.assembly.joints.iter().find(|j| j.name == "Closing").map_or(0, |j| j.id);
+    let j1 = s.doc.assembly.joints.iter().find(|j| j.name == "J1").map_or(0, |j| j.id);
+    s.doc_mut().assembly.links.push(joints::MotionLink { a: id, ia: 0, b: j1, ib: 0, ratio: 2.0, offset: 0.0, coupling: None, lift: Vec::new() });
+    let p = mimic_package(&s);
+    assert!(!p.xml.contains("<mimic"), "{}", p.xml);
+    assert!(p.warnings.iter().any(|w| w.contains("J1") && w.contains("free")), "{:?}", p.warnings);
+}
+
+#[test]
+fn mimic_values_match_solidcraft_when_the_chain_runs_reversed() {
+    // The Hub is on B's side of the follower: its chain runs backwards.
+    let mut s = Session::default();
+    for (name, x) in [("Hub", 0), ("Driver", 20), ("Follower", 40)] {
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": name}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+    }
+    ground(&mut s, "Hub", true);
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": "Hub:1", "face": [5, 5, 10]}, "b": {"occurrence": "Driver:1", "face": [25, 5, 0]}, "name": "D"}),
+    );
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": "Follower:1", "face": [45, 5, 0]}, "b": {"occurrence": "Hub:1", "face": [5, 5, 0]}, "name": "F"}),
+    );
+    link(&mut s, "D", "F", 2.0, 0.1);
+    run(&mut s, "joint.drive", json!({"joint": "D", "values": [20]}));
+    let p = mimic_package(&s);
+    let (driver, m, o) = mimic_of(&p, "F").unwrap_or_else(|| panic!("{}", p.xml));
+    assert_eq!(driver, "D");
+    let driver_value = 20f64.to_radians();
+    let frames = p.model.link_frames(|j| match j.name.as_str() {
+        "D" => driver_value,
+        "F" => m * driver_value + o,
+        _ => 0.0,
+    });
+    let placements = s.doc.placements();
+    for (l, f) in p.model.links.iter().zip(&frames) {
+        if l.path.is_empty() {
+            continue;
+        }
+        let Some((_, _, want)) = placements.iter().find(|x| x.1 == l.path) else { panic!("{}", l.name) };
+        assert!(close(&mat_mul(f, &l.mesh_origin), want), "{}", l.name);
+    }
+}
+
+#[test]
+fn mimic_false_gives_the_previous_output() {
+    let mut s = fan(&["revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    assert!(!package(&s).xml.contains("<mimic"));
+}
+
+#[test]
+fn file_export_writes_mimic_unless_told_not_to() {
+    let mut s = fan(&["revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    let dir = temp("mimic");
+    let on = dir.join("on.urdf");
+    let off = dir.join("off.urdf");
+    run(&mut s, "file.export", json!({"path": on.to_string_lossy()}));
+    run(&mut s, "file.export", json!({"path": off.to_string_lossy(), "mimic": false}));
+    assert!(std::fs::read_to_string(&on).unwrap_or_default().contains("<mimic"));
+    assert!(!std::fs::read_to_string(&off).unwrap_or_default().contains("<mimic"));
+}
+
+#[test]
+fn a_follower_limit_the_driver_can_exceed_warns() {
+    let mut s = fan(&["revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    run(&mut s, "joint.limits", json!({"joint": "J0", "min": -30, "max": 30}));
+    run(&mut s, "joint.limits", json!({"joint": "J1", "min": -20, "max": 20}));
+    assert!(has_warning(&mimic_package(&s), "exceed"), "driver reaches 60 deg");
+    let mut s = fan(&["revolute", "revolute"]);
+    link(&mut s, "J0", "J1", 2.0, 0.0);
+    run(&mut s, "joint.limits", json!({"joint": "J0", "min": -30, "max": 30}));
+    run(&mut s, "joint.limits", json!({"joint": "J1", "min": -90, "max": 90}));
+    assert!(!has_warning(&mimic_package(&s), "exceed"));
+}
+
+/// `two_cubes` on a revolute joint, with a flagged origin "tool0" on the top of B.
+fn tool_frame() -> Session {
+    let mut s = two_cubes();
+    joint(&mut s, "revolute", "Turn", json!([]));
+    let b = occ(&s, "B");
+    // The joint has moved B onto A: its top face is at z = 20 now.
+    run(&mut s, "joint.origin", json!({"name": "tool0", "occurrence": b, "face": [5, 5, 20], "frame": true}));
+    s
+}
+
+/// A link's frame at the design's current joint values.
+fn frame_of(p: &UrdfPackage, s: &Session, link: &str) -> Mat {
+    let vals = joints::joint_values(&s.doc.assembly);
+    let frames = p.model.link_frames(|j| j.source.and_then(|(id, k)| vals.get(&id)?.get(k).copied()).unwrap_or(0.0));
+    let at = p.model.links.iter().position(|l| l.name == link).unwrap_or_else(|| panic!("no link {link}: {}", p.xml));
+    frames[at]
+}
+
+fn world_of_origin(s: &Session, name: &str) -> Mat {
+    let o = s.doc.assembly.origins.iter().find(|o| o.name == name).map(|o| o.origin.clone());
+    let o = o.unwrap_or_else(|| panic!("no origin {name}"));
+    s.doc.origin_world(&s.model.state(), &o).unwrap_or_else(|e| panic!("{e}"))
+}
+
+#[test]
+fn a_flagged_origin_becomes_a_fixed_massless_link() {
+    let s = tool_frame();
+    let p = package(&s);
+    assert!(p.xml.contains(r#"<link name="tool0">"#) || p.xml.contains(r#"<link name="tool0"/>"#), "{}", p.xml);
+    let l = p.model.links.iter().find(|l| l.name == "tool0").unwrap_or_else(|| panic!("{}", p.xml));
+    assert!(l.inertial.is_none() && l.visual.is_none() && l.collision.is_empty());
+    let at = p.model.links.iter().position(|l| l.name == "tool0");
+    let j = p.model.joints.iter().find(|j| Some(j.child) == at).unwrap_or_else(|| panic!("{}", p.xml));
+    assert_eq!(j.step, Step::Fixed);
+    assert_eq!(p.model.links[j.parent].name, "B");
+    let frame = frame_of(&p, &s, "tool0");
+    assert!(close(&frame, &world_of_origin(&s, "tool0")));
+    assert!((frame[3][0] - 5.0).abs() < 1e-9 && (frame[3][1] - 5.0).abs() < 1e-9 && (frame[3][2] - 20.0).abs() < 1e-9, "{frame:?}");
+}
+
+#[test]
+fn an_unflagged_origin_adds_nothing() {
+    let mut s = tool_frame();
+    let before = package(&s).model.links.len();
+    run(&mut s, "joint.origin_frame", json!({"origin": "tool0", "frame": false}));
+    assert_eq!(package(&s).model.links.len(), before - 1);
+    run(&mut s, "joint.origin_frame", json!({"origin": "tool0", "frame": true}));
+    assert_eq!(package(&s).model.links.len(), before);
+    assert!(s.execute("joint.origin_frame", &json!({"origin": "nobody", "frame": true})).is_err());
+}
+
+#[test]
+fn a_frame_moves_with_its_part_when_the_joint_drives() {
+    let mut s = tool_frame();
+    run(&mut s, "joint.drive", json!({"joint": "Turn", "values": [40]}));
+    let p = package(&s);
+    assert!(close(&frame_of(&p, &s, "tool0"), &world_of_origin(&s, "tool0")));
+}
+
+#[test]
+fn a_frame_name_taken_by_a_joint_gets_a_suffix() {
+    let mut s = two_cubes();
+    joint(&mut s, "revolute", "Turn", json!([]));
+    let b = occ(&s, "B");
+    run(&mut s, "joint.origin", json!({"name": "Turn", "occurrence": b, "face": [5, 5, 20], "frame": true}));
+    let p = package(&s);
+    assert!(p.model.links.iter().any(|l| l.name == "Turn_2"), "{}", p.xml);
+    assert!(p.model.joints.iter().any(|j| j.name == "Turn"), "{}", p.xml);
+}
+
+#[test]
+fn a_frame_whose_face_is_gone_is_skipped_with_a_warning() {
+    let mut s = tool_frame();
+    let mut lost = s.doc.assembly.origins[0].origin.clone();
+    lost.occurrence = 987_654;
+    s.doc_mut().assembly.origins[0].origin = lost;
+    let p = package(&s);
+    assert!(!p.model.links.iter().any(|l| l.name == "tool0"), "{}", p.xml);
+    assert!(p.warnings.iter().any(|w| w.contains("tool0")), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_frame_on_a_component_placed_twice_appears_once() {
+    let mut s = tool_frame();
+    run(&mut s, "occurrence.copy", json!({"component": "B", "translate": [50, 0, 0]}));
+    let p = package(&s);
+    assert_eq!(p.model.links.iter().filter(|l| l.name.starts_with("tool0")).count(), 1, "{}", p.xml);
+}
+
+/// A link's mass, centre of mass (mm) and inertia.
+fn inertial_of(p: &UrdfPackage, link: &str) -> solidcraft_io::urdf::Inertial {
+    let l = p.model.links.iter().find(|l| l.name == link).unwrap_or_else(|| panic!("{}", p.xml));
+    l.inertial.unwrap_or_else(|| panic!("{} has no inertial", l.name))
+}
+
+#[test]
+fn a_mass_override_scales_inertia_and_keeps_the_centre() {
+    let mut s = two_cubes();
+    let before = inertial_of(&package(&s), "B");
+    let mass = before.mass * 2.0;
+    run(&mut s, "component.physical_override", json!({"component": "B", "mass": mass}));
+    let after = inertial_of(&package(&s), "B");
+    assert!((after.mass - mass).abs() < 1e-12);
+    for (a, b) in after.inertia.iter().flatten().zip(before.inertia.iter().flatten()) {
+        assert!((a - 2.0 * b).abs() < 1e-15, "{a} {b}");
+    }
+    let moved = after.com - before.com;
+    assert!(moved.dot(moved) < 1e-24);
+}
+
+#[test]
+fn a_full_override_replaces_all_three() {
+    let mut s = two_cubes();
+    run(&mut s, "component.physical_override", json!({"component": "B", "mass": 3.0, "com": [21, 2, 3], "inertia": [1.0, 2.0, 3.0, 0.1, 0.2, 0.3]}));
+    let i = inertial_of(&package(&s), "B");
+    assert_eq!(i.mass, 3.0);
+    let off = i.com - solidcraft_geom::Vec3::new(21.0, 2.0, 3.0);
+    assert!(off.dot(off) < 1e-18, "{:?}", i.com);
+    assert_eq!(i.inertia, [[1.0, 0.1, 0.2], [0.1, 2.0, 0.3], [0.2, 0.3, 3.0]]);
+}
+
+/// A link's centre of mass (mm) and inertia, in world axes.
+fn world_inertial(p: &UrdfPackage, s: &Session, link: &str) -> (solidcraft_geom::Vec3, [[f64; 3]; 3]) {
+    let i = inertial_of(p, link);
+    let f = frame_of(p, s, link);
+    let com = solidcraft_doc::apply_point(&f, i.com);
+    let r = |a: usize, b: usize| f[b][a];
+    let mut out = [[0.0; 3]; 3];
+    for (x, row) in out.iter_mut().enumerate() {
+        for (y, cell) in row.iter_mut().enumerate() {
+            for a in 0..3 {
+                for b in 0..3 {
+                    *cell += r(x, a) * i.inertia[a][b] * r(y, b);
+                }
+            }
+        }
+    }
+    (com, out)
+}
+
+fn assert_world_inertial(p: &UrdfPackage, s: &Session, link: &str, com: [f64; 3], diagonal: [f64; 3]) {
+    let (c, i) = world_inertial(p, s, link);
+    let off = c - solidcraft_geom::Vec3::new(com[0], com[1], com[2]);
+    assert!(off.dot(off) < 1e-16, "{link}: centre {c:?}, expected {com:?}");
+    for k in 0..3 {
+        assert!((i[k][k] - diagonal[k]).abs() < 1e-9, "{link}: {i:?}, expected {diagonal:?}");
+    }
+}
+
+#[test]
+fn each_placement_gets_the_override_in_its_own_frame() {
+    let mut s = two_cubes();
+    run(&mut s, "component.physical_override", json!({"component": "B", "mass": 3.0, "com": [21, 0, 0], "inertia": [1.0, 2.0, 3.0, 0.0, 0.0, 0.0]}));
+    run(&mut s, "occurrence.copy", json!({"component": "B"}));
+    let copy = s.doc.occurrences.iter().map(|o| o.id).max().unwrap_or(0);
+    // A quarter turn about z: x goes to y, so xx and yy swap and the centre swings to +y.
+    run(&mut s, "occurrence.move", json!({"occurrence": copy, "axis": [0, 0, 1], "angle": "90 deg", "origin": [0, 0, 0]}));
+    let p = package(&s);
+    assert_world_inertial(&p, &s, "B_1", [21.0, 0.0, 0.0], [1.0, 2.0, 3.0]);
+    assert_world_inertial(&p, &s, "B_2", [0.0, 21.0, 0.0], [2.0, 1.0, 3.0]);
+}
+
+#[test]
+fn an_override_on_a_jointed_part_follows_it() {
+    let mut s = two_cubes();
+    // B's bottom centre (25, 5, 0) goes to A's top centre (5, 5, 10): a move of (-20, 0, 10).
+    joint(&mut s, "revolute", "Turn", json!([]));
+    run(&mut s, "component.physical_override", json!({"component": "B", "mass": 3.0, "com": [25, 5, 5], "inertia": [1.0, 2.0, 3.0, 0.0, 0.0, 0.0]}));
+    let p = package(&s);
+    assert_world_inertial(&p, &s, "B", [5.0, 5.0, 15.0], [1.0, 2.0, 3.0]);
+}
+
+#[test]
+fn nested_components_keep_their_own_values() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Leg"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 30, "corner": [0, 0, 0]}));
+    let leg = s.doc.find_component("Leg").unwrap_or(0);
+    run(&mut s, "component.create", json!({"name": "Foot", "parent": leg}));
+    run(&mut s, "solid.box", json!({"length": 12, "width": 12, "height": 2, "corner": [-1, -1, -2]}));
+    let foot = inertial_of(&package(&s), "Foot").mass;
+    run(&mut s, "component.physical_override", json!({"component": "Leg", "mass": 9.0}));
+    let p = package(&s);
+    assert_eq!(inertial_of(&p, "Leg").mass, 9.0);
+    assert_eq!(inertial_of(&p, "Foot").mass, foot);
+}
+
+#[test]
+fn the_root_design_is_refused() {
+    let mut s = two_cubes();
+    assert!(s.execute("component.physical_override", &json!({"component": "root", "mass": 1.0})).is_err());
+}
+
+#[test]
+fn mass_alone_on_open_surfaces_is_refused_and_works_with_inertia() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Sheet"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 0], [40, 0]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["l1"], "distance": 10, "body_name": "Wall"}));
+    assert!(s.execute("component.physical_override", &json!({"component": "Sheet", "mass": 1.0})).is_err());
+    run(&mut s, "component.physical_override", json!({"component": "Sheet", "mass": 1.0, "inertia": [1, 1, 1, 0, 0, 0]}));
+    assert_eq!(inertial_of(&package(&s), "Sheet").mass, 1.0);
+}
+
+#[test]
+fn hand_edited_overrides_are_ignored_with_a_warning() {
+    let mut s = two_cubes();
+    let before = inertial_of(&package(&s), "B").mass;
+    let bad = solidcraft_doc::PhysicalOverride { mass: f64::NAN, com: None, inertia: None };
+    let id = s.doc.find_component("B").unwrap_or(0);
+    if let Some(c) = s.doc_mut().components.iter_mut().find(|c| c.id == id) {
+        c.physical_override = Some(bad);
+    }
+    let p = package(&s);
+    assert_eq!(inertial_of(&p, "B").mass, before);
+    assert!(p.warnings.iter().any(|w| w.contains("override") && w.contains('B')), "{:?}", p.warnings);
+}
+
+#[test]
+fn physical_override_refuses_hostile_values() {
+    let mut s = two_cubes();
+    for p in [
+        json!({"component": "B", "mass": 0.0}),
+        json!({"component": "B", "mass": -1.0}),
+        json!({"component": "B", "mass": 1e300}),
+        json!({"component": "B", "mass": 1.0, "com": [1, 2]}),
+        json!({"component": "B", "mass": 1.0, "inertia": [1, 1, 1]}),
+        json!({"component": "B", "mass": 1.0, "inertia": [0, 1, 1, 0, 0, 0]}),
+        json!({"component": "B", "com": [1, 2, 3]}),
+        json!({"component": "Nobody", "mass": 1.0}),
+    ] {
+        assert!(s.execute("component.physical_override", &p).is_err(), "{p}");
+    }
+}
+
+#[test]
+fn omitting_every_value_clears_the_override() {
+    let mut s = two_cubes();
+    let before = inertial_of(&package(&s), "B").mass;
+    run(&mut s, "component.physical_override", json!({"component": "B", "mass": 5.0}));
+    run(&mut s, "component.physical_override", json!({"component": "B"}));
+    assert_eq!(inertial_of(&package(&s), "B").mass, before);
+}
+
+#[test]
+fn properties_keep_the_computed_mass_and_note_the_override() {
+    let mut s = two_cubes();
+    let before = run(&mut s, "component.properties", json!({"component": "B"}));
+    run(&mut s, "component.physical_override", json!({"component": "B", "mass": 5.0}));
+    let after = run(&mut s, "component.properties", json!({"component": "B"}));
+    assert_eq!(after["mass"], before["mass"]);
+    assert_eq!(after["physical_override"]["mass"], json!(5.0), "{after}");
+}
+
+#[test]
+fn a_body_keeps_its_collision_shape_when_renamed() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "body.collision", json!({"body": "Block", "shape": "box"}));
+    assert_eq!(s.doc.collision_shape("Block"), solidcraft_doc::CollisionShape::Box);
+    run(&mut s, "body.rename", json!({"body": "Block", "name": "Brick"}));
+    assert_eq!(s.doc.collision_shape("Brick"), solidcraft_doc::CollisionShape::Box);
+    assert_eq!(s.doc.collision_shape("Block"), solidcraft_doc::CollisionShape::Auto);
+}
+
+#[test]
+fn setting_a_component_sets_all_its_bodies() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "C"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "One"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "body_name": "Two", "operation": "new"}));
+    run(&mut s, "body.collision", json!({"component": "C", "shape": "none"}));
+    for b in ["One", "Two"] {
+        assert_eq!(s.doc.collision_shape(b), solidcraft_doc::CollisionShape::None, "{b}");
+    }
+}
+
+#[test]
+fn auto_removes_the_entry() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "body.collision", json!({"body": "Block", "shape": "sphere"}));
+    run(&mut s, "body.collision", json!({"body": "Block", "shape": "auto"}));
+    assert!(s.doc.collision_shapes.is_empty());
+}
+
+#[test]
+fn body_collision_refuses_bad_requests() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "C"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    for p in [
+        json!({"body": "Block", "component": "C", "shape": "box"}),
+        json!({"shape": "box"}),
+        json!({"body": "Block", "shape": "blob"}),
+        json!({"body": "Nobody", "shape": "box"}),
+        json!({"component": "Nobody", "shape": "box"}),
+        json!({"body": "Block"}),
+    ] {
+        assert!(s.execute("body.collision", &p).is_err(), "{p}");
+    }
+    assert!(s.doc.collision_shapes.is_empty());
+}
+
+#[test]
+fn a_pasted_component_gets_its_bodies_shapes() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "C"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    run(&mut s, "body.collision", json!({"body": "Block", "shape": "sphere"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.paste_new", json!({"component": "C"}));
+    assert_eq!(s.doc.collision_shapes.len(), 2, "{:?}", s.doc.collision_shapes);
+    assert!(s.doc.collision_shapes.values().all(|x| *x == solidcraft_doc::CollisionShape::Sphere));
+}
+
+fn package_with(s: &Session, collision: CollisionDefault) -> UrdfPackage {
+    let options = UrdfOptions { collision, ..Default::default() };
+    solidcraft_io::urdf(&s.doc, &s.doc.painted(&s.model.state()), "t", &options).unwrap_or_else(|e| panic!("urdf: {e}"))
+}
+
+fn collisions_of<'a>(p: &'a UrdfPackage, link: &str) -> &'a [CollisionGeom] {
+    p.model.links.iter().find(|l| l.name == link).map_or(&[], |l| l.collision.as_slice())
+}
+
+/// Volume of a binary STL by name.
+fn named_stl_volume(p: &UrdfPackage, file: &str) -> f64 {
+    let (_, bytes) = p.meshes.iter().find(|(n, _)| n == file).unwrap_or_else(|| panic!("no {file}"));
+    stl_volume(bytes).unwrap_or_else(|| panic!("{file} is not closed"))
+}
+
+#[test]
+fn an_unconfigured_design_shares_the_visual_mesh_as_before() {
+    let p = package(&two_cubes());
+    let files: Vec<&str> = p.meshes.iter().map(|m| m.0.as_str()).collect();
+    assert_eq!(files, ["t-A.stl", "t-B.stl"]);
+    assert!(matches!(collisions_of(&p, "B"), [CollisionGeom::Mesh { file, .. }] if file == "t-B.stl"));
+}
+
+#[test]
+fn none_writes_no_collision_and_no_warning() {
+    let mut s = two_cubes();
+    run(&mut s, "body.collision", json!({"component": "B", "shape": "none"}));
+    let p = package(&s);
+    assert!(collisions_of(&p, "B").is_empty());
+    assert!(!collisions_of(&p, "A").is_empty());
+    assert!(!p.warnings.iter().any(|w| w.contains("collision")), "{:?}", p.warnings);
+    assert_eq!(p.meshes.len(), 2, "no mesh for a body with no collision: {:?}", p.meshes.iter().map(|m| &m.0).collect::<Vec<_>>());
+}
+
+#[test]
+fn a_box_shape_writes_a_metre_primitive_with_its_origin() {
+    let mut s = two_cubes();
+    run(&mut s, "body.collision", json!({"component": "B", "shape": "box"}));
+    let p = package(&s);
+    assert!(p.xml.contains(r#"<box size="0.01 0.01 0.01"/>"#), "{}", p.xml);
+    let [CollisionGeom::Box { origin, .. }] = collisions_of(&p, "B") else { panic!("{}", p.xml) };
+    // The cube at x 20..30, y 0..10, z 0..10 is centred at (25, 5, 5).
+    let link = frame_of(&p, &s, "B");
+    let at = mat_mul(&link, origin);
+    assert!((at[3][0] - 25.0).abs() < 1e-9 && (at[3][1] - 5.0).abs() < 1e-9 && (at[3][2] - 5.0).abs() < 1e-9, "{at:?}");
+}
+
+#[test]
+fn a_cylinder_shape_points_along_urdf_z() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Post"}));
+    // Long along world y: the cylinder's z has to turn onto it.
+    run(&mut s, "solid.box", json!({"length": 10, "width": 40, "height": 10, "corner": [0, 0, 0]}));
+    run(&mut s, "body.collision", json!({"component": "Post", "shape": "cylinder"}));
+    let p = package(&s);
+    let [CollisionGeom::Cylinder { origin, radius, length }] = collisions_of(&p, "Post") else { panic!("{}", p.xml) };
+    assert!((length - 40.0).abs() < 1e-9, "{length}");
+    assert!((radius - 50f64.sqrt()).abs() < 1e-9, "{radius}");
+    let at = mat_mul(&frame_of(&p, &s, "Post"), origin);
+    assert!(at[2][1].abs() > 1.0 - 1e-9, "{at:?}");
+    assert!((at[3][1] - 20.0).abs() < 1e-9, "{at:?}");
+}
+
+#[test]
+fn a_sphere_shape_holds_the_body() {
+    let mut s = two_cubes();
+    run(&mut s, "body.collision", json!({"component": "B", "shape": "sphere"}));
+    let p = package(&s);
+    let [CollisionGeom::Sphere { radius, .. }] = collisions_of(&p, "B") else { panic!("{}", p.xml) };
+    assert!((radius - 75f64.sqrt()).abs() < 1e-9, "{radius}");
+}
+
+#[test]
+fn convex_hull_writes_one_stl_per_body_and_each_is_closed() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "C"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "One"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "body_name": "Two", "operation": "new"}));
+    run(&mut s, "body.collision", json!({"component": "C", "shape": "convex_hull"}));
+    let p = package(&s);
+    let geoms = collisions_of(&p, "C");
+    assert_eq!(geoms.len(), 2, "{}", p.xml);
+    for g in geoms {
+        let CollisionGeom::Mesh { file, .. } = g else { panic!("{g:?}") };
+        assert!(file.ends_with("-collision.stl"), "{file}");
+        // In metres: 1 cm³.
+        assert!((named_stl_volume(&p, file) - 1e-6).abs() < 1e-12);
+    }
+}
+
+#[test]
+fn the_collision_option_applies_only_to_auto_bodies() {
+    let mut s = two_cubes();
+    run(&mut s, "body.collision", json!({"component": "A", "shape": "sphere"}));
+    let p = package_with(&s, CollisionDefault::ConvexHull);
+    assert!(matches!(collisions_of(&p, "A"), [CollisionGeom::Sphere { .. }]), "{}", p.xml);
+    assert!(matches!(collisions_of(&p, "B"), [CollisionGeom::Mesh { file, .. }] if file != "t-B.stl"), "{}", p.xml);
+}
+
+#[test]
+fn a_mesh_body_keeps_the_mesh_under_a_hull_default() {
+    let mut s = two_cubes();
+    run(&mut s, "body.collision", json!({"component": "B", "shape": "mesh"}));
+    let p = package_with(&s, CollisionDefault::ConvexHull);
+    assert!(matches!(collisions_of(&p, "B"), [CollisionGeom::Mesh { file, .. }] if file == "t-B.stl"), "{}", p.xml);
+}
+
+/// A flat open surface in component "Sheet", body "Wall".
+fn sheet() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Sheet"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 0], [40, 0]], "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "surface.extrude", json!({"sketch": "S", "curves": ["l1"], "distance": 10, "body_name": "Wall"}));
+    s
+}
+
+#[test]
+fn a_flat_body_given_a_hull_has_none_and_warns() {
+    let mut s = sheet();
+    run(&mut s, "body.collision", json!({"component": "Sheet", "shape": "convex_hull"}));
+    let p = package(&s);
+    assert!(collisions_of(&p, "Sheet").is_empty(), "{}", p.xml);
+    assert!(p.warnings.iter().any(|w| w.contains("Wall") && w.contains("hull")), "{:?}", p.warnings);
+}
+
+#[test]
+fn an_open_surface_given_a_box_collides_and_adds_no_mass() {
+    let mut s = sheet();
+    run(&mut s, "body.collision", json!({"component": "Sheet", "shape": "box"}));
+    let p = package(&s);
+    assert!(matches!(collisions_of(&p, "Sheet"), [CollisionGeom::Box { .. }]), "{}", p.xml);
+    assert_eq!(inertial_of(&p, "Sheet").mass, 1e-6);
+}
+
+#[test]
+fn hull_stls_stay_inside_allow_paths() {
+    let mut s = two_cubes();
+    run(&mut s, "body.collision", json!({"component": "B", "shape": "convex_hull"}));
+    let dir = temp("hull-files");
+    let urdf = dir.join("robot.urdf");
+    let r = run(&mut s, "file.export", json!({"path": urdf.to_string_lossy()}));
+    let files = r["files"].as_array().cloned().unwrap_or_default();
+    assert!(files.iter().any(|f| f.as_str().is_some_and(|f| f.ends_with("-collision.stl"))), "{r}");
+    assert!(files.iter().all(|f| f.as_str().is_some_and(|f| f.starts_with(&*dir.to_string_lossy()))), "{r}");
+}
+
+#[test]
+fn file_export_refuses_an_unknown_collision_default() {
+    let mut s = two_cubes();
+    let urdf = temp("collision-word").join("r.urdf");
+    assert!(s.execute("file.export", &json!({"path": urdf.to_string_lossy(), "collision": "blob"})).is_err());
+}
+
+#[test]
+fn an_inertia_breaking_the_triangle_inequality_warns() {
+    let mut s = two_cubes();
+    run(&mut s, "component.physical_override", json!({"component": "B", "mass": 1.0, "inertia": [10.0, 1.0, 1.0, 0.0, 0.0, 0.0]}));
+    let p = package(&s);
+    assert!(p.warnings.iter().any(|w| w.contains("inertia") && w.contains('B')), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_plain_hinge_gets_no_plausibility_warning() {
+    let p = package(&hinge());
+    assert!(!p.warnings.iter().any(|w| w.contains("inertia") || w.contains("no mass") || w.contains("triangles")), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_ball_chains_in_between_links_get_no_plausibility_warning() {
+    let mut s = two_cubes();
+    joint(&mut s, "ball", "Ball", json!([]));
+    let p = package(&s);
+    assert!(!p.warnings.iter().any(|w| w.contains("no mass")), "{:?}", p.warnings);
+}
+
+#[test]
+fn a_pasted_component_keeps_its_mass_override() {
+    let mut s = two_cubes();
+    run(&mut s, "component.physical_override", json!({"component": "B", "mass": 5.0}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "component.paste_new", json!({"component": "B"}));
+    let with: Vec<_> = s.doc.components.iter().filter(|c| c.physical_override.is_some()).collect();
+    assert_eq!(with.len(), 2, "{:?}", s.doc.components.iter().map(|c| &c.name).collect::<Vec<_>>());
+}
+
+#[test]
+fn body_collision_refuses_a_component_with_no_bodies_of_its_own() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Group"}));
+    let group = s.doc.find_component("Group").unwrap_or(0);
+    run(&mut s, "component.create", json!({"name": "Child", "parent": group}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    assert!(s.execute("body.collision", &json!({"component": "Group", "shape": "box"})).is_err());
+    assert!(s.doc.collision_shapes.is_empty());
+}
+
+#[test]
+fn a_mass_only_override_with_nothing_to_scale_warns() {
+    let mut s = sheet();
+    let id = s.doc.find_component("Sheet").unwrap_or(0);
+    let o = solidcraft_doc::PhysicalOverride { mass: 2.0, com: None, inertia: None };
+    if let Some(c) = s.doc_mut().components.iter_mut().find(|c| c.id == id) {
+        c.physical_override = Some(o);
+    }
+    let p = package(&s);
+    assert!(p.warnings.iter().any(|w| w.contains("override") && w.contains("Sheet")), "{:?}", p.warnings);
+}
+
+/// Exports `two_cubes` with `prefix` to `urdf` under a fresh folder, and returns that folder.
+fn export_with_prefix(tag: &str, urdf: &str, prefix: &str) -> (PathBuf, std::path::PathBuf, String) {
+    let mut s = two_cubes();
+    let dir = temp(tag);
+    let path = dir.join(urdf);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "mesh_prefix": prefix}));
+    let xml = std::fs::read_to_string(&path).unwrap_or_default();
+    (dir, path, xml)
+}
+
+#[test]
+fn a_folder_prefix_creates_the_folder_and_the_meshes_are_in_it() {
+    let (dir, _, xml) = export_with_prefix("prefix-folder", "robot.urdf", "meshes/");
+    assert!(xml.contains(r#"filename="meshes/robot-B.stl""#), "{xml}");
+    assert!(dir.join("meshes/robot-B.stl").exists());
+    assert!(!dir.join("robot-B.stl").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_nested_folder_prefix_without_a_trailing_slash_is_a_name_start_in_that_folder() {
+    let (dir, _, xml) = export_with_prefix("prefix-name", "robot.urdf", "out/parts/v1_");
+    assert!(xml.contains(r#"filename="out/parts/v1_robot-B.stl""#), "{xml}");
+    assert!(dir.join("out/parts/v1_robot-B.stl").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_parent_folder_prefix_sits_beside_the_urdf_folder() {
+    let (dir, _, xml) = export_with_prefix("prefix-parent", "urdf/robot.urdf", "../meshes/");
+    assert!(xml.contains(r#"filename="../meshes/robot-B.stl""#), "{xml}");
+    assert!(dir.join("meshes/robot-B.stl").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_package_prefix_writes_into_the_package_when_the_urdf_is_in_it() {
+    let (dir, _, xml) = export_with_prefix("prefix-pkg", "robot/urdf/r.urdf", "package://robot/meshes/");
+    assert!(xml.contains(r#"filename="package://robot/meshes/r-B.stl""#), "{xml}");
+    assert!(dir.join("robot/meshes/r-B.stl").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_package_prefix_writes_its_folder_beside_a_urdf_outside_the_package() {
+    let (dir, _, _) = export_with_prefix("prefix-pkg-out", "r.urdf", "package://robot/meshes/");
+    assert!(dir.join("meshes/r-B.stl").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_file_url_prefix_writes_to_that_folder() {
+    let dir = temp("prefix-file");
+    let target = dir.join("abs");
+    let (other, _, xml) = export_with_prefix("prefix-file-2", "r.urdf", &format!("file://{}/", target.to_string_lossy()));
+    assert!(xml.contains("file://"), "{xml}");
+    assert!(target.join("r-B.stl").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&other);
+}
+
+#[test]
+fn a_web_prefix_keeps_the_meshes_beside_the_urdf_and_says_so() {
+    let mut s = two_cubes();
+    let dir = temp("prefix-web");
+    let path = dir.join("r.urdf");
+    let r = run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "mesh_prefix": "https://example.com/m/"}));
+    assert!(dir.join("r-B.stl").exists());
+    assert!(r["warnings"].to_string().contains("mesh_prefix"), "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
