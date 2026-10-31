@@ -527,7 +527,7 @@ struct DialogComputation {
 
 impl DialogComputation {
     fn new(app: &SolveApp, d: &Dialog) -> Result<Self, String> {
-        if app.file_load.busy() || app.file_picker_busy() {
+        if app.file_load_holds() || app.file_picker_busy() {
             return Err("a file operation is in progress".into());
         }
         let cmds = apply_commands(app, d)?;
@@ -557,7 +557,7 @@ impl DialogComputation {
 }
 
 fn adopt_dialog(app: &mut SolveApp, prepared: solidcraft_engine::ComputedCommands) -> Result<(), String> {
-    if app.file_load.busy() || app.file_picker_busy() {
+    if app.file_load_holds() || app.file_picker_busy() {
         return Err("a file operation is in progress".into());
     }
     let replies = app.session.accept_commands(prepared).map_err(|e| e.to_string())?;
@@ -3502,6 +3502,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 Err(error) => d.refuse(app, error),
             }
         }
+        // Not computing again: the computation ended, applied or refused (saying why).
+        if app.applying.is_none() {
+            let outcome = match &d.error {
+                Some(why) if !applied => crate::operations::Outcome::Failed(why.clone()),
+                _ => crate::operations::Outcome::Done,
+            };
+            crate::operations::ended(app, "apply", outcome);
+        }
     }
     if applied && apply_again {
         for input in &mut d.inputs {
@@ -3513,9 +3521,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         d.repeat_after_apply = false;
         let _ = app.session.execute("select.clear", &json!({}));
     }
-    // Cancel while computing: the result goes (its worker runs on to its end).
-    if cancel && !applied {
-        app.applying = None;
+    // Cancel while computing: the result goes (its worker stops at its next feature).
+    if cancel && !applied && app.applying.take().is_some() {
+        crate::operations::ended(app, "apply", crate::operations::Outcome::Cancelled);
     }
     if !keep || cancel {
         app.session.feature_edit_sketch = None;
@@ -3558,7 +3566,9 @@ pub fn cancel(app: &mut SolveApp) {
     if let Some(pending) = &mut app.pending_feature_edit {
         pending.cancel();
     }
-    app.applying = None;
+    if app.applying.take().is_some() {
+        crate::operations::ended(app, "apply", crate::operations::Outcome::Cancelled);
+    }
     if let Some(mut d) = app.dialog.take() {
         crate::dialogs_motion::closed(app, &mut d, false);
         if let Kind::Text(k) = &mut d.kind {

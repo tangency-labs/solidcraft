@@ -20,9 +20,36 @@ fn temp_beside(path: &Path, tag: &str) -> PathBuf {
     path.with_file_name(format!(".{name}.{tag}.{}.{nanos}.tmp", std::process::id()))
 }
 
-fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+/// Bytes written between checks for Cancel and reports of how far the write is.
+const CHUNK: usize = 1 << 20;
+
+/// What a write its watch cancelled returns: the file it was to replace, and its backup, are as
+/// they were.
+pub fn cancelled_error() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::Interrupted, "save cancelled")
+}
+
+/// The watch over this thread's work asked it to stop.
+pub(crate) fn cancelled() -> bool {
+    solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled())
+}
+
+/// Write `bytes` to a new file at `path` and flush it, a piece at a time: a watched write
+/// ([`solidcraft_kernel::watch`]) reports how far it is (`report`) and stops when cancelled.
+fn write_synced(path: &Path, bytes: &[u8], report: bool) -> std::io::Result<()> {
+    let watch = solidcraft_kernel::watch::current();
     let mut f = OpenOptions::new().write(true).create_new(true).open(path)?;
-    f.write_all(bytes)?;
+    let mut done = 0usize;
+    for chunk in bytes.chunks(CHUNK) {
+        if watch.as_ref().is_some_and(|w| w.cancelled()) {
+            return Err(cancelled_error());
+        }
+        f.write_all(chunk)?;
+        done = done.saturating_add(chunk.len());
+        if report && let Some(w) = &watch {
+            w.progress("writing", done, bytes.len());
+        }
+    }
     flush(&f)
 }
 
@@ -148,7 +175,7 @@ fn rename_with_retry(
 fn write_steps(path: &Path, bytes: &[u8], backup: bool, stop: Option<Step>) -> std::io::Result<()> {
     let permissions = fs::metadata(path).ok().filter(|m| m.is_file()).map(|m| m.permissions());
     let tmp = temp_beside(path, "new");
-    if let Err(e) = write_synced(&tmp, bytes) {
+    if let Err(e) = write_synced(&tmp, bytes, true) {
         let _ = fs::remove_file(&tmp);
         return Err(e);
     }
@@ -160,9 +187,11 @@ fn write_steps(path: &Path, bytes: &[u8], backup: bool, stop: Option<Step>) -> s
         // Copy (not move) the old file, so the target exists at every moment.
         let old = fs::read(path);
         let bak_tmp = temp_beside(path, "bak");
+        // The last moment Cancel stops it: nothing has been replaced yet.
         let r = old
-            .and_then(|old| write_synced(&bak_tmp, &old))
+            .and_then(|old| write_synced(&bak_tmp, &old, false))
             .map(|_| keep_permissions(&permissions, &bak_tmp))
+            .and_then(|_| if cancelled() { Err(cancelled_error()) } else { Ok(()) })
             .and_then(|_| replace_synced(&bak_tmp, &backup_path(path)));
         if let Err(e) = r {
             let _ = fs::remove_file(&bak_tmp);
@@ -172,6 +201,12 @@ fn write_steps(path: &Path, bytes: &[u8], backup: bool, stop: Option<Step>) -> s
     }
     if stop == Some(Step::BackupWritten) {
         return Ok(());
+    }
+    // Without a backup to keep, the last moment Cancel stops it; once the backup is replaced the
+    // save goes through to the end.
+    if !(backup && path.is_file()) && cancelled() {
+        let _ = fs::remove_file(&tmp);
+        return Err(cancelled_error());
     }
     if let Err(e) = replace_synced(&tmp, path) {
         let _ = fs::remove_file(&tmp);
@@ -320,6 +355,67 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
         fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    /// A watch for the tests: how far the write said it is, and Cancel once `cancel_at` bytes are
+    /// reported written.
+    struct TestWatch {
+        reported: std::sync::Mutex<Vec<(&'static str, usize, usize)>>,
+        cancel_at: usize,
+        cancelled: std::sync::atomic::AtomicBool,
+    }
+
+    impl solidcraft_kernel::watch::Watch for TestWatch {
+        fn cancelled(&self) -> bool {
+            self.cancelled.load(std::sync::atomic::Ordering::Relaxed)
+        }
+        fn progress(&self, stage: &'static str, done: usize, total: usize) {
+            if done >= self.cancel_at {
+                self.cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            if let Ok(mut r) = self.reported.lock() {
+                r.push((stage, done, total));
+            }
+        }
+    }
+
+    fn watched(cancel_at: usize) -> std::sync::Arc<TestWatch> {
+        std::sync::Arc::new(TestWatch { reported: Default::default(), cancel_at, cancelled: Default::default() })
+    }
+
+    /// A watched save reports how far it has written, a piece at a time, up to the whole file;
+    /// cancelled part way, it stops: the file and its backup are as they were, and no temporary
+    /// file is left behind.
+    #[test]
+    fn a_watched_write_reports_its_progress_and_cancelled_leaves_the_file_and_its_backup() {
+        let d = dir("watched");
+        let path = d.join("Plate.solidcraft");
+        fs::write(&path, b"version one").unwrap();
+        write_atomic(&path, b"version two", true).unwrap();
+        let big = vec![7u8; 3 * CHUNK + 5];
+        // Written to the end: each piece reported, the last the whole file.
+        let watch = watched(usize::MAX);
+        solidcraft_kernel::watch::watching(watch.clone(), || write_atomic(&path, &big, true)).unwrap();
+        let reported = watch.reported.lock().unwrap().clone();
+        assert_eq!(reported.len(), 4, "{reported:?}");
+        assert_eq!(reported.last(), Some(&("writing", big.len(), big.len())));
+        assert_eq!(fs::read(&path).unwrap(), big);
+        assert_eq!(fs::read(backup_path(&path)).unwrap(), b"version two");
+        // Cancelled after the first piece: refused as cancelled, nothing replaced.
+        let watch = watched(1);
+        let newer = vec![9u8; 3 * CHUNK];
+        let e = solidcraft_kernel::watch::watching(watch.clone(), || write_atomic(&path, &newer, true)).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::Interrupted);
+        assert_eq!(watch.reported.lock().unwrap().len(), 1, "stopped at the next piece");
+        assert_eq!(fs::read(&path).unwrap(), big, "the file is as it was");
+        assert_eq!(fs::read(backup_path(&path)).unwrap(), b"version two", "and its backup");
+        assert!(stale_temps(&path).is_empty(), "no temporary file left");
+        // A new file (nothing to back up) cancelled is never created.
+        let fresh = d.join("New.solidcraft");
+        let e = solidcraft_kernel::watch::watching(watched(1), || write_atomic(&fresh, &newer, true)).unwrap_err();
+        assert_eq!(e.kind(), std::io::ErrorKind::Interrupted);
+        assert!(!fresh.exists() && stale_temps(&fresh).is_empty());
+        let _ = fs::remove_dir_all(&d);
     }
 
     /// A network share (SMB on macOS) refuses the drive flush `sync_all` asks for with "Operation
@@ -558,7 +654,7 @@ mod rename_retry_tests {
         let old = directory.join("image.png");
         let pending = directory.join("completed.tmp");
         fs::write(&old, b"old complete image").unwrap();
-        write_synced(&pending, b"new complete image").unwrap();
+        write_synced(&pending, b"new complete image", false).unwrap();
         let mut reader = Some(OpenOptions::new().read(true).share_mode(1).open(&old).unwrap());
         let error = fs::rename(&pending, &old).unwrap_err();
         assert!(matches!(error.raw_os_error(), Some(5 | 32)), "{error}");

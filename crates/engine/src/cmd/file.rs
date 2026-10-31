@@ -454,7 +454,12 @@ fn write_bytes(
         "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
         _ => return Err(bad("file.save", "format must be container or json")),
     };
-    // Atomic, keeping the version being replaced as `<file>.bak`.
+    // Cancelled while the design was being prepared (a watched save): nothing is written.
+    if solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled()) {
+        return Err(EngineError::Other(format!("{path}: save cancelled")));
+    }
+    // Atomic, keeping the version being replaced as `<file>.bak`; a watched save reports how far
+    // the write is and stops on Cancel until the file is replaced.
     solidcraft_io::write_atomic(std::path::Path::new(path), &bytes, true).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);

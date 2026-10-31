@@ -501,10 +501,12 @@ fn second_hole() -> serde_json::Value {
 }
 
 /// While an agent's batch computes, the chip says which step it is on, of how many, and that
-/// step's command (`2/3 · Cylinder`); a single command shows just its name.
+/// step's command (`2/3 · Cylinder`); a single command shows just its name. The chip is what
+/// shows with the operations panel off.
 #[test]
 fn a_computing_batch_says_its_step() {
     let (mut h, tx) = agent_harness();
+    h.app.preferences.operations_panel = false;
     let hole = |x: f64| json!({"command": "solid.cylinder", "params": {"base": [x, 10, -1], "axis": [0, 0, 1], "radius": 3, "height": 20, "operation": "cut"}});
     let batch = ask(&tx, "engine.batch", json!({"commands": [hole(50.0), hole(30.0), hole(70.0)]}));
     h.frames(1);
@@ -987,4 +989,61 @@ fn a_body_renamed_in_the_browser_keeps_the_pattern_after_it() {
     let kept = before.zip(mesh(&h)).is_some_and(|(a, b)| std::sync::Arc::ptr_eq(&a, &b));
     assert!(kept, "no feature computed again");
     assert_eq!(h.app.session.visibility.locked_bodies, ["Plate"]);
+}
+
+/// With the operations panel (the default), an agent's computing batch is a row named after the
+/// step's command, with how many of the batch's steps are done, and no chip; its X stops it as
+/// the chip's Stop did: answered as stopped, nothing applied.
+#[test]
+fn a_computing_batch_is_a_row_of_the_operations_panel_that_stops_it() {
+    let (mut h, tx) = agent_harness();
+    let features = h.app.session.doc.features.len();
+    let hole = |x: f64| json!({"command": "solid.cylinder", "params": {"base": [x, 10, -1], "axis": [0, 0, 1], "radius": 3, "height": 20, "operation": "cut"}});
+    let batch = ask(&tx, "engine.batch", json!({"commands": [hole(50.0), hole(30.0), hole(70.0)]}));
+    h.frames(1);
+    assert!(h.app.agent_computing().is_some(), "the batch computes");
+    let rows = crate::operations::current(&h.app);
+    let row = rows.iter().find(|r| r.key == "agent").expect("a row for the agent's command");
+    assert!(!row.label.is_empty() && !row.label.contains('.'), "the toolbar's name: {row:?}");
+    assert_eq!(row.steps.map(|(_, total)| total), Some(3), "{row:?}");
+    assert!(row.cancellable());
+    assert!(crate::scenario::rect_of("agent:chip").is_none(), "no chip besides the row");
+    let steps = h.app.agent_steps().expect("its steps");
+    crate::operations::cancel(&mut h.app, "agent").unwrap();
+    assert!(steps.progress.is_cancelled(), "its computation stops, not left to compute unseen");
+    let reply = reply_to(&mut h, &batch);
+    assert_eq!((reply["ok"].clone(), reply["stopped"].clone()), (json!(false), json!(true)), "{reply}");
+    h.frames(2);
+    assert_eq!(h.app.session.doc.features.len(), features, "nothing applied");
+    let finished = crate::operations::control(&mut h.app, &json!({})).unwrap()["finished"].clone();
+    assert_eq!(finished[0]["key"], "agent");
+    assert_eq!(finished[0]["outcome"], "cancelled", "{finished}");
+    // One that computes to its end is listed as done, its reply passed on as ever.
+    let single = ask(&tx, "engine.execute", second_hole());
+    h.frames(1);
+    assert_eq!(reply_to(&mut h, &single)["ok"], true);
+    h.frames(1);
+    let finished = crate::operations::control(&mut h.app, &json!({})).unwrap()["finished"].clone();
+    if h.app.operations.rows(crate::now_ms()).any(|(r, _)| r.key == "agent") || finished[0]["key"] == "agent" {
+        assert_eq!(finished[0]["outcome"], "done", "{finished}");
+    }
+}
+
+/// A batch stopped by a failing step answers `ok` with the step in `failed`: the operation is
+/// listed as failed, saying why, not as done.
+#[test]
+fn a_batch_stopped_by_a_failing_step_ends_failed() {
+    let (mut h, tx) = agent_harness();
+    let hole = |x: f64| json!({"command": "solid.cylinder", "params": {"base": [x, 10, -1], "axis": [0, 0, 1], "radius": 3, "height": 20, "operation": "cut"}});
+    let bad = json!({"command": "solid.fillet", "params": {"edges": ["no-such-edge"], "radius": 2}});
+    let batch = ask(&tx, "engine.batch", json!({"commands": [hole(50.0), hole(30.0), bad]}));
+    h.frames(1);
+    assert!(h.app.agent_computing().is_some(), "the batch computes off the window thread");
+    let reply = reply_to(&mut h, &batch);
+    assert!(reply["result"]["failed"].is_object(), "{reply}");
+    h.frames(1);
+    let finished = crate::operations::control(&mut h.app, &json!({})).unwrap()["finished"].clone();
+    assert_eq!(finished[0]["key"], "agent", "{finished}");
+    assert_eq!(finished[0]["outcome"], "failed", "{finished}");
+    assert!(finished[0]["error"].as_str().is_some_and(|e| e.contains("Fillet") || e.contains("edge")), "{finished}");
 }
