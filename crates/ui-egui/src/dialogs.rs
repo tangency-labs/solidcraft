@@ -501,6 +501,8 @@ pub struct Dialog {
     pub press_pull: bool,
     /// The operation the window chooses by itself (#6901).
     pub op_auto: crate::op_auto::OpAuto,
+    /// Targets follow what is shown until edited by hand.
+    pub targets_follow: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -757,6 +759,7 @@ impl Dialog {
             shell_chain: Default::default(),
             press_pull: false,
             op_auto: Default::default(),
+            targets_follow: false,
         }
     }
 
@@ -1187,6 +1190,14 @@ impl Dialog {
         d.sync_thread(s);
         d.sync_material(s);
         d.advance();
+        // After `advance`: Profiles stays active; pre-selected bodies are the targets.
+        if matches!(d.kind, Kind::Extrude { .. }) {
+            let mut targets = SelInput::new(TARGETS, BODIES, true);
+            targets.items = s.selection.iter().filter(|sel| matches!(sel, Sel::Body { .. })).cloned().collect();
+            d.targets_follow = targets.items.is_empty();
+            d.inputs.push(targets);
+            d.follow_targets(s);
+        }
         Some(d)
     }
 
@@ -1194,6 +1205,29 @@ impl Dialog {
         let Kind::Material { index, editor } = &mut self.kind else { return };
         let bodies = self.inputs.first().map(|input| input.items.body_names()).unwrap_or_default();
         editor.sync_selection(&s.doc, &bodies, index);
+    }
+
+    /// Targets set to [`default_targets`] while they follow what is shown.
+    pub(crate) fn follow_targets(&mut self, s: &Session) {
+        if !self.targets_follow {
+            return;
+        }
+        let Kind::Extrude { operation, auto_op, .. } = self.kind else { return };
+        let mut want = default_targets(s, self, TargetScope::Op(operation));
+        // After `op_auto::update`: a chosen Join with nothing to join is a new body.
+        if auto_op
+            && operation == crate::op_auto::JOIN
+            && want.is_empty()
+            && let Kind::Extrude { operation, .. } = &mut self.kind
+        {
+            *operation = crate::op_auto::NEW;
+            want = default_targets(s, self, TargetScope::Op(crate::op_auto::NEW));
+        }
+        if let Some(inp) = self.inputs.iter_mut().find(|i| i.label == TARGETS)
+            && inp.items != want
+        {
+            inp.items = want;
+        }
     }
 
     /// Resolve a newly selected face without replacing an authored size or changing the
@@ -1248,7 +1282,7 @@ impl Dialog {
 
     /// Make the first single input still empty (after the filled ones) active.
     fn advance(&mut self) {
-        if let Some(i) = self.inputs.iter().position(|i| i.items.is_empty()) {
+        if let Some(i) = self.inputs.iter().position(|i| i.items.is_empty() && i.label != TARGETS) {
             self.active = i;
         } else {
             self.active = self.active.min(self.inputs.len().saturating_sub(1));
@@ -1391,9 +1425,14 @@ impl Dialog {
         matches!(self.kind, Kind::Align { components: true, .. }) && self.active == 0
     }
 
-    /// Everything the inputs hold (for highlighting).
+    /// Everything the inputs hold (for highlighting); Extrude's Targets only while that row is active.
     pub fn items(&self) -> Vec<Sel> {
-        self.inputs.iter().flat_map(|i| i.items.iter().cloned()).collect()
+        self.inputs
+            .iter()
+            .enumerate()
+            .filter(|(i, inp)| inp.label != TARGETS || *i == self.active)
+            .flat_map(|(_, inp)| inp.items.iter().cloned())
+            .collect()
     }
 
     /// Faces Shell will open, including the tangent chain. Keep the input itself as the
@@ -1660,6 +1699,9 @@ impl Dialog {
         }
         let is_fillet = matches!(self.kind, Kind::Fillet { .. }) && self.active == 0;
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
+        if inp.label == TARGETS {
+            self.targets_follow = false;
+        }
         if is_fillet {
             self.chain_applied = chain;
             if picked.iter().all(|p| inp.items.iter().any(|x| selection::same_item(x, p))) {
@@ -1719,6 +1761,9 @@ impl Dialog {
             self.picked_edges.clear();
         }
         let Some(inp) = self.inputs.get_mut(self.active) else { return };
+        if inp.label == TARGETS {
+            self.targets_follow = false;
+        }
         if !add {
             inp.items.clear();
         }
@@ -2651,6 +2696,10 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let mut remove = None;
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
+        // Extrude shows its Targets under Operation ([`targets_rows`]).
+        if inp.label == TARGETS {
+            continue;
+        }
         let stored_reference = feature_pattern_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
         form_row(ui, inp.label, |ui| {
             ui.horizontal(|ui| {
@@ -2673,15 +2722,11 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 } else {
                     RichText::new(crate::i18n::tr("dialog.select")).color(t.text)
                 };
-                let selected_text = text.text().strip_prefix("↖ ").unwrap_or_else(|| text.text());
+                let selected_text = chip_text(text.text());
                 let prompt = if !filled && inp.label == "Edges" { tr("Select edges") } else { selected_text };
                 let chip = crate::ui_kit::selection_field(ui, prompt, crate::ui_kit::Selection { active, filled });
                 if matches!(d.kind, Kind::Shell { .. }) && i == 0 {
-                    chip.widget_info(|| {
-                        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tr(inp.label));
-                        info.current_text_value = Some(prompt.to_string());
-                        info
-                    });
+                    chip_info(ui, &chip, inp.label, prompt);
                 }
                 let chip_rect = chip.rect;
                 let tooltip = if let Some(reference) = stored_reference {
@@ -3013,7 +3058,19 @@ fn auto_operation(app: &SolveApp, d: &mut Dialog) {
     if !matches!(d.kind, Kind::Extrude { auto_op: true, .. }) {
         return;
     }
-    let Some(params) = dialog_commands(app, d).ok().and_then(|c| c.into_iter().next()).map(|(_, p)| p) else { return };
+    // Probe the listed targets, else the defaults; none listed makes a new body.
+    let scope = match (d.targets_follow, d.inputs.iter().find(|i| i.label == TARGETS)) {
+        (false, Some(listed)) => listed.items.clone(),
+        _ => default_targets(&app.session, d, TargetScope::Auto),
+    };
+    let mut probe = d.clone();
+    if let Kind::Extrude { operation, .. } = &mut probe.kind {
+        *operation = if scope.is_empty() { 0 } else { 1 };
+    }
+    if let Some(listed) = probe.inputs.iter_mut().find(|i| i.label == TARGETS) {
+        listed.items = scope.clone();
+    }
+    let Some(params) = dialog_commands(app, &probe).ok().and_then(|c| c.into_iter().next()).map(|(_, p)| p) else { return };
     // A new start (From Object, a start offset) puts the extrude somewhere else: the latch was
     // decided for the old one (#467).
     let start = json!([params.get("from"), params.get("start_offset")]);
@@ -3036,9 +3093,13 @@ fn auto_operation(app: &SolveApp, d: &mut Dialog) {
     {
         params["participants"] = json!(shown);
     }
-    let Some(fresh) = solidcraft_engine::auto_operation(&app.session, &params).and_then(|op| OPS.iter().position(|o| *o == op)) else {
-        return;
+    let fresh = if scope.is_empty() {
+        Some(0)
+    } else {
+        solidcraft_engine::auto_operation(&app.session, &params).and_then(|op| OPS.iter().position(|o| *o == op))
     };
+    let Some(fresh) = fresh else { return };
+    let fresh = if d.targets_follow && default_targets(&app.session, d, TargetScope::Op(fresh)).is_empty() { 0 } else { fresh };
     if let Kind::Extrude { operation, smart, .. } = &mut d.kind {
         *operation = crate::smart_extrude::operation(fresh, *operation, side, &mut smart.latch);
     }
@@ -3142,6 +3203,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     sync_reach(app, &mut d);
     auto_operation(app, &mut d);
     crate::op_auto::update(app, &mut d, ctx);
+    d.follow_targets(&app.session);
     d.sync_thread(&app.session);
     d.sync_material(&app.session);
     update_measure(app, &mut d);
@@ -3596,6 +3658,151 @@ pub(crate) fn roll_marker(app: &mut SolveApp, marker: Option<usize>) -> Result<(
 /// The pick input an extent of To Object adds (a face, vertex or point to go to).
 const TO_OBJECT: &str = "To Object";
 const FROM_OBJECT: &str = "From Object";
+/// The bodies an extrude joins, cuts or intersects.
+pub(crate) const TARGETS: &str = "Targets";
+
+fn picked_bodies(inputs: &[SelInput], label: &str) -> Vec<String> {
+    inputs
+        .iter()
+        .filter(|i| i.label == label)
+        .flat_map(|i| &i.items)
+        .filter_map(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None })
+        .collect()
+}
+
+/// Which bodies [`default_targets`] lists for: the operation chosen, or Auto deciding one.
+#[derive(Clone, Copy, PartialEq)]
+enum TargetScope {
+    Op(usize),
+    Auto,
+}
+
+/// The bodies `solid.extrude` changes on its own, less hidden bodies and meshes.
+fn default_targets(s: &Session, d: &Dialog, scope: TargetScope) -> Vec<Sel> {
+    let picked = d.inputs.first().map(|i| i.items.as_slice()).unwrap_or_default();
+    if scope == TargetScope::Op(1) {
+        let face = match picked.first() {
+            Some(Sel::Face { body, .. }) => Some(body.clone()),
+            Some(Sel::Profile { sketch, .. }) => solidcraft_engine::join_face_body(s, &json!({"sketch": sketch})),
+            _ => None,
+        };
+        if let Some(body) = face.filter(|b| s.body_visible(b)) {
+            return vec![Sel::Body { name: body }];
+        }
+    }
+    let st = s.model.state();
+    let has_own = st.bodies.iter().any(|b| s.doc.model_body_component(b) == s.active_component);
+    // Faces of one body, which the command takes as a group.
+    let first_body = match picked.first() {
+        Some(Sel::Face { body, .. }) => Some(body),
+        _ => None,
+    };
+    let faces = picked.len() > 1 && picked.iter().all(|x| matches!(x, Sel::Face { body, .. } if Some(body) == first_body));
+    let every = !has_own
+        && match scope {
+            TargetScope::Op(op) => op == 2 || op == 3,
+            TargetScope::Auto => faces,
+        };
+    let in_scope = solidcraft_engine::scope_bodies(s);
+    let shown: Vec<_> = st.bodies.iter().filter(|b| !b.body.is_mesh() && s.body_visible(&b.name) && (every || in_scope.contains(&b.name))).collect();
+    if scope == TargetScope::Op(1) && !has_own {
+        let mut parts = shown.iter().map(|b| s.doc.model_body_component(b));
+        if let Some(first) = parts.next()
+            && !parts.all(|c| c == first)
+        {
+            return Vec::new();
+        }
+    }
+    shown.into_iter().map(|b| Sel::Body { name: b.name.clone() }).collect()
+}
+
+/// A selection chip's text without the catalog's pick arrow.
+fn chip_text(text: &str) -> &str {
+    text.strip_prefix("↖ ").unwrap_or(text)
+}
+
+/// The chip's text as its accessible value.
+fn chip_info(ui: &egui::Ui, chip: &egui::Response, label: &str, text: &str) {
+    chip.widget_info(|| {
+        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tr(label));
+        info.current_text_value = Some(text.to_string());
+        info
+    });
+}
+
+/// Whether the extrude being edited is a Join, Cut or Intersect saved without targets that its
+/// edit keeps without them: not a Join that would store its sketch's face body.
+pub(crate) fn kept_without_targets(s: &Session, editing: Option<(u64, Option<usize>)>) -> bool {
+    editing.and_then(|(id, _)| s.doc.feature(id)).is_some_and(|f| {
+        matches!(&f.kind, FeatureKind::Extrude { operation, targets, .. } if *operation != Operation::NewBody && targets.is_empty())
+            && join_face_target(s, f).is_none()
+    })
+}
+
+/// The body an edit of a Join saved without targets or participants stores: its sketch's face body.
+fn join_face_target(s: &Session, f: &solidcraft_engine::doc::Feature) -> Option<String> {
+    match &f.kind {
+        FeatureKind::Extrude { sketch, operation: Operation::Join, targets, .. } if targets.is_empty() && f.participants.is_empty() => {
+            solidcraft_engine::join_sketch_face_body(s, sketch.0, f.component)
+        }
+        _ => None,
+    }
+}
+
+/// What an empty Targets field says: a stored `*`, no stored targets, or nothing picked yet.
+pub(crate) fn targets_placeholder(kept: bool, extra: &serde_json::Map<String, Value>) -> &'static str {
+    match (extra.contains_key("targets"), kept) {
+        (true, _) => "All bodies",
+        (false, true) => "All bodies of the component",
+        (false, false) => "dialog.select",
+    }
+}
+
+/// Extrude's Targets under Operation: a selection field and a removable row per body.
+pub(crate) fn targets_rows(ui: &mut egui::Ui, inputs: &mut [SelInput], active: &mut usize, follow: &mut bool, placeholder: &str) {
+    let Some(index) = inputs.iter().position(|i| i.label == TARGETS) else { return };
+    let Some(inp) = inputs.get_mut(index) else { return };
+    let filled = !inp.items.is_empty();
+    let text =
+        if filled { crate::i18n::format("dialog.selected_count", &[("count", &inp.items.len().to_string())]) } else { tr(placeholder).to_string() };
+    let mut clear = false;
+    form_row(ui, TARGETS, |ui| {
+        let chip = crate::ui_kit::selection_field(ui, chip_text(&text), crate::ui_kit::Selection { active: index == *active, filled });
+        chip_info(ui, &chip, TARGETS, chip_text(&text));
+        let chip_rect = chip.rect;
+        if chip.on_hover_text(format!("{} (click to pick into this input)", hint(inp))).clicked() {
+            *active = index;
+        }
+        if filled {
+            let t = Tokens::get();
+            let rect =
+                egui::Rect::from_center_size(egui::pos2(chip_rect.right() - t.space_24 / 2.0, chip_rect.center().y), vec2(t.space_24, t.space_24));
+            let button = crate::ui_kit::icon_button_at(ui, rect, "close", "Clear the selection");
+            crate::scenario::publish_handle(&format!("dialog:clear:{TARGETS}"), button.rect.center());
+            clear = button.clicked();
+        }
+    });
+    let mut remove = None;
+    for (k, item) in inp.items.iter().enumerate() {
+        // Targets are bodies.
+        let name = match item {
+            Sel::Body { name } => name.clone(),
+            _ => format!("{item:?}"),
+        };
+        if crate::ui_kit::list_row(ui, &format!("{TARGETS}:{name}"), &name).clicked() {
+            remove = Some(k);
+        }
+    }
+    if let Some(k) = remove {
+        inp.items.remove(k);
+        *follow = false;
+    }
+    if clear {
+        inp.items.clear();
+        *follow = false;
+        *active = index;
+    }
+}
 
 fn object_on(inputs: &[SelInput], label: &str) -> bool {
     inputs.iter().any(|i| i.label == label)
@@ -4239,6 +4446,15 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             if object_on(&d.inputs, FROM_OBJECT) {
                 common["from"] = object_point(&d.inputs, FROM_OBJECT).ok_or("select the object to extrude from")?;
+            }
+            let op = OPS.get(*operation).copied().unwrap_or("new");
+            let targets = picked_bodies(&d.inputs, TARGETS);
+            if op != "new" && !targets.is_empty() {
+                common["targets"] = json!(targets);
+            }
+            // An edit of a feature stored without targets may keep having none.
+            if op != "new" && targets.is_empty() && !d.extra.contains_key("targets") && !kept_without_targets(s, d.editing) {
+                return Err(tr("Pick the bodies to change, or choose New Body").to_string());
             }
             let with = |extra: Value| -> Value {
                 let mut p = common.clone();
@@ -5639,9 +5855,17 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     inp.items = items.into_iter().map(|index| Sel::Profile { sketch: sketch.0, index }).collect();
                 }
             }
-            if !targets.is_empty() {
+            // `*` has no body to show: kept as stored.
+            let every = targets.len() == 1 && targets.first().is_some_and(|t| t == "*");
+            if every {
                 d.extra.insert("targets".into(), json!(targets));
             }
+            if let Some(input) = d.inputs.iter_mut().find(|i| i.label == TARGETS) {
+                input.items = if every { Vec::new() } else { targets.iter().map(|t| Sel::Body { name: t.to_string() }).collect() };
+                input.items.extend(join_face_target(s, &f).map(|name| Sel::Body { name }));
+            }
+            // A New Body turned into a Join, Cut or Intersect lists what a new one would.
+            d.targets_follow = *operation == Operation::NewBody;
             d
         }
         FeatureKind::Revolve { sketch, profiles, axis, angle, operation, targets, angle2, symmetric, convention, to } => {

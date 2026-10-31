@@ -1660,6 +1660,14 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }
     trial.active_sketch = None;
     trial.selection = s.selection.clone();
+    // Saved without targets, it works on hidden bodies too (#2464).
+    if let FeatureKind::Extrude { operation, targets, .. } = &old.kind
+        && *operation != solidcraft_doc::Operation::NewBody
+        && targets.is_empty()
+    {
+        let v = &mut trial.visibility;
+        (v.hidden_bodies, v.hidden_occurrences, v.hidden_folders) = Default::default();
+    }
     // Keep the original identity as a suppressed placeholder. The constructor and
     // any ownership boundary it adds go AFTER this slot, so discarding its temporary
     // feature leaves auxiliary history after the rewritten original.

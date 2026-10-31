@@ -3031,6 +3031,19 @@ fn apply_traced(doc: &Document, state: &mut ModelState, f: &Feature, tools: Vec<
     apply_traced_with(doc, state, f, tools, op, targets, &[])
 }
 
+/// Whether a Join's `targets` are the ones it takes without any: none, or only the body its
+/// extrude's sketch lies on.
+fn join_targets_by_default(doc: &Document, f: &Feature, targets: &[String]) -> bool {
+    let on = match &f.kind {
+        FeatureKind::Extrude { sketch, .. } => match doc.feature(sketch.0).map(|s| &s.kind) {
+            Some(FeatureKind::Sketch { plane: PlaneRef::Face { anchor: Some(anchor), .. }, .. }) => Some(&anchor.target.body),
+            _ => None,
+        },
+        _ => None,
+    };
+    targets.iter().all(|t| Some(t) == on)
+}
+
 /// [`apply_traced`] with bodies that take part in the boolean besides the feature's targets:
 /// the body a Join extrude runs to (#6424), which joins with the tool.
 fn apply_traced_with(
@@ -7292,9 +7305,12 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 }
             }
             // A Join extrude to an object joins that object too (#6424): the tool and the body
-            // it runs to are one body, not only the body the profile was sketched on.
-            let extra: Vec<String> = if *operation == Operation::Join { to_body.into_iter().collect() } else { Vec::new() };
-            apply_traced_with(doc, st, f, tools, *operation, &crate::plain(targets), &extra)
+            // it runs to are one body, not only the body the profile was sketched on. Targets
+            // that name another body were chosen: only they join (#2464).
+            let targets = crate::plain(targets);
+            let extra: Vec<String> =
+                if *operation == Operation::Join && join_targets_by_default(doc, f, &targets) { to_body.into_iter().collect() } else { Vec::new() };
+            apply_traced_with(doc, st, f, tools, *operation, &targets, &extra)
         }
         FeatureKind::Hole { thread, thread_depth, diameter, handedness, .. } => {
             let thread_depth = thread_depth.as_ref().map(|d| val(vals, d, Kind::Length)).transpose()?;
