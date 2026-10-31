@@ -394,7 +394,7 @@ fn search_picker_lays_out_the_rows_in_view_inside_a_narrow_window() {
     frame(&ctx, vec![], draw);
     let rows = scenario::handles("test:long:vendor/");
     assert!(!rows.is_empty() && rows.len() < 30, "{} rows laid out", rows.len());
-    let row = scenario::rect_of("dialog:list:vendor/a-model-with-a-rather-long-name-0000-and-then-some-more-of-it-and-more").unwrap();
+    let row = scenario::rect_of("test:long:vendor/a-model-with-a-rather-long-name-0000-and-then-some-more-of-it-and-more").unwrap();
     assert!(row.left() >= 0.0 && row.right() <= 320.0, "{row:?} reaches past the window");
     let search = scenario::rect_of("test:long:search").unwrap();
     assert!(search.left() >= 0.0 && search.right() <= 320.0, "{search:?} reaches past the window");

@@ -345,6 +345,8 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
         ui.close();
     }
     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+    // The rows' text starts where the box's and the headings' do.
+    ui.spacing_mut().button_padding.x = t.form_inset;
     ui.set_min_width(search_popup_width(ui, p));
     let mut filter: String = ui.data(|data| data.get_temp(filter_id)).unwrap_or_default();
     let search = ui.add(
@@ -363,6 +365,7 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
             ui.data_mut(|data| data.insert_temp(focused_id, true));
         } else {
             search.request_focus();
+            ui.ctx().request_repaint();
         }
     }
     if search.has_focus() {
@@ -430,7 +433,7 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
         if let Some(model) = custom {
             search_heading(ui, crate::i18n::tr("ui.agent_chat_custom_heading"), t.space_16);
             let text = crate::i18n::format("ui.agent_chat_model_custom", &[("model", &compact(model, SEARCH_LABEL_CAP))]);
-            let row = super::list_picker(ui, "custom", &text, false);
+            let row = search_row(ui, &text, false);
             scenario::publish_target(&format!("{}:custom", p.handles), row.rect);
             if row.clicked() {
                 picked = Some(Picked::Custom(model.to_owned()));
@@ -451,9 +454,8 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
                         match row {
                             SearchRow::Heading(group) => search_heading(ui, group, row_height),
                             SearchRow::Choice(choice) => {
-                                let response =
-                                    super::list_picker(ui, choice.value, &compact(choice.label, SEARCH_LABEL_CAP), choice.value == p.current_value);
-                                scenario::publish_handle(&format!("{}:{}", p.handles, choice.value), response.rect.center());
+                                let response = search_row(ui, &compact(choice.label, SEARCH_LABEL_CAP), choice.value == p.current_value);
+                                scenario::publish_target(&format!("{}:{}", p.handles, choice.value), response.rect);
                                 let response =
                                     if choice.tip.is_empty() { response } else { response.on_hover_text(compact(choice.tip, SEARCH_NOTE_CAP)) };
                                 if response.clicked() {
@@ -501,6 +503,11 @@ fn search_heading_of<'a>(group: &mut Option<&'a str>, choice: &SearchChoice<'a>)
     let heading = next.filter(|_| next != *group);
     *group = next;
     heading
+}
+
+/// A `search_picker` row: as `list_picker`, but read from the left, as a list of ids is.
+fn search_row(ui: &mut Ui, text: &str, selected: bool) -> Response {
+    ui.add_sized(vec2(dimension(ui.available_width()), row_height()), egui::Button::selectable(selected, (text, egui::Atom::grow())))
 }
 
 /// A dim one-line heading in a `search_picker`'s popup.

@@ -1572,6 +1572,7 @@ mod card_tests {
         h.frames(3);
         h.step(&json!({"text":"  vendor/own "})).unwrap();
         h.frames(3);
+        assert!(h.ctx.memory(|m| m.has_focus(egui::Id::new("sc_ai_model:api-1").with("search"))), "the box keeps the focus over Preferences");
         h.step(&json!({"click":{"handle":"prefs:ai_model:api-1:custom"}})).unwrap();
         h.frames(3);
         assert_eq!(model(&h).as_deref(), Some("vendor/own"));

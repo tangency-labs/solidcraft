@@ -1499,8 +1499,15 @@ fn a_typed_model_is_sent_to_a_modern_agent_and_a_rejection_keeps_the_old_one() {
     poll(&mut app, &ctx);
     assert!(!app.agent_chat.config_pending);
     assert_eq!(app.agent_chat.model, "fast");
-    assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, error: true } if text.contains("no such model"))));
+    assert!(
+        app.agent_chat
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Notice { text, error: true } if text.contains("claude-x") && text.contains("no such model"))),
+        "the notice names the model and the reason"
+    );
     assert!(!app.preferences.agent_models.contains_key("modern"));
+    assert_eq!(app.agent_chat.typed_model, None);
 
     // An agent that takes it says so in its snapshot, and that is what is remembered.
     assert!(set_custom_model(&mut app, "claude-x"));

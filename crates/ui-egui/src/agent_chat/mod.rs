@@ -415,6 +415,8 @@ pub struct AgentChat {
     pub models_note: Option<String>,
     /// What to put back if the running ACP agent refuses the model it was last sent.
     model_revert: Option<ModelRevert>,
+    /// The typed model an agent's model option was sent, until it answers.
+    typed_model: Option<String>,
     pub config_options: Option<Vec<acp::ConfigOption>>,
     pub config_pending: bool,
     /// An API endpoint's models, kept per endpoint (its base URL) for the next connection.
@@ -497,6 +499,7 @@ impl AgentChat {
             self.model_provider = None;
         }
         self.config_pending = false;
+        self.typed_model = None;
     }
 
     fn apply_config_snapshot(&mut self, options: Vec<acp::ConfigOption>) {
@@ -587,6 +590,11 @@ impl AgentChat {
         {
             pictures.push(Picture::shared(Arc::new(png), "", true));
         }
+    }
+    /// Say that the agent refused a model, and in its words why.
+    fn model_refused(&mut self, model: &str, error: &str) {
+        let text = trf("ui.agent_chat_model_rejected", &[("model", model), ("error", error)]);
+        self.notice(text.chars().take(MODELS_NOTE_CAP).collect::<String>(), true);
     }
     fn notice(&mut self, text: impl Into<String>, error: bool) {
         self.push(Item::Notice { text: text.into(), error });
@@ -760,8 +768,8 @@ impl AgentChat {
                     error.map(|error| trf("ui.agent_chat_models_failed", &[("error", &error)]).chars().take(MODELS_NOTE_CAP).collect());
             }
             Event::ModelRejected(message) => {
-                let text = trf("ui.agent_chat_model_rejected", &[("model", &self.model), ("error", &message)]);
-                self.notice(text.chars().take(MODELS_NOTE_CAP).collect::<String>(), true);
+                let refused = self.model.clone();
+                self.model_refused(&refused, &message);
                 if let Some(revert) = self.model_revert.take() {
                     if revert.unlisted {
                         let refused = std::mem::take(&mut self.model);
@@ -776,11 +784,14 @@ impl AgentChat {
             }
             Event::ConfigOptionFinished { result, .. } => {
                 self.config_pending = false;
-                match result {
-                    Ok(options) => {
+                let typed = self.typed_model.take();
+                match (result, typed) {
+                    (Ok(options), _) => {
                         self.apply_config_snapshot(options);
                     }
-                    Err(message) => self.notice(message, true),
+                    // An agent's own words may not say what it refused ("Internal error").
+                    (Err(message), Some(model)) => self.model_refused(&model, &message),
+                    (Err(message), None) => self.notice(message, true),
                 }
             }
             Event::AuthRequired { methods } => {
@@ -2034,7 +2045,11 @@ pub fn set_custom_model(app: &mut SolveApp, text: &str) -> bool {
     }
     let option = app.agent_chat.config_options.as_ref().and_then(|options| options.iter().find(|o| o.category == "model"));
     if let Some(id) = option.map(|o| o.id.clone()) {
-        return set_config_option_checked(app, &id, model, false);
+        let sent = set_config_option_checked(app, &id, model, false);
+        if sent {
+            app.agent_chat.typed_model = Some(model.to_string());
+        }
+        return sent;
     }
     send_model(app, model);
     true
