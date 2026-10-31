@@ -24,22 +24,22 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_fillet")
         .enabled(in_sketch)
-        .params(concat!("point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal; a corner is a point reference or {a, b}, the two curves meeting there) | a, b: two lines or arcs meeting at a corner; radius: expr. A corner that dimensions or constraints measure to stays as a virtual sharp corner on both curves' extensions (`virtual_corners`; the moved ones in `moved_to_virtual_corner`)", created_doc!())),
+        .params(concat!("point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal; a corner is a point reference or {a, b}, the two curves meeting there) | a, b: two lines or arcs meeting at a corner (two lines that share no end are first brought to where they meet: the nearer end of a line that stops short moves there, and a line that runs past is cut there, losing its shorter piece); radius: expr. A corner that dimensions or constraints measure to stays as a virtual sharp corner on both curves' extensions (`virtual_corners`; the moved ones in `moved_to_virtual_corner`)", created_doc!())),
     CommandSpec::new("sketch.chamfer.equal_distance", "Equal Distance Chamfer", chamfer_equal)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer")
         .enabled(in_sketch)
-        .params(concat!("point | a, b: a corner of two lines; distance", created_doc!())),
+        .params(concat!("point | a, b: a corner of two lines (two that share no end are first brought to where they meet, as in sketch.fillet); distance", created_doc!())),
     CommandSpec::new("sketch.chamfer.distance_angle", "Distance and Angle Chamfer", chamfer_dist_angle)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer_angle")
         .enabled(in_sketch)
-        .params(concat!("point | a, b: a corner of two lines; distance: along a, angle: deg from a", created_doc!())),
+        .params(concat!("point | a, b: a corner of two lines (two that share no end are first brought to where they meet, as in sketch.fillet); distance: along a, angle: deg from a", created_doc!())),
     CommandSpec::new("sketch.chamfer.two_distance", "Two Distance Chamfer", chamfer_two)
         .at("SKETCH", "MODIFY")
         .icon("sketch_chamfer_two_distances")
         .enabled(in_sketch)
-        .params(concat!("point | a, b: a corner of two lines; distance: along a, distance2: along b", created_doc!())),
+        .params(concat!("point | a, b: a corner of two lines (two that share no end are first brought to where they meet, as in sketch.fillet); distance: along a, distance2: along b", created_doc!())),
     CommandSpec::new("sketch.offset", "Offset", offset)
         .at("SKETCH", "MODIFY")
         .icon("offset")
@@ -1465,6 +1465,70 @@ fn refuse_offset_corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<()> {
     }
 }
 
+/// Two lines given as `a` and `b` that share no end are brought to where they meet, so they
+/// make a corner to round or cut (#6912, #7759, #7985). Each line's end nearer that point moves
+/// onto it: a line that stops short is extended, and one that runs past the other is cut there,
+/// losing its shorter piece. Refused when the lines are parallel or meet too far away, and when
+/// an end that would move is held by anything else (another curve, a constraint or dimension on
+/// it, a fixed or driven position) or its line has a size of its own (a length, an equal or a
+/// midpoint), which moving the end would change.
+fn meet_lines(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
+    if str_(p, "point").is_some() {
+        return Ok(());
+    }
+    let line = |k: &str| str_(p, k).and_then(|i| sk.curve_index(i));
+    let (Some(la), Some(lb)) = (line("a"), line("b")) else { return Ok(()) };
+    let ends = |l: usize| match sk.curves.get(l).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) => Some((*a, *b)),
+        _ => None,
+    };
+    let (Some((a0, a1)), Some((b0, b1))) = (ends(la), ends(lb)) else { return Ok(()) };
+    if la == lb || [a0, a1].iter().any(|x| *x == b0 || *x == b1) {
+        return Ok(());
+    }
+    let (Some(p0), Some(p1), Some(q0), Some(q1)) = (sk.point(a0), sk.point(a1), sk.point(b0), sk.point(b1)) else { return Ok(()) };
+    let (da, db) = (p1 - p0, q1 - q0);
+    let den = da.cross(db);
+    if den.abs() <= 1e-9 * da.len() * db.len() {
+        return Err(bad(cmd, "the lines are parallel"));
+    }
+    // Where they meet, as a fraction along each line from its first end.
+    let (t, u) = ((q0 - p0).cross(db) / den, (q0 - p0).cross(da) / den);
+    let meet = p0 + da * t;
+    if !(meet.is_finite() && meet.len() < 1e7) {
+        return Err(bad(cmd, "the lines meet too far away"));
+    }
+    // The end on the shorter side of the meeting point moves (the nearer end, for a line that
+    // stops short of it).
+    let (na, nb) = (if t >= 0.5 { a1 } else { a0 }, if u >= 0.5 { b1 } else { b0 });
+    for (l, e) in [(la, na), (lb, nb)] {
+        let id = sk.curves.get(l).map(|c| c.id.clone()).unwrap_or_default();
+        let other_curve = sk.curves.iter().enumerate().any(|(i, c)| i != l && c.kind.uses(e));
+        let positioned = sk.points.get(e).is_some_and(|q| q.fixed || q.exprs.is_some() || q.link.is_some());
+        if e == 0 || other_curve || positioned || sk.is_linked_curve(l) || sk.constraints.iter().any(|k| k.kind.refers_to_point(e)) {
+            return Err(bad(cmd, format!("`{id}` doesn't reach the other line, and its end that would move there is held by other geometry")));
+        }
+        let sized = sk.constraints.iter().any(|k| {
+            matches!(k.kind, ConstraintKind::Length { l: x, .. } | ConstraintKind::Midpoint { l: x, .. } if x == l)
+                || matches!(k.kind, ConstraintKind::Equal { a, b } if a == l || b == l)
+        });
+        if sized {
+            return Err(bad(cmd, format!("`{id}` doesn't reach the other line, and its length is held: extending or cutting it would change that")));
+        }
+    }
+    for e in [na, nb] {
+        if let Some(q) = sk.points.get_mut(e) {
+            q.pos = meet;
+        }
+    }
+    // One corner point: b's moved end becomes a's.
+    for c in sk.curves.iter_mut() {
+        c.kind.map_points(&|x| if x == nb { na } else { x });
+    }
+    sk.remove_points(&[nb]);
+    Ok(())
+}
+
 /// A corner of two lines: (line a, line b, corner point, far end of a, far end of b).
 fn corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<(usize, usize, usize, usize, usize)> {
     let ends = |l: usize| match sk.curves.get(l).map(|c| &c.kind) {
@@ -1696,6 +1760,7 @@ fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize
     refuse_infinite_corner(sk, p, cmd)?;
     refuse_offset_corner(sk, p, cmd)?;
     weld_corner(sk, p);
+    meet_lines(sk, p, cmd)?;
     let (la, lb, c, fa, fb) = match corner(sk, p, cmd) {
         Ok(x) => x,
         // Not two lines: a corner with an arc.
@@ -1827,6 +1892,7 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl FnOnce(f64) -> Res
         refuse_infinite_corner(sk, p, cmd)?;
         refuse_offset_corner(sk, p, cmd)?;
         weld_corner(sk, p);
+        meet_lines(sk, p, cmd)?;
         let (la, lb, c, fa, fb) = corner(sk, p, cmd)?;
         let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
         let (u, v) = ((pa - pc).normalized().unwrap_or(Vec2::X), (pb - pc).normalized().unwrap_or(Vec2::Y));
