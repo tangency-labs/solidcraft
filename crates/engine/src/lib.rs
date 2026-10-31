@@ -16,6 +16,7 @@ pub mod control_auth;
 pub mod control_pending;
 pub mod cosmetic_threads;
 pub mod crash;
+pub mod drawing_export;
 pub mod drawing_scene;
 pub mod drawing_view;
 pub mod easyprint;
@@ -520,6 +521,8 @@ pub struct Session {
     /// The sheet scenes of the drawing open, for the sheet page ([`drawing_scene::extract`]): view
     /// state, never saved or an undo step, dropped when the drawing closes.
     pub(crate) drawing_scenes: drawing_scene::Cache,
+    /// The sheet PNG being written as a job ([`drawing_export::step`]): never saved or an undo step.
+    pub(crate) drawing_exports: drawing_export::Exports,
     /// The visibility the design file holds (what `is_dirty` compares with).
     saved_visibility: Visibility,
     /// States to go back to (`edit.checkpoint`, `edit.restore_checkpoint`): how batches of
@@ -709,6 +712,7 @@ impl Session {
             render_jobs: Default::default(),
             dimension_values: Default::default(),
             drawing_scenes: Default::default(),
+            drawing_exports: Default::default(),
             #[cfg(test)]
             evaluations: 0,
             motion_traces: Default::default(),
@@ -729,6 +733,7 @@ impl Session {
         let easyprint_upload = self.easyprint_upload.take();
         let render_viewport = self.render_viewport.clone();
         let render_jobs = self.render_jobs.scratch();
+        let drawing_exports = std::mem::take(&mut self.drawing_exports);
         let checkpoints = std::mem::take(&mut self.checkpoints);
         let next_checkpoint = self.next_checkpoint;
         let ids = self.ids.clone();
@@ -744,6 +749,7 @@ impl Session {
         self.easyprint_upload = easyprint_upload;
         self.render_viewport = render_viewport;
         self.render_jobs = render_jobs;
+        self.drawing_exports = drawing_exports;
         self.checkpoints = checkpoints;
         self.next_checkpoint = next_checkpoint;
         self.replacements = replacements;
@@ -1611,6 +1617,7 @@ impl Session {
             render_viewport: self.render_viewport.clone(),
             render_jobs: self.render_jobs.scratch(),
             drawing_scenes: Default::default(),
+            drawing_exports: Default::default(),
             saved_visibility: self.saved_visibility.clone(),
             dimension_values: self.dimension_values.clone(),
             #[cfg(test)]

@@ -186,6 +186,11 @@ fn what_it_cant_write_is_refused() {
         (json!({}), "sheet"),
         (json!({"sheet": id, "dpi": 300}), "`dpi` and `colour` are for png only"),
         (json!({"sheet": id, "format": "png", "scale": 2}), "scale"),
+        (json!({"sheet": id, "job": true}), "`job` is for a png written to a path"),
+        (json!({"sheet": id, "path": folder.path("sheet.svg"), "job": true}), "`job` is for a png written to a path"),
+        (json!({"sheet": id, "format": "png", "job": true}), "`job` is for a png written to a path"),
+        (json!({"sheet": id, "format": "png", "path": folder.path("sheet.svg"), "job": true}), "path must be a .png file"),
+        (json!({"sheet": id, "format": "png", "path": folder.path("sheet.png"), "job": "yes"}), "job"),
     ] {
         let message = refused(&mut s, p.clone());
         assert!(message.contains(why), "{p}: {message}");
@@ -193,4 +198,88 @@ fn what_it_cant_write_is_refused() {
     assert_eq!(std::fs::read_dir(&folder.0).unwrap().count(), 0);
     run(&mut s, "drawing.close", json!({}));
     assert!(refused(&mut s, json!({"sheet": id})).contains("open a drawing first"));
+}
+
+/// A sheet's PNG written as a job: answered at once in a render job's shape, then a band a step,
+/// the rows written only going up. Nothing is at the path until the last band, and then the file
+/// is the PNG written at once, the reply it ends with the one for that file.
+#[test]
+fn a_png_written_as_a_job_is_the_png_written_at_once() {
+    let (mut s, sheet, _) = front_and_top();
+    let id = ids::encode(sheet);
+    let folder = Folder::new("drawing-export-job");
+    let path = folder.path("sheet.png");
+    let reply = run(&mut s, CMD, json!({"sheet": id, "format": "png", "path": path, "job": true}));
+    let schema = output_schema_for::<ExportReply>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    let job = reply["job"].as_u64().unwrap();
+    assert_eq!(
+        (&reply["progress"], &reply["error"], reply.get("result")),
+        (&json!({"phase": "running", "done": 0, "total": 3508}), &Value::Null, None)
+    );
+    let mut done = Vec::new();
+    while crate::drawing_export::step(&mut s) {
+        assert!(!std::path::Path::new(&path).exists(), "nothing at the path until the last band");
+        done.push(run(&mut s, "drawing.export.status", json!({"job": job}))["progress"]["done"].as_u64().unwrap());
+    }
+    assert!(done.len() > 1 && done.windows(2).all(|w| w[0] < w[1]), "{done:?}");
+    assert!(!crate::drawing_export::step(&mut s), "an ended job takes no more steps");
+    let status = run(&mut s, "drawing.export.status", json!({"job": job}));
+    let schema = output_schema_for::<ExportJobStatus>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &status), "{status}");
+    assert_eq!(status["progress"], json!({"phase": "completed", "done": 3508, "total": 3508}));
+    assert_eq!(run(&mut s, "drawing.export.cancel", json!({"job": job})), status, "a completed job stays completed");
+    assert_eq!(std::fs::read(&path).unwrap(), scene_png(&s, sheet, PngOptions::default()));
+    // The same answer, apart from its path and what working out each view took.
+    let answer = |mut v: Value| {
+        v["path"] = Value::Null;
+        for view in v["views"].as_array_mut().into_iter().flatten() {
+            view.as_object_mut().map(|view| view.remove("stats"));
+        }
+        v
+    };
+    let at_once = run(&mut s, CMD, json!({"sheet": id, "format": "png", "path": folder.path("at once.png")}));
+    assert_eq!(answer(status["result"].clone()), answer(at_once), "the at-once reply, but for its path");
+    assert_eq!(std::fs::read_dir(&folder.0).unwrap().count(), 2, "no temporary file left");
+}
+
+/// A job cancelled part way, or unable to put its file in place, leaves what is at the path as it
+/// was and no temporary file; it is answered as it ended and takes no more steps. A second job is
+/// refused while one is under way, and only the latest job answers.
+#[test]
+fn a_cancelled_or_failed_job_leaves_the_path_as_it_was() {
+    let (mut s, sheet, _) = front_and_top();
+    let id = ids::encode(sheet);
+    let folder = Folder::new("drawing-export-job-ended");
+    let path = folder.path("sheet.png");
+    std::fs::write(&path, b"before").unwrap();
+    let start = json!({"sheet": id, "format": "png", "path": path, "job": true});
+    let job = run(&mut s, CMD, start.clone())["job"].as_u64().unwrap();
+    assert!(crate::drawing_export::step(&mut s));
+    let why = refused(&mut s, start);
+    assert!(why.contains(&format!("an export is under way (job {job})")), "{why}");
+    let cancelled = run(&mut s, "drawing.export.cancel", json!({"job": job}));
+    assert_eq!(cancelled["progress"]["phase"], "cancelled", "{cancelled}");
+    assert_eq!(run(&mut s, "drawing.export.cancel", json!({"job": job})), cancelled, "an ended job stays as it ended");
+    assert!(!crate::drawing_export::step(&mut s));
+    assert_eq!(std::fs::read(&path).unwrap(), b"before");
+    assert_eq!(std::fs::read_dir(&folder.0).unwrap().count(), 1, "no temporary file left");
+
+    // A folder at the path: the file written can't take its place.
+    let blocked = folder.path("blocked.png");
+    std::fs::create_dir(&blocked).unwrap();
+    let job = run(&mut s, CMD, json!({"sheet": id, "format": "png", "path": blocked, "dpi": 25, "job": true}))["job"].as_u64().unwrap();
+    while crate::drawing_export::step(&mut s) {}
+    let failed = run(&mut s, "drawing.export.status", json!({"job": job}));
+    assert_eq!(
+        (&failed["progress"]["phase"], failed["error"]["message"].is_string(), failed.get("result")),
+        (&json!("failed"), true, None),
+        "{failed}"
+    );
+    assert!(std::path::Path::new(&blocked).is_dir());
+    assert_eq!(std::fs::read_dir(&folder.0).unwrap().count(), 2, "no temporary file left");
+    for (cmd, other) in [("drawing.export.status", job - 1), ("drawing.export.cancel", job + 1)] {
+        let why = s.execute(cmd, &json!({"job": other})).unwrap_err().to_string();
+        assert!(why.contains(&format!("no export job {other}")), "{why}");
+    }
 }

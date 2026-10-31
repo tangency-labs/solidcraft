@@ -2480,6 +2480,10 @@ impl SolveApp {
         easyprint_ui::tick(self, ctx);
         render_workspace::sync_backend(self);
         render_workspace::tick(self, ctx);
+        // A sheet PNG written as a job: a band a frame while bands are left.
+        if solidcraft_engine::drawing_export::step(&mut self.session) {
+            ctx.request_repaint();
+        }
         file_load::tick(self, ctx);
         save_job::tick(self, false);
         edit_in_place::tick(self);

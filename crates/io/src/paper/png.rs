@@ -14,6 +14,7 @@
 
 use std::io::Write;
 use std::ops::RangeInclusive;
+use std::sync::{Arc, Mutex};
 
 use solidcraft_geom::paper::{self, Grid, GridItem, GridPath, GridReport, Prepared};
 use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, Stroke, Transform};
@@ -71,87 +72,138 @@ pub fn paper_png(scene: &Prepared, options: PngOptions, out: impl Write) -> Resu
     write(scene, options, out, BAND_BYTES)
 }
 
-fn write(scene: &Prepared, options: PngOptions, out: impl Write, band_bytes: usize) -> Result<PngReport> {
-    let PngOptions { dpi, colour } = options;
-    if !DPI.contains(&dpi) {
-        return Err(IoError::Invalid(format!("a sheet PNG is 25 to 2400 dpi, not {dpi}")));
+fn write(scene: &Prepared, options: PngOptions, mut out: impl Write, band_bytes: usize) -> Result<PngReport> {
+    let mut png = PngWriter::with_bands(scene, options, band_bytes)?;
+    while png.step(&mut out)? {}
+    png.finish(&mut out)
+}
+
+/// A sheet PNG written a band at a time, for a job that mustn't hold the window's thread:
+/// [`PngWriter::step`] draws one band of [`BAND_BYTES`] and writes it, and [`PngWriter::finish`]
+/// ends the file. The bytes are [`paper_png`]'s, which is the same loop.
+pub struct PngWriter {
+    /// What each band draws, with the rows each shape spans.
+    shapes: Vec<(Shape, (f32, f32))>,
+    colour: PngColour,
+    paint: Paint<'static>,
+    report: PngReport,
+    band: Pixmap,
+    /// Rows a band.
+    rows: u32,
+    row: Vec<u8>,
+    /// Rows written.
+    top: u32,
+    stream: png::StreamWriter<'static, Pending>,
+    pending: Pending,
+}
+
+impl PngWriter {
+    /// Everything before the first band: the scene on the grid, its shapes, the file's header.
+    pub fn new(scene: &Prepared, options: PngOptions) -> Result<PngWriter> {
+        PngWriter::with_bands(scene, options, BAND_BYTES)
     }
-    let on = scene.on_grid(Grid::NANOMETRE).map_err(|e| IoError::Invalid(e.to_string()))?;
-    let px = dpi / 25.4e6; // pixels a nanometre
-    let pixels = [on.size.x, on.size.y].map(|n| ((n as f64 * px).round() as u32).max(1));
-    let mut sheet = Sheet { px, height: on.size.y as f64, tolerance: 0.125 / px, points: 0 };
-    let mut shapes = Vec::new();
-    for item in on.groups.iter().flat_map(|g| &g.items) {
-        match item {
-            GridItem::Stroke { width, path } => {
-                let mut builder = PathBuilder::new();
-                sheet.trace(&mut builder, path)?;
-                let width = (*width as f64 * px) as f32;
-                let stroke = Stroke {
-                    width: if colour == PngColour::BlackWhite { width.max(1.0) } else { width },
-                    miter_limit: 4.0,
-                    line_cap: LineCap::Butt,
-                    line_join: LineJoin::Miter,
-                    dash: None,
-                };
-                // A line under a pixel wide is drawn as tiny-skia's hairline, its coverage scaled by its
-                // width: its outline would fall between the rows the rasteriser samples and vanish.
-                let thin = colour != PngColour::BlackWhite && width < 1.0;
-                shapes.extend(
-                    builder.finish().and_then(|line| if thin { Some(Shape::Thin(line, stroke)) } else { line.stroke(&stroke, 1.0).map(Shape::Fill) }),
-                );
-            }
-            GridItem::Fill { loops } => {
-                let mut builder = PathBuilder::new();
-                for l in loops {
-                    sheet.trace(&mut builder, l)?;
+
+    fn with_bands(scene: &Prepared, options: PngOptions, band_bytes: usize) -> Result<PngWriter> {
+        let PngOptions { dpi, colour } = options;
+        if !DPI.contains(&dpi) {
+            return Err(IoError::Invalid(format!("a sheet PNG is 25 to 2400 dpi, not {dpi}")));
+        }
+        let on = scene.on_grid(Grid::NANOMETRE).map_err(|e| IoError::Invalid(e.to_string()))?;
+        let px = dpi / 25.4e6; // pixels a nanometre
+        let pixels = [on.size.x, on.size.y].map(|n| ((n as f64 * px).round() as u32).max(1));
+        let mut sheet = Sheet { px, height: on.size.y as f64, tolerance: 0.125 / px, points: 0 };
+        let mut shapes = Vec::new();
+        for item in on.groups.iter().flat_map(|g| &g.items) {
+            match item {
+                GridItem::Stroke { width, path } => {
+                    let mut builder = PathBuilder::new();
+                    sheet.trace(&mut builder, path)?;
+                    let width = (*width as f64 * px) as f32;
+                    let stroke = Stroke {
+                        width: if colour == PngColour::BlackWhite { width.max(1.0) } else { width },
+                        miter_limit: 4.0,
+                        line_cap: LineCap::Butt,
+                        line_join: LineJoin::Miter,
+                        dash: None,
+                    };
+                    // A line under a pixel wide is drawn as tiny-skia's hairline, its coverage scaled by its
+                    // width: its outline would fall between the rows the rasteriser samples and vanish.
+                    let thin = colour != PngColour::BlackWhite && width < 1.0;
+                    shapes.extend(
+                        builder
+                            .finish()
+                            .and_then(|line| if thin { Some(Shape::Thin(line, stroke)) } else { line.stroke(&stroke, 1.0).map(Shape::Fill) }),
+                    );
                 }
-                shapes.extend(builder.finish().map(Shape::EvenOdd));
+                GridItem::Fill { loops } => {
+                    let mut builder = PathBuilder::new();
+                    for l in loops {
+                        sheet.trace(&mut builder, l)?;
+                    }
+                    shapes.extend(builder.finish().map(Shape::EvenOdd));
+                }
             }
         }
+        let pending = Pending::default();
+        let mut encoder = png::Encoder::new(pending.clone(), pixels[0], pixels[1]);
+        let (colour_type, depth) = match colour {
+            PngColour::Grey => (png::ColorType::Grayscale, png::BitDepth::Eight),
+            PngColour::BlackWhite => (png::ColorType::Grayscale, png::BitDepth::One),
+            PngColour::Rgb => (png::ColorType::Rgb, png::BitDepth::Eight),
+            PngColour::Transparent => (png::ColorType::Rgba, png::BitDepth::Eight),
+        };
+        encoder.set_color(colour_type);
+        encoder.set_depth(depth);
+        encoder.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
+        let per_metre = (dpi / 0.0254).round() as u32;
+        encoder.set_pixel_dims(Some(png::PixelDimensions { xppu: per_metre, yppu: per_metre, unit: png::Unit::Meter }));
+        let stream = encoder.write_header().and_then(png::Writer::into_stream_writer).map_err(png_error)?;
+        let width = pixels[0] as usize;
+        let rows = (band_bytes / (width * 4)).clamp(1, pixels[1] as usize) as u32;
+        let band = Pixmap::new(pixels[0], rows + 2 * MARGIN).ok_or_else(|| IoError::Invalid("the sheet PNG: no room for a band of pixels".into()))?;
+        // A hairline reaches at most a pixel past its line: into the margin rows, never a written one.
+        let shapes = shapes
+            .into_iter()
+            .map(|shape| {
+                let (Shape::Fill(path) | Shape::EvenOdd(path) | Shape::Thin(path, _)) = &shape;
+                let span = (path.bounds().top(), path.bounds().bottom());
+                (shape, span)
+            })
+            .collect();
+        let mut paint = Paint { anti_alias: colour != PngColour::BlackWhite, ..Paint::default() };
+        paint.set_color(Color::BLACK);
+        let report = PngReport { grid: on.report, pixels };
+        Ok(PngWriter { shapes, colour, paint, report, band, rows, row: Vec::with_capacity(width * 4), top: 0, stream, pending })
     }
-    let png_error = |e: png::EncodingError| IoError::Invalid(format!("the sheet PNG: {e}"));
-    let mut encoder = png::Encoder::new(out, pixels[0], pixels[1]);
-    let (colour_type, depth) = match colour {
-        PngColour::Grey => (png::ColorType::Grayscale, png::BitDepth::Eight),
-        PngColour::BlackWhite => (png::ColorType::Grayscale, png::BitDepth::One),
-        PngColour::Rgb => (png::ColorType::Rgb, png::BitDepth::Eight),
-        PngColour::Transparent => (png::ColorType::Rgba, png::BitDepth::Eight),
-    };
-    encoder.set_color(colour_type);
-    encoder.set_depth(depth);
-    encoder.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
-    let per_metre = (dpi / 0.0254).round() as u32;
-    encoder.set_pixel_dims(Some(png::PixelDimensions { xppu: per_metre, yppu: per_metre, unit: png::Unit::Meter }));
-    let mut header = encoder.write_header().map_err(png_error)?;
-    let mut stream = header.stream_writer().map_err(png_error)?;
 
-    let width = pixels[0] as usize;
-    let rows = (band_bytes / (width * 4)).clamp(1, pixels[1] as usize) as u32;
-    let mut band = Pixmap::new(pixels[0], rows + 2 * MARGIN).ok_or_else(|| IoError::Invalid("the sheet PNG: no room for a band of pixels".into()))?;
-    // A hairline reaches at most a pixel past its line: into the margin rows, never a written one.
-    let spans: Vec<(f32, f32)> = shapes
-        .iter()
-        .map(|(Shape::Fill(path) | Shape::EvenOdd(path) | Shape::Thin(path, _))| (path.bounds().top(), path.bounds().bottom()))
-        .collect();
-    let mut paint = Paint { anti_alias: colour != PngColour::BlackWhite, ..Paint::default() };
-    paint.set_color(Color::BLACK);
-    let mut row = Vec::with_capacity(width * 4);
-    let mut top = 0;
-    while top < pixels[1] {
-        let n = rows.min(pixels[1] - top);
-        band.fill(if colour == PngColour::Transparent { Color::TRANSPARENT } else { Color::WHITE });
+    /// What the file will say: the grid's report, and the image's width and height.
+    pub fn report(&self) -> PngReport {
+        self.report
+    }
+
+    /// The image's rows written so far, and its rows in all.
+    pub fn rows(&self) -> [u32; 2] {
+        [self.top, self.report.pixels[1]]
+    }
+
+    /// Draw the next band and write it to `out`, saying whether any rows are left.
+    pub fn step(&mut self, out: &mut impl Write) -> Result<bool> {
+        let [width, height] = self.report.pixels;
+        let (top, colour) = (self.top, self.colour);
+        let n = self.rows.min(height - top);
+        self.band.fill(if colour == PngColour::Transparent { Color::TRANSPARENT } else { Color::WHITE });
         let shift = Transform::from_translate(0.0, MARGIN as f32 - top as f32);
-        for (shape, (y0, y1)) in shapes.iter().zip(&spans) {
+        for (shape, (y0, y1)) in &self.shapes {
             if *y1 >= top as f32 - MARGIN as f32 && *y0 <= (top + n + MARGIN) as f32 {
                 match shape {
-                    Shape::Fill(path) => band.fill_path(path, &paint, FillRule::Winding, shift, None),
-                    Shape::EvenOdd(path) => band.fill_path(path, &paint, FillRule::EvenOdd, shift, None),
-                    Shape::Thin(line, stroke) => band.stroke_path(line, &paint, stroke, shift, None),
+                    Shape::Fill(path) => self.band.fill_path(path, &self.paint, FillRule::Winding, shift, None),
+                    Shape::EvenOdd(path) => self.band.fill_path(path, &self.paint, FillRule::EvenOdd, shift, None),
+                    Shape::Thin(line, stroke) => self.band.stroke_path(line, &self.paint, stroke, shift, None),
                 }
             }
         }
-        for line in band.pixels().chunks_exact(width).skip(MARGIN as usize).take(n as usize) {
+        let row = &mut self.row;
+        for line in self.band.pixels().chunks_exact(width as usize).skip(MARGIN as usize).take(n as usize) {
             row.clear();
             match colour {
                 PngColour::Grey => row.extend(line.iter().map(|p| luma(p.red(), p.green(), p.blue()))),
@@ -165,13 +217,56 @@ fn write(scene: &Prepared, options: PngOptions, out: impl Write, band_bytes: usi
                     [c.red(), c.green(), c.blue(), c.alpha()]
                 })),
             }
-            stream.write_all(&row).map_err(|e| IoError::Invalid(format!("the sheet PNG: {e}")))?;
+            self.stream.write_all(row).map_err(write_error)?;
         }
-        top += n;
+        self.top += n;
+        self.pending.pass_on(out)?;
+        Ok(self.top < height)
     }
-    stream.finish().map_err(png_error)?;
-    header.finish().map_err(png_error)?;
-    Ok(PngReport { grid: on.report, pixels })
+
+    /// End the file (every band written) and write its last bytes to `out`.
+    pub fn finish(self, out: &mut impl Write) -> Result<PngReport> {
+        let PngWriter { stream, pending, report, .. } = self;
+        // The file's end is written as the stream is dropped, here.
+        stream.finish().map_err(png_error)?;
+        pending.pass_on(out)?;
+        out.flush().map_err(write_error)?;
+        Ok(report)
+    }
+}
+
+fn png_error(e: png::EncodingError) -> IoError {
+    IoError::Invalid(format!("the sheet PNG: {e}"))
+}
+
+fn write_error(e: std::io::Error) -> IoError {
+    IoError::Invalid(format!("the sheet PNG: {e}"))
+}
+
+/// The encoder's bytes waiting for the caller's writer. png's stream writer needs a writer of its
+/// own to live between steps, and writes the file's end as it is dropped, dropping any error there;
+/// it writes here instead, where nothing fails, and each step passes the bytes on.
+#[derive(Clone, Default)]
+struct Pending(Arc<Mutex<Vec<u8>>>);
+
+impl Pending {
+    fn pass_on(&self, out: &mut impl Write) -> Result<()> {
+        let mut bytes = self.0.lock().map_err(|_| IoError::Invalid("the sheet PNG: its buffer was poisoned".into()))?;
+        out.write_all(&bytes).map_err(write_error)?;
+        bytes.clear();
+        Ok(())
+    }
+}
+
+impl Write for Pending {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().map_err(|_| std::io::Error::other("poisoned"))?.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 /// What a band draws for one item.
@@ -224,3 +319,7 @@ impl Sheet {
 #[cfg(test)]
 #[path = "png_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "png_job_tests.rs"]
+mod job_tests;

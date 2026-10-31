@@ -30,6 +30,10 @@ pub struct ExportParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ExportColour")]
     pub colour: Option<ExportColour>,
+    /// PNG to a path only: written a band at a time as a job and answered at once with its status;
+    /// `drawing.export.status` follows it and `drawing.export.cancel` stops it.
+    #[serde(default)]
+    pub job: bool,
 }
 
 /// A sheet export's file format.
@@ -91,7 +95,15 @@ pub struct ExportReport {
     pub pixels: Option<[u32; 2]>,
 }
 
-/// What `drawing.export` returns.
+/// What `drawing.export` returns: the document written, or the job writing it.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ExportReply {
+    Written(ExportResult),
+    Job(ExportJobStatus),
+}
+
+/// The sheet written.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ExportResult {
     pub sheet: String,
@@ -113,4 +125,50 @@ pub struct ExportResult {
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// A sheet export job, by the number `drawing.export` gave it.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct ExportJobParams {
+    pub job: u64,
+}
+
+/// A sheet PNG being written by a job, in a render job's shape (`render.status`).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct ExportJobStatus {
+    /// The job's number in this session.
+    pub job: u64,
+    pub progress: ExportProgress,
+    /// Why it failed.
+    pub error: Option<ExportJobError>,
+    /// Once completed: what `drawing.export` returns for a file written at once.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<ExportResult>")]
+    pub result: Option<serde_json::Value>,
+}
+
+/// How far a job is, in rows of pixels written out of the image's.
+#[derive(Clone, Copy, Debug, Serialize, JsonSchema)]
+pub struct ExportProgress {
+    pub phase: ExportPhase,
+    pub done: u64,
+    pub total: u64,
+}
+
+/// Where a job is: writing, or ended one of three ways.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportPhase {
+    Running,
+    Completed,
+    Cancelled,
+    Failed,
+}
+
+/// Why a job failed: its file wasn't written, and the one at the path is as it was.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct ExportJobError {
+    pub message: String,
 }
