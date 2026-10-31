@@ -384,7 +384,7 @@ pub(crate) fn clipboard_buttons(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) 
 
 /// Where each feature's result is in `results`, by feature id: the first result of an id, as
 /// `Model::result` finds it.
-fn result_index(results: &[solidcraft_engine::doc::FeatureResult]) -> std::collections::HashMap<u64, usize> {
+pub(crate) fn result_index(results: &[solidcraft_engine::doc::FeatureResult]) -> std::collections::HashMap<u64, usize> {
     results.iter().enumerate().rev().map(|(k, r)| (r.id, k)).collect()
 }
 
@@ -884,6 +884,19 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             // Each feature's result, found once for the strip: a search per chip made a long
             // timeline cost the square of its length every frame.
             let results = result_index(&app.session.model.results);
+            // The features picked in the design or in the open dialog, collected once for the
+            // strip: the dialog built its item list again for every chip.
+            let feature_of = |selection: &solidcraft_engine::Sel| match selection {
+                solidcraft_engine::Sel::Feature { id } => Some(*id),
+                _ => None,
+            };
+            let picked: std::collections::HashSet<u64> = app
+                .session
+                .selection
+                .iter()
+                .filter_map(feature_of)
+                .chain(app.dialog.as_ref().map(|dialog| dialog.items()).unwrap_or_default().iter().filter_map(feature_of))
+                .collect();
             for tile in folder_tiles(app, &order) {
                 let i = match tile {
                     FolderTile::Folder(id) => {
@@ -950,8 +963,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 let err = res.and_then(|r| r.error.clone());
                 let warn = res.and_then(|r| r.warning.clone());
                 let rolled = i >= marker;
-                let is_it = |s: &solidcraft_engine::Sel| matches!(s, solidcraft_engine::Sel::Feature { id: f } if f == id);
-                let sel = app.session.selection.iter().any(is_it) || app.dialog.as_ref().is_some_and(|d| d.items().iter().any(is_it));
+                let sel = picked.contains(id);
                 if resp.hovered() {
                     hovered = Some(*id);
                 }
@@ -974,25 +986,30 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 if floating && marker > 0 && i == marker - 1 {
                     p.circle_filled(pos2(br.center().x, br.bottom() + t.space_3), t.space_2, accent.color);
                 }
-                let mut tip = status_text(name, ty, err.as_deref(), warn.as_deref());
-                // Greyed out says only "not shown": say why (#8100).
-                if rolled {
-                    tip.push('\n');
-                    tip.push_str(crate::i18n::tr("timeline.feature_rolled_back"));
-                }
-                if let Some(state) = sketch_state {
-                    tip.push('\n');
-                    tip.push_str(&state.text());
-                }
-                if let Some(r) = res {
-                    tip += &format!("\n{:.1} ms", r.ms);
-                }
-                tip.push('\n');
-                tip.push_str(crate::i18n::tr("timeline.feature_hint"));
+                let ms = res.map(|r| r.ms);
                 if resp.drag_started() {
                     drag = Some(Drag::Feature(*id));
                 }
-                let resp = resp.on_hover_text(tip);
+                // The tip is written only while it shows (as `on_hover_text` would lay it out).
+                let resp = resp.on_hover_ui(|ui| {
+                    let mut tip = status_text(name, ty, err.as_deref(), warn.as_deref());
+                    // Greyed out says only "not shown": say why (#8100).
+                    if rolled {
+                        tip.push('\n');
+                        tip.push_str(crate::i18n::tr("timeline.feature_rolled_back"));
+                    }
+                    if let Some(state) = sketch_state {
+                        tip.push('\n');
+                        tip.push_str(&state.text());
+                    }
+                    if let Some(ms) = ms {
+                        tip += &format!("\n{ms:.1} ms");
+                    }
+                    tip.push('\n');
+                    tip.push_str(crate::i18n::tr("timeline.feature_hint"));
+                    ui.set_max_width(ui.spacing().tooltip_width);
+                    ui.add(egui::Label::new(tip));
+                });
                 if resp.clicked() && !pick_feature_into_dialog(app, *id, ui.input(|i| i.modifiers)) {
                     let modifiers = ui.input(|i| i.modifiers);
                     if modifiers.shift {
