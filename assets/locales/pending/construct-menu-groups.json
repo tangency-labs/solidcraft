@@ -4,6 +4,16 @@
     "ui.construct_axes": "Axes",
     "ui.construct_points": "Points"
   },
+  "ar": {
+    "ui.construct_planes": "المستويات",
+    "ui.construct_axes": "المحاور",
+    "ui.construct_points": "النقاط"
+  },
+  "he": {
+    "ui.construct_planes": "מישורים",
+    "ui.construct_axes": "צירים",
+    "ui.construct_points": "נקודות"
+  },
   "ja": {
     "ui.construct_planes": "平面",
     "ui.construct_axes": "軸",
@@ -23,5 +33,10 @@
     "ui.construct_planes": "평면",
     "ui.construct_axes": "축",
     "ui.construct_points": "점"
+  },
+  "vi": {
+    "ui.construct_planes": "Các mặt phẳng",
+    "ui.construct_axes": "Các trục",
+    "ui.construct_points": "Các điểm"
   }
 }
