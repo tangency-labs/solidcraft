@@ -139,7 +139,7 @@ fn operation(op: BooleanOp) -> BooleanOperation {
 
 /// Whether every body is a manifold solid (`IsManifoldSolid` of each copy).
 fn all_solid(bodies: &[Brep]) -> SolidResult<bool> {
-    for (n, b) in bodies.iter().enumerate() {
+    for b in bodies {
         if !p2::is_manifold_solid(b)? {
             return Ok(false);
         }
