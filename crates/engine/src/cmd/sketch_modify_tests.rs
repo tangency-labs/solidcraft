@@ -2709,7 +2709,7 @@ fn trim_piece_is_what_a_trim_there_takes_away() {
 /// refused (the trim used to report success and leave the curve whole). Trimming away a whole
 /// offset curve still works, and once the association is broken the trim cuts it.
 #[test]
-fn trim_and_extend_refuse_an_offsets_ends_until_its_association_is_broken() {
+fn trim_extend_and_break_refuse_an_offsets_ends_until_its_association_is_broken() {
     let mut s = new_sketch();
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
     let out = ids(&run(&mut s, "sketch.offset", json!({"curves": ["l1", "l2", "l3", "l4"], "distance": "2 mm", "side": [-5, -5]}))["curves"]);
@@ -2720,6 +2720,10 @@ fn trim_and_extend_refuse_an_offsets_ends_until_its_association_is_broken() {
     assert!(e.contains("offset") && e.contains("break the offset association"), "{e}");
     let e = s.execute("sketch.extend", &json!({"curve": "l5", "at": [42, -2]})).unwrap_err().to_string();
     assert!(e.contains("offset"), "{e}");
+    for params in [json!({"curve": "l5", "at": [30, -2]}), json!({"curve": "l5", "points": [[20, -2]]})] {
+        let e = s.execute("sketch.break", &params).unwrap_err().to_string();
+        assert!(e.contains("offset") && e.contains("break the offset association"), "{params}: {e}");
+    }
     assert_eq!(serde_json::to_value(sketch(&s)).unwrap(), before, "a refused trim changes nothing");
 
     run(&mut s, "sketch.offset.break", json!({"curve": "l5"}));

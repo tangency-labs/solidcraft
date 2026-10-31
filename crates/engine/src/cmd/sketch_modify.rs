@@ -608,6 +608,10 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
             doc.prune_model_params();
             return Ok(r["curves"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default());
         }
+        // Its new ends would follow the source curves as trim's and extend's would: a broken
+        // offset arc came out in three pieces that went the long way round, and the solve
+        // moved curves the break never touched.
+        refuse_offset_ends(sk, ci, "break", cmd)?;
         let sh = sk.shape(ci).ok_or_else(|| bad(cmd, "curve"))?;
         let (ts, cutters): (Vec<f64>, Vec<Option<usize>>) = if let Some(list) = &points {
             let mut v: Vec<f64> = list.iter().map(|q| sh.param(sh.project(*q))).collect();
