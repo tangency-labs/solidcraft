@@ -1,6 +1,7 @@
 //! The print face in the app (#8429): the Send to Slicer window picks, shows and clears it
 //! (`dialogs_save_mesh`), and the view shows it only while that window is open, for the bodies
-//! being sent. Print Face (Ctrl+B) opens that window with its Print face input ready for a pick.
+//! being sent. Print Face (Ctrl+B) opens that window with its Print face input ready for a pick
+//! (Bodies first when no body is selected).
 //! With the `print_face_everywhere` preference it works as it first did: Ctrl+B and the face menu
 //! mark the selected flat face as its body's print face, or clear it when it already is one, and
 //! the view shows every print face. Each change is a `body.print_face` command, so it undoes.
@@ -62,28 +63,6 @@ pub(crate) fn drawn_bodies(app: &SolveApp) -> Option<Vec<String>> {
     use crate::selection::SelectionExt as _;
     let open = app.dialog.as_ref().filter(|d| sending(&d.kind));
     Some(open.map(|d| crate::selection::items(&d.inputs, 0).body_names()).unwrap_or_default())
-}
-
-/// Opening Send to Slicer moved the ribbon from tab `from` to tab `to`: put it back once the
-/// window is closed, however it closes.
-pub(crate) fn remember_tab(app: &mut SolveApp, from: String, to: String) {
-    if from != to {
-        app.slicer_return_tab = Some((from, to));
-    }
-}
-
-/// Per frame: Send to Slicer has closed, so the ribbon goes back to the tab it was opened from,
-/// unless the user has moved it to another one meanwhile.
-pub(crate) fn tick_return_tab(app: &mut SolveApp) {
-    if app.slicer_return_tab.is_none() || app.dialog.as_ref().is_some_and(|d| sending(&d.kind)) {
-        return;
-    }
-    if let Some((from, to)) = app.slicer_return_tab.take()
-        && app.ui.tab == to
-        && crate::workspace::visible_tabs(app).contains(&from.as_str())
-    {
-        app.ui.tab = from;
-    }
 }
 
 /// Ctrl+B and the face menu with `print_face_everywhere`: the one selected face becomes its body's
@@ -243,35 +222,22 @@ mod tests {
         let d = app.dialog.as_ref().expect("Send to Slicer opens");
         assert_eq!(d.inputs[d.active].label, "Bodies");
         crate::dialogs::cancel(&mut app);
-        // Faces of two bodies selected: the face menu's Send to Slicer sends both.
+        // Faces of two bodies selected: the face menu's Send to Slicer and Save As Mesh take both.
         app.session.selection = vec![side.clone(), face(&app, "Lid", [45.0, 5.0, 5.0])];
-        let send = crate::context_menu::items(&app, &crate::context_menu::Target::Viewport).into_iter().find(|i| i.id == "ui.sendToSlicer");
-        crate::context_menu::run_item(&mut app, &send.expect("Send to Slicer in the face menu"), egui::Pos2::ZERO);
-        assert_eq!(crate::selection::items(inputs(&app), 0).body_names(), ["Block", "Lid"]);
-        crate::dialogs::cancel(&mut app);
+        let two = app.session.selection.clone();
+        for id in ["ui.sendToSlicer", "ui.saveMesh"] {
+            app.session.selection = two.clone();
+            let item = crate::context_menu::items(&app, &crate::context_menu::Target::Viewport).into_iter().find(|i| i.id == id);
+            crate::context_menu::run_item(&mut app, &item.expect("in the face menu"), egui::Pos2::ZERO);
+            assert_eq!(crate::selection::items(inputs(&app), 0).body_names(), ["Block", "Lid"], "{id}");
+            crate::dialogs::cancel(&mut app);
+        }
         app.session.selection = vec![side.clone()];
         app.preferences.print_face_everywhere = true;
         assert!(menu(&app).iter().any(|id| id == "body.print_face"));
         app.start("body.print_face");
         assert!(app.dialog.is_none());
         assert!(app.session.doc.print_faces.contains_key("Block"));
-    }
-
-    /// Opening Send to Slicer moves the ribbon to the tab that has it; closing it, however, goes
-    /// back to the tab it was opened from.
-    #[test]
-    fn closing_send_to_slicer_returns_to_the_tab_it_was_opened_from() {
-        let mut app = two_bodies();
-        let start = app.ui.tab.clone();
-        app.session.selection = vec![Sel::Body { name: "Block".into() }];
-        app.start("file.send_to_slicer");
-        assert_ne!(app.ui.tab, start, "the ribbon shows the tab with Send to Slicer");
-        super::tick_return_tab(&mut app);
-        assert_ne!(app.ui.tab, start, "not while it is open");
-        crate::dialogs::cancel(&mut app);
-        super::tick_return_tab(&mut app);
-        assert_eq!(app.ui.tab, start);
-        assert!(app.slicer_return_tab.is_none());
     }
 
     /// Select the face of Block at `point`; its index.

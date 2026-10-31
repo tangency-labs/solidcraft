@@ -307,7 +307,7 @@ fn sel_bodies(app: &SolveApp) -> Vec<String> {
 }
 
 /// The bodies of everything selected (bodies, and the bodies of faces, edges and vertices), in
-/// selection order, each once: what Send to Slicer from a face sends.
+/// selection order, each once: what Save As Mesh and Send to Slicer from a face or edge take.
 fn sel_solid_bodies(app: &SolveApp) -> Vec<String> {
     let mut v: Vec<String> = Vec::new();
     for s in &app.session.selection {
@@ -706,10 +706,10 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(Item::sep());
         v.push(act("ui.appearance", "Appearance", "appearance").key("A"));
         v.push(act("ui.properties", "Properties", "measure").with(json!({ "bodies": [face] })));
-        v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": [face] })));
         // Every body selected goes, not only the one right-clicked.
-        let sending = sel_solid_bodies(app);
-        v.push(act("ui.sendToSlicer", "Send to Slicer", "export").with(json!({ "bodies": sending })).on(crate::dialogs_save_mesh::available(app)));
+        let bodies = sel_solid_bodies(app);
+        v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": bodies })));
+        v.push(act("ui.sendToSlicer", "Send to Slicer", "export").with(json!({ "bodies": bodies })).on(crate::dialogs_save_mesh::available(app)));
         v.push(Item::sep());
         v.push(act("ui.delete", "Delete", "delete").key("Del"));
         v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": [face] })));
@@ -729,7 +729,7 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
         v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": [body] })));
         v.push(Item::sep());
         v.push(act("ui.findBrowser", "Find in Browser", "list").with(json!({ "body": body })));
-        v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": [body] })));
+        v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": sel_solid_bodies(app) })));
         v.push(Item::sep());
         v.push(act("ui.tangentChain", "Select Tangent Chain", "chain"));
         v.push(cmd(app, "inspect.measure", "Measure"));

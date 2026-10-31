@@ -8,8 +8,10 @@
 //! body's print face (replacing that body's last one) and adds the body to Bodies when it is not
 //! there yet; a face taken out clears it. Each change runs `body.print_face` at once, so it undoes
 //! like any other, and the design keeps it. The view shows print faces only while this window is
-//! open, and only for the bodies in its Bodies list (`print_face_ui::drawn_bodies`). Closing it
-//! puts the ribbon back on the tab it was opened from.
+//! open, and only for the bodies in its Bodies list (`print_face_ui::drawn_bodies`).
+//!
+//! Opening either window may move the ribbon to the tab that has its command; closing it puts the
+//! ribbon back on the tab it was opened from.
 //!
 //! Every place that saves a mesh opens this dialog: File › Export STL / Export 3MF, the Mesh tab, and the
 //! Save As Mesh item of the body menus. The slicer list (Send to Slicer only) holds the programs the user added (kept
@@ -153,6 +155,28 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         inputs.push(SelInput::new("Print face", PLANAR_FACES, true));
     }
     Some((kind, inputs))
+}
+
+/// Opening Save As Mesh or Send to Slicer moved the ribbon from tab `from` to tab `to`: put it
+/// back once the window is closed, however it closes.
+pub(crate) fn remember_tab(app: &mut SolveApp, from: String, to: String) {
+    if from != to {
+        app.mesh_return_tab = Some((from, to));
+    }
+}
+
+/// Per frame: the mesh window has closed, so the ribbon goes back to the tab it was opened from,
+/// unless the user has moved it to another one meanwhile.
+pub(crate) fn tick_return_tab(app: &mut SolveApp) {
+    if app.mesh_return_tab.is_none() || app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::SaveMesh(_))) {
+        return;
+    }
+    if let Some((from, to)) = app.mesh_return_tab.take()
+        && app.ui.tab == to
+        && crate::workspace::visible_tabs(app).contains(&from.as_str())
+    {
+        app.ui.tab = from;
+    }
 }
 
 /// Send to Slicer needs a way to start a program (a browser has none) or a way to reach EasyPrint.
@@ -684,6 +708,33 @@ fn report(app: &mut SolveApp, result: &Value) {
 mod tests {
     use super::*;
     use solidcraft_engine::Sel;
+
+    /// Opening Save As Mesh or Send to Slicer moves the ribbon to the tab that has it; closing
+    /// it, however, goes back to the tab it was opened from, unless the user picked another.
+    #[test]
+    fn closing_the_mesh_window_returns_to_the_tab_it_was_opened_from() {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        app.run("solid.box", serde_json::json!({"length": 20, "width": 10, "height": 5, "body_name": "Block"})).unwrap();
+        let start = app.ui.tab.clone();
+        for id in ["file.send_to_slicer", "file.save_mesh"] {
+            app.session.selection = vec![Sel::Body { name: "Block".into() }];
+            app.start(id);
+            assert_ne!(app.ui.tab, start, "{id}: the ribbon shows the tab with it");
+            tick_return_tab(&mut app);
+            assert_ne!(app.ui.tab, start, "{id}: not while it is open");
+            crate::dialogs::cancel(&mut app);
+            tick_return_tab(&mut app);
+            assert_eq!(app.ui.tab, start, "{id}");
+            assert!(app.mesh_return_tab.is_none());
+        }
+        // A tab the user went to meanwhile stays.
+        app.start("file.save_mesh");
+        app.ui.tab = "INSPECT".into();
+        crate::dialogs::cancel(&mut app);
+        tick_return_tab(&mut app);
+        assert_eq!(app.ui.tab, "INSPECT");
+    }
 
     #[test]
     fn without_a_program_dialog_send_to_slicer_is_unavailable_and_starts_nothing() {
