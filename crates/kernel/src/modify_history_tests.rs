@@ -511,9 +511,9 @@ fn chamfer_after_box_cuts() {
         for (name, cut, tool) in box_cuts_of(&b) {
             let r = crate::chamfer(&cut, &[at], 2.0).unwrap();
             let h = verified(&r, &cut, reach(2.0 * 1.5));
-            // On the painted block the chamfer face keeps the boundaries the cut left.
-            let faces = with(h, &[edge(edge_at(&cut, at))]).len();
-            assert!(if painted { faces >= 1 } else { faces == 1 }, "{name} (painted: {painted}): {h:?}");
+            // The picked edge is one edge of the cut body on either block (its round is one face,
+            // `fillet_after_box_cuts`), so its chamfer is one face too.
+            assert_eq!(with(h, &[edge(edge_at(&cut, at))]).len(), 1, "{name} (painted: {painted}): {h:?}");
             let mut through = h.clone();
             through.substitute(0, cut.history().unwrap()).unwrap();
             through.check(&r, &[&b, &tool]).unwrap();
