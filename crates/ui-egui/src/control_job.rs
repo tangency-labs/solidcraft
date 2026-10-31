@@ -81,6 +81,8 @@ const READ_ON_A_COPY: &[&str] = &[
     // Physical properties of a component or placement: every body of every placement (#8706).
     "component.properties",
     "occurrence.properties",
+    // A live link's meshes: following the design never holds up the window.
+    "live.meshes",
 ];
 
 /// Exports and readings computing at once; more run here.
