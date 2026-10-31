@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::panic)]
 use crate::scenario::Harness;
 use crate::sketch_modify_ui::{Mod, candidate};
 use crate::viewport::Hit;
@@ -436,6 +436,114 @@ fn tracking_does_not_leak_outside_the_viewport_or_into_another_sketch() {
     assert!(h.app.viewport.tracking.guide.is_none());
 }
 
+#[test]
+fn dialog_tab_mirror_advances_from_canvas_and_reverses_without_changing_picks() {
+    let mut h = fixture();
+    step(&mut h, json!({"start":"sketch.mirror"}));
+    pick(&mut h, [-22.5, 10.0], false);
+    pick(&mut h, [-15.0, 17.5], false);
+    step(&mut h, json!({"key":"Tab"}));
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 1);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2);
+    pick(&mut h, [0.0, 20.0], false);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items.len(), 1);
+    step(&mut h, json!({"key":"Tab", "shift":true}));
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+    pick(&mut h, [-22.5, 10.0], true);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items.len(), 1);
+}
+
+#[test]
+fn dialog_tab_patterns_follow_display_order_in_both_directions() {
+    for command in ["sketch.pattern.rectangular", "sketch.pattern.circular"] {
+        let mut h = fixture();
+        step(&mut h, json!({"call":"ui.camera","params":{"target":[-60,0,0],"distance":120}}));
+        step(&mut h, json!({"start":command}));
+        pick(&mut h, [-22.5, 10.0], false);
+        step(&mut h, json!({"key":"Tab"}));
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 1, "{command}");
+        if command == "sketch.pattern.rectangular" {
+            step(&mut h, json!({"key":"Tab"}));
+            assert_eq!(h.app.dialog.as_ref().unwrap().active, 2);
+        }
+        step(&mut h, json!({"key":"Tab"}));
+        step(&mut h, json!({"text":"4"}));
+        let d = h.app.dialog.as_ref().unwrap();
+        match &d.kind {
+            crate::dialogs::Kind::SketchModify(Mod::PatternRect { count, .. } | Mod::PatternCirc { count, .. }) => assert_eq!(count, "4"),
+            _ => panic!("pattern dialog"),
+        }
+        if command == "sketch.pattern.rectangular" {
+            step(&mut h, json!({"key":"Tab", "shift":true}));
+            assert_eq!(h.app.dialog.as_ref().unwrap().active, 2);
+        }
+        step(&mut h, json!({"key":"Tab", "shift":true}));
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 1);
+        step(&mut h, json!({"key":"Tab", "shift":true}));
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+        if command == "sketch.pattern.rectangular" {
+            // Entities, both directions, Quantity, and Spacing; headers and arrows are skipped.
+            for _ in 0..4 {
+                step(&mut h, json!({"key":"Tab"}));
+            }
+            assert_eq!(h.app.dialog.as_ref().unwrap().active, 2);
+            step(&mut h, json!({"key":"Tab"}));
+            step(&mut h, json!({"text":"2"}));
+            let crate::dialogs::Kind::SketchModify(Mod::PatternRect { count2, .. }) = &h.app.dialog.as_ref().unwrap().kind else {
+                panic!("rectangular pattern dialog");
+            };
+            assert_eq!(count2, "2");
+            step(&mut h, json!({"key":"Tab", "shift":true}));
+            assert_eq!(h.app.dialog.as_ref().unwrap().active, 2);
+            step(&mut h, json!({"text":"25"}));
+            let crate::dialogs::Kind::SketchModify(Mod::PatternRect { spacing, .. }) = &h.app.dialog.as_ref().unwrap().kind else {
+                panic!("rectangular pattern dialog");
+            };
+            assert_eq!(spacing, "25 mm");
+        }
+    }
+}
+
+#[test]
+fn dialog_tab_does_not_intercept_modified_tabs_or_collapsed_dialogs() {
+    let mut h = fixture();
+    step(&mut h, json!({"start":"sketch.mirror"}));
+    pick(&mut h, [-22.5, 10.0], false);
+    for modifiers in [egui::Modifiers::CTRL, egui::Modifiers::ALT, egui::Modifiers::COMMAND] {
+        for pressed in [true, false] {
+            h.app.synthetic.push(egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed, repeat: false, modifiers });
+        }
+        h.frames(3);
+        assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+    }
+    h.app.dialog.as_mut().unwrap().collapsed = true;
+    h.frames(3);
+    step(&mut h, json!({"key":"Tab"}));
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 0);
+    h.app.dialog.as_mut().unwrap().collapsed = false;
+    step(&mut h, json!({"key":"Escape"}));
+    assert!(h.app.dialog.is_none());
+}
+
+#[test]
+fn dialog_tab_enter_on_mirror_selection_applies_the_dialog() {
+    let mut h = fixture();
+    step(&mut h, json!({"start":"sketch.mirror"}));
+    pick(&mut h, [-22.5, 10.0], false);
+    pick(&mut h, [-15.0, 17.5], false);
+    step(&mut h, json!({"key":"Tab"}));
+    pick(&mut h, [0.0, 20.0], false);
+    step(&mut h, json!({"key":"Tab", "shift":true}));
+    step(&mut h, json!({"key":"Tab"}));
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 1);
+    step(&mut h, json!({"key":"Space"}));
+    assert!(h.app.dialog.is_some(), "Space activates the selection without applying the dialog");
+    step(&mut h, json!({"key":"Enter"}));
+    assert!(h.app.dialog.is_none(), "Enter on the Mirror line selection must apply the dialog");
+    assert_eq!(h.app.session.world_state().sketch(1).unwrap().sketch.curves.len(), 5);
+}
+
 /// Lining up while drawing (#7828), turned on (it is off by default): a fixture whose points sit
 /// off the grid, so that only lining up can place a point exactly on them, seen from the top at
 /// about 1 mm of snap tolerance.
@@ -543,4 +651,90 @@ fn a_horizontal_line_ends_plumb_with_a_point_above_and_keeps_both() {
         sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Horizontal { .. })),
         "the line stays horizontal"
     );
+}
+
+#[test]
+fn dialog_keyboard_sketch_mirror_and_patterns_cycle_without_committing_and_cancel() {
+    use crate::test_support::{dialog_tab_cycle, dialog_tab_to};
+    for command in ["sketch.mirror", "sketch.pattern.rectangular", "sketch.pattern.circular"] {
+        for placement in [crate::ui_kit::DialogButtons::Bottom, crate::ui_kit::DialogButtons::Top] {
+            let mut h = fixture();
+            h.app.preferences.dialog_buttons = placement;
+            h.call("ui.camera", json!({"target":[-60,0,0],"distance":120}));
+            let document = h.app.session.doc.to_json();
+            let undo = h.app.session.undo.len();
+            step(&mut h, json!({"start":command}));
+            pick(&mut h, [-22.5, 10.0], false);
+            let reference = h.app.dialog.as_ref().unwrap().inputs[1].label.to_string();
+            dialog_tab_to(&mut h, &format!("dialog:{reference}"));
+            if command.ends_with("circular") {
+                pick(&mut h, [-40.0, -20.0], false);
+            } else {
+                pick(&mut h, [0.0, 20.0], false);
+            }
+            dialog_tab_to(&mut h, &format!("dialog:{reference}"));
+            dialog_tab_cycle(&mut h);
+            step(&mut h, json!({"key":"Escape"}));
+            assert!(h.app.dialog.is_none());
+            assert_eq!(h.app.session.doc.to_json(), document);
+            assert_eq!(h.app.session.undo.len(), undo);
+        }
+    }
+}
+
+#[test]
+fn dialog_keyboard_sketch_patterns_enter_applies_the_typed_quantities() {
+    use crate::test_support::dialog_tab_to;
+    for command in ["sketch.pattern.rectangular", "sketch.pattern.circular"] {
+        let mut h = fixture();
+        h.call("ui.camera", json!({"target":[-60,0,0],"distance":120}));
+        step(&mut h, json!({"start":command}));
+        pick(&mut h, [-22.5, 10.0], false);
+        let reference = h.app.dialog.as_ref().unwrap().inputs[1].label.to_string();
+        if command.ends_with("circular") {
+            dialog_tab_to(&mut h, &format!("dialog:{reference}"));
+            pick(&mut h, [-40.0, -20.0], false);
+        } else {
+            step(&mut h, json!({"click":{"handle":"dialog:Quantity 2"}}));
+            step(&mut h, json!({"key":"A","cmd":true}));
+            step(&mut h, json!({"text":"2"}));
+        }
+        step(&mut h, json!({"click":{"handle":"dialog:Quantity"}}));
+        step(&mut h, json!({"key":"A","cmd":true}));
+        step(&mut h, json!({"text":"3"}));
+        dialog_tab_to(&mut h, &format!("dialog:{reference}"));
+        step(&mut h, json!({"key":"Enter"}));
+        assert!(h.app.dialog.is_none(), "{command}: Enter on the reference applies");
+        assert_eq!(h.app.session.world_state().sketch(1).unwrap().sketch.curves.len(), if command.ends_with("rectangular") { 8 } else { 5 });
+    }
+}
+
+#[test]
+fn dialog_keyboard_sketch_empty_selection_and_invalid_inputs_do_not_apply() {
+    use crate::test_support::dialog_tab_to;
+    for command in ["sketch.mirror", "sketch.pattern.rectangular", "sketch.pattern.circular"] {
+        let mut h = fixture();
+        h.call("ui.camera", json!({"target":[-60,0,0],"distance":120}));
+        let document = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+        step(&mut h, json!({"start":command}));
+        dialog_tab_to(&mut h, "dialog:Entities");
+        step(&mut h, json!({"key":"Enter"}));
+        assert!(h.app.dialog.is_some(), "{command}: an empty selection cannot apply");
+        dialog_tab_to(&mut h, "dialog:Entities");
+        pick(&mut h, [-22.5, 10.0], false);
+        if command == "sketch.mirror" {
+            dialog_tab_to(&mut h, "dialog:Mirror line");
+        } else {
+            step(&mut h, json!({"click":{"handle":"dialog:Quantity"}}));
+            step(&mut h, json!({"key":"A","cmd":true}));
+            step(&mut h, json!({"text":"0"}));
+        }
+        step(&mut h, json!({"key":"Enter"}));
+        assert!(h.app.dialog.is_some(), "{command}: missing mirror line or zero quantity cannot apply");
+        step(&mut h, json!({"key":"Escape"}));
+        assert!(h.app.dialog.is_none());
+        assert_eq!(h.app.session.doc.to_json(), document);
+        assert_eq!(h.app.session.undo.len(), undo);
+    }
 }

@@ -35,8 +35,9 @@ fn checkbox_keyboard_pointer_disabled_and_mixed() {
                     frame(&ctx, pointer(at, true), &mut draw);
                     frame(&ctx, pointer(at, false), &mut draw);
                 }
-                assert_eq!(on, enabled, "mixed={mixed}, enabled={enabled}, key={activation:?}");
-                assert_eq!(changed, enabled);
+                let toggles = enabled && activation != Some(egui::Key::Enter);
+                assert_eq!(on, toggles, "mixed={mixed}, enabled={enabled}, key={activation:?}");
+                assert_eq!(changed, toggles);
             }
         }
     }
@@ -441,5 +442,58 @@ fn checkbox_accessibility_preserves_label_checked_and_mixed_metadata() {
         assert_eq!(after.typ, egui::WidgetType::Checkbox);
         assert_eq!(after.label.as_deref(), Some("Enabled"));
         assert_eq!(after.selected, Some(true));
+    }
+}
+
+#[test]
+fn checkbox_variants_use_space_to_toggle_and_enter_to_apply_the_dialog() {
+    use ui_kit::{Action, Window};
+    for variant in 0..3 {
+        let ctx = crate::fonts::test_context();
+        let value = std::cell::Cell::new(false);
+        let applied = std::cell::Cell::new(false);
+        let target = std::cell::Cell::new(Rect::NOTHING);
+        let mut draw = |ui: &mut Ui| {
+            crate::dialog_focus::prepare_active(ui.ctx());
+            let (_, action) = Window::new(egui::Id::new("checkbox_dialog"), "", "Test").show(ui.ctx(), true, |ui| {
+                let mut on = value.get();
+                match variant {
+                    0 => target.set(checkbox(ui, "Option", &mut on).rect),
+                    1 => {
+                        ui_kit::checkbox_grid(ui, &mut [("Option", &mut on)], 1);
+                        target.set(crate::scenario::rect_of("dialog:checkbox:Option").unwrap());
+                    }
+                    _ => {
+                        if ui_kit::checkbox_row(ui, "option", "Option", on) {
+                            on = !on;
+                        }
+                        target.set(crate::scenario::rect_of("sketch_palette:toggle:option").unwrap());
+                    }
+                }
+                value.set(on);
+            });
+            if action == Action::Ok {
+                applied.set(true);
+            }
+        };
+        for _ in 0..3 {
+            frame(&ctx, vec![], &mut draw);
+        }
+        for _ in 0..6 {
+            frame(&ctx, key(egui::Key::Tab), &mut draw);
+            for _ in 0..3 {
+                frame(&ctx, vec![], &mut draw);
+            }
+            if ctx.memory(|m| m.focused()).and_then(|id| ctx.read_response(id)).is_some_and(|r| r.rect == target.get()) {
+                break;
+            }
+        }
+        assert_eq!(ctx.read_response(ctx.memory(|m| m.focused()).unwrap()).unwrap().rect, target.get());
+        frame(&ctx, key(egui::Key::Space), &mut draw);
+        assert!(value.get(), "Space toggles variant {variant}");
+        assert!(!applied.get());
+        frame(&ctx, key(egui::Key::Enter), &mut draw);
+        assert!(value.get(), "Enter must preserve variant {variant}");
+        assert!(applied.get(), "Enter must apply the dialog for variant {variant}");
     }
 }

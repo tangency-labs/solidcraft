@@ -457,14 +457,6 @@ fn fields(mode: usize) -> usize {
     }
 }
 
-/// Show the next (`step` 1) or previous (`step` -1) value in the box, round the type's values.
-pub fn step_value_field(d: &mut Dialog, step: i64) {
-    let Kind::Move { mode, .. } = &d.kind else { return };
-    let n = fields(*mode) as i64;
-    let next = (value_field(d) as i64 + step).rem_euclid(n.max(1));
-    d.extra.insert("value_field".into(), json!(next));
-}
-
 pub fn drag(app: &SolveApp, d: &mut Dialog, g: Drag) {
     // The box shows the value the handle drives: the distance along a dragged arrow, the angle
     // of a dragged ring (#4776). A plane square or the ball moves along two or three axes and

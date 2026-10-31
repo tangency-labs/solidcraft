@@ -62,7 +62,7 @@ pub fn offset_anchor(docked: Pos2, offset: egui::Vec2, vp: egui::Rect, side: Sid
 /// it on screen). Called before the band's buttons are added, so they keep their clicks.
 pub fn drag_dock(ui: &Ui, band: egui::Rect, key: &str, moved: egui::Vec2, applied: egui::Vec2) {
     crate::scenario::publish_handle("dialog:title", band.center());
-    let response = ui.interact(band, ui.id().with("sc_dock_drag"), egui::Sense::drag());
+    let response = ui.interact(band, ui.id().with("sc_dock_drag"), egui::Sense::DRAG);
     if response.dragged() {
         let frame = ui.ctx().cumulative_frame_nr();
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_dock_drag_frame"), frame));

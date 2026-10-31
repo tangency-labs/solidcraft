@@ -97,3 +97,59 @@ pub(crate) fn each_shape(shape: &Shape, visit: &mut impl FnMut(&Shape)) {
         shape => visit(shape),
     }
 }
+
+/// Reach a real dialog control with Tab rather than injecting a widget ID into focus memory.
+pub(crate) fn dialog_tab_to(h: &mut Harness, handle: &str) {
+    for _ in 0..96 {
+        let at = crate::scenario::handle_at(handle).unwrap_or_else(|| panic!("missing dialog target {handle}"));
+        if h.ctx.memory(|m| m.focused()).and_then(|id| h.ctx.read_response(id)).is_some_and(|r| {
+            r.enabled()
+                && r.rect.is_positive()
+                && r.rect.contains(at)
+                && h.app.viewport.dialog_rect.is_some_and(|dialog| dialog.contains(r.rect.center()))
+        }) {
+            return;
+        }
+        h.step(&json!({"key":"Tab"})).unwrap();
+    }
+    panic!("Tab did not reach {handle}");
+}
+
+/// Verify a whole native focus cycle and its exact reverse without changing picks or the model.
+pub(crate) fn dialog_tab_cycle(h: &mut Harness) {
+    let start = h.ctx.memory(|m| m.focused()).expect("start inside the dialog");
+    let layer = h.ctx.read_response(start).unwrap().layer_id;
+    let document = h.app.session.doc.to_json();
+    let undo = h.app.session.undo.len();
+    let selection = h.app.session.selection.clone();
+    let picks: Vec<_> = h.app.dialog.as_ref().unwrap().inputs.iter().map(|input| input.items.clone()).collect();
+    let mut forward = vec![start];
+    let mut wrapped = false;
+    for _ in 0..96 {
+        h.step(&json!({"key":"Tab"})).unwrap();
+        let id = h.ctx.memory(|m| m.focused()).expect("Tab must always reach a control");
+        let response = h.ctx.read_response(id).unwrap();
+        assert_eq!(response.layer_id, layer, "Tab must not enter canvas, browser, toolbar or palette");
+        assert!(response.enabled() && response.rect.is_positive());
+        assert!(h.app.viewport.dialog_rect.unwrap().contains(response.rect.center()));
+        assert_ne!(Some(response.rect), crate::scenario::rect_of("dialog:header"), "drag headers are not controls");
+        if h.app.preferences.dialog_buttons == crate::ui_kit::DialogButtons::Bottom {
+            assert!(!response.rect.contains(crate::scenario::handle_at("dialog:close").unwrap()), "Close is pointer-only");
+        }
+        if id == start {
+            wrapped = true;
+            break;
+        }
+        assert!(!forward.contains(&id), "focus must not get stuck in a smaller sub-cycle");
+        forward.push(id);
+    }
+    assert!(wrapped && forward.len() > 2, "fields and actions must form a bounded cycle");
+    for expected in forward.iter().rev() {
+        h.step(&json!({"key":"Tab", "shift":true})).unwrap();
+        assert_eq!(h.ctx.memory(|m| m.focused()), Some(*expected), "Shift+Tab must exactly reverse the native order");
+    }
+    assert_eq!(h.app.session.doc.to_json(), document, "navigation must not commit preview geometry");
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.selection, selection);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs.iter().map(|input| input.items.clone()).collect::<Vec<_>>(), picks);
+}

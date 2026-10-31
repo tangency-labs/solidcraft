@@ -236,7 +236,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let mut outcome = (false, ui_kit::Action::None);
     let live = app.preferences.parameters_apply_live;
     let held_status = if live { None } else { held_status(held(&d, &all).len()) };
-    panel.window(ctx).show(ctx, |ui| {
+    panel.show(ctx, None, |ui| {
         outcome = panel.feature(
             ui,
             ui_kit::FeatureOptions {
@@ -1762,5 +1762,22 @@ mod tests {
         h.frames(2);
         let short = crate::scenario::rect_of("param:width").unwrap();
         assert!(short.width() <= cell.width() + 0.5, "a formula that fits stays in its cell: {short:?} vs {cell:?}");
+    }
+
+    #[test]
+    fn dialog_tab_parameters_stays_inside_its_manager() {
+        let mut h = escape_dialog();
+        h.step(&json!({"click":{"handle":"dialog:Filter"}})).unwrap();
+        let id = h.ctx.memory(|m| m.focused()).unwrap();
+        let layer = h.ctx.read_response(id).unwrap().layer_id;
+        for backwards in [false, true] {
+            for _ in 0..40 {
+                h.step(&json!({"key":"Tab", "shift":backwards})).unwrap();
+                let focused = h.ctx.memory(|m| m.focused()).unwrap();
+                let response = h.ctx.read_response(focused).unwrap();
+                assert_eq!(response.layer_id, layer);
+                assert!(response.rect.is_positive());
+            }
+        }
     }
 }
