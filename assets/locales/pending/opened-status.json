@@ -1,0 +1,42 @@
+{
+  "en": {
+    "file_load.inserted": "Inserted {name}",
+    "file_load.opened": "Opened {name}",
+    "file_load.opened_in_tab": "Opened {name} in a new tab"
+  },
+  "ar": {
+    "file_load.inserted": "تم إدراج {name}",
+    "file_load.opened": "تم فتح {name}",
+    "file_load.opened_in_tab": "تم فتح {name} في علامة تبويب جديدة"
+  },
+  "de": {
+    "file_load.inserted": "{name} eingefügt",
+    "file_load.opened": "{name} geöffnet",
+    "file_load.opened_in_tab": "{name} in neuem Tab geöffnet"
+  },
+  "he": {
+    "file_load.inserted": "{name} הוכנס",
+    "file_load.opened": "{name} נפתח",
+    "file_load.opened_in_tab": "{name} נפתח בלשונית חדשה"
+  },
+  "ja": {
+    "file_load.inserted": "{name} を挿入しました",
+    "file_load.opened": "{name} を開きました",
+    "file_load.opened_in_tab": "{name} を新しいタブで開きました"
+  },
+  "ko": {
+    "file_load.inserted": "{name}을(를) 삽입했습니다",
+    "file_load.opened": "{name}을(를) 열었습니다",
+    "file_load.opened_in_tab": "{name}을(를) 새 탭에서 열었습니다"
+  },
+  "vi": {
+    "file_load.inserted": "Đã chèn {name}",
+    "file_load.opened": "Đã mở {name}",
+    "file_load.opened_in_tab": "Đã mở {name} trong thẻ mới"
+  },
+  "zh": {
+    "file_load.inserted": "已插入 {name}",
+    "file_load.opened": "已打开 {name}",
+    "file_load.opened_in_tab": "已在新标签页中打开 {name}"
+  }
+}
