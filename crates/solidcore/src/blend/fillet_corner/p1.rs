@@ -26,6 +26,7 @@
 //! | [`FilletCorner::fillet_edges`], [`FilletCorner::fillet_vertices`] | `GetFilletEdges`, `GetFilletVertices` |
 //! | [`FilletCorner::filleted_vertex`], [`FilletCorner::set_back_dist`], [`FilletCorner::status`] | `GetFilletedVertex`, `GetSetBackDist`, `GetStatus` |
 //! | [`FilletCorner::ease_dist`] | `GetEaseDist` (the fork's, tangency-labs/smlib `e74bbd3`) |
+//! | `face_curve_half_along` (private) | the fork's `sm_FaceCurveHalfAlong` (tangency-labs/smlib `4702889`, WR-659) |
 //! | [`FilletCorner::type_code`], [`FilletCorner::type_string`], [`FilletCorner::is_kind_of`] | `GetType`, `GetTypeString`, `IsKindOf` (`SM_COMMON`) |
 //! | [`FilletCorner::add_fillet_vertex`]          | `AddFilletVertex`                           |
 //! | [`FilletCorner::set_bevel`], [`FilletCorner::set_calc_as_const_rad`], [`FilletCorner::set_chamfer`] | `SetBevel`, `SetCalcAsConstRad`, `SmFilletConvexNxNCorner::SetChamfer` |
@@ -158,7 +159,7 @@ use crate::curve::curve::{p2 as curve2, Curve, CurveKind};
 use crate::curve::line::Line;
 use crate::error::EntityRef;
 use crate::error::{Result, SolidError};
-use crate::geom::extent1d::ExtentNd;
+use crate::geom::extent1d::{Extent1d, ExtentNd};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_closest_point;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
@@ -169,6 +170,7 @@ use crate::intersect::surface_intersector::p1::{IntersectionPointType, SrfIndex,
 use crate::kernel::Kernel;
 use crate::math::{rad_to_deg, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
+use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -2260,6 +2262,10 @@ impl FilletCorner {
 
         // arrive here when building an N-sided patch
 
+        // Not upstream (WR-659, opt-in `fillet_corner_face_curve_halves`; the fork's
+        // tangency-labs/smlib 4702889): at a corner whose rounds ease
+        let face_curve_halves = env.k.fixes.fillet_corner_face_curve_halves && self.ease_dist > 0.0;
+
         // for every m_Surfaces->Surface - build 1 face with natural edge boundaries
         for surface in self.surfaces.clone() {
             let uv_domain = surface.natural_uv_domain_with_nurb(env.k)?;
@@ -2278,6 +2284,21 @@ impl FilletCorner {
                     .curve;
                 curves_3d.push(iso_curve);
                 curve_orients.push(orient);
+            }
+
+            // Not upstream (WR-659, opt-in; the fork's 4702889): at a corner whose rounds
+            // ease into their curvature-continuous sections (m_dEaseDist), a side of this
+            // face on one of the corner's face curves is that curve's own half
+            // (sm_FaceCurveHalfAlong), not the patch's iso-curve, which N_FillNSidedHole fits
+            // to the half only to tolerance, in its surfaces' degree and knots
+            if face_curve_halves {
+                for side in &mut curves_3d {
+                    if let Some(half) =
+                        face_curve_half_along(env, &self.edges, side, self.approx_tol_3d)?
+                    {
+                        *side = half;
+                    }
+                }
             }
 
             // Each rectangular surface has 4 sides
@@ -2313,6 +2334,76 @@ impl FilletCorner {
 
         Ok(())
     }
+}
+
+/// Not upstream (WR-659; the fork's `sm_FaceCurveHalfAlong`, tangency-labs/smlib
+/// 4702889): the half of one of the corner's face curves (a
+/// [`FilletEdgeType::RailRailInterpolation`] edge of `edges` whose curve is a B-spline
+/// kind) that the side `iso` of an N-sided patch's face runs along, as its own curve, from
+/// `iso`'s start to its end; `None` when `iso` is on no such half (its ends not the half's
+/// to `tol`). `N_FillNSidedHole` splits each side of the hole at the middle of its
+/// parameter and interpolates the halves by its surfaces, in the degree and knots of their
+/// cross-derivative fields; the face curve's half is the curve itself on half its interval
+/// (a copy without owner, trimmed there and reversed when `iso` runs the other way). At a
+/// corner whose rounds ease, the face curve is one quintic span
+/// (`SmFilletEdge::CalcRailRailInterpolation`), so each half is one quintic span.
+///
+/// # Errors
+///
+/// Those of the evaluations, the curve copy, its trim and reversal, and of the fillet edge
+/// lookups.
+fn face_curve_half_along(
+    env: &CornerPatchEnv<'_, '_>,
+    edges: &[EdgeId],
+    iso: &Curve,
+    tol: f64,
+) -> Result<Option<Curve>> {
+    let k: &Kernel = &*env.k;
+    let iso_ivl = iso.natural_interval();
+    let iso_start = iso.evaluate_point(k, iso_ivl.min())?;
+    let iso_end = iso.evaluate_point(k, iso_ivl.max())?;
+    for &e in edges {
+        if env.pseudo.fillet_edge(e)?.edge_type != FilletEdgeType::RailRailInterpolation {
+            continue;
+        }
+        // SM_CAST_PTR(SmBSplineCurve, pFE->GetCurve()): no curve, or not a B-spline kind
+        let Some(side) = env
+            .pseudo
+            .brep()
+            .edge(e)?
+            .curve
+            .as_ref()
+            .filter(|c| is_b_spline_kind(c))
+        else {
+            continue;
+        };
+        let ivl = side.natural_interval();
+        let at = [ivl.min(), ivl.evaluate(0.5), ivl.max()];
+        let mut pnt = [Point3::new(0.0, 0.0, 0.0); 3];
+        for (p, &t) in pnt.iter_mut().zip(&at) {
+            *p = side.evaluate_point(k, t)?;
+        }
+        // each half h: from at[h] to at[h + 1]
+        for (ends, params) in pnt.windows(2).zip(at.windows(2)) {
+            let (&[from, to], &[t0, t1]) = (ends, params) else {
+                continue;
+            };
+            let same = from.distance(iso_start) <= tol && to.distance(iso_end) <= tol;
+            let opposite = from.distance(iso_end) <= tol && to.distance(iso_start) <= tol;
+            if !same && !opposite {
+                continue;
+            }
+            let mut half = side.copy(k)?;
+            let mut half_ivl = Extent1d::from_min_max(t0, t1);
+            half.trim(k, &mut half_ivl, TrimMode::Notify)?;
+            if !same {
+                let natural = half.natural_interval();
+                half.reverse_parameterization(k, &natural)?;
+            }
+            return Ok(Some(half));
+        }
+    }
+    Ok(None)
 }
 
 impl FilletCorner {
@@ -2993,7 +3084,6 @@ mod tests {
     #[test]
     fn edge_failure_retains_completed_prefix_and_reads_live_merge_flag() {
         use crate::blend::fillet_geom::p1::FilletCornerId;
-        use crate::geom::extent1d::Extent1d;
         let mut pseudo = FilletBrep::new();
         let start = pseudo.brep_mut().add_vertex(Point3::ZERO).unwrap();
         let end = pseudo
