@@ -122,7 +122,7 @@ use crate::geom::matrix::Matrix;
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::transform::{Transform, MAX_DERIV as GW_MAX_DERIV};
 use crate::geom::vector3d::{Point3, Vec3};
-use crate::kernel::Kernel;
+use crate::kernel::{Kernel, UpstreamFixes};
 use crate::math::{max2, EFF_ZERO, EFF_ZERO_SQ};
 use crate::surface::b_spline_volume::{BSplineVolume, VolumeParam};
 use crate::surface::bend_volume::BendVolume;
@@ -200,6 +200,8 @@ pub enum VolumeKind {
 /// Options of the compound evaluations (`Evaluate`, `Map`, `EvaluateSimple`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EvalOptions {
+    /// Opt-in corrections copied from the calling kernel and preserved through next maps.
+    pub fixes: UpstreamFixes,
     /// `bUFromLeft`, `bVFromLeft`, `bWFromLeft`: evaluate a point on an interval
     /// boundary in the upper (`true`) or lower interval, per direction.
     pub from_left: [bool; 3],
@@ -212,9 +214,10 @@ pub struct EvalOptions {
 }
 
 impl Default for EvalOptions {
-    /// Everything `true` (`MapPoint`'s arguments and upstream's defaults).
+    /// Upstream arguments `true`, with all opt-in corrections disabled.
     fn default() -> Self {
         Self {
+            fixes: UpstreamFixes::default(),
             from_left: [true; 3],
             non_zero_tangents: true,
             do_zero_sampling: true,
@@ -1259,7 +1262,9 @@ impl Volume {
             )),
             VolumeKind::Transform(t) => t.evaluate_simple(param_point, n),
             VolumeKind::BSpline(b) => b.evaluate_simple(param_point, n, opts),
-            VolumeKind::Twist(t) => t.evaluate_simple(param_point, n),
+            VolumeKind::Twist(t) => {
+                t.evaluate_simple_impl(param_point, n, opts.fixes.twist_simple_duw_sign)
+            }
             VolumeKind::Unbend(u) => u.evaluate_simple(param_point, n),
             VolumeKind::Bend(b) => b.evaluate_simple(param_point, n),
         }

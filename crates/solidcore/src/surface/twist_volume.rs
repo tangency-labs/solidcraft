@@ -54,7 +54,8 @@
 //!   [`TwistVolume::members_eq`]).
 //! - **`EvaluateSimple`'s `Duw`** is `(-per sin a, -per cos a, 0)` where the header
 //!   documents `(-per sin a, per cos a, 0)`; `Evaluate` uses the documented form.
-//!   Both are kept as written.
+//!   Both are kept as written by default; [`Volume::evaluate_simple`]
+//!   corrects the simple form when `Kernel::fixes.twist_simple_duw_sign` is set.
 //! - **Bounding boxes.** `EvaluateBoundingBoxSimple` keeps upstream's optional
 //!   outputs as `Option<&mut _>`; the unbounded branch writes the axis-aligned box
 //!   unconditionally, so a request for the pseudo box alone is
@@ -425,6 +426,15 @@ impl TwistVolume {
     ///
     /// [`SolidError::InvalidInput`] (`SM_ERR_INVALID_INPUT`) for `n > 3`.
     pub fn evaluate_simple(&self, param_point: Point3, n: usize) -> Result<Vec<Vec3>> {
+        self.evaluate_simple_impl(param_point, n, false)
+    }
+
+    pub(crate) fn evaluate_simple_impl(
+        &self,
+        param_point: Point3,
+        n: usize,
+        fix_duw_sign: bool,
+    ) -> Result<Vec<Vec3>> {
         // check input - limit the number of derivatives
         if n > MAX_DERIV {
             return Err(SolidError::invalid_input(
@@ -472,7 +482,8 @@ impl TwistVolume {
             // 2nd derivs (Duu, Duv, Dvv are zero)
             if n >= 2 {
                 let per2 = per * per;
-                put(sv(1, 0, 1), Vec3::new(per * -sin, per * -cos, 0.0));
+                let duw_y = if fix_duw_sign { per * cos } else { per * -cos };
+                put(sv(1, 0, 1), Vec3::new(per * -sin, duw_y, 0.0));
                 put(sv(0, 1, 1), Vec3::new(per * -cos, -per * sin, 0.0));
                 put(
                     sv(0, 0, 2),

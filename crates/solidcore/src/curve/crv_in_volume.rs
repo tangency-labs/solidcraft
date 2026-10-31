@@ -675,6 +675,7 @@ impl CrvInVolume {
     /// points forward along it, else from the other side.
     fn volume_derivs(
         &self,
+        k: &Kernel,
         crv: &[Vec3],
         n: usize,
         from_left: bool,
@@ -688,6 +689,7 @@ impl CrvInVolume {
             if t.z > 0.0 { from_left } else { !from_left },
         ];
         let opts = EvalOptions {
+            fixes: k.fixes,
             from_left: sides,
             non_zero_tangents,
             ..EvalOptions::default()
@@ -729,13 +731,13 @@ impl CrvInVolume {
             .evaluate(k, t, n_eval, from_left, non_zero_tangents)?;
 
         // Volume Evaluate / Map - with fewer derivatives while the volume can't
-        let mut vol = self.volume_derivs(&crv, n_eval, from_left, non_zero_tangents);
+        let mut vol = self.volume_derivs(k, &crv, n_eval, from_left, non_zero_tangents);
         while let Err(e) = &vol {
             if e.is_unported() || n_eval == 0 {
                 break;
             }
             n_eval -= 1;
-            vol = self.volume_derivs(&crv, n_eval, from_left, non_zero_tangents);
+            vol = self.volume_derivs(k, &crv, n_eval, from_left, non_zero_tangents);
         }
         let vol = vol?;
 

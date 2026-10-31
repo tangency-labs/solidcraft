@@ -835,6 +835,7 @@ impl SrfInVolume {
         let tangent = at(&srf_derivs, n_eval + 1);
         let side = |c: f64| if c > 0.0 { u_from_left } else { !u_from_left };
         let opts = EvalOptions {
+            fixes: k.fixes,
             from_left: [side(tangent.x), side(tangent.y), side(tangent.z)],
             non_zero_tangents,
             ..EvalOptions::default()

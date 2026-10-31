@@ -881,6 +881,7 @@ impl Volume {
             non_zero_tangents,
             do_zero_sampling: true,
             with_compounding,
+            ..EvalOptions::default()
         };
         // sMat[2][2][2]
         let m = self.evaluate(param_point, 1, &opts)?;

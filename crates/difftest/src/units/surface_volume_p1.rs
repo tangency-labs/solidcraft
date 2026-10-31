@@ -703,6 +703,7 @@ fn opts(left: [bool; 3], nz: bool, comp: bool) -> EvalOptions {
         non_zero_tangents: nz,
         do_zero_sampling: true,
         with_compounding: comp,
+        ..EvalOptions::default()
     }
 }
 
