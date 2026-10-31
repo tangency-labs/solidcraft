@@ -192,7 +192,7 @@ fn layout(sk: &Sketch, hold: &Hold) -> Layout {
         .collect();
     let mut slide = vec![false; n];
     for c in &sk.constraints {
-        if let ConstraintKind::PointOnCurve { p, .. } | ConstraintKind::Midpoint { p, .. } = c.kind
+        if let ConstraintKind::PointOnCurve { p, .. } | ConstraintKind::PointAlong { p, .. } | ConstraintKind::Midpoint { p, .. } = c.kind
             && let Some(Some(v)) = pvar.get(p)
         {
             for k in [*v, *v + 1] {
@@ -293,10 +293,63 @@ impl State<'_> {
                 let y = delta.cross(u) / (a * r);
                 return (x.hypot(y) - 1.0) * a.min(r);
             }
-            Some(CurveKind::Spline { pts, control, degree, periodic }) => {
+            Some(CurveKind::Spline { pts, periodic, .. }) => {
                 let p = self.spline_points(pts, *periodic);
                 if p.len() < 2 {
                     return q.dist(p.first().copied().unwrap_or_default());
+                }
+                self.segs(c)
+            }
+            Some(CurveKind::Conic { .. }) => self.segs(c),
+            _ => Vec::new(),
+        };
+        segs.iter()
+            .map(|seg| {
+                let t = seg.closest_param(q);
+                let delta = q - seg.point_at(t);
+                let d = delta.len();
+                (d, if seg.derivative(t).cross(delta) >= 0.0 { d } else { -d })
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, signed)| signed)
+            .unwrap_or_else(|| crate::curves::polyline_signed_dist(&self.poly(c), q))
+    }
+    /// The exact pieces of any curve with trial values, from its start: a circle from sketch +X
+    /// and an ellipse from its major-axis end, both counter-clockwise, an ellipse as four exact
+    /// conic quarters.
+    fn segs(&self, c: usize) -> Vec<Seg2> {
+        match self.sk.curves.get(c).map(|c| &c.kind) {
+            Some(CurveKind::Line { a, b }) => vec![Seg2::Line { a: self.p(*a), b: self.p(*b) }],
+            Some(CurveKind::Circle { .. }) => {
+                let (center, radius) = self.round(c);
+                vec![Seg2::Arc { center, radius, start: 0.0, sweep: std::f64::consts::TAU }]
+            }
+            Some(CurveKind::Arc { c: ci, a, .. }) => {
+                let (center, radius) = self.round(c);
+                let start = (self.p(*a) - self.p(*ci)).angle();
+                let mut sweep = self.arc_sweep(c).abs();
+                if sweep <= 1e-12 {
+                    sweep = std::f64::consts::TAU;
+                }
+                vec![Seg2::Arc { center, radius, start, sweep }]
+            }
+            Some(CurveKind::Ellipse { c: ci, m, .. }) => {
+                let center = self.p(*ci);
+                let u = self.p(*m) - center;
+                let v = u.perp().normalized().unwrap_or(Vec2::ZERO) * self.radius_of(c);
+                let corner = [u, v, -u, -v, u];
+                corner
+                    .windows(2)
+                    .filter_map(|w| match w {
+                        [x, y] => Some(Seg2::Conic { a: center + *x, apex: center + *x + *y, b: center + *y, w: std::f64::consts::FRAC_1_SQRT_2 }),
+                        _ => None,
+                    })
+                    .collect()
+            }
+            Some(CurveKind::Spline { pts, control, degree, periodic }) => {
+                let p = self.spline_points(pts, *periodic);
+                if p.len() < 2 {
+                    return Vec::new();
                 }
                 if *control {
                     let k = (*degree as usize).min(solidcraft_geom::MAX_BEZIER_DEGREE).min(p.len().saturating_sub(1)).max(1);
@@ -312,18 +365,12 @@ impl State<'_> {
             Some(CurveKind::Conic { a, b, apex, rho }) => {
                 vec![Seg2::Conic { a: self.p(*a), b: self.p(*b), apex: self.p(*apex), w: rho / (1.0 - rho).max(1e-9) }]
             }
-            _ => Vec::new(),
-        };
-        segs.iter()
-            .map(|seg| {
-                let t = seg.closest_param(q);
-                let delta = q - seg.point_at(t);
-                let d = delta.len();
-                (d, if seg.derivative(t).cross(delta) >= 0.0 { d } else { -d })
-            })
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|(_, signed)| signed)
-            .unwrap_or_else(|| crate::curves::polyline_signed_dist(&self.poly(c), q))
+            None => Vec::new(),
+        }
+    }
+    /// Where a point at share `at` of curve `c`'s length lies, with trial values.
+    fn along(&self, c: usize, at: f64) -> Vec2 {
+        crate::curves::point_along(&self.segs(c), at).unwrap_or_default()
     }
     /// Radius of a circle or arc; an ellipse's minor radius.
     fn radius_of(&self, c: usize) -> f64 {
@@ -471,6 +518,10 @@ fn residuals(s: &State, k: &ConstraintKind, out: &mut Vec<f64>) {
         OffsetDistance { .. } => {}
         Coincident { p, q } => {
             let d = s.p(p) - s.p(q);
+            out.extend([d.x, d.y]);
+        }
+        PointAlong { p, c, at } => {
+            let d = s.p(p) - s.along(c, at);
             out.extend([d.x, d.y]);
         }
         PointOnCurve { p, c } => {
@@ -692,6 +743,17 @@ fn measure(s: &State, k: &ConstraintKind) -> Option<f64> {
 pub fn measure_dimension(sk: &Sketch, k: &ConstraintKind) -> Option<f64> {
     let lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new() };
     measure(&State { sk, lay: &lay, x: &[] }, k).filter(|v| v.is_finite())
+}
+
+/// Where the point at share `at` (0 to 1) of curve `c`'s length lies on the sketch as it stands,
+/// measured from the curve's start as [`ConstraintKind::PointAlong`] measures it; `None` for an
+/// unknown curve, a share out of range or a curve with no length to share.
+pub fn point_along(sk: &Sketch, c: usize, at: f64) -> Option<Vec2> {
+    if !(at.is_finite() && (0.0..=1.0).contains(&at)) {
+        return None;
+    }
+    let lay = Layout { pvar: vec![None; sk.points.len()], rvar: vec![None; sk.curves.len()], n: 0, points: 0, slide: Vec::new() };
+    crate::curves::point_along(&State { sk, lay: &lay, x: &[] }.segs(c), at).filter(|p| p.x.is_finite() && p.y.is_finite())
 }
 
 /// One residual block: implicit arc radius equality, a user constraint, or a tangency at a known
@@ -929,7 +991,7 @@ fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
             | Distance { p, q, .. }
             | DistanceX { p, q, .. }
             | DistanceY { p, q, .. } => vec![P(p), P(q)],
-            PointOnCurve { p, c } => vec![P(p), C(c)],
+            PointOnCurve { p, c } | PointAlong { p, c, .. } => vec![P(p), C(c)],
             Midpoint { p, l } | PointLineDistance { p, l, .. } | LinearDiameter { p, l, .. } => vec![P(p), L(l)],
             LineCircleDistance { l, c, .. } => vec![L(l), R(c)],
             PointCircleDistance { p, c, .. } => vec![P(p), R(c)],

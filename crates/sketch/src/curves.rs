@@ -11,6 +11,60 @@ const SPAN_SAMPLES: usize = 24;
 /// Most points a spline may have.
 pub const MAX_SPLINE_POINTS: usize = 500;
 
+/// Chords per curved piece when [`point_along`] measures its length.
+const ALONG_SAMPLES: usize = 64;
+
+/// The point at share `at` (0 to 1) of the length of the pieces `segs`, measured along them from
+/// the first one's start. Lines and arcs are measured exactly; other pieces over
+/// [`ALONG_SAMPLES`] chords each. The point is evaluated on its piece, so it lies on the curve.
+/// `None` without pieces or for a share that is not a number.
+pub fn point_along(segs: &[solidcraft_geom::Seg2], at: f64) -> Option<Vec2> {
+    use solidcraft_geom::Seg2;
+    let first = segs.first()?;
+    if !at.is_finite() {
+        return None;
+    }
+    // Per piece: its cumulative lengths at t = i / n.
+    let tables: Vec<Vec<f64>> = segs
+        .iter()
+        .map(|s| match *s {
+            Seg2::Line { a, b } => vec![0.0, a.dist(b)],
+            Seg2::Arc { radius, sweep, .. } => vec![0.0, (radius * sweep).abs()],
+            _ => {
+                let mut acc = 0.0;
+                let mut prev = s.point_at(0.0);
+                let mut t = Vec::with_capacity(ALONG_SAMPLES + 1);
+                t.push(0.0);
+                for i in 1..=ALONG_SAMPLES {
+                    let q = s.point_at(i as f64 / ALONG_SAMPLES as f64);
+                    acc += prev.dist(q);
+                    prev = q;
+                    t.push(acc);
+                }
+                t
+            }
+        })
+        .collect();
+    let total: f64 = tables.iter().filter_map(|t| t.last()).sum();
+    if !(total.is_finite() && total > 1e-12) {
+        return Some(first.start());
+    }
+    let mut left = at.clamp(0.0, 1.0) * total;
+    for (seg, table) in segs.iter().zip(&tables) {
+        let len = table.last().copied().unwrap_or(0.0);
+        if left > len && !std::ptr::eq(seg, segs.last()?) {
+            left -= len;
+            continue;
+        }
+        let n = table.len().saturating_sub(1).max(1);
+        let i = table.windows(2).position(|w| matches!(w, [_, b] if left <= *b)).unwrap_or(n - 1);
+        let (lo, hi) = (table.get(i).copied().unwrap_or(0.0), table.get(i + 1).copied().unwrap_or(len));
+        let frac = if hi - lo > 1e-300 { ((left - lo) / (hi - lo)).clamp(0.0, 1.0) } else { 0.0 };
+        return Some(seg.point_at((i as f64 + frac) / n as f64));
+    }
+    segs.last().map(|s| s.end())
+}
+
 /// Point on an ellipse with centre `c`, major-axis end `m` and minor radius `r` at angle `t`.
 pub fn ellipse_point(c: Vec2, m: Vec2, r: f64, t: f64) -> Vec2 {
     let u = m - c;

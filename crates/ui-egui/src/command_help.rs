@@ -70,6 +70,7 @@ pub const DOCUMENTED: &[&str] = &[
     "sketch.insert_dxf",
     "sketch.insert_svg",
     "sketch.inspect",
+    "sketch.point.divide",
     "solid.align",
     "solid.boundary_fill",
     "solid.bounding_solid",

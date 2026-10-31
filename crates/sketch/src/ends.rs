@@ -108,7 +108,11 @@ pub fn loose_ends(sk: &Sketch) -> EndReport {
     }
     for c in &sk.constraints {
         let on = match c.kind {
-            ConstraintKind::PointOnCurve { p, c } | ConstraintKind::Midpoint { p, l: c } if profile_curve(sk, c) => Some(p),
+            ConstraintKind::PointOnCurve { p, c } | ConstraintKind::PointAlong { p, c, .. } | ConstraintKind::Midpoint { p, l: c }
+                if profile_curve(sk, c) =>
+            {
+                Some(p)
+            }
             _ => None,
         };
         if let Some(p) = on {

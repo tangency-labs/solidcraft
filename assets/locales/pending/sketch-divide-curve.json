@@ -1,0 +1,114 @@
+{
+  "en": {
+    "cmd.sketch_point_divide": "Divide Curve",
+    "help.sketch.point.divide": "Places points that divide the picked curves into equal lengths. The points stay on each curve and keep their spacing when it changes.",
+    "ui.heading_divide_curve": "DIVIDE CURVE",
+    "ui.segments": "Segments",
+    "sketch.divide_hint": "Points divide each curve into equal lengths and keep them as it changes.",
+    "Select the curves to divide first": "Select the curves to divide first"
+  },
+  "ar": {
+    "cmd.sketch_point_divide": "تقسيم المنحنى",
+    "help.sketch.point.divide": "يضع نقاطًا تقسّم المنحنيات المختارة إلى أطوال متساوية. تبقى النقاط على كل منحنى وتحافظ على تباعدها عند تغيّره.",
+    "ui.heading_divide_curve": "تقسيم المنحنى",
+    "ui.segments": "المقاطع",
+    "sketch.divide_hint": "تقسّم النقاط كل منحنى إلى أطوال متساوية وتحافظ عليها عند تغيّره.",
+    "Select the curves to divide first": "حدّد أولًا المنحنيات المراد تقسيمها"
+  },
+  "de": {
+    "cmd.sketch_point_divide": "Kurve teilen",
+    "help.sketch.point.divide": "Setzt Punkte, die die gewählten Kurven in gleich lange Abschnitte teilen. Die Punkte bleiben auf jeder Kurve und behalten ihren Abstand, wenn sie sich ändert.",
+    "ui.heading_divide_curve": "KURVE TEILEN",
+    "ui.segments": "Segmente",
+    "sketch.divide_hint": "Punkte teilen jede Kurve in gleich lange Abschnitte und behalten sie bei, wenn sie sich ändert.",
+    "Select the curves to divide first": "Zuerst die zu teilenden Kurven auswählen"
+  },
+  "es": {
+    "cmd.sketch_point_divide": "Dividir curva",
+    "help.sketch.point.divide": "Coloca puntos que dividen las curvas elegidas en longitudes iguales. Los puntos permanecen en cada curva y mantienen su separación cuando esta cambia.",
+    "ui.heading_divide_curve": "DIVIDIR CURVA",
+    "ui.segments": "Segmentos",
+    "sketch.divide_hint": "Los puntos dividen cada curva en longitudes iguales y las mantienen cuando cambia.",
+    "Select the curves to divide first": "Seleccione primero las curvas que desea dividir"
+  },
+  "fr": {
+    "cmd.sketch_point_divide": "Diviser la courbe",
+    "help.sketch.point.divide": "Place des points qui divisent les courbes choisies en longueurs égales. Les points restent sur chaque courbe et gardent leur espacement quand elle change.",
+    "ui.heading_divide_curve": "DIVISER LA COURBE",
+    "ui.segments": "Segments",
+    "sketch.divide_hint": "Les points divisent chaque courbe en longueurs égales et les gardent quand elle change.",
+    "Select the curves to divide first": "Sélectionner d'abord les courbes à diviser"
+  },
+  "he": {
+    "cmd.sketch_point_divide": "חלוקת עקומה",
+    "help.sketch.point.divide": "מציב נקודות המחלקות את העקומות שנבחרו לאורכים שווים. הנקודות נשארות על כל עקומה ושומרות על המרווח כשהיא משתנה.",
+    "ui.heading_divide_curve": "חלוקת עקומה",
+    "ui.segments": "מקטעים",
+    "sketch.divide_hint": "הנקודות מחלקות כל עקומה לאורכים שווים ושומרות עליהם כשהיא משתנה.",
+    "Select the curves to divide first": "יש לבחור תחילה את העקומות לחלוקה"
+  },
+  "it": {
+    "cmd.sketch_point_divide": "Dividi curva",
+    "help.sketch.point.divide": "Posiziona punti che dividono le curve scelte in lunghezze uguali. I punti restano su ogni curva e ne mantengono la spaziatura quando cambia.",
+    "ui.heading_divide_curve": "DIVIDI CURVA",
+    "ui.segments": "Segmenti",
+    "sketch.divide_hint": "I punti dividono ogni curva in lunghezze uguali e le mantengono quando cambia.",
+    "Select the curves to divide first": "Selezionare prima le curve da dividere"
+  },
+  "ja": {
+    "cmd.sketch_point_divide": "曲線を分割",
+    "help.sketch.point.divide": "選択した曲線を等しい長さに分割する点を配置します。点は各曲線上にとどまり、曲線が変わっても間隔を保ちます。",
+    "ui.heading_divide_curve": "曲線を分割",
+    "ui.segments": "分割数",
+    "sketch.divide_hint": "点は各曲線を等しい長さに分割し、曲線が変わってもその分割を保ちます。",
+    "Select the curves to divide first": "先に分割する曲線を選択してください"
+  },
+  "ko": {
+    "cmd.sketch_point_divide": "곡선 분할",
+    "help.sketch.point.divide": "선택한 곡선을 같은 길이로 나누는 점을 배치합니다. 점은 각 곡선 위에 남고 곡선이 바뀌어도 간격을 유지합니다.",
+    "ui.heading_divide_curve": "곡선 분할",
+    "ui.segments": "세그먼트 수",
+    "sketch.divide_hint": "점은 각 곡선을 같은 길이로 나누고 곡선이 바뀌어도 이를 유지합니다.",
+    "Select the curves to divide first": "먼저 분할할 곡선을 선택하세요"
+  },
+  "pt-BR": {
+    "cmd.sketch_point_divide": "Dividir curva",
+    "help.sketch.point.divide": "Coloca pontos que dividem as curvas escolhidas em comprimentos iguais. Os pontos ficam em cada curva e mantêm o espaçamento quando ela muda.",
+    "ui.heading_divide_curve": "DIVIDIR CURVA",
+    "ui.segments": "Segmentos",
+    "sketch.divide_hint": "Os pontos dividem cada curva em comprimentos iguais e os mantêm quando ela muda.",
+    "Select the curves to divide first": "Selecione primeiro as curvas a dividir"
+  },
+  "ru": {
+    "cmd.sketch_point_divide": "Разделить кривую",
+    "help.sketch.point.divide": "Ставит точки, делящие выбранные кривые на равные по длине части. Точки остаются на каждой кривой и сохраняют шаг при её изменении.",
+    "ui.heading_divide_curve": "РАЗДЕЛИТЬ КРИВУЮ",
+    "ui.segments": "Сегменты",
+    "sketch.divide_hint": "Точки делят каждую кривую на равные по длине части и сохраняют их при её изменении.",
+    "Select the curves to divide first": "Сначала выберите кривые для деления"
+  },
+  "vi": {
+    "cmd.sketch_point_divide": "Chia đường cong",
+    "help.sketch.point.divide": "Đặt các điểm chia các đường cong đã chọn thành những đoạn dài bằng nhau. Các điểm nằm trên mỗi đường cong và giữ khoảng cách khi đường cong thay đổi.",
+    "ui.heading_divide_curve": "CHIA ĐƯỜNG CONG",
+    "ui.segments": "Số đoạn",
+    "sketch.divide_hint": "Các điểm chia mỗi đường cong thành những đoạn dài bằng nhau và giữ nguyên khi đường cong thay đổi.",
+    "Select the curves to divide first": "Hãy chọn các đường cong cần chia trước"
+  },
+  "zh": {
+    "cmd.sketch_point_divide": "等分曲线",
+    "help.sketch.point.divide": "放置将所选曲线分成等长段的点。这些点留在各曲线上，曲线改变时保持间距。",
+    "ui.heading_divide_curve": "等分曲线",
+    "ui.segments": "段数",
+    "sketch.divide_hint": "点将每条曲线分成等长的段，并在曲线改变时保持等分。",
+    "Select the curves to divide first": "请先选择要等分的曲线"
+  },
+  "zh-TW": {
+    "cmd.sketch_point_divide": "等分曲線",
+    "help.sketch.point.divide": "放置將所選曲線分成等長段的點。這些點留在各曲線上，曲線改變時保持間距。",
+    "ui.heading_divide_curve": "等分曲線",
+    "ui.segments": "段數",
+    "sketch.divide_hint": "點將每條曲線分成等長的段，並在曲線改變時保持等分。",
+    "Select the curves to divide first": "請先選擇要等分的曲線"
+  }
+}

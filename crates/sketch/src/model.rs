@@ -281,6 +281,16 @@ pub enum ConstraintKind {
         p: usize,
         c: usize,
     },
+    /// Point `p` on curve `c` at `at`, its share (0 to 1) of the curve's length from the curve's
+    /// start: a line's first point, an arc's start (counter-clockwise), a circle's point on sketch
+    /// +X (counter-clockwise), an ellipse's major-axis end (counter-clockwise), a spline's or a
+    /// conic's first point. Divide Curve places its points with it, so they keep equal shares of
+    /// the curve's length as the curve changes. The length is measured along the exact curve.
+    PointAlong {
+        p: usize,
+        c: usize,
+        at: f64,
+    },
     Horizontal {
         l: usize,
     },
@@ -510,6 +520,7 @@ impl ConstraintKind {
         match self {
             PatternPoint { .. } | PatternRadius { .. } => "Pattern",
             Coincident { .. } | PointOnCurve { .. } => "Coincident",
+            PointAlong { .. } => "PointAlong",
             Horizontal { .. } | HorizontalPoints { .. } => "Horizontal",
             Vertical { .. } | VerticalPoints { .. } => "Vertical",
             Parallel { .. } => "Parallel",
@@ -553,7 +564,7 @@ impl ConstraintKind {
             PatternRadius { a, b } => (vec![], vec![a, b]),
             Coincident { p, q } | HorizontalPoints { p, q } | VerticalPoints { p, q } => (vec![p, q], vec![]),
             Distance { p, q, .. } | DistanceX { p, q, .. } | DistanceY { p, q, .. } => (vec![p, q], vec![]),
-            PointOnCurve { p, c } => (vec![p], vec![c]),
+            PointOnCurve { p, c } | PointAlong { p, c, .. } => (vec![p], vec![c]),
             Horizontal { l } | Vertical { l } | Length { l, .. } | LineAngle { l, .. } => (vec![], vec![l]),
             Radius { c, .. } | Diameter { c, .. } | ArcSweep { c, .. } => (vec![], vec![c]),
             Parallel { a, b } | Perpendicular { a, b } | Collinear { a, b } | Tangent { a, b } | Equal { a, b } | Concentric { a, b } => {
@@ -609,7 +620,7 @@ impl ConstraintKind {
                 fp(p);
                 fp(q);
             }
-            PointOnCurve { p, c } => {
+            PointOnCurve { p, c } | PointAlong { p, c, .. } => {
                 fp(p);
                 fc(c);
             }
@@ -1078,6 +1089,14 @@ impl Sketch {
             Parallel { a, b } | Perpendicular { a, b } | Collinear { a, b } | Angle { a, b, .. } => {
                 need_line(a)?;
                 need_line(b)?;
+            }
+            PointAlong { p, c, at } => {
+                if !(at.is_finite() && (0.0..=1.0).contains(&at)) {
+                    return Err(SketchError::Invalid("a point along a curve needs a share of its length from 0 to 1".into()));
+                }
+                if self.curves.get(c).is_some_and(|x| x.kind.uses(p)) {
+                    return Err(SketchError::Invalid("a curve's own point cannot be placed along it".into()));
+                }
             }
             // On an ellipse, a radius dimension holds its minor radius.
             Radius { c, .. } if matches!(self.curves.get(c).map(|x| &x.kind), Some(CurveKind::Ellipse { .. })) => {}
