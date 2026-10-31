@@ -273,20 +273,26 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         let options = [
             ui_kit::PictureChoice { key: "Signed axes", label: app.tr("prefs.navigation.axes_signed"), figure: ui_kit::paint_navigation_axes },
             ui_kit::PictureChoice { key: "Cube", label: app.tr("prefs.navigation.cube_compact"), figure: ui_kit::paint_navigation_cube },
+            ui_kit::PictureChoice { key: "Custom", label: crate::i18n::tr_label("Custom"), figure: ui_kit::paint_navigation_custom },
         ];
         if let Some(index) = ui_kit::settings_picture_choices_sized(
             ui,
             "navigator",
             app.tr("View navigator"),
             &options,
-            usize::from(app.preferences.navigator_style == NavigatorStyle::Cube),
+            NavigatorStyle::ALL.iter().position(|s| *s == app.preferences.navigator_style).unwrap_or_default(),
             true,
             ui_kit::PictureChoiceSize { width: t.space_24 * 8.0 - t.space_2, aspect: 178.0 / 115.0, caption: true },
         ) {
-            app.preferences.navigator_style = if index == 0 { NavigatorStyle::Axes } else { NavigatorStyle::Cube };
+            app.preferences.navigator_style = NavigatorStyle::ALL.get(index).copied().unwrap_or_default();
         }
-        if let (Some(a), Some(b)) = (crate::scenario::rect_of("prefs:navigator:Signed axes"), crate::scenario::rect_of("prefs:navigator:Cube")) {
-            crate::scenario::publish_target("prefs:navigator", a.union(b));
+        if let Some(all) = ["Signed axes", "Cube", "Custom"]
+            .into_iter()
+            .map(|key| crate::scenario::rect_of(&format!("prefs:navigator:{key}")))
+            .collect::<Option<Vec<_>>>()
+            .and_then(|rects| rects.into_iter().reduce(egui::Rect::union))
+        {
+            crate::scenario::publish_target("prefs:navigator", all);
         }
         setting::look_at_anim(app, ui);
         let width =

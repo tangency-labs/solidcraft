@@ -340,6 +340,29 @@ pub(crate) fn paint_navigation_cube(p: &Painter, rect: Rect) {
     paint_with_tokens(p, rect, &super::preferences_figure_data::NAVIGATOR_CUBE, None, None, &Tokens::get(), Palette::Navigator);
 }
 
+/// A generic body (a hexagonal prism) in the navigator palette: the user's own body stands in its place.
+pub(crate) fn paint_navigation_custom(p: &Painter, rect: Rect) {
+    let Some((p, scale)) = navigation_canvas(p, rect) else { return };
+    let t = Tokens::get();
+    let ctx = Ctx { t: &t, sample: None, palette: Palette::Navigator, origin: rect.min, scale };
+    let c = rect.center();
+    let (radius, height) = (34.0 * scale, 26.0 * scale);
+    let top: Vec<Pos2> = (0..6)
+        .map(|i| {
+            let a = std::f32::consts::FRAC_PI_3 * i as f32;
+            c + vec2(a.cos() * radius, a.sin() * radius * 0.5 - height * 0.5)
+        })
+        .collect();
+    let line = Stroke::new(1.4 * scale, ctx.ink(Ink::Line, 1.0));
+    // The three faces toward the viewer, then the top over them.
+    for (i, ink) in [(0, Ink::Right), (1, Ink::Left), (2, Ink::Left)] {
+        let (a, b) = (top[i], top[i + 1]);
+        let side = vec![a, b, b + vec2(0.0, height), a + vec2(0.0, height)];
+        p.add(Shape::convex_polygon(side, ctx.ink(ink, 1.0), line));
+    }
+    p.add(Shape::convex_polygon(top, ctx.ink(Ink::Top, 1.0), line));
+}
+
 /// Preserve the mouse's figure palette, with slightly stronger lettering.
 pub(super) fn paint_mouse(p: &Painter, rect: Rect) {
     paint_with_tokens(p, rect, &super::preferences_figure_data::MOUSE_MAPPING, None, None, &Tokens::get(), Palette::Mouse);

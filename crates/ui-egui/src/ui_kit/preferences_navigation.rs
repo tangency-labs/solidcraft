@@ -1,6 +1,6 @@
 //! Compact navigation preference compositions and explanatory figures.
 pub(crate) use super::preferences_figure_data::{paint_orbit_centre, paint_orbit_cursor, paint_orbit_origin};
-pub(crate) use super::preferences_figure_ops::{paint_navigation_axes, paint_navigation_cube};
+pub(crate) use super::preferences_figure_ops::{paint_navigation_axes, paint_navigation_cube, paint_navigation_custom};
 use super::{metrics::dimension, text::paint_text};
 use crate::theme::Tokens;
 use egui::{FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
