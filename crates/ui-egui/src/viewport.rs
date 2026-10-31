@@ -5945,10 +5945,67 @@ fn origin_point_shown(app: &SolveApp) -> bool {
     app.origin_visible() && !app.session.visibility.hidden_origin.iter().any(|h| h == "O")
 }
 
+/// Whether a body covers the origin along the view ray. The origin point is a flat dot painted
+/// after the 3D scene, so the GPU cannot depth-test it the way it tests the axes and planes;
+/// this asks the meshes the same question that test asks: is a nearer kept face in front of the
+/// origin. The point then hides behind bodies under the same rule the axes and planes follow:
+/// over them only while a dialog waits for a plane or the through-bodies preference is on (#10050).
+fn origin_hidden_by_body(app: &SolveApp, proj: &Proj) -> bool {
+    if app.picking_plane() || app.preferences.reference_geometry_through_bodies {
+        return false;
+    }
+    // Wireframe draws no faces, so nothing hides the point, as for vertices and edges.
+    if app.ui.visual_style == 2 {
+        return false;
+    }
+    let Some(at) = proj.to_screen(Vec3::ZERO) else {
+        return false;
+    };
+    let (o, d) = proj.ray(at);
+    let t_origin = -o.dot(d);
+    let st = crate::open_meshing::shown_world(app);
+    let bounds = body_bounds(app, &st);
+    // A section hides the material its normal points at: removed material does not hide the
+    // point, as when picking a vertex behind a section (#6328).
+    let section = section_plane(app);
+    let kept = |p: Vec3| section.is_none_or(|(so, sn)| sn.dot(p) <= sn.dot(so) + crate::view_pick::SECTION_EPS);
+    let walk_eps = 1e-6 * (1.0 + scene_radius(app));
+    let slack = scene_pick_slack(app);
+    for (i, b) in st.bodies.iter().enumerate() {
+        if !app.body_visible(&b.name) {
+            continue;
+        }
+        // Bodies whose box the ray misses cannot cover the origin.
+        if let Some((_, bb)) = bounds.get(i)
+            && ray_box(o, d, bb, bb.diagonal() * 1e-6 + 1e-9).is_none()
+        {
+            continue;
+        }
+        let (m, place) = b.mesh_in_place();
+        let index = app.viewport.pick_index.of(&m);
+        // The nearest kept face along the ray: one at or behind the origin does not hide it.
+        let mut from = 0.0f64;
+        for _ in 0..64 {
+            let Some((lo, ld)) = local_ray(&place, o + d * from, d) else { break };
+            let Some((dt, _)) = crate::pick_index::raycast(index.as_deref(), &m, lo, ld) else { break };
+            let t = from + dt;
+            if t >= t_origin - slack {
+                break;
+            }
+            if kept(o + d * t) {
+                return true;
+            }
+            from = t + walk_eps;
+        }
+    }
+    false
+}
+
 /// Screen-space dots: the origin point, and hovered or selected body vertices.
 fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let t = Tokens::get();
     if origin_point_shown(app)
+        && !origin_hidden_by_body(app, proj)
         && let Some(o) = proj.to_screen(Vec3::ZERO)
     {
         painter.circle(o, 4.5, t.origin_point, Stroke::new(1.0, Color32::from_gray(110)));
@@ -6542,6 +6599,44 @@ mod tests {
         };
         assert!(scene.shadow.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.iter().any(|v| shadow_alpha(v).is_some_and(|a| a > 0)));
         Ok(())
+    }
+
+    /// The origin point hides behind bodies under the same rule as the axes and planes (#10050):
+    /// a cylinder standing on the origin hides the dot while the through-bodies preference is
+    /// off, and point, axes and planes come through together with the preference on or while a
+    /// dialog waits for a plane.
+    #[test]
+    fn origin_point_hides_behind_bodies_like_the_axes_and_planes() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.cylinder", &json!({"radius": 20, "height": 40})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.fit_view();
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800., 600.));
+        let proj = projection(&app, rect);
+        assert!(origin_point_shown(&app), "the Origin is shown by default");
+        assert!(origin_hidden_by_body(&app, &proj), "the cylinder covering the origin hides the point");
+        assert!(build_highlight(&app).overlay.is_empty(), "the axes and planes are depth-tested while the point is hidden");
+        // The preference brings point, axes and planes through together (#2697).
+        crate::prefs::set(&mut app, &json!({"reference_geometry_through_bodies": true})).unwrap();
+        assert!(!origin_hidden_by_body(&app, &proj), "with the preference the point shows through the body");
+        assert!(!build_highlight(&app).overlay.is_empty(), "with the preference the axes and planes draw through");
+        crate::prefs::set(&mut app, &json!({"reference_geometry_through_bodies": false})).unwrap();
+        // A dialog waiting for a plane lifts all three as well (#2618).
+        app.dialog = Some(crate::dialogs::Dialog::for_command(&app, "sketch.create").unwrap());
+        assert!(app.picking_plane());
+        assert!(!origin_hidden_by_body(&app, &proj), "while a dialog picks a plane the point shows through");
+        app.dialog = None;
+        // Wireframe draws no faces, so nothing hides the point, as for vertices and edges.
+        app.ui.visual_style = 2;
+        assert!(!origin_hidden_by_body(&app, &proj), "wireframe hides nothing");
+        app.ui.visual_style = 0;
+        // A body away from the origin leaves the point drawn.
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &json!({"length": 20, "width": 20, "height": 20, "center": [200.0, 200.0, 200.0]})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.fit_view();
+        let proj = projection(&app, rect);
+        assert!(!origin_hidden_by_body(&app, &proj), "a body away from the origin does not cover it");
     }
 
     #[test]
