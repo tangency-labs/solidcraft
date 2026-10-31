@@ -61,6 +61,28 @@
 //!   Arc-length walks on edge curves explicitly carry the live edge's zone
 //!   tolerance into their length caches, independently of integration accuracy.
 //!   A reversed copy has no owner and retains the ordinary system tolerance.
+//! - **Face surfaces.** `CalcRailRailInterpolation` drops onto and lifts from
+//!   `pFace->GetSurface()`. The port evaluates a copy that keeps the surface's owner and
+//!   face tolerance (`clone_for_evaluation`, not the copy constructor), through
+//!   `BrepFaceServices` with the face's handle, so the surface cache is the face's
+//!   trimmed one made on `target`, as `smsurf_GetSurfaceCache` finds it through
+//!   `GetFace()`. The drop, the lift and the re-drop share one services object, so the
+//!   cache the first one makes is the one the others use. Upstream keeps that cache in
+//!   the surface's slot (`GetCacheObj`; `SM_USE_GLOBAL_CACHE` is off), even when it is
+//!   the plain cache `smsurf_GetSurfaceCache` falls back to after a failed trimmed
+//!   build: `CacheMakeOrValidate(SM_OC_TRIMSRF, ..)` returns it as it is, and remakes
+//!   only the cache of a face marked modified while B-rep editing is off. Nothing
+//!   changes `target` between these calls. The lift of the concave `NxN` cubic
+//!   interpolant runs after `sm_CreateCubicRailRailInterpolant`, which may change
+//!   `target` (its `ComputeUVPoint` can make UV trim curves, and `RailRailIntersect`
+//!   runs on it). A `BrepFaceServices` keeps its caches only over an unchanged B-rep,
+//!   so that lift makes the face's cache again from the face as it is then; upstream
+//!   reuses the slot's cache unless the face was marked modified. The difftest does
+//!   not reach that lift (the shim's corner is `SM_FCR_UNKNOWN`). The copy keeps the
+//!   face tolerance it had when copied: a cache build whose `CreateUVTrimCurves` raises
+//!   the face's tolerance (even on failure) leaves later calls reading the old value
+//!   through the copy, where `pSurf` reads `GetFace()->GetTolerance()` live
+//!   (`calc_blending_rail` has the same limit; no case shows it).
 //! - **Statuses.** Upstream ignores the status of `IntersectWithPlane`,
 //!   `sm_TwoPntsIntersection`, `GetRailIndexOfSideEU` and `SetMinMax` here; so does the
 //!   port, except that [`SolidError::Unported`] always propagates. An intersector that
@@ -120,6 +142,7 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::nurbs::knots::Side;
+use crate::query::brep::BrepFaceServices;
 use crate::surface::plane::Plane;
 use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::SurfaceIntersection;
@@ -2494,14 +2517,17 @@ impl FilletBrep {
     /// solver picks the continuity, and a concave `NxN` corner may replace the curve by a
     /// cubic rail/rail interpolant. At a corner with an ease (the fork's, `e74bbd3`) the
     /// curve is the faired G2 (or G3) interpolant of the rails' ends instead, meeting the
-    /// rails curvature-continuously.
+    /// rails curvature-continuously. The drops and lifts run on the original face's own
+    /// surface (`target` holds the face): its trimmed surface cache and the face
+    /// tolerance it carries.
     ///
     /// # Errors
     ///
     /// `SM_ERR_NULL_POINTER` without original face, B-spline surface, rail, edge use or
     /// curve; `SM_ERR` when a vertex does not drop onto its rail within 100 times the
     /// tolerance or a drop gives other than one UV curve; those of the evaluations,
-    /// constructions, lifts and `SmSurface::DropCurve`; those of [`CornerLookup::corner`] (`corners`
+    /// constructions, lifts and `SmSurface::DropCurve` (and of the face's surface cache
+    /// they make); those of [`CornerLookup::corner`] (`corners`
     /// resolves `opt_corner`) and of the corner's `TestRailRailInterpolationCurve`.
     pub fn calc_rail_rail_interpolation(
         &mut self,
@@ -2623,11 +2649,15 @@ impl FilletBrep {
             .fillet_edge(e)?
             .original_face()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
-        // a copy: the cubic interpolant below needs the target B-rep mutably
+        // the face's own surface (evaluated as a copy that keeps its owner and the face
+        // tolerance: the drops and lifts below make its trimmed surface cache on `target`
+        // through the face, as `smsurf_GetSurfaceCache` reaches `GetFace()`; the cubic
+        // interpolant needs the target B-rep mutably)
         let face_srf = face2::surface(target, face)?
             .ok_or_else(|| SolidError::null_pointer(OP))?
-            .clone();
+            .clone_for_evaluation()?;
         let face_srf = &face_srf;
+        let handle = Some(CacheObject::Surface(face));
         // SM_CAST_PTR(SmBSplineSurface, ..) and NER: every kind derived from
         // SmBSplineSurface (planes, cones and cylinders, spheres, tori, surfaces of
         // revolution and extrusion), with the NURB its GetDegree reads
@@ -2776,6 +2806,12 @@ impl FilletBrep {
             )?
         };
 
+        // The drop, the lift and the re-drop share the face's surface cache: upstream
+        // keeps it in the surface's cache slot, the plain cache smsurf_GetSurfaceCache
+        // falls back to when the trimmed build fails included, and nothing edits the face
+        // between these calls
+        let mut services = BrepFaceServices::new(target);
+
         // p3DCurve, an SmBSplineCurve: a B-spline, or the line / conic iso curve
         // LiftCurve's sm_ExtractIsoCurve makes
         let mut curve_3d: Option<Curve>;
@@ -2783,8 +2819,18 @@ impl FilletBrep {
         if create_crv_on_3d {
             // Compute UV-curve by projecting 3d curve onto the surface
             let c3 = Curve::from(new_curve);
-            let uv_curves =
-                surface_drop_curve(k, face_srf, &uv_domain, &c3, &c3.natural_interval(), tol)?;
+            let uv_curves = surface_drop_curve_with_context(
+                k,
+                face_srf,
+                &uv_domain,
+                &c3,
+                &c3.natural_interval(),
+                tol,
+                DropSolveContext {
+                    solver: &mut services,
+                    handle,
+                },
+            )?;
             // Will replace the original UV-curve when we have only one result
             if uv_curves.len() != 1 {
                 return Err(SolidError::sm_err(OP));
@@ -2807,13 +2853,15 @@ impl FilletBrep {
             let uv = uv_curve
                 .as_ref()
                 .ok_or_else(|| SolidError::null_pointer(OP))?;
-            let lifted = face_srf.lift_curve(
+            let lifted = face_srf.lift_curve_with_context(
                 k,
                 &uv_domain,
                 uv,
                 &uv.natural_interval(),
                 approx_tol3d(k, tol),
                 false,
+                &mut services,
+                handle,
             )?;
             let mut c3 = lifted.curve;
 
@@ -2823,8 +2871,18 @@ impl FilletBrep {
                     .ok_or_else(|| SolidError::null_pointer(OP))?
                     .reparametrize_with_arc_length()?;
                 // Reproject the 3d curve back onto the surface
-                let uv_curves =
-                    surface_drop_curve(k, face_srf, &uv_domain, &c3, &c3.natural_interval(), tol)?;
+                let uv_curves = surface_drop_curve_with_context(
+                    k,
+                    face_srf,
+                    &uv_domain,
+                    &c3,
+                    &c3.natural_interval(),
+                    tol,
+                    DropSolveContext {
+                        solver: &mut services,
+                        handle,
+                    },
+                )?;
                 if uv_curves.len() != 1 {
                     return Err(SolidError::sm_err(OP));
                 }
@@ -2832,6 +2890,9 @@ impl FilletBrep {
             }
             curve_3d = Some(c3);
         }
+        // the services lend `target`, which the corner test reads and the cubic
+        // interpolant below changes
+        drop(services);
 
         if let Some(corner) = opt_corner {
             let the_corner = corners.corner(corner)?;
@@ -2895,14 +2956,19 @@ impl FilletBrep {
                         )
                     })?;
                     let new_uv = Curve::from(new_uv);
-                    // Lift the UV-curve
-                    let lifted = face_srf.lift_curve(
+                    // Lift the UV-curve (on the face's surface again; the interpolant
+                    // may have changed `target`, so its cache is made again from the
+                    // face as it is now, where upstream reuses the one its surface keeps
+                    // unless the face was marked modified)
+                    let lifted = face_srf.lift_curve_with_context(
                         k,
                         &uv_domain,
                         &new_uv,
                         &new_uv.natural_interval(),
                         approx_tol3d(k, tol),
                         false,
+                        &mut BrepFaceServices::new(target),
+                        handle,
                     )?;
                     curve_3d = Some(lifted.curve);
                     uv_curve = Some(new_uv);

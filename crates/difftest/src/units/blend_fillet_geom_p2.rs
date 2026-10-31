@@ -25,7 +25,10 @@
 //! revolution, sometimes with a corner whose fillet edge list the routine reads first:
 //! more than four edges, or up to four with the test edge two places on, sometimes a
 //! cross-section edge without geometry; the edge's status, curve and its edge uses' UV
-//! curves are compared) or
+//! curves are compared; the original face is built on both sides as the shim's
+//! `face_of` builds it, `CreateFaceFromSurface` over the natural domain, then
+//! `SetTolerance(SmZoneTol3d(tol), FALSE, FALSE)`, so the face owns its surface and the
+//! surface carries the face tolerance) or
 //! `split_face` (the original face, then `UpdateSplitFace`; the face indices are
 //! compared; only the path where the edge is not on the split face runs: the other
 //! one reaches `ShouldSwapFaces`, `blend.fillet_geom_p6`, which the shim refuses).
@@ -33,7 +36,12 @@
 //! Deferred on the Rust side (unported callees): `sm_TwoPntsIntersection`'s point
 //! intersector (`intersect.surface_intersector_p4`), `SmSurface::DropCurve`
 //! (`intersect.surface_drop_lib_p3`) of a non-planar surface, `ShouldSwapFaces`
-//! (`blend.fillet_geom_p6`). Every run has at least [`MIN_GENERATED`] generated cases.
+//! (`blend.fillet_geom_p6`). Every run has at least [`MIN_GENERATED`] generated cases,
+//! plus [`RAIL_RAIL_FACE_GENERATED`] `railrail` cases under their own names and seeds
+//! (so each `gen` case stays the one the baseline has): `rail_rail` inputs that favour
+//! the drops and lifts on the original face's own surface (curved faces, a non-mate
+//! vertex or a rail without UV trim so the 3D curve is dropped, face tolerances far
+//! from the system zone tolerance, near-apex cones).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -48,13 +56,14 @@ use solidcore::kernel::Kernel;
 use solidcore::math::{Point3, Vec3};
 use solidcore::surface::surface::Surface;
 use solidcore::topology::edgeuse::p1 as eu1;
+use solidcore::topology::face::p3 as face3;
 use solidcore::topology::{edge, EdgeId, FaceId};
 use solidcore::SolidError;
 use solidcore_ffi::units::blend_fillet_geom_p2::{self as ffi, Op};
 
 use super::blend_fillet_geom_p1::{
-    analytic_surface, b_spline_part, dump_bcurve, gen_model, gen_surface, push_model, push_srf, scale_of, status,
-    surface_of, AnalyticSrf, Crv, EdgeIn, EuIn, Model, RustModel, Srf,
+    analytic_surface, b_spline_part, dump_bcurve, gen_model, gen_surface, natural_face, push_model,
+    push_srf, scale_of, status, surface_of, AnalyticSrf, Crv, EdgeIn, EuIn, Model, RustModel, Srf,
 };
 use super::blend_fillet_geom_p4::{
     empty_model, gen_analytic, push_analytic, uv_line, vertex_at, SolverIn,
@@ -66,6 +75,13 @@ use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// Generated cases per run, whatever `--seeds` says (it can only raise this).
 pub const MIN_GENERATED: usize = 300;
+
+/// Generated `railrail` cases ([`RailRailMix::Face`]) per run, whatever `--seeds` says
+/// (it can only raise this). The face-surface drops and lifts part from those on an
+/// ownerless copy rarely (four in the first thousand: `railrail0121`, `0550`, `0622`,
+/// `0769`; `railrail0108` and `0450` reach the face's trimmed cache failing and falling
+/// back to the plain one), so the stream is long enough to hold them.
+pub const RAIL_RAIL_FACE_GENERATED: usize = 800;
 
 /// The runner.
 pub struct Runner;
@@ -553,14 +569,14 @@ fn rust(i: &Inputs) -> Result<Rec, HarnessError> {
                         return Ok(Rec::Flat(o));
                     }
                 };
-                let domain = surface.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?;
-                let shell = rm.target.add_shell().map_err(h)?;
-                let f: FaceId = rm.target.add_face(shell).map_err(h)?;
-                let fr = rm.target.face_mut(f).map_err(h)?;
-                fr.surface = Some(surface);
-                fr.uv_domain = domain;
-                // SetTolerance(SmZoneTol3d(tol), FALSE, FALSE)
-                fr.tolerance = zone_tol3d(&k, *face_tol);
+                // the shim's face_of(M.target, s): CreateFaceFromSurface over the
+                // natural domain, in the target B-rep (built with the model's kernel);
+                // the face owns the surface (the shim refuses a case it cannot build)
+                let f: FaceId = natural_face(&mut rm.k, &mut rm.target, surface)?;
+                // SetTolerance(SmZoneTol3d(tol), FALSE, FALSE): the face's surface
+                // carries the face tolerance
+                face3::set_tolerance(&mut rm.target, f, zone_tol3d(&k, *face_tol), false, false)
+                    .map_err(h)?;
                 rm.fb
                     .fillet_edge_mut(eid)
                     .map_err(h)?
@@ -994,13 +1010,60 @@ fn arc3(a: [f64; 3], m: [f64; 3], b: [f64; 3]) -> Crv {
     }
 }
 
+/// The input mix of [`gen_rail_rail`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RailRailMix {
+    /// The `gen` cases' mix (half planes; mostly `SM_FV_MATE` vertices and rails with
+    /// UV trims, so curved faces mostly take the 2D path).
+    Plain,
+    /// The `railrail` cases': inputs where `CalcRailRailInterpolation`'s drops and lifts
+    /// on the face's own surface (its face, trimmed cache and face tolerance, upstream's
+    /// `pFace->GetSurface()`) could differ from those on a copy without face: mostly
+    /// B-spline and revolution faces, sometimes a near-apex cone, an end vertex that is
+    /// not `SM_FV_MATE` or a rail without UV trim (both make the 3D curve dropped,
+    /// the latter also lifted and dropped again), face tolerances far from the system
+    /// zone tolerance, always a face.
+    Face,
+}
+
+/// A surface of revolution about z, cylinder- or cone-like (as [`gen_analytic`]'s), or
+/// nearly a full cone: its far radius a tiny fraction of the near one (a near-apex
+/// circle that a tolerance-dependent singularity test may or may not see).
+fn gen_revolution(rng: &mut Rng, scale: f64) -> AnalyticSrf {
+    let r = rng.uniform(0.2, 1.0) * scale;
+    let h = rng.uniform(0.5, 2.0) * scale;
+    let far = match rng.below(4) {
+        0 => r,
+        1 => r * rng.uniform(0.2, 0.9),
+        _ => r * *rng.choose(&[1e-3, 1e-4, 1e-6]).unwrap_or(&1e-4),
+    };
+    AnalyticSrf::Revolution {
+        a: [r, 0.0, 0.0],
+        b: [far, 0.0, h],
+        axis_point: [0.0, 0.0, 0.0],
+        axis_dir: [0.0, 0.0, 1.0],
+        swap: rng.chance(0.3),
+    }
+}
+
 /// A rail/rail interpolation edge `0 -> 1` with incoming rails from vertices `2` and `3`,
-/// its original face a plane, a B-spline or a surface of revolution.
+/// its original face a plane, a B-spline or a surface of revolution. `mix` picks the
+/// probabilities ([`RailRailMix`]); `Plain` draws exactly what it always drew.
 #[allow(clippy::too_many_lines)]
-fn gen_rail_rail(rng: &mut Rng) -> Option<Inputs> {
+fn gen_rail_rail(rng: &mut Rng, mix: RailRailMix) -> Option<Inputs> {
     let scale = scale_of(rng);
     let k = Kernel::default();
-    let face = match rng.below(6) {
+    let kind = match mix {
+        RailRailMix::Plain => rng.below(6),
+        // plane 1/8, B-spline 4/8, revolution 2/8, gen_analytic 1/8
+        RailRailMix::Face => match rng.below(8) {
+            0 => 0,
+            1..=4 => 3,
+            5 | 6 => 6,
+            _ => 5,
+        },
+    };
+    let face = match kind {
         0..=2 => SurfIn::Analytic(AnalyticSrf::Plane {
             origin: rng.point3(-scale, scale),
             x_axis: [1.0, 0.0, rng.uniform(-0.2, 0.2)],
@@ -1011,7 +1074,13 @@ fn gen_rail_rail(rng: &mut Rng) -> Option<Inputs> {
             make_nurb: rng.chance(0.95),
         }),
         3 | 4 => SurfIn::BSpline(gen_surface(rng, scale)),
-        _ => SurfIn::Analytic(gen_analytic(rng, scale)),
+        5 => SurfIn::Analytic(gen_analytic(rng, scale)),
+        _ => SurfIn::Analytic(gen_revolution(rng, scale)),
+    };
+    // the end vertices' SM_FV_MATE share, the rails' UV trim share, the face tolerances
+    let (mate_share, uv_share, face_tols): (f64, f64, &[f64]) = match mix {
+        RailRailMix::Plain => (0.85, 0.75, &[1e-6, 1e-6, 1e-4, 1e-9, 0.0]),
+        RailRailMix::Face => (0.5, 0.55, &[1e-2, 1e-3, 1e-3, 1e-4, 1e-7, 1e-9]),
     };
     let rs = surf(&k, &face).ok()?.ok()?;
     // (runner helper that does not return Result)
@@ -1034,7 +1103,7 @@ fn gen_rail_rail(rng: &mut Rng) -> Option<Inputs> {
     let mate_type = 3; // SM_FV_MATE
     for (p, uv) in [(p0, uv0), (p1, uv1), (p2, uv2), (p3, uv3)] {
         let mut v = vertex_at(p);
-        v.vtype = if rng.chance(0.85) {
+        v.vtype = if rng.chance(mate_share) {
             mate_type
         } else {
             rng.below(14) as i64
@@ -1063,7 +1132,7 @@ fn gen_rail_rail(rng: &mut Rng) -> Option<Inputs> {
             ];
             arc3(pf, m, pt)
         };
-        let uv = if rng.chance(0.75) {
+        let uv = if rng.chance(uv_share) {
             Some(uv_line(uf, ut))
         } else {
             None
@@ -1149,8 +1218,13 @@ fn gen_rail_rail(rng: &mut Rng) -> Option<Inputs> {
         geom_solvers: Vec::new(),
         query: Query::RailRail {
             e: 0,
-            face_tol: scale * *rng.choose(&[1e-6, 1e-6, 1e-4, 1e-9, 0.0]).unwrap_or(&1e-6),
-            face: if rng.chance(0.03) { None } else { Some(face) },
+            face_tol: scale * *rng.choose(face_tols).unwrap_or(&1e-6),
+            // (the Face mix always has a face and draws nothing here)
+            face: if mix == RailRailMix::Plain && rng.chance(0.03) {
+                None
+            } else {
+                Some(face)
+            },
             corner,
         },
     })
@@ -1192,6 +1266,22 @@ fn gen_rail_rail_corner(rng: &mut Rng, ne: usize) -> Option<Vec<usize>> {
         }
     }
     Some(edges)
+}
+
+/// A `railrail` case ([`RailRailMix::Face`]) the shim runs.
+fn generate_rail_rail_face(rng: &mut Rng) -> Option<Value> {
+    for _ in 0..64 {
+        let Some(inputs) = gen_rail_rail(rng, RailRailMix::Face) else {
+            continue;
+        };
+        let Ok(flat) = cpp_input(&inputs) else {
+            continue;
+        };
+        if ffi::eval(inputs.query.op(), &flat).is_ok() {
+            return serde_json::to_value(inputs).ok();
+        }
+    }
+    None
 }
 
 /// `UpdateSplitFace` on p1's random model with target faces.
@@ -1252,7 +1342,7 @@ impl UnitDiff for Runner {
             let inputs = match rng.below(20) {
                 0..=12 => gen_srf_srf(k, rng),
                 13 | 14 => gen_vertex_calc(rng),
-                15..=18 => match gen_rail_rail(rng) {
+                15..=18 => match gen_rail_rail(rng, RailRailMix::Plain) {
                     Some(i) => i,
                     None => continue,
                 },
@@ -1269,11 +1359,26 @@ impl UnitDiff for Runner {
     }
 
     fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
-        let ctx = CaseContext {
+        let gen_ctx = CaseContext {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut v = default_cases(self, &gen_ctx)?;
+        // the `railrail` cases under their own names and seeds, so that each `gen` case
+        // stays the one the baseline has
+        let rr_ctx = CaseContext {
+            seeds: ctx.seeds.max(RAIL_RAIL_FACE_GENERATED),
+            ..ctx.clone()
+        };
+        for mut c in rr_ctx.generated_cases(
+            "blend.fillet_geom_p2:rail_rail_face",
+            generate_rail_rail_face,
+        ) {
+            c.unit = self.id().to_string();
+            c.name = c.name.replacen("gen", "railrail", 1);
+            v.push(c);
+        }
+        Ok(v)
     }
 }
 
@@ -1328,6 +1433,50 @@ mod tests {
                         .unwrap_or("");
                     q = format!("{q} {key}={kind}{sub}");
                 }
+            }
+            if let Query::RailRail { face_tol, .. } = &i.query {
+                // the stream, a near-apex cone, then the drops and lifts that run past the
+                // rails: `3d` (a non-mate end vertex or a plane: the 3D curve is dropped),
+                // `3d+lift` (a rail without UV trim: dropped, lifted, dropped again),
+                // `2d+lift` (the UV curve is lifted, then dropped again)
+                let src = case.name.trim_end_matches(|c: char| c.is_ascii_digit());
+                if let Some(Value::Object(a)) = qv.get("face").and_then(|f| f.get("analytic")) {
+                    let r = |p: &str| a.get(p).and_then(|v| v.get(0)).and_then(Value::as_f64);
+                    if let (Some(near), Some(far)) = (r("a"), r("b")) {
+                        if far.abs() < 1e-2 * near.abs() {
+                            q = format!("{q}(apex)");
+                        }
+                    }
+                }
+                let mate = |v: usize| i.model.vertices.get(v).is_some_and(|x| x.vtype == 3);
+                // the rail's mate edge use's UV trim (the generator's second edge use)
+                let uv_at = |v: usize| {
+                    i.model
+                        .edges
+                        .iter()
+                        .find(|e| e.etype == 9 && (e.vs == v || e.ve == v))
+                        .is_some_and(|e| e.eus.get(1).is_some_and(|eu| eu.uv_curve.is_some()))
+                };
+                let plane = q.contains("plane");
+                let path = if plane || !mate(0) || !mate(1) {
+                    "3d"
+                } else if !uv_at(0) || !uv_at(1) {
+                    "3d+lift"
+                } else {
+                    "2d+lift"
+                };
+                // the face tolerance against the system zone tolerance an ownerless copy
+                // of the surface reads instead
+                let sys = Kernel::default().tolerances.zone_tol_3d;
+                let tol = zone_tol3d(&Kernel::default(), *face_tol);
+                let tol = if tol > 10.0 * sys {
+                    "tol>>sys"
+                } else if tol < 0.1 * sys {
+                    "tol<<sys"
+                } else {
+                    "tol~sys"
+                };
+                q = format!("{src} {q} {path} {tol}");
             }
             let kind = match Runner.run_rust(case) {
                 Ok(o) if o.deferred.is_some() => {

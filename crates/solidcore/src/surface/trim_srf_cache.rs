@@ -79,12 +79,18 @@
 //!   `PointClassify` of a cache whose surface has no face; the port returns
 //!   `SM_ERR_NULL_POINTER`. A node without surface data in this cache gives
 //!   [`SolidError::InvalidInput`].
+//! - **Statuses.** `BuildTree`'s `SER(sSurfaceDomain.Intersect(sFaceDomain, ..))` of
+//!   disjoint domains (no edge use grew the face domain) is the upstream status
+//!   `SM_ERR_INVALID_INPUT` ([`SolidError::Upstream`]), not
+//!   [`SolidError::InvalidInput`], so the cache factory falls back to the plain
+//!   surface cache as `smsurf_GetSurfaceCache` does when `CacheMakeOrValidate` fails;
+//!   a `GetTree` that builds a deferred tree returns the same status.
 //! - **Not ported here.** `GetMemoryUsed` (the base class sum) and `Dump` (debug
 //!   output).
 
 use crate::curve::curve::Curve;
 use crate::curve::curve_cache::{CurveCache, CurveCacheOptions};
-use crate::error::{Result, SolidError};
+use crate::error::{Result, SolidError, SM_ERR_INVALID_INPUT};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -860,7 +866,15 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
             Some(d) => d,
             None => self.base.surface().natural_uv_domain_with_nurb(k)?,
         };
-        let domain = surface_domain.intersect(&face_domain)?;
+        // SER: disjoint domains (a face domain no edge use grew) are the status
+        // SM_ERR_INVALID_INPUT, a failed build the cache factory falls back from
+        let domain = surface_domain
+            .intersect(&face_domain)
+            .map_err(|_| SolidError::Upstream {
+                operation: OP_BUILD,
+                code: SM_ERR_INVALID_INPUT,
+                entity: None,
+            })?;
         self.base.set_uv_domain(domain);
 
         // When the surface has UVTrimCurves

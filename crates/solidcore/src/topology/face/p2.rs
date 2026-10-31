@@ -3709,8 +3709,13 @@ mod tests {
                 type_code: TYPE,
                 key: ObjectKey(1),
             }));
+        // the surface carries the face tolerance, as every owner rebind of a B-rep
+        // face gives it
+        b.sync_face_surface_tolerance(f).unwrap();
         // no loops: no line interval classifies into the face (the line statuses are
-        // ignored), so the final SM_ERR
+        // ignored; the trimmed cache of a face domain no edge use grew cannot be built,
+        // and the classification falls back to the plain cache, as upstream's
+        // smsurf_GetSurfaceCache does), so the final SM_ERR
         assert!(matches!(
             calculate_an_internal_point(&k, &mut b, f),
             Err(SolidError::Upstream { .. })
