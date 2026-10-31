@@ -25,6 +25,10 @@
 //! | [`FilletBrep::update_geom_split_face`]            | `SmFilletGeom::UpdateSplitFace`                  |
 //!
 //! Deviations:
+//! - **Near-knot rail trims (opt-in, not upstream).** With
+//!   `fixes.fillet_rail_trim_at_near_knot` (WR-664, the fork's tangency-labs/smlib@7d79866),
+//!   `TrimRailCurves` trims a rail at its knot next to a vertex's drop when the rail between
+//!   the two is no longer than the zone tolerance (`snap_rail_end_to_knot`).
 //! - **Object model.** As in `blend.fillet_geom_p1` / `_p4`, a fillet vertex, edge or
 //!   geometry is an id of the [`FilletBrep`] (`self`, upstream's pseudo B-rep
 //!   `pPseudoBrep`). `GetFilletSolver()` is an opaque [`FilletSolverId`] resolved in
@@ -2030,6 +2034,21 @@ impl FilletBrep {
             .fillet_solver()
             .ok_or_else(|| SolidError::null_pointer(OP_TRIM))?;
         let app_tol = resolve(sid, OP_TRIM)?.approx_tol_3d;
+        // Opt-in (`fixes.fillet_rail_trim_at_near_knot`, WR-664; the fork's
+        // tangency-labs/smlib@7d79866): the target B-rep's zone tolerance
+        // (`SmTol::GetZoneTol3d(GetEdgeuse(0)->GetBrep())`).
+        let zone_tol = if k.fixes.fillet_rail_trim_at_near_knot {
+            resolve(sid, OP_TRIM)?
+                .edgeuse(0)?
+                .ok_or_else(|| SolidError::null_pointer(OP_TRIM))?;
+            Some(crate::geom::tol::brep_zone_tol_3d(
+                k,
+                target,
+                crate::geom::tol::SmallTopoType::NormalSize,
+            ))
+        } else {
+            None
+        };
 
         // for both rail curves
         for ii in 0..2 {
@@ -2147,6 +2166,20 @@ impl FilletBrep {
                     // clean up dT value from 3.000000001 to 3.0
                     t = clean_up_noise(t);
 
+                    // fork 7d79866: no end span shorter than the zone tolerance
+                    if let Some(zone_tol) = zone_tol {
+                        let rail_tol = held_curve_zone_tol_3d(k, self.brep(), Some(rail))?;
+                        t = snap_rail_end_to_knot(
+                            k,
+                            &rail_curve,
+                            rail_tol,
+                            &trim_ivl,
+                            zone_tol,
+                            true,
+                            t,
+                        )?;
+                    }
+
                     // set Vertexuse0->UVPoint on filletSurface
                     self.fillet_vertexuse_mut(vu0)?
                         .set_uv_point(Point2::new(t, iso_v));
@@ -2184,6 +2217,22 @@ impl FilletBrep {
                                 best = s.start.solution_value;
                             }
                         }
+                    }
+
+                    // fork 7d79866: no end span shorter than the zone tolerance
+                    if let Some(zone_tol) = zone_tol {
+                        let mut from_start = Extent1d::default();
+                        from_start.set_min_max(param1, trim_ivl.max())?;
+                        let rail_tol = held_curve_zone_tol_3d(k, self.brep(), Some(rail))?;
+                        param2 = snap_rail_end_to_knot(
+                            k,
+                            &rail_curve,
+                            rail_tol,
+                            &from_start,
+                            zone_tol,
+                            false,
+                            param2,
+                        )?;
                     }
 
                     // set Vertexuse1->UVPoint on filletSurface
@@ -2632,6 +2681,62 @@ fn user_surface(
 /// tolerance (`SmEdge::GetTolerance`, zero on a fillet B-rep's rails); the system zone
 /// tolerance when there is no edge. `SmBSplineCurve::Trim` maps it to parameter space
 /// to find degenerate end spans to remove.
+/// The fork's `sm_SnapRailEndToKnot` (tangency-labs/smlib@7d79866, opt-in
+/// `fixes.fillet_rail_trim_at_near_knot`, WR-664), not upstream: where a rail is trimmed
+/// at an end vertex, the parameter `param` found for the vertex, or the rail's knot next
+/// to it inside `trim_ivl` (above it for the trim's start, below it for its end) when the
+/// rail between the two is no longer than `zone_tol`. A trim there would leave an end span
+/// shorter than the zone tolerance with coincident control points: an internal point
+/// singularity of the rail and of the face curves trimmed with it. `rail_tol` is the rail
+/// edge's zone tolerance, read by the length (`SmTol::GetZoneTol3d` of the curve).
+///
+/// # Errors
+///
+/// Those of the rail's knots (`GetKnots`), the interval and the length.
+#[allow(clippy::too_many_arguments)]
+fn snap_rail_end_to_knot(
+    k: &Kernel,
+    rail: &Curve,
+    rail_tol: f64,
+    trim_ivl: &Extent1d,
+    zone_tol: f64,
+    start: bool,
+    param: f64,
+) -> Result<f64> {
+    let (knots, _) = rail.knots(k, None)?;
+    // the rail's knot next to param inside the trim
+    let mut knot = param;
+    let mut found = false;
+    for &kn in &knots {
+        let next = if start {
+            kn > param && kn < trim_ivl.max() && (!found || kn < knot)
+        } else {
+            kn < param && kn > trim_ivl.min() && (!found || kn > knot)
+        };
+        if next {
+            knot = kn;
+            found = true;
+        }
+    }
+    if !found {
+        return Ok(param);
+    }
+    // the rail between them, as long as the zone tolerance at most
+    let mut between = Extent1d::default();
+    // smos_Min / smos_Max
+    let (lo, hi) = if param < knot {
+        (param, knot)
+    } else {
+        (knot, param)
+    };
+    between.set_min_max(lo, hi)?;
+    let length = rail.length_with_zone_tol(k, &between, 0.01 * zone_tol, Some(rail_tol))?;
+    if length > zone_tol {
+        return Ok(param);
+    }
+    Ok(knot)
+}
+
 pub(super) fn held_curve_zone_tol_3d(k: &Kernel, b: &Brep, holder: Option<EdgeId>) -> Result<f64> {
     Ok(match holder {
         Some(e) => edge::tolerance(b, e)?,
@@ -2813,5 +2918,56 @@ mod tests {
                 .unwrap_err(),
             SolidError::Upstream { .. }
         ));
+    }
+
+    /// The degree-1 rail (0,0,0) (1,0,0) (2,0,0), knots 0, 1, 2.
+    fn polyline_rail() -> Curve {
+        use crate::nurbs::b_spline_curve::p1::{BSplineCurveForm, CanonicalData, KnotType};
+        let control = [
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(2.0, 0.0, 0.0),
+        ];
+        Curve::from(
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 3,
+                degree: 1,
+                control_points: &control,
+                form: BSplineCurveForm::default(),
+                knot_multiplicities: &[2, 1, 2],
+                knots: &[0.0, 1.0, 2.0],
+                knot_type: KnotType::default(),
+                weights: None,
+                trim: None,
+            })
+            .unwrap(),
+        )
+    }
+
+    /// Fork tangency-labs/smlib@7d79866 (`sm_SnapRailEndToKnot`, WR-664): a vertex that
+    /// drops 1e-8 before the rail's knot (SolidCraft's fillets/1207 r0.5 drop) trims at
+    /// the knot, as one that drops 1e-8 after it from the other end does; 1e-3 away (more
+    /// than the zone tolerance 1e-6) the drop stays, as does one with the knot outside
+    /// the trim.
+    #[test]
+    fn rail_end_snaps_to_a_knot_within_the_zone_tolerance() {
+        let k = kernel();
+        let rail = polyline_rail();
+        let whole = Extent1d::from_min_max(0.0, 2.0);
+        let snap = |ivl: &Extent1d, start: bool, t: f64| {
+            snap_rail_end_to_knot(&k, &rail, 1e-6, ivl, 1e-6, start, t).unwrap()
+        };
+        assert_eq!(snap(&whole, true, 1.0 - 1e-8), 1.0);
+        assert_eq!(snap(&whole, false, 1.0 + 1e-8), 1.0);
+        assert_eq!(snap(&whole, true, 1.0 - 1e-3), 1.0 - 1e-3);
+        assert_eq!(snap(&whole, false, 1.0 + 1e-3), 1.0 + 1e-3);
+        // the knot past the drop only: a start looks up, an end down
+        assert_eq!(snap(&whole, true, 1.0 + 1e-8), 1.0 + 1e-8);
+        assert_eq!(snap(&whole, false, 1.0 - 1e-8), 1.0 - 1e-8);
+        // a knot at the trim's other end is not inside it
+        let to_knot = Extent1d::from_min_max(0.0, 1.0);
+        assert_eq!(snap(&to_knot, true, 1.0 - 1e-8), 1.0 - 1e-8);
+        let from_knot = Extent1d::from_min_max(1.0, 2.0);
+        assert_eq!(snap(&from_knot, false, 1.0 + 1e-8), 1.0 + 1e-8);
     }
 }

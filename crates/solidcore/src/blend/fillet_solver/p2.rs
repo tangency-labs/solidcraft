@@ -1918,7 +1918,11 @@ impl FilletSolver {
     /// `ops` meets rail `other_rail_index` of `other` on their common surface, solved
     /// from `uv_guess` with both solvers' equations ([`RailRailIntersectEnfo`]).
     /// Returns `rbFoundIntersection`; when found, both tsect points get their UV points
-    /// and further solution values.
+    /// and further solution values. `hold_end_radii` is the fork's `bHoldEndRadii`
+    /// (tangency-labs/smlib@465b62b): the variable radii are held at their end values
+    /// (`SmTemporaryRadiusChange`) only when it is set; upstream always holds them, so
+    /// callers pass `true` unless `fixes.fillet_retry_radius_as_first` is on and their
+    /// corner is not calculated as constant radius.
     ///
     /// # Errors
     ///
@@ -1940,6 +1944,7 @@ impl FilletSolver {
         other_rail_index: usize,
         tsect: &mut TsectPnt,
         other_tsect: &mut TsectPnt,
+        hold_end_radii: bool,
     ) -> Result<bool> {
         // check inputs
         if !has_surface(ops.solver(), 0)?
@@ -1989,10 +1994,13 @@ impl FilletSolver {
         // Temporarily replace the variable-radius functions with a constant. [Reg Iter:306]
         // `SmTemporaryRadiusChange::SetUp` does nothing unless the solver is an
         // `SmVariableRadiusFS` (`SM_CAST_PTR`), first for this solver, then the other.
+        // Fork tangency-labs/smlib@465b62b (`fixes.fillet_retry_radius_as_first`, WR-300):
+        // only where `hold_end_radii` (a corner calculated as constant radius, as the
+        // callers decide); `SmTemporaryRadiusChange(NULL, ..)` does nothing.
         let other_side_eu = other.solver().edgeuse(other_rail_index)?;
         let this_side_eu = ops.solver().edgeuse(rail_index)?;
         let temp_this = match (ops.variable_radius_mut(), other_side_eu) {
-            (Some(vrfs), Some(side)) => {
+            (Some(vrfs), Some(side)) if hold_end_radii => {
                 let target = brep.as_deref().ok_or_else(|| {
                     invalid("variable-radius RailRailIntersect requires target B-rep")
                 })?;
@@ -2006,7 +2014,7 @@ impl FilletSolver {
             _ => crate::blend::fillet_executive::p2::DirectTemporaryRadiusChange::default(),
         };
         let temp_other = match (other.variable_radius_mut(), this_side_eu) {
-            (Some(vrfs), Some(side)) => {
+            (Some(vrfs), Some(side)) if hold_end_radii => {
                 let Some(target) = brep.as_deref() else {
                     temp_this.revert(ops.variable_radius_mut());
                     return Err(invalid(
@@ -3263,6 +3271,7 @@ mod tests {
                 0,
                 &mut tsect,
                 &mut other_tsect,
+                true,
             );
             assert_eq!(result, Err(invalid(reason)));
             assert_eq!(ops.extension_calls.get(), 0);
@@ -3291,6 +3300,7 @@ mod tests {
             0,
             &mut tsect,
             &mut other_tsect,
+            true,
         );
         assert_eq!(result, Err(sm_err()));
         assert_eq!(ops.extension_calls.get(), 1);

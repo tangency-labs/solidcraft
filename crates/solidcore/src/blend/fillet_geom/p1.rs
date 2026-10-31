@@ -3386,7 +3386,8 @@ pub fn adjust_uv_on_seam(
 /// `sm_CreateCubicRailRailInterpolant`: a 2D (parameter space) cubic through the
 /// intersection of two solvers' rails on `face`, from `start_pnt` with `start_tangent`
 /// to `end_pnt` with `end_tangent`; `bulge_factor` in `[0, 1]` sets the tangent lengths
-/// (bigger is sharper).
+/// (bigger is sharper). `hold_end_radii` is passed to `RailRailIntersect` (the fork's
+/// `bHoldEndRadii`, tangency-labs/smlib@465b62b; `true` is upstream).
 ///
 /// # Errors
 ///
@@ -3408,6 +3409,7 @@ pub fn create_cubic_rail_rail_interpolant(
     end_pnt: Point3,
     end_tangent: Vec3,
     bulge_factor: f64,
+    hold_end_radii: bool,
 ) -> Result<BSplineCurve> {
     const OP: &str = "blend::fillet_geom::p1::create_cubic_rail_rail_interpolant";
     let solver_edgeuse = |fs: &FilletSolver, i: usize| {
@@ -3454,6 +3456,7 @@ pub fn create_cubic_rail_rail_interpolant(
         other_rail_index,
         &mut tsect_pnt1,
         &mut tsect_pnt2,
+        hold_end_radii,
     )?;
     if !found_intersection {
         return Err(SolidError::sm_err(OP));

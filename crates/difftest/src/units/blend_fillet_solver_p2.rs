@@ -1099,6 +1099,7 @@ fn rust_run(i: &Inputs, o: &mut Vec<f64>) -> Result<Result<(), SolidError>, Harn
                 *other,
                 &mut ta,
                 &mut tb,
+                true, // upstream holds the end radii
             );
             match r {
                 Ok(found) => {
