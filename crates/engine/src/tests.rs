@@ -4596,3 +4596,31 @@ fn a_cut_leaves_hidden_bodies_alone() {
     let shown = setup(false);
     assert!(vol(&shown, "Below") < full - 1.0 && vol(&shown, "Above") < full - 1.0, "with nothing hidden, both are cut");
 }
+
+/// #4153: the second-choice ISO metric sizes (M33, M39, M3.5…) take their coarse pitch from
+/// the name alone, as the first-choice ones do, and a shaft of such a size is sized to it.
+#[test]
+fn second_choice_metric_threads_are_known_by_name() {
+    for (name, dia, pitch) in [("M3.5", 3.5, 0.6), ("M33", 33.0, 3.5), ("M39", 39.0, 4.0), ("M45", 45.0, 4.5), ("M64", 64.0, 6.0)] {
+        assert_eq!(solidcraft_doc::parse_metric_thread(name), Some((dia, pitch)), "{name}");
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"diameter": dia, "height": 4.0 * dia, "body_name": "Shaft"}));
+        let face = json!([dia / 2.0, 0.0, 2.0 * dia]);
+        let named = run(&mut s, "solid.thread", json!({"face": face, "designation": name}));
+        assert!((named["thread"]["pitch"].as_f64().unwrap() - pitch).abs() < 1e-9, "{named}");
+        run(&mut s, "edit.undo", json!({}));
+        let sized = run(&mut s, "solid.thread", json!({"face": face}));
+        assert_eq!(sized["thread"]["designation"], name, "a Ø{dia} shaft: {sized}");
+    }
+}
+
+/// #4085: a Ø7 shaft is threaded M7. It took M6 (as near as M8, and first) and then refused
+/// it: "an M6 thread does not fit a 7.00 mm shaft".
+#[test]
+fn an_automatic_thread_is_a_size_that_fits() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"diameter": 7, "height": 20}));
+    let t = run(&mut s, "solid.thread", json!({"face": [3.5, 0, 10]}));
+    assert_eq!(t["thread"]["designation"], "M7", "{t}");
+    assert!((t["thread"]["pitch"].as_f64().unwrap() - 1.0).abs() < 1e-9, "{t}");
+}
