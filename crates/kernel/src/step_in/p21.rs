@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 /// Largest STEP text we parse.
-pub const MAX_BYTES: usize = 512 << 20;
+pub const MAX_BYTES: usize = 1 << 30;
 /// Most entity instances in one file.
 pub const MAX_ENTITIES: usize = 20_000_000;
 /// Deepest parameter list nesting.
