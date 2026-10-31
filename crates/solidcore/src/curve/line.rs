@@ -2063,6 +2063,8 @@ impl Line {
                     bounded: this.is_bounded(),
                     is_degenerate: &is_degenerate,
                     trim_surface,
+                    // (WR-668's zero-speed end needs three control points; a line has two)
+                    edge_ends: None,
                 },
             )?;
         }

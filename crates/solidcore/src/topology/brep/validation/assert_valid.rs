@@ -76,7 +76,7 @@ pub(crate) fn standalone_curve_assert_valid(
     key: ObjectKey,
     polar_key: ObjectKey,
 ) -> Result<bool> {
-    edge::curve(k, curve, list, level, key, polar_key, None)
+    edge::curve(k, curve, list, level, key, polar_key, None, None)
 }
 
 /// `SM_LEVEL_GIVEN`: every test, no base classes.
@@ -361,7 +361,9 @@ pub fn curve_assert_valid(
     }
     let mut walk = curves::Walk::new(key);
     let polar_key = walk.next_key()?;
-    edge::curve_in_walk(k, curve, reports, level, key, polar_key, None, &mut walk)
+    edge::curve_in_walk(
+        k, curve, reports, level, key, polar_key, None, None, &mut walk,
+    )
 }
 
 /// The state of one `AssertValid` run: the reports, the requested level, the geometry

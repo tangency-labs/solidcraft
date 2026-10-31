@@ -8,6 +8,7 @@
 //! | `edge` | `SmEdge::AssertValid` |
 //! | `assert_test_edge14` | `sm_AssertTestEdge14` |
 //! | `edgeuse` | `SmEdgeuse::AssertValid` |
+//! | `edge_ends`, `faces_tangent_at` (fork, WR-668) | the edge lookups of `sm_IsZeroSpeedTangentEnd` |
 //! | `curve`, `curve_in_walk` | the virtual `SmCurve::AssertValid` (`m_pCurve->AssertValid`, `m_pUVTrimCurve->AssertValid`; the compound and Hermite overrides are in `curves`) |
 //!
 //! Deviations: the radial edge-use walks are bounded by the edge's use count (upstream
@@ -21,7 +22,14 @@
 //! `Kernel::fixes.edge_check_orders_tangent_faces`, #383): where two faces round an edge
 //! leave it within `SM_ANG_TOL_DEG` of each other, test 9 orders every face by the
 //! direction to its point 20 edge tolerances into the face, square to the edge (the
-//! fork's tangency-labs/smlib@5533bbb).
+//! fork's tangency-labs/smlib@5533bbb). Opt-in (WR-668,
+//! `Kernel::fixes.curve_check_zero_speed_tangent_end`, tangency-labs/smlib ecf1963):
+//! the edge check and edge-use check build the edge's [`EdgeEnds`] (its interval and
+//! whether its faces are tangent at each end) before checking its curve or a UV trim,
+//! since a Rust curve does not point back to its edge as the fork's check reads it.
+//! Only `SmBSplineCurve`, parabola and hyperbola checks take it; a line has too few
+//! control points for a zero-speed end and an ellipse's conic segments have no
+//! coincident end control points.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -34,7 +42,7 @@ use crate::geom::extent2d::Extent2d;
 use crate::geom::tol::{is_zero, ScaledZero, ANG_TOL_DEG, ZONE_TOL_3D};
 use crate::kernel::Kernel;
 use crate::math::{rad_to_deg, Point3, EFF_ZERO, PI, UNDEF_DOUBLE};
-use crate::nurbs::b_spline_curve::p3::DerivedOverrides;
+use crate::nurbs::b_spline_curve::p3::{DerivedOverrides, EdgeEnds};
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::Surface;
@@ -48,6 +56,10 @@ use crate::topology::{
 /// class: the curve object reports as `key`, an ellipse's polar converter as
 /// `polar_key`. `trim_surface` is the face's surface of a UV trim (WR-560, read by the
 /// `SmBSplineCurve` checks with `Kernel::fixes.uv_trim_checks_on_surface`).
+/// `edge_ends` is the edge the curve is the 3D curve or a UV trim of (WR-668, read by
+/// the `SmBSplineCurve` checks with `Kernel::fixes.curve_check_zero_speed_tangent_end`;
+/// see [`edge_ends`]).
+#[allow(clippy::too_many_arguments)]
 pub(super) fn curve(
     k: &Kernel,
     c: &mut Curve,
@@ -56,9 +68,20 @@ pub(super) fn curve(
     key: ObjectKey,
     polar_key: ObjectKey,
     trim_surface: Option<&Surface>,
+    edge_ends: Option<&EdgeEnds>,
 ) -> Result<bool> {
     let mut walk = curves::Walk::new(key);
-    curve_in_walk(k, c, list, level, key, polar_key, trim_surface, &mut walk)
+    curve_in_walk(
+        k,
+        c,
+        list,
+        level,
+        key,
+        polar_key,
+        trim_surface,
+        edge_ends,
+        &mut walk,
+    )
 }
 
 /// [`curve`] within the walk `walk` over an outer curve's contained objects.
@@ -71,13 +94,16 @@ pub(super) fn curve_in_walk(
     key: ObjectKey,
     polar_key: ObjectKey,
     trim_surface: Option<&Surface>,
+    edge_ends: Option<&EdgeEnds>,
     walk: &mut curves::Walk,
 ) -> Result<bool> {
     let given = level == super::LEVEL_GIVEN;
     let owner = c.owner();
     let mut list = list;
     match c.kind_mut() {
-        CurveKind::BSpline(x) => x.assert_valid_on(k, list, given, key, trim_surface),
+        CurveKind::BSpline(x) => {
+            x.assert_valid_on_edge(k, list, given, key, trim_surface, edge_ends)
+        }
         CurveKind::Line(x) => x.assert_valid_on(k, list, given, key, trim_surface),
         CurveKind::Ellipse(x) => x.assert_valid_on(k, list, given, key, polar_key, trim_surface),
         CurveKind::Parabola(x) => {
@@ -101,6 +127,7 @@ pub(super) fn curve_in_walk(
                     bounded,
                     is_degenerate: &is_degenerate,
                     trim_surface,
+                    edge_ends,
                 },
             )
         }
@@ -123,6 +150,7 @@ pub(super) fn curve_in_walk(
                     bounded,
                     is_degenerate: &is_degenerate,
                     trim_surface,
+                    edge_ends,
                 },
             )
         }
@@ -147,9 +175,79 @@ pub(super) struct EdgeSets {
     wire_edges: BTreeMap<ShellId, BTreeSet<EdgeId>>,
 }
 
+/// Not upstream (fork tangency-labs/smlib ecf1963, WR-668, opt-in): what the fork's
+/// `sm_IsZeroSpeedTangentEnd` reads from the edge `e` of a curve it checks, built
+/// before the check since a Rust curve does not point back to its edge. `None` with
+/// `Kernel::fixes.curve_check_zero_speed_tangent_end` off (nothing is evaluated).
+///
+/// # Errors
+///
+/// The arena lookups'.
+pub(super) fn edge_ends(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Option<EdgeEnds>> {
+    if !k.fixes.curve_check_zero_speed_tangent_end {
+        return Ok(None);
+    }
+    let interval = b.edge(e)?.interval;
+    Ok(Some(EdgeEnds {
+        interval,
+        faces_tangent: [
+            faces_tangent_at(k, b, e, interval.min()),
+            faces_tangent_at(k, b, e, interval.max()),
+        ],
+    }))
+}
+
+/// Whether the faces of the edge `e`'s uses are tangent at its parameter `edge_end`:
+/// each face's normal at its use's UV trim point there (the trim's parameter clamped
+/// to its natural interval) parallel to the first one's within `SM_CONTINUITY_ANGLE`,
+/// and at least two such faces (the fork's face loop of `sm_IsZeroSpeedTangentEnd`).
+/// A use without face, surface or UV trim is passed over; a failed evaluation is
+/// `false`. `Err` only for [`crate::SolidError::Unported`] and arena lookups.
+fn faces_tangent_at(k: &Kernel, b: &Brep, e: EdgeId, edge_end: f64) -> Result<bool> {
+    // SM_CONTINUITY_ANGLE is SM_ANG_TOL_DEG
+    let sin_tol = (ANG_TOL_DEG * (PI / 180.0)).sin();
+    let mut faces = 0usize;
+    let mut first_normal = crate::math::Vec3::ZERO;
+    for &eu in &b.edge(e)?.edgeuses {
+        let Some(f) = eu1::face(b, eu)? else {
+            continue;
+        };
+        let Some(surface) = b.face(f)?.surface.as_ref() else {
+            continue;
+        };
+        let Some(trim) = b.edgeuse(eu)?.uv_trim_curve.as_ref() else {
+            continue;
+        };
+        let t = trim.natural_interval().clamp_value(edge_end);
+        let uv = match trim.evaluate_point(k, t) {
+            Ok(p) => crate::geom::vector2d::Point2::new(p.x, p.y),
+            Err(err) if err.is_unported() => return Err(err),
+            Err(_) => return Ok(false),
+        };
+        let normal = match surface.evaluate_normal(
+            k,
+            uv,
+            crate::nurbs::knots::Side::Left,
+            crate::nurbs::knots::Side::Left,
+        ) {
+            Ok(n) => n,
+            Err(err) if err.is_unported() => return Err(err),
+            Err(_) => return Ok(false),
+        };
+        if faces == 0 {
+            first_normal = normal;
+        } else if first_normal.cross(normal).length() > sin_tol {
+            return Ok(false);
+        }
+        faces += 1;
+    }
+    Ok(faces >= 2)
+}
+
 /// Runs the edge's curve check through [`curve`] on the curve held by the edge.
 fn edge_curve_check(k: &Kernel, b: &mut Brep, cx: &mut Cx<'_>, e: EdgeId) -> Result<bool> {
     let level = cx.rep.level;
+    let ends = edge_ends(k, b, e)?;
     let list = cx.rep.array.as_deref_mut();
     let Some(c) = b.edge_mut(e)?.curve.as_mut() else {
         return Ok(true);
@@ -162,6 +260,7 @@ fn edge_curve_check(k: &Kernel, b: &mut Brep, cx: &mut Cx<'_>, e: EdgeId) -> Res
         geometry_key(20001, e.index()),
         geometry_key(20004, e.index()),
         None,
+        ends.as_ref(),
     )
 }
 
@@ -828,6 +927,11 @@ pub(super) fn edgeuse(
         } else {
             None
         };
+        // not upstream (WR-668, opt-in): the trim's edge (`GetEdgeuse()->GetEdge()`)
+        let ends = match eu1::edge(b, eu)? {
+            Some(e) => edge_ends(k, b, e)?,
+            None => None,
+        };
         let list = cx.rep.array.as_deref_mut();
         if let Some(c) = b.edgeuse_mut(eu)?.uv_trim_curve.as_mut() {
             rtn &= curve(
@@ -838,6 +942,7 @@ pub(super) fn edgeuse(
                 geometry_key(20003, eu.index()),
                 geometry_key(20005, eu.index()),
                 trim_surface.as_ref(),
+                ends.as_ref(),
             )?;
         }
     }
@@ -883,4 +988,45 @@ fn test19(
         return Ok(true);
     }
     Ok(v == cw_mate_v)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::boolean::api_brep::boolean_difference;
+    use crate::primitive::api_primitives::{create_box, create_cylinder};
+
+    /// The edges whose faces are tangent at both ends ([`edge_ends`], WR-668).
+    fn tangent_edges(k: &Kernel, b: &Brep) -> (usize, usize) {
+        let ids: Vec<EdgeId> = b.edges().ids().collect();
+        let mut tangent = 0;
+        for &e in &ids {
+            let ends = edge_ends(k, b, e).unwrap().unwrap();
+            let [s, t] = &ends.faces_tangent;
+            if *s.as_ref().unwrap() && *t.as_ref().unwrap() {
+                tangent += 1;
+            }
+        }
+        (tangent, ids.len())
+    }
+
+    /// WR-668's edge context: a box's faces meet at right angles at every edge end;
+    /// a box minus a cylinder resting on its face x = 20 (WR-540's shape) keeps the
+    /// tangency as an edge whose faces (the plane's and the cylinder's) are tangent
+    /// at both ends. With the flag off nothing is built.
+    #[test]
+    fn wr_668_edge_ends_read_the_faces_tangency() {
+        let mut k = Kernel::default();
+        let block = create_box(&mut k, Point3::new(20.0, 5.0, 5.0), 15.0, 15.0, 27.5).unwrap();
+        let ids: Vec<EdgeId> = block.edges().ids().collect();
+        assert!(edge_ends(&k, &block, ids[0]).unwrap().is_none());
+
+        k.fixes.curve_check_zero_speed_tangent_end = true;
+        assert_eq!(tangent_edges(&k, &block), (0, 12));
+        let block = create_box(&mut k, Point3::new(20.0, 5.0, 5.0), 15.0, 15.0, 27.5).unwrap();
+        let pin = create_cylinder(&mut k, Point3::new(25.0, 12.5, 22.5), 5.0, 25.0).unwrap();
+        let cut = boolean_difference(&mut k, block, pin).unwrap();
+        let (tangent, _) = tangent_edges(&k, &cut);
+        assert!(tangent >= 1, "{tangent}");
+    }
 }

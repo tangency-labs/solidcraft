@@ -1306,6 +1306,9 @@ impl Ellipse {
                     bounded: true,
                     is_degenerate: &is_degenerate,
                     trim_surface,
+                    // (WR-668's zero-speed end needs coincident end control points, which
+                    // the conic segments of a nondegenerate ellipse never have)
+                    edge_ends: None,
                 },
             )?;
         }

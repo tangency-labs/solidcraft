@@ -173,7 +173,7 @@ fn contained_curve(
     let mut copy = part.clone_for_evaluation()?;
     let (_, _) = copy.set_owner(owner, None);
     walk.depth += 1;
-    let r = edge::curve_in_walk(k, &mut copy, list, level, key, polar_key, None, walk);
+    let r = edge::curve_in_walk(k, &mut copy, list, level, key, polar_key, None, None, walk);
     walk.depth -= 1;
     r
 }
