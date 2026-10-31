@@ -1,0 +1,12 @@
+# ExtSurfaceRebuild's call through a NULL function pointer (UB-280): the C++ side
+# crashes or returns a result that depends on the heap layout of the forked child
+# (plan/upstream-issues/UB-280--addendum-2026-10-31-heap-layout-dependent-output.md).
+# Parked, not passed: this case is not run in the gate.
+# single_face_box_with_large_fillet_4 shows the same dependence; it passes on main's
+# baseline, so it stays counted (a baseline pass may not become parked).
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "single_face_box_with_large_fillet_2"
+libc = "glibc"
+cpp_defect = "UB-280"
+why = "C++ heap-layout dependent (UB-280): crashes or returns a build-dependent result; the Rust output is the same in every build"
