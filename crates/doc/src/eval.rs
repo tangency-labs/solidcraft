@@ -3754,8 +3754,12 @@ fn face_level_at(st: &ModelState, plane: &Plane, h: f64, targets: &[String]) -> 
     })
 }
 
-/// The body a face-based feature applies to: by name, or the one whose surface is nearest the
-/// first point.
+/// The body a face-based feature applies to: by name, or the one whose face is nearest the first
+/// point (not its bounding box: after a split, both halves' boxes touch the cut and an AABB
+/// pick can shell the other piece, #1972). Among bodies with a face at the pick, take the
+/// nearest. When several sit at the same place (#6564: a new solid under an already-shelled
+/// twin; #6333: the other half after the first was opened on the cut), equal distances used to
+/// pick the oldest body — whose open face may be gone. Prefer the newest body on a distance tie.
 fn body_at(st: &ModelState, body: &Option<crate::BodyName>, points: &[Vec3]) -> Result<usize> {
     if let Some(n) = body {
         return st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")));
@@ -3764,14 +3768,14 @@ fn body_at(st: &ModelState, body: &Option<crate::BodyName>, points: &[Vec3]) -> 
     st.bodies
         .iter()
         .enumerate()
-        .map(|(i, b)| {
-            let bb = b.mesh().bounds();
-            let q = Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z));
-            (i, q.dist(*p))
+        .filter(|(_, b)| !b.body.is_mesh())
+        .filter_map(|(i, b)| {
+            let (d, _) = crate::appearance::nearest_face(b, *p)?;
+            (d <= crate::appearance::pick_tolerance(b)).then_some((d, i))
         })
-        .min_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(i, _)| i)
-        .ok_or_else(|| DocError::Invalid("there is no body".into()))
+        .min_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
+        .map(|(_, i)| i)
+        .ok_or_else(|| DocError::Invalid("no face at the pick".into()))
 }
 
 /// A hole stays on its face when the model changes: a position now inside a body moves back
