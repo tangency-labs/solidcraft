@@ -57,16 +57,20 @@
 //!   after visiting more edge uses than the B-rep holds (upstream loops forever on a
 //!   CCW chain that does not return to its start). `CollectEdgeuses` keeps upstream's
 //!   own bound (`SM_ERR` after 100000 steps).
-//! - **`IsClosed3d`** computes `dOverTol = XSectTol3d - Gap`, which is negative for a
-//!   gap over tolerance, and keeps it only when it exceeds `0.0`: no gap ever counts as
-//!   over tolerance, the loop is always reported closed (with the largest gap), and
-//!   `bCheckAllGaps == FALSE` only stops the scan at the first gap over tolerance.
-//!   Ported as is (`plan/upstream-issues.md`). The tolerances keep the
-//!   `SmZoneTol3d` / `SmXSectTol3d` value semantics (`fabs`, `SM_USE_DEFAULT`; see
-//!   [`tol::zone_tol3d`]), which is why it takes the [`Kernel`]. The edge curve evaluations' statuses
-//!   are ignored as upstream (a failed evaluation keeps the previous point, initially
-//!   [`Vec3::UNDEF`]); [`SolidError::Unported`] still propagates. `SmLoop::IsClosed3d`
-//!   of a loop without loop use returns `None` (closed, outputs not written).
+//! - **`IsClosed3d` (WR-93).** Upstream computes `dOverTol = XSectTol3d - Gap`, which
+//!   is negative for a gap over tolerance, and keeps it only when it exceeds `0.0`:
+//!   no gap ever counts as over tolerance, so the loop is always reported closed (with
+//!   the largest gap). The port matches that by default. With
+//!   `Kernel::fixes.loop_use_reports_open_gaps` it computes `Gap - XSectTol3d`, so an
+//!   over-tolerance gap is reported open with its edge use, actual gap and tolerance;
+//!   `bCheckAllGaps == FALSE` still stops the scan at the first over-tolerance gap,
+//!   while `TRUE` keeps the largest tolerance exceedance (the first on a tie). The
+//!   tolerances keep the `SmZoneTol3d` / `SmXSectTol3d` value semantics (`fabs`,
+//!   `SM_USE_DEFAULT`; see [`tol::zone_tol3d`]), which is why it takes the [`Kernel`].
+//!   The edge curve evaluations' statuses are ignored as upstream (a failed evaluation
+//!   keeps the previous point, initially [`Vec3::UNDEF`]); [`SolidError::Unported`]
+//!   still propagates. `SmLoop::IsClosed3d` of a loop without loop use returns `None`
+//!   (closed, outputs not written).
 //! - **`IsMissingSeamAtVertices`** ignores `ComputeUVSector`'s status, as upstream, and
 //!   reads the missing-seam flags of the sector it returns.
 //! - **`SmFace::Notify`** (the `PRE_EDIT` / `POST_EDIT` around `FlipLoopOrientation` of
@@ -676,8 +680,10 @@ fn edgeuse_end_point(
 
 /// `IsClosed3d`: whether every gap between an edge use's end and its CCW neighbour's
 /// start is within their cross-section tolerance (`ZoneTol3d + ZoneTol3d`), with the
-/// gap reported; `true` for a vertex loop use (outputs zero). See the module docs for
-/// upstream's over-tolerance test, which never fires.
+/// gap reported; `true` for a vertex loop use (outputs zero). By default the
+/// over-tolerance test is upstream's `XSectTol3d - Gap > 0`, which never fires and so
+/// always reports closed; with `Kernel::fixes.loop_use_reports_open_gaps` it is
+/// `Gap - XSectTol3d > 0` and an over-tolerance gap is reported open (WR-93).
 ///
 /// # Errors
 ///
@@ -740,7 +746,13 @@ pub fn is_closed_3d(k: &Kernel, b: &Brep, lu: LoopuseId, check_all_gaps: bool) -
 
         // When gap is bigger than XSectTol3d(ThisEdgeuse, NextEdgeuse)
         if gap_3d_sq > xsect_tol_3d_sq {
-            let over_tol = xsect_tol_3d - gap_3d_sq.sqrt();
+            // WR-93: the pinned C++ computes `tol - gap`, which is negative here and
+            // never exceeds the zero initial maximum, so no gap is reported open.
+            let over_tol = if k.fixes.loop_use_reports_open_gaps {
+                gap_3d_sq.sqrt() - xsect_tol_3d
+            } else {
+                xsect_tol_3d - gap_3d_sq.sqrt()
+            };
 
             // when OverTol is largest - save MaxOvertTol vals
             if over_tol > max_over_tol {
@@ -1544,6 +1556,19 @@ mod tests {
         Curve::from(BSplineCurve::from_nurb(nl, 3, false))
     }
 
+    /// The 3D end of an edge use on its edge curve, read from its orientation.
+    fn curve_end(b: &Brep, k: &Kernel, use_: EdgeuseId, start: bool) -> Point3 {
+        let u = b.edgeuse(use_).unwrap();
+        let e = b.edge(u.edge.unwrap()).unwrap();
+        let c = e.curve.as_ref().unwrap();
+        let t = if (u.orientation == OrientType::Same) == start {
+            e.interval.min()
+        } else {
+            e.interval.max()
+        };
+        c.evaluate_point(k, t).unwrap()
+    }
+
     fn eu(i: u32) -> EdgeuseId {
         EdgeuseId::from_index(i)
     }
@@ -1762,6 +1787,108 @@ mod tests {
             Err(SolidError::InvalidInput { .. })
         ));
         assert!(loop_is_closed_3d(&k, &b, LoopId::from_index(0), true).is_err());
+    }
+
+    #[test]
+    fn is_closed_3d_reports_open_gaps_with_opt_in() {
+        // WR-93: upstream's `XSectTol3d - Gap` is negative for an over-tolerance gap,
+        // so it never exceeds 0 and the loop is always reported closed.
+        let mut k = Kernel::default();
+        k.fixes.loop_use_reports_open_gaps = true;
+
+        // A 0.5 gap over the edges' 2e-4 cross-section tolerance: open on both scans.
+        let b = square(0.5);
+        let gap = curve_end(&b, &k, eu(2), false).distance(curve_end(&b, &k, eu(4), true));
+        for check_all in [false, true] {
+            let c = is_closed_3d(&k, &b, lu(0), check_all).unwrap();
+            assert!(!c.closed);
+            assert_eq!(c.edgeuse, Some(eu(2)));
+            assert_eq!(c.xsect_tol_3d, 2e-4);
+            // The open output is `(gap - tol) + tol`, which need not be bit-exact.
+            assert!((c.max_gap - gap).abs() <= 1e-9 * gap.max(c.max_gap));
+        }
+
+        // Off (pinned C++): the same loop is closed, reporting the largest gap.
+        let c = is_closed_3d(&Kernel::default(), &b, lu(0), true).unwrap();
+        assert!(c.closed);
+        assert_eq!(c.edgeuse, Some(eu(2)));
+        assert!((c.max_gap - gap).abs() <= 1e-9 * gap.max(c.max_gap));
+        assert_eq!(c.xsect_tol_3d, 2e-4);
+
+        // A gap under the tolerance stays closed (1e-4 < 2e-4).
+        let b = square(1e-4);
+        let gap = curve_end(&b, &k, eu(2), false).distance(curve_end(&b, &k, eu(4), true));
+        let c = is_closed_3d(&k, &b, lu(0), true).unwrap();
+        assert!(c.closed);
+        assert_eq!(c.xsect_tol_3d, 2e-4);
+        assert!((c.max_gap - gap).abs() <= 1e-9 * gap.max(c.max_gap));
+
+        // A closed square has no gap.
+        let b = square(0.0);
+        let c = is_closed_3d(&k, &b, lu(0), true).unwrap();
+        assert!(c.closed);
+        assert_eq!(c.edgeuse, None);
+        assert_eq!(c.max_gap, 0.0);
+
+        // A vertex loop use is closed with zero outputs.
+        let mut b = square(0.0);
+        b.loopuse_mut(lu(0)).unwrap().start =
+            LoopuseStart::Vertexuse(Some(VertexuseId::from_index(0)));
+        b.vertexuse_mut(VertexuseId::from_index(0)).unwrap().owner =
+            VertexuseOwner::Loopuse(Some(lu(0)));
+        let c = is_closed_3d(&k, &b, lu(0), true).unwrap();
+        assert!(c.closed);
+        assert_eq!(c.edgeuse, None);
+        assert_eq!(c.max_gap, 0.0);
+        assert_eq!(c.xsect_tol_3d, 0.0);
+    }
+
+    #[test]
+    fn is_closed_3d_picks_first_or_largest_exceedance() {
+        let mut k = Kernel::default();
+        k.fixes.loop_use_reports_open_gaps = true;
+
+        // Two gaps in CCW order: 0.2 at edge use 2, then 0.5 at edge use 4, both over
+        // the 2e-4 cross-section tolerance.
+        let mut b = square(0.2);
+        b.edge_mut(EdgeId::from_index(2)).unwrap().curve =
+            Some(line(Vec3::new(1.0, 1.0, 0.0), Vec3::new(0.0, 1.5, 0.0)));
+
+        // `check_all_gaps == FALSE` stops at the first over-tolerance gap.
+        let c = is_closed_3d(&k, &b, lu(0), false).unwrap();
+        assert!(!c.closed);
+        assert_eq!(c.edgeuse, Some(eu(2)));
+        assert_eq!(c.xsect_tol_3d, 2e-4);
+        let gap = curve_end(&b, &k, eu(2), false).distance(curve_end(&b, &k, eu(4), true));
+        assert!((c.max_gap - gap).abs() <= 1e-9 * gap.max(c.max_gap));
+
+        // `TRUE` keeps the largest tolerance exceedance, the later 0.5 gap.
+        let c = is_closed_3d(&k, &b, lu(0), true).unwrap();
+        assert!(!c.closed);
+        assert_eq!(c.edgeuse, Some(eu(4)));
+        assert_eq!(c.xsect_tol_3d, 2e-4);
+        let gap = curve_end(&b, &k, eu(4), false).distance(curve_end(&b, &k, eu(6), true));
+        assert!((c.max_gap - gap).abs() <= 1e-9 * gap.max(c.max_gap));
+
+        // Selection uses the exceedance, not the absolute gap: 0.2 over 0.01 exceeds by
+        // 0.19, 0.5 over 0.4 by 0.1, so the earlier, smaller gap is reported.
+        b.edge_mut(EdgeId::from_index(1)).unwrap().tolerance = 0.01;
+        b.edge_mut(EdgeId::from_index(2)).unwrap().tolerance = 0.0;
+        b.edge_mut(EdgeId::from_index(3)).unwrap().tolerance = 0.4;
+        let c = is_closed_3d(&k, &b, lu(0), true).unwrap();
+        assert!(!c.closed);
+        assert_eq!(c.edgeuse, Some(eu(2)));
+        assert_eq!(c.xsect_tol_3d, 0.01);
+        let gap = curve_end(&b, &k, eu(2), false).distance(curve_end(&b, &k, eu(4), true));
+        assert!((c.max_gap - gap).abs() <= 1e-9 * gap.max(c.max_gap));
+
+        // Equal exceedances keep the first (strict `>`).
+        let mut b = square(0.25);
+        b.edge_mut(EdgeId::from_index(2)).unwrap().curve =
+            Some(line(Vec3::new(1.0, 1.0, 0.0), Vec3::new(0.0, 1.25, 0.0)));
+        let c = is_closed_3d(&k, &b, lu(0), true).unwrap();
+        assert!(!c.closed);
+        assert_eq!(c.edgeuse, Some(eu(2)));
     }
 
     #[test]
