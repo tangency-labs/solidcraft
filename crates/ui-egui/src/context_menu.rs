@@ -1824,13 +1824,22 @@ pub fn toggle_visibility(app: &mut SolveApp) {
     for c in app.tree.picked_components.clone() {
         bodies.extend(component_bodies(app, c));
     }
-    let sketches: Vec<u64> = app
+    // A sketch picked by its row, or in the view by a profile, curve or point of it (not the
+    // sketch being edited).
+    let mut sketches: Vec<u64> = app
         .session
         .selection
         .iter()
-        .filter_map(|s| if let Sel::Feature { id } = s { Some(*id) } else { None })
+        .filter_map(|s| match s {
+            Sel::Feature { id } => Some(*id),
+            Sel::Profile { sketch, .. } | Sel::ExternalSketchCurve { sketch, .. } | Sel::ExternalSketchPoint { sketch, .. } => Some(*sketch),
+            _ => None,
+        })
+        .filter(|id| Some(*id) != app.session.active_sketch)
         .filter(|id| app.session.doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. })))
         .collect();
+    sketches.sort_unstable();
+    sketches.dedup();
     let origin: Vec<String> = app
         .session
         .selection
@@ -1855,6 +1864,14 @@ pub fn toggle_visibility(app: &mut SolveApp) {
     items.extend(sketches.iter().map(|s| json!(s)));
     if !items.is_empty() {
         let _ = app.run("browser.visibility", json!({ "items": items, "visible": !hide }));
+    }
+    if hide {
+        // What was picked in the view of a sketch now hidden leaves the selection: kept, it is
+        // still drawn highlighted and the sketch looks shown.
+        app.session.selection.retain(|s| {
+            !matches!(s, Sel::Profile { sketch, .. } | Sel::ExternalSketchCurve { sketch, .. } | Sel::ExternalSketchPoint { sketch, .. }
+                if sketches.contains(sketch))
+        });
     }
     if !joints.is_empty() {
         let _ = app.run("browser.visibility", json!({ "joints": joints, "visible": !hide }));
