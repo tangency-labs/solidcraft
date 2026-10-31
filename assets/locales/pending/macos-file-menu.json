@@ -1,4 +1,8 @@
 {
+  "ar": {
+    "prefs.window_file_menu": "إظهار قائمة «ملف» أيضًا في نافذة التطبيق",
+    "prefs.window_file_menu_note": "إظهار قائمة «ملف» في شريط التطبيق أيضًا. تظل جميع إجراءات الملفات متاحة في شريط قوائم macOS."
+  },
   "de": {
     "prefs.window_file_menu": "Dateimenü zusätzlich im App-Fenster anzeigen",
     "prefs.window_file_menu_note": "Zeigt das Dateimenü auch in der App-Leiste an. Alle Dateiaktionen bleiben in der macOS-Menüleiste verfügbar."
@@ -7,6 +11,10 @@
     "prefs.window_file_menu": "Also show the File menu in the app window",
     "prefs.window_file_menu_note": "Show the File menu in the application bar as well. All file actions remain available in the macOS menu bar."
   },
+  "he": {
+    "prefs.window_file_menu": "הצגת התפריט ״קובץ״ גם בחלון היישום",
+    "prefs.window_file_menu_note": "הצגת התפריט ״קובץ״ גם בסרגל היישום. כל פעולות הקבצים נשארות זמינות בשורת התפריטים של macOS."
+  },
   "ja": {
     "prefs.window_file_menu": "アプリのウィンドウにもファイルメニューを表示",
     "prefs.window_file_menu_note": "アプリケーションバーにもファイルメニューを表示します。すべてのファイル操作は macOS のメニューバーから引き続き利用できます。"
@@ -14,6 +22,10 @@
   "ko": {
     "prefs.window_file_menu": "앱 창에도 파일 메뉴 표시",
     "prefs.window_file_menu_note": "앱 표시줄에도 파일 메뉴를 표시합니다. 모든 파일 작업은 macOS 메뉴 막대에서 계속 사용할 수 있습니다."
+  },
+  "vi": {
+    "prefs.window_file_menu": "Hiển thị thêm menu Tệp trong cửa sổ ứng dụng",
+    "prefs.window_file_menu_note": "Hiển thị menu Tệp trong thanh ứng dụng. Tất cả thao tác với tệp vẫn có trong thanh menu macOS."
   },
   "zh": {
     "prefs.window_file_menu": "同时在应用窗口中显示文件菜单",
