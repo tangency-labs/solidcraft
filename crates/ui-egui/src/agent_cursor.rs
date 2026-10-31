@@ -171,6 +171,11 @@ impl AgentCursor {
         self.job.as_ref().filter(|j| j.stops.is_empty()).and_then(|j| j.ahead.as_ref()).map(|a| (a.started, a.steps.shown()))
     }
 
+    /// The steps of the command [`Self::computing`] reports.
+    pub(crate) fn computing_steps(&self) -> Option<std::sync::Arc<crate::control_job::Steps>> {
+        self.job.as_ref().filter(|j| j.stops.is_empty()).and_then(|j| j.ahead.as_ref()).map(|a| a.steps.clone())
+    }
+
     /// Follow the pointer input an agent sends itself (`ui.move`, `ui.click`, `ui.drag`,
     /// `ui.scroll`), as it reaches the app: the pointer goes where the input lands, and a press
     /// leaves a ripple. A request being acted out keeps the pointer meanwhile.

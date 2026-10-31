@@ -501,10 +501,12 @@ fn second_hole() -> serde_json::Value {
 }
 
 /// While an agent's batch computes, the chip says which step it is on, of how many, and that
-/// step's command (`2/3 · Cylinder`); a single command shows just its name.
+/// step's command (`2/3 · Cylinder`); a single command shows just its name. The chip is what
+/// shows with the operations panel off.
 #[test]
 fn a_computing_batch_says_its_step() {
     let (mut h, tx) = agent_harness();
+    h.app.preferences.operations_panel = false;
     let hole = |x: f64| json!({"command": "solid.cylinder", "params": {"base": [x, 10, -1], "axis": [0, 0, 1], "radius": 3, "height": 20, "operation": "cut"}});
     let batch = ask(&tx, "engine.batch", json!({"commands": [hole(50.0), hole(30.0), hole(70.0)]}));
     h.frames(1);
@@ -987,4 +989,28 @@ fn a_body_renamed_in_the_browser_keeps_the_pattern_after_it() {
     let kept = before.zip(mesh(&h)).is_some_and(|(a, b)| std::sync::Arc::ptr_eq(&a, &b));
     assert!(kept, "no feature computed again");
     assert_eq!(h.app.session.visibility.locked_bodies, ["Plate"]);
+}
+
+/// With the operations panel (the default), an agent's computing batch is a row named after the
+/// step's command, with how many of the batch's steps are done, and no chip; its X stops it as
+/// the chip's Stop did: answered as stopped, nothing applied.
+#[test]
+fn a_computing_batch_is_a_row_of_the_operations_panel_that_stops_it() {
+    let (mut h, tx) = agent_harness();
+    let features = h.app.session.doc.features.len();
+    let hole = |x: f64| json!({"command": "solid.cylinder", "params": {"base": [x, 10, -1], "axis": [0, 0, 1], "radius": 3, "height": 20, "operation": "cut"}});
+    let batch = ask(&tx, "engine.batch", json!({"commands": [hole(50.0), hole(30.0), hole(70.0)]}));
+    h.frames(1);
+    assert!(h.app.agent_computing().is_some(), "the batch computes");
+    let rows = crate::operations::current(&h.app);
+    let row = rows.iter().find(|r| r.key == "agent").expect("a row for the agent's command");
+    assert!(!row.label.is_empty() && !row.label.contains('.'), "the toolbar's name: {row:?}");
+    assert_eq!(row.steps.map(|(_, total)| total), Some(3), "{row:?}");
+    assert!(row.cancellable());
+    assert!(crate::scenario::rect_of("agent:chip").is_none(), "no chip besides the row");
+    crate::operations::cancel(&mut h.app, "agent").unwrap();
+    let reply = reply_to(&mut h, &batch);
+    assert_eq!((reply["ok"].clone(), reply["stopped"].clone()), (json!(false), json!(true)), "{reply}");
+    h.frames(2);
+    assert_eq!(h.app.session.doc.features.len(), features, "nothing applied");
 }

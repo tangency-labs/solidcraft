@@ -199,9 +199,20 @@ impl Steps {
     /// What the chip says: the command running, and in a batch which step it is
     /// (`3/21 · Extrude`).
     pub(crate) fn shown(&self) -> String {
+        let (done, total) = self.counts();
+        let label = self.current();
+        if total > 1 { format!("{}/{total} · {label}", done + 1) } else { label }
+    }
+
+    /// The command running, as the toolbar names it.
+    pub(crate) fn current(&self) -> String {
         let now = self.now.load(Ordering::Relaxed).max(1);
-        let label = self.labels.get(now - 1).or(self.labels.last()).cloned().unwrap_or_default();
-        if self.total > 1 { format!("{now}/{} · {label}", self.total) } else { label }
+        self.labels.get(now - 1).or(self.labels.last()).cloned().unwrap_or_default()
+    }
+
+    /// Steps done (the one running not yet) and how many there are.
+    pub(crate) fn counts(&self) -> (usize, usize) {
+        (self.now.load(Ordering::Relaxed).max(1).saturating_sub(1).min(self.total), self.total)
     }
 }
 
@@ -343,6 +354,12 @@ impl SolveApp {
             .as_ref()
             .map(|j| (j.started, j.steps.as_ref().map_or_else(|| j.label.clone(), |s| s.shown())))
             .or_else(|| self.agent.computing())
+    }
+
+    /// How far the agent's design change computing off the window thread is, when it counts its
+    /// steps ([`Steps`]).
+    pub(crate) fn agent_steps(&self) -> Option<Arc<Steps>> {
+        self.control_job.as_ref().map_or_else(|| self.agent.computing_steps(), |j| j.steps.clone())
     }
 
     /// Stop waiting for the agent's design change that is computing: it is answered as stopped
