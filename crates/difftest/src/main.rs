@@ -432,7 +432,10 @@ fn main() -> ExitCode {
         .unwrap_or_else(|| root.join("reports").join("difftest"));
 
     let jobs = difftest::jobs::resolve(args.jobs.unwrap_or(1)).min(wanted.len());
-    if jobs > 1 {
+    // Several units run one at a time still get a child process each: C++ state that one
+    // unit's in-process calls latch (ND-3's `sdStaticStep`) would otherwise reach a later
+    // unit's `fresh_process` children, which fork from this process.
+    if jobs > 1 || (wanted.len() > 1 && args.digest_dir.is_none()) {
         let fwd = difftest::jobs::forwarded_args(&raw);
         // Previous reports order the queue; a fresh --report-dir falls back to the default,
         // and a unit with no report anywhere to its fixture size (reports are not committed).

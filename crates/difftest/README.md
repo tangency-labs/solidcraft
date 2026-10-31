@@ -30,7 +30,7 @@ nice -n 10 cargo test -p difftest --features cpp                     # harness s
 | flag | meaning |
 |---|---|
 | `--unit <id>` | run one unit (repeatable; `*` and `?` match several registered runners, e.g. `--unit 'nlib.*'`) |
-| `--jobs N` / `-j N` | run N units at a time, each in its own child process (default `1`: one process, in order; `0`: every core). Output, reports and exit status are the same as with `1` (below) |
+| `--jobs N` / `-j N` | run N units at a time, each in its own child process (default `1`: one at a time; `0`: every core). Output, reports and exit status are the same as with `1` (below). A run of one unit runs in this process; with several, even `--jobs 1` gives each its own child, so C++ process state one unit latches cannot reach the next (`--digest-dir` runs in this process) |
 | `--green` | all port units with `status = "green"` or `"partial"` in `plan/units/*.toml`, excluding `audit.recursion` (a crate-wide audit with no runner; a port without a runner FAILS; a `green` port that comes out partial FAILS) |
 | `--status-of <id>` | run the unit (no report) and print only `green`, `partial` or `fail`; exit `1` on `fail` (also when no runner is registered) |
 | `--all` | every registered runner |
@@ -925,9 +925,11 @@ nice -n 10 cargo run --profile difftest -p difftest --features cpp -- --step-cor
 
 ## Notes
 
-* Cases run sequentially in one process: the C++ kernel has global state. A
+* A unit's cases run sequentially in one process: the C++ kernel has global state. A
   C++ crash (segfault) kills the run; use `--filter` to bisect (`--fuzz` runs
-  its cases in child processes instead).
+  its cases in child processes instead). Several units each run in a child process
+  of their own (`--jobs`), so one unit's latched C++ state (ND-3's `sdStaticStep`)
+  never reaches another's forked `fresh_process` children.
 * Rust panics in a runner are caught and reported as a failing case.
 * `solidcore-ffi` without feature `cpp` is an empty crate that builds for
   `wasm32-unknown-unknown`; the difftest binary refuses to run without `cpp`, except for `--solidcraft-cases` (Rust only).
