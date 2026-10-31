@@ -30,6 +30,13 @@ fn some<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T
     T::deserialize(d).map(Some)
 }
 
+/// `deviation` as the handler reads it: a positive, finite number of millimetres, with its
+/// message (#2846).
+fn positive_mm<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
+    let mm = f64::deserialize(d)?;
+    if mm.is_finite() && mm > 0.0 { Ok(Some(mm)) } else { Err(D::Error::custom(whole("`deviation` must be a positive number of millimetres"))) }
+}
+
 /// The keys `file.save_mesh` reads. See [`SaveMeshParams`], which leaves `ascii` and
 /// `single_instance` unread in the cases the handler does.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -66,6 +73,10 @@ pub struct SaveMeshKeys {
     /// or `finest`, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size. Default: standard.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
+    /// An absolute chord tolerance in millimetres, overriding `quality` (#2846): a positive,
+    /// finite number. Default: none, which leaves `quality` to apply.
+    #[serde(default, deserialize_with = "positive_mm")]
+    pub deviation: Option<f64>,
     /// 3MF only: `body` is one object per body; `component` is one object for each placed
     /// component with two or more bodies, with those bodies as its parts, so a slicer loads them as
     /// one object with parts (other bodies stay objects of their own). `component` is refused for

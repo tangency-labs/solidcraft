@@ -23,7 +23,10 @@ fn with_box(level: ParamCheck) -> Session {
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<SaveMeshParams>(), &["ascii", "bodies", "format", "objects", "path", "quality", "single_instance", "slicer"]);
+    assert_keys(
+        input_schema_for::<SaveMeshParams>(),
+        &["ascii", "bodies", "deviation", "format", "objects", "path", "quality", "single_instance", "slicer"],
+    );
     // `path` is the key the handler refuses when it is left out: required in the schema, optional in the type.
     let schema = input_schema_for::<SaveMeshParams>();
     assert_eq!(schema.as_value()["required"], json!(["path"]));

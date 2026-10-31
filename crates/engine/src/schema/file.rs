@@ -66,6 +66,9 @@ pub struct ExportMeshParams {
     /// How closely the mesh follows curved faces. Default: standard.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
+    /// An absolute chord tolerance in millimetres, overriding `quality` (#2846). Default: none.
+    #[serde(default)]
+    pub deviation: Option<f64>,
 }
 
 /// Export bodies as a 3MF file, whatever the path's extension.
@@ -80,6 +83,9 @@ pub struct Export3mfParams {
     /// How closely the mesh follows curved faces. Default: standard.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
+    /// An absolute chord tolerance in millimetres, overriding `quality` (#2846). Default: none.
+    #[serde(default)]
+    pub deviation: Option<f64>,
     /// What each object in the file holds. Default: body.
     #[serde(default)]
     pub objects: Option<ObjectsParam>,
@@ -127,6 +133,10 @@ pub struct ExportParams {
     /// for URDF.
     #[serde(default)]
     pub quality: Option<MeshQualityParam>,
+    /// An absolute chord tolerance in millimetres, overriding `quality` (#2846). Default: none.
+    /// Not read for URDF.
+    #[serde(default)]
+    pub deviation: Option<f64>,
     /// What each object in a 3MF file holds. Default: body; `component` is refused for the other
     /// formats. Not read for URDF.
     #[serde(default)]
@@ -179,8 +189,17 @@ fn names<E: serde::de::Error>(m: &Map<String, Value>) -> Result<Option<StringLis
 impl<'de> Deserialize<'de> for ExportParams {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let m = Map::<String, Value>::deserialize(d)?;
-        let mut out =
-            ExportParams { path: None, format: None, bodies: None, quality: None, objects: None, mesh_prefix: None, effort: None, velocity: None };
+        let mut out = ExportParams {
+            path: None,
+            format: None,
+            bodies: None,
+            quality: None,
+            deviation: None,
+            objects: None,
+            mesh_prefix: None,
+            effort: None,
+            velocity: None,
+        };
         // The handler reads `path` first and refuses anything but a name it can write to; the
         // other keys are read only once it has one, and the format is known.
         out.path = match m.get("path") {
@@ -218,8 +237,18 @@ impl<'de> Deserialize<'de> for ExportParams {
                 Some(solidcraft_io::MeshQuality::Standard) => MeshQualityParam::Standard,
                 Some(solidcraft_io::MeshQuality::Fine) => MeshQualityParam::Fine,
                 Some(solidcraft_io::MeshQuality::Finest) => MeshQualityParam::Finest,
-                None => return Err(refuse(format!("`quality` must be standard, fine or finest, not {v}"))),
+                // `from_name` only names the presets; a Deviation never comes back from it.
+                Some(solidcraft_io::MeshQuality::Deviation(_)) | None => {
+                    return Err(refuse(format!("`quality` must be standard, fine or finest, not {v}")));
+                }
             }),
+        };
+        // A numeric surface deviation in millimetres overrides `quality` (#2846), as the handler reads it.
+        out.deviation = match m.get("deviation") {
+            None | Some(Value::Null) => None,
+            Some(v) => {
+                Some(v.as_f64().filter(|x| x.is_finite() && *x > 0.0).ok_or_else(|| refuse("`deviation` must be a positive number of millimetres"))?)
+            }
         };
         out.objects = match m.get("objects") {
             None | Some(Value::Null) => None,

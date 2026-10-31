@@ -75,3 +75,34 @@ fn a_rim_cut_by_a_cylinder_exports_closed() {
     let open = open_edges(&triangles);
     assert!(open.is_empty(), "STL: {} edges not used twice, e.g. {:?}", open.len(), open.first());
 }
+
+/// #2846: `file.save_mesh`'s `deviation` is an absolute chord tolerance in millimetres: a finer
+/// one tessellates a curved face more densely, and anything that is not a positive number is
+/// refused.
+#[test]
+fn a_finer_surface_deviation_exports_a_denser_mesh() {
+    let mut s = Session::default();
+    run(&mut s, json!([{"command": "solid.cylinder", "params": {"diameter": 40, "height": 30}}]));
+    let dir = std::env::temp_dir().join(format!("solidcraft-deviation-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let export = |s: &mut Session, name: &str, extra: Value| -> usize {
+        let path = dir.join(name);
+        let mut p = json!({"path": path.to_string_lossy()});
+        for (k, v) in extra.as_object().unwrap() {
+            p.as_object_mut().unwrap().insert(k.clone(), v.clone());
+        }
+        s.execute("file.save_mesh", &p).unwrap();
+        read_stl(&std::fs::read(&path).unwrap()).unwrap().len()
+    };
+    let standard = export(&mut s, "standard.stl", json!({}));
+    let fine = export(&mut s, "fine.stl", json!({"deviation": 0.001}));
+    assert!(fine > standard, "deviation 0.001 mm on a 40 mm cylinder: {fine} triangles vs {standard}");
+    // A deviation overrides the quality preset rather than combining with it.
+    let coarse = export(&mut s, "coarse.stl", json!({"deviation": 0.5, "quality": "finest"}));
+    assert!(coarse < standard, "0.5 mm beats even finest: {coarse} triangles vs {standard}");
+    for bad in [json!(0), json!(-1), json!("wide"), json!(true)] {
+        let r = s.execute("file.save_mesh", &json!({"path": dir.join("bad.stl").to_string_lossy(), "deviation": bad}));
+        assert!(r.is_err(), "{bad} is not a positive number of millimetres");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

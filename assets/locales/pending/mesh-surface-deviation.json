@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "ui.save_mesh_bad_deviation": "«{value}» ليس عددًا موجبًا بالمليمتر",
+    "ui.save_mesh_deviation": "الانحراف (مم)"
+  },
+  "en": {
+    "ui.save_mesh_bad_deviation": "\"{value}\" is not a positive number of millimetres",
+    "ui.save_mesh_deviation": "Deviation (mm)"
+  },
+  "he": {
+    "ui.save_mesh_bad_deviation": "\"{value}\" אינו מספר חיובי במילימטרים",
+    "ui.save_mesh_deviation": "סטייה (מ\"מ)"
+  },
+  "ja": {
+    "ui.save_mesh_bad_deviation": "「{value}」は正のミリ数ではありません",
+    "ui.save_mesh_deviation": "偏差 (mm)"
+  },
+  "vi": {
+    "ui.save_mesh_bad_deviation": "\"{value}\" không phải là số milimét dương",
+    "ui.save_mesh_deviation": "Độ lệch (mm)"
+  },
+  "zh": {
+    "ui.save_mesh_bad_deviation": "「{value}」不是正的毫米数",
+    "ui.save_mesh_deviation": "偏差 (mm)"
+  }
+}
