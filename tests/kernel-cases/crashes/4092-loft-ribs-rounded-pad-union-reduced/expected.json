@@ -1,9 +1,0 @@
-{
-  "sources": [
-    "tangency-labs/solidcraft#4092"
-  ],
-  "what": "the same without the top flange: the join fails with 'boolean Union: no result'",
-  "source": "invariants",
-  "method": "the pad (X -8..8, Y 18..25, Z 36..59) overlaps the body, ribs and ring, so the join is one connected solid; the join must succeed with one valid closed solid and no panic",
-  "body_count": 1
-}

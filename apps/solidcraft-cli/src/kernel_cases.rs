@@ -871,12 +871,18 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>, validation: solidcraft
     count(&mut c, "faces", got.faces);
     count(&mut c, "edges", edges);
     count(&mut c, "vertices", vertices);
-    if has("volume_mm3") {
-        c.rel("volume_mm3", got.volume, want["volume_mm3"].as_f64(), rel);
-    }
-    if has("area_mm2") {
-        c.rel("area_mm2", got.area, want["area_mm2"].as_f64(), rel);
-    }
+    // A measure is a value within `rel`, or an inclusive range `[min, max]` where analysis only
+    // bounds it (a cut removes at most its tool's volume).
+    let measure = |c: &mut Checks, k: &str, g: f64| {
+        if has(k) {
+            match want[k].as_array() {
+                Some(r) => c.push(k, json!(g), want[k].clone(), within(r, g)),
+                None => c.rel(k, g, want[k].as_f64(), rel),
+            }
+        }
+    };
+    measure(&mut c, "volume_mm3", got.volume);
+    measure(&mut c, "area_mm2", got.area);
     if has("center_of_mass") {
         c.vec("center_of_mass", got.com, v3(&want["center_of_mass"]), abs);
     }
@@ -962,6 +968,14 @@ pub fn run(args: &[String]) -> Result<(), String> {
     if bad > 0 { Err(format!("{bad} kernel case(s) failed")) } else { Ok(()) }
 }
 
+/// `g` lies in the inclusive range `[min, max]`; a range without both ends holds nothing.
+fn within(range: &[Value], g: f64) -> bool {
+    match (range.first().and_then(Value::as_f64), range.get(1).and_then(Value::as_f64), range.len()) {
+        (Some(lo), Some(hi), 2) => lo <= g && g <= hi,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::f64::consts::PI;
@@ -1019,6 +1033,15 @@ mod tests {
         assert!(splines_match(&faces, &json!([{"spans": [1, 1]}])).is_err());
         assert_eq!(spline_shape(&Surface::Plane { origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 1.0, 0.0] }), None);
         assert_eq!(surface_word(&face(1, 1, 1, 1)), "bspline");
+    }
+
+    #[test]
+    fn a_measure_range_holds_its_ends_and_nothing_outside() {
+        let r = [json!(22500.0), json!(24000.0)];
+        assert!(within(&r, 22500.0) && within(&r, 24000.0) && within(&r, 23000.0));
+        assert!(!within(&r, 22499.9) && !within(&r, 24000.1));
+        assert!(!within(&[json!(1.0)], 1.0), "one end is no range");
+        assert!(!within(&[json!(1.0), json!(2.0), json!(3.0)], 1.5), "three ends are no range");
     }
 
     #[test]

@@ -3,7 +3,23 @@
   "tangency-labs/solidcraft#1494"
  ],
  "what": "a 47.5x45x30 box with a cylinder r7.5 joined on its side whose axis lies in the plane of the box's front face (y=0), shelled 1 mm open at the bottom",
- "source": "invariants",
- "method": "the cylinder wall's seam lies on the front plane, giving a five-face saddle corner at (47.5,0,2.5). No closed-form volume (the cavity corners follow the offset surfaces); the shell must succeed and give one valid closed body",
- "body_count": 1
+ "source": "analytic",
+ "method": "the cylinder wall's seam lies on the front plane, giving a five-face saddle corner at (47.5,0,2.5). Body = box 64125 + cylinder pi 7.5^2 30 = 69426.4376 (they share only the half disc on x = 47.5). Cavity with every kept face moved 1 in and extended to meet (sharp): box [1,46.5] x [1,44] x [0,29] (45.5 x 43 x 29) and the cylinder r6.5 from x = 46.5 to 76.5, less, over x 46.5..48.5, its part with y < 1 (the front face's and the uncovered half disc's offsets): 2 (pi 6.5^2/2 + int_0^1 2 sqrt(6.5^2 - y^2) dy) = 158.6294; cavity 60561.8393, material 8864.5983. A cavity that rounds its two concave edges instead (the true 1 mm offset) is larger by at most (1 - pi/4) per mm of each: the front face / half disc line (its offset at most 13 long inside r6.5) and the half circle r7.5 where the cylinder meets the box (at most 7.5 pi): 7.8463, so material 8856.7520 .. 8864.5983. A shell that fails to open leaves 2 shells; the full solid is 69426",
+ "body_count": 1,
+ "volume_mm3": [
+  8856.7,
+  8864.7
+ ],
+ "bbox": {
+  "min": [
+   0,
+   -7.5,
+   0
+  ],
+  "max": [
+   77.5,
+   45,
+   30
+  ]
+ }
 }

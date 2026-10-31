@@ -3,7 +3,19 @@
   "tangency-labs/solidcraft#759"
  ],
  "what": "a window 240 deg round a cylinder's wall (r10 x 40, z 15..25), the faces the cut made taken off and the window patched g0 and stitched",
- "source": "invariants",
- "method": "the window (as the g1 case) filled G0: the fill meets the window's edges; its shape is the fill's own, so one closed valid solid is the right answer",
- "body_count": 1
+ "source": "analytic",
+ "method": "the box x -5..11, y -11..11, z 15..25 cuts the wall where 10 cos a >= -5 (|a| <= 120 deg), as in the g1 case; filled G0, the fill meets the window's edges and its shape is its own, so no volume is graded. The wall left below z 15, above z 25 and round a = 180 deg reaches x = +-10, y = +-10 and z 0..40, and a fill of a rim lying on the cylinder stays inside that box: bbox -10..10, -10..10, 0..40",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   -10,
+   -10,
+   0
+  ],
+  "max": [
+   10,
+   10,
+   40
+  ]
+ }
 }

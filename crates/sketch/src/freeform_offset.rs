@@ -439,7 +439,7 @@ impl Sketch {
             }
             let output = self.curve_index(&record.output).ok_or_else(|| bad("offset output vanished"))?;
             match &self.curves[output].kind {
-                CurveKind::Spline { pts, control: false, degree: 3, periodic }
+                CurveKind::Spline { pts, control: false, degree: 3, periodic, .. }
                     if *periodic == (record.certificate == 2)
                         && (record.certificate != 2 || record.closed)
                         && pts.len() == record.pieces * record.divisions + 1
@@ -484,7 +484,7 @@ impl Sketch {
                 p.fixed = true;
             }
         }
-        let output = candidate.add_curve(CurveKind::Spline { pts: indices, control: false, degree: 3, periodic: closed }, None)?;
+        let output = candidate.add_curve(CurveKind::Spline { pts: indices, control: false, degree: 3, periodic: closed, nurbs: None }, None)?;
         candidate.freeform_offsets.push(FreeformOffset {
             source: source_id,
             output: candidate.curves[output].id.clone(),
@@ -551,7 +551,7 @@ impl Sketch {
                 return Err(bad("offset source topology changed"));
             }
             let old_indices = match &candidate.curves[output].kind {
-                CurveKind::Spline { pts, control: false, degree: 3, periodic }
+                CurveKind::Spline { pts, control: false, degree: 3, periodic, .. }
                     if *periodic == (record.certificate == 2)
                         && (record.certificate != 2 || record.closed)
                         && pts.len() == record.pieces * record.divisions + 1 =>
@@ -583,7 +583,8 @@ impl Sketch {
                 p.pos = pos;
                 p.fixed = true;
             }
-            candidate.curves[output].kind = CurveKind::Spline { pts: indices, control: false, degree: 3, periodic: record.certificate == 2 };
+            candidate.curves[output].kind =
+                CurveKind::Spline { pts: indices, control: false, degree: 3, periodic: record.certificate == 2, nurbs: None };
             candidate.freeform_offsets[record_index].divisions = divisions;
             candidate.freeform_offsets[record_index].pieces = pieces;
         }
@@ -632,7 +633,7 @@ mod tests {
             .into_iter()
             .map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap())
             .collect();
-        let source = sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true }, None).unwrap();
+        let source = sk.add_curve(CurveKind::Spline { pts, control: false, degree: 3, periodic: true, nurbs: None }, None).unwrap();
         let original = sk.clone();
         for (forward, distance) in [(true, 2.0), (false, -2.0)] {
             let mut sk = original.clone();

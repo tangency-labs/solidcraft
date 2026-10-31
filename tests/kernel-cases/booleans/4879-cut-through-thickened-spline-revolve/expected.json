@@ -4,7 +4,11 @@
   "tangency-labs/solidcraft#4484"
  ],
  "what": "a symmetric through-all cut of a window across a thickened (2 mm) surface revolve of a control-point spline (100 deg about X): truck ran ~20 s to 'boolean Cut: no result' (or never finished)",
- "source": "invariants",
- "method": "the window (x -2..6, z 6..20, through all y) crosses the shell where it is near the XZ plane and leaves it joined round the rest of its 100 deg, so the result is one valid closed body. The spline shell has no closed-form volume",
- "body_count": 1
+ "source": "analytic",
+ "method": "the window (x -2..6, z 6..20, through all y) crosses the shell where it is near the XZ plane and leaves it joined round the rest of its 100 deg, so the result is one valid closed body. The revolve's normal lies in each meridian plane, so the 2 mm thicken is the revolution, through 100 deg, of the band between the cubic spline (clamped, knots 0 0 0 0 .5 1 1 1 1; r 8..11.63, curvature at most 0.128, so a 2 mm offset never folds) and its offset; the window removes, at each point (x, r) of the band with -2 <= x <= 6, the angles where r cos phi >= 6 (acos(6/r) of them; r cos phi <= 20 everywhere). V = int over the band of r (100 deg - [x in -2..6] acos(6/r)) dA, by quadrature: 852.04 thickened outwards (uncut 1053.63), 660.02 inwards (uncut 807.73). Which side the revolve's normal faces is the kernel's convention, so V is graded in [660.02, 852.04], widened 1e-3: a cut that did nothing on the outer side, or lost half the body, falls outside. Faces: the two offset walls, the two end caps, the plane at 100 deg, the XZ plane's two pieces either side of the window, and the window's planes x = -2, x = 6 and z = 6: 10 Faces are not graded: whether a spline of several spans is one wall or one face per span is an open decision.",
+ "body_count": 1,
+ "volume_mm3": [
+  659.3,
+  852.9
+ ]
 }

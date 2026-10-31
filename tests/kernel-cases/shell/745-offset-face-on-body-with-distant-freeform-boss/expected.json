@@ -4,7 +4,20 @@
   "tangency-labs/solidcraft#3893"
  ],
  "what": "Offset Face on a planar end of a body that has a spline-outlined boss far from the moved face",
- "source": "invariants",
- "method": "the move is refused today only because the unrelated boss wall is freeform. The operation must succeed and give one valid closed solid; the box end at x=0 moves out by 1 mm (the boss area is a spline integral, so no absolute volume is asserted; the 200 mm3 change is graded in the cut-away variant 745-offset-face-then-cut-boss-away)",
- "body_count": 1
+ "source": "analytic",
+ "method": "the move is refused today only because the unrelated boss wall is freeform. The box end at x=0 moves out by 1 mm between its four planar, square neighbours: +1 x 20 x 10 = 200. The boss outline is the line (25,5)-(35,5) and the fit-point spline through (35,5), (37,10), (30,15), (25,5): the sketch's natural cubic with chord-length parameters, three cubic spans, its area by Green's theorem (1/2 closed integral of x dy - y dx, a polynomial per span, integrated exactly) 94.302132; it stays within x 25..37.04, y 5..15.01. V = 8000 + 5 x 94.302132 + 200. Faces: the box's 6 and the boss's top, flat wall and spline wall. The cut-away variant 745-offset-face-then-cut-boss-away grades the same move without the boss Faces are not graded: whether a spline of several spans is one wall or one face per span is an open decision.",
+ "body_count": 1,
+ "volume_mm3": 8671.510661445036,
+ "bbox": {
+  "min": [
+   -1,
+   0,
+   0
+  ],
+  "max": [
+   40,
+   20,
+   15
+  ]
+ }
 }

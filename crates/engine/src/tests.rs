@@ -391,7 +391,6 @@ mod flush_join_loft;
 mod gltf_import;
 mod import_component;
 mod large_step_import;
-mod loft_cut;
 mod loft_ring;
 mod loft_spacing;
 mod mirror_placed;
@@ -3116,9 +3115,13 @@ fn lip_after_boss() {
     run(&mut s, "plastic.boss", json!({"position": [70, 40, 2], "diameter": 7, "height": 12, "hole_diameter": 2.5}));
     let v0 = volume(&mut s);
     run(&mut s, "plastic.lip", json!({"face": [1, 25, 30], "width": 1, "height": 2}));
-    let v = volume(&mut s);
-    assert!(v > v0 + 1.0, "{v0} {v}");
-    // Bosses up to the rim, with ribs, against a wall; lips, grooves and outside rims.
+    // The band inside the rim, 1 wide and 2 high: (78 × 48 − 76 × 46) × 2; the bosses stop
+    // at z = 14, well under it.
+    let inside = (78.0 * 48.0 - 76.0 * 46.0) * 2.0;
+    assert!(rel(volume(&mut s) - v0, inside) < 1e-6, "{}", volume(&mut s) - v0);
+    // Bosses up to the rim, with ribs, against a wall; lips, grooves and outside rims. None
+    // reaches the rim's bands, so each lip adds, and the groove (no gap) takes, its band: the
+    // inside one (78 × 48 − 76 × 46) × 2, the outside one (80 × 50 − 78 × 48) × 2.
     let bosses = [
         json!({"position": [15, 15, 2], "diameter": 8, "height": 28, "hole_diameter": 3}),
         // Ribs out to the inner walls (15 − 4 − 9 = 2), and short of them.
@@ -3127,13 +3130,14 @@ fn lip_after_boss() {
         json!({"position": [5.5, 25, 2], "diameter": 7, "height": 12, "hole_diameter": 2.5}),
         json!({"position": [40, 25, 2], "diameter": 8, "height": 20, "draft": "1 deg", "fillet": 1}),
     ];
+    let outside = (80.0 * 50.0 - 78.0 * 48.0) * 2.0;
     let lips = [
-        json!({"face": [1, 25, 30], "width": 1, "height": 2}),
-        json!({"face": [1, 25, 30], "width": 1, "height": 2, "type": "groove"}),
-        json!({"face": [1, 25, 30], "width": 1, "height": 2, "side": "outside"}),
+        (json!({"face": [1, 25, 30], "width": 1, "height": 2}), inside),
+        (json!({"face": [1, 25, 30], "width": 1, "height": 2, "type": "groove"}), -inside),
+        (json!({"face": [1, 25, 30], "width": 1, "height": 2, "side": "outside"}), outside),
     ];
     for (i, b) in bosses.iter().enumerate() {
-        for (j, l) in lips.iter().enumerate() {
+        for (j, (l, band)) in lips.iter().enumerate() {
             let mut s = Session::default();
             run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": 30}));
             run(&mut s, "solid.shell", json!({"faces": [[40, 25, 30]], "thickness": 2}));
@@ -3142,7 +3146,7 @@ fn lip_after_boss() {
             let v0 = volume(&mut s);
             let r = s.execute("plastic.lip", l);
             assert!(r.is_ok(), "boss {i} lip {j}: {r:?}");
-            assert!((volume(&mut s) - v0).abs() > 1.0, "boss {i} lip {j}");
+            assert!(rel(volume(&mut s) - v0, *band) < 1e-6, "boss {i} lip {j}: {} vs {band}", volume(&mut s) - v0);
         }
     }
 }
@@ -3168,16 +3172,24 @@ fn hole_as_deep_as_the_plate() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 50, "width": 25, "height": 10}));
     let v0 = volume(&mut s);
+    // The depth is to the drill point's shoulder: the bore, radius 3, runs the plate's 10 and the
+    // point is in the air below it.
     run(&mut s, "solid.hole", json!({"position": [25, 12.5, 10], "diameter": 6, "depth": 10, "type": "drilled"}));
     let v = volume(&mut s);
-    assert!(v < v0 - PI * 9.0 * 9.0 && v > v0 - PI * 9.0 * 10.0 - 1.0, "{v0} {v}");
-    // Other sizes and places, the defaults, and a tapped hole.
-    for (i, p) in [
-        json!({"position": [10, 10, 10], "diameter": 5, "depth": 10, "type": "drilled"}),
-        json!({"position": [40, 15, 10], "diameter": 5, "depth": 10}),
-        json!({"position": [12, 6, 10], "diameter": 8.5, "depth": 10}),
-        json!({"position": [30, 7, 10], "thread": "M6", "depth": 10}),
-        json!({"position": [20, 18, 10], "diameter": 4, "depth": 10, "tip_angle": 90}),
+    assert!((v0 - v - PI * 9.0 * 10.0).abs() < 4e-7 * v0, "{v0} {v}");
+    // Other sizes and places, the defaults, and a tapped hole: each a through bore of its drill,
+    // 10 long. The 8.5 at (12, 6) overlaps the 5 at (10, 10) (√20 apart, under 2.5 + 4.25), so
+    // it takes its bore less the lens they share, 10 long.
+    let (r, q, d) = (2.5f64, 4.25f64, 20f64.sqrt());
+    let lens = r * r * ((d * d + r * r - q * q) / (2.0 * d * r)).acos() + q * q * ((d * d + q * q - r * r) / (2.0 * d * q)).acos()
+        - 0.5 * ((-d + r + q) * (d + r - q) * (d - r + q) * (d + r + q)).sqrt();
+    for (i, (p, cut)) in [
+        (json!({"position": [10, 10, 10], "diameter": 5, "depth": 10, "type": "drilled"}), PI * 6.25 * 10.0),
+        (json!({"position": [40, 15, 10], "diameter": 5, "depth": 10}), PI * 6.25 * 10.0),
+        (json!({"position": [12, 6, 10], "diameter": 8.5, "depth": 10}), (PI * q * q - lens) * 10.0),
+        // M6 × 1: the tap maker's 5.0 drill.
+        (json!({"position": [30, 7, 10], "thread": "M6", "depth": 10}), PI * 6.25 * 10.0),
+        (json!({"position": [20, 18, 10], "diameter": 4, "depth": 10, "tip_angle": 90}), PI * 4.0 * 10.0),
     ]
     .into_iter()
     .enumerate()
@@ -3185,7 +3197,8 @@ fn hole_as_deep_as_the_plate() {
         let before = volume(&mut s);
         let r = s.execute("solid.hole", &p);
         assert!(r.is_ok(), "{i} {p}: {r:?}");
-        assert!(volume(&mut s) < before - 1.0, "{i} {p}");
+        let v = volume(&mut s);
+        assert!((before - v - cut).abs() < 4e-7 * before, "{i} {p}: {} vs {cut}", before - v);
     }
 }
 

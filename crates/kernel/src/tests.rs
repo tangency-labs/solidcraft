@@ -726,9 +726,11 @@ fn loft_and_sweep() {
     let sq = Loop2::polygon(&[Vec2::new(-20.0, -20.0), Vec2::new(20.0, -20.0), Vec2::new(20.0, 20.0), Vec2::new(-20.0, 20.0)]);
     let top = Plane::XY.offset(40.0);
     let l = loft(&[(Plane::XY, sq), (top, Loop2::circle(Vec2::ZERO, 10.0))]).unwrap();
-    let m = measure(&l).unwrap();
-    println!("loft volume {} faces {:?}", m.volume, m.merged);
-    assert!(m.volume > 314.0 * 40.0 && m.volume < 1600.0 * 40.0);
+    // Ruled, each side on the rational quarter of the circle between its corners' directions: the
+    // section at t has area (1 − t)² A_S + t² A_C + t(1 − t) M, M = ½∮(S × C' + C × S'), so
+    // V = h (A_S/3 + A_C/3 + M/6) = 35080.725 (M = 1433.790 by quadrature; tests/oracle/17-loft).
+    let v = measure(&l).unwrap().volume;
+    assert!(rel(v, 35080.725116) < 1e-6, "{v}");
     // A tube: up 30, quarter bend of radius 20, across 30.
     let disc = Region2 { outer: Loop2::circle(Vec2::ZERO, 3.0), holes: vec![] };
     let path = [
@@ -742,9 +744,6 @@ fn loft_and_sweep() {
         PathSeg::Line { a: Vec3::new(20.0, 0.0, 50.0), b: Vec3::new(50.0, 0.0, 50.0) },
     ];
     let t = sweep(&Plane::XY, &disc, &path).unwrap();
-    for tol in [0.1, 0.01, 0.003, 0.001] {
-        println!("tube tess {tol}: {}", t.mesh(&crate::MeshTolerance::chord(tol)).unwrap().measure().volume);
-    }
     let area = PI * 9.0;
     let expect = area * (30.0 + 30.0 + 20.0 * std::f64::consts::FRAC_PI_2);
     assert!(rel(measure(&t).unwrap().volume, expect) < 1e-3, "{} vs {expect}", measure(&t).unwrap().volume);
@@ -1024,78 +1023,6 @@ fn similar_spheres_meet() {
 }
 
 #[test]
-#[ignore]
-fn debug_convergence() {
-    let b = extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::ZERO, 15.0), holes: vec![] }], 0.0, 50.0).unwrap().pop().unwrap();
-    for t in [0.1, 0.05, 0.02, 0.01, 0.005, 0.002] {
-        let m = b.mesh(&crate::MeshTolerance::chord(t)).unwrap();
-        let mm = m.measure();
-        println!("tol {t}: tris {} vol {} err {:.3e}", m.triangles.len(), mm.volume, mm.volume / (PI * 225.0 * 50.0) - 1.0);
-    }
-    let m = b.mesh(&crate::MeshTolerance::chord(0.05)).unwrap();
-    for f in 0..4u32 {
-        let ns: Vec<Vec3> =
-            m.triangles.iter().zip(&m.tri_face).filter(|(_, ff)| **ff == f).flat_map(|(t, _)| t.iter().map(|k| m.normals[*k as usize])).collect();
-        println!("face {f}: {} normals, first {:?}, max |n.z| {}", ns.len(), ns.first(), ns.iter().map(|n| n.z.abs()).fold(0.0, f64::max));
-    }
-}
-
-#[test]
-#[ignore]
-fn debug_coplanar() {
-    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
-    for (z0, z1) in [(0.0, 20.0), (-5.0, 20.0), (0.0, 25.0), (-5.0, 25.0), (5.0, 20.0), (5.0, 25.0)] {
-        let c = cylinder(Vec3::new(20.0, 15.0, z0), Vec3::Z, 5.0, z1 - z0).unwrap();
-        let r = boolean(&b, &c, BoolOp::Cut);
-        println!("cut z {z0}..{z1}: {:?}", r.map(|o| o.map(|b| measure(&b).unwrap().volume)));
-        let r = boolean(&b, &c, BoolOp::Union);
-        println!("union z {z0}..{z1}: {:?}", r.map(|o| o.map(|b| measure(&b).unwrap().volume)));
-    }
-    let r =
-        Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(40.0, 0.0), Vec2::new(40.0, 30.0), Vec2::new(0.0, 30.0)]), holes: vec![] };
-    for ang in [PI / 2.0, PI, 1.5 * PI, 2.0 * PI] {
-        let q = revolve(&Plane::XY, std::slice::from_ref(&r), Vec2::ZERO, Vec2::Y, ang).unwrap().pop().unwrap();
-        let m = measure(&q).unwrap();
-        println!("revolve {ang}: vol {} expect {} faces {}", m.volume, ang / 2.0 * 1600.0 * 30.0, m.faces);
-    }
-}
-
-#[test]
-#[ignore]
-fn debug_blind() {
-    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
-    let t = box_solid(Vec3::new(10.0, 10.0, 5.0), Vec3::new(20.0, 20.0, 25.0)).unwrap();
-    println!("box pocket: {:?}", boolean(&b, &t, BoolOp::Cut).map(|o| o.map(|b| measure(&b).unwrap().volume)));
-    let t = box_solid(Vec3::new(10.0, 10.0, 5.0), Vec3::new(20.0, 20.0, 15.0)).unwrap();
-    println!("box void: {:?}", boolean(&b, &t, BoolOp::Cut).map(|o| o.map(|b| measure(&b).unwrap().volume)));
-    for r in [5.0, 4.3] {
-        for z in [5.0, 7.3, 13.1] {
-            let c = cylinder(Vec3::new(20.3, 15.1, z), Vec3::Z, r, 30.0).unwrap();
-            println!("cyl r{r} z{z}: {:?}", boolean(&b, &c, BoolOp::Cut).map(|o| o.map(|b| measure(&b).unwrap().volume)));
-        }
-    }
-    let c = cylinder(Vec3::new(20.0, 15.0, 25.0), -Vec3::Z, 5.0, 20.0).unwrap();
-    println!("cyl down: {:?}", boolean(&b, &c, BoolOp::Cut).map(|o| o.map(|b| measure(&b).unwrap().volume)));
-    let s = sphere(Vec3::new(20.0, 15.0, 20.0), 5.0).unwrap();
-    println!("sphere: {:?}", boolean(&b, &s, BoolOp::Cut).map(|o| o.map(|b| measure(&b).unwrap().volume)));
-}
-
-#[test]
-#[ignore]
-fn debug_revolve_doc_case() {
-    let r =
-        Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(40.0, 0.0), Vec2::new(40.0, 30.0), Vec2::new(0.0, 30.0)]), holes: vec![] };
-    for ang in [PI / 2.0, -PI / 2.0] {
-        let q = revolve(&Plane::XY, std::slice::from_ref(&r), Vec2::ZERO, Vec2::Y, ang).unwrap().pop().unwrap();
-        let m = measure(&q).unwrap();
-        println!("ang {ang}: vol {} bbox {:?}", m.volume, m.bbox);
-    }
-    let r2 = Region2 { outer: r.outer.reversed(), holes: vec![] };
-    let q = revolve(&Plane::XY, std::slice::from_ref(&r2), Vec2::ZERO, Vec2::Y, PI / 2.0).unwrap().pop().unwrap();
-    println!("reversed: {}", measure(&q).unwrap().volume);
-}
-
-#[test]
 fn chamfer_top_loop_mitres() {
     let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
     let edges = [Vec3::new(0.0, 15.0, 20.0), Vec3::new(20.0, 0.0, 20.0), Vec3::new(40.0, 15.0, 20.0), Vec3::new(20.0, 30.0, 20.0)];
@@ -1204,111 +1131,6 @@ fn chamfer_wider_than_sloped_basin_rim_builds() {
 }
 
 #[test]
-#[ignore]
-fn debug_chamfer_cut() {
-    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
-    // Prism along x: triangle in the YZ plane beyond the top-front edge.
-    let plane = Plane { origin: Vec3::new(-5.0, 0.0, 0.0), x: Vec3::Y, y: Vec3::Z };
-    let tri = Loop2::polygon(&[Vec2::new(2.3, 20.3), Vec2::new(-0.3, 17.7), Vec2::new(10.0, 30.0)]);
-    let tri = if tri.signed_area() < 0.0 { tri.reversed() } else { tri };
-    let tool = extrude(&plane, &[Region2 { outer: tri, holes: vec![] }], 0.0, 50.0).unwrap().pop().unwrap();
-    println!("tool vol {}", measure(&tool).unwrap().volume);
-    let r = boolean(&b, &tool, BoolOp::Cut).unwrap().unwrap();
-    let m = measure(&r).unwrap();
-    println!("cut: {} faces {} {:?}", m.volume, m.faces, m.merged);
-    for f in r.faces(0.01).unwrap() {
-        println!("face {} area {:.3} c {:?} n {:?}", f.index, f.area, f.centroid, f.plane_normal);
-    }
-    for tol in [0.1, 0.01, 0.001] {
-        println!("tess {tol}: {}", r.mesh(&crate::MeshTolerance::chord(tol)).unwrap().measure().volume);
-    }
-}
-
-#[test]
-#[ignore]
-fn debug_revolved_hole_tool() {
-    let b = box_solid(Vec3::ZERO, Vec3::new(60.0, 40.0, 15.0)).unwrap();
-    // Drill point profile in the XZ plane through x = 50: revolve about the vertical line x = 50.
-    let pl = Plane { origin: Vec3::new(50.0, 20.0, 0.0), x: Vec3::X, y: Vec3::Z };
-    let r = 3.0;
-    let tip = r / 59f64.to_radians().tan();
-    let prof =
-        Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 16.0), Vec2::new(0.0, 5.0 - tip), Vec2::new(r, 5.0), Vec2::new(r, 16.0)]), holes: vec![] };
-    let tool = revolve(&pl, &[prof], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU).unwrap().pop().unwrap();
-    println!("tool vol {}", measure(&tool).unwrap().volume);
-    let res = boolean(&b, &tool, BoolOp::Cut);
-    println!("cut: {:?}", res.map(|o| o.map(|x| measure(&x).unwrap().volume)));
-    let expect = 36000.0 - std::f64::consts::PI * 9.0 * 10.0 - std::f64::consts::PI * 9.0 * tip / 3.0;
-    println!("expect {expect}");
-}
-
-#[test]
-#[ignore]
-fn debug_sphere() {
-    let s = sphere(Vec3::new(1.0, 2.0, 3.0), 10.0).unwrap();
-    let m = measure(&s).unwrap();
-    println!("vol {} area {} faces {} bbox {:?}", m.volume, m.area, m.faces, m.bbox);
-    for f in s.faces(0.05).unwrap() {
-        println!("face {} area {:.3} c {:?}", f.index, f.area, f.centroid);
-    }
-    let b = box_solid(Vec3::new(-25.0, -25.0, -20.0), Vec3::new(25.0, 25.0, 0.0)).unwrap();
-    for (name, c) in [("origin", Vec3::ZERO), ("up", Vec3::new(0.0, 0.0, 3.0)), ("off", Vec3::new(1.3, 2.1, 0.7))] {
-        let sp = sphere(c, 15.0).unwrap();
-        println!("{name} cut {:?}", boolean(&b, &sp, BoolOp::Cut).map(|o| o.map(|x| measure(&x).unwrap().volume)));
-        println!("{name} and {:?}", boolean(&b, &sp, BoolOp::Intersect).map(|o| o.map(|x| measure(&x).unwrap().volume)));
-    }
-}
-
-#[test]
-#[ignore]
-fn debug_countersink() {
-    let b = box_solid(Vec3::ZERO, Vec3::new(60.0, 40.0, 15.0)).unwrap();
-    for (name, pts) in [
-        ("csink", vec![Vec2::new(0.0, 0.6), Vec2::new(6.6, 0.6), Vec2::new(3.0, -3.0), Vec2::new(3.0, -31.0), Vec2::new(0.0, -31.0)]),
-        ("csink-thru-top", vec![Vec2::new(0.0, 0.6), Vec2::new(6.6, 0.6), Vec2::new(3.0, -3.0), Vec2::new(3.0, -16.3), Vec2::new(0.0, -16.3)]),
-        (
-            "cbore",
-            vec![Vec2::new(0.0, 0.6), Vec2::new(7.0, 0.6), Vec2::new(7.0, -5.0), Vec2::new(4.0, -5.0), Vec2::new(4.0, -31.0), Vec2::new(0.0, -31.0)],
-        ),
-    ] {
-        for (pn, pl) in [
-            ("xz@top", Plane::new(Vec3::new(35.0, 20.0, 15.0), Vec3::X, Vec3::Z).unwrap()),
-            ("yz@top", Plane::new(Vec3::new(35.0, 20.0, 15.0), Vec3::Y, Vec3::Z).unwrap()),
-            ("diag", Plane::new(Vec3::new(35.0, 20.0, 15.0), Vec3::new(0.6, 0.8, 0.0), Vec3::Z).unwrap()),
-        ] {
-            let tool = revolve(&pl, &[Region2 { outer: Loop2::polygon(&pts), holes: vec![] }], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)
-                .unwrap()
-                .pop()
-                .unwrap();
-            println!(
-                "{name} {pn}: tool {} cut {:?}",
-                measure(&tool).unwrap().volume,
-                boolean(&b, &tool, BoolOp::Cut).map(|o| o.map(|x| measure(&x).unwrap().volume))
-            );
-        }
-    }
-}
-
-#[test]
-#[ignore]
-fn debug_cbore_seq() {
-    let b = box_solid(Vec3::ZERO, Vec3::new(60.0, 40.0, 15.0)).unwrap();
-    let pl = Plane::from_normal(Vec3::new(15.0, 20.0, 15.0), Vec3::Z).unwrap();
-    for (s1, s2, r2top) in [(0.0, 0.0, 0.6), (0.613, 1.226, 0.6), (0.3, 0.9, 2.37)] {
-        let t1 = extrude(&pl, &[Region2 { outer: Loop2::circle_from(Vec2::ZERO, 4.0, s1), holes: vec![] }], -31.0, 0.6).unwrap().pop().unwrap();
-        let c1 = boolean(&b, &t1, BoolOp::Cut).unwrap().unwrap();
-        let t2 = extrude(&pl, &[Region2 { outer: Loop2::circle_from(Vec2::ZERO, 7.0, s2), holes: vec![] }], -5.0, r2top).unwrap().pop().unwrap();
-        println!(
-            "seams {s1} {s2}: first {} second {:?}",
-            measure(&c1).unwrap().volume,
-            boolean(&c1, &t2, BoolOp::Cut).map(|o| o.map(|x| measure(&x).unwrap().volume))
-        );
-        let c2 = boolean(&b, &t2, BoolOp::Cut).unwrap().unwrap();
-        println!("  swapped: {:?}", boolean(&c2, &t1, BoolOp::Cut).map(|o| o.map(|x| measure(&x).unwrap().volume)));
-    }
-}
-
-#[test]
 fn mesh_bodies_move_measure_and_refuse_solid_ops() {
     // Unit cube as 12 triangles with repeated corners (welded on construction).
     let c = |i: u32| Vec3::new((i & 1) as f64 * 10.0, ((i >> 1) & 1) as f64 * 10.0, ((i >> 2) & 1) as f64 * 10.0);
@@ -1354,26 +1176,6 @@ fn concave_fillet() {
 }
 
 #[test]
-#[ignore]
-fn debug_pocket_corners() {
-    let b = box_solid(Vec3::ZERO, Vec3::new(80.0, 60.0, 20.0)).unwrap();
-    let p = box_solid(Vec3::new(15.0, 15.0, 12.0), Vec3::new(65.0, 45.0, 25.0)).unwrap();
-    let mut cur = boolean(&b, &p, BoolOp::Cut).unwrap().unwrap();
-    for e in [Vec3::new(65.0, 15.0, 16.0), Vec3::new(15.0, 15.0, 16.0), Vec3::new(65.0, 45.0, 16.0), Vec3::new(15.0, 45.0, 16.0)] {
-        match fillet(&cur, &[e], 5.0) {
-            Ok(n) => {
-                println!("ok {e:?} vol {}", measure(&n).unwrap().volume);
-                cur = n;
-            }
-            Err(err) => {
-                println!("fail {e:?}: {err}");
-                break;
-            }
-        }
-    }
-}
-
-#[test]
 fn pocket_floor_loop_fillet() {
     let b = box_solid(Vec3::ZERO, Vec3::new(80.0, 60.0, 20.0)).unwrap();
     let p = box_solid(Vec3::new(15.0, 15.0, 12.0), Vec3::new(65.0, 45.0, 25.0)).unwrap();
@@ -1381,18 +1183,23 @@ fn pocket_floor_loop_fillet() {
     cur = fillet(&cur, &[Vec3::new(65.0, 15.0, 16.0), Vec3::new(15.0, 15.0, 16.0), Vec3::new(65.0, 45.0, 16.0), Vec3::new(15.0, 45.0, 16.0)], 5.0)
         .unwrap();
     let v1 = measure(&cur).unwrap().volume;
+    // The 50 x 30 x 8 pocket, less the four concave R5 rounds of its corners filling r²(1 − π/4)
+    // of section along their 8.
+    let want1 = 80.0 * 60.0 * 20.0 - 50.0 * 30.0 * 8.0 + 4.0 * 25.0 * (1.0 - PI / 4.0) * 8.0;
+    assert!(rel(v1, want1) < 1e-6, "{v1} vs {want1}");
     let floor: Vec<Vec3> = [(40.0, 15.0), (65.0, 30.0), (40.0, 45.0), (15.0, 30.0)].iter().map(|(x, y)| Vec3::new(*x, *y, 12.0)).collect();
     let mut pts = floor.clone();
     let d = 5.0 - 5.0 / 2f64.sqrt();
     pts.extend([(15.0 + d, 15.0 + d), (65.0 - d, 15.0 + d), (65.0 - d, 45.0 - d), (15.0 + d, 45.0 - d)].iter().map(|(x, y)| Vec3::new(*x, *y, 12.0)));
     let f = fillet(&cur, &pts, 2.0).unwrap();
     let m = measure(&f).unwrap();
-    // Added: the fillet profile (r²(1 − π/4)) swept along the floor outline (Pappus for the
-    // corners: the profile's centroid sits 2 − 4·2/(3(4 − π))·… inward; check loosely).
-    let straight = 2.0 * (40.0 + 20.0);
-    let added_lines = (4.0 - PI) * straight;
-    assert!(m.volume > v1 + added_lines && m.volume < v1 + added_lines + 4.0 * 2.0 * PI * 5.0, "{} {}", m.volume, v1);
-    println!("pocket: {:?} vol {}", m.merged, m.volume);
+    // Added: the R2 round's section, a = r²(1 − π/4), along the floor outline's straight 2(40 + 20),
+    // and round its four R5 corners by Pappus: a quarter turn each at the radius of the section's
+    // centroid, which sits r(10 − 3π)/(3(4 − π)) in from the wall, at 5 from the corner's axis.
+    let a = 4.0 * (1.0 - PI / 4.0);
+    let centroid = 5.0 - 2.0 * (10.0 - 3.0 * PI) / (3.0 * (4.0 - PI));
+    let want = v1 + a * 2.0 * (40.0 + 20.0) + 4.0 * a * (PI / 2.0) * centroid;
+    assert!(rel(m.volume, want) < 1e-6, "{} vs {want}", m.volume);
 }
 
 #[test]
@@ -1425,7 +1232,25 @@ fn coplanar_curved_booleans() {
     assert!(rel(measure(&cut).unwrap().volume, 32000.0 - half * 20.0) < 1e-3);
     let i = boolean(&a, &c, BoolOp::Intersect).unwrap().unwrap();
     assert!(rel(measure(&i).unwrap().volume, half * 20.0) < 1e-3);
-    println!("union {:?}", m.merged);
+    // A cylinder of radius 5 through the middle of a 40 x 30 x 20 box, its caps flush with the
+    // box's top or bottom or past them: the cut takes the part inside, π·25 a mm of height, and
+    // the union adds the parts outside. A cylinder inside but for a flush cap adds nothing.
+    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+    let disc = PI * 25.0;
+    for (z0, z1, inside, outside) in [
+        (0.0, 20.0, 20.0, 0.0),
+        (-5.0, 20.0, 20.0, 5.0),
+        (0.0, 25.0, 20.0, 5.0),
+        (-5.0, 25.0, 20.0, 10.0),
+        (5.0, 20.0, 15.0, 0.0),
+        (5.0, 25.0, 15.0, 5.0),
+    ] {
+        let c = cylinder(Vec3::new(20.0, 15.0, z0), Vec3::Z, 5.0, z1 - z0).unwrap();
+        let cut = measure(&boolean(&b, &c, BoolOp::Cut).unwrap().unwrap()).unwrap().volume;
+        assert!(rel(cut, 24000.0 - disc * inside) < 1e-6, "cut z {z0}..{z1}: {cut}");
+        let union = measure(&boolean(&b, &c, BoolOp::Union).unwrap().unwrap()).unwrap().volume;
+        assert!(rel(union, 24000.0 + disc * outside) < 1e-6, "union z {z0}..{z1}: {union}");
+    }
 }
 
 #[test]
@@ -2098,57 +1923,6 @@ fn fillet_partial_mixed_arc_and_line_perimeter_run() {
     }
 }
 
-/// Boolean survey: random boxes, cylinders and spheres combined every way; prints what fails.
-#[test]
-#[ignore]
-fn boolean_survey() {
-    let mut seed: u64 = 0x2545_f491_4f6c_dd1d;
-    let mut rnd = || {
-        seed ^= seed << 13;
-        seed ^= seed >> 7;
-        seed ^= seed << 17;
-        (seed % 1_000_000) as f64 / 1_000_000.0
-    };
-    let mut shapes: Vec<(String, Body)> = Vec::new();
-    for i in 0..40 {
-        let kind = i % 4;
-        let (x, y, z) = ((rnd() - 0.5) * 20.0, (rnd() - 0.5) * 20.0, (rnd() - 0.5) * 20.0);
-        // Snap some coordinates to a 5 mm grid: coincident faces and tangencies.
-        let snap = |v: f64, s: bool| if s { (v / 5.0).round() * 5.0 } else { v };
-        let s = rnd() < 0.5;
-        let (x, y, z) = (snap(x, s), snap(y, s), snap(z, s));
-        let a = 5.0 + snap(rnd() * 20.0, s);
-        let ax = (rnd() * 3.0) as usize % 3;
-        let b = match kind {
-            0 => box_solid(Vec3::new(x, y, z), Vec3::new(x + a, y + a * 0.8, z + a * 0.6)),
-            1 => cylinder(Vec3::new(x, y, z), [Vec3::X, Vec3::Y, Vec3::Z][ax], a * 0.4, a),
-            2 => sphere(Vec3::new(x, y, z), a * 0.5),
-            _ => box_solid(Vec3::new(x, y, z), Vec3::new(x + a * 0.5, y + a, z + a * 0.3)),
-        };
-        if let Ok(b) = b {
-            shapes.push((format!("{}{i}@({x:.3},{y:.3},{z:.3}) a={a:.3} ax={ax}", ["box", "cyl", "sph", "slab"][kind]), b));
-        }
-    }
-    let (mut ok, mut empty, mut fail) = (0, 0, Vec::new());
-    for i in 0..shapes.len() {
-        for j in i + 1..(i + 4).min(shapes.len()) {
-            for op in [BoolOp::Union, BoolOp::Cut, BoolOp::Intersect] {
-                let (na, a) = &shapes[i];
-                let (nb, b) = &shapes[j];
-                match boolean(a, b, op) {
-                    Ok(Some(_)) => ok += 1,
-                    Ok(None) => empty += 1,
-                    Err(e) => fail.push(format!("{na} {op:?} {nb}: {}", e.to_string().chars().take(140).collect::<String>())),
-                }
-            }
-        }
-    }
-    println!("ok {ok} empty {empty} failed {}", fail.len());
-    for f in &fail {
-        println!("  {f}");
-    }
-}
-
 #[test]
 fn booleans_found_by_the_survey() {
     // A tool wholly inside: a void (the solid keeps an inner shell).
@@ -2336,25 +2110,6 @@ fn a_bend_as_tight_as_the_tube_sweeps_a_valid_solid() {
     let want = pi * 25.0 * (40.0 + 2.5 * pi);
     let v = measure(&b).unwrap().volume;
     assert!(rel(v, want) < 1e-6, "{v} vs {want}");
-}
-
-#[test]
-#[ignore]
-fn boolean_identity_survey() {
-    let n: u64 = std::env::var("N").ok().and_then(|x| x.parse().ok()).unwrap_or(100);
-    let seeds: Vec<u64> = match std::env::var("SEEDS") {
-        Ok(s) => s.split(',').filter_map(|x| x.parse().ok()).collect(),
-        Err(_) => (0..n).collect(),
-    };
-    let mut bad = 0;
-    for seed in seeds {
-        let c = crate::fuzz::boolean_case(seed);
-        if c.outcome != "ok" {
-            bad += 1;
-            println!("{seed}: {} {} | {:?} | {:?}", c.outcome, c.detail, c.a, c.b);
-        }
-    }
-    println!("{bad}/{n} failed");
 }
 
 /// A quarter turn of a rectangle with an edge on the axis: no zero-area face along the axis, so

@@ -55,6 +55,10 @@ fn face_at(b: &Body, p: Vec3) -> usize {
     (0..b.face_count()).min_by(|x, y| to_face(&m, *x, p).total_cmp(&to_face(&m, *y, p))).unwrap()
 }
 
+fn volume(b: &Body) -> f64 {
+    crate::measure(b).unwrap().volume
+}
+
 fn cube() -> Body {
     box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap()
 }
@@ -227,6 +231,8 @@ fn shell_lines_the_walls_with_offsets() {
     let b = cube();
     let top = Vec3::new(20.0, 15.0, 20.0);
     let r = crate::shell(&b, &[top], 2.0).unwrap();
+    // The cavity is 36 x 26 x 18 (the floor 2 thick, the top open).
+    assert!((volume(&r) - (24000.0 - 36.0 * 26.0 * 18.0)).abs() < 1e-3, "{}", volume(&r));
     let h = verified(&r, &b, reach(2.0));
     // Five inner walls, each an offset of the face it lines; the top is left as a rim.
     let top = face_at(&b, top);
@@ -236,7 +242,7 @@ fn shell_lines_the_walls_with_offsets() {
         assert_eq!(h.faces[walls[0]].change, Change::Generated);
     }
     assert!(with(h, &[FaceOrigin::Offset { operand: 0, face: top }]).is_empty());
-    assert_eq!(changes(h), [0, 6, 0, 0, 5]);
+    assert_eq!(changes(h), [0, 6, 0, 0, 5], "{h:?}");
 }
 
 #[test]
@@ -306,10 +312,17 @@ fn offset_moves_a_face() {
     let b = ell();
     let top = Vec3::new(5.0, 5.0, 20.0);
     let r = crate::offset_faces(&b, &[top], 3.0).unwrap();
+    // The L's plan is 40 x 15 + 15 x 15 = 825; 23 high.
+    assert!((volume(&r) - 825.0 * 23.0).abs() < 1e-3, "{}", volume(&r));
     let h = verified(&r, &b, Reach { made: 0.0, moved: 3.0 * 1.1 });
     assert_eq!(h.faces.len(), b.face_count());
-    assert_eq!(with(h, &[face(face_at(&b, top))]).len(), 1);
+    let moved = with(h, &[face(face_at(&b, top))]);
+    assert_eq!(moved.len(), 1);
+    assert_eq!(h.faces[moved[0]].change, Change::Modified);
     assert!(h.edges.iter().all(|e| matches!(e.origins.as_slice(), [EdgeOrigin::Edge { .. }])));
+    // Into the body by its whole height: nothing is left behind the face.
+    let e = crate::offset_faces(&b, &[top], -20.0).unwrap_err();
+    assert!(e.to_string().contains("no room"), "{e}");
 }
 
 #[test]
@@ -403,10 +416,24 @@ fn surfaces_keep_their_faces() {
 fn thicken_offsets_the_surface() {
     let s = crate::patch_region(&Plane::XY, &Region2 { outer: square(0.0, 0.0, 10.0, 10.0), holes: vec![] }).unwrap();
     let t = crate::thicken(&s, 2.0, false).unwrap();
+    assert!((volume(&t) - 200.0).abs() < 1e-6, "{}", volume(&t));
+    // Along the sheet's normal (+Z).
+    let m = t.mesh(&crate::MeshTolerance::chord(TOL)).unwrap();
+    let (lo, hi) = m.positions.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.z), hi.max(p.z)));
+    assert!(lo.abs() < 1e-9 && (hi - 2.0).abs() < 1e-9, "z {lo}..{hi}");
     let h = verified(&t, &s, reach(2.0));
-    assert_eq!(with(h, &[face(0)]).len(), 1);
-    assert_eq!(with(h, &[FaceOrigin::Offset { operand: 0, face: 0 }]).len(), 1);
-    assert_eq!(blends(h).len(), 4);
+    assert_eq!(with(h, &[face(0)]).len(), 1, "{h:?}");
+    assert_eq!(with(h, &[FaceOrigin::Offset { operand: 0, face: 0 }]).len(), 1, "{h:?}");
+    assert_eq!(blends(h).len(), 4, "{h:?}");
+    let both = crate::thicken(&s, 2.0, true).unwrap();
+    let m = both.mesh(&crate::MeshTolerance::chord(TOL)).unwrap();
+    let (lo, hi) = m.positions.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.z), hi.max(p.z)));
+    assert!((lo + 1.0).abs() < 1e-9 && (hi - 1.0).abs() < 1e-9, "z {lo}..{hi}");
+    let h = verified(&both, &s, reach(1.0));
+    assert_eq!(with(h, &[FaceOrigin::Offset { operand: 0, face: 0 }]).len(), 2, "{h:?}");
+    assert_eq!(blends(h).len(), 4, "{h:?}");
+    let against = crate::thicken(&s, -2.0, false).unwrap();
+    assert!((volume(&against) - 200.0).abs() < 1e-6);
 }
 
 #[test]
@@ -484,9 +511,9 @@ fn chamfer_after_box_cuts() {
         for (name, cut, tool) in box_cuts_of(&b) {
             let r = crate::chamfer(&cut, &[at], 2.0).unwrap();
             let h = verified(&r, &cut, reach(2.0 * 1.5));
-            // On the painted block the chamfer face keeps the boundaries the cut left.
-            let faces = with(h, &[edge(edge_at(&cut, at))]).len();
-            assert!(if painted { faces >= 1 } else { faces == 1 }, "{name} (painted: {painted}): {h:?}");
+            // The picked edge is one edge of the cut body on either block (its round is one face,
+            // `fillet_after_box_cuts`), so its chamfer is one face too.
+            assert_eq!(with(h, &[edge(edge_at(&cut, at))]).len(), 1, "{name} (painted: {painted}): {h:?}");
             let mut through = h.clone();
             through.substitute(0, cut.history().unwrap()).unwrap();
             through.check(&r, &[&b, &tool]).unwrap();
@@ -494,43 +521,12 @@ fn chamfer_after_box_cuts() {
     }
 }
 
-/// Shell, offset faces and thicken through SMLib (`crate::offset_backend`), their histories
-/// checked against the geometry as truck's are, and their numbers against the analytic ones.
+/// Shell, offset faces and draft straight through `crate::offset_backend`: refusals, and their
+/// histories checked against the geometry and their numbers against the analytic ones.
 #[cfg(feature = "smlib")]
 mod smlib {
     use super::*;
     use crate::offset_backend;
-
-    fn volume(b: &Body) -> f64 {
-        crate::measure(b).unwrap().volume
-    }
-
-    #[test]
-    fn shell_lines_the_walls_with_offsets() {
-        let b = cube();
-        let top = Vec3::new(20.0, 15.0, 20.0);
-        let r = offset_backend::shell(&b, &[top], 2.0).unwrap();
-        // The cavity is 36 x 26 x 18 (the floor 2 thick, the top open).
-        assert!((volume(&r) - (24000.0 - 36.0 * 26.0 * 18.0)).abs() < 1e-3, "{}", volume(&r));
-        let h = verified(&r, &b, reach(2.0));
-        let top = face_at(&b, top);
-        for f in (0..6).filter(|f| *f != top) {
-            let walls = with(h, &[FaceOrigin::Offset { operand: 0, face: f }]);
-            assert_eq!(walls.len(), 1, "{h:?}");
-            assert_eq!(h.faces[walls[0]].change, Change::Generated);
-        }
-        assert!(with(h, &[FaceOrigin::Offset { operand: 0, face: top }]).is_empty());
-        assert_eq!(changes(h), [0, 6, 0, 0, 5], "{h:?}");
-    }
-
-    #[test]
-    fn shell_of_a_body_that_is_not_convex() {
-        let b = ell();
-        let r = offset_backend::shell(&b, &[Vec3::new(5.0, 5.0, 20.0)], 2.0).unwrap();
-        let h = verified(&r, &b, reach(2.0 * 1.5));
-        let offsets = h.faces.iter().filter(|f| matches!(f.origins.as_slice(), [FaceOrigin::Offset { .. }])).count();
-        assert_eq!(offsets, 7, "{h:?}");
-    }
 
     /// tangency-labs/solidcore#380: a closed shell whose wall leaves no room inside the body is
     /// refused before SMLib's offset sees it, by the body's own inradius (the L's legs are 15
@@ -574,25 +570,6 @@ mod smlib {
     }
 
     #[test]
-    fn offset_moves_a_face() {
-        let b = ell();
-        let top = Vec3::new(5.0, 5.0, 20.0);
-        let healed = crate::boolean_record::healed(&b).unwrap();
-        let chosen = [face_at(&healed, top)];
-        let r = offset_backend::offset_faces(&healed, &chosen, 3.0).unwrap();
-        // The L's plan is 40 x 15 + 15 x 15 = 825; 23 high.
-        assert!((volume(&r) - 825.0 * 23.0).abs() < 1e-3, "{}", volume(&r));
-        let h = verified(&r, &healed, Reach { made: 0.0, moved: 3.0 * 1.1 });
-        assert_eq!(h.faces.len(), healed.face_count());
-        let moved = with(h, &[face(chosen[0])]);
-        assert_eq!(moved.len(), 1);
-        assert_eq!(h.faces[moved[0]].change, Change::Modified);
-        // Into the body by its whole height: nothing is left behind the face.
-        let e = offset_backend::offset_faces(&healed, &chosen, -20.0).unwrap_err();
-        assert!(e.to_string().contains("no room"), "{e}");
-    }
-
-    #[test]
     fn draft_tilts_a_side_and_keeps_its_name() {
         let b = cube();
         let side = Vec3::new(40.0, 15.0, 10.0);
@@ -615,29 +592,5 @@ mod smlib {
         assert!((volume(&frustum) - exact).abs() < 1e-3, "{} vs {exact}", volume(&frustum));
         let e = offset_backend::draft(&b, &[Vec3::new(20.0, 15.0, 20.0)], &Plane::XY, Vec3::Z, 5.0 * deg).unwrap_err();
         assert!(e.to_string().contains("not supported yet"), "{e}");
-    }
-
-    #[test]
-    fn thicken_offsets_the_surface() {
-        let s = crate::patch_region(&Plane::XY, &Region2 { outer: square(0.0, 0.0, 10.0, 10.0), holes: vec![] }).unwrap();
-        let t = offset_backend::thicken(&s, 2.0, false).unwrap();
-        assert!((volume(&t) - 200.0).abs() < 1e-6, "{}", volume(&t));
-        // Along the sheet's normal (+Z).
-        let m = t.mesh(&crate::MeshTolerance::chord(TOL)).unwrap();
-        let (lo, hi) = m.positions.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.z), hi.max(p.z)));
-        assert!(lo.abs() < 1e-9 && (hi - 2.0).abs() < 1e-9, "z {lo}..{hi}");
-        let h = verified(&t, &s, reach(2.0));
-        assert_eq!(with(h, &[face(0)]).len(), 1, "{h:?}");
-        assert_eq!(with(h, &[FaceOrigin::Offset { operand: 0, face: 0 }]).len(), 1, "{h:?}");
-        assert_eq!(blends(h).len(), 4, "{h:?}");
-        let both = offset_backend::thicken(&s, 2.0, true).unwrap();
-        let m = both.mesh(&crate::MeshTolerance::chord(TOL)).unwrap();
-        let (lo, hi) = m.positions.iter().fold((f64::MAX, f64::MIN), |(lo, hi), p| (lo.min(p.z), hi.max(p.z)));
-        assert!((lo + 1.0).abs() < 1e-9 && (hi - 1.0).abs() < 1e-9, "z {lo}..{hi}");
-        let h = verified(&both, &s, reach(1.0));
-        assert_eq!(with(h, &[FaceOrigin::Offset { operand: 0, face: 0 }]).len(), 2, "{h:?}");
-        assert_eq!(blends(h).len(), 4, "{h:?}");
-        let against = offset_backend::thicken(&s, -2.0, false).unwrap();
-        assert!((volume(&against) - 200.0).abs() < 1e-6);
     }
 }

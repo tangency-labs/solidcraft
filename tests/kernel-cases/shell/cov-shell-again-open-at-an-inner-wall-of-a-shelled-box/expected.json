@@ -1,7 +1,23 @@
 {
  "sources": [],
  "what": "a 70 x 50 x 30 box with R6 vertical rounds shelled 2 mm open on top, shelled again 0.5 mm open at an inner wall: its 2 mm walls hollowed (action matrix (apps/solidcraft-cli/tests/action_matrix.rs): typical/filleted-shelled-box, Body1/F4:inner:F2:side:l1 face.shell)",
- "source": "invariants",
- "method": "the 2 mm walls take a 0.5 shell (a 1 mm cavity inside them, open at the picked inner wall); the rounds' offsets are concentric, but the rim and the open faces' cavity ends are the offset's own: one closed valid solid is the right answer",
- "body_count": 1
+ "source": "analytic",
+ "method": "the 2 mm walls take a 0.5 shell (a 1 mm cavity inside them, open at the picked inner wall, the flat x -29..29 of y = -23). Rounded rectangle area L W - (4 - pi) r^2. First shell: 70 x 50 R6 x 30 less 66 x 46 r4 x 28 = 19449.4866. Second cavity, every kept face moved 0.5 in (the rounds' offsets concentric) and extended to meet: 69 x 49 r5.5 from z = 0.5 to 29.5 less 67 x 47 r4.5 above z = 1.5 (9610.6791), and where the inner wall is open the cavity reaches its plane, 58 x 0.5 x 28 (812): 10422.6791, material 9026.8074. Rounding the cavity at the 159.13 mm of concave floor edge (the true offset; r4 arcs counted at r4.5) enlarges it by at most (1 - pi/4) 0.25 per mm: 8.7061; the true offset's distance to the kept rounds where the open wall ends (two vertical tangent edges, 28 long) shrinks it by at most a quarter disc r0.5 each: 10.9956; 0.125 for each of the 4 ends. Material 9017.60 .. 9038.30. A shell that fails to open leaves 2 shells; the unchanged body is 19449.5",
+ "body_count": 1,
+ "volume_mm3": [
+  9017.6,
+  9038.3
+ ],
+ "bbox": {
+  "min": [
+   -35,
+   -25,
+   0
+  ],
+  "max": [
+   35,
+   25,
+   30
+  ]
+ }
 }
