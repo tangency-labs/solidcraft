@@ -138,9 +138,50 @@ impl Caches {
     }
 }
 
+/// Emits the [`UpstreamFixes`] definition it wraps unchanged, plus
+/// [`UpstreamFixes::NAMES`] and [`UpstreamFixes::flags`] read from that same field
+/// list, so a new field is listed by name with no second place to edit (#2014). It
+/// accepts only `pub <name>: bool` fields (each with its doc comment), so a field of
+/// another type fails to compile instead of being left out of the list.
+macro_rules! upstream_fixes {
+    (
+        $(#[$meta:meta])*
+        pub struct $name:ident {
+            $(
+                $(#[$field_meta:meta])*
+                pub $field:ident: bool
+            ),* $(,)?
+        }
+    ) => {
+        $(#[$meta])*
+        pub struct $name {
+            $(
+                $(#[$field_meta])*
+                pub $field: bool,
+            )*
+        }
+
+        impl $name {
+            /// The name of every flag (its field name), in declaration order.
+            pub const NAMES: &'static [&'static str] = &[$(stringify!($field)),*];
+
+            /// Every flag as `(name, on)`, in declaration order: the names of
+            /// [`Self::NAMES`], each with its field's value.
+            pub fn flags(&self) -> impl Iterator<Item = (&'static str, bool)> {
+                Self::NAMES.iter().copied().zip([$(self.$field),*])
+            }
+        }
+    };
+}
+
+upstream_fixes! {
 /// Opt-in fixes of upstream SMLib defects (`plan/upstream-issues/`), all off by default
 /// (upstream behaviour). Set them on [`Kernel::fixes`] before running operations; each
 /// field names its record (`WR-…`) and the `tangency-labs/solidcore` issue.
+///
+/// [`UpstreamFixes::flags`] lists every field with its value and
+/// [`UpstreamFixes::NAMES`] every field name, both in declaration order. `upstream_fixes!`
+/// generates them from this definition, so a new field needs no other edit to be listed.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[allow(clippy::struct_excessive_bools)]
 #[non_exhaustive]
@@ -732,6 +773,7 @@ pub struct UpstreamFixes {
     ///
     /// [`MAX_START_LOOP_TRACE_STEPS`]: crate::intersect::surface_intersector::p4::MAX_START_LOOP_TRACE_STEPS
     pub ssi_start_loop_trace_budget: bool,
+}
 }
 
 /// Options for [`Kernel::new`].
