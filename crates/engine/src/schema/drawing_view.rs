@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::drawing_view::{TangentEdges, ViewDirection, ViewSettings};
 use solidcraft_geom::Seg2;
 use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, SheetSize};
-use solidcraft_geom::drawing_view::{NamedView, Scale};
+use solidcraft_geom::drawing_view::{NamedView, ProjectedSide, Scale};
 use solidcraft_geom::paper::ObjectKind;
 use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_render::VisualStyle;
@@ -440,6 +440,95 @@ pub struct CopyParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub with_linked: Option<bool>,
+}
+
+/// What `drawing.view.base` takes: the sheet, which way the view looks, its scale and where its
+/// centre goes, and each setting it sets itself (a setting left out follows the default).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct BaseParams {
+    /// The sheet, by id or name.
+    #[serde(deserialize_with = "super::drawing_sheet::sheet_ref")]
+    pub sheet: String,
+    /// Which way it looks (front when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ViewParam")]
+    pub view: Option<ViewParam>,
+    /// Its scale (when not given, the largest preset at which it lies inside the sheet's drawing
+    /// space, or 1:1 with nothing to measure); saved either way.
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "ScaleParam")]
+    pub scale: Option<ScaleParam>,
+    /// Where its centre goes, in paper millimetres from the sheet's lower-left corner (the sheet's
+    /// centre when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub position_mm: Option<Point2>,
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "StyleParam")]
+    pub display_style: Option<StyleParam>,
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "StyleParam")]
+    pub reference_style: Option<StyleParam>,
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub reference_hides_model: Option<bool>,
+    /// Model millimetres added on every side of its extents: 0 to 100000 (0 when not given).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "f64")]
+    pub reference_margin_mm: Option<f64>,
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "TangentEdgesParam")]
+    pub tangent_edges: Option<TangentEdgesParam>,
+}
+
+/// What `drawing.view.projected` takes: its parent, the side of it it sits on, and where.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct ProjectedParams {
+    pub parent: ViewIdParam,
+    pub side: SideParam,
+    /// Where it sits (when not given, lined up with its parent, a gap past the parent's boundary).
+    #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "PlaceParam")]
+    pub place: Option<PlaceParam>,
+}
+
+/// The side of its parent a projected view sits on.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(transparent)]
+pub struct SideParam(pub ProjectedSide);
+
+impl JsonSchema for SideParam {
+    fn schema_name() -> Cow<'static, str> {
+        "ProjectedSide".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let names: Vec<Value> = ProjectedSide::ALL.iter().filter_map(|s| serde_json::to_value(s).ok()).collect();
+        json_schema!({
+            "description": "The side of its parent it sits on: left, right, above or below. The drawing's projection says which side of the model it shows.",
+            "type": "string",
+            "enum": names
+        })
+    }
+}
+
+/// What `drawing.view.base` and `drawing.view.projected` return.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct CreateResult {
+    /// The new view.
+    pub view: String,
+    pub sheet: String,
+    /// The scale it draws at: given or fitted for a base view, its parent's for a projected one.
+    pub scale: ScaleResult,
+    pub boundary_mm: BoxResult,
+    /// It, when its boundary leaves the sheet's drawing space; it isn't moved back in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outside: Vec<OutsideResult>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// What `drawing.view.move_to_sheet` and `drawing.view.copy_to_sheet` return.

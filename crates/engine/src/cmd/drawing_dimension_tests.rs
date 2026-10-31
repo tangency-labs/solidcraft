@@ -47,12 +47,12 @@ fn edge_index(s: &Session, a: [f64; 3], b: [f64; 3]) -> usize {
     mesh.edges.iter().position(|line| joins(ends(line))).unwrap()
 }
 
-/// The index of the box's edge whose every point is `radius` from `centre`, as `{body, index}`
+/// The index of `body`'s edge whose every point is `radius` from `centre`, as `{body, index}`
 /// names it: one of a circle's or an arc's.
-fn round_index(s: &Session, centre: [f64; 3], radius: f64) -> usize {
+pub(crate) fn round_index(s: &Session, body: &str, centre: [f64; 3], radius: f64) -> usize {
     let centre = Vec3::from(centre);
     let state = s.model.state();
-    let mesh = state.body("Box").unwrap().mesh();
+    let mesh = state.body(body).unwrap().mesh();
     mesh.edges.iter().position(|line| line.iter().all(|p| (p.dist(centre) - radius).abs() < 1e-6)).unwrap()
 }
 
@@ -180,11 +180,11 @@ fn a_radial_dimension_reads_a_hole_and_an_edit_makes_it_a_diameter() {
     run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 42, "base": [40, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"]}));
     run(&mut s, "solid.fillet", json!({"edges": [[80, 20, 30]], "radius": 5, "body": "Box"}));
     run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
-    let hole = json!({"body": "Box", "index": round_index(&s, [40.0, 0.0, 15.0], 6.0)});
+    let hole = json!({"body": "Box", "index": round_index(&s, "Box", [40.0, 0.0, 15.0], 6.0)});
     let across = add(&mut s, view, json!({"radial": {"edge": hole}}));
     reads(&across, 12.0, "Ø12.00");
     assert_eq!(across["record"]["kind"]["radial"]["diameter"], json!(true), "{across}");
-    let fillet = json!({"body": "Box", "index": round_index(&s, [75.0, 0.0, 25.0], 5.0)});
+    let fillet = json!({"body": "Box", "index": round_index(&s, "Box", [75.0, 0.0, 25.0], 5.0)});
     let arc = add(&mut s, view, json!({"radial": {"edge": fillet}}));
     reads(&arc, 5.0, "R5.00");
     assert_eq!(arc["record"]["kind"]["radial"].get("diameter"), None, "{arc}");
