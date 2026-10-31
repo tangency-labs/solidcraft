@@ -1452,3 +1452,78 @@ fn a_mass_only_override_with_nothing_to_scale_warns() {
     let p = package(&s);
     assert!(p.warnings.iter().any(|w| w.contains("override") && w.contains("Sheet")), "{:?}", p.warnings);
 }
+
+/// Exports `two_cubes` with `prefix` to `urdf` under a fresh folder, and returns that folder.
+fn export_with_prefix(tag: &str, urdf: &str, prefix: &str) -> (PathBuf, std::path::PathBuf, String) {
+    let mut s = two_cubes();
+    let dir = temp(tag);
+    let path = dir.join(urdf);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "mesh_prefix": prefix}));
+    let xml = std::fs::read_to_string(&path).unwrap_or_default();
+    (dir, path, xml)
+}
+
+#[test]
+fn a_folder_prefix_creates_the_folder_and_the_meshes_are_in_it() {
+    let (dir, _, xml) = export_with_prefix("prefix-folder", "robot.urdf", "meshes/");
+    assert!(xml.contains(r#"filename="meshes/robot-B.stl""#), "{xml}");
+    assert!(dir.join("meshes/robot-B.stl").exists());
+    assert!(!dir.join("robot-B.stl").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_nested_folder_prefix_without_a_trailing_slash_is_a_name_start_in_that_folder() {
+    let (dir, _, xml) = export_with_prefix("prefix-name", "robot.urdf", "out/parts/v1_");
+    assert!(xml.contains(r#"filename="out/parts/v1_robot-B.stl""#), "{xml}");
+    assert!(dir.join("out/parts/v1_robot-B.stl").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_parent_folder_prefix_sits_beside_the_urdf_folder() {
+    let (dir, _, xml) = export_with_prefix("prefix-parent", "urdf/robot.urdf", "../meshes/");
+    assert!(xml.contains(r#"filename="../meshes/robot-B.stl""#), "{xml}");
+    assert!(dir.join("meshes/robot-B.stl").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_package_prefix_writes_into_the_package_when_the_urdf_is_in_it() {
+    let (dir, _, xml) = export_with_prefix("prefix-pkg", "robot/urdf/r.urdf", "package://robot/meshes/");
+    assert!(xml.contains(r#"filename="package://robot/meshes/r-B.stl""#), "{xml}");
+    assert!(dir.join("robot/meshes/r-B.stl").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_package_prefix_writes_its_folder_beside_a_urdf_outside_the_package() {
+    let (dir, _, _) = export_with_prefix("prefix-pkg-out", "r.urdf", "package://robot/meshes/");
+    assert!(dir.join("meshes/r-B.stl").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_file_url_prefix_writes_to_that_folder() {
+    let dir = temp("prefix-file");
+    let target = dir.join("abs");
+    let (other, _, xml) = export_with_prefix("prefix-file-2", "r.urdf", &format!("file://{}/", target.to_string_lossy()));
+    assert!(xml.contains("file://"), "{xml}");
+    assert!(target.join("r-B.stl").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&other);
+}
+
+#[test]
+fn a_web_prefix_keeps_the_meshes_beside_the_urdf_and_says_so() {
+    let mut s = two_cubes();
+    let dir = temp("prefix-web");
+    let path = dir.join("r.urdf");
+    let r = run(&mut s, "file.export", json!({"path": path.to_string_lossy(), "mesh_prefix": "https://example.com/m/"}));
+    assert!(dir.join("r-B.stl").exists());
+    assert!(r["warnings"].to_string().contains("mesh_prefix"), "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
