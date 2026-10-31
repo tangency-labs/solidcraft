@@ -256,6 +256,15 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.fillet_run_on_bspline_trims = true;
     f.offset_tangent_gap_statuses = true;
     f.ssi_alignment_statuses = true;
+    f.fillet_corner_statuses = true;
+    f.fillet_edge_curve_domain_statuses = true;
+    f.query_statuses_pass_on = true;
+    f.sweep_statuses_pass_on = true;
+    f.ssi_proto_topology_statuses_pass_on = true;
+    f.analytic_inversion_answers_apart = true;
+    f.fillet_statuses_pass_on = true;
+    f.fillet_corner_per_vertex_fan = true;
+    f.fillet_rail_trim_at_near_knot = true;
     f
 }
 
@@ -281,10 +290,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// a short span of a UV curve, and still removes a 3D conic's) and `corner_patch_face_side_twist`
 /// (WR-613: the fork refines the patch, `corner_blend_coons_patch_tangent_to_sides`).
 ///
-/// The fork carries on softly where these refuse: `temporary_radius_setup_errors` (#458: a scope guard
-/// cannot report), `fillet_corner_statuses` (`sm_TestG1Continuity`: no tangent is no tangency),
-/// and `fillet_edge_curve_domain_statuses` (`sm_CheckEdgeCurveDomains`: a failed trim keeps the
-/// edge's curve).
+/// The fork carries on softly where this refuses: `temporary_radius_setup_errors` (#458: a scope
+/// guard cannot report).
 ///
 /// Upstream's defect is still in the fork's source at `SMLIB_REV` 2fc375f:
 /// `offset_swap_uv_extended_distance` (WR-164: `SmOffsetSurface::SwapUV` negates twice),
@@ -292,8 +299,11 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// `planar_path_profile_in_path_frame` (WR-660: `PositionProfileCurves` orients by global axes),
 /// `validation_does_not_make_uv_trims` (WR-446: `sm_CheckEdgeuseGeometry` evaluates with TRUE),
 /// `iso_curve_uv_line_both_params` (WR-30: `CreateUVIsoLine` tests `SM_SP_U` twice),
-/// `extrusion_step_uses_clamped_uv` (WR-61: `EvaluateSTEP*` evaluate `crUV`) and
-/// `analytic_corner_failure_is_false` (WR-254: `MakeAnalyticCornerSurface`'s `SER` reads as TRUE).
+/// `extrusion_step_uses_clamped_uv` (WR-61: `EvaluateSTEP*` evaluate `crUV`),
+/// `analytic_corner_failure_is_false` (WR-254: `MakeAnalyticCornerSurface`'s `SER` reads as TRUE),
+/// `proto_edge_split_upper_keeps_the_old_max` (WR-101: `SmProtoEdge::Split` reads the maximum after
+/// clamping it) and `point_on_start_point_squared_tolerance` (WR-51: `IsPointOnStartPoint` compares
+/// a squared distance with the tolerance).
 ///
 /// The fork has no such code: `offset_splits_corner_vertices` (WR-657: `CloseLoopGaps` splits no
 /// corner and an offset's result is not refused for being open), `defeature_refuses_open_base`
@@ -318,10 +328,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// `MakeDupin`'s bottom hyperbola takes k2 for both axes) and
 /// `extent3d_contains_both_segment_endpoints` (WR-3: `ContainsLineSeg3d` ors its two points).
 ///
-/// The fork handles a failed status softly where these flags refuse (solidcore#1775, #483), so the
-/// flags would fail where the C++ kernel carries on: `fillet_corner_statuses` (`sm_TestG1Continuity`:
-/// no tangent is no tangency) and `fillet_edge_curve_domain_statuses` (`sm_CheckEdgeCurveDomains`: a
-/// failed trim keeps the edge's curve). `translation_sweep_regularize` (solidcore#1937) has no fork commit, and the fork keeps
+/// `translation_sweep_regularize` (solidcore#1937) has no fork commit, and the fork keeps
 /// upstream's `gap_samples_use_trimmed_spans` (WR-89: `BuildSampleSet` spans from the first knot) and
 /// `twist_simple_duw_sign` (WR-46: `EvaluateSimple`'s Duw y is -per cos).
 #[cfg(test)]
@@ -343,8 +350,6 @@ const HELD_BACK: &[&str] = &[
     "sphere_from_arcs_common_centre",
     "dupin_bottom_hyperbola_axis",
     "extent3d_contains_both_segment_endpoints",
-    "fillet_corner_statuses",
-    "fillet_edge_curve_domain_statuses",
     "translation_sweep_regularize",
     "gap_samples_use_trimmed_spans",
     "twist_simple_duw_sign",
@@ -359,6 +364,8 @@ const HELD_BACK: &[&str] = &[
     "defeature_refuses_open_base",
     "ssi_start_loop_trace_budget",
     "fillet_refuse_crossing_rails",
+    "proto_edge_split_upper_keeps_the_old_max",
+    "point_on_start_point_squared_tolerance",
 ];
 
 fn fresh() -> Kernel {
