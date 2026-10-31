@@ -4,7 +4,8 @@
   "tangency-labs/solidcraft#355"
  ],
  "what": "an 80 x 40 base with a 30 mm flange on the y = 0 edge and a 15 mm flange on the x = 80 edge, and a round hole through the base beside them: sew failed with a non-manifold edge contact",
- "source": "invariants",
- "method": "the hole is cut straight through the flat base, clear of both bends and of the corner, so it must give one valid closed body; the corner geometry of two adjacent flanges has no simple closed form, so no volume is graded",
- "body_count": 1
+ "source": "analytic",
+ "method": "T = 2, R = 2, 90 deg flanges, setback R + T = 4 (K = 0.4 moves only the flat pattern, not the folded part). The earlier flange keeps its length and the later one ends at its bend, and the later one trims the base under the first bend (the convention oracle 75-sm-bracket-holes is graded on): base x 0..76, y 4..40 (5472); bend 1, a quarter annulus of radii 2..4 (3 pi a mm), x 0..76 (228 pi); flange 1's panel y 0..2, z 4..30, x 0..80 (4160); bend 2 y 4..40 (108 pi); flange 2's panel x 78..80, z 4..15, y 4..40 (792); the hole r 3 at (25, 20) straight through the base, clear of both bends and the corner, takes 18 pi. V = 10424 + 318 pi = 11423.026464",
+ "body_count": 1,
+ "volume_mm3": 11423.026463841552
 }
