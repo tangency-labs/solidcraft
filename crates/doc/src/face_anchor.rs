@@ -90,7 +90,7 @@ pub fn plane_face_anchor(plane: &PlaneRef) -> Option<&FaceAnchor> {
     }
 }
 
-fn has_face_reference(plane: &PlaneRef) -> bool {
+pub(crate) fn has_face_reference(plane: &PlaneRef) -> bool {
     match plane {
         PlaneRef::Face { .. } => true,
         PlaneRef::Offset { base, .. } | PlaneRef::ThroughPoint { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => {
