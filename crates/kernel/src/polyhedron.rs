@@ -212,7 +212,9 @@ fn shell_impl(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
             if removed { HalfSpace { n: h.n, d: h.d + thickness + size * 0.05 } } else { HalfSpace { n: h.n, d: h.d - thickness } }
         })
         .collect();
-    if !hs.iter().zip(&inner).any(|((h, ..), i)| i.d > h.d) {
+    // Empty `open`: every face shrinks — a closed hollow (#4009). Otherwise at least one face
+    // must be pushed out so the cavity opens.
+    if !open.is_empty() && !hs.iter().zip(&inner).any(|((h, ..), i)| i.d > h.d) {
         return Err(KernelError::Invalid("select at least one face to remove".into()));
     }
     let (cavity, on) = polyhedron(&inner)?;
@@ -479,9 +481,7 @@ fn shell_planar(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
             opened.push(f);
         }
     }
-    if opened.is_empty() {
-        return Err(KernelError::Invalid("select at least one face to remove".into()));
-    }
+    // Empty `opened`: every wall moves in — a closed hollow with an internal void (#4009).
     // A successful Boolean is not evidence that a tangential rim has wall thickness.
     // Refuse only when the entire planar opening loses its rim. A single collapsed
     // round can still end in a valid sharp edge (the tutorial plate, for example).
