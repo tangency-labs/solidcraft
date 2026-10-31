@@ -988,12 +988,7 @@ impl OffsetFacesExecutive {
             .into_iter()
             .filter(|&v| !join_ends.contains(&Some(v)))
             .collect();
-        crate::topology::brep::p5::remove_topological_edges_and_vertices(
-            k,
-            b,
-            Some(&keep_edges),
-            Some(&keep_vertices),
-        )
+        remove_topological_edges_and_vertices(k, b, Some(&keep_edges), Some(&keep_vertices))
     }
 
     /// `OffsetFaces` step 5: the sharp edges each followed blend became ([`MARK_SHARP`]),
