@@ -897,6 +897,18 @@ impl UnitDiff for Runner {
             c.unit = self.id().to_string();
             v.push(c);
         }
+        // overfull knots and past-pole spheres: their own seed stream too; `ovfNNNN`
+        let ovf = CaseContext {
+            seeds: ctx.seeds.max(OVERFULL_CASES),
+            ..ctx.clone()
+        };
+        for mut c in ovf.generated_cases("surface.surface_assert_valid:overfull", |rng| {
+            serde_json::to_value(gen_overfull_case(rng)).ok()
+        }) {
+            c.name = c.name.replacen("gen", "ovf", 1);
+            c.unit = self.id().to_string();
+            v.push(c);
+        }
         Ok(v)
     }
 

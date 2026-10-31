@@ -75,10 +75,7 @@
 //! - **Extrusion origin zero (WR-511, #1508).** Test 8 uses the pinned unscaled
 //!   `SM_EFF_ZERO` by default; `Kernel::fixes.extrusion_origin_scaled_zero` uses
 //!   `SM_EFF_ZERO * (1 + origin.max_dimension())` for that solve only.
-//! - **Unported overrides.** `SmSrfInVolume` and
-//!   `SmOffsetSurface` have their own `AssertValid`, not ported here; they return
-//!   [`SolidError::Unported`]. `SmSTEPSurface` has none and
-//!   runs the base check.
+//! - `SmSTEPSurface` has no override and runs the base check.
 //! - **Contained checks.** Curve-bounded basis checks carry an explicit nesting
 //!   counter bounded by `MAX_GEOMETRY_NESTING` (32; fixtures reach at most 3).
 //!   Contained report keys are assigned in traversal order, distinct from the root
@@ -95,6 +92,10 @@
 //!   the inherited base continuity test reads an unwritten output: this class uses
 //!   the generic failing `GetKnots`. The existing continuity guard returns
 //!   `InvalidInput`; `LEVEL_GIVEN` skips that base call and is defined.
+//! - **Wrapping surfaces.** `SmOffsetSurface` and `SmSrfInVolume` are in the `wrapped`
+//!   submodule (its own deviations); the latter calls `Volume::assert_valid`.
+//! - **Recursion.** A surface in a volume also recurses (into its base surface), after
+//!   checking its owned geometry nests at most `MAX_GEOMETRY_NESTING` (32) deep.
 
 use std::borrow::Cow;
 use std::collections::BTreeSet;
