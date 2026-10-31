@@ -1,8 +1,10 @@
 //! `cargo xtask test`: build the workspace's tests once, then run every test binary.
-//! By default they all run at once, with sequential doc/wasm `side` jobs alongside.
+//! CPU-only binaries run concurrently; GPU-capable binaries share one serial lane by default.
+//! Sequential doc/wasm `side` jobs run alongside.
 //! SOLIDCRAFT_TEST_JOBS opts into a shared bound for test binaries and those side jobs, and
 //! splits each binary's libtest threads and action-matrix workers across the binaries in flight.
 
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::process::{Command, Stdio};
 use std::sync::{Mutex, mpsc};
@@ -15,6 +17,7 @@ struct TestBin {
     label: String,
     exe: String,
     dir: String,
+    gpu: bool,
 }
 
 /// Build the tests with `cargo_args` (e.g. `--locked`), run each binary with `test_args`, and run
@@ -22,20 +25,18 @@ struct TestBin {
 /// Each prints a line when it ends; a failure prints its whole output and does not cancel work.
 pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>) -> Result<(), String> {
     let limit = job_limit(std::env::var_os("SOLIDCRAFT_TEST_JOBS").as_deref())?;
+    let gpu_jobs = job_limit_for("SOLIDCRAFT_GPU_TEST_JOBS", std::env::var_os("SOLIDCRAFT_GPU_TEST_JOBS").as_deref())?.unwrap_or(1);
     let split = thread_split(limit, std::thread::available_parallelism().map_or(1, |n| n.get()));
     let bins = build(cargo_args)?;
     let start = Instant::now();
     let side_count = side.len();
-    let mut batches = Vec::with_capacity(bins.len() + 1);
-    if !side.is_empty() {
-        batches.push(side);
-    }
-    for b in &bins {
-        batches.push(vec![(b.label.clone(), binary_command(b, test_args, split))]);
-    }
+    let batches = batches(&bins, test_args, split, side, gpu_jobs);
     let jobs = limit.unwrap_or(batches.len()).min(batches.len());
     let split_note = split.map_or(String::new(), |t| format!("; {t} test threads and matrix workers per binary unless overridden"));
-    eprintln!("test: {} binaries, {side_count} side jobs; at most {jobs} concurrent top-level commands{split_note}", bins.len());
+    eprintln!(
+        "test: {} binaries, {side_count} side jobs; at most {jobs} concurrent top-level commands; at most {gpu_jobs} GPU binaries, one test thread each unless overridden{split_note}",
+        bins.len()
+    );
     let mut failed = Vec::new();
     run_bounded(
         batches,
@@ -58,15 +59,38 @@ pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>
     if failed.is_empty() { Ok(()) } else { Err(format!("failed: {}", failed.join(", "))) }
 }
 
+/// Group commands into sequential lanes before the shared worker budget is applied.
+fn batches(bins: &[TestBin], test_args: &[&str], split: Option<usize>, side: Vec<(String, Command)>, gpu_jobs: usize) -> Vec<Vec<(String, Command)>> {
+    let mut batches = Vec::with_capacity(bins.len() + 1);
+    if !side.is_empty() {
+        batches.push(side);
+    }
+    let mut gpu_lanes: Vec<Vec<_>> = (0..gpu_jobs.max(1).min(bins.iter().filter(|b| b.gpu).count())).map(|_| Vec::new()).collect();
+    let mut next_gpu = 0;
+    for b in bins {
+        let job = (b.label.clone(), binary_command(b, test_args, split));
+        if b.gpu {
+            let count = gpu_lanes.len();
+            if let Some(lane) = gpu_lanes.get_mut(next_gpu) {
+                lane.push(job);
+            }
+            next_gpu = (next_gpu + 1) % count.max(1);
+        } else {
+            batches.push(vec![job]);
+        }
+    }
+    batches.extend(gpu_lanes);
+    batches
+}
+
 /// An absent limit preserves the existing unbounded default; invalid input fails before the test build.
 fn job_limit(value: Option<&OsStr>) -> Result<Option<usize>, String> {
+    job_limit_for("SOLIDCRAFT_TEST_JOBS", value)
+}
+
+fn job_limit_for(name: &str, value: Option<&OsStr>) -> Result<Option<usize>, String> {
     let Some(value) = value else { return Ok(None) };
-    value
-        .to_str()
-        .and_then(|v| v.parse::<usize>().ok())
-        .filter(|n| *n > 0)
-        .map(Some)
-        .ok_or_else(|| "SOLIDCRAFT_TEST_JOBS must be a positive integer".into())
+    value.to_str().and_then(|v| v.parse::<usize>().ok()).filter(|n| *n > 0).map(Some).ok_or_else(|| format!("{name} must be a positive integer"))
 }
 
 /// The per-binary worker count that keeps the whole run inside the machine's parallelism:
@@ -114,7 +138,8 @@ fn binary_command(b: &TestBin, test_args: &[&str], split: Option<usize>) -> Comm
     let mut c = Command::new(&b.exe);
     c.args(test_args).current_dir(&b.dir).env("CARGO_MANIFEST_DIR", &b.dir);
     for name in ["RUST_TEST_THREADS", "ACTION_MATRIX_JOBS"] {
-        if let Some(threads) = budget_env(name, split) {
+        let budget = if b.gpu && name == "RUST_TEST_THREADS" { Some(1) } else { split };
+        if let Some(threads) = budget_env(name, budget) {
             c.env(name, threads);
         }
     }
@@ -134,6 +159,15 @@ fn finish(mut c: Command) -> Result<String, String> {
 
 /// `cargo test --workspace --profile ci --no-run`, and the executables it built.
 fn build(cargo_args: &[&str]) -> Result<Vec<TestBin>, String> {
+    let mut metadata = cargo();
+    // All features and target platforms deliberately over-approximate GPU capability, including
+    // dev dependencies. A caller enabling an optional GPU backend must not bypass the lane.
+    metadata.args(["metadata", "--format-version=1", "--locked", "--all-features"]);
+    let out = metadata.stderr(Stdio::inherit()).output().map_err(|e| format!("cargo metadata: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("cargo metadata: {}", out.status));
+    }
+    let gpu = gpu_packages(&out.stdout)?;
     let mut c = cargo();
     c.args(["test", "--workspace", "--profile", "ci", "--no-run", "--message-format=json-render-diagnostics"]).args(cargo_args);
     eprintln!("$ cargo test --workspace --profile ci --no-run");
@@ -155,12 +189,54 @@ fn build(cargo_args: &[&str]) -> Result<Vec<TestBin>, String> {
         let pkg = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let kind = m["target"]["kind"][0].as_str().unwrap_or("");
         let label = format!("{pkg} {kind} {}", m["target"]["name"].as_str().unwrap_or(""));
-        bins.push(TestBin { label, exe: exe.to_string(), dir: dir.to_string_lossy().into_owned() });
+        bins.push(TestBin {
+            label,
+            exe: exe.to_string(),
+            dir: dir.to_string_lossy().into_owned(),
+            gpu: m["package_id"].as_str().is_some_and(|id| gpu.contains(id)),
+        });
     }
     if bins.is_empty() {
         return Err("cargo test --no-run built no test executables".into());
     }
     Ok(bins)
+}
+
+/// Conservatively include every package that can reach wgpu, rather than keeping a list of
+/// today's GPU test names. Cargo's package IDs join metadata to compiler artifacts exactly.
+fn gpu_packages(json: &[u8]) -> Result<HashSet<String>, String> {
+    #[derive(serde::Deserialize)]
+    struct Package {
+        id: String,
+        name: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct Node {
+        id: String,
+        dependencies: Vec<String>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Resolve {
+        nodes: Vec<Node>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Metadata {
+        packages: Vec<Package>,
+        resolve: Resolve,
+    }
+    let metadata: Metadata = serde_json::from_slice(json).map_err(|e| format!("Cargo GPU dependency metadata: {e}"))?;
+    let mut gpu: HashSet<_> = metadata.packages.into_iter().filter(|p| p.name == "wgpu").map(|p| p.id).collect();
+    loop {
+        let before = gpu.len();
+        for node in &metadata.resolve.nodes {
+            if node.dependencies.iter().any(|id| gpu.contains(id)) {
+                gpu.insert(node.id.clone());
+            }
+        }
+        if gpu.len() == before {
+            return Ok(gpu);
+        }
+    }
 }
 
 /// The doc tests (`cargo test --doc`), to run as a side job.
@@ -172,11 +248,77 @@ pub fn doc_tests(cargo_args: &[&str], test_args: &[&str]) -> (String, Command) {
 
 #[cfg(test)]
 mod tests {
-    use super::{TestBin, binary_command, budget_env, job_limit, run_bounded, thread_split};
+    use super::{TestBin, batches, binary_command, budget_env, gpu_packages, job_limit, job_limit_for, run_bounded, thread_split};
     use std::ffi::OsStr;
     use std::path::Path;
     use std::sync::Barrier;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn gpu_binaries_share_one_lane_while_cpu_and_side_work_remain_independent() {
+        let bins: Vec<_> = [("gpu lib", true), ("engine lib", false), ("ui lib", true), ("cli snapshot", true)]
+            .into_iter()
+            .map(|(label, gpu)| TestBin { label: label.into(), exe: "unused".into(), dir: ".".into(), gpu })
+            .collect();
+        let lanes = batches(&bins, &["--exact", "selected"], None, vec![("docs".into(), std::process::Command::new("unused"))], 1);
+        let gpu_lanes: Vec<_> = lanes.iter().filter(|lane| lane.iter().any(|(label, _)| bins.iter().any(|b| b.gpu && b.label == *label))).collect();
+        assert_eq!(gpu_lanes.len(), 1, "GPU devices must not be opened by independent lanes");
+        assert_eq!(gpu_lanes[0].iter().map(|(label, _)| label.as_str()).collect::<Vec<_>>(), ["gpu lib", "ui lib", "cli snapshot"]);
+        assert_eq!(lanes.len(), 3, "CPU and docs must not wait in the GPU lane");
+        assert_eq!(lanes.iter().map(Vec::len).sum::<usize>(), 5, "no gate may disappear");
+    }
+
+    #[test]
+    fn gpu_binary_defaults_to_one_libtest_thread_without_changing_filters() {
+        let b = TestBin { label: "gpu lib".into(), exe: "unused".into(), dir: ".".into(), gpu: true };
+        for split in [None, Some(8)] {
+            let c = binary_command(&b, &["--exact", "path::selected"], split);
+            if std::env::var_os("RUST_TEST_THREADS").is_none() {
+                assert_eq!(c.get_envs().find(|(k, _)| *k == "RUST_TEST_THREADS").and_then(|(_, v)| v), Some(OsStr::new("1")));
+            }
+            assert_eq!(c.get_args().collect::<Vec<_>>(), ["--exact", "path::selected"]);
+        }
+    }
+
+    #[test]
+    fn gpu_dependency_classification_includes_transitive_and_dev_consumers_not_cpu_packages() {
+        let metadata = serde_json::json!({
+            "packages": [
+                {"id": "gpu-v1", "name": "wgpu"}, {"id": "cpu", "name": "engine"},
+                {"id": "ui", "name": "ui"}, {"id": "new-app", "name": "future-consumer"}
+            ],
+            "resolve": {"nodes": [
+                {"id": "new-app", "dependencies": ["ui", "cpu"]},
+                {"id": "cpu", "dependencies": []},
+                {"id": "ui", "dependencies": ["gpu-v1"]},
+                {"id": "gpu-v1", "dependencies": []}
+            ]}
+        });
+        let gpu = gpu_packages(&serde_json::to_vec(&metadata).unwrap()).unwrap();
+        assert_eq!(gpu.len(), 3);
+        assert!(gpu.contains("gpu-v1") && gpu.contains("ui") && gpu.contains("new-app"));
+        assert!(!gpu.contains("cpu"));
+        assert!(gpu_packages(br#"{"packages":[],"resolve":null}"#).is_err(), "missing graph must not silently disable GPU protection");
+    }
+
+    #[test]
+    fn gpu_lane_override_is_positive_bounded_and_does_not_drop_jobs() {
+        for value in ["0", "", "-1", "two"] {
+            assert_eq!(
+                job_limit_for("SOLIDCRAFT_GPU_TEST_JOBS", Some(OsStr::new(value))),
+                Err("SOLIDCRAFT_GPU_TEST_JOBS must be a positive integer".into())
+            );
+        }
+        let bins: Vec<_> = (0..5).map(|i| TestBin { label: i.to_string(), exe: "unused".into(), dir: ".".into(), gpu: true }).collect();
+        for (jobs, count) in [(1, 1), (2, 2), (usize::MAX, 5)] {
+            let lanes = batches(&bins, &[], None, vec![], jobs);
+            assert_eq!(lanes.len(), count);
+            let mut labels: Vec<_> = lanes.into_iter().flatten().map(|(label, _)| label).collect();
+            labels.sort();
+            assert_eq!(labels, ["0", "1", "2", "3", "4"]);
+        }
+        assert!(batches(&[], &[], None, vec![], usize::MAX).is_empty());
+    }
 
     #[test]
     fn job_limit_is_opt_in_and_rejects_invalid_values() {
@@ -284,7 +426,7 @@ mod tests {
 
     #[test]
     fn binary_command_bounds_threads_and_matrix_workers_only_under_a_budget() {
-        let bin = TestBin { label: "pkg test t".into(), exe: "true".into(), dir: ".".into() };
+        let bin = TestBin { label: "pkg test t".into(), exe: "true".into(), dir: ".".into(), gpu: false };
         let env_of = |c: &std::process::Command, name: &str| {
             c.get_envs().find(|(k, _)| *k == OsStr::new(name)).and_then(|(_, v)| v).map(|v| v.to_string_lossy().into_owned())
         };
