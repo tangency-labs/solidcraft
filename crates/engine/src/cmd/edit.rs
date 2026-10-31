@@ -1608,6 +1608,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "plastic.lip"
                 | "plastic.snap_fit"
                 | "plastic.rest"
+                | "frame.end_cap"
                 | "frame.member"
         );
     if !constructor {
@@ -1655,6 +1656,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let shared = kept.clone().unwrap_or_default();
     trial.model.keep(Some(shared.clone()));
     trial.active_component = old.component;
+    if let FeatureKind::FrameEndCap { ends, .. } = &old.kind
+        && let Some(anchor) = ends.first().and_then(|e| super::sketch::face::anchor(&e.plane))
+    {
+        trial.active_occurrence_path = (!anchor.author_path.is_empty()).then(|| anchor.author_path.clone());
+    }
     if let FeatureKind::Emboss { face: Some(face), .. } = &old.kind {
         trial.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
     }

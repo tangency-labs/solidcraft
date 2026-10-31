@@ -33,6 +33,7 @@ pub const DOCUMENTED: &[&str] = &[
     "file.insert_step",
     "file.save_mesh",
     "file.send_to_slicer",
+    "frame.end_cap",
     "joint.as_built",
     "joint.cam",
     "joint.create",

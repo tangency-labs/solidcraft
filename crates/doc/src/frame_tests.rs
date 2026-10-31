@@ -411,3 +411,106 @@ fn a_line_a_hair_off_vertical_is_vertical() {
     let (_, y) = member_axes(Vec3::new(1e-3, 0.0, 1.0), 0.0).unwrap();
     assert!(y.z > 0.0 && y.x < 0.0, "{y:?}");
 }
+
+#[test]
+fn end_cap_outlines_inset_and_chamfer_exactly() {
+    use crate::end_cap::{chamfered, inset};
+    // A 40 square with corners of radius 6, in by 3: a 34 square with corners of radius 3.
+    let tube = Profile::RectTube { width: 40.0, height: 40.0, wall: 3.0, outer_radius: Some(6.0) }.region().unwrap();
+    let lp = inset(&tube.outer, 3.0).unwrap();
+    close(lp.signed_area(), 34.0 * 34.0 - (4.0 - std::f64::consts::PI) * 9.0, "rounded inset");
+    // In by 8, past the rounding: a sharp 24 square.
+    close(inset(&tube.outer, 8.0).unwrap().signed_area(), 24.0 * 24.0, "sharp inset");
+    // Chamfers at least the rounding cut it away; shorter ones are refused.
+    close(chamfered(&lp, 3.0).unwrap().signed_area(), 34.0 * 34.0 - 4.0 * 4.5, "chamfer");
+    assert!(chamfered(&lp, 2.0).is_err());
+    assert!(chamfered(&lp, 17.0).is_err());
+    let round = Profile::RoundTube { diameter: 40.0, wall: 3.0 }.region().unwrap();
+    close(inset(&round.outer, 2.0).unwrap().signed_area(), std::f64::consts::PI * 324.0, "round inset");
+    assert!(inset(&round.outer, 20.0).is_err());
+    assert!(chamfered(&inset(&round.outer, 2.0).unwrap(), 1.0).is_err());
+    // A 40 x 40 x 4 angle in by 1: an L 38 long each way and 2 thick, 38 * 2 + 36 * 2.
+    let angle = Profile::Angle { width: 40.0, height: 40.0, thickness: 4.0, root_radius: Some(0.0), toe_radius: Some(0.0) }.region().unwrap();
+    let l = inset(&angle.outer, 1.0).unwrap();
+    close(l.signed_area(), 148.0, "angle inset");
+    // Five outside corners lose 0.5 * 0.5 / 2 each; the inside corner stays. A chamfer of 1 eats
+    // the 2 mm toes whole.
+    close(chamfered(&l, 0.5).unwrap().signed_area(), 148.0 - 5.0 * 0.125, "angle chamfer");
+    assert!(chamfered(&l, 1.0).is_err());
+    // Half the leg thickness or more leaves no plate.
+    assert!(inset(&angle.outer, 2.0).is_err());
+    assert!(inset(&angle.outer, 2.5).is_err());
+    // A root rounding of 3 grows to 4 and keeps its fillet: 16 - 4 pi more than the sharp L.
+    let rooted = Profile::Angle { width: 40.0, height: 40.0, thickness: 4.0, root_radius: Some(3.0), toe_radius: Some(0.0) }.region().unwrap();
+    close(inset(&rooted.outer, 1.0).unwrap().signed_area(), 148.0 + 16.0 - 4.0 * std::f64::consts::PI, "rooted angle inset");
+    // A 100 x 50 I-beam (web 4.5, flanges 7) in by 1: flanges 48 x 5, a web 2.5 x 88.
+    let beam = Profile::IBeam { height: 100.0, width: 50.0, web: 4.5, flange: 7.0, root_radius: Some(0.0) }.region().unwrap();
+    close(inset(&beam.outer, 1.0).unwrap().signed_area(), 2.0 * 48.0 * 5.0 + 2.5 * 88.0, "beam inset");
+    assert!(inset(&beam.outer, 2.3).is_err());
+    let channel =
+        Profile::Channel { height: 100.0, width: 50.0, web: 6.0, flange: 8.0, root_radius: Some(5.0), toe_radius: Some(2.0) }.region().unwrap();
+    let c = inset(&channel.outer, 1.5).unwrap();
+    assert!(chamfered(&c, 3.0).is_err(), "3 + 3 is more than the 5 mm flange tip");
+    let cut = chamfered(&c, 2.0).unwrap();
+    assert!(cut.signed_area() < c.signed_area() && cut.signed_area() > c.signed_area() - 30.0);
+    for d in [f64::NAN, f64::INFINITY, -1.0, 1e300] {
+        let _ = inset(&tube.outer, d).and_then(|l| chamfered(&l, d));
+    }
+}
+
+#[test]
+fn end_caps_close_open_sections_with_the_outside_of_the_profile() {
+    use crate::end_cap::cap_outline;
+    // Closed sections keep their own outline: the rounded tube, the round tube.
+    let tube = Profile::RectTube { width: 40.0, height: 30.0, wall: 3.0, outer_radius: Some(6.0) }.region().unwrap();
+    close(cap_outline(&tube.outer).signed_area(), tube.outer.signed_area(), "rect tube");
+    let round = Profile::RoundTube { diameter: 40.0, wall: 3.0 }.region().unwrap();
+    close(cap_outline(&round.outer).signed_area(), round.outer.signed_area(), "round tube");
+    // Open sections (an L, a C, an I) get the rectangle round them.
+    let open = [
+        (Profile::Angle { width: 40.0, height: 30.0, thickness: 4.0, root_radius: Some(3.0), toe_radius: Some(1.0) }, 40.0 * 30.0),
+        (Profile::Channel { height: 100.0, width: 50.0, web: 6.0, flange: 8.0, root_radius: Some(5.0), toe_radius: Some(2.0) }, 100.0 * 50.0),
+        (Profile::IBeam { height: 100.0, width: 50.0, web: 4.5, flange: 7.0, root_radius: Some(4.5) }, 100.0 * 50.0),
+    ];
+    for (p, area) in open {
+        close(cap_outline(&p.region().unwrap().outer).signed_area(), area, "open section");
+    }
+    // The outside of the profile, rounds and chamfers included: a 40 x 40 extrusion with r 3
+    // corners but a 2 x 2 chamfer at the bottom left, and a 6 wide, 5 deep slot in each side,
+    // gets the rounded, chamfered square with the slots closed: 1600 - 3 r² (1 - π/4) - 2.
+    use solidcraft_geom::{Loop2, Seg2, Vec2};
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let (h, r, w, dp) = (20.0, 3.0, 3.0, 5.0);
+    let v = Vec2::new;
+    let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+    let round = |center: Vec2, start: f64| Seg2::Arc { center, radius: r, start, sweep: FRAC_PI_2 };
+    let segs = vec![
+        line(v(-h + 2.0, -h), v(-w, -h)),
+        line(v(-w, -h), v(-w, -h + dp)),
+        line(v(-w, -h + dp), v(w, -h + dp)),
+        line(v(w, -h + dp), v(w, -h)),
+        line(v(w, -h), v(h - r, -h)),
+        round(v(h - r, -h + r), -FRAC_PI_2),
+        line(v(h, -h + r), v(h, -w)),
+        line(v(h, -w), v(h - dp, -w)),
+        line(v(h - dp, -w), v(h - dp, w)),
+        line(v(h - dp, w), v(h, w)),
+        line(v(h, w), v(h, h - r)),
+        round(v(h - r, h - r), 0.0),
+        line(v(h - r, h), v(w, h)),
+        line(v(w, h), v(w, h - dp)),
+        line(v(w, h - dp), v(-w, h - dp)),
+        line(v(-w, h - dp), v(-w, h)),
+        line(v(-w, h), v(-h + r, h)),
+        round(v(-h + r, h - r), FRAC_PI_2),
+        line(v(-h, h - r), v(-h, w)),
+        line(v(-h, w), v(-h + dp, w)),
+        line(v(-h + dp, w), v(-h + dp, -w)),
+        line(v(-h + dp, -w), v(-h, -w)),
+        line(v(-h, -w), v(-h, -h + 2.0)),
+        line(v(-h, -h + 2.0), v(-h + 2.0, -h)),
+    ];
+    let cap = cap_outline(&Loop2 { segs });
+    close(cap.signed_area(), 1600.0 - 3.0 * r * r * (1.0 - PI / 4.0) - 2.0, "slotted extrusion");
+    assert_eq!(cap.segs.iter().filter(|s| matches!(s, Seg2::Arc { .. })).count(), 3, "its three rounds are kept");
+}

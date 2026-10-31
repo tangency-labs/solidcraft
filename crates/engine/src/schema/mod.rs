@@ -57,6 +57,7 @@ mod tests;
 pub mod component;
 pub mod construct;
 pub mod edit;
+pub mod end_cap;
 pub mod features;
 pub mod inspect;
 pub mod joints;

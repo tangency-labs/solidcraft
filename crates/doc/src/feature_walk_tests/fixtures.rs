@@ -30,6 +30,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         |h: Value| json!({"type": "hole", "position": o, "direction": [0, 0, 1], "diameter": "hole.diameter", "depth": "hole.depth", "hole": h});
     vec![
         (
+            "frame_end_cap",
+            json!({"type":"frame_end_cap","ends":[{"plane":plane("cap1"),"member":{"feature":7,"line":"l1"}}],"thickness":"cap.thickness","ratio":"cap.ratio","chamfer":"cap.chamfer","direction":"inward"}),
+        ),
+        (
             "body_transfer",
             json!({"type": "body_transfer", "bodies": ["B"], "from": 0, "to": 1, "transform": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]}),
         ),

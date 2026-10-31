@@ -365,7 +365,7 @@ fn at_most(what: &str, r: f64, room: f64, why: &str) -> Result<()> {
 }
 
 /// A number for a name: up to four decimals, without trailing zeros.
-fn short(x: f64) -> String {
+pub(crate) fn short(x: f64) -> String {
     let t = format!("{x:.4}");
     let t = if t.contains('.') { t.trim_end_matches('0').trim_end_matches('.') } else { &t };
     if t == "-0" { "0".into() } else { t.to_string() }
