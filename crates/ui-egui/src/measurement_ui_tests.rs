@@ -210,6 +210,65 @@ fn the_view_numbers_the_two_picks() {
     }
 }
 
+/// The labels in the view can be dragged away from the part (#8510): each follows the pointer,
+/// keeps a leader to what it measures, picks nothing and starts no box selection on the way, and
+/// goes back to its own place on a double-click or with the next measurement.
+#[test]
+fn the_measure_labels_drag_away_from_the_part_and_back() {
+    let mut h = vertex_measurement([0., 0., 0.], [-3., 4., -12.]);
+    h.call("ui.view", json!({"view": "iso"}));
+    painted_text(&mut h);
+    let own = component_rects();
+    let measurement = result(&h).clone();
+    let picks = h.call("ui.selection", json!({}))["result"].clone();
+    let drag = |h: &mut Harness, from: egui::Pos2, by: egui::Vec2| {
+        h.call("ui.drag", json!({"x0": from.x, "y0": from.y, "x1": from.x + by.x, "y1": from.y + by.y, "steps": 6}));
+        painted_text(h);
+    };
+    // The distance, then the Z part, each dragged by the grabbed point away from the part.
+    for (i, by) in [(0, egui::vec2(180.0, -130.0)), (3, egui::vec2(-160.0, 90.0))] {
+        let from = component_rects()[i].left_top() + egui::vec2(6.0, 4.0);
+        let before = component_rects();
+        drag(&mut h, from, by);
+        let after = component_rects();
+        let moved = after[i].min - before[i].min;
+        assert!((moved - by).length() < 1.0, "label {i} follows the pointer: moved {moved:?}, dragged {by:?}");
+        if i == 3 {
+            assert_eq!(after[..3], before[..3], "only the dragged label moves");
+        }
+        assert_eq!(*result(&h), measurement, "dragging a label measures nothing new");
+        assert_eq!(h.call("ui.selection", json!({}))["result"], picks, "dragging a label picks nothing");
+        assert!(h.app.viewport.boxsel.is_none(), "dragging a label starts no box selection");
+    }
+    let dragged = component_rects();
+    assert!(!dragged[0].intersects(own[0]), "the distance left its place over the part: {:?} vs {:?}", dragged[0], own[0]);
+    // The view turns: a dragged label stays away from the line by the same amount.
+    h.call("ui.view", json!({"view": "front"}));
+    painted_text(&mut h);
+    let turned = component_rects();
+    h.call("ui.view", json!({"view": "iso"}));
+    painted_text(&mut h);
+    assert_eq!(component_rects()[0], dragged[0], "back in the same view, back in the same place");
+    assert!(turned.iter().all(|r| r.is_finite()));
+    // A double-click puts the distance back.
+    let at = dragged[0].center();
+    h.call("ui.click", json!({"x": at.x, "y": at.y, "double": true}));
+    painted_text(&mut h);
+    assert_eq!(component_rects()[0], own[0], "a double-click puts the label back");
+    // Another measurement puts the Z part back too.
+    let offsets = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        Kind::Measure { labels, .. } => (0..4).map(|i| labels.offset(i)).collect::<Vec<_>>(),
+        _ => panic!("expected the Measure dialog"),
+    };
+    assert_ne!(offsets(&h)[3], egui::Vec2::ZERO);
+    if let Some(input) = h.app.dialog.as_mut().and_then(|d| d.inputs.first_mut()) {
+        input.items = [[0., 0., 0.], [-3., 4., 0.]].into_iter().map(|p| Sel::Vertex { body: "Box".into(), point: p.into() }).collect();
+    }
+    painted_text(&mut h);
+    assert!((result(&h)["distance_mm"].as_f64().unwrap() - 5.).abs() < 1e-8, "measured the new picks");
+    assert!(offsets(&h).iter().all(|o| *o == egui::Vec2::ZERO), "{:?}", offsets(&h));
+}
+
 #[test]
 fn the_distance_row_has_a_copy_button_that_copies_the_shown_value() {
     let mut h = vertex_measurement([0., 0., 0.], [3., 4., 0.]);

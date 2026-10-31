@@ -38,7 +38,7 @@ pub enum Kind {
     /// Export a snapshot of the current design without adopting the worker's session.
     ExportDxf,
     /// Read the active design's linked designs again (`component.update_links`, with the
-    /// request's options: `component` reads only that link).
+    /// request's options: `component` or `components` reads only those links).
     UpdateLinks,
 }
 
@@ -58,6 +58,8 @@ pub struct Request {
     /// The saved design this request is for, when it must not run on another: one shown in its
     /// place by the time the request starts drops it.
     pub design: Option<String>,
+    /// The chat turn that requested the load. It must still be current when the file lands.
+    pub(crate) chat_turn: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl Request {
@@ -70,6 +72,7 @@ impl Request {
             options: Default::default(),
             allow_hosts: Vec::new(),
             design: None,
+            chat_turn: None,
         }
     }
     fn insert(&self) -> bool {
@@ -94,6 +97,10 @@ impl Request {
     }
     fn answer(&self, r: Result<Value, String>) {
         if let Some(reply) = &self.reply {
+            if crate::control::chat_turn_cancelled(self.chat_turn.as_deref()) {
+                let _ = reply.send(crate::control::cancelled_chat_response());
+                return;
+            }
             let _ = reply.send(match r {
                 Ok(v) => json!({"ok": true, "result": v}),
                 Err(e) => json!({"ok": false, "error": e}),
@@ -183,7 +190,7 @@ impl Running {
         Arc::ptr_eq(&session.doc, &self.base) && session.revision == self.base_revision
     }
     fn cancelled(&self) -> bool {
-        self.progress.is_cancelled()
+        self.progress.is_cancelled() || crate::control::chat_turn_cancelled(self.request.chat_turn.as_deref())
     }
 }
 
@@ -241,6 +248,10 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
 
 /// Queue a file operation; on the web (no threads) it runs now.
 pub fn begin_request(app: &mut SolveApp, request: Request) -> Result<(), String> {
+    if crate::control::chat_turn_cancelled(request.chat_turn.as_deref()) {
+        request.answer(Err("the agent chat turn ended".into()));
+        return Ok(());
+    }
     if app.file_load.idle() && reuse_open(app, &request) {
         return Ok(());
     }
@@ -320,7 +331,7 @@ fn reuse_open(app: &mut SolveApp, request: &Request) -> bool {
         if !request.options.is_empty() {
             return Ok(false);
         }
-        crate::documents::reuse_path(app, &request.path)
+        crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| crate::documents::reuse_path(app, &request.path))
     });
     match reused {
         Ok(false) => false,
@@ -371,7 +382,16 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         options.remove("path");
         options.retain(|_, v| !v.is_null());
     }
-    let request = Request { path: path.into(), kind, reply: Some(req.reply.clone()), scope, options, allow_hosts: Vec::new(), design: None };
+    let request = Request {
+        path: path.into(),
+        kind,
+        reply: Some(req.reply.clone()),
+        scope,
+        options,
+        allow_hosts: Vec::new(),
+        design: None,
+        chat_turn: req.chat_turn,
+    };
     let _ = begin_request(app, request);
     None
 }
@@ -405,6 +425,10 @@ fn start(app: &mut SolveApp) {
         return;
     }
     let Some(request) = app.file_load.queued.pop_front() else { return };
+    if crate::control::chat_turn_cancelled(request.chat_turn.as_deref()) {
+        request.answer(Err("the agent chat turn ended".into()));
+        return;
+    }
     if reuse_open(app, &request) {
         return;
     }
@@ -865,6 +889,18 @@ fn compute(
 }
 
 pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
+    // Stop must release the waiting slot even if the worker has not reached its next check.
+    let chat_cancelled = app.file_load.running.as_ref().is_some_and(|r| crate::control::chat_turn_cancelled(r.request.chat_turn.as_deref()));
+    if chat_cancelled && let Some(running) = &app.file_load.running {
+        running.progress.cancel();
+    }
+    // As with FileLoad::cancel, a publishing export retains its worker until it reports back.
+    if chat_cancelled
+        && app.file_load.running.as_ref().is_some_and(|r| r.request.kind != Kind::ExportDxf)
+        && let Some(running) = app.file_load.running.take()
+    {
+        running.request.answer(Err("the agent chat turn ended".into()));
+    }
     if let Some(running) = &mut app.file_load.running {
         step_staged(running);
     }
@@ -906,11 +942,16 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 let (id, _) = request.command();
                 app.session.accept_computed(made.session);
                 app.big_operation = true;
-                crate::linked_source::read_again(app, request.options.get("component").and_then(Value::as_u64));
+                crate::linked_source::read_again(app, &request.options, &made.result);
                 let r = Ok(made.result);
                 app.finish_command(id, &r);
                 let language = crate::i18n::Locale::for_language(&app.preferences.language);
                 app.set_status(language.format("ui.command_done", &[("command", language.label(crate::command_label(id)))]), false);
+                // A design it could not read is said as when that was all it was asked.
+                if let Some(f) = r.as_ref().ok().and_then(|v| v["failed"].as_array()).and_then(|f| f.first()) {
+                    let (name, why) = (f["name"].as_str().unwrap_or_default(), f["error"].as_str().unwrap_or_default());
+                    app.set_status(format!("{name}: {why}"), true);
+                }
                 request.answer(r);
             }
             Ok(_) if reuse_open(app, request) => {}
@@ -922,7 +963,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                     app.session.accept_computed(made.session);
                     app.big_operation = true;
                 } else {
-                    crate::documents::adopt(app, made.session);
+                    crate::agent_chat::with_tool_request(app, request.chat_turn.as_ref(), |app| crate::documents::adopt(app, made.session));
                     if request.kind == Kind::Open {
                         app.home.add_recent(&request.path);
                     }

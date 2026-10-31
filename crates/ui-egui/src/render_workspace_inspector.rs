@@ -1654,9 +1654,10 @@ fn base_appearance(app: &mut SolveApp, ui: &mut egui::Ui) {
 mod tests;
 
 pub(super) fn fit_subject(app: &mut SolveApp) -> Result<(), String> {
-    // Capture the current navigation orientation before the engine's view command.
+    // Capture the current navigation orientation before the engine's view command, which fits
+    // the product to the picture's aspect: what the preview frames and Export PNG writes.
     app.run("render.camera.set", json!({"camera":app.cam}))?;
-    app.run("render.camera.fit", json!({}))?;
+    app.run("render.camera.fit", json!({"aspect":super::image_aspect(&app.render_workspace.view.draft)}))?;
     app.follow_view_request(false);
     app.fit_view();
     Ok(())

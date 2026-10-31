@@ -64,6 +64,7 @@ static GERMAN: Catalog = Catalog::new("de", "Deutsch", include_str!(concat!(env!
 /// English in UK spelling: only the messages whose spelling differs; the rest are English's.
 static ENGLISH_UK: Catalog = Catalog::new("en-GB", "English (UK)", include_str!(concat!(env!("OUT_DIR"), "/locales/en-GB.json")));
 static SPANISH: Catalog = Catalog::new("es", "Español (España)", include_str!(concat!(env!("OUT_DIR"), "/locales/es.json")));
+static FINNISH: Catalog = Catalog::new("fi", "Suomi", include_str!(concat!(env!("OUT_DIR"), "/locales/fi.json")));
 static FRENCH: Catalog = Catalog::new("fr", "Français", include_str!(concat!(env!("OUT_DIR"), "/locales/fr.json")));
 static GALICIAN: Catalog = Catalog::new("gl", "Galego", include_str!(concat!(env!("OUT_DIR"), "/locales/gl.json")));
 static HEBREW: Catalog = Catalog::new("he", "עברית", include_str!(concat!(env!("OUT_DIR"), "/locales/he.json")));
@@ -99,6 +100,7 @@ pub const LOCALES: &[&Catalog] = &[
     &GERMAN,
     &ENGLISH_UK,
     &SPANISH,
+    &FINNISH,
     &FRENCH,
     &GALICIAN,
     &HEBREW,
@@ -275,6 +277,26 @@ thread_local! {
     // Helpers without an app reference share a render scope. Nested renders restore
     // their caller's locale; no owned language strings or persistent global setting.
     static CURRENT: Cell<Locale> = const { Cell::new(Locale(&ENGLISH)) };
+    /// Theme-authored language maps are already resolved and are not catalog source labels.
+    static RESOLVED_LABELS: Cell<bool> = const { Cell::new(false) };
+}
+
+#[must_use]
+pub(crate) struct ResolvedLabels {
+    previous: bool,
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+/// Shared controls can render supplied translations verbatim while retaining catalog messages.
+pub(crate) fn resolved_labels() -> ResolvedLabels {
+    let previous = RESOLVED_LABELS.with(|labels| labels.replace(true));
+    ResolvedLabels { previous, _thread: std::marker::PhantomData }
+}
+
+impl Drop for ResolvedLabels {
+    fn drop(&mut self) {
+        RESOLVED_LABELS.with(|labels| labels.set(self.previous));
+    }
 }
 
 #[must_use]
@@ -304,7 +326,7 @@ pub fn tr(id: &str) -> &str {
     CURRENT.with(|current| current.get().text(id))
 }
 pub fn tr_label(label: &str) -> &str {
-    CURRENT.with(|current| current.get().label(label))
+    if RESOLVED_LABELS.with(Cell::get) { label } else { CURRENT.with(|current| current.get().label(label)) }
 }
 
 /// Every English catalog entry `(id, text)`, for Preferences search to match a translation
@@ -329,6 +351,24 @@ pub fn tr_diagnostic(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn theme_options_resolved_labels_are_verbatim_and_restore_catalog_adapters() {
+        let _language = super::scope("de");
+        assert_eq!(super::tr_label("Profile"), "Profil");
+        {
+            let _labels = super::resolved_labels();
+            assert_eq!(super::tr_label("Profile"), "Profile");
+            assert_eq!(super::tr_label("ui.cancel"), "ui.cancel");
+            assert_ne!(super::tr("ui.cancel"), "ui.cancel", "stable catalog messages remain translated");
+            {
+                let _nested = super::resolved_labels();
+                assert_eq!(super::tr_label("Profile"), "Profile");
+            }
+            assert_eq!(super::tr_label("Profile"), "Profile");
+        }
+        assert_eq!(super::tr_label("Profile"), "Profil");
+    }
+
     use super::*;
 
     /// Strings a pull request adds under `assets/locales/pending/` work before they are folded
@@ -1152,6 +1192,18 @@ mod tests {
         assert_eq!(gl.format("dialog.selected_count", &[("count", "2")]), "↖ 2 seleccionados");
         assert_eq!(gl.label("Fillet"), "Arredondamento");
         assert_eq!(gl.label("NonExistentKey"), "NonExistentKey");
+    }
+
+    #[test]
+    fn finnish_catalog_is_registered_and_translates_keys() {
+        let fi = Locale::for_language("fi");
+        assert_eq!(fi.name(), "Suomi");
+        assert!(is_supported("fi"));
+        assert_eq!(fi.text("ui.preferences"), "Asetukset");
+        assert_eq!(fi.format("document.save_changes", &[("name", "My {design}")]), "Tallennetaanko muutokset tiedostoon My {design}?");
+        assert_eq!(fi.format("dialog.selected_count", &[("count", "2")]), "↖ 2 valittu");
+        assert_eq!(fi.label("Fillet"), "Pyöristys");
+        assert_eq!(fi.label("NonExistentKey"), "NonExistentKey");
     }
 
     #[test]

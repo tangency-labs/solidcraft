@@ -331,6 +331,13 @@ Orbit around, zoom to the cursor, the SpaceMouse, the middle double-click, F6 an
 view or navigation cube all work and
 **Fit Product** frames visible product bodies without including sketches or selection.
 
+While Frame shows the picture's frame, **Fit Product** and the fit on entering Render keep
+the product inside that frame rather than the viewport, so a picture taller than wide moves
+the camera back. The fit on entering waits for the saved setup to load, so it frames that
+setup's aspect, not the draft it replaces. `render.camera.fit` takes the picture's `aspect`
+(width over height, 0.000001 to 1000000, default 1) and refuses a fit whose camera would be
+out of range, leaving the current camera as it was.
+
 Preview drafts do not make the document dirty until saved. Unknown backend preferences
 and unsupported modes remain saved intent: the strict resolver reports the unsupported
 viewport request. **Use Integrated Preview** is an explicit draft change, never an

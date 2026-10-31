@@ -319,6 +319,28 @@ fn pictures_show_the_surface_analysis() {
     assert!(reachable > 1000 && under > 1000, "accessibility: {reachable} reachable, {under} blocked pixels");
 }
 
+/// A flat face of a box keeps its zebra colour while the view turns a little at a time (#2153):
+/// a horizontal face reflected straight ahead, on the edge between a black and a white stripe,
+/// and rounding flipped it from one step to the next.
+#[test]
+fn zebra_on_flat_faces_holds_still_while_the_view_turns() {
+    let Some(c) = capturer() else { return };
+    let mut s = session(&[("solid.box", json!({"length": 60, "width": 40, "height": 20}))]);
+    s.execute("inspect.zebra", &json!({})).unwrap();
+    let home = view::home_camera(&s);
+    let whites: Vec<usize> = (0..24)
+        .map(|step| {
+            let mut cam = home;
+            cam.yaw += f64::from(step) * 0.11_f64.to_radians();
+            let img = c.rgba(&view::scene_with_guides(&s, &cam, None, Guides { grid: false, axes: false }), &cam, 320, 200).unwrap();
+            pixels(&img).filter(|p| p[0] > 225 && p[1] > 225 && p[2] > 225).count()
+        })
+        .collect();
+    let (least, most) = (whites.iter().min().copied().unwrap_or(0), whites.iter().max().copied().unwrap_or(0));
+    assert!(most > 1000, "white stripes: {whites:?}");
+    assert!((most - least) * 10 < most, "white pixels jump while the view turns by 0.11 degree steps: {whites:?}");
+}
+
 fn colors_of(c: [[f32; 3]; 2]) -> [[u8; 3]; 2] {
     c.map(|rgb| rgb.map(|x| (x * 255.0).round() as u8))
 }

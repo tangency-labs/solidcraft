@@ -307,6 +307,37 @@ fn centre_and_midpoint_tracking_is_visual_in_idle_and_drawing_modes() {
     assert_eq!(h.app.session.undo.len(), undo);
 }
 
+/// #9105: while a drawing tool waits for a point, a rectangle corner starts a guide as a
+/// midpoint does; idle hovering and the preference turned off keep the old centre/MID-only guides.
+#[test]
+fn a_corner_starts_a_guide_while_drawing_unless_turned_off() {
+    use solidcraft_engine::geom::Vec2;
+    let mut h = tracking_fixture();
+    assert!(h.app.preferences.sketch_tracking_points, "on by default");
+    let before = h.app.session.doc.to_json();
+    let corner = Vec2::new(30.0, 20.0);
+    let hover_corner_then_level = |h: &mut Harness| {
+        step(h, json!({"move":{"sketch":[30,20]}}));
+        step(h, json!({"move":{"sketch":[45,20]}}));
+        h.app.viewport.tracking.guide
+    };
+    assert!(hover_corner_then_level(&mut h).is_none(), "idle: a corner is no reference");
+    for tool in ["sketch.line", "sketch.rectangle.two_point", "sketch.circle.center"] {
+        h.app.start(tool);
+        let (a, b) = hover_corner_then_level(&mut h).unwrap_or_else(|| panic!("{tool}: a guide from the corner"));
+        assert!(a.dist(corner) < 1e-9 && b.dist(Vec2::new(45.0, 20.0)) < 1e-4, "{tool}: {a:?} {b:?}");
+        step(&mut h, json!({"key":"Escape"}));
+    }
+    h.call("ui.prefs", json!({"sketch_tracking_points": false}));
+    h.app.start("sketch.line");
+    assert!(hover_corner_then_level(&mut h).is_none(), "the preference keeps the old guides");
+    step(&mut h, json!({"move":{"sketch":[0,20]}}));
+    step(&mut h, json!({"move":{"sketch":[0,-10]}}));
+    assert!(h.app.viewport.tracking.guide.is_some(), "midpoints still guide");
+    step(&mut h, json!({"key":"Escape"}));
+    assert_eq!(h.app.session.doc.to_json(), before, "guides add no geometry or constraints");
+}
+
 #[test]
 fn two_recent_midpoints_snap_where_their_guides_meet() {
     use solidcraft_engine::geom::Vec2;

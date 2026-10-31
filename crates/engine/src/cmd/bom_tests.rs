@@ -482,6 +482,91 @@ fn bom_types_decide_what_is_a_row_and_what_counts_inside_it() {
 }
 
 #[test]
+fn group_children_keeps_an_inseparable_parts_purchased_children_in_its_row() {
+    let mut s = Session::default();
+    for (name, parent, part_number, bom_type) in
+        [("Sub", "root", "SUB-1", "inseparable"), ("Screw", "Sub", "M2x10", "purchased"), ("Pin", "Sub", "PIN-1", "normal")]
+    {
+        run(&mut s, "component.create", json!({"name": name, "parent": parent, "activate": false}));
+        run(&mut s, "component.metadata.set", json!({"component": name, "part_number": part_number, "bom_type": bom_type}));
+    }
+    run(&mut s, "occurrence.copy", json!({"component": "Screw", "parent": "Sub"}));
+    run(&mut s, "occurrence.copy", json!({"component": "Sub"}));
+    let plain = run(&mut s, "assembly.bom", json!({}));
+    assert_eq!(typed(&plain), [row("M2x10", "purchased", 4), row("SUB-1", "inseparable", 2)]);
+    for levels in ["flat", "top"] {
+        for group in ["part_number", "definition"] {
+            let r = run(&mut s, "assembly.bom", json!({"levels": levels, "group_by": [group], "group_children": true}));
+            assert_eq!(typed(&r), [row("SUB-1", "inseparable", 2)], "{r}");
+            assert_eq!(r["total_occurrences"], plain["total_occurrences"]);
+            let children = r["rows"][0]["children"].as_array().unwrap();
+            assert_eq!(children.len(), 1, "the made Pin stays inside the inseparable part: {r}");
+            assert_eq!(children[0]["item"], "1.1");
+            assert_eq!(children[0]["part_number"], "M2x10");
+            assert_eq!(children[0]["bom_type"], "purchased");
+            assert_eq!(children[0]["each"], 2);
+            assert_eq!(children[0]["count"], 4);
+        }
+    }
+    let path = scratch("inseparable-kit").join("bom.csv");
+    run(&mut s, "assembly.bom", json!({"group_children": true, "path": path}));
+    let text = std::fs::read_to_string(path).unwrap();
+    let rows: Vec<&str> = text.lines().skip(1).collect();
+    assert_eq!(rows, ["\"1\",\"SUB-1\",\"\",\"\",\"2\",\"Sub\"", "\"1.1\",\"M2x10\",\"\",\"\",\"4\",\"Screw\""]);
+
+    // In its own context the component still lists all its parts, regardless of its type.
+    let own = run(&mut s, "assembly.bom", json!({"component": "Sub", "group_children": true}));
+    assert_eq!(typed(&own), [row("M2x10", "purchased", 2), row("PIN-1", "normal", 1)]);
+    // Only numbered parts fold; turning the option off or removing the number keeps the flat list.
+    run(&mut s, "component.metadata.set", json!({"component": "Sub", "part_number": ""}));
+    assert_eq!(run(&mut s, "assembly.bom", json!({"group_children": true}))["rows"], run(&mut s, "assembly.bom", json!({}))["rows"]);
+}
+
+#[test]
+fn an_inseparable_kit_finds_nested_purchased_parts_without_opening_purchased_or_reference_parts() {
+    let mut s = Session::default();
+    for (name, parent, bom_type) in [
+        ("Sub", "root", "inseparable"),
+        ("Carrier", "Sub", "normal"),
+        ("Nested", "Carrier", "inseparable"),
+        ("Bolt", "Nested", "purchased"),
+        ("Phantom", "Sub", "phantom"),
+        ("Reference", "Sub", "reference"),
+        ("Bought", "Sub", "purchased"),
+    ] {
+        run(&mut s, "component.create", json!({"name": name, "parent": parent, "activate": false}));
+        run(&mut s, "component.metadata.set", json!({"component": name, "part_number": name, "bom_type": bom_type}));
+    }
+    for parent in ["Phantom", "Reference", "Bought"] {
+        run(&mut s, "occurrence.copy", json!({"component": "Bolt", "parent": parent}));
+    }
+    let plain = run(&mut s, "assembly.bom", json!({}));
+    assert_eq!(typed(&plain), [row("Bolt", "purchased", 2), row("Bought", "purchased", 1), row("Sub", "inseparable", 1)]);
+    let folded = run(&mut s, "assembly.bom", json!({"group_children": true}));
+    assert_eq!(typed(&folded), [row("Sub", "inseparable", 1)]);
+    assert_eq!(folded["total_occurrences"], plain["total_occurrences"]);
+    let children = &folded["rows"][0]["children"];
+    assert_eq!(children.as_array().unwrap().len(), 2, "{folded}");
+    assert_eq!(children[0]["part_number"], "Bolt");
+    assert_eq!(children[0]["each"], 2);
+    assert_eq!(children[1]["part_number"], "Bought");
+    assert_eq!(children[1]["each"], 1);
+
+    // Two definitions with the same number but different purchased contents stay separate kits.
+    run(&mut s, "component.create", json!({"name": "Other", "activate": false}));
+    run(&mut s, "component.metadata.set", json!({"component": "Other", "part_number": "Sub", "bom_type": "inseparable"}));
+    run(&mut s, "occurrence.copy", json!({"component": "Bolt", "parent": "Other"}));
+    let different = run(&mut s, "assembly.bom", json!({"group_children": true}));
+    assert_eq!(typed(&different), [row("Sub", "inseparable", 1), row("Sub", "inseparable", 1)]);
+    assert_eq!(different["total_occurrences"], 6);
+    // Buying the whole parent makes one purchased row, with no children listed.
+    set_type(&mut s, "Sub", "purchased");
+    let bought = run(&mut s, "assembly.bom", json!({"group_children": true}));
+    let sub = bought["rows"].as_array().unwrap().iter().find(|r| r["definition"] == "Sub").unwrap();
+    assert!(sub.get("children").is_none(), "{bought}");
+}
+
+#[test]
 fn a_phantom_counts_what_it_holds_in_its_parent_merged_with_the_same_parts() {
     // A fastener set (no bodies) of two screws, placed three times, and one more screw placed directly.
     let mut s = Session::default();

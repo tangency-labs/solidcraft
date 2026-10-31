@@ -40,6 +40,13 @@ const HALVINGS: usize = 16;
 const AHEAD: usize = 8;
 /// An arc whose sweep gets this close (radians) to 0 or a full turn has run into its start.
 const SWEEP_EPS: f64 = 1e-6;
+/// A line or circle longer or wider than this before a step and shorter or narrower than
+/// `SHRINK_TO` after it was shrunk to a point by that step. An edit's `shrunk` stops at 1e-5,
+/// but a drag's first step shrank a horizontal 20 mm line to 1.05e-5 (#9062): its direction
+/// rows (`b.y - a.y`) scale with its length, so the solve stops wherever the length times the
+/// tilt is under the tolerance, and the next frames took it the rest of the way.
+const SHRINK_FROM: f64 = 1e-3;
+const SHRINK_TO: f64 = 1e-4;
 
 /// What a drag moves, from where it is (`t = 0`) to where the cursor puts it (`t = 1`).
 enum Path {
@@ -179,7 +186,9 @@ pub(super) fn drag_entity(
     let held = |sk: &mut Sketch, last: &Geometry, t: f64, budget: &mut Budget| {
         path.apply(sk, t);
         let kept = keep.as_ref().is_some_and(|keep| {
-            let ok = counted_solve(sk, keep, Some(&last.pos), Analysis::StatusOnly, Some(&mut *budget)).ok() && !last.sweep_wrapped(sk);
+            let ok = counted_solve(sk, keep, Some(&last.pos), Analysis::StatusOnly, Some(&mut *budget)).ok()
+                && !last.sweep_wrapped(sk)
+                && !last.shrank(sk);
             if !ok {
                 last.restore(sk);
                 path.apply(sk, t);
@@ -197,7 +206,8 @@ pub(super) fn drag_entity(
         solves.work += budget.spent() - spent;
         solves.cut |= budget.exhausted();
         solves.numeric |= budget.numeric_exhausted();
-        let outcome = if !ok {
+        // A step that shrank a line to a point only met its constraints without that line.
+        let outcome = if !ok || last.shrank(sk) {
             Step::Failed
         } else if last.sweep_wrapped(sk) {
             Step::Wrapped
@@ -332,7 +342,7 @@ pub(super) fn drag_entity(
         let valid = |before: &Sketch, after: &Sketch| {
             let mut geometry = Geometry::default();
             geometry.take(before);
-            !geometry.sweep_wrapped(after) && solidcraft_sketch::fillets_kept(before, after)
+            !geometry.sweep_wrapped(after) && !geometry.shrank(after) && solidcraft_sketch::fillets_kept(before, after)
         };
         let followed = match (e, line_grab) {
             (Ent::Point(q), _) => solidcraft_sketch::move_point_towards(sk, q, to, max_step, frame.as_mut(), valid),
@@ -583,6 +593,22 @@ impl Geometry {
             let CurveKind::Arc { c, a, b } = *kind else { return false };
             let (Some(s0), Some(s1)) = (sweep(was(c), was(a), was(b)), sweep(now(c), now(a), now(b))) else { return false };
             (s1 - s0).abs() > PI || (clear(s0) && !clear(s1))
+        })
+    }
+
+    /// Did the step shrink a line or circle to a point (from longer or wider than `SHRINK_FROM`
+    /// to under `SHRINK_TO`)? A line with no length has no direction left, so its horizontal,
+    /// parallel or point-on-line constraints hold anything: a solve took that to put a point it
+    /// couldn't reach on the line, and the construction line it was on vanished (#9062).
+    fn shrank(&self, sk: &Sketch) -> bool {
+        let was = |q: usize| self.pos.get(q).copied();
+        self.curves.iter().zip(&sk.curves).any(|((kind, _), now)| match (kind, &now.kind) {
+            (CurveKind::Line { a, b }, _) => match (was(*a).zip(was(*b)), sk.point(*a).zip(sk.point(*b))) {
+                (Some((a0, b0)), Some((a1, b1))) => a0.dist(b0) > SHRINK_FROM && !(a1.dist(b1) >= SHRINK_TO),
+                _ => false,
+            },
+            (CurveKind::Circle { r: r0, .. }, CurveKind::Circle { r: r1, .. }) => *r0 > SHRINK_FROM && !(*r1 >= SHRINK_TO),
+            _ => false,
         })
     }
 }

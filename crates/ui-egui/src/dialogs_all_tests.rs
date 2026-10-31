@@ -1173,3 +1173,73 @@ fn ok_on_a_rolled_back_pattern_editor_says_it_is_not_built() {
     assert!(!error, "{text}");
     assert!(text.starts_with("Pattern changed, but it is after the history marker"), "{text}");
 }
+
+/// The Circular Pattern dialog must show only one field active at a time (#10066): the pick
+/// field's accent ring yields while a text field holds the keyboard, and clicking a pick field
+/// takes the keyboard back.
+#[test]
+fn circular_pattern_dialog_shows_one_active_field_at_a_time() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10})).unwrap();
+    let mut d = Dialog::for_command(&h.app, "solid.pattern.circular").unwrap();
+    d.inputs[1].items = vec![Sel::Axis { name: "Z".into() }];
+    h.app.dialog = Some(d);
+    h.settle();
+    let active = |label: &str| crate::scenario::count_of(&format!("dialog:selection:{label}:active")) == Some(1.0);
+    let keyboard = |h: &Harness| h.ctx.memory(|m| m.focused()).is_some();
+    let click_field = |h: &mut Harness, rect: &str| {
+        let at = crate::scenario::rect_of(rect).unwrap_or_else(|| panic!("{rect} is not drawn")).center();
+        h.step(&json!({"click": [at.x, at.y]})).unwrap();
+        h.frames(2);
+    };
+    // A fresh dialog: the Objects pick field is the one active field, no text field has the keyboard.
+    assert!(!keyboard(&h), "nothing holds the keyboard when the dialog opens");
+    assert_eq!((active("Objects"), active("Axis")), (true, false), "only Objects looks active");
+    // Clicking Quantity: the text field takes the keyboard and no pick field keeps its ring.
+    h.step(&json!({"click": {"handle": "dialog:Quantity"}})).unwrap();
+    h.frames(2);
+    assert!(keyboard(&h), "Quantity holds the keyboard");
+    assert_eq!((active("Objects"), active("Axis")), (false, false), "only the typed field looks active");
+    // Clicking the Axis pick field: it becomes the one active field and takes the keyboard back.
+    click_field(&mut h, "dialog:field:Axis");
+    assert!(!keyboard(&h), "the pick field takes the keyboard from Quantity");
+    assert_eq!((active("Objects"), active("Axis")), (false, true), "only Axis looks active");
+    assert_eq!(h.app.dialog.as_ref().unwrap().active, 1, "picks still go to Axis");
+}
+
+/// #10057: a sketch clicked for a pattern's objects is not taken in silence. In the view, the
+/// Browser and the History, with either Object Type, the dialog says a sketch is neither a body
+/// nor a feature and what to do instead, as a hint rather than an error; nothing is picked and
+/// the selection stays as it was.
+#[test]
+fn pattern_says_why_a_clicked_sketch_is_not_taken() {
+    for (dock, ty) in [("bottom", "Bodies"), ("left", "Features"), ("under_browser", "Bodies")] {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("view.history_layout", json!({"dock": dock})).unwrap();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center": [20, 0], "radius": 5})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("select.clear", json!({})).unwrap();
+        h.app.start("solid.pattern.circular");
+        h.frames(4);
+        mirror_object_type(&mut h, ty);
+        for click in [json!({"browser": "Sketch1"}), json!({"handle": "timeline:Sketch1"}), json!({"world": [25, 0, 0]})] {
+            h.app.dialog.as_mut().unwrap().error = None;
+            // Out of double-click time: a double click opens the sketch to edit.
+            h.frames(30);
+            h.step(&json!({ "click": click })).unwrap();
+            h.frames(2);
+            let d = h.app.dialog.as_ref().expect("the pattern stays open");
+            assert!(matches!(d.kind, Kind::PatternCirc { .. }), "{dock} {ty} {click}");
+            assert_eq!(d.error.as_deref(), Some(crate::dialogs::SKETCH_NOT_OBJECT), "{dock} {ty} {click}");
+            assert!(d.inputs[0].items.is_empty(), "{dock} {ty} {click}: the sketch is not picked");
+            assert!(h.app.session.selection.is_empty(), "{dock} {ty} {click}: the selection stays as it was");
+        }
+    }
+    assert!(crate::dialogs::missing_pick(crate::dialogs::SKETCH_NOT_OBJECT), "shown as what to pick, with no Create Issue");
+    let _japanese = crate::i18n::scope("ja");
+    assert!(!crate::i18n::tr_label(crate::dialogs::SKETCH_NOT_OBJECT).is_ascii(), "the hint reads in the user's language");
+    assert!(!crate::i18n::tr("ui.pattern_object_type_tip").is_ascii(), "so does the Object Type tooltip");
+}

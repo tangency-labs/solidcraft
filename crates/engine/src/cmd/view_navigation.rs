@@ -35,6 +35,10 @@ const RENDER_SELECT: TypedContract<RenderSelect> = TypedContract::new();
 const STATUS_ITEMS_CONTRACT: TypedContract<crate::schema::view_navigation::StatusItemsParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
+CommandSpec::new("view.status_details", "Viewport Status Details", crate::checked!("view.status_details", status_details))
+    .icon("list").noundo().doc_only()
+    .contract(&STATUS_ITEMS_CONTRACT).output(output_schema_for::<crate::status_details::StatusDetails>)
+    .params("no parameters → current effect settings/detail capabilities and retained per-seam Continuity diagnostics, with current geometry validity; read-only, no evaluation"),
 CommandSpec::new("view.status_items", "Viewport Status Items", crate::checked!("view.status_items", status_items))
     .icon("list").noundo().doc_only()
     .contract(&STATUS_ITEMS_CONTRACT).output(output_schema_for::<crate::status_items::StatusItems>)
@@ -184,6 +188,23 @@ fn normal_target(s: &Session) -> Option<(solidcraft_geom::Vec3, solidcraft_geom:
         Sel::Plane { name } => solidcraft_geom::Plane::named(name).map(|plane| (plane.origin, plane.normal())),
         _ => None,
     })
+}
+
+fn status_details(s: &mut Session, p: &Value) -> Result<Value> {
+    let p = if p.is_null() { json!({}) } else { p.clone() };
+    if !p.as_object().is_some_and(|object| object.is_empty()) {
+        return Err(bad("view.status_details", "parameters must be an empty object"));
+    }
+    let _: crate::schema::view_navigation::StatusItemsParams = serde_json::from_value(p).map_err(|e| bad("view.status_details", e.to_string()))?;
+    let items =
+        s.status_items().into_iter().map(|source| crate::status_details::StatusDetailItem { has_details: source.has_details(), source }).collect();
+    serde_json::to_value(crate::status_details::StatusDetails {
+        document_id: s.document_id.clone(),
+        items,
+        continuity: s.continuity_details(),
+        param_warnings: Vec::new(),
+    })
+    .map_err(|e| bad("view.status_details", e.to_string()))
 }
 
 fn normal_to(s: &mut Session, p: &Value) -> Result<Value> {

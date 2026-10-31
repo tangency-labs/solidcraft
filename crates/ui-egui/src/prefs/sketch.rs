@@ -7,6 +7,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "sketch", app.tr("prefs.sketching"), |ui| {
         ui_kit::checkbox(ui, app.tr("prefs.sketch_tracking_guides"), &mut app.preferences.sketch_tracking_guides)
             .on_hover_text(app.tr("prefs.sketch_tracking_guides_note"));
+        ui.add_enabled_ui(app.preferences.sketch_tracking_guides, |ui| {
+            ui_kit::checkbox(ui, app.tr("prefs.sketch_tracking_points"), &mut app.preferences.sketch_tracking_points)
+                .on_hover_text(app.tr("prefs.sketch_tracking_points_note"));
+        });
         ui_kit::checkbox(ui, app.tr("prefs.sketch_recent_snap"), &mut app.preferences.sketch_recent_snap)
             .on_hover_text(app.tr("prefs.sketch_recent_snap_note"));
         ui_kit::checkbox(ui, app.tr("prefs.sketch_align_points"), &mut app.preferences.sketch_align_points)
@@ -38,6 +42,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ));
         let line_drag = setting::line_drag_draws_one(app, ui).on_hover_text(app.tr("prefs.line_drag_draws_one_note"));
         crate::scenario::publish_target("prefs:line_drag_draws_one", line_drag.rect);
+        let line_arc = setting::line_hover_tangent_arc(app, ui).on_hover_text(app.tr("prefs.line_hover_tangent_arc_note"));
+        crate::scenario::publish_target("prefs:line_hover_tangent_arc", line_arc.rect);
         ui_kit::settings_block_hint(ui, app.tr("prefs.hold_stop_snapping"), app.tr("prefs.snap_drawing_note"), t.space_24 * 8.0 + t.space_8, |ui| {
             let combo = &mut app.preferences.suppress_sketch_snap;
             ui_kit::settings_control_width(ui, t.space_24 * 7.0 + t.space_12, |ui| {

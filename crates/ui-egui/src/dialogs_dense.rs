@@ -193,6 +193,8 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
     }
     d.sync_material(&app.session);
+    // The Hole dialog's dropdowns preview each choice on a copy of the form as it stands.
+    let hole_form = matches!(d.kind, Kind::Hole { .. }).then(|| (d.kind.clone(), to_object_on(&d.inputs)));
     match &mut d.kind {
         Kind::Material { index, editor } => crate::material_editor::rows(app, ui, index, editor),
         Kind::Appearance(k) => enter |= crate::dialogs_appearance::rows(app, ui, k, &mut d.inputs),
@@ -523,10 +525,19 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             }
         }
         Kind::Hole { kind, opts, .. } => {
+            let doc = &app.session.doc;
+            let eval = |e: &str, k| doc.eval(e, k).ok();
+            // Each option shows the hole it makes while hovered (dialogs_hole::preview).
+            let preview = |ui: &mut egui::Ui, choice| {
+                if let Some((form, to_object)) = &hole_form {
+                    crate::dialogs_hole::preview(ui, form, *to_object, choice, &eval);
+                }
+            };
+            use crate::dialogs_hole::Choice;
             form_row(ui, "Extents", |ui| {
                 let cur = if to_object_on(&d.inputs) { 1 } else { usize::from(opts.all) * 2 };
                 let mut ext = cur;
-                combo(ui, "hole_ext", &["Distance", "To Object", "All"], &mut ext);
+                ui_kit::dropdown_previews(ui, "hole_ext", &mut ext, &["Distance", "To Object", "All"], |ui, i| preview(ui, Choice::Extents(i)));
                 opts.all = ext == 2;
                 set_to_object(&mut d.inputs, &mut d.active, ext == 1);
             });
@@ -542,10 +553,12 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     extra_check(ui, &mut d.extra, "flip");
                 });
             }
-            choice_row(ui, "Hole Type", "hole_kind", kind, &HOLE_LABELS);
+            form_row(ui, "Hole Type", |ui| {
+                ui_kit::dropdown_previews(ui, "hole_kind", kind, &HOLE_LABELS, |ui, i| preview(ui, Choice::Type(i)));
+            });
             form_row(ui, "Hole Tap Type", |ui| {
                 let mut tap = usize::from(opts.tapped);
-                combo(ui, "hole_tap", &["Simple", "Tapped"], &mut tap);
+                ui_kit::dropdown_previews(ui, "hole_tap", &mut tap, &["Simple", "Tapped"], |ui, i| preview(ui, Choice::Tapped(i == 1)));
                 opts.tapped = tap == 1;
             });
             if opts.tapped {
@@ -557,14 +570,13 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             if !opts.all {
                 form_row(ui, "Drill Point", |ui| {
                     let mut tip = usize::from(opts.angled);
-                    combo(ui, "hole_tip", &["Flat", "Angle"], &mut tip);
+                    ui_kit::dropdown_previews(ui, "hole_tip", &mut tip, &["Flat", "Angle"], |ui, i| preview(ui, Choice::Angled(i == 1)));
                     opts.angled = tip == 1;
                 });
             }
             // The section through the hole, each size beside its dimension (#2171).
             let to_object = to_object_on(&d.inputs);
-            let doc = &app.session.doc;
-            enter |= crate::dialogs_hole::rows(ui, &mut d.kind, to_object, &|e, k| doc.eval(e, k).ok());
+            enter |= crate::dialogs_hole::rows(ui, &mut d.kind, to_object, &eval);
         }
         _ => enter |= additional_rows(app, d, ui),
     }
@@ -757,7 +769,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             });
             ui.add(egui::Label::new(crate::i18n::tr("ui.emboss_wrap_note")).wrap());
         }
-        Kind::Align { flip, components } => {
+        Kind::Align { flip, components, axes: [ax, ay, az] } => {
             // Where on the picked face or edge to snap: as picked (a face turns to meet
             // the other, an edge at its middle), its centre, or a round one's centre.
             for (label, key) in [("From Snap", "from_snap"), ("To Snap", "to_snap")] {
@@ -765,7 +777,11 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                     extra_choice(ui, &mut d.extra, key, key, &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle")]);
                 });
             }
-            ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
+            if *components {
+                ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
+            } else {
+                ui_kit::options(ui, "feature_options", &mut [("Flip", flip), ("X", ax), ("Y", ay), ("Z", az)]);
+            }
             // A part inside a subassembly placed more than once sits where that shared
             // definition says: aligning it moves it in every placement.
             if *components && align_moves_shared(&app.session, d.inputs.first().map_or(&[], |i| i.items.as_slice())) {

@@ -265,6 +265,9 @@ fn editor_reserving(ui: &mut Ui, value: &mut String, hint: &str, completion: boo
         edit = edit.margin(egui::Margin { left: inset, right: inset.saturating_add(reserve.round() as i8), top: 0, bottom: 0 });
     }
     let mut response = ui.add_sized(vec2(width, row_height()), edit);
+    if response.has_focus() {
+        ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new("sc_focused_editor"), response.id));
+    }
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     if completion && ui.is_enabled() {
         ui.ctx().data_mut(|data| {
@@ -301,6 +304,24 @@ pub(crate) fn dropdown(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&
         for (index, option) in options.iter().enumerate() {
             let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
             scenario::publish_target(&format!("dialog:{row}:{option}"), response.rect);
+        }
+    })
+}
+
+/// [`dropdown`] whose options each show a picture beside them while hovered, painted by `preview`
+/// for that option's index, so a choice can be seen before it is picked. Tokens: dropdown tokens,
+/// the tooltip frame.
+pub(crate) fn dropdown_previews(ui: &mut Ui, id: &str, selected: &mut usize, options: &[&str], preview: impl Fn(&mut Ui, usize)) -> Response {
+    let text = options.get(*selected).copied().map(crate::i18n::tr_label).unwrap_or("");
+    let row = label(ui).to_string();
+    dropdown_menu(ui, id, text, |ui| {
+        for (index, option) in options.iter().enumerate() {
+            let response = ui.selectable_value(selected, index, crate::i18n::tr_label(option));
+            scenario::publish_target(&format!("dialog:{row}:{option}"), response.rect);
+            Container::tooltip_ui(&response, |ui| {
+                preview(ui, index);
+                scenario::publish_rect(&format!("dialog:preview:{row}:{option}"), ui.min_rect());
+            });
         }
     })
 }
@@ -435,6 +456,7 @@ pub(crate) fn selection_field(ui: &mut Ui, text: &str, options: Selection) -> Re
     publish(ui, &response, egui::WidgetType::Button);
     scenario::publish_rect(&format!("dialog:field:{}", label(ui)), rect);
     scenario::publish_count(&format!("dialog:selection:{}:filled", label(ui)), f64::from(filled));
+    scenario::publish_count(&format!("dialog:selection:{}:active", label(ui)), f64::from(active));
     response
 }
 
@@ -541,6 +563,92 @@ fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, 
     });
     crate::theme::TabAccent::number_focus(ui, &response);
     t.input_bevel(ui, &response);
+    response
+}
+
+/// Table cell editor that opens wide while it has the focus and its text no longer fits
+/// (#9358): over the cells to its right up to `right`, wrapping onto as many lines as the text
+/// needs, with `note` (the live value, or an error when its flag is set) under it. Otherwise,
+/// and when there is no room to its right, it is [`cell_editor`]. Enter does not break the
+/// line: the caller commits on it as for the cell. Tokens: cell_editor tokens, popup frame.
+pub fn wide_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, right: f32, note: (&str, bool)) -> Response {
+    let t = Tokens::get();
+    let cell = egui::Rect::from_min_size(ui.cursor().min, vec2(dimension(ui.available_width()), row_height()));
+    let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
+    let font = egui::FontId::monospace(t.font_label);
+    let text_width = ui.fonts_mut(|f| f.layout_no_wrap(value.clone(), font.clone(), t.form_ink)).size().x;
+    let fits = text_width + 2.0 * t.form_inset <= cell.width();
+    if !focused || fits || right <= cell.right() || !ui.is_rect_visible(cell) {
+        return cell_editor(ui, id, value, hint, invalid);
+    }
+    // The cell keeps its place in the row; the editor itself floats over it.
+    let (rect, _) = ui.allocate_exact_size(cell.size(), egui::Sense::hover());
+    ui.painter().rect_filled(rect, t.control_radius, if invalid { t.form_error_fill } else { t.input_fill() });
+    let width = right - rect.left();
+    let (ctx, enabled) = (ui.ctx().clone(), ui.is_enabled());
+    // The border sits outside the cell, so the text stays where it was.
+    let border = t.primary_border(t.dialog_border);
+    let area = Container::new(&ctx, Surface::Popup)
+        .area(id.with("wide"))
+        .fixed_pos(rect.min - vec2(border.width, border.width))
+        .constrain(true)
+        .order(egui::Order::Foreground);
+    let shown = area.show(&ctx, |ui| {
+        Container::popup_frame(ui.style())
+            .fill(t.control_fill)
+            .stroke(border)
+            .corner_radius(t.control_radius)
+            .inner_margin(0.0)
+            .show(ui, |ui| {
+                ui.set_width(width);
+                let editor = text_input(egui::TextEdit::multiline(value))
+                    .id(id)
+                    .return_key(None)
+                    .desired_rows(1)
+                    .desired_width(width)
+                    .hint_text(crate::i18n::tr_label(hint))
+                    .font(font)
+                    .background_color(if invalid { t.form_error_fill } else { t.input_fill() })
+                    .text_color(if invalid { t.form_error } else { t.form_ink });
+                let mut response = ui.add(editor);
+                // The area's first frame is a sizing pass that disables its widgets, and egui
+                // takes the focus from a disabled one: hand it straight back.
+                if ui.is_sizing_pass() {
+                    response.request_focus();
+                }
+                // It wraps but stays one line: Enter ends the edit as in a single-line field.
+                // Raw events, as the table reads them: an accepted completion has already taken its Enter.
+                let enter = ui.input(|i| {
+                    i.raw.events.iter().any(|e| {
+                        matches!(e, egui::Event::Key { key: egui::Key::Enter, pressed: true, repeat: false, modifiers, .. } if *modifiers == egui::Modifiers::NONE)
+                    })
+                });
+                if response.has_focus() && enter {
+                    response.surrender_focus();
+                }
+                super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
+                publish(ui, &response, egui::WidgetType::TextEdit);
+                crate::theme::TabAccent::number_focus(ui, &response);
+                t.input_bevel(ui, &response);
+                let (text, error) = note;
+                if !text.is_empty() {
+                    ui.add_space(t.space_2);
+                    ui.horizontal(|ui| {
+                        ui.add_space(t.form_inset);
+                        ui.add(egui::Label::new(RichText::new(text).size(t.font_small).color(if error { t.form_error } else { t.form_dim })).wrap());
+                    });
+                    ui.add_space(t.space_2);
+                }
+                response
+            })
+            .inner
+    });
+    let response = shown.inner;
+    response.widget_info(|| {
+        let mut info = egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, enabled, crate::i18n::tr_label(hint));
+        info.current_text_value = Some(value.clone());
+        info
+    });
     response
 }
 

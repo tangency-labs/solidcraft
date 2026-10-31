@@ -26,6 +26,69 @@ fn open(h: &mut Harness) {
 }
 
 #[test]
+fn undoing_the_edited_feature_closes_its_editor_and_preserves_redo() {
+    let mut h = make(json!({}));
+    let feature = h.app.session.doc.find_feature("Depth").unwrap().id;
+    open(&mut h);
+    assert!(h.app.dialog.is_some());
+
+    h.app.start("edit.undo");
+    h.frames(8);
+    assert!(h.app.session.doc.feature(feature).is_none());
+    assert!(h.app.dialog.is_none(), "a removed feature must not keep an Edit Extrude dialog");
+    assert!(h.app.editing_state.is_none());
+    assert!(h.app.applying.is_none());
+    assert!(!h.app.preview.active);
+    assert!(h.app.session.feature_edit_sketch.is_none());
+    assert_eq!(h.app.session.redo.len(), 1);
+    assert_eq!(h.app.session.doc.features.len(), 1);
+    let revision = h.app.session.revision;
+    h.frames(8);
+    assert_eq!(h.app.session.revision, revision, "closing the stale editor does not change the design");
+
+    h.app.run("edit.redo", json!({})).unwrap();
+    assert!(h.app.session.doc.feature(feature).is_some());
+    assert!(h.app.dialog.is_none(), "redo does not resurrect the old editor");
+    assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds().max.z, 10.0);
+    open(&mut h);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "the restored feature can be edited normally");
+}
+
+#[test]
+fn undo_that_keeps_the_edited_feature_keeps_its_editor() {
+    let mut h = make(json!({}));
+    let feature = h.app.session.doc.find_feature("Depth").unwrap().id;
+    h.app.run("solid.box", json!({"corner":[30,0,0],"length":2,"width":2,"height":2})).unwrap();
+    open(&mut h);
+    h.app.start("edit.undo");
+    h.frames(8);
+    assert!(h.app.session.doc.feature(feature).is_some());
+    assert_eq!(h.app.dialog.as_ref().unwrap().editing.map(|(id, _)| id), Some(feature));
+    assert!(h.app.editing_state.is_some());
+    assert!(h.app.session.feature_edit_sketch.is_some());
+    assert_eq!(h.app.session.redo.len(), 1);
+}
+
+#[test]
+fn deleting_the_edited_feature_closes_its_editor_and_undo_restores_the_design() {
+    let mut h = make(json!({}));
+    let original = h.app.session.doc.clone();
+    open(&mut h);
+    h.app.run("timeline.delete", json!({"feature":"Depth"})).unwrap();
+    let deleted = h.app.session.doc.clone();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    h.frames(8);
+    assert!(h.app.dialog.is_none() && h.app.editing_state.is_none());
+    assert!(!h.app.preview.active);
+    assert!(std::sync::Arc::ptr_eq(&deleted, &h.app.session.doc), "closing preserves the current document and marker");
+    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&original, &h.app.session.doc), "Undo restores the document before the temporary editor rollback");
+    assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds().max.z, 10.0);
+}
+
+#[test]
 fn unchanged_all_profiles_includes_profiles_added_after_edit() {
     let mut h = make(json!({}));
     open(&mut h);
@@ -520,4 +583,56 @@ fn without_value_boxes_in_the_view_the_distance_is_typed_in_the_window() {
     h.step(&json!({"drag":[{"handle":"arrow"},on_arrow(&h, 30.0)]})).unwrap();
     assert!((dialog_distance(&h) - 30.0).abs() < 0.5, "{}", dialog_distance(&h));
     assert!(h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_canvas_area"))).is_none(), "a value box in the view");
+}
+
+#[test]
+fn editing_face_extrusion_temporarily_shows_its_hidden_source_body() {
+    for finish in ["Cancel", "OK"] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Source"})).unwrap();
+        h.app.run("solid.box", json!({"length":2,"width":2,"height":2,"corner":[30,0,0],"body_name":"Other"})).unwrap();
+        h.app
+            .run("solid.extrude", json!({"face":[5,5,10],"face_body":"Source","distance":5,"operation":"new","body_name":"Extension","name":"Depth"}))
+            .unwrap();
+        h.app.session.visibility.hidden_bodies.push("Source".into());
+        let visibility = h.app.session.visibility.clone();
+        let undo = h.app.session.undo.len();
+        open(&mut h);
+        assert!(h.app.body_visible("Source"));
+        assert!(!h.app.session.body_visible("Source"), "the editor must not change persistent visibility");
+        assert!(h.app.body_visible("Other"));
+        assert!(h.app.session.world_state().body("Extension").is_none(), "the feature's result is rolled off");
+        assert_eq!(h.app.session.undo.len(), undo);
+        h.app.session.visibility.hidden_bodies.push("Other".into());
+        h.step(&json!({"widget":finish})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+        assert!(!h.app.body_visible("Source"));
+        assert!(!h.app.body_visible("Other"), "unrelated visibility edits are preserved");
+        assert_eq!(h.app.session.visibility.hidden_sketches, visibility.hidden_sketches);
+        assert_eq!(h.app.session.visibility.shown_sketches, visibility.shown_sketches);
+        assert!(h.app.session.world_state().body("Extension").is_some());
+    }
+}
+
+#[test]
+fn failed_face_extrusion_edit_keeps_context_until_escape_and_preserves_visibility() {
+    let mut h = Harness::new();
+    let owner = h.app.run("component.create", json!({"name":"Part"})).unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Source"})).unwrap();
+    h.app.run("solid.extrude", json!({"face":[5,5,10],"face_body":"Source","distance":5,"operation":"new","name":"Depth"})).unwrap();
+    let path = vec![owner["occurrence"].as_u64().unwrap()];
+    h.app.session.visibility.hidden_occurrences.push(path);
+    let visibility = h.app.session.visibility.clone();
+    assert!(!h.app.body_visible("Source"));
+    open(&mut h);
+    assert!(h.app.body_visible("Source"), "a hidden parent must not hide the source during editing");
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"missing_length"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_some());
+    assert!(h.app.body_visible("Source"));
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert!(!h.app.body_visible("Source"));
+    assert_eq!(h.app.session.visibility, visibility);
 }

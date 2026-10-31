@@ -187,6 +187,11 @@ pub struct Found {
     pub argv: Vec<String>,
     pub version: Option<String>,
     pub login: Login,
+    /// Why its program doesn't start (#9034): asked for `--version`, it failed without printing
+    /// one, as the `opencode.exe` of an npm install whose setup script didn't run does on Windows.
+    pub problem: Option<String>,
+    /// Its one-line install hint, to reinstall it with.
+    pub install: &'static str,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -288,8 +293,24 @@ pub(super) fn command_for(program: &Path) -> Command {
     cmd
 }
 
-/// `program --version`'s first line, or `None` after `limit` (the probe is then stopped).
-fn version(program: &Path, limit: Duration) -> Option<String> {
+/// What `program --version` showed.
+#[derive(Debug, Default, PartialEq)]
+struct Probe {
+    /// Its version number, from the first line it printed.
+    version: Option<String>,
+    /// Why it can't start: the system refused to start it, or it failed and printed nothing but
+    /// an error. A probe that runs out of time says nothing either way (a slow machine).
+    problem: Option<String>,
+}
+
+/// How long an agent is given to answer `--version`.
+const PROBE_LIMIT: Duration = Duration::from_secs(3);
+
+/// The longest reason kept from a failed probe.
+const PROBLEM_CHARS: usize = 300;
+
+/// Ask `program --version`; it is stopped after `limit`.
+fn probe(program: &Path, limit: Duration) -> Probe {
     let mut cmd = command_for(program);
     #[cfg(windows)]
     {
@@ -297,23 +318,50 @@ fn version(program: &Path, limit: Duration) -> Option<String> {
         // CREATE_NO_WINDOW: probing a console agent doesn't flash a terminal window.
         cmd.creation_flags(0x0800_0000);
     }
-    let mut child = cmd.arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let mut child = match cmd.arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+        Ok(child) => child,
+        // Windows: "not a valid Win32 application" (193), "not compatible with the version of
+        // Windows you're running" (216); elsewhere: not allowed to run it, an unknown format.
+        // Windows leaves the program's place in its message as `%1`.
+        Err(e) => return Probe { version: None, problem: Some(cut(&e.to_string().replace("%1", &program.display().to_string()))) },
+    };
     let start = Instant::now();
-    loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(status)) => break status,
             Ok(None) if start.elapsed() < limit => std::thread::sleep(Duration::from_millis(20)),
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return None;
+                return Probe::default();
             }
         }
+    };
+    let out = read_capped(child.stdout.take());
+    if let Some(line) = out.lines().map(str::trim).find(|l| !l.is_empty()) {
+        return Probe { version: Some(version_of(line)), problem: None };
     }
-    let mut out = String::new();
-    std::io::Read::read_to_string(&mut child.stdout.take()?, &mut out).ok()?;
-    let line = out.lines().map(str::trim).find(|l| !l.is_empty())?;
-    Some(version_of(line))
+    if status.success() {
+        return Probe::default();
+    }
+    // Through a `.cmd` shim, Windows' own refusal arrives on stderr with a failing exit code.
+    let err = read_capped(child.stderr.take());
+    let reason = err.lines().map(str::trim).find(|l| !l.is_empty()).map(str::to_string).unwrap_or_else(|| status.to_string());
+    Probe { version: None, problem: Some(cut(&reason)) }
+}
+
+/// What a finished probe wrote on a pipe, up to 64 KiB.
+fn read_capped(pipe: Option<impl std::io::Read>) -> String {
+    let mut bytes = Vec::new();
+    if let Some(p) = pipe {
+        let _ = std::io::Read::read_to_end(&mut p.take(64 * 1024), &mut bytes);
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// `text`, cut short.
+fn cut(text: &str) -> String {
+    text.chars().take(PROBLEM_CHARS).collect()
 }
 
 /// The version number in a `--version` line (`codex-cli 0.162.1`, `2.1.295 (Claude Code)`,
@@ -342,10 +390,10 @@ fn login_of(k: &Known, home: Option<&Path>) -> Login {
 
 /// Look for every known agent. Blocking (each probe has a time limit): run it off the UI thread.
 pub fn detect() -> Detection {
-    detect_in(&search_dirs(), home().as_deref())
+    detect_in(&search_dirs(), home().as_deref(), PROBE_LIMIT)
 }
 
-fn detect_in(dirs: &[PathBuf], home: Option<&Path>) -> Detection {
+fn detect_in(dirs: &[PathBuf], home: Option<&Path>, limit: Duration) -> Detection {
     let t0 = Instant::now();
     let mut d = Detection::default();
     for k in KNOWN {
@@ -358,8 +406,8 @@ fn detect_in(dirs: &[PathBuf], home: Option<&Path>) -> Detection {
         let login = login_of(k, home);
         let mut argv = vec![path.to_string_lossy().into_owned()];
         argv.extend(k.args.iter().map(|a| a.to_string()));
-        let version = if k.reports_version { version(&path, Duration::from_secs(3)) } else { None };
-        d.found.push(Found { id: k.id, name: k.name, version, argv, login });
+        let Probe { version, problem } = if k.reports_version { probe(&path, limit) } else { Probe::default() };
+        d.found.push(Found { id: k.id, name: k.name, version, argv, login, problem, install: k.install });
     }
     d.took_ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX);
     d
@@ -544,7 +592,7 @@ mod tests {
         };
         let ids = |d: &Detection| (d.found.iter().map(|f| f.id).collect::<Vec<_>>(), d.missing.iter().map(|m| m.id).collect::<Vec<_>>());
 
-        let none = detect_in(std::slice::from_ref(&root), None);
+        let none = detect_in(std::slice::from_ref(&root), None, PROBE_LIMIT);
         let (found, missing) = ids(&none);
         assert!(found.is_empty());
         assert!(missing.contains(&"antigravity") && !missing.contains(&"gemini"), "{missing:?}");
@@ -554,7 +602,7 @@ mod tests {
         run("gemini", "echo gemini 0.64.0");
         // A server that would take seconds to answer `--version`, which Antigravity is never asked.
         run("agy_acp_server.par", "sleep 30");
-        let both = detect_in(std::slice::from_ref(&root), None);
+        let both = detect_in(std::slice::from_ref(&root), None, PROBE_LIMIT);
         let (found, missing) = ids(&both);
         assert_eq!(found, ["antigravity", "gemini"]);
         assert!(!missing.contains(&"antigravity") && !missing.contains(&"gemini"), "{missing:?}");
@@ -571,6 +619,73 @@ mod tests {
             assert!(!k.programs.is_empty() && !k.install.is_empty(), "{}", k.id);
         }
         assert_eq!(KNOWN.first().map(|k| k.id), Some("claude"), "the Claude Code adapter is the default");
+    }
+
+    /// #9034: npm installed OpenCode without running its setup script, so the `opencode.exe` its
+    /// `.cmd` shim starts is one Windows refuses. It is still found (its shim is there), with
+    /// the system's reason and the command to install it again, while an agent that answers
+    /// `--version`, or ends without a word but successfully, has no problem.
+    #[test]
+    fn an_agent_that_does_not_start_is_found_with_the_reason() {
+        let root = std::env::temp_dir().join(format!("sc-agent-broken-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        #[cfg(windows)]
+        {
+            // npm's layout: the shim in the prefix, the program under node_modules.
+            let bin = root.join("node_modules").join("opencode-ai").join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            std::fs::write(bin.join("opencode.exe"), "not a program for this computer").unwrap();
+            std::fs::write(root.join("opencode.cmd"), "@ECHO off\r\n\"%~dp0\\node_modules\\opencode-ai\\bin\\opencode.exe\" %*\r\n").unwrap();
+            // Started directly, the system itself refuses it.
+            std::fs::write(root.join("copilot.exe"), "not a program either").unwrap();
+            std::fs::write(root.join("grok.cmd"), "@echo off\r\nexit /b 3\r\n").unwrap();
+            std::fs::write(root.join("qwen.cmd"), "@echo off\r\necho 0.1.2\r\n").unwrap();
+            std::fs::write(root.join("goose.cmd"), "@echo off\r\n").unwrap();
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let run = |name: &str, body: &str| {
+                let path = root.join(name);
+                std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            };
+            run("opencode", "echo 'cannot execute binary file: Exec format error' >&2; exit 126");
+            // Not allowed to run: the system refuses it.
+            std::fs::write(root.join("copilot"), "not a program").unwrap();
+            std::fs::set_permissions(root.join("copilot"), std::fs::Permissions::from_mode(0o644)).unwrap();
+            run("grok", "exit 3");
+            run("qwen", "echo 0.1.2");
+            run("goose", "true");
+        }
+        // A generous limit: on a loaded machine `cmd` alone can take longer than three seconds to
+        // start, and a probe that runs out of time reports nothing.
+        let d = detect_in(std::slice::from_ref(&root), None, Duration::from_secs(60));
+        let found = |id: &str| d.found.iter().find(|f| f.id == id).unwrap_or_else(|| panic!("{id} not found: {:?}", d.found));
+
+        let opencode = found("opencode");
+        assert_eq!(opencode.version, None);
+        assert!(opencode.problem.as_deref().is_some_and(|p| !p.trim().is_empty()), "{opencode:?}");
+        assert_eq!(opencode.install, "npm install -g opencode-ai");
+        assert_eq!(opencode.argv.get(1).map(String::as_str), Some("acp"), "still offered with its ACP arguments");
+        let copilot = found("copilot");
+        assert!(copilot.problem.as_deref().is_some_and(|p| !p.trim().is_empty()), "{copilot:?}");
+        #[cfg(windows)]
+        assert!(
+            copilot.problem.as_deref().is_some_and(|p| (p.contains("216") || p.contains("193")) && p.contains("copilot.exe") && !p.contains("%1")),
+            "the system's reason, naming the program: {copilot:?}"
+        );
+        // Silent but failing: the exit status is the reason.
+        let grok = found("grok");
+        assert!(grok.problem.as_deref().is_some_and(|p| p.contains('3')), "{grok:?}");
+
+        let qwen = found("qwen");
+        assert_eq!((qwen.version.as_deref(), qwen.problem.as_deref()), (Some("0.1.2"), None));
+        let goose = found("goose");
+        assert_eq!((goose.version.as_deref(), goose.problem.as_deref()), (None, None));
+        assert!(d.found.iter().all(|f| f.problem.as_ref().is_none_or(|p| p.chars().count() <= PROBLEM_CHARS)));
+        let _ = std::fs::remove_dir_all(root);
     }
 
     /// A launcher can start SolidCraft with a PATH that lacks Node (#9297). On Windows, Node's
@@ -623,7 +738,7 @@ mod tests {
             let agent = find_in("solidcraft-test-agent", &search_dirs()).unwrap();
             // Generous limits: both answer at once, but a whole test run on a loaded machine
             // can keep `env`, the shell and the script from starting within 3 s.
-            assert_eq!(version(&agent, Duration::from_secs(20)).as_deref(), Some("1.2.3"));
+            assert_eq!(probe(&agent, Duration::from_secs(20)).version.as_deref(), Some("1.2.3"));
             let mut p = AgentProcess::spawn(&[agent.to_string_lossy().into_owned()], &root, &[], || {}).unwrap();
             let message = serde_json::json!({"id": 1, "method": "initialize"});
             p.send(&message);

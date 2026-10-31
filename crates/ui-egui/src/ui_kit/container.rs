@@ -58,6 +58,17 @@ impl DockEdges {
     pub const ALL: Self = Self { left: true, right: true, top: true, bottom: true };
 }
 
+thread_local! {
+    /// The areas built as [`Surface::Canvas`]: a value box, a dimension's editor, a readout.
+    static CANVAS_AREAS: std::cell::RefCell<std::collections::HashSet<Id>> = std::cell::RefCell::default();
+}
+
+/// Is `layer` a model-anchored editor or readout ([`Surface::Canvas`])? Such an area sits on the
+/// model and scrolls nothing, so the model's wheel and trackpad navigation go on under it (#10061).
+pub(crate) fn is_canvas(layer: egui::LayerId) -> bool {
+    CANVAS_AREAS.with(|areas| areas.borrow().contains(&layer.id))
+}
+
 /// Universal outer host and surface policy. Both host geometry and frame construction must go
 /// through this API, including code in nested modules and platform apps.
 #[derive(Clone, Copy)]
@@ -142,6 +153,18 @@ impl Container {
         tip.popup = tip.popup.frame(Self::new(ctx, Surface::Toast).tooltip_frame(ctx));
         tip.show(|ui| {
             ui.label(text);
+            crate::scenario::publish_rect("kit:tooltip", ui.min_rect());
+        });
+    }
+
+    /// [`Self::tooltip`] holding what `add` draws (a picture, say), beside `response` rather than
+    /// at the pointer, so it does not cover the row's neighbours.
+    pub(crate) fn tooltip_ui(response: &egui::Response, add: impl FnOnce(&mut egui::Ui)) {
+        let ctx = &response.ctx;
+        let mut tip = egui::Tooltip::for_enabled(response);
+        tip.popup = tip.popup.align(egui::RectAlign::RIGHT_START).frame(Self::new(ctx, Surface::Toast).tooltip_frame(ctx));
+        tip.show(|ui| {
+            add(ui);
             crate::scenario::publish_rect("kit:tooltip", ui.min_rect());
         });
     }
@@ -298,6 +321,9 @@ impl Container {
     }
 
     pub fn area(self, id: Id) -> egui::Area {
+        if self.surface == Surface::Canvas {
+            CANVAS_AREAS.with(|areas| areas.borrow_mut().insert(id));
+        }
         // Workspace cards and viewport status stay below tool/system windows even when
         // clicked. Other areas keep the normal window layer; popups choose their order.
         let order = if matches!(self.surface, Surface::Panel | Surface::ViewportStatus) { egui::Order::Background } else { egui::Order::Middle };

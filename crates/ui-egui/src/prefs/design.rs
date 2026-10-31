@@ -83,6 +83,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             },
         );
         setting::extrude_auto_to_object(app, ui);
+        // Extrude's view (#9176): isometric when it opens, and back afterwards only with that.
+        setting::extrude_view_isometric(app, ui);
+        let isometric = app.preferences.extrude_view_isometric;
+        ui.add_enabled_ui(isometric, |ui| setting::extrude_view_return(app, ui));
         let auto = setting::auto_operation(app, ui);
         crate::scenario::publish_handle("prefs:auto_operation", auto.rect.center());
         ui_kit::text(ui, app.tr("prefs.auto_operation_note"), ui_kit::Text::Hint("auto_operation"));

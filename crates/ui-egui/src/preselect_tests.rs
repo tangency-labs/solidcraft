@@ -1911,7 +1911,7 @@ fn align_components_input_picks_occurrence_from_viewport_body_and_skips_root_bod
     let second = app.run("occurrence.copy", json!({"component": comp, "translate": [30, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
 
     let mut d = start(&mut app, vec![], "solid.align");
-    d.kind = Kind::Align { flip: false, components: true };
+    d.kind = Kind::Align { flip: false, components: true, axes: [true; 3] };
     d.inputs[0].label = "Components";
     d.active = 0;
 
@@ -2773,7 +2773,9 @@ fn hovering_a_large_body_does_not_wait_for_its_pick_index() {
     h.step(&json!({"move": at})).unwrap();
     let hover_ms = t.elapsed().as_secs_f64() * 1000.0;
     assert!(matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })), "{:?}", h.app.viewport.hover);
-    assert!(hover_ms < index_ms / 3.0, "the first hover took {hover_ms:.1} ms; making the index takes {index_ms:.1} ms");
+    // Half, not a third: on a loaded runner the hover alone has taken 70 ms against a 190 ms index.
+    // Waiting for the index would cost the whole of it, so half still tells the two apart.
+    assert!(hover_ms < index_ms / 2.0, "the first hover took {hover_ms:.1} ms; making the index takes {index_ms:.1} ms");
 }
 
 /// #4452: with Combine open, bodies clicked in the Browser fill its inputs, as clicks on them
@@ -2956,4 +2958,31 @@ fn construction_points_fill_three_point_plane_dialog() {
     assert_eq!(planes.len(), 1);
     assert!((planes[0].2.origin.z - 10.0).abs() < 1e-9);
     assert!(planes[0].2.normal().dot(Vec3::Z).abs() > 1.0 - 1e-9);
+}
+
+/// #6106: with Extrude open, a sketch clicked in the Browser fills Profiles with all of its
+/// profiles, so one OK extrudes every area.
+#[test]
+fn extrude_takes_every_profile_of_a_sketch_clicked_in_the_browser() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [40, 0], "p1": [50, 10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center": [0, 40], "radius": 5})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.session.selection.clear();
+    h.app.start("solid.extrude");
+    h.frames(2);
+    h.step(&json!({"click": {"browser": "Sketch1"}})).unwrap();
+    h.frames(2);
+    let d = h.app.dialog.as_ref().expect("Extrude stays open");
+    let first =
+        h.app.session.doc.features.iter().find(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Sketch { .. })).map(|f| f.id).unwrap();
+    assert_eq!(
+        d.inputs[0].items,
+        vec![Sel::Profile { sketch: first, index: 0 }, Sel::Profile { sketch: first, index: 1 }],
+        "both rectangles of the clicked sketch, not the last sketch's circle"
+    );
 }

@@ -456,7 +456,14 @@ impl Document {
         let id = self.next_id.max(1);
         self.next_id = id.checked_add(1).ok_or_else(|| DocError::Invalid("too many items in the design".into()))?;
         let cname = self.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default();
-        let k = self.occurrences.iter().filter(|o| o.component == component).count() + 1;
+        // The next number, or, when an occurrence already has that name (one before it was
+        // deleted, or of another component of that name), the first number none has (#9738).
+        let next = self.occurrences.iter().filter(|o| o.component == component).count() + 1;
+        let free = |k: &usize| {
+            let name = format!("{cname}:{k}");
+            !self.occurrences.iter().any(|o| o.name == name)
+        };
+        let k = std::iter::once(next).chain(1..).find(free).unwrap_or(next);
         self.occurrences.push(crate::Occurrence { id, component, parent, name: format!("{cname}:{k}"), transform, grounded: false });
         Ok(id)
     }

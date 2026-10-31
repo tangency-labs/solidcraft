@@ -110,6 +110,36 @@ fn profiles_and_the_active_one_are_kept_between_runs() {
 }
 
 #[test]
+fn theme_options_profiles_restore_replace_and_preserve_stale_values() {
+    let mut h = Harness::new();
+    let file = json!({
+        "format":"solidcraft-theme/1", "name":"Profile Options", "base":"dark",
+        "options":[{"id":"enabled","type":"bool","default":false}],
+        "overlays":[{"when":{"opt":"enabled","eq":true},"colors":{"panel":"#abcdef"}}]
+    });
+    let out = h.call("ui.prefs", json!({"theme_import":file,"theme_options":{"profile-options":{"enabled":true}}}));
+    assert!(out["error"].is_null(), "{out}");
+    h.app.preferences.theme_options.entry("profile-options".into()).or_default().insert("future".into(), json!({"unrecognized":true}));
+    h.app.preferences.theme_options.insert("unknown-theme".into(), [("saved".into(), json!([1, 2]))].into());
+    run(&mut h, "settings.profile.save", json!({"name":"Options"}));
+    let exported = run(&mut h, "settings.profile.export", json!({"name":"Options"}))["profile"].clone();
+    let options = exported["preferences"]["theme_options"].clone();
+    assert_eq!(exported["themes"][0]["options"][0]["default"], false);
+    h.call("ui.prefs", json!({"open":"Interface","button":"defaults"}));
+    run(&mut h, "settings.profile.save", json!({"name":"Empty"}));
+    run(&mut h, "settings.profile.import", json!({"profile":exported,"name":"Imported"}));
+    let out = run(&mut h, "settings.profile.apply", json!({"name":"Imported"}));
+    assert_eq!(out["skipped"], json!([]));
+    assert_eq!(serde_json::to_value(&h.app.preferences.theme_options).unwrap(), options);
+    h.frames(2);
+    assert_eq!(crate::theme::Tokens::get().panel, egui::Color32::from_rgb(0xab, 0xcd, 0xef));
+    run(&mut h, "settings.profile.apply", json!({"name":"Empty"}));
+    assert!(h.app.preferences.theme_options.is_empty());
+    run(&mut h, "settings.profile.apply", json!({"name":"Options"}));
+    assert_eq!(serde_json::to_value(&h.app.preferences.theme_options).unwrap(), options);
+}
+
+#[test]
 fn export_and_import_go_through_one_file_and_import_never_switches() {
     let dir = std::env::temp_dir().join(format!("solidcraft-profile-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

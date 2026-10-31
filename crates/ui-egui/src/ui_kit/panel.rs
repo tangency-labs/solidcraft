@@ -671,6 +671,17 @@ impl<'a> Panel<'a> {
     }
 
     pub(crate) fn window(&self, ctx: &egui::Context) -> egui::Window<'a> {
+        self.window_placed(ctx, None)
+    }
+
+    /// The same window for contents the caller holds to `size` (egui's `fixed_size`); the card
+    /// is that plus its frame.
+    pub(crate) fn fixed_window(&self, ctx: &egui::Context, size: egui::Vec2) -> egui::Window<'a> {
+        let outer = size.x + self.positioned_frame(ctx).total_margin().sum().x;
+        self.window_placed(ctx, Some(outer)).fixed_size(size)
+    }
+
+    fn window_placed(&self, ctx: &egui::Context, outer_width: Option<f32>) -> egui::Window<'a> {
         let gap = super::Container::new(ctx, super::Surface::Feature).gap();
         let viewport = self.viewport;
         let anchor = self.bounded_anchor(ctx);
@@ -680,17 +691,22 @@ impl<'a> Panel<'a> {
         let width = self.width.min(viewport.width().max(0.0));
         let inner_width = (width - margin.sum().x).max(0.0);
         let height = (viewport.bottom() - anchor.y - gap).max(0.0);
+        // Place the card by its left edge, worked out from the outer width the window is held to.
+        // Pivoting on the right edge subtracts the size egui measured last frame, and at a
+        // fractional display scale rounding the left edge to a physical pixel changes the next
+        // measured width by one, so the card hopped a pixel back and forth on every repaint (#9457).
+        let left_top = match side {
+            crate::frame::Side::Right => egui::pos2(anchor.x - outer_width.unwrap_or(inner_width), anchor.y),
+            crate::frame::Side::Left => anchor,
+        };
         // Keep drawing safe when even the header/footer cannot fit. egui clips the contents to
         // the remaining viewport; the normal small-height case still keeps both actions visible.
         super::Container::new(ctx, super::Surface::Feature)
             .window(self.title)
             .id(self.id)
             .title_bar(false)
-            .pivot(match side {
-                crate::frame::Side::Right => egui::Align2::RIGHT_TOP,
-                crate::frame::Side::Left => egui::Align2::LEFT_TOP,
-            })
-            .fixed_pos(anchor)
+            .pivot(egui::Align2::LEFT_TOP)
+            .fixed_pos(left_top)
             .constrain(false)
             .collapsible(false)
             .resizable(false)
@@ -835,6 +851,8 @@ impl<'a> Panel<'a> {
     /// Tokens: space_24 and form_footer_height; header/body/footer own their historical padding.
     pub(crate) fn palette(&self, ui: &mut Ui, bottom: f32, top: f32, mut add: impl FnMut(&mut Ui, Part)) {
         let t = Tokens::get();
+        // Dialog buttons at top (#9860): the footer row moves under the header, above the options.
+        let at_top = DialogButtons::current(ui.ctx()) == DialogButtons::Top;
         ui.set_max_height((bottom - ui.cursor().top()).max(0.0));
         super::scope(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -842,7 +860,11 @@ impl<'a> Panel<'a> {
             let short = height < t.space_24 * 6.0;
             let mut contents = |ui: &mut Ui| {
                 add(ui, Part::Header);
-                let body_height = (bottom - ui.cursor().top() - t.form_footer_height).max(0.0);
+                if at_top {
+                    add(ui, Part::Footer);
+                }
+                let footer_height = if at_top { 0.0 } else { t.form_footer_height };
+                let body_height = (bottom - ui.cursor().top() - footer_height).max(0.0);
                 let mut body = |ui: &mut Ui| {
                     egui::Frame::NONE.inner_margin(egui::Margin::symmetric(t.space_10 as i8, t.space_4 as i8)).show(ui, |ui| add(ui, Part::Body));
                 };
@@ -862,7 +884,9 @@ impl<'a> Panel<'a> {
                         .inner;
                     scenario::publish_rect("sketch_palette:options", scroll.inner_rect);
                 }
-                add(ui, Part::Footer);
+                if !at_top {
+                    add(ui, Part::Footer);
+                }
             };
             if short {
                 let scroll = egui::ScrollArea::vertical()
@@ -1036,10 +1060,13 @@ impl<'a> Window<'a> {
                 if self.body_padding {
                     let height =
                         (dimension(ui.ctx().content_rect().height()) - t.form_header_height - t.form_footer_height - t.space_24 * 2.0).max(0.0);
+                    // Offer the body all the room the screen leaves, not just the height the card
+                    // had last frame: a card first laid out on a tiny page (a browser canvas not
+                    // sized yet) would otherwise keep a body of no height, its buttons hidden (#9472).
                     egui::ScrollArea::vertical()
                         .id_salt("window_body")
                         .max_height(height)
-                        .min_scrolled_height(0.0)
+                        .min_scrolled_height(height)
                         .auto_shrink([false, true])
                         .show(ui, body);
                 } else {

@@ -502,6 +502,28 @@ impl Camera {
         let r = (b.diagonal() * 0.5).max(1.0);
         self.distance = if self.fov > 0.0 { r / (self.fov * 0.5).sin() * 1.1 } else { r / 0.4 * 1.15 };
     }
+    /// [`Camera::fit`] for a picture of `aspect` (width over height). The fit frames the
+    /// bounding sphere by the picture's height; a picture taller than wide also needs it inside
+    /// the sides, so the camera moves back by the ratio (the orthographic width grows with the
+    /// distance; in perspective the sphere's angular radius shrinks with it, which the fit's
+    /// margin covers). A wide picture, or an aspect that is not a positive number, keeps the
+    /// plain fit. Returns false, leaving the camera alone, when there is nothing to fit or the
+    /// fitted camera would not be valid (a distance that overflows).
+    pub fn fit_aspect(&mut self, b: &Aabb3, aspect: f64) -> bool {
+        if b.is_empty() {
+            return false;
+        }
+        let mut fitted = *self;
+        fitted.fit(b);
+        if aspect.is_finite() && aspect > 0.0 && aspect < 1.0 {
+            fitted.distance /= aspect;
+        }
+        if !fitted.is_valid() {
+            return false;
+        }
+        *self = fitted;
+        true
+    }
     /// The same camera looking from direction `back` (target → eye). Straight up or down
     /// keeps the yaw, rounded to the nearest quarter turn so the view stays square.
     pub fn looking_from(&self, back: Vec3) -> Camera {
@@ -860,6 +882,20 @@ mod tests {
         ] {
             assert_eq!(cam.clip_bounds(&bounds), fallback);
             assert!(cam.view_proj_bounds(1.0, &bounds).0.iter().flatten().all(|v| v.is_finite()));
+        }
+    }
+
+    /// A fit whose distance would overflow (a subnormal aspect, a huge product) is refused
+    /// and leaves the finite camera as it was.
+    #[test]
+    fn fit_aspect_refuses_an_overflowing_fit() {
+        let before = Camera { distance: 80.0, ..Default::default() };
+        let small = Aabb3 { min: Vec3::ZERO, max: Vec3::new(40.0, 30.0, 20.0) };
+        let huge = Aabb3 { min: Vec3::new(-1e307, -1e307, -1e307), max: Vec3::new(1e307, 1e307, 1e307) };
+        for (b, aspect) in [(&small, 1e-320), (&huge, 1e-6)] {
+            let mut c = before;
+            assert!(!c.fit_aspect(b, aspect), "aspect {aspect}");
+            assert_eq!(c, before);
         }
     }
 

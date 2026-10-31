@@ -214,7 +214,8 @@ It is a fit point spline through fixed points that the formulas place, and they 
 when the design's parameters change. Compare *spline*, whose points are placed by hand.
 
 - **In SolidCraft:** `sketch.equation_curve`, `sketch.equation_curve.edit`; the `equations`
-  design-file key of a sketch.
+  design-file key of a sketch; `variable_unit` says whether the variable is a plain number or a
+  length like its range.
 - **Don't use:** formula curve, function curve, parametric curve (for the command).
 - **Elsewhere:** equation-driven curve, curve from equation, function plot.
 - **For translators:** "equation" is a mathematical formula, not a balance or an equality constraint.

@@ -127,6 +127,51 @@ fn equation_curve_window_draws_and_reopens_on_its_formulas() {
     assert_eq!(sk.equation_of(&eq.curve).map(|e| e.end.as_str()), Some("20"));
 }
 
+/// The window reaches the variable's unit (#9333): its checkbox draws the issue's curve, the
+/// window reopens with it ticked, and unticking it reaches the curve too.
+#[test]
+fn equation_curve_window_gives_the_variable_its_ranges_unit() {
+    use solidcraft_engine::sketch::VariableUnit;
+    let mut h = fixture();
+    h.app.session.execute("parameters.add", &json!({"name": "a", "expression": "10 mm"})).unwrap();
+    h.app.start("sketch.equation_curve");
+    h.settle();
+    let Some(Kind::SketchModify(Mod::Equation { x, y, start, end, range_unit, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else {
+        panic!("no equation window")
+    };
+    assert!(!*range_unit, "off to begin with");
+    *x = "t".into();
+    *y = "a ^ 2 / (4 * t)".into();
+    *start = "a".into();
+    *end = "3 * a".into();
+    h.settle();
+    let handle = format!("dialog:{}", crate::i18n::tr("ui.equation_variable_unit"));
+    h.step(&json!({"click": {"handle": handle}})).unwrap();
+    h.settle();
+    let Some(Kind::SketchModify(Mod::Equation { range_unit, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("no equation window") };
+    assert!(*range_unit, "the click ticks it");
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "the curve is made");
+    let sid = h.app.session.active_sketch.unwrap();
+    let eq = h.app.session.doc.sketch(sid).unwrap().equations.first().cloned().expect("an equation curve");
+    assert_eq!(eq.variable_unit, VariableUnit::Range);
+    assert!(crate::sketch_modify_ui::edit_equation(&mut h.app, &eq.curve));
+    h.settle();
+    let Some(Kind::SketchModify(Mod::Equation { y, start, end, range_unit, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) else {
+        panic!("no equation window")
+    };
+    assert!(*range_unit, "reopens ticked");
+    *y = "t / 2".into();
+    *start = "0".into();
+    *end = "10".into();
+    *range_unit = false;
+    h.settle();
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.doc.sketch(sid).unwrap().equation_of(&eq.curve).map(|e| e.variable_unit), Some(VariableUnit::Number));
+}
+
 #[test]
 fn create_sketch_uses_card_and_still_starts_immediately_on_plane_pick() {
     let mut h = Harness::new();
@@ -263,6 +308,25 @@ fn apply_in_the_header_row_commits_once_and_keeps_the_dialog() {
     assert_eq!(h.app.session.undo.len(), undo + 1, "one Apply, one undo");
     assert!(h.app.dialog.is_some(), "Apply keeps the dialog");
     assert_eq!(scenario::rect_of("dialog:apply"), Some(apply), "the buttons stay where they were");
+}
+
+/// Interface › Dialog buttons › Top (#9860): the sketch panel's Finish Sketch row sits above its
+/// options, and below them with the preference off.
+#[test]
+fn sketch_panel_finish_row_follows_dialog_buttons() {
+    for (placement, on_top) in [("top", true), ("bottom", false)] {
+        let mut h = fixture();
+        h.call("ui.prefs", json!({"dialog_buttons": placement}));
+        h.settle();
+        let finish = scenario::rect_of("sketch_palette:finish").unwrap_or_else(|| panic!("{placement}: no Finish Sketch"));
+        let first = scenario::rect_of("sketch_palette:toggle:show_constraints").unwrap_or_else(|| panic!("{placement}: no first option"));
+        if on_top {
+            assert!(finish.bottom() <= first.top(), "top: Finish {finish:?} above its first option {first:?}");
+        } else {
+            assert!(first.bottom() <= finish.top(), "bottom: Finish {finish:?} below its first option {first:?}");
+        }
+        assert!(scenario::handle_at("sketch_palette:finish").is_some(), "{placement}: the handle stays");
+    }
 }
 
 #[test]

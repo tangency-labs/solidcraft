@@ -504,7 +504,7 @@ fn go_reply_from_parts(text: Vec<(bool, String)>, calls: Vec<Call>, kept_calls: 
     if !kept_calls.is_empty() {
         assistant["tool_calls"] = Value::Array(kept_calls);
     }
-    Reply { text, calls, assistant }
+    Reply { text, calls, assistant, stop: "" }
 }
 
 /// Shared text + capped tool-call accumulator for the three Go reply parsers.
@@ -914,7 +914,7 @@ impl Worker {
             }
             self.history.push(reply.assistant);
             if reply.calls.is_empty() {
-                self.emit(Event::TurnEnded { reason: String::new() });
+                self.emit(Event::TurnEnded { reason: reply.stop.into() });
                 return;
             }
             // Anthropic takes every result of a round in one user message; OpenAI takes one
@@ -1332,6 +1332,19 @@ struct Reply {
     /// The assistant message to keep in the history, in the endpoint's own shape. Tool calls are
     /// capped to the ones the loop answers, so every call kept here gets a result.
     assistant: Value,
+    /// Why the answer stopped, as the turn-end reason the chat knows: empty for a normal end,
+    /// `max_tokens` for an answer cut off at its length limit, `refusal` when the model declined.
+    stop: &'static str,
+}
+
+/// The turn-end reason for an Anthropic `stop_reason` or an OpenAI `finish_reason`. Anything
+/// else, including a value a server made up, is a normal end.
+fn stop_reason(reason: Option<&str>) -> &'static str {
+    match reason {
+        Some("max_tokens" | "length") => "max_tokens",
+        Some("refusal" | "content_filter") => "refusal",
+        _ => "",
+    }
 }
 
 /// The answer in the endpoint's shape.
@@ -1363,8 +1376,16 @@ fn sanitize_reasoning_details(details: Option<&Value>) -> Option<Value> {
 fn openai_reply(body: &Value) -> Reply {
     let message = body.pointer("/choices/0/message").cloned().unwrap_or(Value::Null);
     let text = message.get("content").and_then(Value::as_str).filter(|t| !t.is_empty()).map(|t| vec![(false, t.to_string())]).unwrap_or_default();
-    // No more than the loop answers: every call kept here must get a `tool` message.
-    let raw: Vec<Value> = message.get("tool_calls").and_then(Value::as_array).map(|a| a.iter().take(32).cloned().collect()).unwrap_or_default();
+    let refused = message.get("refusal").and_then(Value::as_str).is_some_and(|r| !r.trim().is_empty());
+    let stop = if refused { "refusal" } else { stop_reason(body.pointer("/choices/0/finish_reason").and_then(Value::as_str)) };
+    // No more than the loop answers: every call kept here must get a `tool` message. A call cut
+    // off at the length limit is incomplete, so none is run or kept.
+    let raw: Vec<Value> = message
+        .get("tool_calls")
+        .and_then(Value::as_array)
+        .filter(|_| stop != "max_tokens")
+        .map(|a| a.iter().take(32).cloned().collect())
+        .unwrap_or_default();
     let calls = raw
         .iter()
         .enumerate()
@@ -1390,11 +1411,12 @@ fn openai_reply(body: &Value) -> Reply {
     if !raw.is_empty() {
         assistant["tool_calls"] = Value::Array(raw);
     }
-    Reply { text, calls, assistant }
+    Reply { text, calls, assistant, stop }
 }
 
 fn anthropic_reply(body: &Value) -> Reply {
     let content = body.get("content").cloned().unwrap_or(Value::Null);
+    let stop = stop_reason(body.get("stop_reason").and_then(Value::as_str));
     let mut text = Vec::new();
     let mut calls = Vec::new();
     let assistant = match &content {
@@ -1417,6 +1439,8 @@ fn anthropic_reply(body: &Value) -> Reply {
                         }
                         kept.push(block.clone());
                     }
+                    // A call cut off at the length limit has incomplete input: not run, not kept.
+                    Some("tool_use") if stop == "max_tokens" => {}
                     Some("tool_use") if calls.len() < 32 => {
                         calls.push(Call {
                             id: block.get("id").and_then(Value::as_str).map_or_else(|| format!("toolu-{i}"), str::to_string),
@@ -1444,7 +1468,7 @@ fn anthropic_reply(body: &Value) -> Reply {
         }
         _ => json!({"role": "assistant", "content": content.clone()}),
     };
-    Reply { text, calls, assistant }
+    Reply { text, calls, assistant, stop }
 }
 
 /// Keeps the newest `keep` pictures of the view in the history and swaps every older one for a
@@ -2672,6 +2696,59 @@ mod tests {
         let capped = anthropic_reply(&json!({"content": many}));
         assert_eq!(capped.calls.len(), 32);
         assert_eq!(capped.assistant["content"].as_array().unwrap().len(), 32);
+    }
+
+    /// Why an answer stopped reaches the turn's end: cut off at the length limit, or declined,
+    /// in either protocol (#9495). A call cut off mid-way is neither run nor kept in the history.
+    #[test]
+    fn answers_say_why_they_stopped() {
+        let thinking = json!({"type": "thinking", "thinking": "", "signature": "s"});
+        let call = json!({"type": "tool_use", "id": "t1", "name": "measure", "input": {}});
+        for (reason, stop) in [("end_turn", ""), ("tool_use", ""), ("max_tokens", "max_tokens"), ("refusal", "refusal"), ("made_up", "")] {
+            assert_eq!(anthropic_reply(&json!({"content": [thinking], "stop_reason": reason})).stop, stop, "{reason}");
+        }
+        assert_eq!(anthropic_reply(&json!({"content": [thinking]})).stop, "");
+        let cut = anthropic_reply(&json!({"content": [thinking, call], "stop_reason": "max_tokens"}));
+        assert!(cut.calls.is_empty());
+        assert_eq!(cut.assistant["content"], json!([thinking]));
+
+        let openai = |finish: &str, message: Value| openai_reply(&json!({"choices": [{"message": message, "finish_reason": finish}]}));
+        let calls = json!([{"id": "c1", "type": "function", "function": {"name": "measure", "arguments": "{\"a\""}}]);
+        assert_eq!(openai("stop", json!({"content": "Hi"})).stop, "");
+        assert_eq!(openai("content_filter", json!({"content": null})).stop, "refusal");
+        assert_eq!(openai("stop", json!({"content": null, "refusal": "I can't help with that."})).stop, "refusal");
+        let cut = openai("length", json!({"content": null, "tool_calls": calls}));
+        assert_eq!(cut.stop, "max_tokens");
+        assert!(cut.calls.is_empty());
+        assert!(cut.assistant.get("tool_calls").is_none());
+    }
+
+    /// The loop ends the turn with the reason: an answer that is only thinking, cut off at the
+    /// length limit, ends as `max_tokens`, not as a normal end with nothing said.
+    #[test]
+    fn a_cut_off_answer_ends_the_turn_as_max_tokens() {
+        let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+            if r.method == "GET" {
+                return Ok((200, b"{\"data\":[]}".to_vec()));
+            }
+            let body = json!({"content": [{"type": "thinking", "thinking": "", "signature": "s"}], "stop_reason": "max_tokens"});
+            Ok((200, body.to_string().into_bytes()))
+        });
+        let cfg = ApiConfig {
+            name: "Test".into(),
+            protocol: Protocol::Anthropic,
+            base_url: "http://localhost:1".into(),
+            model: "m".into(),
+            key: Some("sk-secret".into()),
+            http,
+            request_timeout_s: 300,
+        };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let mut b = ApiBackend::start(cfg, ctx).unwrap();
+        b.prompt(&[PromptPart::Text("look closer".into())]);
+        let events = wait_for_turn(&mut b);
+        b.shutdown(true);
+        assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason == "max_tokens"), "{events:?}");
     }
 
     #[test]

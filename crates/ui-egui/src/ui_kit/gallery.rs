@@ -1289,7 +1289,7 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("text_emphasis", "dialog:row:Gallery", Some("dialog:Bold"), |ui, s| {
         row(ui, "Gallery", |ui| {
-            text_emphasis(ui, &mut s.checked, &mut false);
+            text_emphasis(ui, &mut s.checked, &mut false, true);
         });
     }),
     element!("value_pair_named", "dialog:row:Position", Some("dialog:Distance X"), |ui, s| {
@@ -1332,6 +1332,13 @@ const ELEMENTS: &[Element] = &[
     element!("dropdown", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         row(ui, "Gallery", |ui| {
             dropdown(ui, "gallery", &mut s.selected, &["One", "Two"]);
+        });
+    }),
+    element!("dropdown_previews", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
+        row(ui, "Gallery", |ui| {
+            dropdown_previews(ui, "gallery_previews", &mut s.selected, &["One", "Two"], |ui, index| {
+                ui.label(if index == 0 { "One" } else { "Two" });
+            });
         });
     }),
     element!("dropdown_picked", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
@@ -1764,7 +1771,7 @@ fn emphasis_and_compact_modes_keep_independent_actions_in_both_themes() {
         let mut italic = false;
         let mut selected = 0;
         let mut draw = |ui: &mut Ui| {
-            row(ui, "Style", |ui| text_emphasis(ui, &mut bold, &mut italic));
+            row(ui, "Style", |ui| text_emphasis(ui, &mut bold, &mut italic, true));
             row(ui, "Alignment", |ui| {
                 segmented(
                     ui,
@@ -1932,8 +1939,8 @@ fn gallery_covers_every_inline_element() {
                 && matches!(&item.vis, syn::Visibility::Restricted(v) if v.path.is_ident("crate"))
             {
                 let name = item.sig.ident.to_string();
-                // The inherited row label is metadata, not a renderable element.
-                if name != "label" {
+                // The inherited row label and the eye-drag state key are metadata, not renderable elements.
+                if name != "label" && name != "eye_drag_id" {
                     assert!(names.contains(name.as_str()), "{file}: {name} needs a gallery entry");
                 }
             }

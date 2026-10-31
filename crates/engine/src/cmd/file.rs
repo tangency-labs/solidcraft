@@ -81,6 +81,8 @@ pub static COMMANDS: &[CommandSpec] = &[
 fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_(p, "name").unwrap_or("Untitled");
     s.replace_design(Session::new(Document::new(name)));
+    // A name given here is the user's own, so Save As keeps it (#4907); "Untitled" is none.
+    s.user_named = !name.trim().is_empty() && name.trim() != DEFAULT_NAME;
     Ok(json!({"name": name}))
 }
 
@@ -370,17 +372,22 @@ fn default_name_for(name: &str, path: &str) -> Option<String> {
     (!stem.is_empty()).then_some(stem)
 }
 
-/// The name a design takes when saved to `path`, if it changes: its file's name while it has
-/// none of its own ([`default_name_for`]), or while it still has the name it took from the file
-/// it was saved as before, so Save As under another name renames it too (#1710). A name the
-/// user chose is kept.
-fn saved_name(name: &str, old_path: Option<&str>, path: &str) -> Option<String> {
+/// The name a design takes when saved to `path`, if it changes. A design with no name of its
+/// own takes the file's ([`default_name_for`]). Otherwise a name the user chose is kept, while
+/// a borrowed one — taken from the file it was saved as before (#1710), from a sample, or from
+/// a file that stored another design's name — follows a Save As to the new file's name, so
+/// after Save As the open design *is* the new file (#4907). A plain Save to the same file
+/// never renames.
+fn saved_name(name: &str, old_path: Option<&str>, path: &str, user_named: bool) -> Option<String> {
     if let Some(stem) = default_name_for(name, path) {
         return Some(stem);
     }
+    if user_named {
+        return None;
+    }
     let stem = |p: &str| std::path::Path::new(p).file_stem().map(|x| x.to_string_lossy().trim().to_string()).filter(|x| !x.is_empty());
-    let (old, new) = (stem(old_path?)?, stem(path)?);
-    (name.trim() == old && new != old).then_some(new)
+    let new = stem(path)?;
+    (old_path != Some(path) && name.trim() != new).then_some(new)
 }
 
 /// Rename the design, and the undo and redo states that still carry the old name, so undo
@@ -417,9 +424,9 @@ fn write(s: &mut Session, path: &str, format: &str, compression: &str, preview: 
             )));
         }
     }
-    // Saving an unnamed design, or one named after the file it was saved as, names it after its
-    // file (not an undoable edit).
-    let renamed = saved_name(&s.doc.name, s.path.as_deref(), path).map(|stem| (s.doc.name.clone(), stem));
+    // Saving an unnamed or borrowed-named design to a new file names it after that file
+    // (not an undoable edit); a name the user chose is kept (#4907).
+    let renamed = saved_name(&s.doc.name, s.path.as_deref(), path, s.user_named).map(|stem| (s.doc.name.clone(), stem));
     if let Some((from, to)) = &renamed {
         rename_design(s, from, to);
     }
@@ -1725,6 +1732,44 @@ mod tests {
         let mut reopened = Session::default();
         reopened.execute("doc.open", &json!({"path":dir.join("lid-v2.solidcraft")})).unwrap();
         assert_eq!(reopened.doc.name, "Gearbox lid");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// #4907: after Save As the open design *is* the new file — tab, browser and the name stored
+    /// in the file — whenever its name didn't come from its current file: a sample's name, or a
+    /// file renamed outside SolidCraft or named by someone else. A plain Save never renames.
+    #[test]
+    fn save_as_names_a_borrowed_name_after_the_new_file() {
+        let dir = name_dir("borrowed");
+        // The issue's steps: the sample "Sample Plate" saved as "Bracket v2.solidcraft".
+        let mut s = Session::default();
+        s.doc_mut().name = "Sample Plate".into();
+        s.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
+        let path = dir.join("Bracket v2.solidcraft");
+        let r = s.execute("file.save_as", &json!({"path":path})).unwrap();
+        assert_eq!(r["name"], "Bracket v2");
+        assert_eq!(s.doc.name, "Bracket v2");
+        assert!(!s.is_dirty(), "taking the new file's name is part of the save");
+        assert_eq!(solidcraft_io::read_design(&std::fs::read(&path).unwrap()).unwrap().name, "Bracket v2");
+        // Undoing the box does not bring the sample's name back.
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc.name, "Bracket v2");
+        // Reopening shows the new name too.
+        let mut reopened = Session::default();
+        reopened.execute("doc.open", &json!({"path":path})).unwrap();
+        assert_eq!(reopened.doc.name, "Bracket v2");
+        // A file whose stored name is not its own (renamed outside SolidCraft, or saved by a
+        // version before #1710): Save As names the design after the new file, while a plain
+        // Save to the file it has leaves the name alone.
+        let odd = dir.join("renamed.solidcraft");
+        std::fs::write(&odd, solidcraft_io::write_design(&Document::new("Sample Plate"))).unwrap();
+        let mut s = Session::default();
+        s.execute("doc.open", &json!({"path":odd})).unwrap();
+        assert_eq!(s.doc.name, "Sample Plate");
+        s.execute("file.save", &json!({})).unwrap();
+        assert_eq!(s.doc.name, "Sample Plate", "a plain Save does not rename behind the user's back");
+        s.execute("file.save_as", &json!({"path":dir.join("Bracket v3.solidcraft")})).unwrap();
+        assert_eq!(s.doc.name, "Bracket v3");
         std::fs::remove_dir_all(dir).unwrap();
     }
 

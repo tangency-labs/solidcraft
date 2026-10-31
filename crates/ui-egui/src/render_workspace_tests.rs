@@ -1,5 +1,6 @@
 use super::*;
 use crate::scenario::Harness;
+use egui::Color32;
 use solidcraft_engine::Session;
 
 fn environment_editor_frame(h: &mut Harness, events: Vec<egui::Event>) {
@@ -867,6 +868,52 @@ mod async_path_host {
         h.frames(3);
     }
 
+    /// Choose the GPU path image method, which is what starts the deferred setup.
+    fn choose_gpu_path(h: &mut Harness) {
+        select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
+        h.frames(1);
+    }
+
+    /// Entering Render and moving its view with the Raster (or CPU) image method never compiles
+    /// the GPU path tracer: on Vulkan drivers that compile takes gigabytes (#9041). Choosing the
+    /// GPU path method starts it, once.
+    #[test]
+    fn render_with_another_image_method_never_starts_the_path_setup() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1200,"height":900}));
+        h.app.render_workspace.defer_path_host("selected viewport".into(), move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            job::ImageHost::with_executor(Arc::new(TestExecutor)).map_err(|e| e.to_string())
+        });
+        enter(&mut h.app, true).unwrap();
+        assert_eq!(h.app.render_workspace.view.method, ImageMethod::Raster);
+        for step in 0..20 {
+            h.call("ui.camera", json!({"yaw": f64::from(step) * 0.1, "pitch": 0.3}));
+            h.frames(1);
+        }
+        select_image_method(&mut h.app, ImageMethod::CpuRaytrace);
+        h.frames(5);
+        enter(&mut h.app, false).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.frames(5);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(matches!(h.app.render_workspace.path_host, PathHost::NotStarted));
+        assert!(h.app.render_workspace.pending_setup.is_some());
+        choose_gpu_path(&mut h);
+        finish_setup(&mut h);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(matches!(h.app.render_workspace.path_host, PathHost::Ready(_)));
+        // The GPU method chosen in Design (a loaded setup) waits for Render.
+        let mut h = Harness::new();
+        h.app.render_workspace.defer_path_host("selected viewport".into(), || Err("not opened".into()));
+        select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
+        h.frames(5);
+        assert!(matches!(h.app.render_workspace.path_host, PathHost::NotStarted));
+    }
+
     #[test]
     fn design_frames_and_document_reset_never_start_the_deferred_path_host() {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -884,6 +931,7 @@ mod async_path_host {
         assert!(matches!(h.app.render_workspace.path_host, PathHost::NotStarted));
         assert!(h.app.render_workspace.pending_setup.is_some());
         enter(&mut h.app, true).unwrap();
+        choose_gpu_path(&mut h);
         finish_setup(&mut h);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(matches!(h.app.render_workspace.path_host, PathHost::Ready(_)));
@@ -905,6 +953,8 @@ mod async_path_host {
             Err("deliberate device refusal".into())
         });
         sync_backend(&mut h.app);
+        assert!(matches!(h.app.render_workspace.path_host, PathHost::NotStarted));
+        choose_gpu_path(&mut h);
         finish_setup(&mut h);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(matches!(h.app.render_workspace.path_host, PathHost::Failed(_)));
@@ -923,6 +973,7 @@ mod async_path_host {
         h.frames(5);
         assert_eq!(h.app.render_workspace.setup_key.as_deref(), Some("selected safe-mode adapter"));
         enter(&mut h.app, true).unwrap();
+        choose_gpu_path(&mut h);
         finish_setup(&mut h);
         let PathHost::Failed(message) = &h.app.render_workspace.path_host else { panic!("expected selected adapter result") };
         assert_eq!(message, "selected adapter unavailable");
@@ -1297,6 +1348,150 @@ fn saved_camera_survives_frames_and_product_fit_ignores_selection() {
     assert_eq!(h.app.cam, selected_fit, "Fit Product ignores the selected subset");
     enter(&mut h.app, false).unwrap();
     assert_eq!(h.app.cam, design);
+}
+
+/// Inspect the mesh submitted by the actual Render canvas, including its GPU-unavailable path.
+/// This is a headless colour handoff assertion, not a rendered-pixel or screenshot comparison.
+fn render_preview_background_frame(h: &mut Harness, time: f64) -> [Color32; 4] {
+    let app = &mut h.app;
+    let mut viewport = egui::Rect::NOTHING;
+    let mut output = h.ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))),
+            time: Some(time),
+            ..Default::default()
+        },
+        |ui| {
+            app.logic(ui.ctx());
+            viewport = ui.max_rect();
+            show(app, ui);
+        },
+    );
+    let corners = [viewport.left_top(), viewport.right_top(), viewport.right_bottom(), viewport.left_bottom()];
+    let colors = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Mesh(mesh) if mesh.vertices.len() == 4 && mesh.vertices.iter().zip(corners).all(|(vertex, corner)| vertex.pos == corner) => {
+                Some(std::array::from_fn(|i| mesh.vertices[i].color))
+            }
+            _ => None,
+        })
+        .expect("Render must paint a background mesh over the full viewport");
+    output.textures_delta.clear();
+    colors
+}
+
+#[test]
+fn render_preview_tab_surfaces_use_published_gradient_through_fade() {
+    for base in ["dark", "light"] {
+        let mut h = Harness::new();
+        let file = crate::theme_files::tab_fixture(base);
+        crate::prefs::control(&mut h.app, &json!({"theme_import":crate::theme_files::export_file(&file)})).unwrap();
+        let app = &mut h.app;
+        h.ctx.run_ui(egui::RawInput { time: Some(1.0), ..Default::default() }, |ui| app.logic(ui.ctx())).textures_delta.clear();
+        let model = Tokens::get();
+        enter(&mut h.app, true).unwrap();
+        assert!(h.app.session.doc.render.setups.is_empty());
+        let document = h.app.session.doc.clone();
+        let request = image_request(&h.app).unwrap();
+        let history = (h.app.session.revision, h.app.session.undo.len());
+        let end = crate::theme_files::resolve_for_tab(&file, &Default::default(), Some("RENDER"));
+        let expected_start = [model.viewport_top, model.viewport_top, model.viewport_bottom, model.viewport_bottom];
+        let expected_end = [end.viewport_top, end.viewport_top, end.viewport_bottom, end.viewport_bottom];
+        let mut previous = expected_start;
+        for progress in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let colors = render_preview_background_frame(&mut h, 2.0 + 0.24 * progress);
+            let shown = Tokens::get();
+            assert_eq!(colors, [shown.viewport_top, shown.viewport_top, shown.viewport_bottom, shown.viewport_bottom]);
+            if progress == 0.0 {
+                assert_eq!(colors, expected_start);
+            } else if progress == 1.0 {
+                assert_eq!(colors, expected_end);
+            } else if progress <= 0.5 {
+                assert_ne!(colors, expected_start, "the Render canvas must leave the starting colours at {progress}");
+                assert_ne!(colors, expected_end, "the Render canvas must receive intermediate fade colours at {progress}");
+                assert_ne!(colors, previous, "the Render canvas fade must advance between early samples at {progress}");
+            }
+            // At 75% elapsed time, ease-out cubic is already 98.4375% of the way to the
+            // destination. Byte quantization can legitimately produce the exact final colours.
+            previous = colors;
+            assert!(Arc::ptr_eq(&document, &h.app.session.doc));
+            assert_eq!((h.app.session.revision, h.app.session.undo.len()), history);
+            assert_eq!(image_request(&h.app).unwrap(), request, "UI themes never modify rendered image settings");
+        }
+        assert_eq!(render_preview_background_frame(&mut h, 3.0), expected_end);
+    }
+}
+
+#[test]
+fn render_preview_tab_surfaces_preserve_scene_backplates_and_viewport_overrides() {
+    for base in ["dark", "light"] {
+        let mut h = Harness::new();
+        let file = crate::theme_files::tab_fixture(base);
+        crate::prefs::control(
+            &mut h.app,
+            &json!({
+                "theme_import":crate::theme_files::export_file(&file),
+                "theme_options":{&file.id:{"tab_fade_ms":0}}
+            }),
+        )
+        .unwrap();
+        enter(&mut h.app, true).unwrap();
+        let scene_rgb = h.app.render_workspace.view.draft.background;
+        let scene = [Color32::from_rgb(scene_rgb[0], scene_rgb[1], scene_rgb[2]); 4];
+        let gradient = render_preview_background_frame(&mut h, 1.0);
+        assert_ne!(gradient, scene);
+
+        crate::prefs::control(&mut h.app, &json!({"theme_options":{&file.id:{"tab_colours":false}}})).unwrap();
+        assert_eq!(render_preview_background_frame(&mut h, 2.0), scene);
+        crate::prefs::control(
+            &mut h.app,
+            &json!({"theme_options":{&file.id:{"tab_colours":true}},"viewport_theme":if base == "dark" {"light"} else {"dark"}}),
+        )
+        .unwrap();
+        let opposite = if base == "dark" { Tokens::light() } else { Tokens::dark() };
+        assert_eq!(
+            render_preview_background_frame(&mut h, 3.0),
+            [opposite.viewport_top, opposite.viewport_top, opposite.viewport_bottom, opposite.viewport_bottom]
+        );
+        crate::prefs::control(&mut h.app, &json!({"viewport_theme":"theme","viewport_background":[3,7,11]})).unwrap();
+        assert_eq!(render_preview_background_frame(&mut h, 4.0), [Color32::from_rgb(3, 7, 11); 4]);
+
+        // Authored scene intent takes priority even over a viewport preference. Test temporary
+        // drafts as well as saved setups, without persisting any theme colour into the scene.
+        let original = h.app.render_workspace.view.clone();
+        for case in 0..6 {
+            h.app.render_workspace.view = original.clone();
+            match case {
+                0 => h.app.render_workspace.view.draft.background = [21, 43, 65],
+                1 => h.app.render_workspace.view.transparent = true,
+                2 => h.app.render_workspace.view.studio.backdrop_enabled = true,
+                3 => h.app.render_workspace.view.studio.environment = studio::Environment::Sky,
+                4 => h.app.render_workspace.view.cpu.environment = cpu::Environment::Constant,
+                _ => {
+                    h.app.render_workspace.view.raytrace.environment =
+                        Some(solidcraft_engine::render::job::RaytraceEnvironmentOptions { color: [0.2, 0.3, 0.4], intensity: 1.0 })
+                }
+            }
+            let expected = if case == 0 { [Color32::from_rgb(21, 43, 65); 4] } else { scene };
+            assert_eq!(render_preview_background_frame(&mut h, 5.0 + f64::from(case)), expected);
+        }
+        h.app.render_workspace.view = original;
+        h.app.run("render.settings.set", json!({"name":"Studio","set":{"camera":h.app.cam}})).unwrap();
+        setups::load(&mut h.app);
+        let authored = h.app.session.doc.clone();
+        assert_eq!(render_preview_background_frame(&mut h, 11.0), scene, "even a saved default-colour backplate is scene-owned");
+        assert!(Arc::ptr_eq(&authored, &h.app.session.doc));
+
+        // A theme without tabs keeps the legacy Render background, as do built-in themes.
+        h.app.render_workspace.view.name = "Unsaved".into();
+        setups::load(&mut h.app);
+        crate::prefs::control(&mut h.app, &json!({"theme_import":{"format":"solidcraft-theme/1","name":"No tabs","base":base}})).unwrap();
+        assert_eq!(render_preview_background_frame(&mut h, 12.0), scene);
+        crate::prefs::control(&mut h.app, &json!({"theme":base})).unwrap();
+        assert_eq!(render_preview_background_frame(&mut h, 13.0), scene);
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -4432,6 +4627,35 @@ fn render_workspace_pick_stage_tools_filter_sample_clicks_with_shots_shown_and_h
 }
 
 #[test]
+fn modelling_select_panel_shows_and_clears_renders_component_pick() {
+    use egui::accesskit::{Role, Toggled};
+    const BODY: &str = "Select bodies (a face picks its body)";
+    const COMPONENT: &str = "Select components (a face picks its component)";
+    let (mut h, _) = render_pick_sample();
+    h.step(&json!({"click":{"handle":"render:pick:component"}})).unwrap();
+    enter(&mut h.app, false).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"handle":"tab:VIEW"}})).unwrap();
+    h.step(&json!({"click":{"handle":"panel:VIEW:SELECT"}})).unwrap();
+
+    let check = |h: &Harness, body: bool, component: bool| {
+        assert_eq!((h.app.ui.pick_bodies, h.app.ui.pick_components), (body, component));
+        let tree = h.output.accesskit_update.as_ref().unwrap();
+        for (label, on) in [(BODY, body), (COMPONENT, component)] {
+            let node = tree.nodes.iter().find(|(_, n)| n.role() == Role::CheckBox && n.label() == Some(label));
+            assert_eq!(node.and_then(|(_, n)| n.toggled()), Some(if on { Toggled::True } else { Toggled::False }), "{label}");
+        }
+    };
+    check(&h, false, true);
+    h.step(&json!({"widget":"Faces"})).unwrap();
+    for (label, body, component) in [(COMPONENT, false, false), (BODY, true, false), (COMPONENT, false, true), (BODY, true, false)] {
+        h.step(&json!({"widget":label})).unwrap();
+        check(&h, body, component);
+        assert!(h.app.ui.pick_off.iter().any(|kind| kind == "faces"), "changing pick mode must preserve the panel's Faces filter");
+    }
+}
+
+#[test]
 fn render_workspace_click_modifiers_clear_and_browser_share_selection() {
     use solidcraft_engine::Sel;
     let mut h = Harness::new();
@@ -6406,4 +6630,86 @@ fn the_field_of_view_rescales_only_the_design_view() {
     h.frames(2);
     assert!(h.app.ui.perspective);
     assert!((size(h.app.cam, 1.2) / size(design, 0.6) - 1.0).abs() < 1e-9, "the design view keeps its size: {:?}", h.app.cam);
+}
+
+/// Fit Product keeps the whole product inside the image, whatever its aspect: a picture
+/// taller than wide moves the camera back so the sides hold it too.
+#[test]
+fn fit_aspect_keeps_the_product_inside_a_tall_image() {
+    use solidcraft_engine::geom::{Aabb3, Vec3};
+    let bounds = Aabb3 { min: Vec3::new(-30.0, -30.0, -30.0), max: Vec3::new(30.0, 30.0, 30.0) };
+    let radius = bounds.diagonal();
+    for fov in [0.0, std::f64::consts::FRAC_PI_4] {
+        let mut landscape = Camera { fov, ..Default::default() };
+        assert!(landscape.fit_aspect(&bounds, 2.0));
+        let mut plain = Camera { fov, ..Default::default() };
+        plain.fit(&bounds);
+        assert_eq!(landscape, plain, "a wide picture keeps the standard fit");
+        for aspect in [0.5, 0.25] {
+            let mut cam = Camera { fov, ..Default::default() };
+            assert!(cam.fit_aspect(&bounds, aspect));
+            for p in corners(&bounds) {
+                let q = cam.view_proj(aspect, radius).apply(p);
+                let (x, y) = (q[0] / q[3], q[1] / q[3]);
+                assert!(x.abs() <= 1.0 && y.abs() <= 1.0, "fov {fov}, aspect {aspect}: corner {p:?} projects to ({x}, {y}), outside the picture");
+            }
+        }
+        // Nothing to fit leaves the camera alone.
+        let mut cam = Camera { fov, distance: 123.0, ..Default::default() };
+        assert!(!cam.fit_aspect(&Aabb3::EMPTY, 0.5));
+        assert_eq!(cam.distance, 123.0);
+    }
+}
+
+fn corners(b: &solidcraft_engine::geom::Aabb3) -> Vec<solidcraft_engine::geom::Vec3> {
+    let mut out = Vec::new();
+    for x in [b.min.x, b.max.x] {
+        for y in [b.min.y, b.max.y] {
+            for z in [b.min.z, b.max.z] {
+                out.push(solidcraft_engine::geom::Vec3::new(x, y, z));
+            }
+        }
+    }
+    out
+}
+
+/// Entering Render fits the product to the setup in effect, not to the draft that setup
+/// replaces: in a cold workspace whose saved Studio setup is portrait (1024 × 4096) the fit
+/// waits for the setup to load, so with Frame open the product sits inside the final 1:4
+/// picture, in orthographic and in perspective, and leaving Render gives the Design camera
+/// back.
+#[test]
+fn entering_render_fits_a_saved_portrait_setup_inside_its_final_frame() {
+    for fov in [0.0, 0.8] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":60,"width":20,"height":20})).unwrap();
+        let name = h.app.render_workspace.view.name.clone();
+        h.app.run("render.settings.set", json!({"name":name,"set":{"width":1024,"height":4096}})).unwrap();
+        h.app.ui.perspective = fov > 0.0;
+        h.app.cam.fov = fov;
+        h.frames(2);
+        let design = (h.app.cam, h.app.ui.perspective);
+        let draft = &h.app.render_workspace.view.draft;
+        assert_ne!((draft.width, draft.height), (1024, 4096), "the cold draft is still the default");
+        h.app.render_workspace.view.stage = Stage::Frame;
+        enter(&mut h.app, true).unwrap();
+        h.frames(3);
+        assert!(shot::overlay_visible(&h.app));
+        let draft = &h.app.render_workspace.view.draft;
+        assert_eq!((draft.width, draft.height), (1024, 4096), "the saved setup is in effect");
+        let frame = shot::preview_rect(&h.app, h.app.viewport.rect.unwrap()).unwrap();
+        assert!((frame.width() / frame.height() - 0.25).abs() < 1e-3, "{frame:?}");
+        let scene = solidcraft_engine::product_scene::extract(&h.app.session).unwrap();
+        let cam = h.app.cam;
+        let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(cam.target);
+        for p in corners(&scene.bounds) {
+            let (x, y, _) = cam.to_screen(p, f64::from(frame.width()), f64::from(frame.height()), radius).unwrap();
+            assert!(
+                (0.0..=f64::from(frame.width())).contains(&x) && (0.0..=f64::from(frame.height())).contains(&y),
+                "fov {fov}: corner {p:?} at ({x}, {y}) outside the {frame:?} picture"
+            );
+        }
+        enter(&mut h.app, false).unwrap();
+        assert_eq!((h.app.cam, h.app.ui.perspective), design, "fov {fov}: leaving Render restores the Design camera");
+    }
 }

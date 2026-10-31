@@ -566,6 +566,10 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             s.visibility.hidden_folders.retain(|k| !k.ends_with(&own) && !groups.iter().any(|g| k.ends_with(g.as_str())));
         }
     }
+    // Only a sketch a feature uses is kept shown on its own: one nothing uses yet is shown anyway,
+    // and marking it would keep it shown once an Extrude uses it (#9954).
+    let used: Vec<u64> =
+        items.iter().filter_map(|it| if let Shown::Sketch(id) = it { crate::view::sketch_consumed(s, *id).then_some(*id) } else { None }).collect();
     let v = &mut s.visibility;
     match str_(p, "folder") {
         Some("bodies" | "all") if visible => {
@@ -584,7 +588,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
             Shown::Sketch(id) => {
                 if visible {
                     v.hidden_sketches.retain(|x| x != id);
-                    if !v.shown_sketches.contains(id) {
+                    if used.contains(id) && !v.shown_sketches.contains(id) {
                         v.shown_sketches.push(*id);
                     }
                 } else {
@@ -1009,7 +1013,11 @@ pub(crate) fn counted(f: &solidcraft_doc::Feature, i: usize) -> bool {
 
 fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "body.rename";
-    let old = str_(p, "body").ok_or_else(|| bad(cmd, "`body` must be a body name"))?.to_string();
+    let given = str_(p, "body").ok_or_else(|| bad(cmd, "`body` must be a body name"))?;
+    // A placed copy's name (`KB (K:2)`, the name the browser lists a pasted placement's body by)
+    // means the body it shows, as appearance.assign takes it (#9740): renaming it renames that body,
+    // in every placement of its component (#10017).
+    let old = s.own_body_name(given).ok_or_else(|| bad(cmd, format!("no body `{given}`")))?;
     let name =
         str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
     if name == old {
@@ -1134,9 +1142,6 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, e));
     }
     d.rename_body_keys(&old, name);
-    for b in s.visibility.locked_bodies.iter_mut().filter(|b| **b == old) {
-        *b = name.to_string();
-    }
     s.remember_body_rename(&previous, &old, name);
     Ok(json!({"body": old, "name": name}))
 }
@@ -1268,6 +1273,31 @@ mod tests {
         s.model.state().bodies.iter().map(|b| b.name.clone()).collect()
     }
 
+    /// #10017: a pasted placement's body is listed by its placed name (`KB (K:2)`), and Rename
+    /// sends that name. It renames the body that placement shows, so both placements show the new
+    /// name; a name that is neither a body's nor a placed copy's is still refused.
+    #[test]
+    fn a_placed_copys_body_renames_by_its_placed_name() {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "K"}));
+        run(&mut s, "solid.box", json!({"body_name": "KB", "length": 10, "width": 10, "height": 10}));
+        run(&mut s, "occurrence.copy", json!({"component": "K", "translate": [30, 0, 0]}));
+        // The copy hidden first stays hidden under its new name, and one undo brings both names
+        // back.
+        run(&mut s, "browser.visibility", json!({"items": ["KB (K:2)"], "visible": false}));
+        let r = run(&mut s, "body.rename", json!({"body": "KB (K:2)", "name": "Lid"}));
+        assert_eq!((r["body"].as_str(), r["name"].as_str()), (Some("KB"), Some("Lid")), "{r}");
+        let world = |s: &Session| s.world_state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+        let renamed = world(&s);
+        assert!(renamed.iter().any(|n| n == "Lid") && renamed.iter().any(|n| n == "Lid (K:2)"), "{renamed:?}");
+        assert!(!renamed.iter().any(|n| n.starts_with("KB")), "{renamed:?}");
+        assert!(!s.body_visible("Lid (K:2)") && s.body_visible("Lid"), "{:?}", s.visibility.hidden_bodies);
+        assert!(s.execute("body.rename", &json!({"body": "Lid (K:9)", "name": "Other"})).is_err());
+        run(&mut s, "edit.undo", json!({}));
+        let back = world(&s);
+        assert!(back.iter().any(|n| n == "KB") && back.iter().any(|n| n == "KB (K:2)"), "{back:?}");
+    }
+
     #[test]
     fn body_rename_preserves_plastic_rules_and_current_visibility_through_history() {
         let mut s = Session::default();
@@ -1316,6 +1346,82 @@ mod tests {
         assert_eq!(s.visibility.hidden_bodies, ["Peg"]);
         run(&mut s, "edit.redo", json!({}));
         assert!(!s.body_visible("Stud"));
+    }
+
+    /// Two 5 mm boxes, `A` and `B`, as the #9737 repro script makes them.
+    fn two_boxes(s: &mut Session) {
+        run(s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "A"}));
+        run(s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [10, 0, 0], "body_name": "B"}));
+    }
+
+    fn delete_selection(s: &mut Session) -> Value {
+        let items: Vec<Value> = s.selection.iter().map(|x| serde_json::to_value(x).unwrap()).collect();
+        match s.execute("selection.delete", &json!({"items": items})) {
+            Ok(v) => v,
+            Err(e) => panic!("selection.delete: {e}"),
+        }
+    }
+
+    #[test]
+    fn selection_follows_body_rename_and_delete_hits_the_renamed_body() {
+        // #9737: after renaming a selected body the selection is the new name, and Delete
+        // deletes it — the "nothing to delete" and the wrong-body delete are both gone.
+        let mut s = Session::default();
+        two_boxes(&mut s);
+        run(&mut s, "select.set", json!({"items": [{"type": "body", "name": "A"}]}));
+        run(&mut s, "body.rename", json!({"body": "A", "name": "Renamed"}));
+        assert_eq!(s.selection, vec![crate::Sel::Body { name: "Renamed".into() }]);
+        delete_selection(&mut s);
+        assert_eq!(names(&s), ["B"]);
+        // The old name is free; B takes it, and Delete finds nothing — B is never deleted.
+        run(&mut s, "body.rename", json!({"body": "B", "name": "A"}));
+        assert!(s.execute("selection.delete", &json!({"items": []})).is_err());
+        assert_eq!(names(&s), ["A"]);
+    }
+
+    #[test]
+    fn renaming_the_selection_leaves_the_old_name_for_another_body_to_take() {
+        // The wrong-body delete, head on: B takes A's name before Delete is pressed. The
+        // selection followed the rename, so Delete takes `Renamed` and B (now `A`) survives.
+        let mut s = Session::default();
+        two_boxes(&mut s);
+        run(&mut s, "select.set", json!({"items": [{"type": "body", "name": "A"}]}));
+        run(&mut s, "body.rename", json!({"body": "A", "name": "Renamed"}));
+        run(&mut s, "body.rename", json!({"body": "B", "name": "A"}));
+        assert_eq!(s.selection, vec![crate::Sel::Body { name: "Renamed".into() }]);
+        delete_selection(&mut s);
+        assert_eq!(names(&s), ["A"]);
+    }
+
+    #[test]
+    fn face_selection_follows_the_body_rename() {
+        let mut s = Session::default();
+        two_boxes(&mut s);
+        let face = json!({"type": "face", "body": "A", "index": 0, "point": [2.5, 2.5, 0]});
+        run(&mut s, "select.set", json!({"items": [face]}));
+        run(&mut s, "body.rename", json!({"body": "A", "name": "Renamed"}));
+        assert_eq!(s.selection, vec![crate::Sel::Face { body: "Renamed".into(), index: 0, point: [2.5, 2.5, 0.0].into() }]);
+    }
+
+    #[test]
+    fn a_selected_body_that_goes_away_leaves_the_selection() {
+        // A stale selection is how a later body taking the name gets deleted: once the body
+        // is gone the selection drops it, at the refresh that removed the body.
+        let mut s = Session::default();
+        two_boxes(&mut s);
+        run(&mut s, "select.set", json!({"items": [{"type": "body", "name": "A"}]}));
+        run(&mut s, "solid.remove", json!({"bodies": ["A"]}));
+        assert!(s.selection.is_empty(), "the gone body must not stay selected: {:?}", s.selection);
+    }
+
+    #[test]
+    fn select_set_refuses_a_body_name_that_is_not_there() {
+        let mut s = Session::default();
+        two_boxes(&mut s);
+        assert!(s.execute("select.set", &json!({"items": [{"type": "body", "name": "NoSuchBody"}]})).is_err());
+        assert!(s.selection.is_empty());
+        run(&mut s, "select.set", json!({"items": [{"type": "body", "name": "A"}, {"type": "body", "name": "B"}]}));
+        assert_eq!(s.selection.len(), 2);
     }
 
     #[test]
@@ -1859,6 +1965,23 @@ mod tests {
         assert!(s.visibility.hidden_bodies.is_empty());
     }
 
+    /// #9954: a sketch hidden and shown again before an Extrude uses it hides itself once the
+    /// Extrude uses it, as a sketch never hidden does; shown after the Extrude, it stays shown.
+    #[test]
+    fn a_sketch_shown_before_an_extrude_hides_itself_once_the_extrude_uses_it() {
+        let mut s = Session::default();
+        let sketch = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "browser.visibility", json!({"items": [sketch], "visible": false}));
+        run(&mut s, "browser.visibility", json!({"items": [sketch], "visible": true}));
+        assert!(crate::view::sketch_shown(&s, sketch));
+        run(&mut s, "solid.extrude", json!({"sketch": sketch, "distance": 10}));
+        assert!(!crate::view::sketch_shown(&s, sketch), "the Extrude uses it: it hides itself");
+        run(&mut s, "browser.visibility", json!({"items": [sketch], "visible": true}));
+        assert!(crate::view::sketch_shown(&s, sketch), "shown on its own, it stays shown");
+    }
+
     #[test]
     fn a_sheet_metal_flange_hides_its_sketch_as_an_extrude_does() {
         // #6804: the base flange's sketch stayed shown; its line on the plate's bottom edge then
@@ -1956,7 +2079,7 @@ mod tests {
         assert_eq!(lines(&s), n0);
         // The browser's Sketches folder hidden: sketches shown one by one aren't drawn either,
         // only the sketch being edited.
-        assert!(s.visibility.shown_sketches.contains(&floor));
+        assert!(crate::view::sketch_shown(&s, floor));
         run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/sketches"], "visible": false}));
         assert!([floor, drain].iter().all(|id| !crate::view::sketch_shown(&s, *id)));
         s.active_sketch = Some(floor);
@@ -2020,7 +2143,8 @@ mod tests {
         assert!(s.visibility.hidden_bodies.is_empty());
         run(&mut s, "browser.visibility", json!({"items": ["BACK LID"], "visible": true}));
         assert!(s.visibility.hidden_sketches.is_empty());
-        assert_eq!(s.visibility.shown_sketches, vec![sketch]);
+        // Nothing uses the sketch: shown again, it is on neither list (#9954).
+        assert!(s.visibility.shown_sketches.is_empty() && crate::view::sketch_shown(&s, sketch));
     }
 
     /// #2219: hiding is a step of its own, so Ctrl+Z brings the body back instead of undoing the

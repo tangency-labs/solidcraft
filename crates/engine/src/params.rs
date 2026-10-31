@@ -146,21 +146,22 @@ pub fn string_list(cmd: &str, p: &Value, k: &str) -> Result<Vec<String>> {
 /// named by its position as in [`string_list`]. The commands that take feature keys read them
 /// here, because their list is not a list of names (#6651).
 pub fn name_or_id_list(cmd: &str, p: &Value, k: &str) -> Result<Vec<String>> {
+    Ok(name_or_id_values(cmd, p, k)?.iter().map(|v| v.as_str().map(str::to_owned).unwrap_or_else(|| v.to_string())).collect())
+}
+
+/// Keep the JSON types when a command distinguishes a numeric name from a numeric id.
+pub(crate) fn name_or_id_values<'a>(cmd: &str, p: &'a Value, k: &str) -> Result<&'a [Value]> {
     match p.get(k) {
-        None | Some(Value::Null) => Ok(Vec::new()),
-        Some(Value::String(s)) => Ok(vec![s.clone()]),
+        None | Some(Value::Null) => Ok(&[]),
+        Some(v @ Value::String(_)) => Ok(std::slice::from_ref(v)),
         Some(Value::Array(a)) => {
             if a.len() > MAX_STRING_LIST {
                 return Err(bad(cmd, format!("`{k}` must list at most {MAX_STRING_LIST} keys")));
             }
-            a.iter()
-                .enumerate()
-                .map(|(i, v)| match v {
-                    Value::String(s) => Ok(s.clone()),
-                    Value::Number(n) if n.is_u64() => Ok(n.to_string()),
-                    other => Err(bad(cmd, format!("`{k}` must list names or ids; the entry {} is {}", i + 1, json_brief(other)))),
-                })
-                .collect()
+            if let Some((i, v)) = a.iter().enumerate().find(|(_, v)| !v.is_string() && !v.is_u64()) {
+                return Err(bad(cmd, format!("`{k}` must list names or ids; the entry {} is {}", i + 1, json_brief(v))));
+            }
+            Ok(a)
         }
         Some(v) => Err(bad(cmd, format!("`{k}` must be a list of names or ids; it is {}", json_brief(v)))),
     }

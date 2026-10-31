@@ -236,6 +236,13 @@ across). Large bodies are sampled more coarsely, at about `max_points` (eight mi
 each; `sampling.spacing_mm` says what was used, and a larger `max_points` (up to 50 million)
 samples them finer, at the cost of time.
 
+When editing an Extrude in the UI, the Browser's bodies, sketches, construction objects and
+feature rows follow the history marker before that feature. Later objects return when editing
+ends. Rolling back manually keeps feature rows listed, so they remain available to edit.
+A hidden body supplying the profile's face is shown temporarily during the edit, including
+when a folder or component hides it. OK, Cancel and Escape end that display override; the body's
+saved visibility and unrelated visibility changes are preserved.
+
 ## Editing a feature from a script
 
 For `solid.pattern.circular`, `axis` accepts `X`, `Y`, `Z`, `{origin, dir}`, or an edge or

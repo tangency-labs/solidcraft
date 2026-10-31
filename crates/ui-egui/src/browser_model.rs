@@ -38,6 +38,9 @@ impl Model {
             if !matches!(feature.kind, FeatureKind::Sketch { .. }) {
                 features.entry(feature.component).or_default().push(i);
             }
+            if session.doc.marker.is_some_and(|marker| i >= marker) {
+                continue;
+            }
             let index = match feature.kind {
                 FeatureKind::Sketch { .. } => &mut sketches,
                 FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. } => &mut planes,

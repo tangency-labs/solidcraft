@@ -274,6 +274,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             Align {
                 flip: bool,
                 components: bool,
+                /// Point-to-point: which of the world X, Y and Z axes take the offset.
+                axes: [bool; 3],
             },
             /// Remove bodies from here on in the timeline.
             Remove,
@@ -302,6 +304,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// The measure chosen in the panel (centre, min or max); `None` follows the result's
                 /// own default (centre where a round item gives one).
                 show: Option<Shown>,
+                /// Where the labels in the view were dragged to (#8510).
+                labels: crate::canvas::MeasureLabels,
             },
             /// Move bodies by a distance along X, Y and Z.
             /// Move/Copy (see `dialogs_move`): the move type, X/Y/Z distances (Point to Position: the
@@ -464,6 +468,9 @@ pub struct Dialog {
     pub error: Option<String>,
     /// Editing an existing feature (its id, and the timeline marker to restore afterwards).
     pub editing: Option<(u64, Option<usize>)>,
+    /// Hidden face-profile sources shown only for this editor's lifetime. Visibility itself is
+    /// unchanged, so OK, Cancel, failed apply and replacing the dialog cannot leak an override.
+    pub(crate) edit_source_bodies: Vec<String>,
     /// A user pick or clear makes the profile selector explicit, even if all are reselected.
     pub profile_selection_changed: bool,
     /// Give the on-canvas value box the keyboard (and select its text) on the next frame.
@@ -736,6 +743,7 @@ impl Dialog {
             active: 0,
             error: None,
             editing: None,
+            edit_source_bodies: Vec::new(),
             profile_selection_changed: false,
             focus: true,
             value_focus: None,
@@ -872,7 +880,7 @@ impl Dialog {
             "solid.align" => {
                 let components = s.selection.iter().any(|x| matches!(x, Sel::Occurrence { .. }));
                 Dialog::new(
-                    Kind::Align { flip: false, components },
+                    Kind::Align { flip: false, components, axes: [true; 3] },
                     vec![
                         SelInput::new(if components { "Components" } else { "Bodies" }, BODIES, true),
                         SelInput::new("From", FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN, false),
@@ -925,7 +933,7 @@ impl Dialog {
                 vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)],
             ),
             "inspect.measure" => Dialog::new(
-                Kind::Measure { result: None, of: Vec::new(), show: None },
+                Kind::Measure { result: None, of: Vec::new(), show: None, labels: Default::default() },
                 vec![SelInput::new(
                     "Items",
                     FACES
@@ -1593,6 +1601,53 @@ impl Dialog {
         self.restore_value_focus = true;
     }
 
+    /// A sketch clicked in the Browser or the History while Extrude, Revolve or Emboss is open
+    /// (#6106): Profiles takes every profile of the sketch, as when the sketch is selected before
+    /// the command starts. The island inside another profile's hole is left out, or it would fill
+    /// the hole. False when the click is not one of those (the caller selects it as usual).
+    pub fn pick_sketch(&mut self, s: &Session, id: u64) -> bool {
+        if self.refuse_sketch(s, id) {
+            return true;
+        }
+        if self.active != 0
+            || !matches!(self.kind, Kind::Extrude { .. } | Kind::Revolve { .. } | Kind::Emboss { .. })
+            || !self.inputs.first().is_some_and(|i| i.accept & PROFILES != 0)
+            || !s.doc.feature(id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
+        {
+            return false;
+        }
+        let profiles: Vec<Sel> = s
+            .world_state()
+            .sketch(id)
+            .map(|ss| outermost_profiles(&ss.profiles).map(|index| Sel::Profile { sketch: id, index }).collect())
+            .unwrap_or_default();
+        let Some(input) = self.inputs.first_mut() else { return false };
+        if profiles.is_empty() {
+            return false;
+        }
+        input.items = profiles;
+        self.profile_selection_changed = true;
+        self.focus = true;
+        self.error = None;
+        self.sync_thread(s);
+        true
+    }
+
+    /// A sketch clicked (in the view, the Browser or the History) while a pattern or Mirror waits
+    /// for its bodies or features: a sketch is neither, so the dialog says what to do instead of
+    /// taking nothing in silence (#10057). False when the click is not one of those.
+    pub fn refuse_sketch(&mut self, s: &Session, id: u64) -> bool {
+        if self.active != 0
+            || !is_pattern(&self.kind)
+            || !self.inputs.first().is_some_and(|i| i.accept == BODIES || i.accept == selection::FEATURES)
+            || !s.doc.feature(id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
+        {
+            return false;
+        }
+        self.error = Some(SKETCH_NOT_OBJECT.to_string());
+        true
+    }
+
     /// A pick in the viewport (already accepted by the active input).
     pub fn pick(&mut self, s: &Session, sel: Sel) {
         if self.take_extrude_target(s, &sel) {
@@ -1769,6 +1824,19 @@ fn fillet_edges(s: &Session, sel: &Sel, chain: bool) -> Vec<Sel> {
         }
     }
     picked
+}
+
+/// The profiles of a sketch that aren't the island inside another profile's hole: a circle in a
+/// rectangle gives the rectangle-with-hole and the disc, and taking both would fill the hole.
+/// Loops are compared as sets of curve ids, so where a loop starts or which way it runs doesn't matter.
+fn outermost_profiles(profiles: &[solidcraft_engine::sketch::Profile]) -> impl Iterator<Item = usize> + '_ {
+    let key = |ids: &[String]| {
+        let mut v = ids.to_vec();
+        v.sort();
+        v
+    };
+    let holes: Vec<Vec<String>> = profiles.iter().flat_map(|p| p.hole_curves.iter().map(|h| key(h))).collect();
+    (0..profiles.len()).filter(move |&i| profiles.get(i).is_some_and(|p| !holes.contains(&key(&p.outer_curves))))
 }
 
 /// Profiles of the sketch a feature would use, when there is just one: the active sketch's, else
@@ -2361,6 +2429,11 @@ fn objects_label(accept: Accept) -> &'static str {
     if accept == selection::FEATURES { "Features" } else { "Objects" }
 }
 
+/// What a pattern or Mirror says when a sketch is clicked for its objects (#10057). It names what
+/// to pick, so it shows as a hint rather than an error ([`missing_pick`]).
+const SKETCH_NOT_OBJECT: &str =
+    "Pick bodies or features: a sketch is neither. Repeat its curves with the sketch's own Pattern or Mirror, or extrude it first.";
+
 fn is_pattern(k: &Kind) -> bool {
     matches!(k, Kind::PatternRect { .. } | Kind::PatternCirc { .. } | Kind::PathPattern { .. } | Kind::Mirror)
 }
@@ -2371,7 +2444,8 @@ fn object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
     let Some(inp) = d.inputs.first_mut() else { return };
     let cur = usize::from(inp.accept == selection::FEATURES);
     let mut ty = cur;
-    choice_row(ui, "Object Type", "pat_obj", &mut ty, &["Bodies", "Features"]);
+    // What the two kinds are, and that a sketch is neither (#10057).
+    choice_row(ui, "Object Type", "pat_obj", &mut ty, &["Bodies", "Features"]).on_hover_text(crate::i18n::tr("ui.pattern_object_type_tip"));
     if ty != cur {
         inp.accept = if ty == 1 { selection::FEATURES } else { BODIES };
         inp.label = objects_label(inp.accept);
@@ -2594,6 +2668,14 @@ fn stored_revolve_axis(kind: &Kind) -> Option<&Value> {
     }
 }
 
+/// Give the keyboard back from whatever text editor holds it, so the pick field clicked into
+/// becomes the one field that looks active (#10066).
+fn surrender_keyboard_focus(ui: &egui::Ui) {
+    if let Some(id) = ui.ctx().memory(|memory| memory.focused()) {
+        ui.ctx().memory_mut(|memory| memory.surrender_focus(id));
+    }
+}
+
 pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames, range: std::ops::Range<usize>) {
     // Edit Text shows its Path input among its own rows.
     if matches!(d.kind, Kind::Text(_)) {
@@ -2603,12 +2685,15 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let mut clear: Option<usize> = None;
     let mut activate: Option<usize> = None;
     let mut remove = None;
+    // Only one field may look active at a time (#10066): while a text editor holds the keyboard,
+    // no pick field draws its accent ring, and clicking a pick field takes the keyboard back.
+    let text_focus = crate::ui_kit::editor_has_focus(ui.ctx());
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
         let stored_reference = feature_pattern_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
         form_row(ui, inp.label, |ui| {
             ui.horizontal(|ui| {
-                let active = i == d.active;
+                let active = i == d.active && !text_focus;
                 // A chip: "↖ Select" (outlined) while empty, "N selected" (filled) once picked.
                 let custom_axis = i == 1 && inp.items.is_empty() && stored_revolve_axis(&d.kind).is_some();
                 let filled = !inp.items.is_empty() || custom_axis || stored_reference.is_some();
@@ -2659,6 +2744,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 };
                 if chip.on_hover_text(tooltip).clicked() {
                     activate = Some(i);
+                    surrender_keyboard_focus(ui);
                 }
                 if !inp.items.is_empty() || stored_reference.is_some() {
                     let rect = egui::Rect::from_center_size(
@@ -2669,6 +2755,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                     crate::scenario::publish_handle(&format!("dialog:clear:{}", inp.label), button.rect.center());
                     if button.clicked() {
                         clear = Some(i);
+                        surrender_keyboard_focus(ui);
                     }
                 }
             });
@@ -2870,9 +2957,11 @@ pub(crate) fn fill_cells(st: &solidcraft_engine::doc::ModelState, tools: &[Strin
 /// Measure again when the picked items changed.
 fn update_measure(app: &SolveApp, d: &mut Dialog) {
     let items: Vec<Sel> = sels(d, 0).to_vec();
-    if let Kind::Measure { result, of, .. } = &mut d.kind
+    if let Kind::Measure { result, of, labels, .. } = &mut d.kind
         && *of != items
     {
+        // Another measurement: its labels start in their own places.
+        *labels = Default::default();
         *result = if items.is_empty() { None } else { Some(app.session.measure_items(&items)) };
         *of = items;
     }
@@ -2977,20 +3066,33 @@ fn auto_operation(app: &SolveApp, d: &mut Dialog) {
         smart.start = start;
         smart.latch = None;
     }
+    // Showing or hiding a body changes what the extrude meets: the latch was decided among the
+    // bodies shown before (#9919).
+    let shown = solidcraft_engine::shown_scope(&app.session);
+    if let Kind::Extrude { smart, .. } = &mut d.kind
+        && smart.shown != shown
+    {
+        smart.shown = shown.clone();
+        smart.latch = None;
+    }
     // To an object, the extrude goes to it on whichever side it is: that is the side (#1633).
     if params.get("to").is_some()
         && let Some(reach) = solidcraft_engine::extrude_reach(&app.session, &params)
     {
         side = crate::smart_extrude::side(reach, 0);
     }
-    // Hidden bodies are out of its scope (#6901).
+    // Hidden bodies are out of its scope (#6901). With none shown there is nothing to join or
+    // cut: an empty `participants` would read as every body, hidden ones too (#9919).
     let mut params = params;
-    if let Some(shown) = solidcraft_engine::shown_scope(&app.session)
+    let mut nothing_shown = false;
+    if let Some(shown) = shown
         && params.get("participants").is_none()
     {
+        nothing_shown = shown.is_empty();
         params["participants"] = json!(shown);
     }
-    let Some(fresh) = solidcraft_engine::auto_operation(&app.session, &params).and_then(|op| OPS.iter().position(|o| *o == op)) else {
+    let fresh = if nothing_shown { Some("new") } else { solidcraft_engine::auto_operation(&app.session, &params) };
+    let Some(fresh) = fresh.and_then(|op| OPS.iter().position(|o| *o == op)) else {
         return;
     };
     if let Kind::Extrude { operation, smart, .. } = &mut d.kind {
@@ -3011,10 +3113,28 @@ fn picked_side(app: &SolveApp, d: &Dialog, first: &Sel) -> Option<usize> {
     Some(crate::smart_extrude::picked_direction(crate::smart_extrude::view_ray(&app.cam, at), normal, false))
 }
 
-/// Show the sketch of the Extrude, Revolve, sheet metal base or contour flange, or Hole at sketch
+/// Discard an editor whose target was removed, before its preview can draw again. Show the sketch
+/// of the Extrude, Revolve, sheet metal base or contour flange, or Hole at sketch
 /// points the open dialog edits, and only while it is open: whichever way the dialog closed (OK,
 /// Cancel, another tool, another design), the sketch returns to its own visibility.
-pub(crate) fn sync_feature_edit_sketch(app: &mut SolveApp) {
+pub(crate) fn sync_feature_edit(app: &mut SolveApp) {
+    if app.dialog.as_ref().and_then(|d| d.editing).is_some_and(|(id, _)| app.session.doc.feature(id).is_none()) {
+        // Undo or deletion already chose the current document and history. Cancel's rollback
+        // would try to restore the obsolete editing session; just discard its work instead.
+        app.dialog = None;
+        app.applying = None;
+        if let Some(state) = app.editing_state.take() {
+            // Undo can save the editor's temporary rollback in Redo (deletion saves it in
+            // Undo). Those exact snapshots belong to the complete design, with its old marker.
+            for snapshot in app.session.undo.iter_mut().chain(&mut app.session.redo) {
+                if std::sync::Arc::ptr_eq(&snapshot.doc, &state.source.doc) {
+                    snapshot.doc = state.original.doc.clone();
+                }
+            }
+        }
+        app.preview.reset();
+        app.op_check.abandon();
+    }
     app.session.feature_edit_sketch = app.dialog.as_ref().and_then(|d| d.editing).and_then(|(id, _)| match &app.session.doc.feature(id)?.kind {
         FeatureKind::Extrude { sketch, .. }
         | FeatureKind::Revolve { sketch, .. }
@@ -3070,7 +3190,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // A click in the view's corner is for the dialog open this frame, or for none.
     let corner = app.viewport.corner.take();
     app.viewport.corner_ok = false;
-    sync_feature_edit_sketch(app);
+    sync_feature_edit(app);
     app.op_check.poll();
     if app.tree.redefine.is_none() {
         app.viewport.dialog_rect = None;
@@ -4596,7 +4716,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "faces")?;
             ("face.delete", json!({"faces": face_points(0)}))
         }
-        Kind::Align { flip, components } => {
+        Kind::Align { flip, components, axes } => {
             need(0, if *components { "components" } else { "bodies" })?;
             need(1, "what to move from")?;
             need(2, "where to move it to")?;
@@ -4607,7 +4727,11 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 }
                 json!({"paths": paths, "flip": flip})
             } else {
-                json!({"bodies": sels(d, 0).body_names(), "flip": flip})
+                let mut p = json!({"bodies": sels(d, 0).body_names(), "flip": flip});
+                if *axes != [true; 3] {
+                    p["axes"] = json!(axes);
+                }
+                p
             };
             for (i, key) in [(1, "from"), (2, "to")] {
                 let snap = d.extra.get(&format!("{key}_snap")).and_then(Value::as_str).unwrap_or("picked");
@@ -6456,6 +6580,29 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             *value = crate::length_input::stored(&s.doc, value);
         }
         crate::length_input::extra(&mut d.extra, |e| crate::length_input::stored(&s.doc, e));
+    }
+    if let FeatureKind::Extrude { sketch, .. } = &f.kind
+        && let Some(FeatureKind::Sketch { plane, .. }) = s.doc.feature(sketch.0).map(|f| &f.kind)
+    {
+        let mut plane = plane;
+        // Plane nesting comes from design files: bound the walk just like other reference walks.
+        for _ in 0..64 {
+            match plane {
+                PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => plane = base,
+                PlaneRef::Face { anchor: Some(anchor), .. } => {
+                    let model = s.model.state();
+                    if let Some(body) = model.body(&anchor.target.body) {
+                        let owner = s.doc.model_body_component(body);
+                        let name = s.doc.world_body_name(&model, &body.name, owner, &anchor.path);
+                        if st.body(&name).is_some() && !s.body_visible(&name) {
+                            d.edit_source_bodies.push(name);
+                        }
+                    }
+                    break;
+                }
+                _ => break,
+            }
+        }
     }
     d.editing = Some((id, marker));
     d.active = 0;

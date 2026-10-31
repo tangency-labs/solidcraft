@@ -9,6 +9,310 @@ use egui::{Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, pos2, vec2}
 
 pub(super) const PAGE_SCROLL_GUTTER: &str = "sc_page_scroll_gutter";
 
+/// Presentation data is resolved by the caller; controls never distinguish standard/custom ids.
+pub(crate) struct ThemeOptionRow<'a> {
+    pub definition: &'a crate::theme_files::OptionDef,
+    pub label: String,
+    pub help: String,
+    pub choices: Vec<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+struct ThemeOptionMetrics {
+    label: f32,
+    readout: f32,
+    reason: f32,
+    minimum: f32,
+}
+
+fn theme_option_slider_minimum(t: &Tokens) -> f32 {
+    t.space_24 * 2.0 + t.space_8
+}
+
+/// Measure the same fonts, gutters and control sizes used by `theme_option_control`.
+fn theme_option_metrics(ui: &Ui, option: &ThemeOptionRow<'_>, value: Option<&crate::theme_files::OptionValue>) -> ThemeOptionMetrics {
+    use crate::theme_files::{OptionKind, OptionValue};
+    let t = Tokens::get();
+    let label = super::ContentWidth::label(ui, &option.label) + t.space_4;
+    let mut readout = 0.0;
+    let control = match &option.definition.kind {
+        OptionKind::Bool { .. } => t.space_24 + t.space_8,
+        OptionKind::Range { default, min, max, step, unit } => {
+            let current = match value {
+                Some(OptionValue::Num(n)) => *n,
+                _ => *default,
+            };
+            // Endpoints and adjacent steps reserve fractional readouts before the first edit.
+            readout = [*min, *max, *default, current, (*min + *step).min(*max), (*max - *step).max(*min)]
+                .into_iter()
+                .map(|n| super::ContentWidth::label(ui, &format!("{n}{}", unit.as_deref().unwrap_or(""))))
+                .fold(0.0, f32::max);
+            theme_option_slider_minimum(&t) + t.space_8 + readout
+        }
+        OptionKind::Choice { values, .. } => {
+            if values.len() > 5 {
+                let labels: Vec<_> = option.choices.iter().map(String::as_str).collect();
+                super::ContentWidth::dropdown(ui, &labels).min(t.form_label_width + t.space_24)
+            } else {
+                // Compact segments use equal widths based on the widest semibold label.
+                let widest = option.choices.iter().map(|s| super::ContentWidth::name(ui, s)).fold(0.0, f32::max);
+                (widest + t.space_16) * values.len() as f32
+            }
+        }
+    };
+    let reason = option
+        .reason
+        .as_ref()
+        .map_or(0.0, |reason| ui.painter().layout_no_wrap(reason.clone(), FontId::proportional(t.font_body), t.form_dim).size().x.ceil() + t.space_8);
+    // settings_form/row use the measured label plus a fixed space_14 gutter.
+    ThemeOptionMetrics { label, readout, reason, minimum: label + t.space_14 + control + reason }
+}
+
+/// A quiet badge drawn within the existing theme card, without changing its hit target or size.
+pub(crate) fn theme_options_badge(ui: &Ui, card: Rect, label: &str) {
+    let t = Tokens::get();
+    let text = ui.painter().layout_no_wrap(label.to_owned(), FontId::proportional(t.font_micro), t.form_ink);
+    let size = vec2(text.size().x + t.space_8, t.space_16);
+    let rect = Rect::from_min_size(card.left_top() + vec2(t.space_6, t.space_6), size);
+    ui.painter().rect_filled(rect, t.radius_sm, t.dialog_body);
+    ui.painter().galley(rect.center() - text.size() / 2.0, text, t.form_ink);
+    scenario::publish_rect("prefs:theme_options_badge", rect);
+}
+
+/// Ordered two-column list, with composite children sharing their parent's cell and hit row.
+/// Returns Reset; edited values are returned through `values` for the caller's preference merge.
+pub(crate) fn theme_options_list(
+    ui: &mut Ui,
+    theme_id: &str,
+    name: &str,
+    options: &[ThemeOptionRow<'_>],
+    values: &mut std::collections::BTreeMap<String, crate::theme_files::OptionValue>,
+) -> bool {
+    use super::preferences_layout::{Entry, Width, choice_width, layout};
+    use crate::theme_files::OptionKind;
+    // Label/help/choice text is already resolved, including the theme's English fallback.
+    let _labels = crate::i18n::resolved_labels();
+    if options.is_empty() {
+        return false;
+    }
+    let t = Tokens::get();
+    let mut cells: Vec<Vec<usize>> = Vec::new();
+    for (i, option) in options.iter().enumerate() {
+        if option.definition.parent.as_ref().is_some_and(|id| options.iter().any(|o| &o.definition.id == id)) {
+            continue;
+        }
+        let mut cell = vec![i];
+        let mut parent = option.definition.id.as_str();
+        for _ in 0..crate::theme_files::MAX_OPTIONS {
+            let Some((j, child)) = options.iter().enumerate().find(|(_, o)| o.definition.parent.as_deref() == Some(parent)) else { break };
+            if cell.contains(&j) {
+                break;
+            }
+            cell.push(j);
+            parent = &child.definition.id;
+        }
+        cells.push(cell);
+    }
+    let metrics: Vec<_> = options.iter().map(|option| theme_option_metrics(ui, option, values.get(&option.definition.id))).collect();
+    let entries: Vec<_> = cells
+        .iter()
+        .map(|cell| {
+            let mut width = if cell.len() > 1 { Width::Composite } else { Width::Narrow };
+            let mut minimum = t.space_8 * cell.len().saturating_sub(1) as f32;
+            let mut advanced = false;
+            for &index in cell {
+                let Some(option) = options.get(index) else { continue };
+                advanced |= option.definition.advanced;
+                if let OptionKind::Choice { values, .. } = &option.definition.kind
+                    && choice_width(values.len()) == Width::Wide
+                {
+                    width = Width::Wide;
+                }
+                minimum += metrics.get(index).map_or(0.0, |m| m.minimum);
+            }
+            Entry { width, advanced, minimum }
+        })
+        .collect();
+    let plan = layout(&entries, dimension(ui.available_width()) - t.space_16);
+    let mut reset = false;
+    let header = ui.horizontal(|ui| {
+        super::text(ui, name, super::Text::Inline);
+        if options.iter().any(|option| values.get(&option.definition.id).is_some_and(|v| *v != option.definition.default_value())) {
+            let response = super::text_button(ui, crate::i18n::tr("prefs.theme_options_reset"), true);
+            scenario::publish_target("prefs:theme_options_reset", response.rect);
+            reset = response.clicked();
+        }
+    });
+    scenario::publish_rect("prefs:theme_options_header", header.response.rect);
+    let mut draw_rows = |ui: &mut Ui, rows: &[Vec<usize>]| {
+        let mut section = None;
+        for row in rows {
+            // Labels are theme-authored metadata, shown only above the six-cell threshold.
+            let label =
+                row.iter().filter_map(|i| cells.get(*i)).flatten().filter_map(|i| options.get(*i)).find_map(|o| o.definition.section.as_deref());
+            if plan.section_labels && label != section {
+                if let Some(label) = label {
+                    super::text(ui, label, super::Text::Hint("theme_option_section"));
+                }
+                section = label;
+            }
+            let width = dimension(ui.available_width());
+            let cell_width = (width - t.space_16) / 2.0;
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = t.space_16;
+                for &index in row {
+                    let Some(cell) = cells.get(index) else { continue };
+                    let full = entries.get(index).is_some_and(|e| e.width == Width::Wide || e.minimum > cell_width);
+                    let width = if full { width } else { cell_width };
+                    ui.allocate_ui_with_layout(vec2(width.max(0.0), t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+                        ui.set_width(width.max(0.0));
+                        let stack = entries.get(index).is_some_and(|e| e.minimum > width);
+                        let direction =
+                            if stack { egui::Layout::top_down(egui::Align::Min) } else { egui::Layout::left_to_right(egui::Align::Center) };
+                        let response = ui.with_layout(direction, |ui| {
+                            ui.spacing_mut().item_spacing.x = t.space_8;
+                            let total: f32 = cell.iter().filter_map(|i| metrics.get(*i)).map(|m| m.minimum).sum();
+                            let usable = (width - t.space_8 * cell.len().saturating_sub(1) as f32).max(0.0);
+                            for &i in cell {
+                                if let (Some(option), Some(metrics)) = (options.get(i), metrics.get(i)) {
+                                    let option_width = if stack { width } else { usable * metrics.minimum / total.max(1.0) };
+                                    ui.allocate_ui_with_layout(
+                                        vec2(option_width.max(0.0), t.control_height),
+                                        egui::Layout::left_to_right(egui::Align::Center),
+                                        |ui| {
+                                            theme_option_control(ui, option, options, values, metrics, cell.len() == 1);
+                                        },
+                                    );
+                                }
+                            }
+                        });
+                        if let Some(option) = cell.first().and_then(|i| options.get(*i)) {
+                            scenario::publish_rect(&format!("prefs:theme_option_cell:{}", option.definition.id), response.response.rect);
+                        }
+                    });
+                }
+            });
+        }
+    };
+    ui.push_id(("theme_options", theme_id), |ui| {
+        draw_rows(ui, &plan.rows);
+        if plan.more_count > 0 {
+            let title = crate::i18n::format("prefs.theme_options_more", &[("count", &plan.more_count.to_string())]);
+            super::section(ui, "more", &title, false, |ui| draw_rows(ui, &plan.more));
+            if let Some(rect) = scenario::rect_of(&format!("dialog:section:{title}")) {
+                scenario::publish_target("prefs:theme_options_more", rect);
+            }
+        }
+    });
+    reset
+}
+
+fn theme_option_control(
+    ui: &mut Ui,
+    option: &ThemeOptionRow<'_>,
+    options: &[ThemeOptionRow<'_>],
+    values: &mut std::collections::BTreeMap<String, crate::theme_files::OptionValue>,
+    metrics: &ThemeOptionMetrics,
+    fill_range: bool,
+) {
+    use crate::theme_files::{OptionKind, OptionValue};
+    let t = Tokens::get();
+    let def = option.definition;
+    let mut active = option.reason.is_none();
+    let mut parent = def.parent.as_deref();
+    for _ in 0..crate::theme_files::MAX_OPTIONS {
+        let Some(id) = parent else { break };
+        active &= values.get(id) == Some(&OptionValue::Bool(true));
+        let ancestor = options.iter().find(|o| o.definition.id == id);
+        active &= ancestor.is_some_and(|o| o.reason.is_none());
+        parent = ancestor.and_then(|o| o.definition.parent.as_deref());
+    }
+    let mut value = values.get(&def.id).cloned().unwrap_or_else(|| def.default_value());
+    let before = value.clone();
+    let control_width = (ui.available_width() - metrics.reason).max(0.0);
+    let response = ui.allocate_ui_with_layout(vec2(control_width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.push_id(&def.id, |ui| {
+            ui.add_enabled_ui(active, |ui| {
+                // `row` owns the accessible control label and the shared control geometry.
+                super::settings_form(ui, metrics.label, |ui| {
+                    super::row(ui, &option.label, |ui| {
+                        match (&def.kind, &mut value) {
+                            (OptionKind::Bool { .. }, OptionValue::Bool(on)) => {
+                                theme_option_switch(ui, &option.label, on);
+                            }
+                            (OptionKind::Range { min, max, step, unit, .. }, OptionValue::Num(n)) => {
+                                let available = dimension(ui.available_width() - metrics.readout - t.space_8);
+                                // Standalone ranges fill their cell; composites retain their compact control alignment.
+                                let width =
+                                    if fill_range { available } else { available.min(t.form_label_width.max(theme_option_slider_minimum(&t))) };
+                                ui.allocate_ui_with_layout(vec2(width, t.control_height), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                    super::slider(
+                                        ui,
+                                        n,
+                                        *min..=*max,
+                                        super::Slider { step: Some(f64::from(*step)), show_value: false, ..Default::default() },
+                                    );
+                                });
+                                // Keep fractional theme values visible, including sliders with fractional steps.
+                                let readout = ui.allocate_ui_with_layout(
+                                    vec2(metrics.readout, t.control_height),
+                                    egui::Layout::left_to_right(egui::Align::Center),
+                                    |ui| {
+                                        super::text(ui, &format!("{}{}", *n, unit.as_deref().unwrap_or("")), super::Text::Inline);
+                                    },
+                                );
+                                scenario::publish_rect(&format!("prefs:theme_option_readout:{}", def.id), readout.response.rect);
+                            }
+                            (OptionKind::Choice { values, .. }, OptionValue::Choice(selected)) => {
+                                let labels: Vec<_> = option.choices.iter().map(String::as_str).collect();
+                                let mut index = values.iter().position(|v| &v.id == selected).unwrap_or(0);
+                                let changed = if values.len() > 5 {
+                                    super::dropdown_picked(ui, &def.id, &mut index, &labels)
+                                } else {
+                                    super::segmented(ui, &mut index, &labels, super::Segments { compact: true, ..Default::default() })
+                                };
+                                if changed && let Some(choice) = values.get(index) {
+                                    *selected = choice.id.clone();
+                                }
+                            }
+                            _ => {}
+                        }
+                    })
+                });
+            })
+        })
+        .inner
+        .response
+    });
+    let response = response.inner.on_hover_text(&option.help);
+    scenario::publish_target(&format!("prefs:theme_option:{}", def.id), response.rect);
+    if let Some(reason) = &option.reason {
+        let note = ui.horizontal(|ui| super::settings_inline_note(ui, reason));
+        scenario::publish_rect(&format!("prefs:theme_option_reason:{}", def.id), note.response.rect);
+    }
+    if active && value != before {
+        values.insert(def.id.clone(), value);
+    }
+}
+
+fn theme_option_switch(ui: &mut Ui, label: &str, on: &mut bool) {
+    let t = Tokens::get();
+    let (rect, response) = ui.allocate_exact_size(vec2(t.space_24 + t.space_8, t.control_height), Sense::click());
+    if response.clicked() {
+        *on = !*on;
+    }
+    let track = Rect::from_center_size(rect.center(), vec2(rect.width(), t.space_16 + t.space_2));
+    ui.painter().rect_filled(track, t.radius_xl, if *on { t.form_primary_fill } else { t.control_border });
+    let x = if *on { track.right() - t.space_8 - t.space_2 } else { track.left() + t.space_8 + t.space_2 };
+    ui.painter().circle_filled(pos2(x, track.center().y), t.space_6, if *on { t.on_accent } else { t.form_ink });
+    if response.has_focus() {
+        ui.painter().rect_stroke(rect, t.control_radius, Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Inside);
+    }
+    response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *on, label));
+    scenario::publish_target(&format!("prefs:theme_option_switch:{label}"), response.rect);
+}
+
 /// Page scroller keeps content aligned while centring its bar in the window's right inset.
 /// Nested pages (including Shortcuts) inherit the same gutter and height contract.
 pub(crate) fn settings_scroll<R>(ui: &mut Ui, id: impl egui::AsIdSalt, add: impl FnOnce(&mut Ui) -> R) -> egui::scroll_area::ScrollAreaOutput<R> {

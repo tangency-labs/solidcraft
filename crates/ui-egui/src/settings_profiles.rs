@@ -9,6 +9,7 @@
 //! preference this version can't read is left out. Applying one sets each preference through
 //! [`prefs::set`], so it is checked again and has the same effects as a change in Preferences;
 //! one that is refused there (an interface font this computer lacks) keeps its current value.
+//! Saved theme option maps are restored intact, retaining stale entries for fallback notices.
 //!
 //! The `settings.profile.*` commands reach the profiles; the engine only checks their
 //! parameters, and [`command`] does the rest after `SolveApp::run`.
@@ -243,7 +244,7 @@ fn shortcut_keys(v: &Value) -> Option<Value> {
     keys.iter().all(|k| k.chars().count() <= MAX_ID).then(|| crate::keymap::keys_value(&keys))
 }
 
-/// Apply a checked profile: its themes, each preference (through [`prefs::set`]), the
+/// Apply a checked profile: its themes, each preference (through [`prefs::set`], except saved option maps), the
 /// shortcuts, the favourites and the toolbar. Returns the preferences that were refused.
 fn apply(app: &mut SolveApp, doc: &Value) -> Vec<String> {
     let mut theme_ids = std::collections::BTreeMap::new();
@@ -257,6 +258,18 @@ fn apply(app: &mut SolveApp, doc: &Value) -> Vec<String> {
     }
     let mut skipped = Vec::new();
     for (key, value) in doc.get("preferences").and_then(Value::as_object).into_iter().flatten() {
+        if key == "theme_options" {
+            // Restoring saved state keeps stale entries just like loading preferences. The
+            // control channel's strict merge is for new edits, not profile restoration.
+            match serde_json::from_value::<std::collections::BTreeMap<String, std::collections::BTreeMap<String, Value>>>(value.clone()) {
+                Ok(options) => {
+                    app.preferences.theme_options =
+                        options.into_iter().map(|(id, values)| (theme_ids.get(&id).cloned().unwrap_or(id), values)).collect();
+                }
+                Err(_) => skipped.push(key.clone()),
+            }
+            continue;
+        }
         let value = match value.as_str().and_then(|id| theme_ids.get(id)) {
             Some(id) if key == "theme" => json!(id),
             _ => value.clone(),

@@ -14,7 +14,7 @@ Written against SolidCraft `main` after 0.11.1, which counts the degrees of free
 1. In SolidCraft's own chat or any MCP client, call `skill_reference {"skill":"solidcraft-mechanisms"}`. Elsewhere, read `reference.md`.
 2. **Open:** if the design is not open yet, run `open {path}`. When the server is bridged to the app and the current design is `dirty`, ask before opening anything.
 3. **Map it:** run `inspect_design {"measure":false,"sketches":false}`, then `execute joint.list`. `joint.list` shows `fixed` (the grounded occurrences, always with the root, 0), `dof` per occurrence, `conflicts`, the joints, links and named origins, at about 0.5 KB per joint. `execute motion.list` lists the motion studies.
-4. **Existing design:** take `edit.checkpoint` in its own call before you move bodies into components. `edit.restore_checkpoint {checkpoint}` goes back exactly.
+4. **Existing design:** take `edit.checkpoint` in its own call before you move bodies into components. `edit.restore_checkpoint {checkpoint}` goes back exactly, once: restoring uses the checkpoint up, so take a new one to go back again.
 5. **Write the plan:**
    - the components, and which one is grounded
    - each joint: type, the two occurrences, its world point and axis, limits

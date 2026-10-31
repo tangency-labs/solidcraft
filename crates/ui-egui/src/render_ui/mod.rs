@@ -85,7 +85,7 @@ fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
         Stage::Look => {
             ui_kit::StageBar::caption(ui, app.tr("render.pick_label"));
             let modes = ["body", "face", "component"];
-            let mut selected = modes.iter().position(|mode| *mode == current_pick_mode(app)).unwrap_or(0);
+            let mut selected = modes.iter().position(|mode| *mode == app.ui.pick_mode()).unwrap_or(0);
             let pick = ui.add_enabled_ui(!crate::render_workspace::result_active(app), |ui| {
                 if ui_kit::segmented(
                     ui,
@@ -223,16 +223,6 @@ pub(crate) fn dock_chip(app: &mut SolveApp, ui: &mut egui::Ui, id: &'static str,
             }
         });
     crate::shell::register_panel(app, id, Some(chip.response.rect), None);
-}
-
-fn current_pick_mode(app: &SolveApp) -> &'static str {
-    if app.ui.pick_components {
-        "component"
-    } else if app.ui.pick_bodies {
-        "body"
-    } else {
-        "face"
-    }
 }
 
 fn shots_pill(app: &mut SolveApp, ui: &mut egui::Ui, free: Rect) {

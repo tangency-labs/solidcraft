@@ -1283,6 +1283,9 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
                     }
                     if response.clicked() {
                         app.ui.tab = tab.to_string();
+                        // Floating ribbons draw after the viewport. An instant surface switch
+                        // needs one more pass too; settled tabs never schedule their own frames.
+                        ui.ctx().request_repaint();
                     }
                     if response.secondary_clicked() {
                         crate::context_menu::open_for(
@@ -2881,8 +2884,14 @@ fn drag_ghost(app: &SolveApp, ctx: &egui::Context, id: &str, at: egui::Pos2, rem
 pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui.label(egui::RichText::new(crate::i18n::tr_label("Selection filter")).color(t.text_dim).size(t.font_small));
-    if crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Select bodies (a face picks its body)"), &mut app.ui.pick_bodies).changed() {
-        app.ui.pick_components = false;
+    for (mode, label) in [("body", app.tr_label("Select bodies (a face picks its body)")), ("component", app.tr("ui.select_components_by_face"))] {
+        let mut on = app.ui.pick_mode() == mode;
+        if ui_kit::checkbox(ui, label, &mut on).changed() {
+            // The Faces checkbox below is independent. The standalone command enables faces.
+            let filters = std::mem::take(&mut app.ui.pick_off);
+            let _ = app.run("select.filter", json!({"mode": if on { mode } else { "face" }}));
+            app.ui.pick_off = filters;
+        }
     }
     for (k, label) in [
         ("faces", "Faces"),
@@ -2906,6 +2915,33 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
 
 /// Two Esc presses within this many seconds finish the open sketch.
 pub const ESCAPE_TWICE_S: f64 = 0.4;
+
+/// Whether `cancel_unfinished` has something to cancel.
+pub(crate) fn unfinished(app: &SolveApp) -> bool {
+    app.tool.is_some()
+        || crate::select_other::is_open(app)
+        || app.menu.joint_move_warning.is_some()
+        || app.viewport.joint_handles.is_some()
+        || app.viewport.text_drag.is_some()
+        || crate::occurrence_drag::active(app)
+}
+
+/// Cancels what one Esc cancels before it reaches the dialog, the selection or the sketch:
+/// a drag, the Select Other list, or the active tool's points and then the tool. The view's
+/// corner Cancel (#6709) takes this step first too. Returns whether anything was cancelled.
+pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
+    if crate::joint_handles::cancel(app) || crate::sketch_text_move::cancel_drag(app) || crate::occurrence_drag::cancel(app) {
+        return true;
+    }
+    if crate::select_other::is_open(app) {
+        crate::select_other::close(app);
+    } else if app.tool.is_some() {
+        crate::tools::finish(app);
+    } else {
+        return false;
+    }
+    true
+}
 
 /// Global keyboard shortcuts (when no text field has focus).
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
@@ -2971,6 +3007,20 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         || crate::hole_presets::name_prompt_open(ctx, app.dialog.as_ref())
         || crate::personal_sheet_rules::name_prompt_open(ctx, app.dialog.as_ref());
     let inline_editor = crate::dim_view::editing();
+    if !popup_owner
+        && app.viewport_status.open_key.is_some()
+        && crate::ui_kit::details_field_owned_escape(ctx)
+        && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        ctx.memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
+        app.esc_handled = true;
+        app.escape_owner = Some(crate::EscapeOwner::Overlay);
+        return;
+    }
     if popup_owner
         || inline_editor
         || (crate::viewport_status::enabled(app) && app.ui.palette_open)
@@ -3083,19 +3133,15 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     let blank = app.session.doc.sketch(sketch).is_ok_and(crate::sketch_palette::is_blank);
                     let depth = app.session.undo.len();
                     app.finish_sketch();
-                    if blank && app.session.active_sketch.is_none() && app.run("timeline.delete", json!({ "feature": sketch.to_string() })).is_ok() {
+                    if blank && app.session.active_sketch.is_none() && app.run("timeline.delete", json!({ "feature": sketch })).is_ok() {
                         app.session.undo.truncate(depth + 1);
                     }
                     continue;
                 }
-                if crate::joint_handles::cancel(app) || crate::sketch_text_move::cancel_drag(app) || crate::occurrence_drag::cancel(app) {
+                if cancel_unfinished(app) {
                     continue;
                 }
-                if crate::select_other::is_open(app) {
-                    crate::select_other::close(app);
-                } else if app.tool.is_some() {
-                    crate::tools::finish(app);
-                } else if app.dialog.is_some() || app.pending_feature_edit.is_some() {
+                if app.dialog.is_some() || app.pending_feature_edit.is_some() {
                     crate::dialogs::cancel(app);
                 } else if crate::viewport_status::enabled(app) && crate::viewport_status::escape(app, repeat) {
                     app.last_escape = None;

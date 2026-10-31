@@ -4,8 +4,24 @@
 `Surface::ViewportStatus`. Callers supply translated names, formatted settings,
 kind, stable identity and key availability, and dispatch returned clear/edit actions.
 The row keeps supplied order and anchors to the top centre of the free viewport.
-Its presentation state only remembers which key card is open. The `ui.status_fixture`
+Its presentation state remembers only open cards, focus, scroll and the selected diagnostic
+record, scoped to the current document. The `ui.status_fixture`
 control method provides named specimens for UI scenarios and live visual review.
+
+`details` renders a `Details` description in the shared host: optional caption, live settings,
+key, findings or readout, then at most two text actions. Tools supply data and handle
+`DetailEvent` requests through their normal commands. The caption and actions stay fixed
+around a body bounded to 60% of the free viewport height. Findings/readouts preview six rows;
+Show all expands the same scrolling body. `patterned_swatch` supports an optional second
+semantic colour, so a grouped key can honestly represent both existing scene colours.
+
+`viewport_status_details` defaults to live cards. Its false value restores read-only keys
+and the Section dialog independently of the analysis/Section HUD and Summary preferences.
+Continuity edits explicitly select one retained body/edge record; its own successful limits
+and sample count accompany every live command. Stale geometry disables editing and targets.
+`view.status_details` reads current effect settings/capabilities and the retained per-seam
+diagnostics without preparing or evaluating geometry. `details_findings` and
+`details_readout` fixture presets are labelled component specimens, not production results.
 
 | Component | Use |
 | --- | --- |
@@ -91,6 +107,8 @@ rules. Its compass is 110 pt; the 48 pt Shots strip clears the docks by 8 pt.
   puts the actions in the header row through `HeaderActions` instead of a footer: the same
   buttons, enabled states, keyboard and handles, each as wide as its bold label, with Cancel
   standing in for the close button and the compute status in the title's place.
+  `palette` (the Sketch panel) follows the same preference: its footer row moves under the
+  header, above the options.
   `body_rows` caps a manager's scrolling body independently of its position; short
   viewports still keep the header and actions visible.
 - `Window` composes the shared Panel frame with a 40 pt icon/title/close header,
@@ -140,6 +158,34 @@ four workspace choices without opening another viewport. Scale, palette, autosav
 and live-axis specimens share tokens and the gallery; live bars show actual calibrated
 input and introduce no repaint timer.
 
+`theme_options_list` renders generic `ThemeOptionRow` definitions without standard-option
+branches. Its pure `preferences_layout::layout` packs measured narrow/composite/wide entries
+in order, with ten non-advanced top-level cells before More. A composite retains its child in
+one cell; advanced descendants move the entire cell under More. Packing and allocation share
+measured localized label/readout widths, the form gutter and a compact slider minimum; short
+composites can share a row with narrow entries. A composite takes a full row when needed and
+stacks its controls only if they exceed that entire row's width. `theme_options_badge` paints
+inside an existing theme card and is called only for offered options. The small registry in
+`theme_options.rs` supplies standard label/help catalog ids, availability and behaviour;
+only opacity is registered today. Missing providers are absent; unavailable registered
+providers keep their controls and show their translated reason. Callers submit list edits
+and Reset through the existing atomic preference merge/control path.
+The scoped `i18n::resolved_labels` adapter keeps theme language-map text and fallback labels
+verbatim through shared controls, while stable catalog messages continue to translate.
+
+Review fixtures are in `crates/ui-egui/tests/fixtures/theme-options.json`, keyed by
+`light-0/1/3/6/12` and `dark-0/1/3/6/12`. Each value is a complete importable theme file:
+pass it as `ui.prefs` `theme_import` together with `open: "Interface"`. The 12-entry files
+include a four-choice wide row, Shadow/Softness composite, six-choice dropdown, an advanced
+entry and overflow. More contains two top-level entries. Set
+`theme_options: {"options-dark-12": {"opacity": 60}}` (or the selected fixture's id) to
+compare with 100 on a busy model. Reset uses `prefs:theme_options_reset`; More uses
+`prefs:theme_options_more`; controls and cells publish `prefs:theme_option:<id>` and
+`prefs:theme_option_cell:<id>`. Unavailable-provider specimens are internal to the existing
+`prefs::tests::theme_options_provider_registry_filters_unknown_and_retains_unavailable` test;
+they are never installed in the live registry or exposed as preferences. The manager captures
+and reviews live-app screenshot evidence separately from the headless harness tests.
+
 ## Elements
 
 `aspect_grid` composes three-column `AspectTile` choices with token-sized aspect glyphs,
@@ -180,6 +226,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `password_field` | Stable secret editor; excludes the secret from scenario/accessibility metadata | field tokens |
 | `message_field` | Growing message editor; owner retains scroll and Enter routing | field tokens |
 | `cell_editor`, `bounded_cell_editor`, `search_field`, `library_cell` | Stable-ID inline/search editors; bounded variant caps Unicode characters; `library_cell` attaches a Library dropdown inside the editor border | field tokens, `text/error` |
+| `wide_cell_editor` | A table cell editor that, while focused and too narrow for its text, opens over the cells to its right and wraps, with the live value or error under it (#9358) | field tokens, popup frame, `text/error` |
 | `menu_filter` | The filter at the top of a long menu: search glyph, frameless editor and a rule under them, so it does not read as an entry; the caller filters and owns focus | `space_8/16`, `font_label`, `form_dim/ink`, `dialog_rule` |
 | `text_area` | Bounded multiline JSON/data editor | field tokens |
 | `dropdown`, `dropdown_menu`, `compact_dropdown_menu` | Indexed choices or caller-supplied menu controls | `control_height`, `text_dim`, form tokens |

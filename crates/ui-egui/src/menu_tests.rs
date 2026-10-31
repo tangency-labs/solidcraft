@@ -673,6 +673,26 @@ fn delete_key_handles_every_kind_and_asks_about_dependents() {
     assert_eq!(app.session.doc.features.len(), n);
 }
 
+/// #9079: Modify ▸ Delete with nothing selected says what to pick, not the command's parameter
+/// error, and changes nothing; with something selected it deletes it, as the Delete key does.
+#[test]
+fn modify_delete_with_nothing_selected_asks_for_a_pick() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"})).unwrap();
+    app.run("construct.plane.offset", json!({"base": "XY", "offset": 10})).unwrap();
+    let n = app.session.doc.features.len();
+    app.run("select.clear", json!({})).unwrap();
+    app.start("timeline.delete");
+    let (message, _, error) = app.status.clone().expect("a hint");
+    assert!(!error && message == app.tr("ui.delete_select_first"), "{message:?} error: {error}");
+    assert!(!message.contains('`'), "no parameter names: {message}");
+    assert_eq!(app.session.doc.features.len(), n, "nothing deleted");
+    app.run("select.set", json!({"items": [{"type": "plane", "name": "Plane1"}]})).unwrap();
+    app.start("timeline.delete");
+    assert!(app.session.doc.find_feature("Plane1").is_none(), "the selection goes");
+    assert_eq!(app.session.doc.features.len(), n - 1);
+}
+
 #[test]
 fn browser_feature_menu_deletes_its_target_and_supports_undo() {
     let mut app = SolveApp::new(Session::default(), Services::default());

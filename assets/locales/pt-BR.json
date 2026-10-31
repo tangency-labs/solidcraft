@@ -606,6 +606,7 @@
   "cmd.appearance_library": "Biblioteca de aparências",
   "cmd.appearance_list": "Listar aparências",
   "cmd.assembly_bom": "Lista de materiais",
+  "cmd.assembly_mass_properties": "Propriedades de massa",
   "cmd.body.print_face": "Face de impressão",
   "cmd.body_rename": "Renomear corpo",
   "cmd.browser_group": "Novo grupo",
