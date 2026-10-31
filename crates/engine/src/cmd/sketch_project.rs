@@ -630,9 +630,11 @@ fn curve_intersection_arg(v: &Value, cmd: &str) -> Result<Option<(String, String
 /// Point arguments that snap to model geometry while drawing, rewritten to sketch point ids:
 /// `{"vertex": [x,y,z]}` projects the vertex (a linked point); `{"on_edge": [x,y,z]}` projects
 /// the edge and makes a free point on it (coincident with the projection); `"mid:<line>"`
-/// makes a point held at the line's midpoint; `"x:<a>+<b>:x,y"` makes a point at the crossing of
-/// two lines, circles or arcs (and `"vertex:x,y,z"` is the vertex form). Everything else is left
-/// as it is. The links are added to the active sketch in the session's document.
+/// makes a point held at the line's midpoint; `"on:<curve>:x,y"` makes a point held on a curve
+/// near x,y; `"x:<a>+<b>:x,y"` makes a point at the crossing of two lines, circles or arcs (and
+/// `"vertex:x,y,z"` is the vertex form). In `on:` and `x:`, `x` and `y` name the sketch's own
+/// axes, as in constraints. Everything else is left as it is. The links are added to the active
+/// sketch in the session's document.
 pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     let Some(id) = sketch_store::active(s) else { return Ok(p.clone()) };
     let mut out = p.clone();
@@ -670,8 +672,9 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
         }
         let Some((d, sk)) = doc.as_mut() else { return Ok(()) };
         let body = str_(v, "body").unwrap_or("").to_string();
+        // A curve may be `x` or `y`, the sketch's own axes, as for constraints (#9330).
         let pid = if let Some((curve, near)) = on {
-            let c = sk.curve_index(&curve).ok_or_else(|| bad(cmd, format!("unknown curve `{curve}`")))?;
+            let c = super::sketch::curve_or_axis(sk, &curve)?.ok_or_else(|| bad(cmd, format!("unknown curve `{curve}`")))?;
             let at = match sk.shape(c) {
                 Some(sh) => sh.project(near),
                 None => near,
@@ -680,8 +683,8 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
             sk.add_constraint(ConstraintKind::PointOnCurve { p: pi, c }, None)?;
             sk.points.get(pi).map(|q| q.id.clone()).unwrap_or_default()
         } else if let Some((a, b, near)) = crossing {
-            let ci = sk.curve_index(&a).ok_or_else(|| bad(cmd, format!("unknown curve `{a}`")))?;
-            let cj = sk.curve_index(&b).ok_or_else(|| bad(cmd, format!("unknown curve `{b}`")))?;
+            let ci = super::sketch::curve_or_axis(sk, &a)?.ok_or_else(|| bad(cmd, format!("unknown curve `{a}`")))?;
+            let cj = super::sketch::curve_or_axis(sk, &b)?.ok_or_else(|| bad(cmd, format!("unknown curve `{b}`")))?;
             if ci == cj {
                 return Err(bad(cmd, "`x:` needs two distinct curves"));
             }

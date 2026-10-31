@@ -464,8 +464,8 @@ fn nearest_on_polyline(poly: &[Vec2], p: Vec2) -> Option<Vec2> {
 }
 
 /// Snap a cursor point on the sketch plane to what is inferred while drawing: a crossing of
-/// two curves, a line's midpoint, or alignment (horizontal/vertical) with the previous point
-/// of the tool. None: nothing near, use the grid.
+/// two curves, a line's midpoint, alignment (horizontal/vertical) with the previous point of
+/// the tool, or else the sketch's own X or Y axis. None: nothing near, use the grid.
 pub fn refine_snap(
     app: &SolveApp,
     proj: &Proj,
@@ -620,6 +620,17 @@ pub fn refine_snap(
             best = Some((level.iter().chain(&plumb).map(off).fold(f64::INFINITY, f64::min), label, at));
             lined.extend(level);
             lined.extend(plumb);
+        }
+    }
+    // Last, before the grid: on the sketch's own X or Y axis, while the Origin shows them. The
+    // point is held on it, as on a curve (`x` and `y` name the axes in a point argument, as in
+    // constraints), its free coordinate on the grid (#9330).
+    if !mid_only && best.is_none() && app.origin_visible() {
+        for (axis, d, q) in [("x", lp.y.abs(), Vec2::new(g(lp.x), 0.0)), ("y", lp.x.abs(), Vec2::new(0.0, g(lp.y)))] {
+            if d < tol * 0.8 && best.is_none_or(|x| d < x.0) {
+                best = Some((d, "On", q));
+                mid_of = Some(format!("{axis}:{},{}", q.x, q.y));
+            }
         }
     }
     SNAP.with(|s| *s.borrow_mut() = best.map(|(_, l, p)| (l, p)));

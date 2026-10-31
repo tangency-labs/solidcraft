@@ -97,11 +97,13 @@ fn drag(h: &mut Harness, from: [f64; 2], to: [f64; 2]) {
     h.settle();
 }
 
-/// The lines of the sketch being edited, end to end.
+/// The lines drawn in the sketch being edited, end to end: not linked reference lines, such as
+/// the line of a sketch axis a point snapped onto is held on (#9330).
 fn lines(h: &Harness) -> Vec<[solidcraft_engine::geom::Vec2; 2]> {
     let sid = h.app.session.active_sketch.unwrap();
     let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
     (0..sk.curves.len())
+        .filter(|&i| !sk.is_linked_curve(i))
         .filter_map(|i| match sk.shape(i) {
             Some(solidcraft_engine::sketch::Shape::Line { a, b }) => Some([a, b]),
             _ => None,
