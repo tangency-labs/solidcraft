@@ -1423,6 +1423,54 @@ fn choosing_a_model_sets_it_and_remembers_it() {
     assert_eq!(app.agent_chat.models.len(), 2, "the list stays");
 }
 
+/// A listing that fails says why and leaves last time's list, with the configured model in it; the
+/// next connection starts without the note.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_listing_that_fails_says_why_and_keeps_the_list_of_last_time() {
+    let (mut app, script, ctx) = app_with_script();
+    let endpoint = "http://localhost:11434/v1";
+    app.agent_chat.running_endpoint = endpoint.into();
+    script.report(Event::ModelsNote(None));
+    script.report(models_reply("fast"));
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.models_note, None);
+    let ids = |app: &SolveApp| app.agent_chat.models.iter().map(|m| m.id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids(&app), ["fast", "smart"]);
+
+    let only = |id: &str| acp::ModelInfo { id: id.into(), name: id.into(), description: String::new() };
+    script.report(Event::ModelsNote(Some("x".repeat(MODELS_NOTE_CAP + 10))));
+    script.report(Event::Models { current: "local".into(), available: vec![only("local")] });
+    poll(&mut app, &ctx);
+    let note = app.agent_chat.models_note.clone().unwrap();
+    assert!(note.starts_with(&trf("ui.agent_chat_models_failed", &[("error", "x")])), "{note}");
+    assert_eq!(note.chars().count(), MODELS_NOTE_CAP);
+    assert_eq!(ids(&app), ["local", "fast", "smart"]);
+    assert_eq!(app.agent_chat.model, "local");
+    assert_eq!(app.agent_chat.models_cache.get(endpoint).map(Vec::len), Some(2), "the failed listing is not remembered");
+
+    script.report(Event::ModelsNote(Some("again".into())));
+    script.report(Event::Models { current: "fast".into(), available: vec![only("fast")] });
+    poll(&mut app, &ctx);
+    assert_eq!(ids(&app), ["local", "fast", "smart"], "a model already listed is not listed twice");
+
+    // A real listing on an endpoint that cannot be reached.
+    let mut app = app_with_endpoints();
+    app.agent_chat.models_note = Some("from before".into());
+    app.agent_chat.agent_id = Some("api-1".into());
+    connect(&mut app, &ctx);
+    assert_eq!(app.agent_chat.models_note, None);
+    let start = std::time::Instant::now();
+    while app.agent_chat.models.is_empty() && start.elapsed() < std::time::Duration::from_secs(10) {
+        poll(&mut app, &ctx);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(app.agent_chat.models_note.as_deref().is_some_and(|note| note.contains("offline")), "{:?}", app.agent_chat.models_note);
+    assert_eq!(ids(&app), ["m"]);
+    assert!(models_shown(&app));
+    disconnect(&mut app);
+}
+
 /// The next session puts back the model chosen last time, when the agent offers it.
 #[test]
 fn the_remembered_model_is_set_on_the_next_session() {

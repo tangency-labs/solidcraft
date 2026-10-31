@@ -303,9 +303,11 @@ pub struct ApiPreset {
 pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "Ollama", base_url: "http://localhost:11434/v1" },
     ApiPreset { name: "LM Studio", base_url: "http://localhost:1234/v1" },
+    ApiPreset { name: "OpenClaw", base_url: "http://localhost:18789/v1" },
     ApiPreset { name: "OpenAI", base_url: "https://api.openai.com/v1" },
     ApiPreset { name: "Mammouth AI", base_url: "https://api.mammouth.ai/v1" },
     ApiPreset { name: "OpenCode Go", base_url: "https://opencode.ai/zen/go/v1" },
+    ApiPreset { name: "OpenRouter", base_url: "https://openrouter.ai/api/v1" },
 ];
 
 /// Anthropic-compatible endpoints people use. The base URL is the one their documentation calls
@@ -398,6 +400,18 @@ mod tests {
         assert!(presets(Protocol::OpenAi).iter().all(|p| !p.name.is_empty() && p.base_url.starts_with("http")));
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Mammouth AI" && key_safe_for(p.base_url)));
         assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.anthropic.com/v1"));
+    }
+
+    /// The first preset is the one an Add dialog opens with, and the one taken for Ollama.
+    #[test]
+    fn ollama_stays_the_first_preset_and_every_preset_can_take_a_key() {
+        assert_eq!(OPENAI_PRESETS.first().map(|p| p.name), Some("Ollama"));
+        assert_eq!(OPENAI_PRESETS.last().map(|p| p.name), Some("OpenRouter"));
+        assert!(OPENAI_PRESETS.iter().any(|p| p.name == "OpenClaw"));
+        for preset in OPENAI_PRESETS.iter().chain(ANTHROPIC_PRESETS) {
+            assert_eq!(normalize_url(preset.base_url).as_deref(), Ok(preset.base_url), "{}", preset.name);
+            assert!(key_safe_for(preset.base_url), "{}", preset.name);
+        }
     }
 
     #[test]

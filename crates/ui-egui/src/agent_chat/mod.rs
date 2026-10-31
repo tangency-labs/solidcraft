@@ -402,6 +402,8 @@ pub struct AgentChat {
     /// The provider picked in the header when the models come from several providers (`None`: the
     /// current model's). It only narrows the model list; the agent keeps its model until one is chosen.
     pub model_provider: Option<String>,
+    /// Why the running endpoint's models could not be listed, for the picker.
+    pub models_note: Option<String>,
     pub config_options: Option<Vec<acp::ConfigOption>>,
     pub config_pending: bool,
     /// An API endpoint's models, kept per endpoint (its base URL) for the next connection.
@@ -719,10 +721,19 @@ impl AgentChat {
             }
             Event::Models { current, available } => {
                 if self.config_options.is_none() && !available.is_empty() {
-                    if !self.running_endpoint.is_empty() {
-                        self.models_cache.insert(self.running_endpoint.clone(), available.clone());
+                    if self.models_note.is_some() {
+                        // The listing failed: last time's list stays, with the configured model in it.
+                        for model in available {
+                            if !self.models.iter().any(|m| m.id == model.id) {
+                                self.models.insert(0, model);
+                            }
+                        }
+                    } else {
+                        if !self.running_endpoint.is_empty() {
+                            self.models_cache.insert(self.running_endpoint.clone(), available.clone());
+                        }
+                        self.models = available;
                     }
-                    self.models = available;
                 }
                 if self.config_options.is_none() {
                     if current != self.model {
@@ -730,6 +741,11 @@ impl AgentChat {
                     }
                     self.model = current;
                 }
+            }
+            // Formatted here: the listing's thread has no language of its own.
+            Event::ModelsNote(error) => {
+                self.models_note =
+                    error.map(|error| trf("ui.agent_chat_models_failed", &[("error", &error)]).chars().take(MODELS_NOTE_CAP).collect());
             }
             Event::ConfigOptions(options) => {
                 self.apply_config_snapshot(options);
@@ -986,6 +1002,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
             chat.mode.clear();
             chat.models.clear();
             chat.model.clear();
+            chat.models_note = None;
             chat.running_endpoint = if entry.kind.is_api() { entry.base_url.clone() } else { String::new() };
             // An endpoint's models from the last time, until the new list arrives.
             if let Some(list) = chat.models_cache.get(&chat.running_endpoint) {
@@ -1984,6 +2001,15 @@ pub fn models_shown(app: &SolveApp) -> bool {
 
 /// Longest provider name kept from an agent's model list.
 const PROVIDER_NAME_CAP: usize = 128;
+/// Longest model id kept from a listing or sent to an agent.
+pub const MODEL_ID_CAP: usize = 256;
+/// Longest note about a listing that failed.
+const MODELS_NOTE_CAP: usize = 1024;
+
+/// Whether a model id can go to an agent: not empty, not too long, no control characters.
+fn model_id_valid(id: &str) -> bool {
+    !id.is_empty() && id.chars().count() <= MODEL_ID_CAP && !id.chars().any(char::is_control)
+}
 
 /// A model's provider and its name at that provider, when the agent says which provider serves it:
 /// a name `Provider · model` (Hermes, OpenCode) or a description `Provider: …` (up to a ` • `).

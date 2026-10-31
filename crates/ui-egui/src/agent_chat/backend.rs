@@ -96,6 +96,9 @@ pub enum Event {
         current: String,
         available: Vec<super::acp::ModelInfo>,
     },
+    /// Why an endpoint's models could not be listed (`None`: they could). It comes before the
+    /// [`Event::Models`] of that listing, which then holds only the configured model.
+    ModelsNote(Option<String>),
     ConfigOptions(Vec<ConfigOption>),
     ConfigOptionFinished {
         id: String,

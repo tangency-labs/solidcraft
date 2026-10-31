@@ -22,6 +22,10 @@ use super::process::{AgentProcess, FromAgent, ProcessHandle};
 
 /// Longest tool result handed back to the model.
 const MAX_TOOL_TEXT: usize = 20_000;
+/// Most models kept from an endpoint's listing.
+const MODEL_LIST_CAP: usize = 2000;
+/// Longest name kept for a listed model.
+const MODEL_NAME_CAP: usize = 256;
 /// Messages kept in the conversation (the system note stays).
 const MAX_HISTORY: usize = 240;
 /// Pictures of the view kept in the conversation. The whole history goes with every request
@@ -795,15 +799,24 @@ impl Worker {
         }
         self.emit(Event::ToolsAvailable(!self.tools.is_empty()));
         self.emit(Event::Ready { agent: format!("{} · {}", self.cfg.name, self.cfg.model), images: true });
-        // The endpoint's models for the picker; an endpoint that does not list them shows none.
-        if let Ok(list) = self.model_list() {
-            let mut available = list;
-            if !self.cfg.model.is_empty() && !available.iter().any(|m| m.id == self.cfg.model) {
-                available.insert(0, ModelInfo { id: self.cfg.model.clone(), name: self.cfg.model.clone(), description: String::new() });
+        // The endpoint's models for the picker. An endpoint that does not list them still shows the
+        // configured model, and says why there are no others.
+        let configured = ModelInfo { id: self.cfg.model.clone(), name: self.cfg.model.clone(), description: String::new() };
+        let available = match self.model_list() {
+            Ok(mut list) => {
+                self.emit(Event::ModelsNote(None));
+                if !self.cfg.model.is_empty() && !list.iter().any(|m| m.id == self.cfg.model) {
+                    list.insert(0, configured);
+                }
+                list
             }
-            if !available.is_empty() {
-                self.emit(Event::Models { current: self.cfg.model.clone(), available });
+            Err(e) => {
+                self.emit(Event::ModelsNote(Some(e)));
+                if self.cfg.model.is_empty() { Vec::new() } else { vec![configured] }
             }
+        };
+        if !available.is_empty() {
+            self.emit(Event::Models { current: self.cfg.model.clone(), available });
         }
         for cmd in cmds {
             match cmd {
@@ -1628,7 +1641,7 @@ fn anthropic_headers(base_url: &str, key: Option<&str>) -> Result<Vec<(String, S
 }
 
 /// The endpoint's models for the picker. The Messages API has no models endpoint at every
-/// compatible provider (Qwen's has none), so a failure here simply leaves the picker empty.
+/// compatible provider (Qwen's has none), so a failure here leaves only the configured model.
 pub fn anthropic_model_list(http: &HttpFn, base_url: &str, key: Option<&str>) -> Result<Vec<ModelInfo>, String> {
     let req = HttpRequest { method: "GET", url: endpoint(base_url, "models"), headers: anthropic_headers(base_url, key)?, body: None, timeout_s: 15 };
     let (status, bytes) = http(&req)?;
@@ -1636,19 +1649,10 @@ pub fn anthropic_model_list(http: &HttpFn, base_url: &str, key: Option<&str>) ->
     if status != 200 {
         return Err(http_error(status, &v));
     }
-    Ok(v.get("data")
-        .and_then(Value::as_array)
-        .map(|a| {
-            a.iter()
-                .take(500)
-                .filter_map(|m| {
-                    let id = m.get("id").and_then(Value::as_str)?.to_string();
-                    let name = m.get("display_name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| id.clone());
-                    Some(ModelInfo { id, name, description: String::new() })
-                })
-                .collect()
-        })
-        .unwrap_or_default())
+    Ok(listed_models(&v, "display_name")
+        .into_iter()
+        .map(|(id, name)| ModelInfo { name: name.unwrap_or_else(|| id.clone()), id, description: String::new() })
+        .collect())
 }
 
 /// Test an Anthropic-compatible endpoint: send the smallest message there is, so the check covers
@@ -1721,18 +1725,32 @@ fn tool_title(name: &str, args: &Value) -> String {
     }
 }
 
-/// `GET {base_url}/models`: the model ids, in the order the endpoint lists them.
-fn model_ids(http: &HttpFn, base_url: &str, headers: Vec<(String, String)>) -> Result<Vec<String>, String> {
+/// The ids of a `/models` body and the names the endpoint gives them (when not just the id), in
+/// its order. The body is the endpoint's to write: an id that could not be sent back is left out,
+/// and a name is cut.
+fn listed_models(body: &Value, name_key: &str) -> Vec<(String, Option<String>)> {
+    let Some(entries) = body.get("data").and_then(Value::as_array) else { return Vec::new() };
+    entries
+        .iter()
+        .filter_map(|m| {
+            let id = m.get("id").and_then(Value::as_str).filter(|id| super::model_id_valid(id))?;
+            let name = m.get(name_key).and_then(Value::as_str).filter(|name| *name != id).map(|name| name.chars().take(MODEL_NAME_CAP).collect());
+            Some((id.to_string(), name))
+        })
+        .take(MODEL_LIST_CAP)
+        .collect()
+}
+
+/// `GET {base_url}/models`: the models, in the order the endpoint lists them. The picker shows the
+/// ids, so an endpoint's own name for a model is its description.
+fn model_entries(http: &HttpFn, base_url: &str, headers: Vec<(String, String)>) -> Result<Vec<ModelInfo>, String> {
     let req = HttpRequest { method: "GET", url: format!("{base_url}/models"), headers, body: None, timeout_s: 15 };
     let (status, bytes) = http(&req)?;
     let v: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
     if status != 200 {
         return Err(http_error(status, &v));
     }
-    Ok(v.get("data")
-        .and_then(Value::as_array)
-        .map(|a| a.iter().take(500).filter_map(|m| m.get("id").and_then(Value::as_str).map(String::from)).collect())
-        .unwrap_or_default())
+    Ok(listed_models(&v, "name").into_iter().map(|(id, name)| ModelInfo { name: id.clone(), id, description: name.unwrap_or_default() }).collect())
 }
 
 /// The endpoint's models for the picker.
@@ -1744,7 +1762,7 @@ pub fn model_list(http: &HttpFn, base_url: &str, key: Option<&str>) -> Result<Ve
         }
         headers.push(("Authorization".to_string(), format!("Bearer {k}")));
     }
-    Ok(model_ids(http, base_url, headers)?.into_iter().map(|id| ModelInfo { name: id.clone(), id, description: String::new() }).collect())
+    model_entries(http, base_url, headers)
 }
 
 /// Ask an endpoint for its models (Test connection): how many, and whether `model` is one.
@@ -1756,10 +1774,9 @@ pub fn test_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>, model: &s
         }
         headers.push(("Authorization".to_string(), format!("Bearer {k}")));
     }
-    let ids = model_ids(http, base_url, headers)?;
-    let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
-    let found = model.is_empty() || ids.contains(&model);
-    Ok(crate::i18n::format(if found { "ui.ai_test_ok" } else { "ui.ai_test_no_model" }, &[("count", &ids.len().to_string()), ("model", model)]))
+    let models = model_entries(http, base_url, headers)?;
+    let found = model.is_empty() || models.iter().any(|m| m.id == model);
+    Ok(crate::i18n::format(if found { "ui.ai_test_ok" } else { "ui.ai_test_no_model" }, &[("count", &models.len().to_string()), ("model", model)]))
 }
 
 #[cfg(test)]
@@ -2059,6 +2076,7 @@ mod tests {
         let Some(Event::Models { current, available }) = events.iter().find(|e| matches!(e, Event::Models { .. })) else { panic!("{events:?}") };
         assert_eq!(current, "local");
         assert_eq!(available.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["local", "big", "small"]);
+        assert!(events.iter().any(|e| matches!(e, Event::ModelsNote(None))), "{events:?}");
         b.set_model("big");
         b.prompt(&[PromptPart::Text("hi".into())]);
         wait_for_seen(&seen);
@@ -2559,6 +2577,72 @@ mod tests {
         assert_eq!(clean["required"], json!(["commands"]));
         let tools = go_gemini_tools(&[json!({"type": "function", "function": {"name": "batch", "parameters": schema}})]);
         assert!(tools[0].pointer("/parameters/additionalProperties").is_none(), "{tools:?}");
+    }
+
+    /// An endpoint that refuses the listing still shows the configured model, and says why first.
+    #[test]
+    fn a_refused_listing_keeps_the_configured_model_and_says_why() {
+        let http: HttpFn = Arc::new(|r: &HttpRequest| {
+            assert_eq!(r.method, "GET");
+            Ok((401, json!({"error": {"message": "No auth credentials"}}).to_string().into_bytes()))
+        });
+        let cfg = ApiConfig {
+            name: "Test".into(),
+            protocol: Protocol::OpenAi,
+            base_url: "http://localhost:1/v1".into(),
+            model: "local".into(),
+            key: None,
+            http,
+            request_timeout_s: 300,
+            reasoning_effort: String::new(),
+        };
+        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        let mut b = ApiBackend::start(cfg, ctx).unwrap();
+        let mut events = Vec::new();
+        let start = std::time::Instant::now();
+        while !events.iter().any(|e| matches!(e, Event::Models { .. })) && start.elapsed() < Duration::from_secs(10) {
+            events.extend(b.poll());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let listing: Vec<&Event> = events.iter().filter(|e| matches!(e, Event::Models { .. } | Event::ModelsNote(_))).collect();
+        let [Event::ModelsNote(Some(note)), Event::Models { current, available }] = listing[..] else { panic!("{events:?}") };
+        assert!(note.contains("No auth credentials"), "{note}");
+        assert_eq!(current, "local");
+        assert_eq!(available.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["local"]);
+        b.shutdown(true);
+    }
+
+    /// OpenRouter's shape: the name is the description, whatever else an entry holds is ignored, an
+    /// id that could not be sent back is left out, and the list stays within its caps.
+    #[test]
+    fn a_listing_keeps_the_names_and_stays_within_its_caps() {
+        let mut data = vec![
+            json!({"id": "openai/gpt-x", "name": "OpenAI: GPT X", "description": "Long text", "supported_parameters": ["tools"]}),
+            json!({"id": "same", "name": "same", "display_name": "Same One"}),
+            json!({"id": "long", "name": "n".repeat(MODEL_NAME_CAP + 10), "display_name": "d".repeat(MODEL_NAME_CAP + 10)}),
+            json!({"id": "x".repeat(super::super::MODEL_ID_CAP + 1)}),
+            json!({"id": "bell\u{7}"}),
+            json!({"id": ""}),
+            json!({"id": 7}),
+            json!({"name": "no id"}),
+        ];
+        data.extend((0..MODEL_LIST_CAP + 500).map(|i| json!({"id": format!("m{i}")})));
+        let body = json!({"data": data}).to_string().into_bytes();
+        let http: HttpFn = Arc::new(move |_: &HttpRequest| Ok((200, body.clone())));
+        let list = model_list(&http, "https://openrouter.ai/api/v1", None).unwrap();
+        assert_eq!(list.len(), MODEL_LIST_CAP);
+        let [first, same, long, next] = &list[..4] else { panic!("{}", list.len()) };
+        assert_eq!((first.id.as_str(), first.name.as_str(), first.description.as_str()), ("openai/gpt-x", "openai/gpt-x", "OpenAI: GPT X"));
+        assert_eq!((same.id.as_str(), same.description.as_str()), ("same", ""));
+        assert_eq!(long.description.chars().count(), MODEL_NAME_CAP);
+        assert_eq!(next.id, "m0");
+        let list = anthropic_model_list(&http, "https://openrouter.ai/api/v1", None).unwrap();
+        assert_eq!(list.len(), MODEL_LIST_CAP);
+        let [first, same, long] = &list[..3] else { panic!("{}", list.len()) };
+        assert_eq!(first.name, "openai/gpt-x");
+        assert_eq!(same.name, "Same One");
+        assert_eq!(long.name.chars().count(), MODEL_NAME_CAP);
+        assert!(test_endpoint(&http, "https://openrouter.ai/api/v1", None, "openai/gpt-x").unwrap().contains(&MODEL_LIST_CAP.to_string()));
     }
 
     #[test]

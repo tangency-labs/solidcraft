@@ -246,13 +246,17 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
 - **Custom command:** any other program that speaks ACP on stdin and stdout, such as
   `my-agent --acp`. SolidCraft starts it directly, not through a shell.
 - **OpenAI-compatible API:** a preset (Ollama `http://localhost:11434/v1`, LM Studio
-  `http://localhost:1234/v1`, OpenAI, Mammouth AI `https://api.mammouth.ai/v1`, OpenCode Go `https://opencode.ai/zen/go/v1`) or a custom URL, the model name, and an optional key.
+  `http://localhost:1234/v1`, OpenClaw `http://localhost:18789/v1`, OpenAI, Mammouth AI
+  `https://api.mammouth.ai/v1`, OpenCode Go `https://opencode.ai/zen/go/v1`, OpenRouter
+  `https://openrouter.ai/api/v1`) or a custom URL, the model name, and an optional key.
   OpenCode Go models are routed to their endpoint by themselves (`/responses`,
   `/messages` or Gemini for those families, `/chat/completions` for the rest),
   each conversation request carrying the session header Go asks for, so one
   preset covers every model.
   A model the list does not know is retried on the next protocol when Go names
   the mismatch.
+  For OpenClaw, turn on its chat endpoint (`gateway.http.endpoints.chatCompletions.enabled` in its
+  config) and use its gateway token as the key; the models it lists are its agents, such as `openclaw/default`.
 - **Anthropic-compatible API:** a preset (Anthropic) or a custom URL, for an endpoint that
   speaks the Anthropic Messages API (`{base}/v1/messages`). This covers Anthropic itself and
   providers that offer an Anthropic-compatible endpoint, such as DeepSeek and Qwen.
