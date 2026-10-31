@@ -48,6 +48,7 @@
 //! | `Sweep` (attributed) | 21 | `behavior`, then op 15's args     | op 15's record, then the attribute rows         |
 //! | `RotationalSweep` (attributed) | 22 | `behavior`, then op 16's args | op 16's record, then the attribute rows |
 //! | `Boolean2d` (attributed) | 23 | `behavior`, then op 12's args | op 12's record, then (an assigned result) the attribute rows |
+//! | `ArcLengths`    | 24 | brep brep `operation` `fraction`       | two-B-rep record, then the edge curve rows     |
 //!
 //! The two-B-rep record is `has [is_first kept brep [brep]]` (the second B-rep when
 //! upstream keeps it); a B-rep is `faces edges vertices regions manifold_solid`, then per
@@ -62,6 +63,14 @@
 //! (`SmApiBrepComputeVolume` at [`VOLUME_ACCURACY`], then each face's `SmApiFaceComputeArea`
 //! at [`AREA_ACCURACY`] in ascending order, a failed face as minus its status) and the
 //! number of those values last ([`split_measures`]).
+//! `ArcLengths` is `SmApiBoolean`; on success its record ends with `edges` and one row
+//! per result edge, `length_status length find_status x y z past`: the edge curve's
+//! `SmCurve::Length` over the edge interval at [`ARC_LENGTH_ACCURACY`], then
+//! `SmCurve::FindParameterAtArcLength` from the interval's start for `fraction` (`0` to
+//! `1`) of that length and the curve point at the parameter found (zeros where a step
+//! fails; `-1` and zeros for an edge without curve). The rows are in ascending
+//! lexicographic order, as the two sides number edges differently, and the number of
+//! those values comes last ([`split_measures`]).
 //! `WithCurves` ends with each intersection edge's index in the result's `GetEdges` list
 //! (`-1` for one the result no longer has; matched by address, so a deleted edge whose
 //! address a new result edge reuses reads as that edge's index). `Boolean2d` writes
@@ -150,6 +159,8 @@ pub const MAX_SELECTION: usize = 16;
 pub const VOLUME_ACCURACY: f64 = 1e-6;
 /// Most edges whose curve [`Call::TessellateBoundaries`] takes away.
 pub const MAX_DROPPED_CURVES: usize = 64;
+/// `dDesiredAccuracy` of the [`Call::ArcLengths`] edge curve lengths (`SmCurve::Length`).
+pub const ARC_LENGTH_ACCURACY: f64 = 1e-9;
 /// `dRelativeAccuracy` of the [`Call::Measured`] face areas (`SmApiFaceComputeArea`).
 pub const AREA_ACCURACY: f64 = 1e-4;
 /// `dDesiredAccuracy` of the [`Call::Attributed`] edge lengths (`SmApiEdgeComputeLength`).
@@ -472,6 +483,18 @@ pub enum Call {
         operation: i32,
         /// `bBooleanPostProcess`.
         post_process: bool,
+    },
+    /// `SmApiBoolean`, then per result edge its curve's `SmCurve::Length` and the point
+    /// `SmCurve::FindParameterAtArcLength` finds `fraction` of that length along it.
+    ArcLengths {
+        /// First operand.
+        a: BrepSpec,
+        /// Second operand.
+        b: BrepSpec,
+        /// `SmBooleanOperationType` value.
+        operation: i32,
+        /// The fraction of each edge curve's length to step along it (`0` to `1`).
+        fraction: f64,
     },
     /// `SmApiBooleanWithCurves`.
     WithCurves {
@@ -973,6 +996,22 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
             push_spec(&mut o, b)?;
             o.push(f64::from(*operation));
             o.push(flag(*post_process));
+        }
+        Call::ArcLengths {
+            a,
+            b,
+            operation,
+            fraction,
+        } => {
+            check_op(*operation)?;
+            if !(0.0..=1.0).contains(fraction) {
+                return Err(bad("arc-length fraction outside 0 to 1"));
+            }
+            o.push(24.0);
+            push_spec(&mut o, a)?;
+            push_spec(&mut o, b)?;
+            o.push(f64::from(*operation));
+            o.push(*fraction);
         }
         Call::WithCurves { a, b, operation } | Call::NonManifold { a, b, operation } => {
             check_op(*operation)?;

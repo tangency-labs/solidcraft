@@ -28,7 +28,10 @@
 // and edge with an SmLongAttribute before SmApiBoolean and records the attributes the result's
 // faces and edges carry (the Rust side tags its own operands the same way); OP_ATTRIBUTED_LIST
 // does the same for SmApiMergeBreps, SmApiBooleanLists and SmApiBooleanTrees and their
-// output B-reps. A failed N-ary call after validation
+// output B-reps. OP_ARC_LENGTHS runs SmApiBoolean and records, per result edge, its curve's
+// SmCurve::Length and the point SmCurve::FindParameterAtArcLength finds a fraction of that
+// length along it (the Rust side measures its own result's edge curves the same way).
+// A failed N-ary call after validation
 // may have consumed some operands, so those are leaked rather than risk a double delete.
 #include "sc_shim.h"
 
@@ -42,6 +45,7 @@
 #include <SmTopology.h>
 #include <SmBSplineCurve.h>
 #include <SmBrep.h>
+#include <SmCurve.h>
 #include <SmContext.h>
 #include <SmEdge.h>
 #include <SmFace.h>
@@ -94,6 +98,7 @@ enum : int32_t
     OP_ATTRIBUTED_NM_SWEEP = 21,            // `behavior` then OP_NM_SWEEP's program
     OP_ATTRIBUTED_NM_ROTATIONAL_SWEEP = 22, // `behavior` then OP_NM_ROTATIONAL_SWEEP's
     OP_ATTRIBUTED_BOOLEAN_2D = 23,          // `behavior` then OP_BOOLEAN_2D's program
+    OP_ARC_LENGTHS = 24,                    // brep brep `operation` `fraction`
 };
 
 // Most entries of one non-manifold sweep selection array (MAX_SELECTION in the Rust module).
@@ -481,6 +486,69 @@ void put_areas(std::vector<double>& o, SmBrep* b)
     o.push_back((double)(o.size() - start));
 }
 
+// OP_ARC_LENGTHS: the accuracy of the edge curves' lengths.
+const double ARC_LENGTH_ACCURACY = 1e-9;
+
+// OP_ARC_LENGTHS's tail: `edges` then one row per edge of `b`, the rows in ascending order
+// (lexicographic: the two sides number edges differently), then the number of those values.
+// A row is `length_status length find_status x y z past`: the edge curve's
+// Length(GetInterval(), ARC_LENGTH_ACCURACY), then FindParameterAtArcLength from the
+// interval's start for `fraction` of that length and the curve point at the parameter found
+// (zeros where a step fails; an edge without curve is `-1` and zeros).
+void put_arc_lengths(std::vector<double>& o, SmBrep* b, double fraction)
+{
+    size_t start = o.size();
+    SmTArray<SmEdge*> edges;
+    b->GetEdges(edges);
+    o.push_back((double)edges.GetSize());
+    std::vector<std::vector<double>> rows;
+    for (ULONG i = 0; i < edges.GetSize(); i++)
+    {
+        std::vector<double> row(7, 0.0);
+        SmCurve* c = edges[i]->GetCurve();
+        if (c == NULL)
+        {
+            row[0] = -1.0;
+            rows.push_back(row);
+            continue;
+        }
+        SmExtent1d ivl = edges[i]->GetInterval();
+        double length = 0.0;
+        SmStatus lstat = c->Length(ivl, ARC_LENGTH_ACCURACY, length);
+        row[0] = st(lstat);
+        if (lstat == SM_SUCCESS)
+        {
+            row[1] = length;
+            double end = 0.0;
+            SmBoolean past = FALSE;
+            SmStatus fstat =
+                c->FindParameterAtArcLength(ivl.GetMin(), fraction * length, end, &past);
+            row[2] = st(fstat);
+            if (fstat == SM_SUCCESS || fstat == SM_ERR_NOT_CONVERGING)
+            {
+                SmPoint3d p;
+                SmStatus pstat = c->EvaluatePoint(end, p);
+                if (pstat == SM_SUCCESS)
+                {
+                    row[3] = p.x;
+                    row[4] = p.y;
+                    row[5] = p.z;
+                }
+                else
+                {
+                    row[2] = st(pstat);
+                }
+                row[6] = flg(past);
+            }
+        }
+        rows.push_back(row);
+    }
+    std::sort(rows.begin(), rows.end());
+    for (size_t i = 0; i < rows.size(); i++)
+        o.insert(o.end(), rows[i].begin(), rows[i].end());
+    o.push_back((double)(o.size() - start));
+}
+
 // Whether upstream keeps the second operand of a successful two-B-rep boolean
 // (source/SM_API/inc/SmApiBrep.h).
 bool keeps_other(int32_t op, bool keep_option)
@@ -493,6 +561,7 @@ void run_two(Rd& rd, int32_t api, std::vector<double>& o)
     BrepSpec a = read_spec(rd);
     BrepSpec b = read_spec(rd);
     int32_t op = SM_BO_UNKNOWN;
+    double fraction = 0.0; // OP_ARC_LENGTHS
     bool flags[5] = {false, false, true, false, false};
     switch (api)
     {
@@ -511,6 +580,12 @@ void run_two(Rd& rd, int32_t api, std::vector<double>& o)
         op = (int32_t)rd.idx(0, 10);
         flags[2] = rd.flag();
         break;
+    case OP_ARC_LENGTHS:
+        op = (int32_t)rd.idx(0, 10);
+        fraction = rd.num();
+        if (!(fraction >= 0.0 && fraction <= 1.0))
+            throw Bad();
+        break;
     default: throw Bad();
     }
     if (rd.at != rd.n)
@@ -526,7 +601,8 @@ void run_two(Rd& rd, int32_t api, std::vector<double>& o)
     SmApiStatus stat = SM_ERR;
     switch (api)
     {
-    case OP_BOOLEAN: stat = SmApiBoolean(b1, b2, eop, res); break;
+    case OP_BOOLEAN:
+    case OP_ARC_LENGTHS: stat = SmApiBoolean(b1, b2, eop, res); break;
     case OP_UNION: stat = SmApiBooleanUnion(b1, b2, res); break;
     case OP_DIFFERENCE: stat = SmApiBooleanDifference(b1, b2, res); break;
     case OP_INTERSECTION: stat = SmApiBooleanIntersection(b1, b2, res); break;
@@ -561,6 +637,8 @@ void run_two(Rd& rd, int32_t api, std::vector<double>& o)
     }
     if (api == OP_MEASURED)
         put_measures(o, res);
+    if (api == OP_ARC_LENGTHS)
+        put_arc_lengths(o, res, fraction);
     delete res; // b1 itself on the documented path; any other b1 is left (ownership unknown)
 }
 
@@ -1286,7 +1364,7 @@ void run_tessellate_boundaries(Rd& rd, std::vector<double>& o)
 
 void run(Rd& rd, std::vector<double>& o)
 {
-    int32_t api = (int32_t)rd.idx(1, 23);
+    int32_t api = (int32_t)rd.idx(1, 24);
     switch (api)
     {
     case OP_BOOLEAN:
@@ -1295,7 +1373,8 @@ void run(Rd& rd, std::vector<double>& o)
     case OP_INTERSECTION:
     case OP_MERGE:
     case OP_WITH_OPTIONS:
-    case OP_MEASURED: run_two(rd, api, o); break;
+    case OP_MEASURED:
+    case OP_ARC_LENGTHS: run_two(rd, api, o); break;
     case OP_MERGE_BREPS: run_merge_breps(rd, o); break;
     case OP_LISTS: run_lists(rd, o); break;
     case OP_TREES: run_trees(rd, o); break;
