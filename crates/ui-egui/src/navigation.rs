@@ -945,7 +945,7 @@ pub(crate) fn bridge_camera(
         if free_orbit {
             cam.rotate_in_view(Vec3::new(-oy * 0.008, -ox * 0.008, 0.0));
         } else {
-            cam.orbit(ox, oy);
+            orbit_on_screen(cam, ox, oy);
         }
         if let Some((p, coords)) = keep {
             cam.place(p, coords);
@@ -997,13 +997,23 @@ pub(crate) fn device_camera(
         if free_orbit {
             cam.rotate_in_view(Vec3::new(-rx, -ry, rz) * (2.0 * seconds));
         } else {
-            cam.orbit(ry * 250.0 * seconds, rx * 250.0 * seconds);
+            orbit_on_screen(cam, ry * 250.0 * seconds, rx * 250.0 * seconds);
             cam.roll_by(rz * 2.0 * seconds);
         }
         if let Some((p, coords)) = keep {
             cam.place(p, coords);
         }
     }
+}
+
+/// A 3D mouse's turn in the upright (turntable) orbit: `dx` and `dy` are screen deltas, as for
+/// [`Camera::orbit`], which turns about the unrolled view's axes. The device's Spin rolls the
+/// view, so its Tilt and Turn are taken back through that roll first: rolled upside down (#10083)
+/// or on its side, the cap still turns the view the way it is pushed on screen, not the way the
+/// world's axes lie. Unrolled, this is [`Camera::orbit`] exactly.
+fn orbit_on_screen(cam: &mut Camera, dx: f64, dy: f64) {
+    let (sin, cos) = cam.roll.sin_cos();
+    cam.orbit(dx * cos + dy * sin, dy * cos - dx * sin);
 }
 
 /// Six principal views, twelve edge diagonals and eight isometric corner directions.
@@ -1779,6 +1789,47 @@ mod tests {
         let mut cam = Camera { yaw: 0.0, pitch: 1.5, ..Default::default() };
         device_camera(&mut cam, Motion { translation: [0.0; 3], rotation: [1.0, 0.0, 0.0] }, 0.1, 600.0, true, false, None, None);
         assert!(cam.pitch < std::f64::consts::FRAC_PI_2 && cam.pitch > 1.5);
+    }
+
+    /// The upright 3D mouse orbit follows the view, not the world (#10083): with the view rolled
+    /// upside down or on its side, Tilt and Turn move the model on screen as they do upright,
+    /// for the cap and for a device app over the bridge.
+    #[test]
+    fn the_3d_mouse_turns_a_rolled_or_upside_down_view_the_way_it_is_pushed() {
+        use super::*;
+        use std::f64::consts::{FRAC_PI_2, PI};
+        // Where the eye moves on screen (along the view's right and up) for one small turn.
+        let on_screen = |cam: Camera, turn: &dyn Fn(&mut Camera)| {
+            let mut after = cam;
+            turn(&mut after);
+            let (right, up, _) = cam.basis();
+            let moved = after.back() - cam.back();
+            let (x, y) = (moved.dot(right), moved.dot(up));
+            let length = x.hypot(y);
+            assert!(length > 1e-6, "{cam:?}: the view turns");
+            (x / length, y / length)
+        };
+        for (pitch, roll) in [(1.28, PI), (0.0, PI), (0.0, FRAC_PI_2), (0.0, -FRAC_PI_2), (0.3, 2.5)] {
+            let upright = Camera { yaw: -0.13, pitch, roll: 0.0, ..Default::default() };
+            let rolled = Camera { roll, ..upright };
+            for rotation in [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.6, -0.8, 0.0]] {
+                let cap = |cam: &mut Camera| {
+                    device_camera(cam, Motion { translation: [0.0; 3], rotation }, 1e-4, 600.0, true, false, None, None);
+                };
+                let bridge = |cam: &mut Camera| {
+                    let orbit = [rotation[1] * 0.03, rotation[0] * 0.03];
+                    bridge_camera(cam, BridgeMotion { orbit, ..Default::default() }, 600.0, true, false, false, None, None);
+                };
+                for turn in [&cap as &dyn Fn(&mut Camera), &bridge] {
+                    let (want, got) = (on_screen(upright, turn), on_screen(rolled, turn));
+                    let tolerance = if pitch == 0.0 || roll == PI { 1e-3 } else { 0.1 };
+                    assert!(
+                        (want.0 - got.0).hypot(want.1 - got.1) < tolerance,
+                        "pitch {pitch}, roll {roll}, {rotation:?}: {want:?} upright, {got:?} rolled"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
