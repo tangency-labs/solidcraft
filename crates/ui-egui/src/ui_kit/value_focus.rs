@@ -19,8 +19,7 @@ pub(crate) fn last_value_field(ctx: &egui::Context) -> Option<egui::Id> {
 /// most one field looking active: its pick fields drop their accent ring while a text field
 /// has the keyboard (#10066).
 pub(crate) fn editor_has_focus(ctx: &egui::Context) -> bool {
-    ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::new("sc_focused_editor")))
-        .is_some_and(|id| ctx.memory(|memory| memory.focused() == Some(id)))
+    ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::new("sc_focused_editor"))).is_some_and(|id| ctx.memory(|memory| memory.focused() == Some(id)))
 }
 
 /// Only a value box drawn this pass can receive the keyboard after a viewport pick.
