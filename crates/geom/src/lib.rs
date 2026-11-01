@@ -24,6 +24,7 @@ pub mod drawing_view;
 pub mod env;
 pub mod fill;
 pub mod fill_general;
+pub mod gdt;
 mod grid;
 pub mod hlr;
 pub mod ids;

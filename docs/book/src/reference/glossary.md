@@ -175,6 +175,16 @@ A sketch entity that is not a point: a line, an arc, a circle, an ellipse, a spl
 - **Elsewhere:** curve, sketch curve, segment.
 - **For translators:** not an edge of a body.
 
+### datum identifier
+
+A letter designation that names a reference used in a geometrical tolerance specification.
+
+- **In SolidCraft:** `solidcraft_geom::gdt::DatumIdentifier` is a boxed label;
+  `DatumReference::identifier` names a reference in a frame. These records do not yet attach
+  to model geometry or establish the referenced datum.
+- **Don't use:** construction plane (for the designation).
+- **For translators:** the letters identify the reference; they are not the reference geometry.
+
 ### design
 
 The model that is open in SolidCraft: its timeline, components, bodies, sketches, parameters and
@@ -235,6 +245,16 @@ construction plane.
 - **Elsewhere:** feature, operation.
 - **For translators:** French uses *fonction* for a timeline feature, so "AI features" had to
   become *fonctionnalités IA*. Translate "feature" only in the timeline sense.
+
+### feature control frame
+
+A compartmented indication of a geometrical characteristic, tolerance and any datum references.
+
+- **In SolidCraft:** `solidcraft_geom::gdt::Frame` stores the selected standard and edition,
+  characteristic, tolerance zone, supported modifiers and ordered datum references. It supplies
+  validated text and local geometry below the UI; sheet placement is later work.
+- **Elsewhere:** feature control frame; geometrical tolerance indicator in ISO terminology.
+- **For translators:** not a dimension's size tolerance or a border around a drawing sheet.
 
 ### folder
 
