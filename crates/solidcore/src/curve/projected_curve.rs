@@ -795,6 +795,7 @@ impl ProjectedCurve {
 mod tests {
     use super::*;
     use crate::curve::hermite_curve::HermiteCurve;
+    use crate::error::SM_ERR;
 
     fn base() -> Curve {
         Curve::from(HermiteCurve::new(
@@ -994,5 +995,251 @@ mod tests {
         assert_eq!(c.proj_type(), ProjectionType::Perspective);
         assert_eq!(c.owns_curve(), OwnsCurve::Yes);
         assert_eq!(c.curve().type_code(), HermiteCurve::TYPE);
+    }
+
+    fn upstream_err(code: i32) -> SolidError {
+        SolidError::Upstream {
+            operation: OP,
+            code,
+            entity: None,
+        }
+    }
+
+    /// WR-28 (fixed in v1.0.1 `3fd5b95`): `SmProjectedCurve::MakeOrthoNormal` unitizes a
+    /// non-unit parallel view normal `(0, 0, 2)` to `(0, 0, 1)` so `Evaluate` and
+    /// `EvaluatePoint` match `(0, 0, 1)` without skew.
+    #[test]
+    fn wr28_parallel_non_unit_proj_vec_evaluates_without_skew() {
+        let k = Kernel::default();
+        let plane_pt = Vec3::new(0.0, 0.0, -1.0);
+        let non_unit = Vec3::new(0.0, 0.0, 2.0);
+
+        let mut from_new = ProjectedCurve::new(
+            base(),
+            Some(plane_pt),
+            Some(non_unit),
+            None,
+            ProjectionType::Parallel,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        assert_eq!(from_new.proj_vec(), Vec3::Z);
+        assert_eq!(from_new.make_ortho_normal(), Ok(()));
+        assert_eq!(from_new.proj_vec(), Vec3::Z);
+
+        let mut from_set = ProjectedCurve::new(
+            base(),
+            None,
+            None,
+            None,
+            ProjectionType::Unknown,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        let res = from_set.set_canonical(
+            base(),
+            plane_pt,
+            non_unit,
+            Vec3::UNDEF,
+            ProjectionType::Parallel,
+            OwnsCurve::No,
+        );
+        assert_eq!(res, Ok(()));
+        assert_eq!(from_set.proj_vec(), Vec3::Z);
+
+        let unit_ref = ProjectedCurve::new(
+            base(),
+            Some(plane_pt),
+            Some(Vec3::Z),
+            None,
+            ProjectionType::Parallel,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        assert!(from_new.approx_eq(&k, &unit_ref).unwrap());
+        assert!(from_set.approx_eq(&k, &unit_ref).unwrap());
+
+        for t in [0.0, 0.3, 0.5, 1.0] {
+            let p_ref = unit_ref.evaluate_point(&k, t).unwrap();
+            let p_new = from_new.evaluate_point(&k, t).unwrap();
+            let p_set = from_set.evaluate_point(&k, t).unwrap();
+            assert!((p_ref.z + 1.0).abs() < 1e-12);
+            assert_eq!(p_new, p_ref);
+            assert_eq!(p_set, p_ref);
+
+            let d_ref = unit_ref.evaluate(&k, t, 2, true, false).unwrap();
+            let d_new = from_new.evaluate(&k, t, 2, true, false).unwrap();
+            let d_set = from_set.evaluate(&k, t, 2, true, false).unwrap();
+            assert_eq!(d_new, d_ref);
+            assert_eq!(d_set, d_ref);
+            for deriv in d_ref.iter().skip(1) {
+                assert!(deriv.z.abs() < 1e-12);
+            }
+        }
+    }
+
+    /// WR-28 (fixed in v1.0.1 `3fd5b95`): zero `(0, 0, 0)` and uninitialised `Vec3::UNDEF`
+    /// projection vectors fail in `make_ortho_normal` and `set_canonical` with `SM_ERR`.
+    #[test]
+    fn wr28_zero_and_uninitialized_proj_vec_fail_with_sm_err() {
+        let partial_undef = Vec3::new(Vec3::UNDEF.x, 0.0, 2.0);
+        for bad_proj in [Vec3::ZERO, Vec3::UNDEF, partial_undef] {
+            let mut from_new = ProjectedCurve::new(
+                base(),
+                Some(Vec3::ZERO),
+                Some(bad_proj),
+                None,
+                ProjectionType::Parallel,
+                OwnsCurve::No,
+            )
+            .unwrap();
+            assert_eq!(from_new.proj_vec(), bad_proj);
+            let err = from_new.make_ortho_normal();
+            assert_eq!(err, Err(upstream_err(SM_ERR)));
+            assert_eq!(from_new.proj_vec(), bad_proj);
+
+            let mut from_set = ProjectedCurve::new(
+                base(),
+                None,
+                None,
+                None,
+                ProjectionType::Unknown,
+                OwnsCurve::No,
+            )
+            .unwrap();
+            let err = from_set.set_canonical(
+                base(),
+                Vec3::ZERO,
+                bad_proj,
+                Vec3::ZERO,
+                ProjectionType::Parallel,
+                OwnsCurve::Yes,
+            );
+            assert_eq!(err, Err(upstream_err(SM_ERR)));
+            assert_eq!(from_set.proj_vec(), bad_proj);
+        }
+
+        let mut omitted = ProjectedCurve::new(
+            base(),
+            Some(Vec3::ZERO),
+            None,
+            None,
+            ProjectionType::Parallel,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        assert_eq!(omitted.proj_vec(), Vec3::UNDEF);
+        let err = omitted.make_ortho_normal();
+        assert_eq!(err, Err(upstream_err(SM_ERR)));
+    }
+
+    /// WR-28 (fixed in v1.0.1 `3fd5b95`): `ProjectionType::Rotation` orthonormalizes non-unit
+    /// non-orthogonal `proj_vec` and `aux_data`, rejects zero or uninitialised `aux_data`
+    /// with `SM_ERR`, and rejects parallel `aux_data` with `SM_ERR_INVALID_INPUT` after
+    /// setting `aux_data` to `(0, 0, 1)`.
+    #[test]
+    fn wr28_rotation_orthonormalizes_and_rejects_degenerate_aux_data() {
+        let k = Kernel::default();
+        let axis_pt = Vec3::new(1.0, -1.0, 0.0);
+        let raw_proj = Vec3::new(0.0, 0.0, 2.0);
+        let raw_aux = Vec3::new(3.0, 4.0, 7.0);
+        let unit_aux = Vec3::new(0.6, 0.8, 0.0);
+
+        let mut rot_new = ProjectedCurve::new(
+            base(),
+            Some(axis_pt),
+            Some(raw_proj),
+            Some(raw_aux),
+            ProjectionType::Rotation,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        assert_eq!(rot_new.proj_vec(), Vec3::Z);
+        assert!((rot_new.aux_data() - unit_aux).length() < 1e-15);
+        assert!(rot_new.proj_vec().dot(rot_new.aux_data()).abs() < 1e-15);
+        assert_eq!(rot_new.make_ortho_normal(), Ok(()));
+
+        let mut rot_set = ProjectedCurve::new(
+            base(),
+            None,
+            None,
+            None,
+            ProjectionType::Unknown,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        let res = rot_set.set_canonical(
+            base(),
+            axis_pt,
+            raw_proj,
+            raw_aux,
+            ProjectionType::Rotation,
+            OwnsCurve::No,
+        );
+        assert_eq!(res, Ok(()));
+        assert_eq!(rot_set.proj_vec(), Vec3::Z);
+        assert!((rot_set.aux_data() - unit_aux).length() < 1e-15);
+
+        let rot_ref = ProjectedCurve::new(
+            base(),
+            Some(axis_pt),
+            Some(Vec3::Z),
+            Some(unit_aux),
+            ProjectionType::Rotation,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        assert!(rot_new.approx_eq(&k, &rot_ref).unwrap());
+        assert!(rot_set.approx_eq(&k, &rot_ref).unwrap());
+        for t in [0.0, 0.4, 1.0] {
+            let d_new = rot_new.evaluate(&k, t, 2, true, false).unwrap();
+            let d_ref = rot_ref.evaluate(&k, t, 2, true, false).unwrap();
+            for (&a, &b) in d_new.iter().zip(&d_ref) {
+                assert!((a - b).length() < 1e-14);
+            }
+        }
+
+        let partial_undef = Vec3::new(Vec3::UNDEF.x, 3.0, 0.0);
+        for bad_aux in [Vec3::ZERO, Vec3::UNDEF, partial_undef] {
+            let err = rot_set.set_canonical(
+                base(),
+                axis_pt,
+                raw_proj,
+                bad_aux,
+                ProjectionType::Rotation,
+                OwnsCurve::No,
+            );
+            assert_eq!(err, Err(upstream_err(SM_ERR)));
+            assert_eq!(rot_set.proj_vec(), Vec3::Z);
+            assert_eq!(rot_set.aux_data(), bad_aux);
+        }
+
+        let mut omitted_aux = ProjectedCurve::new(
+            base(),
+            Some(axis_pt),
+            Some(raw_proj),
+            None,
+            ProjectionType::Rotation,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        assert_eq!(omitted_aux.proj_vec(), Vec3::Z);
+        assert_eq!(omitted_aux.aux_data(), Vec3::UNDEF);
+        let err = omitted_aux.make_ortho_normal();
+        assert_eq!(err, Err(upstream_err(SM_ERR)));
+
+        for par_aux in [Vec3::new(0.0, 5.0, 0.0), Vec3::new(0.0, -3.0, 0.0)] {
+            let err = rot_set.set_canonical(
+                base(),
+                axis_pt,
+                Vec3::new(0.0, 2.0, 0.0),
+                par_aux,
+                ProjectionType::Rotation,
+                OwnsCurve::No,
+            );
+            assert_eq!(err, Err(upstream_err(SM_ERR_INVALID_INPUT)));
+            assert_eq!(rot_set.proj_vec(), Vec3::Y);
+            assert_eq!(rot_set.aux_data(), Vec3::Z);
+        }
     }
 }
