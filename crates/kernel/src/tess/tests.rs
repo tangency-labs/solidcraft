@@ -449,3 +449,47 @@ fn a_boundary_running_back_along_itself_is_all_slit() {
     let (kept, _) = drop_slits(std::slice::from_ref(&lens), &[Vec::new()], 1e-9);
     assert_eq!(kept, vec![lens]);
 }
+
+/// A ball or a ring read back from STEP (as a linked design comes in, #8450): the file merges the
+/// kernel's patches into a cap and the rest of the surface around it, one loop for both. The
+/// rest lies outside its loop in (u, v), and filled from the loop alone it was drawn as the cap
+/// a second time, so the viewport showed a small wedge of the ball. Its display plan covers the
+/// whole surface: the bounding box, area and volume of the analytic solid, closed.
+#[test]
+fn a_ball_or_ring_read_back_from_step_is_drawn_whole() {
+    let tol = 0.02;
+    let c = Vec3::new(12.0, -4.0, 3.0);
+    let (r, big, small) = (5.0, 6.0, 1.5);
+    let cases = [
+        ("ball", ok(crate::sphere(c, r)), Vec3::new(r, r, r), 4.0 * PI * r * r, 4.0 / 3.0 * PI * r * r * r),
+        (
+            "ring",
+            ok(crate::torus(c, big, small)),
+            Vec3::new(big + small, big + small, small),
+            4.0 * PI * PI * big * small,
+            2.0 * PI * PI * big * small * small,
+        ),
+    ];
+    for (name, body, half, area, volume) in cases {
+        let imported = ok(crate::step_import(&ok(crate::step_export(&[&body], name))));
+        let Some(copy) = imported.bodies.first() else { panic!("{name}: no body") };
+        let plan = ok(copy.body.display_plan_angular(tol, crate::DISPLAY_ANGLE));
+        let m = plan.evaluate();
+        assert_watertight(&m, name);
+        let (mut lo, mut hi) = (Vec3::new(f64::MAX, f64::MAX, f64::MAX), Vec3::new(f64::MIN, f64::MIN, f64::MIN));
+        for p in &m.positions {
+            lo = Vec3::new(lo.x.min(p.x), lo.y.min(p.y), lo.z.min(p.z));
+            hi = Vec3::new(hi.x.max(p.x), hi.y.max(p.y), hi.z.max(p.z));
+        }
+        // Inscribed: the nodes lie on the surface, the extremes within a facet of its box.
+        let slack = 0.05 * half.x.max(half.z);
+        for (got, want) in [(lo, c - half), (hi, c + half)] {
+            assert!((got - want).len() <= slack, "{name}: box corner {got:?}, analytic {want:?}");
+        }
+        let got = m.measure();
+        assert!((got.area - area).abs() <= 0.01 * area, "{name}: area {} vs {area}", got.area);
+        assert!((got.volume - volume).abs() <= 0.01 * volume, "{name}: volume {} vs {volume}", got.volume);
+        // The same check as for the kernel's own bodies.
+        check(name, &copy.body, tol, volume);
+    }
+}

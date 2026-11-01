@@ -524,7 +524,11 @@ fn plan_face(
     // A face cut along a seam is a long winding strip whose sides are the cut lines and the
     // boundary in turn: Delaunay with sag refinement meshes it (the patch layouts below assume
     // boundary all round, and leave fans across the strip's corners off the surface).
-    let seamed = !wound.is_empty();
+    // A face outside all of its loops on a closed surface (a sphere less a cap) gets the
+    // surface's whole parameter box as its outer loop, seams and poles for sides; meshed the same
+    // way as a face cut along a seam.
+    let enclosing = if wound.is_empty() { seam::enclosing(s, &dom, &mut projected, rules, h) } else { None };
+    let seamed = !wound.is_empty() || enclosing.is_some();
     match wound.as_slice() {
         [] => {}
         [d] => {
@@ -537,6 +541,12 @@ fn plan_face(
     let mut fixed: Vec<Vec3> = Vec::new();
     let mut uvs: Vec<[f64; 2]> = Vec::new();
     let mut ranges: Vec<std::ops::Range<usize>> = Vec::new();
+    // The enclosing box's pole sides already have a node per line; they are not split again.
+    if let Some(outer) = &enclosing {
+        uvs.extend_from_slice(&outer.uv);
+        fixed.extend_from_slice(&outer.pts);
+        ranges.push(0..uvs.len());
+    }
     for seam::Loop { uv: luv, pts } in &projected {
         let start = uvs.len();
         let n = luv.len();
