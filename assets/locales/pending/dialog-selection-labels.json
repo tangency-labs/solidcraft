@@ -1,0 +1,50 @@
+{
+  "ar": {
+    "dialog.selection_constraint": "قيد {id}",
+    "dialog.selection_external_curve": "{sketch} · منحنى {id}",
+    "dialog.selection_midpoint": "نقطة المنتصف · {id}",
+    "dialog.selection_profile": "{sketch} · المقطع {number}"
+  },
+  "de": {
+    "dialog.selection_constraint": "Bedingung {id}",
+    "dialog.selection_external_curve": "{sketch} · Kurve {id}",
+    "dialog.selection_midpoint": "Mittelpunkt · {id}",
+    "dialog.selection_profile": "{sketch} · Profil {number}"
+  },
+  "en": {
+    "dialog.selection_constraint": "Constraint {id}",
+    "dialog.selection_external_curve": "{sketch} · curve {id}",
+    "dialog.selection_midpoint": "Midpoint · {id}",
+    "dialog.selection_profile": "{sketch} · profile {number}"
+  },
+  "he": {
+    "dialog.selection_constraint": "אילוץ {id}",
+    "dialog.selection_external_curve": "{sketch} · עקומה {id}",
+    "dialog.selection_midpoint": "נקודת אמצע · {id}",
+    "dialog.selection_profile": "{sketch} · פרופיל {number}"
+  },
+  "ja": {
+    "dialog.selection_constraint": "拘束 {id}",
+    "dialog.selection_external_curve": "{sketch} · 曲線 {id}",
+    "dialog.selection_midpoint": "中点 · {id}",
+    "dialog.selection_profile": "{sketch} · プロファイル {number}"
+  },
+  "ko": {
+    "dialog.selection_constraint": "구속 조건 {id}",
+    "dialog.selection_external_curve": "{sketch} · 곡선 {id}",
+    "dialog.selection_midpoint": "중점 · {id}",
+    "dialog.selection_profile": "{sketch} · 프로파일 {number}"
+  },
+  "vi": {
+    "dialog.selection_constraint": "Ràng buộc {id}",
+    "dialog.selection_external_curve": "{sketch} · đường cong {id}",
+    "dialog.selection_midpoint": "Trung điểm · {id}",
+    "dialog.selection_profile": "{sketch} · biên dạng {number}"
+  },
+  "zh": {
+    "dialog.selection_constraint": "约束 {id}",
+    "dialog.selection_external_curve": "{sketch} · 曲线 {id}",
+    "dialog.selection_midpoint": "中点 · {id}",
+    "dialog.selection_profile": "{sketch} · 轮廓 {number}"
+  }
+}

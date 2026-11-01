@@ -1299,3 +1299,56 @@ fn stored_bare_numbers_edit_with_their_units() {
         assert_eq!(h.app.session.doc.features.len(), count, "{command}: the feature is redefined in place");
     }
 }
+
+#[test]
+fn dialog_profile_labels_name_the_sketch_in_coil_and_mirror() {
+    for command in ["solid.coil", "sketch.mirror"] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Panel"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})).unwrap();
+        let sketch = h.app.session.active_sketch.unwrap();
+        if command == "solid.coil" {
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.call("ui.view", json!({"view": "top"}));
+        h.call("ui.camera", json!({"target": [20, 15, 0], "distance": 100}));
+        h.step(&json!({"click": {"world": [20, 15, 0]}})).unwrap();
+        assert_eq!(h.app.session.selection, vec![Sel::Profile { sketch, index: 0 }]);
+        h.app.start(command);
+        h.app.dialog.as_mut().unwrap().preview_enabled = false;
+        h.frames(3);
+        let d = h.app.dialog.as_ref().unwrap();
+        let input = &d.inputs[0];
+        assert_eq!(input.items, vec![Sel::Profile { sketch, index: 0 }]);
+        assert_eq!(selection_label(&h.app.session, h.app.preferences.origin_plane_names, d, input, &input.items[0]), "Panel · profile 1");
+        let mut painted = false;
+        for clipped in &h.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                if let egui::Shape::Text(text) = shape {
+                    painted |= text.galley.text() == "Panel · profile 1";
+                }
+            });
+        }
+        assert!(painted, "{command}: the painted selection label");
+    }
+}
+
+#[test]
+fn dialog_sketch_selection_labels_translate_and_keep_identifiers() {
+    let mut h = Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane": "XY", "name": "Panel"})).unwrap()["sketch"].as_u64().unwrap();
+    let d = Dialog::for_command(&h.app, "sketch.mirror").unwrap();
+    for (sel, english, german) in [
+        (Sel::Profile { sketch, index: 1 }, "Panel · profile 2", "Panel · Profil 2"),
+        (Sel::SketchMidpoint { id: "l7".into() }, "Midpoint · l7", "Mittelpunkt · l7"),
+        (Sel::ExternalSketchCurve { sketch, id: "l7".into() }, "Panel · curve l7", "Panel · Kurve l7"),
+        (Sel::SketchConstraint { id: "k3".into() }, "Constraint k3", "Bedingung k3"),
+    ] {
+        for (language, expected) in [("en", english), ("de", german)] {
+            let _language = crate::i18n::scope(language);
+            assert_eq!(selection_label(&h.app.session, h.app.preferences.origin_plane_names, &d, &d.inputs[0], &sel), expected);
+        }
+    }
+    let missing = Sel::Profile { sketch: 999, index: 0 };
+    assert_eq!(selection_label(&h.app.session, h.app.preferences.origin_plane_names, &d, &d.inputs[0], &missing), "Sketch999 · profile 1");
+}
