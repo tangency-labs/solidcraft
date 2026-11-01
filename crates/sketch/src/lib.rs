@@ -56,8 +56,8 @@ pub use dims::{
 pub use ends::{END_TOL, EndReport, EndTouch, UntiedEnd, loose_ends};
 pub use equation::{EquationCurve, MAX_EQUATION_TEXT};
 pub use fonts::{
-    DEFAULT_FONT_FAMILY, FontData, check_family, families_in, find_style_in, font_data, font_data_styled, font_dirs, installed_families,
-    set_font_file_check,
+    DEFAULT_FONT_FAMILY, FontData, check_family, fallback, families_in, find_style_in, font_data, font_data_styled, font_dirs, font_override_dirs,
+    installed_families, set_font_file_check,
 };
 pub use freeform_offset::{FreeformOffset, FreeformOffsetOutput, OFFSET_TOLERANCE};
 pub use link::{Link, LinkGeom, LinkKind, LinkSource, MAX_LINK_ENTITIES, SKETCH_AXIS_HALF, TextExprs, sketch_axis_geom};
