@@ -1,0 +1,151 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/2005",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/2010",
+ "test": "crates/kernel/src/issue_2005_tests.rs: one_full_arc_closes_like_a_sketch_circle, half_turn_sweep_cuts_a_torus",
+ "summary": "A sweep along a closed path must join its end back to its start without leaving two coincident caps there. On SolidCraft's earlier kernel the capped tool stalled or failed when it was cut from the torus it lay inside (#2005). Geometry from the fix's test: an 8 mm square centred 30 mm from Z, swept once round the circle of radius 30, alone and cut from a torus of major radius 30 and tube radius 8 whose tube is centred on the square (its centre circle at z = 4, see below). The square is given relative to the path start and starts on it, at the middle of its inner side, as in 434-two-overlapping-swept-arc-walls.json: the sweep moves the profile's first point onto the path start, so the square spans z 0..8 and the torus is centred at z = 4 to hold it. Both volumes are exact by Pappus; SolidCraft's test allowed 1 % and 1.5 % because it measured meshes, these check 0.01 mm^3. The test's twisted, scaled and holed variants need sweep options the runner does not have and are not ported.",
+ "cases": [
+  {
+   "name": "closed_circle_sweep",
+   "note": "An 8 mm square in the XZ plane, spanning x 26..34 and z 0..8 (the sweep puts its first point, the middle of its inner side, on the path start at (30, 0, 0)), swept a full turn along the circle of radius 30 about Z: a closed square tube, its end joined back to its start with no caps left between them.",
+   "steps": [
+    {
+     "op": "sweep",
+     "id": "result",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0,
+         -4
+        ],
+        [
+         4,
+         -4
+        ],
+        [
+         4,
+         4
+        ],
+        [
+         -4,
+         4
+        ],
+        [
+         -4,
+         -4
+        ]
+       ]
+      }
+     ],
+     "plane": "xz",
+     "path": {
+      "kind": "arc",
+      "center": [
+       0,
+       0
+      ],
+      "radius": 30,
+      "start_deg": 0,
+      "end_deg": 360
+     }
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 12063.715789784805,
+     "tol": 0.01,
+     "formula": "8^2 * 2*pi*30 (Pappus: the square's area times the path its centroid travels)"
+    }
+   }
+  },
+  {
+   "name": "closed_sweep_cuts_its_torus",
+   "note": "The same closed square tube cut from the torus it lies inside: major radius 30, tube radius 8 (the circle of radius 8 at x = 30, z = 4 in the XZ plane, revolved a full turn about Z: the sweep puts the square's first point, the middle of its inner side, on the path start, so the square spans z 0..8 and its centre, where the tube's centre is, lies at z = 4). SolidCraft's test turns the tool half a turn about the path (twist pi), which leaves its volume and the cut's unchanged; the runner's sweep has no twist, so the square stays square to the path here. The tool lies wholly inside the torus, so the cut leaves a closed cavity; that void is a region of its own, so lumps are not checked (as in 451-hollow-shell-cut.json's join).",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "torus",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        30,
+        4
+       ],
+       "radius": 8
+      }
+     ],
+     "plane": "xz",
+     "axis_point": [
+      0,
+      0,
+      0
+     ],
+     "axis_dir": [
+      0,
+      0,
+      1
+     ],
+     "angle_deg": 360
+    },
+    {
+     "op": "sweep",
+     "id": "tool",
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0,
+         -4
+        ],
+        [
+         4,
+         -4
+        ],
+        [
+         4,
+         4
+        ],
+        [
+         -4,
+         4
+        ],
+        [
+         -4,
+         -4
+        ]
+       ]
+      }
+     ],
+     "plane": "xz",
+     "path": {
+      "kind": "arc",
+      "center": [
+       0,
+       0
+      ],
+      "radius": 30,
+      "start_deg": 0,
+      "end_deg": 360
+     }
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "torus",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "volume": {
+     "value": 25835.56511039833,
+     "tol": 0.01,
+     "formula": "(pi*8^2 - 8^2) * 2*pi*30 (Pappus: the disc less the square, about the Z axis at radius 30)"
+    }
+   }
+  }
+ ]
+}
