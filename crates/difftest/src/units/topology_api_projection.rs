@@ -318,6 +318,14 @@ fn rust_record(k: &mut Kernel, i: &Inputs) -> Result<Output, HarnessError> {
             "null B-rep dereferenced upstream (SmApiCreateSilhouetteCurves)",
         ));
     }
+    // nor a normal that unitizes to a zero vector, which ops 1 and 2 go on with
+    // through uninitialised vectors upstream (UB-169)
+    if matches!(i.op, Op::ProjectBrep | Op::Silhouette) && ffi::normal_overflows(i.normal) {
+        return Ok(Output::rejected(format!(
+            "ffi guard: invalid argument: {}",
+            ffi::NORMAL_OVERFLOWS
+        )));
+    }
     let mut body = match build(k, i)? {
         Ok(b) => b,
         Err(e) => {

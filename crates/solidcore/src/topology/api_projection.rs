@@ -21,6 +21,11 @@
 //!   port returns [`SolidError::InvalidInput`].
 //! - **Statuses.** The `SM_ERR_INVALID_INPUT` and `SM_ERR` the wrappers return themselves
 //!   are [`SolidError::Upstream`] with that code.
+//! - **Overflowing normal (UB-169).** A normal whose squared length overflows unitizes
+//!   to a zero vector. `SmApiProjectBrepOntoPlane` then ignores the failed
+//!   `MakeUnitOrthoVectors` and places its plane with the uninitialised outputs; the port
+//!   returns that failure. `SmApiCreateSilhouetteCurves` reaches `SmHCR`'s UB-169, which
+//!   the port's HCR reports as [`SolidError::InvalidInput`].
 //! - **Output arrays.** A caller's `SmTArray<SmCurve*>` is a `Vec<Option<Curve>>`;
 //!   upstream's appends and restores on failure are kept (an error leaves it as it
 //!   was). The output slots are [`add_curve_output_slots`] (`SmApiAddCurveOutputSlots`).

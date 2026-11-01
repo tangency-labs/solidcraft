@@ -27,7 +27,11 @@
 //! without `..`, not a part file). A box has sizes in `1e-6..=1e6` and a fillet radius
 //! `0` or positive below a quarter of the smallest size. `SmApiCreateSilhouetteCurves`
 //! dereferences a null B-rep once its normal unitizes: a null body with a non-zero
-//! normal is refused there.
+//! normal is refused there. Ops 1 and 2 also refuse a normal whose squared length
+//! overflows ([`normal_overflows`], UB-169): it unitizes to a zero vector, from which
+//! `SmApiProjectBrepOntoPlane` places its plane with the uninitialised outputs of a
+//! failed `MakeUnitOrthoVectors` and `SmApiCreateSilhouetteCurves`' `SmHCR` builds its
+//! view transform from uninitialised vectors.
 
 use std::ffi::CString;
 use std::path::{Component, Path};
@@ -54,8 +58,20 @@ mod sys {
 /// u1v1` (12), the curve's point count `n`; the `3 n` point coordinates follow.
 pub const NFIXED: usize = 31;
 
+/// The guard's message for a normal [`normal_overflows`] refuses.
+pub const NORMAL_OVERFLOWS: &str =
+    "UB-169: the normal's squared length overflows, so it unitizes to a zero vector";
+
 fn bad(msg: &str) -> FfiError {
     FfiError::InvalidArgument(msg.to_string())
+}
+
+/// Whether `normal`'s squared length (`SmVector3d::LengthSquared`) overflows, so that
+/// `Unitize` succeeds with a zero vector (UB-169). Ops 1 and 2 refuse such a normal;
+/// the difftest runner's Rust side applies the same test.
+#[must_use]
+pub fn normal_overflows([x, y, z]: [f64; 3]) -> bool {
+    (x * x + y * y + z * z).is_infinite()
 }
 
 /// The guard of a file body: an upstream test B-rep file.
@@ -132,6 +148,9 @@ pub fn eval(op: u8, path: &str, args: &[f64]) -> Result<Vec<f64>, FfiError> {
         if op == 2 && body == 0.0 && !zero_normal {
             return Err(bad("null B-rep dereferenced (SmApiCreateSilhouetteCurves)"));
         }
+        if op <= 2 && normal_overflows([arg(12), arg(13), arg(14)]) {
+            return Err(bad(NORMAL_OVERFLOWS));
+        }
     }
     let path = CString::new(path).map_err(|_| bad("path has a NUL byte"))?;
     let args = args.to_vec();
@@ -152,4 +171,36 @@ pub fn eval(op: u8, path: &str, args: &[f64]) -> Result<Vec<f64>, FfiError> {
             }
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The overflow boundary: `x * x` is finite up to about `1.34e154`.
+    #[test]
+    fn only_an_overflowing_squared_length_is_refused() {
+        assert!(!normal_overflows([0.0, 0.0, 0.0]));
+        assert!(!normal_overflows([0.0, 0.0, 1.0]));
+        assert!(!normal_overflows([1.3e154, 0.0, 0.0]));
+        assert!(!normal_overflows([9e153, 9e153, 0.0]));
+        assert!(normal_overflows([1.4e154, 0.0, 0.0]));
+        assert!(normal_overflows([1e154, 1e154, 1e154]));
+        // the nightly fuzz00010 and fuzz00002 normals
+        assert!(normal_overflows([1.0, 1e300, 0.1]));
+        assert!(normal_overflows([-1e300, 0.0, 1.0]));
+    }
+
+    /// Ops 1 and 2 refuse such a normal before any C++ call; ops 3 and 4 do not test it.
+    #[test]
+    fn projections_along_an_overflowing_normal_are_refused() {
+        let mut args = vec![0.0; NFIXED];
+        args[0] = 2.0; // a box
+        args[1..4].copy_from_slice(&[1.0, 2.0, 3.0]);
+        args[12..15].copy_from_slice(&[1.0, 1e300, 0.1]);
+        for op in [1, 2] {
+            let e = eval(op, "", &args).unwrap_err().to_string();
+            assert!(e.contains("UB-169"), "{e}");
+        }
+    }
 }
