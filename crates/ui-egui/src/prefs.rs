@@ -1008,6 +1008,8 @@ preference_settings! {
     free_orbit_upright: bool = false, PAGE_NAVIGATION => check_tr("nav.free_orbit_upright.label");
     /// Off: a right drag that the mouse mapping would orbit leaves the camera alone (#6492).
     right_drag_orbits: bool = true, PAGE_NAVIGATION => check_tr("nav.right_drag_orbits.label");
+    /// A right-click in the view with a dialog open confirms its input: on to the next one, then OK.
+    right_click_confirms: bool = true, PAGE_NAVIGATION => check("Right-click confirms dialog inputs", "With a dialog open, a right-click in the view goes on to its next empty input, and on the last one runs OK");
     /// View orientation widget: original signed axes (default) or compact cube.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
