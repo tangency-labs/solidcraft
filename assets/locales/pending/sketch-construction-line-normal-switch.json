@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.construction.normal_needs_length": "An infinite line is always construction: type a length to draw a normal line"
+  },
+  "de": {
+    "ui.construction.normal_needs_length": "Eine unendliche Linie ist immer Konstruktion: Länge eingeben, um eine normale Linie zu zeichnen"
+  },
+  "ja": {
+    "ui.construction.normal_needs_length": "無限直線は常に補助線です。通常の線を描くには長さを入力"
+  },
+  "ko": {
+    "ui.construction.normal_needs_length": "무한 직선은 항상 보조선입니다. 일반 선을 그리려면 길이를 입력하세요"
+  },
+  "zh": {
+    "ui.construction.normal_needs_length": "无限直线始终是构造线：输入长度以绘制普通直线"
+  },
+  "ar": {
+    "ui.construction.normal_needs_length": "الخط اللانهائي إنشائي دائمًا: اكتب طولًا لرسم خط عادي"
+  },
+  "he": {
+    "ui.construction.normal_needs_length": "קו אינסופי הוא תמיד קו עזר: הקלדת אורך משרטטת קו רגיל"
+  },
+  "vi": {
+    "ui.construction.normal_needs_length": "Đường vô hạn luôn là đường dựng hình: nhập chiều dài để vẽ đường thường"
+  }
+}

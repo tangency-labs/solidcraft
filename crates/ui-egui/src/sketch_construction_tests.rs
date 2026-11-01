@@ -214,3 +214,58 @@ fn the_angle_tool_takes_a_length_beside_its_angle() {
     let d = sk.point(b).unwrap() - sk.point(a).unwrap();
     assert!((d.len() - 12.0).abs() < 1e-6 && (d.angle().to_degrees() - 30.0).abs() < 1e-6, "{d:?}");
 }
+
+fn click_switch(h: &mut Harness, which: &str) {
+    let at = crate::scenario::handle_at(&format!("construction_switch:{which}")).expect("the Construction/Normal switch");
+    h.call("ui.click", json!({"x": at.x, "y": at.y}));
+    h.settle();
+}
+
+/// The Construction/Normal switch is greyed out while the line is infinite; with a length, Normal
+/// makes the segment a normal sketch line. The Sketch Palette's line type is left alone (#10258).
+#[test]
+fn the_normal_switch_needs_a_length_and_draws_a_normal_line() {
+    let mut h = sketch();
+    crate::sketch_palette::set_mode(&mut h.app, 1);
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.horizontal", &[]);
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    click_switch(&mut h, "normal");
+    assert!(!h.app.tool.as_ref().unwrap().normal, "an infinite line stays construction");
+
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    digit(&mut h, '8');
+    h.frames(2);
+    click_switch(&mut h, "normal");
+    assert!(h.app.tool.as_ref().unwrap().normal, "with a length the switch works");
+    assert!(h.app.tool.as_ref().unwrap().pts.is_empty(), "a click on the switch places no point");
+    assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "8");
+
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    h.frames(30);
+    h.step(&json!({"click":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    h.step(&json!({"move":{"sketch":[6,5]}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"sketch":[6,5]}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "{:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(!curve.construction && !curve.infinite && !curve.centerline, "{curve:?}");
+    let CurveKind::Line { a, b } = curve.kind else { panic!("a line") };
+    assert!((sk.point(a).unwrap().dist(sk.point(b).unwrap()) - 8.0).abs() < 1e-6);
+    assert_eq!(crate::sketch_palette::mode(&h.app), 1, "the palette's line type is untouched");
+
+    // Without a length the next line is infinite construction again, whatever the switch says.
+    h.frames(30);
+    h.step(&json!({"click":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    let curve = sk.curves.last().unwrap();
+    assert!(curve.construction && curve.infinite, "{curve:?}");
+}

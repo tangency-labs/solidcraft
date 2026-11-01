@@ -557,6 +557,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     let Some(mut t) = app.tool.take() else { return };
     sync(&mut t);
     let place = if t.dims.is_empty() { None } else { boxes(app, ui, proj, &mut t) };
+    crate::sketch_construction::line_type_switch(ui, &mut t);
     app.tool = Some(t);
     if let Some(p) = place {
         crate::tools::place(app, (p, None));

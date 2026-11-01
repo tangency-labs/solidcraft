@@ -49,6 +49,46 @@ pub fn claim_typed_length(app: &SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// The Construction/Normal switch under a construction line tool's Length box (#10258). Normal
+/// makes the segment an ordinary sketch line, ready to close a profile, without converting it
+/// afterwards. It only works with a length: an infinite line stays construction, so the switch
+/// is greyed out and says why until a length is typed. It belongs to the tool alone and leaves
+/// the Sketch Palette's drawing line type (X) as it is.
+pub fn line_type_switch(ui: &mut egui::Ui, t: &mut Tool) {
+    if construction_line_mode(t.cmd).is_none() {
+        return;
+    }
+    let Some(i) = t.dims.iter().position(|b| b.label == "Length") else { return };
+    let Some(length_box) = ui.ctx().memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", i)))) else { return };
+    let tokens = crate::theme::Tokens::get();
+    let has_length = typed_length(t).is_some();
+    let reason = crate::i18n::tr("ui.construction.normal_needs_length");
+    let refused = [Some(reason), Some(reason)];
+    // The Sketch Palette's own line type names, which `segmented` translates.
+    let options = ["Construction", "Normal"];
+    let mut selected = usize::from(has_length && t.normal);
+    let frame = crate::ui_kit::Container::popup_frame(ui.style()).inner_margin(egui::Margin::same(1)).fill(tokens.panel);
+    crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Canvas)
+        .area(egui::Id::new("sc_construction_switch"))
+        .fixed_pos(length_box.left_bottom() + egui::vec2(0.0, tokens.space_2))
+        .order(egui::Order::Background)
+        .show(ui.ctx(), |ui| {
+            frame.show(ui, |ui| {
+                let segments = crate::ui_kit::Segments {
+                    disabled_reasons: if has_length { &[] } else { &refused },
+                    targets: &["construction_switch:construction", "construction_switch:normal"],
+                    small: true,
+                    intrinsic: true,
+                    compact: true,
+                    ..Default::default()
+                };
+                if crate::ui_kit::segmented(ui, &mut selected, &options, segments) {
+                    t.normal = selected == 1;
+                }
+            });
+        });
+}
+
 pub fn hint(id: &str) -> String {
     let key = match construction_line_mode(id).unwrap_or("free") {
         "free" => "ui.construction.free_hint",
@@ -103,6 +143,10 @@ fn params(app: &SolveApp, t: &Tool, pointer: &(Vec2, Option<String>), preview: b
     }
     if let Some(expression) = typed_length(t) {
         p["length"] = if preview { json!(crate::sketch_dims::locked_value(app, t, "Length")?) } else { json!(expression) };
+        // An infinite line is always construction, so the switch only counts with a length.
+        if t.normal {
+            p["construction"] = json!(false);
+        }
     }
     Some(p)
 }

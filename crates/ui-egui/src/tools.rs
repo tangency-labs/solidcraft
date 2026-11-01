@@ -100,6 +100,9 @@ pub struct Tool {
     /// The Line tool's chain, which a rest on its last point switches to tangent arcs and back
     /// (#9489).
     pub chain: crate::sketch_line_arc::LineChain,
+    /// The construction line tools' Construction/Normal switch (#10258): a segment with a length
+    /// becomes a normal sketch line. Each start of a tool begins at Construction.
+    pub normal: bool,
 }
 
 impl Tool {
@@ -153,6 +156,7 @@ impl Tool {
             arc_turn: 0.0,
             lined: Vec::new(),
             chain: Default::default(),
+            normal: false,
         })
     }
 }
