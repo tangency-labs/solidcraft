@@ -155,7 +155,7 @@ Before #9170 one mesh body left the cache out for the whole model. As for a B-re
 mesh body is kept only when its slice reads back as the same vertices, bit for bit, the
 same triangles, colour and paint; the picture shown while opening draws its triangles.
 
-`cache/model.json` records `solidcraft-model-cache/5`, the producer revision
+`cache/model.json` records `solidcraft-model-cache/6`, the producer revision
 `solidcraft-truck-adapter/3`, the application version, the build (source commit,
 CPU architecture and OS), the evaluation source (below, with the CPU architecture
 and OS), the SHA-256 of the exact `document.json` (whose blob references pin every
@@ -191,7 +191,10 @@ repeat for longest), each while what it adds still fits: the bodies no state kep
 so far holds (a body is stored once however many states hold it) and the records
 of the state, those bodies, their names and sketches. Sheet bodies, like sketches, are
 written once and named by place in the states (most features leave the sheets as they were); a
-thinned cache keeps all of them. So are the states' sketch keys (the evaluation key of each
+thinned cache keeps all of them. So are the tap markings (cosmetic threads): a state lists the
+markings of every feature before it, so writing them with each state grew with the square of the
+features (400 marked cylinders: 34 of a 37 MB manifest); each marking is written once and a state
+names its markings as runs of places, and a thinned cache keeps all of them. So are the states' sketch keys (the evaluation key of each
 sketch before the state): each distinct set is written once, as the keys it sets and drops
 relative to the set written before it, and a state names its set by place; a thinned cache
 keeps all of them too. When the rest of the
