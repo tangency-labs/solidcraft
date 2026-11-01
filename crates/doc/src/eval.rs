@@ -5253,11 +5253,15 @@ const APART_GAP: f64 = 1e-3;
 
 /// The tool bodies a feature adds or removes (extrude, revolve, primitives), in the current state.
 /// `to_body` is the body a To Object extent runs to (an extrude), when it found one.
+/// `copy` builds the tool of a pattern's or mirror's source: the state already holds the source
+/// feature's own material, so a join end that reads as buried in the target there may be bare
+/// material where the copy lands — its ends are left as drawn (#6452).
 fn feature_tools_with_constructor(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
     f: &Feature,
     st: &ModelState,
+    copy: bool,
     constructor: &mut Option<ExtrudeConstructor>,
     to_body: &mut Option<String>,
 ) -> Result<Vec<Traced>> {
@@ -5499,7 +5503,7 @@ fn feature_tools_with_constructor(
                 }
             }
             let surroundings = if exact_planar_cut || touching_batch { None } else { Surroundings::of(st, *operation, &plain_targets) };
-            let join_surroundings = if *operation == Operation::Join && !touching_batch {
+            let join_surroundings = if *operation == Operation::Join && !touching_batch && !copy {
                 // Trimming may discard a tool's material, so only bodies this feature
                 // actually joins can establish that the discarded end is already filled.
                 let participants = if plain_targets.is_empty() { &f.participants } else { &plain_targets };
@@ -6866,7 +6870,7 @@ fn replay(
             // points follow their named faces, as the feature's own did (#2121): a To Object
             // extrude's copies reach the face where it is now, not where it was picked.
             let moved = with_named_face_points(doc, st, src).map(|(g, _)| g);
-            let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, &mut None, &mut None)?;
+            let tools = feature_tools_with_constructor(doc, vals, moved.as_ref().unwrap_or(src), st, true, &mut None, &mut None)?;
             for (k, m) in mats.iter().enumerate() {
                 let start = copies.len();
                 for t in &tools {
@@ -7398,7 +7402,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         | FeatureKind::Sweep { operation, targets, .. } => {
             let mut constructor = None;
             let mut to_body = None;
-            let tools = feature_tools_with_constructor(doc, vals, f, st, &mut constructor, &mut to_body)?;
+            let tools = feature_tools_with_constructor(doc, vals, f, st, false, &mut constructor, &mut to_body)?;
             // Cuts through sheet metal become cut-outs of its flat pattern.
             if matches!(operation, Operation::Cut | Operation::Intersect) && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.sheets.is_empty() {
                 let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
