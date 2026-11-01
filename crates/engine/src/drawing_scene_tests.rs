@@ -1177,7 +1177,7 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
     for title_block in [None, Some(solidcraft_geom::title_block::default_block())] {
         let record = Sheet { title_block, ..(**d.sheets.iter().find(|x| x.id == sheet).unwrap()).clone() };
         let (empty, ..) =
-            assemble(&record, Projection::Third, &labels(&record), &[], std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap().finish().unwrap();
+            assemble(&record, Projection::Third, &labels(&record), &[], &[], std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap().finish().unwrap();
         assert_eq!(empty.groups.len(), if record.title_block.is_some() { 4 } else { 3 });
         // The block's text and its fonts count too.
         let fonts = |scene: &Scene| Scene::new(scene.size_mm, Vec::new()).font_records_beyond(&scene.fonts);
@@ -1186,7 +1186,7 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
         let views = [lines(left - 22), lines(30), lines(18)];
         let centre = Vec2::new(100.0, 100.0);
         let views = views.iter().enumerate().map(|(i, v)| (i as u64, centre, v));
-        let (scene, states, ..) = assemble(&record, Projection::Third, &labels(&record), &[], views).unwrap().finish().unwrap();
+        let (scene, states, ..) = assemble(&record, Projection::Third, &labels(&record), &[], &[], views).unwrap().finish().unwrap();
         let statuses: Vec<&'static str> = states.iter().map(|v| v.status.name()).collect();
         assert_eq!(statuses, ["drawn", "failed", "drawn"]);
         let records = scene.groups.iter().map(Group::records).sum::<usize>() + fonts(&scene);
@@ -1531,7 +1531,7 @@ fn a_views_box_is_what_it_draws() {
             owners: None,
         };
         let (_, _, objects, _, _) =
-            assemble(&record, Projection::Third, &labels(&record), &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
+            assemble(&record, Projection::Third, &labels(&record), &[], &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
         let object = objects.iter().find(|o| o.object == 7).unwrap();
         assert!(near(&object.bounds_mm, min, max), "{object:?}");
     }
@@ -1976,7 +1976,8 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
         frame: Some(ViewFrame::new(solidcore_record::Plane::XY, "1:1".parse().unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap()),
         owners: None,
     };
-    let mut assembly = assemble(record, Projection::Third, &labels(record), &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
+    let mut assembly =
+        assemble(record, Projection::Third, &labels(record), &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
     let stroke = |to: Vec2| Item::Stroke { path: vec![Seg2::Line { a: Vec2::ZERO, b: to }], closed: false, width_mm: 0.25, pattern: None };
     let dimension = |id, items| DrawnDimension {
         dimension: id,
@@ -2037,7 +2038,7 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     let (a, b, too_big) = (text(1, "11", 0), text(2, "22", 0), text(3, "77", MAX_RECORDS));
     let shared = glyphs(&a) + glyphs(&b);
     let mut assembly =
-        assemble(record, Projection::Third, &labels(record), &[], std::iter::once((front, Vec2::new(100.0, 100.0), view.clone()))).unwrap();
+        assemble(record, Projection::Third, &labels(record), &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view.clone()))).unwrap();
     assembly.add_dimensions([&a, &too_big, &b].into_iter());
     let (scene, _, objects, states, _) = assembly.finish().unwrap();
     assert!(states[0].drawn && !states[1].drawn && states[2].drawn, "{states:?}");
@@ -2048,7 +2049,8 @@ fn dimensions_share_one_font_table_and_one_left_out_adds_nothing() {
     assert!(bounds.min.x >= 100.0 && bounds.min.y >= 100.0 && bounds.max.y > 102.0 && bounds.max.y < 104.0, "{bounds:?}");
 
     // Past the limit only with its font's records: its group alone would fit. Without them, it joins.
-    let mut assembly = assemble(record, Projection::Third, &labels(record), &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
+    let mut assembly =
+        assemble(record, Projection::Third, &labels(record), &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
     let room = MAX_RECORDS - assembly.records;
     let records = |one: &DrawnDimension| one.group.as_ref().unwrap().records();
     let (bare, per_line) = (text(4, "8", 0), records(&text(4, "8", 1)) - records(&text(4, "8", 0)));
