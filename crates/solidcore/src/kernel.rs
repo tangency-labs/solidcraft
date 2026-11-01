@@ -618,6 +618,12 @@ pub struct UpstreamFixes {
     /// Off by default for pinned C++ parity. This is not the WR-406 trim-reversal fix
     /// (`uv_trim_reversal_on_surface`): validation still repairs existing trims as before.
     pub validation_does_not_make_uv_trims: bool,
+    /// `SmBrep::ValidateAndUpdateTolerances` grows a vertex's tolerance when one of its
+    /// edge use's vertex/edge or vertex/face gaps is over half the tolerance, the test its
+    /// report applies. Upstream grows it only past the whole tolerance, so the update
+    /// mode reports a gap between the two as bad and never fixes it (WR-679, #2111; the
+    /// fork's tangency-labs/smlib@8c4bda5 by bherbruck).
+    pub validate_tolerances_fixes_reported_gaps: bool,
     /// Before the piecewise merge, `do_extended_offset` rebuilds every offset face whose loops cross from the stretches of its loops that bound it (WR-345, #854).
     pub offset_resolve_crossing_loops: bool,
     /// `SmPointSet3d::SetUpCentroid` sums every full 50-point block when the point count

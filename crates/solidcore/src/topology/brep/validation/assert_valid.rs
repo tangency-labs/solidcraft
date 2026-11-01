@@ -14,6 +14,7 @@
 //! | [`CheckLevel`] | `SmAssertTestLevel` (`SM_LEVEL_0`..`SM_LEVEL_2`) |
 //! | `brep::sub_topology` (private) | `SmBrep::AssertSubTopology`, the `SmBrep` branch of `SmTopologyTraverser::GetSubTopology` |
 //! | `brep::tolerances` (private) | `SmBrep::ValidateAndUpdateTolerances(TRUE, ...)` |
+//! | [`validate_and_update_tolerances`], [`ToleranceGaps`] | `SmBrep::ValidateAndUpdateTolerances` |
 //! | `brep::collect_regions`, `brep::adjacent_regions` (private) | `SmTopologyTraverser::CollectRegions`, `SmRegion::GetAdjacentRegions` |
 //! | `base::topology`, `base::owning` (private) | `SmTopology::AssertValid`, `SmOwningTopology::AssertValid`, `SmSAGObject::AssertValid` |
 //! | `shell::region`, `shell::shell` (private) | `SmRegion::AssertValid`, `SmShell::AssertValid`, `sm_GetShellVertices`, `sm_GetShellFaceuses`, `SmEdgeuse::GetConnectedEdgeuses` |
@@ -332,6 +333,49 @@ pub fn assert_valid(
         edge_sets: edge::EdgeSets::default(),
     };
     brep::brep(k, b, &mut cx, walk)
+}
+
+pub use brep::ToleranceGaps;
+
+/// `SmBrep::ValidateAndUpdateTolerances(bValidateOnly, rbTolerancesViolatedOrUpdated,
+/// .., pAList, eTestLevel)`: for every face's upward-faceuse edge use (an edge use and
+/// its mate once) the vertex/edge and vertex/face gaps at both ends and the edge/face
+/// gap. Unless `validate_only`, a vertex with a gap over its tolerance (over half of
+/// it with [`crate::kernel::UpstreamFixes::validate_tolerances_fixes_reported_gaps`],
+/// WR-679) is grown to twice its larger gap, and an edge with an edge/face gap over its
+/// tolerance is grown (with its vertices) to twice the gap when the gap is under the
+/// B-rep's box diagonal / 800; tolerances only grow. The gaps still over half the vertex
+/// tolerance (tests 0-3) or over the edge tolerance (test 4) are then reported into
+/// `reports` (list 2 of `SmBrep`, about the edge use) at `level` (0..4), in native
+/// order. Returns whether a gap was over its tolerance and the largest vertex gaps.
+///
+/// # Errors
+///
+/// [`SolidError::Upstream`] (`SM_ERR`) for an edge use end without vertex (upstream's
+/// `NER`, after the reports and updates of the earlier edge uses);
+/// [`SolidError::InvalidInput`] for a level above 4 or broken topology links upstream
+/// would dereference; those of the gap and bounding box computations.
+pub fn validate_and_update_tolerances(
+    k: &mut Kernel,
+    b: &mut Brep,
+    validate_only: bool,
+    reports: Option<&mut AssertArray>,
+    level: u8,
+) -> Result<ToleranceGaps> {
+    if level > LEVEL_GIVEN {
+        return Err(super::invalid("invalid assert test level"));
+    }
+    let mut rep = Rep {
+        array: reports,
+        level,
+    };
+    let (status, gaps) = brep::validate_and_update(k, b, &mut rep, validate_only)?;
+    if status != SUCCESS {
+        return Err(SolidError::sm_err(
+            "topology::brep::validation::validate_and_update_tolerances",
+        ));
+    }
+    Ok(gaps)
 }
 
 /// The virtual `AssertValid(pAList, eTestLevel, SM_NO_WALK)` of a curve outside any

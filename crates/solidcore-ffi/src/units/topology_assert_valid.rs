@@ -41,10 +41,14 @@ fn primitive_len(kind: f64) -> Option<usize> {
 /// value. Op 2 refuses the null-pointer mutations 8 and 9: the tests dereference the face
 /// surface and edge curve without the `ValidatePointers` guard `AssertValid` runs first
 /// (UB-281, `SmEdgeuse::CalcMaxEdgeFaceGap`); a null edge use link (mutation 10) is
-/// defined there.
+/// defined there. Op 5 runs `SmBrep::ValidateAndUpdateTolerances(FALSE)` after the
+/// mutation, then the capi sequence; it takes levels 0-2 and mutations 0-7 (the null
+/// surface, curve and link mutations 8-10 are dereferenced by the gap computations).
 pub fn eval(op: u8, path: &str, block: &[f64], args: [f64; 5]) -> Result<Vec<f64>, FfiError> {
     let bad = || FfiError::InvalidArgument("invalid AssertValid arguments".into());
-    if op > 4
+    if op > 5
+        || (op == 5 && args[2] > 7.0)
+        || (op == 5 && args[0] > 2.0)
         || (op == 2 && (args[2] == 8.0 || args[2] == 9.0))
         || (op == 3 && args[2] != 0.0)
         || (op == 4 && !(1.0..=5.0).contains(&args[2]))

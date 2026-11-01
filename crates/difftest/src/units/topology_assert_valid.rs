@@ -70,6 +70,10 @@ struct Inputs {
     /// distance `value` (`SmApiOffsetBrepFull`, extended, merged; #2111).
     #[serde(default)]
     copy_op: u8,
+    /// Run `SmBrep::ValidateAndUpdateTolerances(FALSE)` at `level` after the mutation,
+    /// then the capi sequence on the updated body (shim op 5; #2111, WR-679).
+    #[serde(default)]
+    update: bool,
     #[serde(default)]
     mutation: u8,
     #[serde(default)]
@@ -500,6 +504,98 @@ fn output(protocol: &[f64], capi: bool) -> Result<Output, HarnessError> {
     }
     Ok(o)
 }
+/// The update mode's results (shim op 5): its status and, on success, its outputs, its
+/// reports and every vertex then edge tolerance, then the capi check of the updated body.
+fn update_output(protocol: &[f64]) -> Result<Output, HarnessError> {
+    let mut rd = Reader {
+        data: protocol,
+        pos: 0,
+    };
+    if rd.num()? != 0.0 {
+        return Ok(Output::rejected("native fixture construction failed"));
+    }
+    let status = rd.num()? as i64;
+    let o = Output::new().int("update_status", status);
+    if status != 1000 {
+        if rd.pos != protocol.len() {
+            return Err(herr("trailing update output"));
+        }
+        return Ok(o);
+    }
+    let violated = rd.num()? as i64;
+    let max_gaps = rd.slice(2)?.to_vec();
+    let uses: Vec<i64> = rd.slice(4)?.iter().map(|&x| x as i64).collect();
+    let (reports, last) = read_reports(&mut rd)?;
+    let nv = rd.count()?;
+    let vertex_tols = rd.slice(nv)?.to_vec();
+    let ne = rd.count()?;
+    let edge_tols = rd.slice(ne)?.to_vec();
+    let o = o
+        .int("violated_or_updated", violated)
+        .values("max_vertex_edge_face_gaps", max_gaps)
+        .ints("max_vertex_edge_face_uses", uses)
+        .values("vertex_tolerances", vertex_tols)
+        .values("edge_tolerances", edge_tols);
+    let o = put(o, "update_", &reports, last);
+    let mut rest = vec![0.0];
+    rest.extend(protocol.get(rd.pos..).unwrap_or_default());
+    let check = output(&rest, true)?;
+    let mut o = o;
+    o.ints.extend(check.ints);
+    o.values.extend(check.values);
+    Ok(o)
+}
+/// The Rust side of shim op 5: `validate_and_update_tolerances(FALSE)` at the case's
+/// level, then `check_brep_with_keys`, encoded as the shim does.
+fn update_rust(k: &mut Kernel, b: &mut Brep, i: &Inputs) -> Result<Output, HarnessError> {
+    let level = capi_level(i)?;
+    let mut reports = AssertArray::new();
+    let mut out = vec![0.0];
+    match validation::validate_and_update_tolerances(k, b, false, Some(&mut reports), i.level) {
+        Ok(g) => {
+            out.push(1000.0);
+            out.extend([
+                f64::from(g.violated_or_updated),
+                g.max_vertex_edge_gap,
+                g.max_vertex_face_gap,
+            ]);
+            for vu in [g.max_vertex_edge_use, g.max_vertex_face_use] {
+                match vu {
+                    Some(vu) => out.extend([16006.0, f64::from(vu.index())]),
+                    None => out.extend([-1.0, -1.0]),
+                }
+            }
+        }
+        Err(solidcore::SolidError::Upstream { code, .. }) => {
+            out.push(f64::from(code));
+            return update_output(&out);
+        }
+        Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+    }
+    put_reports(&mut out, &reports);
+    let vertices: Vec<VertexId> = b.vertices().ids().collect();
+    out.push(vertices.len() as f64);
+    for v in vertices {
+        out.push(b.vertex(v).map_err(|e| herr(e.to_string()))?.tolerance);
+    }
+    let edges: Vec<EdgeId> = b.edges().ids().collect();
+    out.push(edges.len() as f64);
+    for e in edges {
+        out.push(b.edge(e).map_err(|e| herr(e.to_string()))?.tolerance);
+    }
+    let check = match validation::check_brep_with_keys(k, b, level, &key) {
+        Ok(c) => c,
+        Err(e) => return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+    };
+    out.push(f64::from(check.pointers_status));
+    put_reports(&mut out, &check.pointer_reports);
+    out.push(match check.assert_valid {
+        None => -1.0,
+        Some(v) => f64::from(v),
+    });
+    put_reports(&mut out, &check.reports);
+    update_output(&out)
+}
 /// The level-2 test results (shim op 2): per face tests 32, 33, 38 (`-1` without
 /// surface), per edge test 13 and its max gap, per vertex test 1, its max gap and the
 /// face of that gap (index, `-1` for none).
@@ -790,7 +886,9 @@ impl UnitDiff for Runner {
             return Ok(Output::rejected(NULL_LINK_TESTS));
         }
         let (path, block) = block(&i.brep)?;
-        let op = if i.tests {
+        let op = if i.update {
+            5
+        } else if i.tests {
             2
         } else if i.copy && i.copy_op != 0 {
             4
@@ -800,6 +898,9 @@ impl UnitDiff for Runner {
             u8::from(i.capi)
         };
         let out = ffi::eval(op, &path, &block, args(&i)).map_err(|e| herr(e.to_string()))?;
+        if i.update {
+            return update_output(&out);
+        }
         if i.tests {
             return tests_output(&out);
         }
@@ -819,6 +920,9 @@ impl UnitDiff for Runner {
             return copy_check(&mut k, &b, &i);
         }
         mutate(&k, &mut b, &i)?;
+        if i.update {
+            return update_rust(&mut k, &mut b, &i);
+        }
         if i.tests {
             return match level2_tests(&mut k, &mut b) {
                 Ok(out) => tests_output(&out),
@@ -913,6 +1017,7 @@ impl UnitDiff for Runner {
             tests: false,
             copy: false,
             copy_op: 0,
+            update: false,
             mutation,
             index: rng.below(100) as usize,
             value,

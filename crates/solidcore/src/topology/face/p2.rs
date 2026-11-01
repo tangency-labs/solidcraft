@@ -972,7 +972,8 @@ fn is_singularity(
         | SurfaceKind::Step(_)
         | SurfaceKind::SrfInVolume(_)
         | SurfaceKind::OffsetSurface(_) => {
-            let r = surface.is_singularity(k, uv, tol, false)?;
+            // bPtTestOnly = TRUE, as upstream passes it
+            let r = surface.is_singularity(k, uv, tol, true)?;
             Ok((r.singular, r.direction))
         }
     }

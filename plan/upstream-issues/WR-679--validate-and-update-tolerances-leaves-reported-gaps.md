@@ -1,0 +1,9 @@
+#### WR-679. ValidateAndUpdateTolerances' update mode reports vertex gaps it never fixes
+- **Severity:** Wrong result
+- **Area:** Topology
+- **Location:** `source/SMLib/src/SmBrep.cpp`, `SmBrep::ValidateAndUpdateTolerances` (def. `:33436`), the two "bad edgeuse start/end vertex gaps" tests before the `SM_LIST_2` reports 0-3.
+- **What happens:** with `bValidateOnly = FALSE`, a vertex's tolerance is grown (to twice its larger vertex/edge or vertex/face gap) only when a gap is over the whole vertex tolerance (the `/ 2.0` is commented out). The reports that follow then test each gap against half the tolerance. A gap between half the tolerance and all of it is reported as a Bad Gap and left unfixed, so the update mode does not clear the failures it reports.
+- **Trigger:** the WR-671 offset (`offset_edges_keep_source_tolerance`) of the patch sheet `fixtures/topology.assert_valid/data/issue2111_patch_sheet.smb` by d = 0.5, then `ValidateAndUpdateTolerances(FALSE)`. Four vertex/edge gaps of 6.05e-5 to 6.77e-5 at vertices of tolerance 8.43e-5 and 8.31e-5 are not grown, and the update's own report and `check_brep(Level2)` both report them (`Test #0/#2 Bad Gap: Edge/Vertex gap ... tolerance=4.2138103e-05` / `4.1533134e-05`).
+- **How found:** following up tangency-labs/solidcore#2111 (the d = 0.5 gaps WR-671 leaves); the fork's tangency-labs/smlib@8c4bda5 (bherbruck) fixes the same test.
+- **Confirmed:** yes. Difftest `topology.assert_valid`, `update_tolerances.json` (shim op 5, the pinned update mode), matches the C++ with the flag off; `crates/solidcore/tests/issue_2111_offset_patch_sheet_gaps.rs` (`updated_tolerances_at_a_half_cover_the_gaps`).
+- **Fix (opt-in):** `Kernel::fixes.validate_tolerances_fixes_reported_gaps`, the fork's 8c4bda5. Both vertex tests use half the tolerance, as the report does, so every vertex it reports is grown to twice its gap. With it on, the d = 0.5 offset above checks clean after the update.
