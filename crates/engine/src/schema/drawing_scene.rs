@@ -22,7 +22,7 @@ pub struct SheetSceneParams {
 
 /// A sheet's paper scene: its size and its groups in paint order, in paper millimetres from the
 /// sheet's lower-left corner: the drawing border's (object: the sheet), then each view's strokes
-/// (object: the view).
+/// (object: the view), then the title block's (object: the sheet).
 #[derive(Debug, Serialize)]
 #[serde(transparent)]
 pub struct SheetPaperScene(pub solidcraft_geom::paper::Scene);
@@ -32,7 +32,7 @@ impl JsonSchema for SheetPaperScene {
         "SheetPaperScene".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        paper_scene_schema(generator, &[ObjectKind::DrawingBorder, ObjectKind::View], true)
+        paper_scene_schema(generator, &[ObjectKind::DrawingBorder, ObjectKind::View, ObjectKind::TitleBlock], true)
     }
 }
 

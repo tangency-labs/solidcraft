@@ -1,6 +1,7 @@
 use super::*;
 use crate::cmd::{Part, command_specs, find_command};
 use crate::tests::Folder;
+use solidcraft_doc::drawing::template;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap_or_else(|e| panic!("{id}: {e}"))
@@ -17,6 +18,127 @@ fn design() -> Session {
     s
 }
 
+/// A sheet's general tolerances, as `drawing.inspect` lists its cells.
+fn tolerances(made: &Value) -> Value {
+    let cells = made["sheets"][0]["title_block_cells"].as_array().unwrap();
+    cells.iter().find(|cell| cell["name"] == "general_tolerances").unwrap()["text"].clone()
+}
+
+/// A drawing starts from the template named, else ISO A3 for a part or, for a design with
+/// components, for an assembly, which `drawing.template.list` marks; it keeps the template's
+/// projection unless given one. An unknown template is refused with nothing changed, and undo
+/// takes the drawing away whole.
+#[test]
+fn a_drawing_starts_from_a_template() {
+    let mut s = design();
+    let listed = run(&mut s, "drawing.template.list", json!({}))["templates"].clone();
+    let names: Vec<&str> = listed.as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(names, template::BUILT_INS);
+    let marked: Vec<&Value> = listed.as_array().unwrap().iter().filter(|t| t["default"] == json!(true)).collect();
+    assert_eq!(marked, [&json!({"name": "iso-a3-part", "title": "ISO A3 part", "default": true})]);
+    let made = run(&mut s, "drawing.create", json!({"template": "iso-a4-part", "projection": "first", "language": "de"}));
+    let sheet = &made["sheets"][0];
+    assert_eq!((&sheet["size_mm"], &sheet["orientation"]), (&json!([210.0, 297.0]), &json!("portrait")));
+    assert_eq!((&made["projection"], &made["language"]), (&json!("first"), &json!("de")));
+    assert_eq!(tolerances(&made), json!(template::PART_TOLERANCES));
+    let (undo, before) = (s.undo.len(), s.doc.drawings.clone());
+    assert!(refused(&mut s, "drawing.create", json!({"template": "iso-b2-part"})).contains("no template `iso-b2-part`"));
+    assert_eq!((s.undo.len(), &s.doc.drawings), (undo, &before), "nothing changed");
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.drawings.is_empty(), "undo takes the drawing away whole");
+    // A design with components: the assembly template, in its own projection.
+    run(&mut s, "component.create", json!({"name": "Bracket"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let marked =
+        run(&mut s, "drawing.template.list", json!({}))["templates"].as_array().unwrap().iter().find(|t| t["default"] == json!(true)).cloned();
+    assert_eq!(marked.map(|t| t["name"].clone()), Some(json!("iso-a3-assembly")));
+    let made = run(&mut s, "drawing.create", json!({}));
+    assert_eq!((&made["sheets"][0]["size_mm"], &made["projection"]), (&json!([420.0, 297.0]), &json!("third")));
+    assert_eq!(tolerances(&made), json!(template::ASSEMBLY_TOLERANCES));
+}
+
+/// A template applied to the drawing open: a dry run answers what would change and changes nothing;
+/// applying it is one undo step, and applying it again none. The views the new paper leaves
+/// outside are listed and stay where they were.
+#[test]
+fn a_template_applied_restyles_the_sheets_and_moves_nothing() {
+    let (mut s, [front, right, top]) = crate::cmd::drawing_view::tests::three_views();
+    let before = open_one(&s);
+    let (steps, sheet) = (s.undo.len(), ids::encode(before.sheets[0].id));
+    let dry = run(&mut s, "drawing.template.apply", json!({"template": "iso-a4-part", "dry_run": true}));
+    assert_eq!(dry["changed"], json!([{"sheet": sheet, "paper": true, "border": false, "title_block": false, "lost": []}]));
+    let outside: Vec<&str> = dry["outside"].as_array().unwrap().iter().map(|v| v["view"].as_str().unwrap()).collect();
+    assert!(outside.contains(&ids::encode(right).as_str()) && outside.contains(&ids::encode(top).as_str()), "{dry}");
+    assert!(!outside.contains(&ids::encode(front).as_str()), "{dry}");
+    assert_eq!((open_one(&s), s.undo.len()), (before.clone(), steps), "a dry run changes nothing");
+    let applied = run(&mut s, "drawing.template.apply", json!({"template": "iso-a4-part"}));
+    assert_eq!((&applied["changed"], &applied["outside"], &applied["dry_run"]), (&dry["changed"], &dry["outside"], &json!(false)));
+    let after = open_one(&s);
+    assert_eq!(after.sheets[0].sheet, template::built_in("iso-a4-part").unwrap().unwrap().sheets[0].sheet);
+    assert_eq!(after.views, before.views, "nothing moves");
+    assert_eq!(s.undo.len(), steps + 1);
+    let again = run(&mut s, "drawing.template.apply", json!({"template": "iso-a4-part"}));
+    assert_eq!((again["changed"].clone(), s.undo.len()), (json!([]), steps + 1), "nothing to change, no step");
+    for (p, why) in [
+        (json!({"template": "iso-b2-part"}), "no template `iso-b2-part`"),
+        (json!({}), "`template` must be a template's name"),
+        (json!({"template": "iso-a3-part", "dry_run": "yes"}), "`dry_run` is true or false"),
+    ] {
+        assert!(refused(&mut s, "drawing.template.apply", p.clone()).contains(why), "{p}");
+    }
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(open_one(&s).sheets, before.sheets, "undo puts the paper back");
+}
+
+/// A drawing saved as a template file starts new drawings and restyles others, with nothing of its
+/// model; a later save changes no drawing made from it. Only a .json path is taken, and only inside
+/// the folders an agent may use while a scope is active.
+#[test]
+fn a_template_file_saves_and_starts_drawings() {
+    let (mut s, _) = crate::cmd::drawing_view::tests::three_views();
+    let folder = Folder::new("drawing-template");
+    let path = folder.path("company-a3.json");
+    run(&mut s, "drawing.sheet.set", json!({"sheet": "Sheet 1", "title_block_overrides": {"material": "See note 3"}}));
+    let saved = run(&mut s, "drawing.template.save", json!({"path": path}));
+    assert_eq!(saved["bytes"].as_u64(), Some(std::fs::metadata(&path).unwrap().len()));
+    let first = open_one(&s);
+    run(&mut s, "drawing.close", json!({}));
+    let made = run(&mut s, "drawing.create", json!({"name": "From the file", "template": path}));
+    let from_file = open_one(&s);
+    assert!(from_file.views.is_empty() && from_file.sheets[0].id != first.sheets[0].id, "{made}");
+    assert_eq!((from_file.sheets[0].sheet, &from_file.sheets[0].title_block), (first.sheets[0].sheet, &first.sheets[0].title_block));
+    assert_eq!(from_file.sheets[0].title_block_overrides, first.sheets[0].title_block_overrides);
+    // A later save of another format changes no drawing made from the file.
+    run(&mut s, "drawing.template.apply", json!({"template": "iso-a4-part"}));
+    run(&mut s, "drawing.template.save", json!({"path": path}));
+    let other = s.doc.drawings.iter().find(|d| d.id == first.id).unwrap().clone();
+    assert_eq!(other.sheets, first.sheets, "the first drawing kept its own copy");
+    let applied = run(&mut s, "drawing.template.apply", json!({"template": path, "dry_run": true}));
+    assert_eq!(applied["changed"], json!([]), "the file now holds this drawing's own format: {applied}");
+    for (command, p, why) in [
+        ("drawing.template.save", json!({"path": folder.path("company.txt")}), "`path` must be a .json file"),
+        ("drawing.template.save", json!({}), "`path` must be a .json file"),
+        ("drawing.create", json!({"template": folder.path("missing.json")}), "template `"),
+        ("drawing.create", json!({"template": "company"}), "no template `company`"),
+    ] {
+        assert!(refused(&mut s, command, p.clone()).contains(why), "{command} {p}");
+    }
+    let plain = folder.path("plain.json");
+    std::fs::write(&plain, first.to_json().unwrap()).unwrap();
+    assert!(refused(&mut s, "drawing.create", json!({"template": plain})).contains("a template draws no design"));
+    // While a scope is active, only its folders.
+    let (inside, outside) = (Folder::new("drawing-template-in"), Folder::new("drawing-template-out"));
+    solidcraft_io::vfs::scoped(Some(solidcraft_io::vfs::PathScope::new([inside.0.clone()])), || {
+        run(&mut s, "drawing.template.save", json!({"path": inside.path("ok.json")}));
+        let refusal = refused(&mut s, "drawing.template.save", json!({"path": outside.path("no.json")}));
+        assert!(refusal.contains("outside the folders this agent may use"), "{refusal}");
+        let refusal = refused(&mut s, "drawing.create", json!({"template": path}));
+        assert!(refusal.contains("outside the folders this agent may use"), "{refusal}");
+    });
+    assert!(std::path::Path::new(&inside.path("ok.json")).is_file() && !std::path::Path::new(&outside.path("no.json")).exists());
+}
+
 /// The drawing open, as the design holds it.
 fn open_one(s: &Session) -> Arc<Drawing> {
     s.drawing("test").unwrap().clone()
@@ -31,8 +153,8 @@ fn names(s: &Session) -> Vec<&str> {
     s.doc.drawings.iter().map(|d| d.name.as_str()).collect()
 }
 
-/// A drawing of the design: one A3 sheet with the ISO border, the design its one source, kept in
-/// the design and opened. Making it is one step of the model, and evaluates nothing.
+/// A drawing of the design: one A3 sheet with the ISO border and the built-in title block, the
+/// design its one source, kept in the design and opened. Making it is one step of the model, and evaluates nothing.
 #[test]
 fn a_drawing_of_the_design_is_kept_in_it_and_opened() {
     let mut s = design();
@@ -49,6 +171,9 @@ fn a_drawing_of_the_design_is_kept_in_it_and_opened() {
     let d = open_one(&s);
     assert_eq!(made["id"], json!(ids::encode(d.id)));
     assert!(d.sheets[0].border.is_some(), "the ISO border");
+    let built_in = template::built_in("iso-a3-part").unwrap().unwrap();
+    assert_eq!(d.sheets[0].title_block, built_in.sheets[0].title_block, "the part template's block");
+    assert_eq!(sheet["title_block"]["size_mm"], json!([180.0, 49.0]));
     assert_eq!((s.doc.drawings.len(), s.open_drawing), (1, Some(d.id)));
     assert_eq!((s.undo.len(), s.undo.last().map(|u| u.part)), (undo + 1, Some(None)), "a step of the model");
     assert_eq!((s.evaluations, &s.doc.features), (evaluations, &features), "nothing evaluated, the model as it was");

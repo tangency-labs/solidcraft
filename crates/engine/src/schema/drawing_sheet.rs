@@ -42,6 +42,16 @@ fn orientation<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Err
     }
 }
 
+/// A title block's definition, as `TitleBlock` reads it, or `null` for none.
+fn title_block<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    let v = Value::deserialize(d)?;
+    if !v.is_null() {
+        serde_json::from_value::<solidcraft_geom::title_block::TitleBlock>(v.clone())
+            .map_err(|e| serde::de::Error::custom(whole(format!("`title_block`: {e}"))))?;
+    }
+    Ok(Some(v))
+}
+
 /// A finite number below 1e9 in size, as `params::num` reads it.
 fn number<'de, D: Deserializer<'de>>(d: D) -> Result<Option<f64>, D::Error> {
     match Value::deserialize(d)?.as_f64().and_then(crate::params::finite) {
@@ -80,6 +90,16 @@ fn excluded<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Map<String, Value>
     Ok(Some(o))
 }
 
+/// Text over a title block's cells: `{cell: text or null}`, or `null` for none.
+fn overrides<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Value>, D::Error> {
+    let v = Value::deserialize(d)?;
+    let shaped = v.is_null() || v.as_object().is_some_and(|o| o.values().all(|text| text.is_null() || text.is_string()));
+    if !shaped {
+        return Err(serde::de::Error::custom(whole("`title_block_overrides` is {cell: text or null} or null")));
+    }
+    Ok(Some(v))
+}
+
 /// Every sheet's id once, in a new order.
 fn every_sheet<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
     let every = || serde::de::Error::custom(whole("`sheets` must list every sheet's id once"));
@@ -90,8 +110,9 @@ fn every_sheet<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error>
         .ok_or_else(every)
 }
 
-/// Add a sheet after another: it takes that sheet's paper, border and resolution, unless told
-/// otherwise, and a name of its own; it documents nothing and leaves nothing out unless told.
+/// Add a sheet after another: it takes that sheet's paper, border, title block and resolution,
+/// unless told otherwise, and a name of its own; it documents nothing and leaves nothing out unless
+/// told.
 /// One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -132,6 +153,11 @@ pub struct SheetSettings {
     #[serde(default, deserialize_with = "orientation", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub orientation: Option<String>,
+    /// Its title block: a definition (`size_mm`, `outline_line_mm`, `cell_line_mm`, `cells`) that
+    /// sits on the drawing border's lower-right corner and must fit inside it, or `null` for none.
+    #[serde(default, deserialize_with = "title_block", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Value")]
+    pub title_block: Option<Value>,
     /// The resolution its pictures are rendered at: 25 to 2400 dots per inch.
     #[serde(default, deserialize_with = "number", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "f64")]
@@ -146,6 +172,13 @@ pub struct SheetSettings {
     #[serde(default, deserialize_with = "excluded", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Map<String, Value>")]
     pub excluded: Option<Map<String, Value>>,
+    /// Text shown in place of its title block cells' values, by cell name (each a text cell of
+    /// its block): `{cell: text}`, merged into the ones it has; `null` for a cell drops its
+    /// override, `null` for all of them drops them all. The values are still worked out, and
+    /// `drawing.inspect` shows them beside.
+    #[serde(default, deserialize_with = "overrides", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Value")]
+    pub title_block_overrides: Option<Value>,
 }
 
 /// Put the sheets in a new order. One undo step, none when the order is the same.
@@ -193,8 +226,9 @@ pub struct SheetsResult {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sheet: Option<String>,
     pub sheets: Vec<SheetName>,
-    /// After a change of paper, the sheet's views whose boundary leaves its drawing space. None is
-    /// moved: what goes where stays the drawing's author's choice.
+    /// After a change of paper or title block, the sheet's views whose boundary leaves its drawing
+    /// space or lies over its title block. None is moved: what goes where stays the drawing's
+    /// author's choice.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub outside: Vec<super::drawing_view::OutsideResult>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

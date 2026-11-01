@@ -1,0 +1,42 @@
+{
+  "en": {
+    "cmd.drawing_template_list": "List Drawing Templates",
+    "ui.template_for_assembly_drawings": "Template for assembly drawings",
+    "ui.template_for_part_drawings": "Template for part drawings"
+  },
+  "ar": {
+    "cmd.drawing_template_list": "سرد قوالب اللوحات",
+    "ui.template_for_assembly_drawings": "قالب لوحات التجميعات",
+    "ui.template_for_part_drawings": "قالب لوحات القطع"
+  },
+  "de": {
+    "cmd.drawing_template_list": "Zeichnungsvorlagen auflisten",
+    "ui.template_for_assembly_drawings": "Vorlage für Baugruppenzeichnungen",
+    "ui.template_for_part_drawings": "Vorlage für Bauteilzeichnungen"
+  },
+  "he": {
+    "cmd.drawing_template_list": "רשימת תבניות שרטוט",
+    "ui.template_for_assembly_drawings": "תבנית לשרטוטי הרכבות",
+    "ui.template_for_part_drawings": "תבנית לשרטוטי חלקים"
+  },
+  "ja": {
+    "cmd.drawing_template_list": "図面テンプレートを一覧表示",
+    "ui.template_for_assembly_drawings": "アセンブリ図面のテンプレート",
+    "ui.template_for_part_drawings": "部品図面のテンプレート"
+  },
+  "ko": {
+    "cmd.drawing_template_list": "도면 템플릿 목록",
+    "ui.template_for_assembly_drawings": "어셈블리 도면 템플릿",
+    "ui.template_for_part_drawings": "부품 도면 템플릿"
+  },
+  "vi": {
+    "cmd.drawing_template_list": "Liệt kê mẫu bản vẽ",
+    "ui.template_for_assembly_drawings": "Mẫu cho bản vẽ lắp ráp",
+    "ui.template_for_part_drawings": "Mẫu cho bản vẽ chi tiết"
+  },
+  "zh": {
+    "cmd.drawing_template_list": "列出绘图模板",
+    "ui.template_for_assembly_drawings": "装配体绘图的模板",
+    "ui.template_for_part_drawings": "零件绘图的模板"
+  }
+}

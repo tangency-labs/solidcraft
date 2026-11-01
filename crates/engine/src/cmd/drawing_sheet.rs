@@ -2,19 +2,22 @@
 //! the drawing (none when nothing changes). A sheet is named by its id or, when only one has it,
 //! its name.
 //!
-//! A new sheet takes the paper, border and resolution of the sheet it follows, so a drawing's
-//! sheets match unless told otherwise. Changing a sheet's paper regrows its border and zones,
+//! A new sheet takes the paper, border, title block and resolution of the sheet it follows, so a
+//! drawing's sheets match unless told otherwise. Changing a sheet's paper regrows its border and zones,
 //! which nothing on it is saved against, and moves nothing (S5): the answer lists the sheet's views
 //! whose boundary the new paper leaves outside its drawing space. A sheet with anything on it is
 //! deleted only with what is on it, when asked, in the same undo step.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use serde_json::Value;
+use solidcraft_doc::drawing::fields::overridable;
 use solidcraft_doc::drawing::view::ViewKind;
 use solidcraft_doc::drawing::{Drawing, Excluded, OnSheet, Sheet, SheetComponent};
 use solidcraft_doc::ids;
 use solidcraft_geom::drawing_sheet::{Orientation, SheetSize};
+use solidcraft_geom::title_block::TitleBlock;
 
 use super::CommandSpec;
 use crate::params::{bad, num, str_};
@@ -37,8 +40,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         .output(output_schema_for::<SheetsResult>)
         .params(
             "after?: a sheet (id or name; default the last); name?; size?: {standard: a3} or {custom: {sides_mm: [w, h]}}; \
-             orientation?: landscape|portrait; dpi?: 25..2400 (each defaulting to the sheet it follows); documents?: {source: id, \
-             component: id (0 the design)}; excluded?: {count?, print?} (none unless given) → sheet: the new sheet's id, sheets. \
+             orientation?: landscape|portrait; title_block?: a definition or null; dpi?: 25..2400 (each defaulting to the sheet it              follows); documents?: {source: id, \
+             component: id (0 the design)}; excluded?: {count?, print?}; title_block_overrides?: {cell: text} (none of these unless given) → sheet: the new sheet's id, sheets. \
              One undo step.",
         ),
     CommandSpec::new("drawing.sheet.set", "Sheet Settings", crate::checked!("drawing.sheet.set", set))
@@ -48,8 +51,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&SET)
         .output(output_schema_for::<SheetsResult>)
         .params(
-            "sheet: id or name; name?, size?, orientation?, dpi?; documents?: {source: id, component: id (0 the design)} or null; \
-             excluded?: {count?, print?} → the drawing's sheets, and after a change of paper `outside`: the sheet's views whose \
+            "sheet: id or name; name?, size?, orientation?, title_block?: a definition or null (a new block keeps the overrides of the text cells it still has), dpi?; \
+             documents?: {source: id, component: id (0 the design)} or null; excluded?: {count?, print?}; title_block_overrides?: {cell: text, shown in place of \
+             its value, or null to drop it} or null to drop them all → the drawing's sheets, and after a change of paper or title block `outside`: the sheet's views whose \
              boundary leaves its drawing space (none is moved). One undo step, none when nothing changes.",
         ),
     CommandSpec::new("drawing.sheet.reorder", "Reorder Sheets", crate::checked!("drawing.sheet.reorder", reorder))
@@ -122,6 +126,32 @@ fn apply(cmd: &str, sheet: &mut Sheet, p: &Value) -> Result<()> {
         sheet.sheet.orientation =
             serde_json::from_value::<Orientation>(orientation.clone()).map_err(|_| bad(cmd, "`orientation` is landscape or portrait"))?;
     }
+    match p.get("title_block") {
+        None => {}
+        Some(Value::Null) => sheet.title_block = None,
+        Some(block) => {
+            let block = serde_json::from_value::<TitleBlock>(block.clone()).map_err(|e| bad(cmd, format!("`title_block`: {e}")))?;
+            sheet.title_block = Some(block);
+        }
+    }
+    if p.get("title_block").is_some() {
+        let block = sheet.title_block.clone();
+        sheet.title_block_overrides.retain(|name, _| overridable(block.as_ref(), name));
+    }
+    match p.get("title_block_overrides") {
+        None => {}
+        Some(Value::Null) => sheet.title_block_overrides.clear(),
+        Some(Value::Object(cells)) => {
+            for (cell, text) in cells {
+                match text {
+                    Value::Null => sheet.title_block_overrides.remove(cell),
+                    Value::String(text) => sheet.title_block_overrides.insert(cell.clone(), text.clone()),
+                    _ => return Err(bad(cmd, format!("`title_block_overrides.{cell}` is text or null"))),
+                };
+            }
+        }
+        Some(_) => return Err(bad(cmd, "`title_block_overrides` is {cell: text or null} or null")),
+    }
     if p.get("dpi").is_some() {
         sheet.dpi = num(p, "dpi").ok_or_else(|| bad(cmd, "`dpi` must be a number"))?;
     }
@@ -157,7 +187,8 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         let after = if p.get("after").is_some() { sheet_at(cmd, d, p, "after")? } else { d.sheets.len().saturating_sub(1) };
         let model = d.sheets.get(after).ok_or_else(|| bad(cmd, "the drawing has no sheet to follow"))?;
         let free = (d.sheets.len() + 1..).map(|n| format!("Sheet {n}")).find(|name| d.sheets.iter().all(|s| s.name != *name)).unwrap_or_default();
-        let mut sheet = Sheet { id, name: free, documents: None, excluded: Excluded::default(), ..(**model).clone() };
+        let mut sheet =
+            Sheet { id, name: free, documents: None, excluded: Excluded::default(), title_block_overrides: BTreeMap::new(), ..(**model).clone() };
         apply(cmd, &mut sheet, p)?;
         d.sheets.insert(after + 1, Arc::new(sheet));
         Ok(())
@@ -167,16 +198,16 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "drawing.sheet.set";
-    let (id, paper) = s.edit_drawing(cmd, |d| {
+    let (id, room) = s.edit_drawing(cmd, |d| {
         let at = sheet_at(cmd, d, p, "sheet")?;
         let sheet = Arc::make_mut(d.sheets.get_mut(at).ok_or_else(|| bad(cmd, "no such sheet"))?);
-        let was = sheet.sheet;
+        let was = (sheet.sheet, sheet.title_block.clone());
         apply(cmd, sheet, p)?;
-        Ok((sheet.id, sheet.sheet != was))
+        Ok((sheet.id, (sheet.sheet, sheet.title_block.clone()) != was))
     })?;
-    // Only a change of paper moves the drawing space; each view measured once.
+    // Only a change of paper or block changes the room views have; each view measured once.
     let d = s.drawing(cmd)?;
-    let on: Vec<u64> = if paper { d.on_sheet(id).views } else { Vec::new() };
+    let on: Vec<u64> = if room { d.on_sheet(id).views } else { Vec::new() };
     let outside = super::drawing_view::outside_results(crate::drawing_view::outside(s, d, &on, cmd)?);
     answer(s, cmd, None, outside)
 }

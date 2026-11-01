@@ -829,6 +829,19 @@ fn walk(tree: &Tree, request: &Request, members: bool) -> Result<(Vec<Entry>, Ve
     Ok((entries, paths))
 }
 
+impl Tree<'_> {
+    /// Component `id` (0: the design) as a title block shows it (#3875): what one of it weighs, as
+    /// a list weighs the assembly ([`Total::mass`]: its own bodies and all it holds but references),
+    /// and what that is made of, as its row would say. Each is worked out once for the tree.
+    pub fn component(&mut self, id: u64) -> Result<(Mass, Vec<String>)> {
+        if id != 0 && !self.components.contains_key(&id) {
+            return Err(DocError::Unknown(format!("component {id}")));
+        }
+        let mass = agree(&[self.weigh(id, Holds::All, 0)?]);
+        Ok((mass, self.made_of(id, Holds::All, 0)?))
+    }
+}
+
 /// The rows `request` lists, with the assembly's total; with `request.mass`, each row and the
 /// assembly weighed.
 pub fn list(tree: &mut Tree, request: &Request) -> Result<Bom> {

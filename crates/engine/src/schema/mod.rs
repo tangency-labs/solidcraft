@@ -57,6 +57,7 @@ pub(crate) mod tests;
 pub mod bom;
 pub mod component;
 pub mod construct;
+pub mod drawing;
 pub mod drawing_balloon;
 pub mod drawing_dimension;
 pub mod drawing_export;
