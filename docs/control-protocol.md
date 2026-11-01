@@ -157,7 +157,8 @@ connection's own request. `{"running": []}` when the app is idle.
 
 `control.capabilities` says what this app's control channel does beyond the methods every
 version has, so a client can find out before it relies on it: `{"param_check": ["off", "warn",
-"strict"]}`, the levels a request's own `param_check` takes (below). It is answered at once, like
+"strict"], "live_meshes": 1}`: the levels a request's own `param_check` takes (below), and the
+version of the meshes `live.meshes` sends ([Live link](#live-link)). It is answered at once, like
 `control.running`, also on a `busy` connection. An app older than it answers ``unknown method
 `control.capabilities` ``; a feature added later is listed here too.
 
@@ -288,6 +289,41 @@ sends it a line whenever the active design changes (#6985):
   second `control.subscribe` on a subscribed connection is refused with `already subscribed`;
   ask `document.revision` for the design now. A `control.subscribe` that timed out or failed did
   not subscribe the connection: send it again.
+
+### Live link
+
+A program that keeps its own copy of the design (a modelling or rendering program, such as the
+Blender add-on described in the [guide](book/src/guide/live-link.md)) follows it with
+`control.subscribe` and fetches the bodies as polygon meshes with the `live.meshes` command
+([format](formats/live-mesh.md)). `control.capabilities` lists `live_meshes` (the mesh format's
+version) in an app that has the command.
+
+```text
+{"id":1,"method":"control.subscribe","token":"…"}
+→ {"id":1,"ok":true,"result":{"document_id":"18f3a0c2d4e5b6a7-1","revision":3}}
+{"id":2,"method":"engine.execute","params":{"command":"live.meshes","params":{"have":[]}}}
+→ {"id":2,"ok":true,"result":{"document_id":"18f3a0c2d4e5b6a7-1","unit":"mm","up":"Z",
+     "components":[…],"objects":[{"key":"Body1","mesh":"3f0c…","matrix":[…],…}],
+     "meshes":[{"format":"solidcraft.live-mesh","key":"3f0c…",…}]}}
+{"event":"design.changed","params":{"document_id":"18f3a0c2d4e5b6a7-1","revision":4}}
+{"id":3,"method":"engine.execute","params":{"command":"live.meshes","params":{"have":["3f0c…"]}}}
+```
+
+- Every reply lists every visible body (`objects`) with its placement, colours and the key of
+  its mesh, so a body missing from a reply is gone. Placements of one part share one mesh.
+- A mesh is sent only when its key is not in `have`. Keep the meshes you hold by key, send their
+  keys, and a change re-sends only the bodies that changed. Meshes past `max_mb` are listed in
+  `pending`: ask again with the received keys in `have`.
+- Ask with one request at a time. When another `design.changed` comes while one is out, note it
+  and ask once more after the reply: events are coalesced, and the latest design is what counts.
+- The command only reads. Like `document.inspect`, it is answered from a copy of the design taken
+  when it arrives, so meshing a large design never holds up the window, and it does not wait
+  behind design changes. During a sketch drag the bodies are meshed as the sketch stands.
+- `quality`, `chord_mm` or `chord_relative`, `angle_deg` and `topology` set how bodies are
+  tessellated; `overrides` sets them for named bodies (a refacet). Replies can be many megabytes:
+  the command is for a live link, not for an agent's context.
+- The browser build has no control channel; there the command still runs (from scripts), but
+  nothing is pushed.
 
 ### Slow commands and the window (#1989)
 

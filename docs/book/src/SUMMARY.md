@@ -18,6 +18,7 @@
 - [Keyboard shortcuts](guide/shortcuts.md)
 - [Updates and privacy](guide/updates.md)
 - [Troubleshooting: SolidCraft won't start](guide/troubleshooting.md)
+- [Live link to Blender and other programs](guide/live-link.md)
 - [Driving SolidCraft with an AI agent (MCP)](guide/mcp.md)
 - [Agent chat](guide/agent-chat.md)
 - [Local models with the Assistant](guide/local-models.md)

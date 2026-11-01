@@ -512,9 +512,13 @@ fn send_events(design: &DesignWatch, lines: &Lines, stop: &AtomicBool, mut seen:
 /// What this app's control channel does beyond the methods every version has, for a client to
 /// find out before it relies on it (an older app answers `control.capabilities` with "unknown
 /// method"). `param_check`: the levels `engine.execute`, `engine.batch` and `engine.script` take
-/// as a request's own parameter check (#9184).
+/// as a request's own parameter check (#9184). `live_meshes`: the version of the live-link mesh
+/// format `live.meshes` sends (`docs/formats/live-mesh.md`).
 fn capabilities() -> Value {
-    json!({"param_check": solidcraft_engine::schema::ParamCheck::ALL.map(|l| l.name())})
+    json!({
+        "param_check": solidcraft_engine::schema::ParamCheck::ALL.map(|l| l.name()),
+        "live_meshes": solidcraft_engine::io::live_mesh::LIVE_MESH_VERSION,
+    })
 }
 
 /// Write `reply` on the connection: through its subscription once it has one.
@@ -800,6 +804,7 @@ mod tests {
         // What the app's control channel does beyond the methods every version has (#9184).
         let r = watcher(json!({"id": 0, "method": "control.capabilities", "token": token}));
         assert_eq!((&r["ok"], &r["result"]["param_check"]), (&json!(true), &json!(["off", "warn", "strict"])), "{r}");
+        assert_eq!(r["result"]["live_meshes"], json!(1), "{r}");
 
         let mut export = open();
         let path = "/private/part.step";

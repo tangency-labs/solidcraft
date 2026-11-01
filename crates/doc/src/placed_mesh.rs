@@ -68,6 +68,17 @@ impl PlacedMesh {
         (reference_mesh(&self.body, &self.mesh, self.tolerance), self.transform)
     }
 
+    /// The definition's display plan at quality `q` (shared by every placement of it) and this
+    /// placement.
+    pub(super) fn source_plan(&self, q: crate::display_quality::DisplayQuality, name: &str) -> Option<(Arc<TessPlan>, crate::Mat)> {
+        Some((definition_plan(&self.body, self.plans.get(q.index())?, q, name)?, self.transform))
+    }
+
+    /// The definition's body (shared by every placement of it) and this placement.
+    pub(super) fn source_body(&self) -> (&Body, crate::Mat) {
+        (&self.body, self.transform)
+    }
+
     /// The definition's display plan mesh at quality `q` (shared by every placement of it) and
     /// this placement.
     pub(super) fn source_plan_mesh(&self, q: crate::display_quality::DisplayQuality, name: &str) -> Option<(Arc<Mesh>, crate::Mat)> {
@@ -264,6 +275,8 @@ mod tests {
                 .collect();
         let (own, identity) = source.mesh_in_place();
         assert_eq!(identity, crate::IDENTITY);
+        assert!(source.definition_in_place().0.same(&source.body));
+        assert_eq!(source.plan_in_place_at(DisplayQuality::parse("normal").unwrap()).unwrap().1, crate::IDENTITY);
         let q = DisplayQuality::parse("normal").unwrap();
         for p in &placed {
             let (mesh, m) = p.mesh_in_place();
@@ -273,6 +286,12 @@ mod tests {
             let (plan_mesh, pm) = p.plan_mesh_in_place_at(q).unwrap();
             assert!(Arc::ptr_eq(&plan_mesh, &source.plan_mesh_at(q).unwrap()));
             assert_eq!(pm, m);
+            let (plan, plan_m) = p.plan_in_place_at(q).unwrap();
+            assert!(Arc::ptr_eq(&plan, &source.display_plan_at(q).unwrap()), "the definition's plan, not a moved copy");
+            assert_eq!(plan_m, m);
+            let (body, body_m) = p.definition_in_place();
+            assert!(body.same(&source.body));
+            assert_eq!(body_m, m);
             let moved = p.mesh();
             let exact = moved.bounds();
             assert!(bounds.min.dist(exact.min) < 1e-9 && bounds.max.dist(exact.max) < 1e-9, "{bounds:?} vs {exact:?}");

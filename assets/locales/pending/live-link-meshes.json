@@ -1,0 +1,10 @@
+{
+  "en": { "cmd.live_meshes": "Live Link Meshes" },
+  "ar": { "cmd.live_meshes": "شبكات الرابط المباشر" },
+  "de": { "cmd.live_meshes": "Live-Link-Netze" },
+  "he": { "cmd.live_meshes": "רשתות קישור חי" },
+  "ja": { "cmd.live_meshes": "ライブリンク メッシュ" },
+  "ko": { "cmd.live_meshes": "라이브 링크 메시" },
+  "vi": { "cmd.live_meshes": "Lưới liên kết trực tiếp" },
+  "zh": { "cmd.live_meshes": "实时链接网格" }
+}
