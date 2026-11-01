@@ -280,7 +280,7 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   and a pick becomes the model for its next connection. While it runs, a pick changes the chat's
   model at once.
 - The key goes into the system keychain (Keychain on macOS, Credential Manager on Windows, the
-  Secret Service on Linux) and is only ever sent over HTTPS or to this computer. **Test** asks an
+  Secret Service on Linux). By default it is only sent over HTTPS or to this computer. **Test** asks an
   OpenAI-compatible endpoint for its models; an Anthropic-compatible one gets a short message,
   because not every such endpoint lists models (Qwen's has no model list). For these agents
   SolidCraft runs the conversation itself, with the same tools, limits and questions as for a
@@ -298,10 +298,19 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
 **Edit** on an agent you added opens the same dialog filled with its name and command, or its
 protocol, endpoint, model and request timeout, and **Save** changes it in place: it keeps its id,
 its permission setting and the tools you always allow for it. A stored key is never shown: leave
-the key field empty to keep it, or type a new one to replace it. A saved key still only goes to
-HTTPS or this computer, so moving an endpoint with a key to a plain `http://` address elsewhere is
-refused. The running conversation takes a new request timeout at once; a new command, endpoint
+the key field empty to keep it, or type a new one to replace it. Moving an endpoint with a key to
+a plain `http://` address elsewhere requires the confirmation described below. The running
+conversation takes a new request timeout at once; a new command, endpoint
 or model applies the next time the agent connects.
+
+For a private or on-premises OpenAI-compatible endpoint that requires a key over HTTP, enable
+**Allow insecure HTTP** in its Add/Edit dialog and confirm the displayed endpoint. This option is
+off by default and applies only to that endpoint. The API key and conversation travel unencrypted:
+anyone with access to the network may read or change them. Use it only on a network you trust.
+The key remains in the system keychain. **Test**, model discovery and chat all use the same
+permission; redirects are not followed. Changing the URL or preset clears consent and requires
+confirmation again. Turning the option off keeps the stored key and disconnects that endpoint's
+conversations, including those in other document tabs.
 
 For Ollama, choosing a model checks its reported capabilities in the background. If its
 capabilities list lacks `tools`, a warning below the model picker explains that the model can

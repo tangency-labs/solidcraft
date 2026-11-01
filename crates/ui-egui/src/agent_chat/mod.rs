@@ -490,6 +490,12 @@ impl AgentChat {
         }
     }
 
+    pub(crate) fn disconnect_endpoint(&mut self, session: &mut solidcraft_engine::Session, id: &str) {
+        if self.running_id == id {
+            self.disconnect_document(session, false);
+        }
+    }
+
     fn clear_config(&mut self) {
         if self.config_options.take().is_some() {
             self.models.clear();
@@ -1016,6 +1022,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
                         base_url: entry.base_url.clone(),
                         model: entry.model.clone(),
                         key,
+                        allow_insecure_http: entry.allow_insecure_http,
                         http,
                         request_timeout_s: entry.request_timeout_s,
                         reasoning_effort: entry.reasoning_effort.clone(),
@@ -1102,6 +1109,14 @@ fn connect_at_start(app: &mut SolveApp, ctx: &egui::Context) {
 pub fn disconnect(app: &mut SolveApp) {
     crate::edit_in_place::forget_after_turn(app);
     app.agent_chat.disconnect_document(&mut app.session, false);
+}
+
+/// Revoking an endpoint's HTTP consent also stops its conversations in other document tabs.
+pub(super) fn disconnect_endpoint(app: &mut SolveApp, id: &str) {
+    if app.agent_chat.running_id == id {
+        disconnect(app);
+    }
+    crate::documents::disconnect_background_endpoint(app, id);
 }
 
 /// The app is quitting: end the agent and its helpers before the window goes.
@@ -2313,6 +2328,10 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
             c.id = agents::new_id(&app.preferences, if c.kind.is_api() { c.kind.id() } else { "custom" });
         }
         c.key = false;
+        c.allow_insecure_http &= c.kind == agents::Kind::Api;
+        if !c.allow_insecure_http && app.preferences.agents.iter().any(|old| old.id == c.id && old.allow_insecure_http) {
+            disconnect_endpoint(app, &c.id);
+        }
         app.preferences.agents.retain(|x| x.id != c.id);
         app.preferences.agents.push(c);
     }

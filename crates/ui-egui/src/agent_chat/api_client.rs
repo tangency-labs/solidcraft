@@ -643,6 +643,7 @@ pub struct ApiConfig {
     pub base_url: String,
     pub model: String,
     pub key: Option<String>,
+    pub allow_insecure_http: bool,
     pub http: HttpFn,
     /// How long one model request may take, in seconds (the endpoint's setting).
     pub request_timeout_s: u64,
@@ -669,7 +670,7 @@ pub struct ApiBackend {
 
 impl ApiBackend {
     pub fn start(cfg: ApiConfig, ctx: StartContext) -> Result<ApiBackend, String> {
-        if cfg.key.is_some() && !super::agents::key_safe_for(&cfg.base_url) {
+        if cfg.key.is_some() && !super::agents::key_allowed_for(&cfg.base_url, cfg.protocol == Protocol::OpenAi && cfg.allow_insecure_http) {
             return Err(crate::i18n::tr("ui.ai_key_needs_https").to_string());
         }
         // One stable session ID per chat for OpenCode Go's routing and prompt cache.
@@ -846,7 +847,7 @@ impl Worker {
     /// The endpoint's models, in the shape its protocol lists them.
     fn model_list(&self) -> Result<Vec<ModelInfo>, String> {
         match self.cfg.protocol {
-            Protocol::OpenAi => model_list(&self.cfg.http, &self.cfg.base_url, self.cfg.key.as_deref()),
+            Protocol::OpenAi => model_list(&self.cfg.http, &self.cfg.base_url, self.cfg.key.as_deref(), self.cfg.allow_insecure_http),
             Protocol::Anthropic => anthropic_model_list(&self.cfg.http, &self.cfg.base_url, self.cfg.key.as_deref()),
         }
     }
@@ -1756,10 +1757,10 @@ fn model_entries(http: &HttpFn, base_url: &str, headers: Vec<(String, String)>) 
 }
 
 /// The endpoint's models for the picker.
-pub fn model_list(http: &HttpFn, base_url: &str, key: Option<&str>) -> Result<Vec<ModelInfo>, String> {
+pub fn model_list(http: &HttpFn, base_url: &str, key: Option<&str>, allow_insecure_http: bool) -> Result<Vec<ModelInfo>, String> {
     let mut headers = Vec::new();
     if let Some(k) = key {
-        if !super::agents::key_safe_for(base_url) {
+        if !super::agents::key_allowed_for(base_url, allow_insecure_http) {
             return Err(crate::i18n::tr("ui.ai_key_needs_https").to_string());
         }
         headers.push(("Authorization".to_string(), format!("Bearer {k}")));
@@ -1768,10 +1769,10 @@ pub fn model_list(http: &HttpFn, base_url: &str, key: Option<&str>) -> Result<Ve
 }
 
 /// Ask an endpoint for its models (Test connection): how many, and whether `model` is one.
-pub fn test_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>, model: &str) -> Result<String, String> {
+pub fn test_endpoint(http: &HttpFn, base_url: &str, key: Option<&str>, model: &str, allow_insecure_http: bool) -> Result<String, String> {
     let mut headers = Vec::new();
     if let Some(k) = key {
-        if !super::agents::key_safe_for(base_url) {
+        if !super::agents::key_allowed_for(base_url, allow_insecure_http) {
             return Err(crate::i18n::tr("ui.ai_key_needs_https").to_string());
         }
         headers.push(("Authorization".to_string(), format!("Bearer {k}")));
@@ -1910,6 +1911,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "http://localhost:1/v1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -1961,6 +1963,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "http://localhost:1/v1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -2015,6 +2018,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "http://localhost:1/v1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -2062,6 +2066,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "http://localhost:1/v1".into(),
             model: "local".into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -2147,6 +2152,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "https://opencode.ai/inference/go/v1".into(),
             model: model.into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -2221,6 +2227,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "https://api.openai.com/v1".into(),
             model: "muse-spark-1.3-contributor".into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -2387,7 +2394,7 @@ mod tests {
             log.lock().unwrap().push(r.clone());
             Ok((200, b"{\"data\":[{\"id\":\"kimi-k3\"}]}".to_vec()))
         });
-        let listed = model_list(&http, "https://opencode.ai/inference/go/v1", None).unwrap();
+        let listed = model_list(&http, "https://opencode.ai/inference/go/v1", None, false).unwrap();
         assert_eq!(listed.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["kimi-k3"]);
         let reqs = seen.lock().unwrap();
         assert_eq!(reqs.len(), 1);
@@ -2540,6 +2547,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "http://localhost:1/v1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -2593,6 +2601,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "http://localhost:1/v1".into(),
             model: "local".into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -2631,7 +2640,7 @@ mod tests {
         data.extend((0..MODEL_LIST_CAP + 500).map(|i| json!({"id": format!("m{i}")})));
         let body = json!({"data": data}).to_string().into_bytes();
         let http: HttpFn = Arc::new(move |_: &HttpRequest| Ok((200, body.clone())));
-        let list = model_list(&http, "https://openrouter.ai/api/v1", None).unwrap();
+        let list = model_list(&http, "https://openrouter.ai/api/v1", None, false).unwrap();
         assert_eq!(list.len(), MODEL_LIST_CAP);
         let [first, same, long, next] = &list[..4] else { panic!("{}", list.len()) };
         assert_eq!((first.id.as_str(), first.name.as_str(), first.description.as_str()), ("openai/gpt-x", "openai/gpt-x", "OpenAI: GPT X"));
@@ -2644,7 +2653,7 @@ mod tests {
         assert_eq!(first.name, "openai/gpt-x");
         assert_eq!(same.name, "Same One");
         assert_eq!(long.name.chars().count(), MODEL_NAME_CAP);
-        assert!(test_endpoint(&http, "https://openrouter.ai/api/v1", None, "openai/gpt-x").unwrap().contains(&MODEL_LIST_CAP.to_string()));
+        assert!(test_endpoint(&http, "https://openrouter.ai/api/v1", None, "openai/gpt-x", false).unwrap().contains(&MODEL_LIST_CAP.to_string()));
     }
 
     /// A 200 that is no model list (a web page where the endpoint should be) is an error, so the
@@ -2653,13 +2662,13 @@ mod tests {
     fn an_answer_that_is_no_model_list_is_an_error() {
         let expected = crate::i18n::tr("ui.agent_chat_models_not_a_list").to_string();
         let page: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, b"<!doctype html><html><body>Control UI</body></html>".to_vec())));
-        assert_eq!(model_list(&page, "http://localhost:18789/v1", None).unwrap_err(), expected);
+        assert_eq!(model_list(&page, "http://localhost:18789/v1", None, false).unwrap_err(), expected);
         assert_eq!(anthropic_model_list(&page, "http://localhost:18789/v1", None).unwrap_err(), expected);
-        assert_eq!(test_endpoint(&page, "http://localhost:18789/v1", None, "").unwrap_err(), expected);
+        assert_eq!(test_endpoint(&page, "http://localhost:18789/v1", None, "", false).unwrap_err(), expected);
         let object: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, json!({"object": "list"}).to_string().into_bytes())));
-        assert_eq!(model_list(&object, "http://localhost:18789/v1", None).unwrap_err(), expected);
+        assert_eq!(model_list(&object, "http://localhost:18789/v1", None, false).unwrap_err(), expected);
         let empty: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, json!({"data": []}).to_string().into_bytes())));
-        assert!(model_list(&empty, "http://localhost:18789/v1", None).unwrap().is_empty());
+        assert!(model_list(&empty, "http://localhost:18789/v1", None, false).unwrap().is_empty());
     }
 
     #[test]
@@ -2694,6 +2703,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "http://localhost:1/v1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: None,
             http,
             request_timeout_s: 300,
@@ -2716,21 +2726,46 @@ mod tests {
     }
 
     #[test]
-    fn keys_never_go_over_plain_http_to_another_computer() {
-        let http: HttpFn = Arc::new(|_: &HttpRequest| Ok((200, b"{}".to_vec())));
-        assert!(test_endpoint(&http, "http://10.0.0.2:11434/v1", Some("k"), "m").is_err());
-        let cfg = ApiConfig {
+    fn http_authentication_needs_opt_in_for_tests_models_and_chat() {
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<HttpRequest>::new()));
+        let requests = seen.clone();
+        let http: HttpFn = Arc::new(move |r: &HttpRequest| {
+            requests.lock().unwrap().push(r.clone());
+            let body = if r.method == "GET" {
+                json!({"data":[{"id":"m"}]})
+            } else {
+                json!({"choices":[{"message":{"role":"assistant","content":"Done."}}]})
+            };
+            Ok((200, body.to_string().into_bytes()))
+        });
+        assert!(test_endpoint(&http, "http://10.0.0.2:11434/v1", Some("k"), "m", false).is_err());
+        assert!(model_list(&http, "http://10.0.0.2:11434/v1", Some("k"), false).is_err());
+        let config = |allow_insecure_http, protocol| ApiConfig {
             name: "x".into(),
-            protocol: Protocol::OpenAi,
+            protocol,
             base_url: "http://10.0.0.2/v1".into(),
             model: "m".into(),
+            allow_insecure_http,
             key: Some("k".into()),
-            http,
+            http: http.clone(),
             request_timeout_s: 300,
             reasoning_effort: String::new(),
         };
-        let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
-        assert!(ApiBackend::start(cfg, ctx).is_err());
+        let context = || StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
+        assert!(ApiBackend::start(config(false, Protocol::OpenAi), context()).is_err());
+        assert!(ApiBackend::start(config(true, Protocol::Anthropic), context()).is_err());
+        assert!(seen.lock().unwrap().is_empty(), "refusal must happen before any HTTP request");
+        assert!(test_endpoint(&http, "http://10.0.0.2/v1", Some("k"), "m", true).is_ok());
+        assert_eq!(model_list(&http, "http://10.0.0.2/v1", Some("k"), true).unwrap()[0].id, "m");
+        let mut backend = ApiBackend::start(config(true, Protocol::OpenAi), context()).unwrap();
+        backend.prompt(&[PromptPart::Text("hello".into())]);
+        let events = wait_for_turn(&mut backend);
+        assert!(events.iter().any(|e| matches!(e, Event::Text { text, .. } if text == "Done.")), "{events:?}");
+        backend.shutdown(true);
+        let sent = seen.lock().unwrap();
+        assert!(sent.iter().any(|r| r.url == "http://10.0.0.2/v1/chat/completions" && r.method == "POST"));
+        assert!(sent.iter().filter(|r| r.url.ends_with("/models")).count() >= 3);
+        assert!(sent.iter().all(|r| r.headers.iter().any(|(name, value)| name == "Authorization" && value == "Bearer k")));
     }
 
     /// A worker with one function tool whose endpoint answers each POST with the next scripted
@@ -2754,6 +2789,7 @@ mod tests {
             protocol: Protocol::OpenAi,
             base_url: "http://localhost:1/v1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,
@@ -2919,6 +2955,7 @@ mod tests {
             protocol: Protocol::Anthropic,
             base_url: "http://localhost:1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,
@@ -2969,6 +3006,7 @@ mod tests {
             protocol: Protocol::Anthropic,
             base_url: "http://localhost:1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,
@@ -3020,6 +3058,7 @@ mod tests {
             protocol: Protocol::Anthropic,
             base_url: "http://localhost:1".into(),
             model: "m".into(),
+            allow_insecure_http: false,
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,

@@ -599,6 +599,13 @@ pub(crate) fn disconnect_background_chats(app: &mut SolveApp, wait: bool) {
     }
 }
 
+/// Stop only the hidden conversations whose endpoint permission was revoked.
+pub(crate) fn disconnect_background_endpoint(app: &mut SolveApp, id: &str) {
+    for slot in app.docs.background_mut() {
+        slot.agent_chat.disconnect_endpoint(&mut slot.session, id);
+    }
+}
+
 /// Close several tabs (Close Other Tabs, Close All Tabs; #3055): each with unsaved changes asks
 /// "save changes?" in turn, the others close; Cancel keeps the tabs not closed yet.
 pub fn close_many(app: &mut SolveApp, mut tabs: Vec<usize>) {
