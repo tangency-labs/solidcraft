@@ -346,13 +346,59 @@ fn rip_plane(nx: Vec3, ny: Vec3, e: Vec3) -> Option<Vec3> {
 /// The edge's way at each end, along the edge from its start to its end, comes last.
 type RipEnds = (usize, [Vec3; 2], [Option<Vec3>; 2], [Vec3; 2]);
 
+/// An edge read exactly in a plane as segments, one per Bezier span: a free-form curve of several
+/// spans split at its knots (exact: knot insertion on its homogeneous points). None for a rational
+/// span above degree two, which no segment holds.
+fn segments(pieces: &[solidcraft_kernel::PlanarPiece]) -> Option<Vec<Seg2>> {
+    use solidcraft_geom::bspline::HPoint;
+    use solidcraft_geom::spline_space::{Space, embed};
+    let mut out = Vec::new();
+    for piece in pieces {
+        let s = match piece {
+            solidcraft_kernel::PlanarPiece::Seg(seg) => {
+                out.push(*seg);
+                continue;
+            }
+            solidcraft_kernel::PlanarPiece::Spline(s) => s,
+        };
+        let d = s.degree;
+        if d == 0 {
+            return None;
+        }
+        let weight = |i: usize| s.weights.get(i).copied().unwrap_or(1.0);
+        let ctrl: Vec<HPoint> = s.points.iter().enumerate().map(|(i, p)| HPoint::weighted(Vec3::new(p.x, p.y, 0.0), weight(i))).collect();
+        let from = Space::new(d, s.knots.clone()).ok()?;
+        let [lo, hi] = from.domain();
+        let mut breaks = s.knots.clone();
+        breaks.dedup();
+        let mut knots = vec![lo; d + 1];
+        for &k in breaks.iter().filter(|&&k| k > lo && k < hi) {
+            knots.extend(std::iter::repeat_n(k, d));
+        }
+        knots.extend(std::iter::repeat_n(hi, d + 1));
+        let spans = embed(&from, &ctrl, &Space::new(d, knots).ok()?).ok()?;
+        let rational = s.weights.windows(2).any(|w| w[0] != w[1]);
+        // Clamped, every inner knot of multiplicity d: span i is control points i d ..= i d + d.
+        for span in (0..(spans.len() - 1) / d).filter_map(|i| spans.get(i * d..=i * d + d)) {
+            let pts: Vec<Vec2> = span.iter().map(|h| h.project().map(|p| Vec2::new(p.x, p.y))).collect::<Option<_>>()?;
+            out.push(match (rational, pts.as_slice()) {
+                (false, _) => solidcraft_geom::bezier(&pts)?,
+                (true, &[a, apex, b]) => Seg2::Conic { a, apex, b, w: span.get(1)?.w / (span.first()?.w * span.get(2)?.w).sqrt() },
+                _ => return None,
+            });
+        }
+    }
+    Some(out)
+}
+
 /// Edge `e` of the body exactly in a planar face's parameters (lines, circular arcs, free-form
 /// spans), run the way its points `path` there run; empty on a roll, and where the body's edge
 /// doesn't end where the points do.
 fn exact_edge(b: &Body, shape: &Shape, e: usize, path: &[Vec2], tol: f64) -> Vec<Seg2> {
     let Shape::Plane { plane, .. } = shape else { return Vec::new() };
     let (Some(first), Some(last)) = (path.first(), path.last()) else { return Vec::new() };
-    let Some(Some(curve)) = b.planar_edges(plane, &[e]).into_iter().next() else { return Vec::new() };
+    let Some(Some(pieces)) = b.planar_edges(plane, &[e]).into_iter().next() else { return Vec::new() };
+    let Some(curve) = segments(&pieces) else { return Vec::new() };
     let Some((p, q)) = curve.first().zip(curve.last()).map(|(p, q)| (p.start(), q.end())) else { return Vec::new() };
     // A closed edge (a whole circle) ends where it starts: it runs the path's way where it
     // leaves its start toward the path's second point.

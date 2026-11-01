@@ -1287,10 +1287,11 @@ impl Body {
     }
 
     /// Edges `indices` (record edge indices) in `plane`'s coordinates, exactly: lines, circular
-    /// arcs, and free-form curves as the Bézier spans they are, for a sketch to project them.
-    /// `None` for an edge that doesn't lie in a plane parallel to `plane`, isn't read exactly or
-    /// isn't there, and for every edge of a mesh body.
-    pub fn planar_edges(&self, plane: &solidcraft_geom::Plane, indices: &[usize]) -> Vec<Option<Vec<solidcraft_geom::Seg2>>> {
+    /// arcs, single free-form segments, and a free-form curve of several spans as the one
+    /// B-spline it is, for a sketch to project them. `None` for an edge that doesn't lie in a
+    /// plane parallel to `plane`, isn't read exactly or isn't there, and for every edge of a mesh
+    /// body.
+    pub fn planar_edges(&self, plane: &solidcraft_geom::Plane, indices: &[usize]) -> Vec<Option<Vec<crate::PlanarPiece>>> {
         if self.is_mesh() {
             return vec![None; indices.len()];
         }
@@ -1299,7 +1300,7 @@ impl Body {
             .iter()
             .map(|i| {
                 let mut work = 262_144usize;
-                crate::prism_curve::Run::of(&self.record, *i, true).and_then(|run| crate::prism_curve::projected(&run, plane, tol, &mut work))
+                crate::prism_curve::Run::of(&self.record, *i, true).and_then(|run| crate::prism_curve::projected_curves(&run, plane, tol, &mut work))
             })
             .collect()
     }

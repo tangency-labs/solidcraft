@@ -936,3 +936,38 @@ fn intersect_on_a_top_face_gives_its_outline() {
     let ends = outline(&intersect_curves(&block, json!({"plane": "XY", "offset": 20})).unwrap());
     assert_eq!(ends, vec![[0.0, 0.0, 0.0, 30.0], [0.0, 0.0, 40.0, 0.0], [0.0, 30.0, 40.0, 30.0], [40.0, 0.0, 40.0, 30.0]]);
 }
+
+/// A free-form edge projects as the one exact spline it is, its knots and weights its own: the
+/// bottom face of a 40 x 20 x 10 box whose upright edges have G2 rounds (each round's bottom
+/// edge a B-spline of several spans) comes into its sketch as four lines and four splines, one a
+/// corner, each meeting the lines at their ends (#3604, where each span was a curve of its own).
+/// The profile they bound, extruded the box's height, is the box: its sides are upright.
+#[test]
+fn a_free_form_edge_projects_as_one_spline_with_its_own_knots() {
+    use solidcraft_sketch::CurveKind;
+    let volume = |s: &Session, body: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(body).unwrap().body).unwrap().volume;
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner":[0,0,0],"length":40,"width":20,"height":10,"body_name":"B"}));
+    run(&mut s, "solid.fillet", json!({"body":"B","edges":[[0,0,5],[40,0,5],[40,20,5],[0,20,5]],"radius":5,"type":"g2"}));
+    let id = run(&mut s, "sketch.create", json!({"plane":{"face":[20,10,0]},"project_edges":true,"name":"Bottom"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    let st = s.model.state();
+    let sketch = &st.sketch(id).unwrap().sketch;
+    let lines = sketch.curves.iter().filter(|c| matches!(c.kind, CurveKind::Line { .. })).count();
+    let splines: Vec<_> = sketch.curves.iter().filter(|c| matches!(c.kind, CurveKind::Spline { .. })).collect();
+    assert_eq!((lines, splines.len(), sketch.curves.len()), (4, 4, 8), "{:?}", sketch.curves);
+    for c in &splines {
+        let CurveKind::Spline { pts, control: true, nurbs: Some(nurbs), .. } = &c.kind else { panic!("{:?}", c.kind) };
+        assert_eq!(nurbs.knots.len(), pts.len() + 4, "a cubic's knots");
+        let (a, b) = c.kind.ends().unwrap();
+        for end in [a, b] {
+            let meets = sketch.curves.iter().filter(|o| matches!(o.kind, CurveKind::Line { a, b } if a == end || b == end)).count();
+            assert_eq!(meets, 1, "{} end {end}", c.id);
+        }
+    }
+    drop(st);
+    let rounded = volume(&s, "B");
+    run(&mut s, "solid.extrude", json!({"sketch":"Bottom","distance":10,"operation":"new","body_name":"P"}));
+    let prism = volume(&s, "P");
+    assert!((prism - rounded).abs() < rounded * 1e-6, "{prism} vs {rounded}");
+}

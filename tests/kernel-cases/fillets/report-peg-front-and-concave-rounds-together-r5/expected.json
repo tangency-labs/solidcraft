@@ -1,0 +1,24 @@
+{
+ "what": "the peg's front top edge (convex) and the concave arc where its top meets the cylinder, rounded r5 together: the two edges are tangent where they meet, at the point where the front face runs tangent into the cylinder, and the corner patch there stood out of the front face; reported from the app (2026-10-30, test-peg part)",
+ "source": "invariants",
+ "method": "a bar 40 x 16 x 10 whose far end is a half disc R8 about (40, 8), a disc R8 about the same centre sketched on its top (the top's outline projected) and extruded 10 up, joined: the bar's front face y = 0 runs tangent into the cylinder along x = 40, V0 = 6400 + 960 pi; the front top edge (y = 0, z = 10) and the concave arc rounded r5 in one fillet, tangent chain on; the planes of the front face y = 0, the back y = 16, the bottom, the left end and the cylinder's top bound the whole body (the cylinder's wall runs tangent into the front and back faces), and every blend lies within them, so the body's exact box (SMLib's tight box) is the unblended body's, (0, 0, 0) .. (48, 16, 20); graded to 4e-5, the blends' approximation tolerance: a corner patch or an end that stands out of the front face fails; every seam a round makes with its faces, and those of a corner patch, G1",
+ "body_count": 1,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   48,
+   16,
+   20
+  ]
+ },
+ "tolerance": {
+  "abs_mm": 4e-05
+ },
+ "continuity": {
+  "order": "g1"
+ }
+}

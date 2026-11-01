@@ -192,3 +192,25 @@ fn a_sweep_round_a_closed_path_starts_where_the_profile_is() {
         assert!((got - want).abs() < 0.08, "{:?}", m.bbox);
     }
 }
+
+/// #3604: a path whose first curve is a spline of several exact pieces, the next curve meeting
+/// it at its start, follows the spline back from its end: a curve is turned round whole, not
+/// piece by piece. A 2 x 2 profile at the spline's end (20, 0), swept along the spline through
+/// (20, 0), (10, 0), (0, 0) and on along the line to (-15, 0): a 35 long bar.
+#[test]
+fn a_path_turns_a_spline_of_several_pieces_round_whole() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+    run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 0], [10, 0], [20, 0]], "ids": ["s1"]}));
+    run(&mut s, "sketch.line", json!({"points": [[-15, 0], [0, 0]], "infer": false, "ids": ["l1"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [20, 0, 0], "x_dir": [0, 1, 0], "y_dir": [0, 0, 1]}, "name": "Prof"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [1, 1]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.sweep", json!({"sketch": "Prof", "path_sketch": "Path", "path": ["s1", "l1"], "operation": "new", "body_name": "Bar"}));
+    let m = measure(&s, "Bar");
+    assert!((m.volume - 140.0).abs() < 140.0 * 1e-6, "{}", m.volume);
+    for (got, want) in [(m.bbox.min.x, -15.0), (m.bbox.max.x, 20.0), (m.bbox.min.y, -1.0), (m.bbox.max.y, 1.0)] {
+        assert!((got - want).abs() < 0.04, "{:?}", m.bbox);
+    }
+}

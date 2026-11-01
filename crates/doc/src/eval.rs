@@ -5293,36 +5293,45 @@ pub(crate) fn path_segments_at(ps: &SolvedSketch, ids: &[String], start: Vec3, p
     if let Some(path) = path_points(ps, ids, start)? {
         return Ok(path.points().windows(2).map(|w| kernel::PathSeg::Line { a: w[0], b: w[1] }).collect());
     }
-    let mut segs: Vec<solidcraft_geom::Seg2> = Vec::new();
+    // Each curve as its exact pieces (Béziers, conics) where it has them, in its own direction
+    // of travel. A curve is turned round whole: its pieces stay one run.
+    let mut curves: Vec<Vec<solidcraft_geom::Seg2>> = Vec::with_capacity(ids.len());
     for id in ids {
         let ci = ps.sketch.curve_index(id).ok_or_else(|| DocError::Unknown(format!("path curve `{id}`")))?;
-        // A free-form curve as its exact pieces (Béziers, conics) where it has them.
-        segs.extend(ps.sketch.exact_segs(ci).unwrap_or_else(|| ps.sketch.segs(ci)));
+        curves.push(ps.sketch.exact_segs(ci).unwrap_or_else(|| ps.sketch.segs(ci)));
     }
-    // Orient the chain: the first segment starts at the end nearest `start`, each next one
-    // starts where the previous ended.
+    curves.retain(|c| !c.is_empty());
+    let ends = |c: &[solidcraft_geom::Seg2]| c.first().zip(c.last()).map(|(f, l)| (f.start(), l.end()));
+    let reversed = |c: Vec<solidcraft_geom::Seg2>| c.into_iter().rev().map(|s| s.reversed()).collect::<Vec<_>>();
+    // Where two curves meet: one tolerance for telling which ends touch and for the joint.
+    const JOINT: f64 = 1e-5;
+    // Orient the first curve: it runs toward the second where it meets it at one end only;
+    // otherwise (one curve, or a second meeting it at both ends) from the end nearest `start`
+    // (no start given, a pipe: as drawn).
     let w = |p: Vec2| ps.plane.to_world(p);
-    if let (Some(f), true) = (segs.first().copied(), !segs.is_empty())
-        && w(f.end()).dist(start) < w(f.start()).dist(start)
-        && (segs.len() == 1 || segs.get(1).is_some_and(|n| n.start().dist(f.start()) < 1e-6 || n.end().dist(f.start()) < 1e-6))
-    {
-        segs[0] = f.reversed();
-    }
-    // No start given (a pipe): the first curve runs toward the second.
-    if !start.is_finite()
-        && let (Some(f), Some(n)) = (segs.first().copied(), segs.get(1).copied())
-        && (n.start().dist(f.start()) < 1e-6 || n.end().dist(f.start()) < 1e-6)
-    {
-        segs[0] = f.reversed();
-    }
-    for i in 1..segs.len() {
-        let prev_end = segs[i - 1].end();
-        if segs[i].end().dist(prev_end) < segs[i].start().dist(prev_end) {
-            segs[i] = segs[i].reversed();
+    if let Some((a, b)) = curves.first().and_then(|c| ends(c)) {
+        let touches = |p: Vec2| curves.get(1).and_then(|n| ends(n)).is_some_and(|(na, nb)| na.dist(p) <= JOINT || nb.dist(p) <= JOINT);
+        let flip = match (touches(a), touches(b)) {
+            (true, false) => true,
+            (false, true) => false,
+            _ => start.is_finite() && w(b).dist(start) < w(a).dist(start),
+        };
+        if flip && let Some(first) = curves.first_mut() {
+            *first = reversed(std::mem::take(first));
         }
-        if segs[i].start().dist(prev_end) > 1e-5 {
-            return Err(DocError::Invalid("the path curves are not connected end to end".into()));
-        }
+    }
+    // Each next curve starts where the previous one ended.
+    let mut segs: Vec<solidcraft_geom::Seg2> = Vec::new();
+    for curve in curves {
+        let (Some(prev_end), Some((a, b))) = (segs.last().map(solidcraft_geom::Seg2::end), ends(&curve)) else {
+            segs.extend(curve);
+            continue;
+        };
+        let curve = if b.dist(prev_end) < a.dist(prev_end) { reversed(curve) } else { curve };
+        segs.extend(curve);
+    }
+    if segs.windows(2).any(|pair| pair[1].start().dist(pair[0].end()) > JOINT) {
+        return Err(DocError::Invalid("the path curves are not connected end to end".into()));
     }
     if let Some(profile) = profile {
         segs = from_profile_on_closed_path(segs, &ps.plane, profile, start);

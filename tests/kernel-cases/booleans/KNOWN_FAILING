@@ -2,5 +2,3 @@
 # rig gate (.github/workflows/kernel-rig.yml) fails on a case that fails and is not listed here,
 # and on a listed case that passes: a fix removes its line in the same pull request.
 # Baseline: develop 5ada4fc8a with SMLib 90aabff (the run on 60b1c6a, aarch64 Linux).
-3604-cut-with-g2-swept-tool-along-projected-edge step 12 (solid.sweep): the path curves are not connected end to end
-3830-split-cup-by-extended-spline-surface not supported yet: surface.extend of a surface of more than one face (this one has 3)

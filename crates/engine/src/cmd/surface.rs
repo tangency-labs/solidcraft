@@ -1296,8 +1296,8 @@ mod tests {
     /// along a straight edge, 20 long: each SMLib's G1 or G2 extension of the surface, so the
     /// strip stays one face. The distance is measured across the surface (the run-off's section
     /// is 5 long, whatever its curvature) and the strip is its section swept 20 along z, so each
-    /// run-off adds 5 × 20: 10 · π/2 · 20 + 100.
-    /// Undo, redo and reopening; the default saves nothing new.
+    /// run-off adds 5 × 20: 10 · π/2 · 20 + 100 = 414.159265, exact to 1e-6. Areas are SMLib's,
+    /// integrated on the exact surfaces. Undo, redo and reopening; the default saves nothing new.
     #[test]
     fn extend_a_cylinder_strip_every_way() {
         let pi = std::f64::consts::PI;
@@ -1306,7 +1306,7 @@ mod tests {
         let top = [10.0 * (pi / 4.0).cos(), 10.0 * (pi / 4.0).sin(), 20.0];
         run(&mut s, "surface.extend", json!({"body": "Strip", "edges": [top], "distance": "5 mm", "name": "Up"}));
         let want = 10.0 * pi / 2.0 * 25.0;
-        assert!((area(&s, "Strip") - want).abs() < want * 1e-3, "{} vs {want}", area(&s, "Strip")); // (measured on meshes)
+        assert!((area(&s, "Strip") - want).abs() < want * 1e-3, "{} vs {want}", area(&s, "Strip"));
         assert_eq!(s.world_state().unwrap().body("Strip").unwrap().body.face_count(), 1);
         let saved = s.doc.to_json();
         assert!(!saved.contains("\"mode\"") && !saved.contains("\"up_to\"") && !saved.contains("\"neighbours\""), "the default saves as before");
@@ -1319,14 +1319,15 @@ mod tests {
 
         run(&mut s, "surface.extend", json!({"body": "Strip", "edges": [top], "up_to": {"origin": [0, 0, 30], "normal": [0, 0, 1]}}));
         let want = 10.0 * pi / 2.0 * 30.0;
-        assert!((area(&s, "Strip") - want).abs() < want * 1e-3, "{} vs {want}", area(&s, "Strip")); // (measured on meshes)
+        assert!((area(&s, "Strip") - want).abs() < want * 1e-3, "{} vs {want}", area(&s, "Strip"));
         run(&mut s, "edit.undo", json!({}));
 
         let side = [0.0, 10.0, 10.0];
         for mode in ["tangent", "curvature"] {
             run(&mut s, "surface.extend", json!({"body": "Strip", "edges": [side], "distance": 5, "mode": mode}));
             let want = 10.0 * pi / 2.0 * 20.0 + 5.0 * 20.0;
-            assert!((area(&s, "Strip") - want).abs() < want * 1e-3, "{mode}: {} vs {want}", area(&s, "Strip")); // (measured on meshes)
+            // SMLib's area, integrated on the exact surface to 1e-8: the run-off is exactly 5 long.
+            assert!((area(&s, "Strip") - want).abs() < want * 1e-6, "{mode}: {} vs {want}", area(&s, "Strip"));
             let cold = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
             assert!((area(&cold, "Strip") - area(&s, "Strip")).abs() < 1e-9, "{mode}");
             run(&mut s, "edit.undo", json!({}));
@@ -1975,15 +1976,16 @@ mod tests {
         let before: Vec<solidcraft_geom::Vec3> = st.body("Shell").unwrap().body.edges(0.1).unwrap().iter().flat_map(|e| e.points.clone()).collect();
         assert!(!before.is_empty());
         let area_before = area(&s, "Shell");
-        // The fairing reports both energies, the second no larger than the first.
+        // The fairing reports both energies. The fit is not the fairest surface on its own rim, so
+        // the energy falls strictly and the face moves: its area changes.
         let reply = run(&mut s, "surface.fair", json!({"body": "Shell", "tolerance": 1.0, "iterations": 3}));
         let (energy_before, energy_after) = energies(&reply);
         let area_after = area(&s, "Shell");
-        eprintln!("surface.fair: {reply}\nenergies {energy_before:e} → {energy_after:e}, area {area_before} → {area_after}");
-        assert!(energy_before > 0.0 && energy_after <= energy_before, "{energy_before:e} → {energy_after:e}");
-        // The face moved (the fit is not the flattest surface on its own rim), but not its edges:
-        // every boundary point of the body is where it was, bit for bit.
-        assert!((area_after - area_before).abs() > 0.0 || energy_after < energy_before);
+        assert!(energy_before > 0.0 && energy_after < energy_before, "{energy_before:e} → {energy_after:e}");
+        assert_ne!(area_after, area_before, "the fairing did not move the face");
+        // The edges do not move: every boundary point of the faired body is where it was, bit for
+        // bit, and the sheet is still the one face.
+        let st = s.world_state().unwrap();
         let after: Vec<solidcraft_geom::Vec3> = st.body("Shell").unwrap().body.edges(0.1).unwrap().iter().flat_map(|e| e.points.clone()).collect();
         assert_eq!(after, before, "fairing must not move the face's edges");
         assert_eq!(st.body("Shell").unwrap().body.face_count(), 1);

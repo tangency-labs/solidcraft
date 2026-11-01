@@ -1,6 +1,7 @@
 {
   "sources": [
-    "tangency-labs/solidcraft#168"
+    "tangency-labs/solidcraft#168",
+    "tangency-labs/solidcraft#3841"
   ],
   "what": "a rim on a coin's top face that meets the coin along one circle only (no shared area, no shared volume): it must not be joined into it",
   "source": "analytic",

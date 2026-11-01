@@ -33,7 +33,9 @@ use crate::{KernelError, Result, guard, record};
 pub enum SplitTool<'a> {
     /// A plane (unbounded).
     Plane(Plane),
-    /// The surface of another body's face (`face` in that body's face order), extended.
+    /// The surface of another body's face (`face` in that body's face order), extended. Split
+    /// Body by a face of a surface body joined tangentially to others cuts with their smooth
+    /// sheet as it is ([`split_body`]).
     Face { body: &'a Body, face: usize },
     /// Sketch curves (chains of segments in `plane`) swept along `along` (none: the plane's
     /// normal); each curve splits on its own, an open one extended past its ends.
@@ -535,29 +537,51 @@ fn new_lines(split: &Body, h: &History) -> Result<Vec<Vec<Vec3>>> {
 }
 
 /// Split a body into the parts on either side of a tool: a plane, another face's surface
-/// (extended), or one sketch line swept along its direction. Every part is closed with the piece
+/// (extended; a face of a surface body joined tangentially to others: their smooth sheet as it
+/// is, which must cross the body), or one sketch line swept along its direction. Every part is closed with the piece
 /// of the tool's surface inside the body; parts on the tool's back come first, each side's in
 /// face order. A body the tool misses comes back whole. Each part's history is over `[body]`:
 /// its faces the body's (or pieces of them), the section new.
 pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
     let _span = solidcraft_profile::span("kernel", "split_body");
-    const NAME: &str = "split body";
-    body.require_brep(NAME)?;
+    body.require_brep(SPLIT_BODY)?;
+    if let SplitTool::Face { body: sheet, face } = tool {
+        let faces = smooth_sheet(sheet, *face)?;
+        if faces.len() > 1 {
+            return split_by_sheet(body, sheet, *face, &faces);
+        }
+    }
     let reach = reach_of(body);
     let groups = cutters(tool, &reach)?;
     let [group] = groups.as_slice() else { return Err(invalid("a body is split by a plane or a face")) };
     let [patch] = group.as_slice() else { return Err(invalid("a body is split by a plane, a face or one sketch line")) };
+    let Some(surface) = smlib_tools(std::slice::from_ref(group), &reach)?.pop() else {
+        return Ok(vec![crate::boolean_record::operand(body, 0, &record::counts(&[body]))]);
+    };
+    sliced(body, patch.flip, |sb| sb.split_body(&surface))
+}
+
+const SPLIT_BODY: &str = "split body";
+
+/// `body` cut in two by `cut` (SMLib's slice of its tagged copy, giving the parts behind and in
+/// front of the tool's surface), the parts in the tool's order of sides (`flip`: the tool's side
+/// is its surface's back), each solid of a part its own body. The body whole where the tool
+/// cuts nothing.
+fn sliced(
+    body: &Body,
+    flip: bool,
+    cut: impl FnOnce(&solidcraft_smlib::Brep) -> solidcraft_smlib::Result<Option<(solidcraft_smlib::Brep, solidcraft_smlib::Brep)>>,
+) -> Result<Vec<Body>> {
     let counts = record::counts(&[body]);
     let whole = || crate::boolean_record::operand(body, 0, &counts);
-    let Some(surface) = smlib_tools(std::slice::from_ref(group), &reach)?.pop() else { return Ok(vec![whole()]) };
-    guard(NAME, || {
-        let (sb, ob) = tagged(NAME, body)?;
-        let Some((back, front)) = sb.split_body(&surface).map_err(|e| failed(NAME, e))? else { return Ok(vec![whole()]) };
+    guard(SPLIT_BODY, || {
+        let (sb, ob) = tagged(SPLIT_BODY, body)?;
+        let Some((back, front)) = cut(&sb).map_err(|e| failed(SPLIT_BODY, e))? else { return Ok(vec![whole()]) };
         // SMLib's sides are the surface's; the tool's are the face's.
-        let sides = if patch.flip { [front, back] } else { [back, front] };
+        let sides = if flip { [front, back] } else { [back, front] };
         let (mut parts, mut cut) = (Vec::new(), false);
         for side in &sides {
-            let (part, h) = brought_back(NAME, body, &ob, side)?;
+            let (part, h) = brought_back(SPLIT_BODY, body, &ob, side)?;
             // The section comes from no face of the body.
             cut |= h.faces.iter().any(|f| f.origins.is_empty());
             let part = part.with_checked_history(Some(h), &counts);
@@ -573,6 +597,61 @@ pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
         }
         Ok(if cut { parts } else { vec![whole()] })
     })
+}
+
+/// The faces of the surface body `sheet` joined to its face `face` tangentially, through edges
+/// along which the faces' normals agree all along ([`crate::tangent_edge`], within the one angle
+/// for smooth, [`crate::smooth_edges::ANGLE`]), and through those faces' tangent neighbours in
+/// turn: the smooth surface the face is part of, in face order. Only `face` for a closed body
+/// (a solid's face splits with its own surface extended).
+fn smooth_sheet(sheet: &Body, face: usize) -> Result<Vec<usize>> {
+    sheet.require_brep("a split tool")?;
+    let r = sheet.record();
+    if r.faces.get(face).is_none() {
+        return Err(invalid(format!("the tool body has no face {face}")));
+    }
+    if !r.edges.iter().any(|e| e.uses.len() == 1) {
+        return Ok(vec![face]);
+    }
+    let sides = crate::surfaces::face_sides(r);
+    let sign = |f: usize| sides.get(f).map(|forward| if *forward { 1.0 } else { -1.0 });
+    let mut joined = std::collections::BTreeSet::from([face]);
+    let mut todo = vec![face];
+    while let Some(f) = todo.pop() {
+        let Some(this) = r.faces.get(f) else { continue };
+        for l in &this.loops {
+            let brep::Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let e = u.edge as usize;
+                let Some([a, b]) = r.edges.get(e).map(|edge| edge.uses.as_slice()) else { continue };
+                let g = if a.face as usize == f { b.face } else { a.face } as usize;
+                if g == f || joined.contains(&g) {
+                    continue;
+                }
+                if crate::tangent_edge::tangent_all_along(r, sign, e, crate::smooth_edges::ANGLE)? {
+                    joined.insert(g);
+                    todo.push(g);
+                }
+            }
+        }
+    }
+    Ok(joined.into_iter().collect())
+}
+
+/// `body` cut in two by the faces `faces` of the surface body `sheet` as they are (a smooth sheet
+/// of several faces, bounded where they end), its sides those of `sheet`'s face `face`: SMLib's
+/// slice by the sheet ([`solidcraft_smlib::Brep::split_body_by_sheet`]). A sheet that does not
+/// cross the body cuts nothing.
+fn split_by_sheet(body: &Body, sheet: &Body, face: usize, faces: &[usize]) -> Result<Vec<Body>> {
+    let picked: Vec<(usize, bool)> = faces.iter().map(|f| (*f, false)).collect();
+    let c = crate::surfaces::Parts::of(sheet.record(), &picked)?.canonical()?;
+    let at = c.faces.iter().position(|p| faces.get(*p) == Some(&face)).ok_or_else(|| failed(SPLIT_BODY, "the tool face is not in its sheet"))?;
+    let (tool, order) = crate::native::smlib_record_ordered(&c.brep)?;
+    let order = order.ok_or_else(|| failed(SPLIT_BODY, "SMLib numbers the tool sheet's faces unlike its record"))?;
+    // SMLib's face `i` is the record's `order.faces[i]` (the same where none is given).
+    let k = if order.faces.is_empty() { Some(at) } else { order.faces.iter().position(|f| *f == at) };
+    let k = k.ok_or_else(|| failed(SPLIT_BODY, "the tool face has no SMLib face"))?;
+    sliced(body, !sheet.face_forward(face), |sb| sb.split_body_by_sheet(&tool, k))
 }
 #[cfg(test)]
 mod tests {
@@ -698,6 +777,61 @@ mod tests {
         let half = (1200.0 - std::f64::consts::PI * 25.0) / 2.0;
         assert_eq!(tops.len(), 2, "{tops:?}");
         assert!(tops.iter().all(|a| rel(*a, half) < 1e-3), "{tops:?}");
+    }
+
+    /// Cubic spans of a spline, each with its x control points evenly spaced (so x runs linearly
+    /// along it and y is a cubic in x), meeting tangent, extruded from z = -5 to 15.
+    fn spans(ys: &[[f64; 4]]) -> Body {
+        let chain = ys
+            .iter()
+            .enumerate()
+            .map(|(i, y)| {
+                let x0 = -3.0 + 6.0 * i as f64;
+                let p = |k: usize| Vec2::new(x0 + 2.0 * k as f64, y[k]);
+                Seg2::Cubic { p0: p(0), p1: p(1), p2: p(2), p3: p(3) }
+            })
+            .collect();
+        crate::extrude_sheet(&Plane::XY, &[chain], -5.0, 15.0).unwrap()
+    }
+
+    /// The face of `b` farthest to -x (by its centroid).
+    fn leftmost(b: &Body) -> usize {
+        let faces = b.faces(0.01).unwrap();
+        (0..faces.len()).min_by(|i, j| faces[*i].centroid.x.total_cmp(&faces[*j].centroid.x)).unwrap()
+    }
+
+    /// Split Body by a face of a smooth sheet cuts with the whole sheet (#3830): three spans
+    /// meeting tangent cross the cube 0…10, the face of the first alone does not. The part
+    /// under the spline is 10 ∫ y dx over x 0…10 (y a cubic in x on each span: Gauss–Legendre at
+    /// three points is exact). Two spans that end inside the cube cut nothing.
+    #[test]
+    fn a_face_of_a_smooth_sheet_splits_with_the_whole_sheet() {
+        let ys = [[5.0, 5.0, 4.0, 4.0], [4.0, 4.0, 6.0, 6.0], [6.0, 6.0, 5.0, 5.0]];
+        let bern = |y: &[f64; 4], t: f64| {
+            let s = 1.0 - t;
+            y[0] * s * s * s + 3.0 * y[1] * s * s * t + 3.0 * y[2] * s * t * t + y[3] * t * t * t
+        };
+        // ∫ y dx over the span's t0…t1 (dx = 6 dt).
+        let integral = |y: &[f64; 4], t0: f64, t1: f64| {
+            let (m, h) = (0.5 * (t0 + t1), 0.5 * (t1 - t0));
+            let g = (0.6f64).sqrt();
+            6.0 * h * (5.0 * bern(y, m - h * g) + 8.0 * bern(y, m) + 5.0 * bern(y, m + h * g)) / 9.0
+        };
+        let under = 10.0 * (integral(&ys[0], 0.5, 1.0) + integral(&ys[1], 0.0, 1.0) + integral(&ys[2], 0.0, 1.0 / 6.0));
+        let sheet = spans(&ys);
+        assert_eq!(sheet.face_count(), 3);
+        let first = leftmost(&sheet);
+        let cube = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let parts = split_body(&cube, &SplitTool::Face { body: &sheet, face: first }).unwrap();
+        let v = volumes(&parts);
+        assert_eq!(v.len(), 2, "{v:?}");
+        assert!(rel(v[0], under) < 1e-6 && rel(v[1], 1000.0 - under) < 1e-6, "{v:?} vs {under}");
+
+        let short = spans(&ys[..2]);
+        let first = leftmost(&short);
+        let nicked = split_body(&cube, &SplitTool::Face { body: &short, face: first }).unwrap();
+        let info: Vec<_> = nicked.iter().map(|b| (measure(b).unwrap().volume, b.face_count(), b.lumps().unwrap().len())).collect();
+        assert_eq!(nicked.len(), 1, "{info:?}");
     }
 
     fn volumes(parts: &[Body]) -> Vec<f64> {

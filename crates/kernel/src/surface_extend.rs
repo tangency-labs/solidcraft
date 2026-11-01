@@ -11,7 +11,15 @@
 //! The face is extended where it is its surface's whole parameter box and the edge is a whole
 //! side of it: the box grows past that side, the sides next to it continue along the surface's
 //! parameter lines, and the face stays one face on the extended surface. Edges picked on two
-//! sides grow the box on both, meeting at the box's corner. Up to a target, the face is extended
+//! sides grow the box on both, meeting at the box's corner.
+//!
+//! A body of several faces grows face by face, each extended alone as above and the faces sewn
+//! back together. A side that lengthens is shared with the face next to it: that face grows too,
+//! past its edge continuing the picked one, when the two meet tangent along the side (the faces
+//! of one smooth surface, a spline's spans extruded, grow as one); across a crease it grows only
+//! when that edge is picked as well, and otherwise the extension is refused (it would run past
+//! the face beside it). The lengthened sides must meet again: faces whose extensions part are
+//! refused. Up to a target, the face is extended
 //! past it and trimmed back where the target meets it ([`crate::trim_keep`]: SMLib's exact
 //! intersection). Back to the bounds is the face untrimmed to its surface's box
 //! ([`crate::untrim`]). A plane's straight edges pushed out with their neighbours lengthened
@@ -19,7 +27,9 @@
 //!
 //! Refused rather than built: edges between two faces, edges of holes, and (not supported yet)
 //! an edge that is not a whole side of its surface's box (a trimmed edge, whose extension is no
-//! curve SMLib holds exactly), or a body of more than one face.
+//! curve SMLib holds exactly).
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::{self, eval::CurveEval};
@@ -29,7 +39,8 @@ use crate::body::Body;
 use crate::history::{Change, FaceOrigin};
 use crate::native::{body_from_smlib_ordered, smlib_body_ordered};
 use crate::surface_trim::TrimKeep;
-use crate::{KernelError, Result, SplitTool};
+use crate::surfaces::Parts;
+use crate::{KernelError, Result, SplitTool, record};
 
 /// Most edge picks.
 const MAX_PICKS: usize = 10_000;
@@ -104,11 +115,14 @@ pub fn extend_surface(body: &Body, at: &[Vec3], opts: &ExtendOptions) -> Result<
     {
         return crate::surfaces::extend(body, at, d);
     }
-    let faces = picked_faces(&record, body.size(), at)?;
+    let picked = picked_edges(&record, body.size(), at)?;
     match opts.limit {
-        ExtendLimit::Bounds => back_to_bounds(body, &faces),
-        ExtendLimit::Distance(d) => continued(body, at, d, opts.mode),
-        ExtendLimit::UpTo(tool) => up_to(body, at, tool, opts.mode),
+        ExtendLimit::Bounds => {
+            let faces: BTreeSet<usize> = picked.iter().map(|(_, f)| *f).collect();
+            back_to_bounds(body, &faces.into_iter().collect::<Vec<_>>())
+        }
+        ExtendLimit::Distance(d) => continued(body, at, &picked, d, opts.mode).map(|(out, _)| out),
+        ExtendLimit::UpTo(tool) => up_to(body, at, &picked, tool, opts.mode),
     }
 }
 
@@ -120,10 +134,10 @@ fn plain_planar(record: &brep::Brep) -> bool {
         && edges.iter().all(|u| record.edges.get(u.edge as usize).is_some_and(|e| matches!(e.curve, brep::Curve::Line { .. })))
 }
 
-/// The faces (in face order, each once) of the boundary edges the points pick: for each point,
-/// the record edge nearest it (by samples along each edge), within a twentieth of the body's
-/// size. An edge two faces share, or one of a hole, is refused.
-fn picked_faces(record: &brep::Brep, size: f64, at: &[Vec3]) -> Result<Vec<usize>> {
+/// The boundary edges the points pick, each with its face: for each point, the record edge
+/// nearest it (by samples along each edge), within a twentieth of the body's size. An edge two
+/// faces share, or one of a hole, is refused.
+fn picked_edges(record: &brep::Brep, size: f64, at: &[Vec3]) -> Result<Vec<(usize, usize)>> {
     let curves: Vec<CurveEval> = record
         .edges
         .iter()
@@ -131,7 +145,7 @@ fn picked_faces(record: &brep::Brep, size: f64, at: &[Vec3]) -> Result<Vec<usize
         .map(|(i, e)| CurveEval::new(e.parameters()).map_err(|err| KernelError::Failed(format!("extend: edge {i}'s curve: {err}"))))
         .collect::<Result<_>>()?;
     let reach = size * 0.05 + 1e-6;
-    let mut faces = Vec::new();
+    let mut picked = Vec::with_capacity(at.len());
     for p in at {
         let mut best: Option<(f64, usize)> = None;
         for (i, (e, c)) in record.edges.iter().zip(&curves).enumerate() {
@@ -144,8 +158,8 @@ fn picked_faces(record: &brep::Brep, size: f64, at: &[Vec3]) -> Result<Vec<usize
                 }
             }
         }
-        let edge = match best {
-            Some((d, i)) if d <= reach => record.edges.get(i),
+        let (index, edge) = match best {
+            Some((d, i)) if d <= reach => record.edges.get(i).map(|e| (i, e)),
             _ => None,
         }
         .ok_or_else(|| KernelError::Invalid(format!("no edge at {p:?}")))?;
@@ -156,23 +170,163 @@ fn picked_faces(record: &brep::Brep, size: f64, at: &[Vec3]) -> Result<Vec<usize
         if only.r#loop != 0 {
             return Err(KernelError::Invalid("not supported yet: extending an edge of a hole (Untrim takes holes away)".into()));
         }
-        let face = only.face as usize;
-        if !faces.contains(&face) {
-            faces.push(face);
+        picked.push((index, only.face as usize));
+    }
+    Ok(picked)
+}
+
+/// The faces of `body` continued `distance` past the picked edges (`at`, which `picked` names
+/// with their faces), as `mode` says, and the faces that grew. One face is extended by SMLib
+/// ([`one_face`]); a body of several grows face by face ([`grown`] says which past which edges),
+/// each face extended alone and the faces sewn back together, each the face it was. Faces whose
+/// lengthened sides part (no longer one edge) are refused.
+fn continued(body: &Body, at: &[Vec3], picked: &[(usize, usize)], distance: f64, mode: ExtendMode) -> Result<(Body, Vec<usize>)> {
+    if body.face_count() == 1 {
+        return Ok((one_face(body, at, distance, mode)?, vec![0]));
+    }
+    let r = body.record();
+    let grow = grown(r, picked)?;
+    let mut pieces = Vec::with_capacity(grow.len() + 1);
+    for (&f, edges) in &grow {
+        let alone = crate::surfaces::taken(body, r, &[(f, false)])?;
+        let points = edges.iter().map(|e| edge_middle(r, *e)).collect::<Result<Vec<_>>>()?;
+        let longer = one_face(&alone, &points, distance, mode)?;
+        pieces.push((longer.record().clone(), vec![record::from_face(0, f, Change::Modified)]));
+    }
+    let rest: Vec<(usize, bool)> = (0..r.faces.len()).filter(|f| !grow.contains_key(f)).map(|f| (f, false)).collect();
+    if !rest.is_empty() {
+        let c = Parts::of(r, &rest)?.canonical()?;
+        let kept = c
+            .faces
+            .iter()
+            .map(|p| rest.get(*p).map(|(f, _)| record::from_face(0, *f, Change::Kept)))
+            .collect::<Option<Vec<_>>>()
+            .ok_or_else(|| failed("sew", "a face of the rest of the body is missing"))?;
+        pieces.push((c.brep, kept));
+    }
+    let out = crate::surfaces::sheet_of(pieces, true, &[body])?;
+    if (out.face_count(), out.edge_count()) != (body.face_count(), body.edge_count()) {
+        return Err(KernelError::Invalid(
+            "the extended faces part along the sides they lengthen: their extensions don't meet again (extend each face on its own)".into(),
+        ));
+    }
+    Ok((out, grow.into_keys().collect()))
+}
+
+/// The boundary edges each face grows past (by face): the `picked` ones (edge, face), and those
+/// that continue a grown edge across a side it lengthens onto a face meeting its own tangent
+/// there. A side lengthening along a crease onto a face that does not grow past the edge
+/// continuing the grown one is refused: the extension would run past that face.
+fn grown(r: &brep::Brep, picked: &[(usize, usize)]) -> Result<BTreeMap<usize, BTreeSet<usize>>> {
+    let sides = crate::surfaces::face_sides(r);
+    let sign = |f: usize| sides.get(f).map(|forward| if *forward { 1.0 } else { -1.0 });
+    let mut grow: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
+    let mut todo = picked.to_vec();
+    // (face, its edge that must grow, the creased side between): checked once all have grown.
+    let mut creased = Vec::new();
+    let mut count = 0usize;
+    while let Some((e, f)) = todo.pop() {
+        if !grow.entry(f).or_default().insert(e) {
+            continue;
+        }
+        count += 1;
+        if count > MAX_PICKS {
+            return Err(KernelError::Invalid("too many edges to extend".into()));
+        }
+        for (side, at) in next_to(r, f, e)? {
+            let uses = &record_edge(r, side)?.uses;
+            let other = match uses.as_slice() {
+                [_] => continue,
+                [a, b] => [a.face, b.face].into_iter().map(|g| g as usize).find(|g| *g != f),
+                _ => return Err(KernelError::Invalid(format!("not supported yet: extending along edge {side}, which more than two faces share"))),
+            };
+            // A seam: the face lengthens along it on both sides at once.
+            let Some(g) = other else { continue };
+            let cont = continuing(r, g, side, at)?;
+            if !matches!(record_edge(r, cont)?.uses.as_slice(), [only] if only.r#loop == 0) {
+                return Err(KernelError::Invalid(format!(
+                    "not supported yet: extending past edge {e}, whose side {side} runs on into the inside of the face next to it"
+                )));
+            }
+            if crate::tangent_edge::tangent_all_along(r, sign, side, crate::smooth_edges::ANGLE)? {
+                todo.push((cont, g));
+            } else {
+                creased.push((g, cont, side));
+            }
         }
     }
-    faces.sort_unstable();
-    Ok(faces)
+    for (g, cont, side) in creased {
+        if !grow.get(&g).is_some_and(|edges| edges.contains(&cont)) {
+            return Err(KernelError::Invalid(format!(
+                "extending the edge lengthens its face along edge {side}, a crease with the face next to it: pick that face's edge {cont} too"
+            )));
+        }
+    }
+    Ok(grow)
+}
+
+fn record_edge(r: &brep::Brep, e: usize) -> Result<&brep::Edge> {
+    r.edges.get(e).ok_or_else(|| failed("topology", format!("no edge {e}")))
+}
+
+/// The outer loop of face `f` and where edge `e` is in it.
+fn in_outer_loop(r: &brep::Brep, f: usize, e: usize) -> Result<(&[brep::OrientedEdge], usize)> {
+    let face = r.faces.get(f).ok_or_else(|| failed("topology", format!("no face {f}")))?;
+    let Some(brep::Loop::Edges { edges }) = face.loops.first() else { return Err(failed("topology", format!("face {f} has no edge loop"))) };
+    let i = edges.iter().position(|u| u.edge as usize == e).ok_or_else(|| failed("topology", format!("edge {e} is not on face {f}'s outer loop")))?;
+    Ok((edges, i))
+}
+
+/// The vertices edge use `u` runs from and to round its loop.
+fn ends(r: &brep::Brep, u: &brep::OrientedEdge) -> Result<[u32; 2]> {
+    let [a, b] = record_edge(r, u.edge as usize)?.vertices;
+    Ok(if u.forward { [a, b] } else { [b, a] })
+}
+
+/// The sides of face `f` next to its edge `e` round its outer loop, each with the vertex it
+/// shares with `e`: the edges an extension past `e` lengthens.
+fn next_to(r: &brep::Brep, f: usize, e: usize) -> Result<Vec<(usize, u32)>> {
+    let (edges, i) = in_outer_loop(r, f, e)?;
+    let n = edges.len();
+    let (Some(prev), Some(this), Some(next)) = (edges.get((i + n - 1) % n), edges.get(i), edges.get((i + 1) % n)) else { return Ok(Vec::new()) };
+    let [from, to] = ends(r, this)?;
+    let mut out = Vec::with_capacity(2);
+    for (u, v) in [(prev, from), (next, to)] {
+        if u.edge as usize != e && !out.iter().any(|(s, _)| *s == u.edge as usize) {
+            out.push((u.edge as usize, v));
+        }
+    }
+    Ok(out)
+}
+
+/// The edge of face `g`'s outer loop that meets its side `side` at vertex `at`.
+fn continuing(r: &brep::Brep, g: usize, side: usize, at: u32) -> Result<usize> {
+    let (edges, i) = in_outer_loop(r, g, side)?;
+    let n = edges.len();
+    let this = edges.get(i).ok_or_else(|| failed("topology", "a loop position"))?;
+    let [from, to] = ends(r, this)?;
+    let k = if from == at {
+        (i + n - 1) % n
+    } else if to == at {
+        (i + 1) % n
+    } else {
+        return Err(failed("topology", format!("edge {side} does not end at vertex {at}")));
+    };
+    match edges.get(k) {
+        Some(u) if u.edge as usize != side => Ok(u.edge as usize),
+        _ => Err(KernelError::Invalid(format!("not supported yet: extending along edge {side}, the only side of the face next to it"))),
+    }
+}
+
+/// The point halfway along record edge `e`.
+fn edge_middle(r: &brep::Brep, e: usize) -> Result<Vec3> {
+    let edge = record_edge(r, e)?;
+    let c = CurveEval::new(edge.parameters()).map_err(|err| failed("edge", format!("edge {e}'s curve: {err}")))?;
+    c.point(0.5 * (edge.interval[0] + edge.interval[1])).ok_or_else(|| failed("edge", format!("edge {e} has no middle")))
 }
 
 /// The one face of `body` continued `distance` past each picked edge, as `mode` says.
-fn continued(body: &Body, at: &[Vec3], distance: f64, mode: ExtendMode) -> Result<Body> {
-    if body.face_count() != 1 {
-        return Err(KernelError::Invalid(format!(
-            "not supported yet: extending a surface of more than one face (this one has {})",
-            body.face_count()
-        )));
-    }
+fn one_face(body: &Body, at: &[Vec3], distance: f64, mode: ExtendMode) -> Result<Body> {
     let how = match mode {
         ExtendMode::Natural => Continuation::Natural,
         ExtendMode::Tangent => Continuation::Tangent,
@@ -186,7 +340,9 @@ fn continued(body: &Body, at: &[Vec3], distance: f64, mode: ExtendMode) -> Resul
             solidcraft_smlib::Error::Unsupported => KernelError::Invalid(
                 "not supported yet: extending an edge that is not a whole side of its surface's parameter box (a trimmed edge)".into(),
             ),
-            solidcraft_smlib::Error::NotExact => KernelError::Invalid("the extension would run past a pole of its surface or wrap round it".into()),
+            solidcraft_smlib::Error::NotExact => KernelError::Invalid(format!(
+                "the surface cannot be extended exactly {distance} mm there: the extension would run past a pole of its surface, wrap round it, or not reach that length"
+            )),
             solidcraft_smlib::Error::NoMatch { .. } => KernelError::Invalid(format!("no edge at {p:?}")),
             e => failed("extend", e),
         })?;
@@ -207,12 +363,12 @@ fn continued(body: &Body, at: &[Vec3], distance: f64, mode: ExtendMode) -> Resul
     Ok(out.with_checked_history(history, &crate::record::counts(&[body])))
 }
 
-/// The face extended past the target and trimmed back where the target meets it, keeping the
-/// piece the face itself lies in.
-fn up_to(body: &Body, at: &[Vec3], tool: &SplitTool, mode: ExtendMode) -> Result<Body> {
-    let inside = crate::surface_untrim::face_point(body, 0)?;
-    let long = continued(body, at, body.size().max(1e-6) * REACH, mode)?;
-    let cut = crate::trim_keep(&long, tool, TrimKeep::Regions(&[inside]))?;
+/// The faces extended past the target and trimmed back where the target meets them, keeping the
+/// pieces the faces themselves lie in.
+fn up_to(body: &Body, at: &[Vec3], picked: &[(usize, usize)], tool: &SplitTool, mode: ExtendMode) -> Result<Body> {
+    let (long, faces) = continued(body, at, picked, body.size().max(1e-6) * REACH, mode)?;
+    let inside = faces.iter().map(|f| crate::surface_untrim::face_point(body, *f)).collect::<Result<Vec<_>>>()?;
+    let cut = crate::trim_keep(&long, tool, TrimKeep::Regions(&inside))?;
     Ok(crate::record::after(cut, &long, &crate::record::counts(&[body])))
 }
 
@@ -409,6 +565,57 @@ mod tests {
         let a = area(&back);
         assert!(rel(a, 150.0 * PI) < 1e-3, "{a} vs {}", 150.0 * PI); // (measured on meshes)
         assert!((measure(&back).unwrap().bbox.max.z - 15.0).abs() < 1e-6);
+    }
+
+    /// Three cubic spans of a spline meeting tangent, extruded 0…20 along Z: a sheet of three
+    /// faces, as a fit-point spline's surface is (#3830).
+    fn spline_spans() -> Body {
+        let v = Vec2::new;
+        let c = |p0, p1, p2, p3| Seg2::Cubic { p0, p1, p2, p3 };
+        let chain = vec![
+            c(v(0.0, 0.0), v(5.0, 0.0), v(10.0, 5.0), v(15.0, 5.0)),
+            c(v(15.0, 5.0), v(20.0, 5.0), v(25.0, 0.0), v(30.0, 0.0)),
+            c(v(30.0, 0.0), v(35.0, 0.0), v(40.0, 5.0), v(45.0, 5.0)),
+        ];
+        crate::extrude_sheet(&Plane::XY, &[chain], 0.0, 20.0).unwrap()
+    }
+
+    /// A sheet of several faces grows face by face (#3830): its end edge (the last span's
+    /// generator) 10 further, the last span continued, 10 · 20 more; the middle span's top edge
+    /// 5 up takes its tangent neighbours with it, the whole spline 25 tall. The faces stay three,
+    /// sewn as before, each the face it was.
+    #[test]
+    fn a_sheet_of_tangent_faces_grows_face_by_face() {
+        let s = spline_spans();
+        assert_eq!(s.face_count(), 3);
+        let base = area(&s);
+        let end = extend_surface(&s, &[Vec3::new(45.0, 5.0, 10.0)], &natural(10.0)).unwrap();
+        assert!(rel(area(&end), base + 200.0) < 1e-4, "{} vs {}", area(&end), base + 200.0); // (measured on meshes)
+        assert_eq!((end.face_count(), edges(&end)), (3, edges(&s)));
+        assert!(measure(&end).unwrap().bbox.max.x > 50.0, "{:?}", measure(&end).unwrap().bbox);
+        let h = end.history().unwrap();
+        let changes: Vec<Change> = h.faces.iter().map(|f| f.change).collect();
+        assert_eq!(changes.iter().filter(|c| **c == Change::Modified).count(), 1, "{changes:?}");
+
+        let up = extend_surface(&s, &[Vec3::new(22.5, 2.5, 20.0)], &natural(5.0)).unwrap();
+        assert!(rel(area(&up), base * 25.0 / 20.0) < 1e-4, "{} vs {}", area(&up), base * 25.0 / 20.0); // (measured on meshes)
+        assert_eq!((up.face_count(), edges(&up)), (3, edges(&s)));
+        assert!((measure(&up).unwrap().bbox.max.z - 25.0).abs() < 1e-6);
+    }
+
+    /// Across a crease the face next door grows only when its edge is picked too: an L of two
+    /// planes, one top edge refused (it would run past the other wall), both 5 up, 25 · 20.
+    #[test]
+    fn a_crease_grows_only_when_both_edges_are_picked() {
+        let l =
+            vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) }, Seg2::Line { a: Vec2::new(10.0, 0.0), b: Vec2::new(10.0, 10.0) }];
+        let s = crate::extrude_sheet(&Plane::XY, &[l], 0.0, 20.0).unwrap();
+        assert_eq!(s.face_count(), 2);
+        let e = extend_surface(&s, &[Vec3::new(5.0, 0.0, 20.0)], &natural(5.0)).unwrap_err();
+        assert!(e.to_string().contains("crease"), "{e}");
+        let both = extend_surface(&s, &[Vec3::new(5.0, 0.0, 20.0), Vec3::new(10.0, 5.0, 20.0)], &natural(5.0)).unwrap();
+        assert!(rel(area(&both), 500.0) < 1e-9, "{}", area(&both));
+        assert_eq!((both.face_count(), edges(&both)), (2, edges(&s)));
     }
 
     /// Hostile and unsupported requests are refused, never panic.
