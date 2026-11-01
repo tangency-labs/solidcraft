@@ -575,7 +575,7 @@ mod tests {
     }
 
     /// A radius through a middle point, straight pieces 2 → 4 → 2: a corner in the law, where the
-    /// ball there shows between its two sides' touch circles; the balls' union takes 39.541034
+    /// two sides' rounds cross and each ends where they do; the balls' union takes 39.541034
     /// (the halves' great circles would take 40.0590).
     #[test]
     fn variable_radius_with_a_corner_through_a_middle_point() {
