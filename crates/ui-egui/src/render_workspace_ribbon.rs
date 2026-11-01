@@ -62,7 +62,7 @@ pub(super) fn busy(app: &SolveApp) -> bool {
 /// Reads only current host/job metadata and the numerical draft. No preflight,
 /// scene preparation, device discovery, resource IO or rendering during painting.
 pub(super) fn action_ready(app: &SolveApp, id: &str) -> Result<(), String> {
-    if app.file_load.busy() || app.file_picker.is_some() || inspector::confirmation_open(app) {
+    if app.file_load_holds() || app.file_picker.is_some() || inspector::confirmation_open(app) {
         return Err(app.tr("render.ribbon_finish_dialog").into());
     }
     match id {

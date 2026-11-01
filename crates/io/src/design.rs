@@ -70,6 +70,11 @@ fn invalid(message: impl std::fmt::Display) -> IoError {
     IoError::Invalid(format!("design container: {message}"))
 }
 
+/// What building a container a watched save cancelled returns.
+fn cancelled() -> IoError {
+    IoError::Invalid("save cancelled".into())
+}
+
 /// Detect the package signature independently of the file name.
 pub fn is_design_container(bytes: &[u8]) -> bool {
     bytes.starts_with(b"PK\x03\x04")
@@ -130,7 +135,15 @@ impl PackageWriter {
             .compression_level(compressed.then_some(level))
             .large_file(bytes.len() as u64 >= u64::from(u32::MAX));
         self.zip.start_file(name, options).map_err(invalid)?;
-        self.zip.write_all(bytes).map_err(invalid)
+        // A piece at a time: a watched save (a large mesh or model cache being compressed) stops
+        // on Cancel within a piece instead of after the whole part.
+        for chunk in bytes.chunks(1 << 20) {
+            if crate::safe_write::cancelled() {
+                return Err(cancelled());
+            }
+            self.zip.write_all(chunk).map_err(invalid)?;
+        }
+        Ok(())
     }
     /// Would `entries` more optional parts of `extra` bytes, stored uncompressed, still keep
     /// the file within `budget` and its expanded size within the reader's budget?
@@ -347,7 +360,10 @@ fn write_container(
     writer.part("document.json", &metadata, true)?;
     writer.part("container.json", &serde_json::to_vec(&json!({"format": VERSION})).map_err(invalid)?, false)?;
     // The model cache is optional: one that does not fit the container keeps fewer states, or is
-    // left out, never a failed save.
+    // left out, never a failed save. Encoding it is a save's longest step: not begun once cancelled.
+    if crate::safe_write::cancelled() {
+        return Err(cancelled());
+    }
     let cache = geometry.and_then(|g| native_cache::encode_model(g, &metadata, writer.space(2, budget)).ok());
     if let Some((manifest, data)) = cache {
         let [manifest_entry, payload_entry] = native_cache::ENTRIES;
@@ -994,6 +1010,26 @@ fn hydrate_hdr_resources<R: Read + Seek>(metadata: &mut Value, reader: &mut Pack
 mod tests {
     use super::*;
     use solidcraft_geom::Vec2;
+
+    /// Building a design file under a watch that asks to stop (a cancelled save) stops with
+    /// "save cancelled", before the next part; unwatched, it is built as ever.
+    #[test]
+    fn a_watched_container_stops_when_its_save_is_cancelled() {
+        struct Stop;
+        impl solidcraft_kernel::watch::Watch for Stop {
+            fn cancelled(&self) -> bool {
+                true
+            }
+            fn progress(&self, _: &'static str, _: usize, _: usize) {}
+        }
+        let doc = Document::new("Cancelled");
+        let e = solidcraft_kernel::watch::watching(std::sync::Arc::new(Stop), || {
+            write_design_container_with_thumbnail(&doc, DesignCompression::Fast, None, None, None)
+        })
+        .unwrap_err();
+        assert_eq!(e.to_string(), "save cancelled");
+        assert!(write_design_container_with_thumbnail(&doc, DesignCompression::Fast, None, None, None).is_ok());
+    }
 
     struct CountingReader {
         source: Cursor<Vec<u8>>,
