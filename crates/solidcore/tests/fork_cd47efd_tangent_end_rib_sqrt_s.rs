@@ -30,6 +30,7 @@
     clippy::cast_precision_loss
 )] // test helpers
 use solidcore::blend::fillet_executive::api::fillet_edges;
+use solidcore::blend::fillet_executive::session::FilletSession;
 use solidcore::boolean::api_brep::boolean_union;
 use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
@@ -38,6 +39,7 @@ use solidcore::math::{Point3, Vec3};
 use solidcore::primitive::api_curves as curves;
 use solidcore::query::api_queries::get_edges;
 use solidcore::sweep::api_brep::create_linear_sweep;
+use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::{edge, EdgeId};
 use solidcore::{Brep, Kernel};
@@ -168,6 +170,28 @@ fn g2_front_round_end_rib_has_zero_speed_at_its_tangent_end() {
     assert!((v - v_off).abs() < 5e-5, "V {v} vs {v_off}");
     // 9395.419893021 here, 9395.419890495 with the rib fitted in s (before cd47efd)
     assert!((v - 9395.419893021).abs() < 1e-6, "V {v}");
+}
+
+/// The fork's 9393.307931047 (tangency-labs/smlib `cd47efd`) is the G2 round with the
+/// blend curve's quintic control points at thirds (the fork-only `SetBlendCurveAtThirds`,
+/// `fd3b6a7`, ported as `FilletSession::set_blend_curve_at_thirds`, #1438), which
+/// `fillet_edges` never turns on. Built as `fillet_edges` does internally, with the mode
+/// on, solidcore measures 9393.307938954; the off path stays pinned above (9395.419893021).
+#[test]
+fn g2_front_round_at_thirds_matches_the_fork_volume() {
+    let mut k = kernel();
+    let mut b = peg(&mut k);
+    let e = front_top(&b);
+    {
+        let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+        s.set_blend_curve_at_thirds(true);
+        s.prepare_constant_radius_edges(&mut k, &[e], 2.0, 2, 2, 1.0)
+            .unwrap();
+        s.do_fillet(&mut k).unwrap();
+    }
+    stitch_and_orient(&mut k, &mut b, &StitchAndOrientOptions::default()).unwrap();
+    let v = volume(&k, &mut b);
+    assert!((v - 9393.307931047).abs() < 1e-5, "V {v}");
 }
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
