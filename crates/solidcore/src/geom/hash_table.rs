@@ -944,6 +944,31 @@ mod tests {
         Extent3d::from_bounds(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
     }
 
+    fn sorted_item_pairs(v: &ObjsInVoxels<u32>, p: &CoincidentPairs) -> Vec<(u32, u32)> {
+        assert_eq!(p.first.len(), p.second.len());
+        let items = v.point_items();
+        let mut pairs = Vec::new();
+        for (&i, &j) in p.first.iter().zip(&p.second) {
+            let a = items[i].item;
+            let b = items[j].item;
+            pairs.push((a.min(b), a.max(b)));
+        }
+        pairs.sort_unstable();
+        pairs
+    }
+
+    fn point_item_bits(v: &ObjsInVoxels<u32>) -> Vec<[u64; 4]> {
+        let mut out = Vec::new();
+        for pi in v.point_items() {
+            let x = pi.point.x.to_bits();
+            let y = pi.point.y.to_bits();
+            let z = pi.point.z.to_bits();
+            let t = pi.zone_tol.to_bits();
+            out.push([x, y, z, t]);
+        }
+        out
+    }
+
     #[test]
     fn new_rejects_voxel_dimension_overflow() {
         assert!(matches!(
@@ -1103,5 +1128,193 @@ mod tests {
         assert_eq!(v.point_capacity(), 69);
         let mut w: ObjsInVoxels<u32> = ObjsInVoxels::new(0, 1, 1, Some(&unit_box()), 0).unwrap();
         assert!(w.add(1, Vec3::ZERO, 0.1, None).is_err());
+    }
+
+    #[test]
+    fn wr12_single_voxel_clusters_report_all_unique_pairs_without_mutation() {
+        let k = Kernel::new(&KernelOptions::default());
+
+        // 3 coincident items in a single voxel: bucket 0 holds [10, 30, 20], so
+        // (20, 30) does not involve the bucket head 10.
+        let mut v3: ObjsInVoxels<u32> = ObjsInVoxels::new(1, 1, 1, Some(&unit_box()), 0).unwrap();
+        let pts3 = [
+            (10, Vec3::new(0.25, 0.25, 0.25)),
+            (20, Vec3::new(0.2504, 0.25, 0.25)),
+            (30, Vec3::new(0.2508, 0.25, 0.25)),
+        ];
+        for (id, pt) in pts3 {
+            v3.add(id, pt, 1e-3, None).unwrap();
+        }
+        assert_eq!(v3.len(), 3);
+        let before3_items = v3.point_items().to_vec();
+        let before3_bits = point_item_bits(&v3);
+        let p3 = v3
+            .find_coincident_pairs(&k, FindPairsOptions::default())
+            .unwrap();
+        assert_eq!(p3.first, vec![0, 0, 2]);
+        assert_eq!(p3.second, vec![2, 1, 1]);
+        assert_eq!(sorted_item_pairs(&v3, &p3), [(10, 20), (10, 30), (20, 30)]);
+        assert_eq!(v3.point_items(), before3_items.as_slice());
+        assert_eq!(point_item_bits(&v3), before3_bits);
+
+        // 4 coincident items in one voxel -> all 4 * 3 / 2 = 6 unique pairs, and a
+        // 5-item voxel whose head (item 1) is far away still reports all 6 pairs.
+        let cluster4 = [
+            (4, Vec3::new(0.75, 0.75, 0.75)),
+            (5, Vec3::new(0.7503, 0.75, 0.75)),
+            (6, Vec3::new(0.75, 0.7504, 0.75)),
+            (7, Vec3::new(0.75, 0.75, 0.7505)),
+        ];
+        let exp4 = [(4, 5), (4, 6), (4, 7), (5, 6), (5, 7), (6, 7)];
+
+        let mut v4: ObjsInVoxels<u32> = ObjsInVoxels::new(1, 1, 1, Some(&unit_box()), 0).unwrap();
+        for (id, pt) in cluster4 {
+            v4.add(id, pt, 1e-3, None).unwrap();
+        }
+        let before4_items = v4.point_items().to_vec();
+        let before4_bits = point_item_bits(&v4);
+        let p4 = v4
+            .find_coincident_pairs(&k, FindPairsOptions::default())
+            .unwrap();
+        assert_eq!(sorted_item_pairs(&v4, &p4), exp4);
+        assert_eq!(v4.point_items(), before4_items.as_slice());
+        assert_eq!(point_item_bits(&v4), before4_bits);
+
+        let mut v5: ObjsInVoxels<u32> = ObjsInVoxels::new(1, 1, 1, Some(&unit_box()), 0).unwrap();
+        v5.add(1, Vec3::new(0.1, 0.1, 0.1), 1e-3, None).unwrap();
+        for (id, pt) in cluster4 {
+            v5.add(id, pt, 1e-3, None).unwrap();
+        }
+        let before5_items = v5.point_items().to_vec();
+        let before5_bits = point_item_bits(&v5);
+        let p5 = v5
+            .find_coincident_pairs(&k, FindPairsOptions::default())
+            .unwrap();
+        assert_eq!(sorted_item_pairs(&v5, &p5), exp4);
+        assert_eq!(v5.point_items(), before5_items.as_slice());
+        assert_eq!(point_item_bits(&v5), before5_bits);
+    }
+
+    #[test]
+    fn wr12_voxel_boundary_deduplication_and_limit_index_and_histogram() {
+        let k = Kernel::new(&KernelOptions::default());
+
+        // 3 coincident items straddling x = 0.5 and y = 0.5 on a 2x2x1 grid: each
+        // item is placed into 3 buckets, and every pair shares 2 buckets, yet each
+        // coincident item pair is reported once while the histogram counts all 6
+        // bucket-level comparisons (and accumulates across calls).
+        let mut v: ObjsInVoxels<u32> = ObjsInVoxels::new(2, 2, 1, Some(&unit_box()), 0).unwrap();
+        let mut upd1 = Vec::new();
+        let mut upd2 = Vec::new();
+        let mut upd3 = Vec::new();
+        let p1 = Vec3::new(0.4998, 0.4998, 0.5);
+        let p2 = Vec3::new(0.5002, 0.4998, 0.5);
+        let p3 = Vec3::new(0.4998, 0.5002, 0.5);
+        assert_eq!(v.add(1, p1, 1e-3, Some(&mut upd1)).unwrap(), Some(0));
+        assert_eq!(v.add(2, p2, 1e-3, Some(&mut upd2)).unwrap(), Some(1));
+        assert_eq!(v.add(3, p3, 1e-3, Some(&mut upd3)).unwrap(), Some(2));
+        assert_eq!(upd1, vec![0, 1, 2]);
+        assert_eq!(upd2, vec![1, 0, 3]);
+        assert_eq!(upd3, vec![2, 3, 0]);
+        assert_eq!(v.len(), 9);
+        assert_eq!(v.hash_table().used_bucket_count(), 4);
+
+        let mut hist = [0u64; GAP_HISTOGRAM_BUCKETS];
+        let all = v
+            .find_coincident_pairs(
+                &k,
+                FindPairsOptions {
+                    histogram: Some(&mut hist),
+                    ..FindPairsOptions::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(sorted_item_pairs(&v, &all), [(1, 2), (1, 3), (2, 3)]);
+        assert_eq!(hist, [0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0]);
+
+        let subset_buckets = [1, 3];
+        let sub = v
+            .find_coincident_pairs(
+                &k,
+                FindPairsOptions {
+                    buckets: Some(&subset_buckets),
+                    histogram: Some(&mut hist),
+                    ..FindPairsOptions::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(sorted_item_pairs(&v, &sub), [(1, 2), (2, 3)]);
+        assert_eq!(hist, [0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0]);
+
+        let empty = v
+            .find_coincident_pairs(
+                &k,
+                FindPairsOptions {
+                    buckets: Some(&[]),
+                    histogram: Some(&mut hist),
+                    ..FindPairsOptions::default()
+                },
+            )
+            .unwrap();
+        assert!(empty.first.is_empty());
+        assert_eq!(hist, [0, 0, 0, 0, 0, 8, 0, 0, 0, 0, 0]);
+        assert!(matches!(
+            v.find_coincident_pairs(
+                &k,
+                FindPairsOptions {
+                    buckets: Some(&[4]),
+                    ..FindPairsOptions::default()
+                },
+            ),
+            Err(SolidError::InvalidInput {
+                operation: "geom::hash_table::ObjsInVoxels::find_coincident_pairs",
+                reason: "bucket index out of range",
+            })
+        ));
+
+        // limit_index: items 1 (id 0) and 2 (id 1) are below lim = 2; items 3
+        // (id 2), 4 (id 3) and non-coincident 5 (id 4) are >= lim. Bucket 0 order
+        // is [0, 4, 3, 2, 1], exercising <lim vs >=lim, >=lim vs <lim, >=lim vs
+        // >=lim, and skipping only (0, 1).
+        let mut w: ObjsInVoxels<u32> = ObjsInVoxels::new(1, 1, 1, Some(&unit_box()), 0).unwrap();
+        w.add(1, Vec3::new(0.5, 0.5, 0.5), 1e-3, None).unwrap();
+        w.add(2, Vec3::new(0.5, 0.5, 0.5), 1e-3, None).unwrap();
+        let lim = w.len();
+        assert_eq!(lim, 2);
+        let q3 = Vec3::new(0.5 + 5e-7, 0.5, 0.5);
+        let q4 = Vec3::new(0.5 + 5e-5, 0.5, 0.5);
+        let q5 = Vec3::new(0.9, 0.5, 0.5);
+        w.add(3, q3, 1e-3, None).unwrap();
+        w.add(4, q4, 1e-3, None).unwrap();
+        w.add(5, q5, 1e-3, None).unwrap();
+
+        let mut lim_hist = [0u64; GAP_HISTOGRAM_BUCKETS];
+        let inc = w
+            .find_coincident_pairs(
+                &k,
+                FindPairsOptions {
+                    limit_index: Some(lim),
+                    histogram: Some(&mut lim_hist),
+                    ..FindPairsOptions::default()
+                },
+            )
+            .unwrap();
+        let exp_inc = [(1, 3), (1, 4), (2, 3), (2, 4), (3, 4)];
+        assert_eq!(sorted_item_pairs(&w, &inc), exp_inc);
+        assert_eq!(lim_hist, [0, 0, 2, 0, 3, 0, 0, 0, 4, 0, 0]);
+
+        let mut full_hist = [0u64; GAP_HISTOGRAM_BUCKETS];
+        let full = w
+            .find_coincident_pairs(
+                &k,
+                FindPairsOptions {
+                    histogram: Some(&mut full_hist),
+                    ..FindPairsOptions::default()
+                },
+            )
+            .unwrap();
+        let exp_full = [(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)];
+        assert_eq!(sorted_item_pairs(&w, &full), exp_full);
+        assert_eq!(full_hist, [1, 0, 2, 0, 3, 0, 0, 0, 4, 0, 0]);
     }
 }
