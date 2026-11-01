@@ -109,16 +109,17 @@ pub(super) fn label_column(ui: &Ui, text: &str, row_width: f32) -> f32 {
     };
     let needed = widest + t.space_4;
     if let Some(&key) = ui.stack().iter().find_map(|node| node.tags().get_downcast::<egui::Id>(super::layout::GROW_LABEL)) {
-        // A growing card (#10620): the column takes the width the widest label needs, past the
-        // 1.6x cap, and the extra the card must gain over its design width is published under
-        // `key` so the card widens by the same amount and the control column keeps its room.
-        let extra = (needed - t.form_label_width).max(0.0);
+        // A growing card (#10620): labels up to the ordinary 1.6x cap keep the design's card
+        // width; a longer label grows the column past the cap, and the extra the card must
+        // gain is published under `key` so the card widens by the same amount and the
+        // control column keeps its design width.
+        let extra = (needed - base * LABEL_COLUMN_MAX).max(0.0);
         let previous = ui.ctx().data(|d| d.get_temp::<f32>(key)).unwrap_or(0.0);
         if (extra - previous).abs() > 0.5 {
             ui.ctx().request_discard("dialog label column width");
         }
         ui.ctx().data_mut(|d| d.insert_temp(key, extra));
-        return needed.max(t.form_label_width).min(row_width * 0.6);
+        return needed.max(base).min(row_width * 0.7);
     }
     needed.clamp(base, base * LABEL_COLUMN_MAX).min(row_width * 0.5)
 }

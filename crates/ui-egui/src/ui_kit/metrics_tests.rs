@@ -1,7 +1,7 @@
+use crate::theme::Tokens;
 use crate::ui_kit::metrics::dimension;
 use crate::ui_kit::test_support::*;
 use crate::ui_kit::*;
-use crate::theme::Tokens;
 
 use crate::scenario;
 
@@ -37,11 +37,9 @@ fn a_growing_form_widens_past_the_cap_and_publishes_the_card_extra() {
     for _ in 0..3 {
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             ui.set_width(300.0);
-            scope(ui, |ui| {
-                grow_form(ui, key, |ui| {
-                    let mut value = String::new();
-                    row(ui, long, |ui| field(ui, &mut value));
-                });
+            scope_grow(ui, key, |ui| {
+                let mut value = String::new();
+                row(ui, long, |ui| field(ui, &mut value));
             });
         });
         output.textures_delta.clear();
@@ -52,7 +50,7 @@ fn a_growing_form_widens_past_the_cap_and_publishes_the_card_extra() {
     assert!(label.width() > t.form_label_width * 1.6, "past the ordinary cap: {label:?}");
     assert!(label.width() >= measured, "the label fits its column: {label:?} vs {measured}");
     let extra = ctx.data(|d| d.get_temp::<f32>(key)).unwrap();
-    assert!((extra - (label.width() - t.form_label_width)).abs() < 0.01, "the card grows by the column's extra: {extra}");
+    assert!((extra - (label.width() - t.form_label_width * 1.6)).abs() < 0.01, "the card grows only past the cap: {extra}");
 }
 
 #[test]

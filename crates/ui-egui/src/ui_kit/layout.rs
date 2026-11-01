@@ -10,11 +10,11 @@ pub(super) const FIXED_LABEL: &str = "sc_fixed_label_width";
 pub(super) const GROW_LABEL: &str = "sc_grow_label_column";
 
 /// A form whose card widens so its widest label fits (#10620). Each pass the form publishes,
-/// under `key`, the width its label column needs beyond the design's `form_label_width`; the
-/// card's owner reads that before opening the card, so the card settles one frame later.
+/// under `key`, the width its label column needs beyond the design's 1.6x cap; the card's
+/// owner reads that before opening the card, so the card settles one frame later.
 /// Tokens: `form_label_width, font_label, dialog_label, space_4`.
-pub(crate) fn grow_form<R>(ui: &mut Ui, key: egui::Id, add: impl FnOnce(&mut Ui) -> R) -> R {
-    ui.scope_builder(egui::UiBuilder::new().ui_stack_info(egui::UiStackInfo::default().with_tag_value(GROW_LABEL, key)), add).inner
+pub(crate) fn scope_grow<R>(ui: &mut Ui, key: egui::Id, add: impl FnOnce(&mut Ui) -> R) -> R {
+    scope_inner(ui, Some(key), add)
 }
 
 /// A deliberate label grid for multi-column settings, inherited by the existing shared rows.
@@ -26,7 +26,15 @@ pub(crate) fn settings_form<R>(ui: &mut Ui, label_width: f32, add: impl FnOnce(&
 /// Mark a form without global state: children inherit this tag through their UI stack.
 /// Inherited form styling and label-column identity. Tokens: `space_4/8, form_gap_y, control_height, font_label, accent, selected_bg, dialog_rule, control_fill/border/radius, text`.
 pub(crate) fn scope<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
-    ui.scope_builder(egui::UiBuilder::new().ui_stack_info(egui::UiStackInfo::default().with_tag(FORM)), |ui| {
+    scope_inner(ui, None, add)
+}
+
+fn scope_inner<R>(ui: &mut Ui, grow: Option<egui::Id>, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let mut info = egui::UiStackInfo::default().with_tag(FORM);
+    if let Some(key) = grow {
+        info = info.with_tag_value(GROW_LABEL, key);
+    }
+    ui.scope_builder(egui::UiBuilder::new().ui_stack_info(info), |ui| {
         let t = Tokens::get();
         ui.spacing_mut().item_spacing = vec2(t.space_4, t.form_gap_y);
         ui.spacing_mut().interact_size.y = row_height();

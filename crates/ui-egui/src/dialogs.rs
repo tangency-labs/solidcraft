@@ -3361,7 +3361,16 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let ok_enabled = valid && !ok_label.is_empty() && app.applying.is_none();
     // #10620: the card widens to fit its widest label in the current language. The body
     // publishes the extra it needs under this key each pass; the card applies it next pass,
-    // so the label column grows and the control column keeps its design width.
+    // so the label column grows and the control column keeps its design width. Manager cards
+    // keep their approved fixed width.
+    let manager = matches!(
+        d.kind,
+        Kind::Material { .. }
+            | Kind::Appearance(_)
+            | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })
+            | Kind::Sheet(crate::dialogs_sheet::Sm::Rules { .. })
+            | Kind::Plastic(crate::dialogs_plastic::Pl::Rules { .. })
+    );
     let grow_key = egui::Id::new(("sc_dialog_label_grow", raw_title));
     let label_grow = ctx.data(|data| data.get_temp::<f32>(grow_key)).unwrap_or(0.0).min((vp.width() - t.space_24 - card_width(&d)).max(0.0));
     let panel = crate::ui_kit::Panel::new(&heading, egui::Id::new(("sc_dialog", title(&d.kind))), anchor, drag_bounds, side, frame)
@@ -3371,8 +3380,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     } else if wide && side == crate::frame::Side::Left {
         let available = app.viewport.palette_rect.map_or(vp.width(), |r| (r.left() - vp.left() - t.space_8).max(0.0));
         panel.width(card_width(&d).min(available))
+    } else if manager {
+        panel.width(card_width(&d))
     } else {
-        panel.width(card_width(&d) + label_grow)
+        panel.width(card_width(&d) + label_grow).grow_label(grow_key)
     };
     let reset_scroll = d.reset_scroll;
     let panel =
@@ -3406,20 +3417,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             let heading = crate::ui_kit::FeatureOptions { icon, title: label, drag_key, moved, docked, apply_label: repeatable.then_some("Apply") };
             let applying = app.applying.is_some();
             let mut collapsed = d.collapsed;
-            let manager = matches!(
-                d.kind,
-                Kind::Material { .. }
-                    | Kind::Appearance(_)
-                    | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })
-                    | Kind::Sheet(crate::dialogs_sheet::Sm::Rules { .. })
-                    | Kind::Plastic(crate::dialogs_plastic::Pl::Rules { .. })
-            );
             // A study/configuration owns Enter for its cells, including when folded.
             let cell_enter = matches!(&d.kind, Kind::Motion(k) if k.wide()) || matches!(&d.kind, Kind::Material { editor, .. } if editor.editing());
             if cell_enter && collapsed {
                 ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
             }
-            let mut body = |ui: &mut egui::Ui| {
+            let body = |ui: &mut egui::Ui| {
                 d.sync_fillet_chain(&app.session);
                 crate::hole_presets::rows(ui, &mut d, &mut app.preferences.hole_presets, &app.session.doc, reset_scroll);
                 crate::personal_sheet_rules::rows(ui, &mut d, &mut app.preferences.personal_sheet_rules, &app.session.doc, reset_scroll);
@@ -3439,7 +3442,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             let (closed, action) = if manager {
                 panel.feature_collapsible(ui, heading, applying, valid, &mut collapsed, body)
             } else {
-                panel.feature(ui, heading, applying, valid, |ui| crate::ui_kit::grow_form(ui, grow_key, |ui| body(ui)))
+                panel.feature(ui, heading, applying, valid, body)
             };
             d.reset_scroll = false;
             d.collapsed = collapsed;

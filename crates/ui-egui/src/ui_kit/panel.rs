@@ -282,6 +282,7 @@ pub(crate) struct Panel<'a> {
     cancel: &'a str,
     reset_scroll: bool,
     joined: Option<super::DockEdges>,
+    grow_key: Option<egui::Id>,
 }
 
 pub(crate) struct WorkspaceOptions<'a> {
@@ -600,6 +601,7 @@ impl<'a> Panel<'a> {
             cancel: "Cancel",
             reset_scroll: false,
             joined: None,
+            grow_key: None,
         }
     }
 
@@ -618,6 +620,13 @@ impl<'a> Panel<'a> {
 
     pub(crate) fn width(mut self, width: f32) -> Self {
         self.width = width;
+        self
+    }
+
+    /// The feature card's form measures its labels and publishes the width it needs under
+    /// this key, so the card can widen for the current language (#10620).
+    pub(crate) fn grow_label(mut self, key: egui::Id) -> Self {
+        self.grow_key = Some(key);
         self
     }
 
@@ -759,7 +768,7 @@ impl<'a> Panel<'a> {
         mut collapsed: Option<&mut bool>,
         body: impl FnOnce(&mut Ui) -> ComputeStatus,
     ) -> (bool, super::Action) {
-        super::scope(ui, |ui| {
+        let card = |ui: &mut Ui| {
             let t = Tokens::get();
             let min = ui.cursor().min;
             let band = egui::Rect::from_min_size(min, vec2(ui.available_width(), super::header_height()));
@@ -845,7 +854,11 @@ impl<'a> Panel<'a> {
             );
             super::Container::finish_content(ui, self.positioned_frame(ui.ctx()));
             (close, action)
-        })
+        };
+        match self.grow_key {
+            Some(key) => super::scope_grow(ui, key, card),
+            None => super::scope(ui, card),
+        }
     }
 
     /// Palette composition retains its compact padding and whole-card scrolling on short views.
