@@ -1591,9 +1591,10 @@ impl SolveApp {
             }
             return;
         }
-        // Print Face (Ctrl+B) acts on the selected face at once: it has no dialog.
+        // Print Face (Ctrl+B) opens Send to Slicer to pick it, or with the old preference acts on
+        // the selected face at once.
         if id == "body.print_face" {
-            print_face_ui::toggle(self);
+            print_face_ui::start(self);
             return;
         }
         if id == "view.normal_to" {

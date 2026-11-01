@@ -1,6 +1,10 @@
-//! The print face in the app (#8429): Ctrl+B and the face menu mark the selected flat face as its
-//! body's print face, or clear it when it already is one; the Send to Slicer window shows and
-//! changes it (`dialogs_save_mesh`). Each change is a `body.print_face` command, so it undoes.
+//! The print face in the app (#8429): the Send to Slicer window picks, shows and clears it
+//! (`dialogs_save_mesh`), and the view shows it only while that window is open, for the bodies
+//! being sent. Print Face (Ctrl+B) opens that window with its Print face input ready for a pick
+//! (Bodies first when no body is selected).
+//! With the `print_face_everywhere` preference it works as it first did: Ctrl+B and the face menu
+//! mark the selected flat face as its body's print face, or clear it when it already is one, and
+//! the view shows every print face. Each change is a `body.print_face` command, so it undoes.
 
 use serde_json::json;
 use solidcraft_engine::Sel;
@@ -32,8 +36,37 @@ pub(crate) fn set(app: &mut SolveApp, body: &str, face: Option<&Sel>) -> bool {
     app.run("body.print_face", params).is_ok()
 }
 
-/// Ctrl+B and the face menu: the one selected face becomes its body's print face, or stops being
-/// it when it already is.
+/// Print Face (Ctrl+B, the command palette): Send to Slicer, with its Print face input taking
+/// picks when the selection gave it bodies, else Bodies; with `print_face_everywhere`, [`toggle`].
+pub(crate) fn start(app: &mut SolveApp) {
+    if app.preferences.print_face_everywhere {
+        return toggle(app);
+    }
+    app.start("file.send_to_slicer");
+    if let Some(d) = app.dialog.as_mut().filter(|d| sending(&d.kind)) {
+        let bodies = d.inputs.first().is_some_and(|i| !i.items.is_empty());
+        d.active = if bodies { 1.min(d.inputs.len().saturating_sub(1)) } else { 0 };
+    }
+}
+
+/// `kind` is the Send to Slicer window (or Open in EasyPrint, which shares it).
+fn sending(kind: &crate::dialogs::Kind) -> bool {
+    matches!(kind, crate::dialogs::Kind::SaveMesh(k) if crate::dialogs_save_mesh::command_id(k) == "file.send_to_slicer")
+}
+
+/// The bodies whose print faces the view shows: `None` for every body (`print_face_everywhere`),
+/// else the Bodies of an open Send to Slicer window, else none.
+pub(crate) fn drawn_bodies(app: &SolveApp) -> Option<Vec<String>> {
+    if app.preferences.print_face_everywhere {
+        return None;
+    }
+    use crate::selection::SelectionExt as _;
+    let open = app.dialog.as_ref().filter(|d| sending(&d.kind));
+    Some(open.map(|d| crate::selection::items(&d.inputs, 0).body_names()).unwrap_or_default())
+}
+
+/// Ctrl+B and the face menu with `print_face_everywhere`: the one selected face becomes its body's
+/// print face, or stops being it when it already is.
 pub(crate) fn toggle(app: &mut SolveApp) {
     let picked = match app.session.selection.as_slice() {
         [face @ Sel::Face { body, index, .. }] => Some((face.clone(), body.clone(), *index)),
@@ -52,6 +85,7 @@ pub(crate) fn toggle(app: &mut SolveApp) {
 
 #[cfg(test)]
 mod tests {
+    use crate::selection::SelectionExt as _;
     use serde_json::json;
     use solidcraft_engine::Sel;
 
@@ -59,6 +93,151 @@ mod tests {
         let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         app.run("solid.box", json!({"length": 20, "width": 10, "height": 5, "corner": [0, 0, 0], "body_name": "Block"})).unwrap();
         app
+    }
+
+    /// [`app`] as it was first: Print Face (Ctrl+B) and the face menu mark the selected face.
+    fn app_everywhere() -> crate::SolveApp {
+        let mut app = app();
+        app.preferences.print_face_everywhere = true;
+        app
+    }
+
+    /// [`app`] with a second box, Lid, beside Block, and a way to start a slicer.
+    fn two_bodies() -> crate::SolveApp {
+        let mut app = app();
+        app.run("solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [40, 0, 0], "body_name": "Lid"})).unwrap();
+        app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        app
+    }
+
+    /// The face of `body` at `point`, as a pick.
+    fn face(app: &crate::SolveApp, body: &str, point: [f64; 3]) -> Sel {
+        let world = app.session.world_state();
+        let p = solidcraft_engine::geom::Vec3::new(point[0], point[1], point[2]);
+        let index = solidcraft_engine::doc::appearance::face_index_at(world.body(body).unwrap(), p).unwrap();
+        Sel::Face { body: body.into(), index, point: p }
+    }
+
+    /// One frame of the open Send to Slicer window, after `change` to its inputs.
+    fn frame(app: &mut crate::SolveApp, change: impl FnOnce(&mut [crate::selection::SelInput])) {
+        let mut d = app.dialog.take().expect("Send to Slicer is open");
+        change(&mut d.inputs);
+        let crate::dialogs::Kind::SaveMesh(k) = &mut d.kind else { panic!("not Send to Slicer") };
+        crate::dialogs_save_mesh::sync_print_faces(app, k, &mut d.inputs);
+        app.dialog = Some(d);
+    }
+
+    fn inputs(app: &crate::SolveApp) -> &[crate::selection::SelInput] {
+        &app.dialog.as_ref().unwrap().inputs
+    }
+
+    fn picked(app: &crate::SolveApp) -> Vec<(String, usize)> {
+        inputs(app)[1].items.iter().filter_map(|s| if let Sel::Face { body, index, .. } = s { Some((body.clone(), *index)) } else { None }).collect()
+    }
+
+    /// Send to Slicer's Print face input takes one flat face per body, for several bodies: a face
+    /// of a body not being sent adds that body, a second face of one replaces its first, and a face
+    /// taken out clears it. The design keeps each, and the window shows them again when reopened.
+    #[test]
+    fn send_to_slicer_picks_one_print_face_per_body_and_adds_its_body() {
+        let mut app = two_bodies();
+        app.session.selection = vec![Sel::Body { name: "Block".into() }];
+        app.start("file.send_to_slicer");
+        assert!(inputs(&app)[1].multi);
+        frame(&mut app, |_| {});
+        assert!(picked(&app).is_empty());
+        let side = face(&app, "Block", [20.0, 5.0, 2.5]);
+        frame(&mut app, |i| i[1].items.push(side.clone()));
+        let lid = face(&app, "Lid", [45.0, 5.0, 5.0]);
+        frame(&mut app, |i| i[1].items.push(lid.clone()));
+        let bodies = crate::selection::items(inputs(&app), 0).body_names();
+        assert_eq!(bodies, ["Block", "Lid"], "Lid joins the bodies being sent");
+        assert!(super::is_print_face(&app, "Block", face_index(&side)));
+        assert!(super::is_print_face(&app, "Lid", face_index(&lid)));
+        assert_eq!(picked(&app).len(), 2);
+        // Another face of Block replaces the first: one per body.
+        let bottom = face(&app, "Block", [10.0, 5.0, 0.0]);
+        frame(&mut app, |i| i[1].items.push(bottom.clone()));
+        assert_eq!(picked(&app).len(), 2);
+        assert!(super::is_print_face(&app, "Block", face_index(&bottom)));
+        // Taking Lid's out clears it.
+        frame(&mut app, |i| i[1].items.retain(|s| !matches!(s, Sel::Face { body, .. } if body == "Lid")));
+        assert!(!app.session.doc.print_faces.contains_key("Lid"));
+        assert!(app.session.doc.print_faces.contains_key("Block"));
+        // An undo shows in the window.
+        app.run("edit.undo", json!({})).unwrap();
+        frame(&mut app, |_| {});
+        assert_eq!(picked(&app).len(), 2, "undo brings Lid's back");
+        // Kept per body: taking Lid out of Bodies leaves its print face, only unshown.
+        frame(&mut app, |i| i[0].items.retain(|s| !matches!(s, Sel::Body { name } if name == "Lid")));
+        assert_eq!(picked(&app).len(), 1);
+        assert!(app.session.doc.print_faces.contains_key("Lid"));
+        crate::dialogs::cancel(&mut app);
+        app.session.selection = vec![Sel::Body { name: "Lid".into() }, Sel::Body { name: "Block".into() }];
+        app.start("file.send_to_slicer");
+        frame(&mut app, |_| {});
+        assert_eq!(picked(&app).len(), 2, "reopened, it shows both");
+    }
+
+    fn face_index(sel: &Sel) -> usize {
+        if let Sel::Face { index, .. } = sel { *index } else { usize::MAX }
+    }
+
+    /// The view shows print faces only while Send to Slicer is open, for the bodies it sends; with
+    /// `print_face_everywhere`, always and for every body.
+    #[test]
+    fn print_faces_are_drawn_only_for_the_bodies_send_to_slicer_sends() {
+        let mut app = two_bodies();
+        assert_eq!(super::drawn_bodies(&app), Some(vec![]));
+        app.session.selection = vec![Sel::Body { name: "Lid".into() }];
+        app.start("file.send_to_slicer");
+        assert_eq!(super::drawn_bodies(&app), Some(vec!["Lid".to_string()]));
+        crate::dialogs::cancel(&mut app);
+        assert_eq!(super::drawn_bodies(&app), Some(vec![]));
+        app.preferences.print_face_everywhere = true;
+        assert_eq!(super::drawn_bodies(&app), None);
+    }
+
+    /// Print Face (Ctrl+B) opens Send to Slicer with its Print face input taking picks, and the
+    /// face menu has Send to Slicer and no Print Face; with the old preference, both as before.
+    #[test]
+    fn print_face_lives_in_send_to_slicer_unless_the_preference_keeps_it_everywhere() {
+        let mut app = two_bodies();
+        let side = face(&app, "Block", [20.0, 5.0, 2.5]);
+        app.session.selection = vec![side.clone()];
+        let menu = |app: &crate::SolveApp| -> Vec<String> {
+            crate::context_menu::items(app, &crate::context_menu::Target::Viewport).into_iter().map(|i| i.id).collect()
+        };
+        let ids = menu(&app);
+        assert!(ids.iter().any(|id| id == "ui.sendToSlicer"), "{ids:?}");
+        assert!(!ids.iter().any(|id| id == "body.print_face"), "{ids:?}");
+        app.start("body.print_face");
+        let d = app.dialog.as_ref().expect("Send to Slicer opens");
+        assert_eq!(d.inputs[d.active].label, "Print face");
+        assert!(app.session.doc.print_faces.is_empty(), "nothing is marked until a face is picked");
+        crate::dialogs::cancel(&mut app);
+        // Nothing selected: the bodies come first.
+        app.session.selection.clear();
+        app.start("body.print_face");
+        let d = app.dialog.as_ref().expect("Send to Slicer opens");
+        assert_eq!(d.inputs[d.active].label, "Bodies");
+        crate::dialogs::cancel(&mut app);
+        // Faces of two bodies selected: the face menu's Send to Slicer and Save As Mesh take both.
+        app.session.selection = vec![side.clone(), face(&app, "Lid", [45.0, 5.0, 5.0])];
+        let two = app.session.selection.clone();
+        for id in ["ui.sendToSlicer", "ui.saveMesh"] {
+            app.session.selection = two.clone();
+            let item = crate::context_menu::items(&app, &crate::context_menu::Target::Viewport).into_iter().find(|i| i.id == id);
+            crate::context_menu::run_item(&mut app, &item.expect("in the face menu"), egui::Pos2::ZERO);
+            assert_eq!(crate::selection::items(inputs(&app), 0).body_names(), ["Block", "Lid"], "{id}");
+            crate::dialogs::cancel(&mut app);
+        }
+        app.session.selection = vec![side.clone()];
+        app.preferences.print_face_everywhere = true;
+        assert!(menu(&app).iter().any(|id| id == "body.print_face"));
+        app.start("body.print_face");
+        assert!(app.dialog.is_none());
+        assert!(app.session.doc.print_faces.contains_key("Block"));
     }
 
     /// Select the face of Block at `point`; its index.
@@ -73,7 +252,7 @@ mod tests {
 
     #[test]
     fn ctrl_b_marks_the_selected_face_and_clears_it_the_second_time() {
-        let mut app = app();
+        let mut app = app_everywhere();
         let index = select_face(&mut app, [20.0, 5.0, 2.5]);
         app.start("body.print_face");
         assert!(app.session.doc.print_faces.contains_key("Block"));
@@ -86,7 +265,7 @@ mod tests {
 
     #[test]
     fn ctrl_b_without_one_face_selected_marks_nothing() {
-        let mut app = app();
+        let mut app = app_everywhere();
         app.session.selection = vec![Sel::Body { name: "Block".into() }];
         app.start("body.print_face");
         assert!(app.session.doc.print_faces.is_empty());
