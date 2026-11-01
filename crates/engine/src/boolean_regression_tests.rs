@@ -1492,3 +1492,54 @@ fn join_that_meets_no_body_keeps_the_piece_and_says_so() {
     let combine = s.execute("solid.combine", &json!({"target": "A", "tools": ["B"], "operation": "join"})).unwrap();
     assert!(combine["warning"].is_null(), "{combine}");
 }
+
+/// #7317: a cut that opens on no face leaves a closed cavity and says so, with the void's volume.
+/// A cut that opens on the outside, one that touches no material and a cup shelled on purpose
+/// say nothing.
+#[test]
+fn cut_that_leaves_a_closed_cavity_says_so() {
+    let plot = || {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"corner": [-10, -20, 0], "length": 20, "width": 20, "height": 10, "operation": "new", "body_name": "Plot"}))
+            .unwrap();
+        s
+    };
+    let magnet = |height: f64| json!({"base": [0, -2.2, 5], "axis": [0, 1, 0], "radius": 3.1, "height": height, "operation": "cut", "targets": ["Plot"], "name": "Logement"});
+
+    // Through the y = 0 face: one shell, nothing to say.
+    let mut s = plot();
+    let open = s.execute("solid.cylinder", &magnet(2.3)).unwrap();
+    assert!(open["warning"].is_null(), "{open}");
+    assert_eq!(s.model.state().body("Plot").map(|b| b.body.shell_count()), Some(1));
+
+    // Shorter, it stops inside the body: a cavity of pi * 3.1² * 2.0 mm³, told in the reply and on the feature.
+    let mut s = plot();
+    let closed = s.execute("solid.cylinder", &magnet(2.0)).unwrap();
+    assert_eq!(s.model.state().body("Plot").map(|b| b.body.shell_count()), Some(2));
+    let note = closed["warning"].as_str().unwrap_or_default();
+    assert!(note.contains("closed cavity") && note.contains("60.38"), "{closed}");
+    assert_eq!(s.model.results.last().and_then(|r| r.warning.as_deref()), closed["warning"].as_str());
+
+    // The same feature edited from the opening height to the closed one.
+    let mut s = plot();
+    s.execute("solid.cylinder", &magnet(2.3)).unwrap();
+    s.execute("timeline.edit", &json!({"feature": "Logement", "set": {"height": "2.0"}})).unwrap();
+    assert!(s.model.results.last().and_then(|r| r.warning.as_deref()).is_some_and(|w| w.contains("closed cavity")));
+
+    // A cut that misses the body changes nothing and says nothing here.
+    let mut s = plot();
+    let away = s
+        .execute(
+            "solid.cylinder",
+            &json!({"base": [0, 50, 5], "axis": [0, 1, 0], "radius": 3.1, "height": 2.0, "operation": "cut", "targets": ["Plot"]}),
+        )
+        .unwrap();
+    assert!(!away["warning"].as_str().unwrap_or_default().contains("closed cavity"), "{away}");
+
+    // A cup made by cutting from its top: open, no warning.
+    let mut s = plot();
+    let cup = s
+        .execute("solid.box", &json!({"length": 16, "width": 16, "height": 10, "center": [0, -10, 6], "operation": "cut", "targets": ["Plot"]}))
+        .unwrap();
+    assert!(!cup["warning"].as_str().unwrap_or_default().contains("closed cavity"), "{cup}");
+}

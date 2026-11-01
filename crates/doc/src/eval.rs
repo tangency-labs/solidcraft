@@ -2391,6 +2391,7 @@ impl Model {
                 }
                 track_altered_sheets(&state, &mut next, f, &mut warning);
                 note_join_apart(&state, &next, f, &mut warning);
+                note_cut_cavity(&state, &next, f, &mut warning);
             } else {
                 boolean_diagnostics = Default::default();
             }
@@ -2881,24 +2882,7 @@ fn track_altered_sheets(before: &ModelState, after: &mut ModelState, f: &Feature
 /// when Join was left on by mistake. Says so when a feature's Join leaves the bodies it changed
 /// in more pieces than they had (#4434). Combine joins the bodies it is given, apart or not.
 fn note_join_apart(before: &ModelState, after: &ModelState, f: &Feature, warning: &mut Option<String>) {
-    let operation = match &f.kind {
-        FeatureKind::Extrude { operation, .. }
-        | FeatureKind::Revolve { operation, .. }
-        | FeatureKind::Box { operation, .. }
-        | FeatureKind::Cylinder { operation, .. }
-        | FeatureKind::Sphere { operation, .. }
-        | FeatureKind::Torus { operation, .. }
-        | FeatureKind::Cone { operation, .. }
-        | FeatureKind::Loft { operation, .. }
-        | FeatureKind::Sweep { operation, .. }
-        | FeatureKind::Pipe { operation, .. }
-        | FeatureKind::Coil { operation, .. }
-        | FeatureKind::BoundaryFill { operation, .. }
-        | FeatureKind::Thicken { operation, .. }
-        | FeatureKind::SurfaceNetwork { operation, .. } => *operation,
-        _ => return,
-    };
-    if operation != Operation::Join {
+    if feature_operation(f) != Some(Operation::Join) {
         return;
     }
     for (name, n) in join_pieces_added(before, after) {
@@ -2932,6 +2916,56 @@ pub fn join_pieces_added(before: &ModelState, after: &ModelState) -> Vec<(String
         }
     }
     if have <= had { Vec::new() } else { grown }
+}
+
+/// A Cut whose tool never reaches the outside of a body leaves a closed cavity in it: valid, but
+/// rarely meant (a hole whose tool was shortened until it stopped short of the face, #7317).
+/// Says so, with the volume of the new void, when a feature's Cut leaves a body with more
+/// closed voids than it had.
+fn note_cut_cavity(before: &ModelState, after: &ModelState, f: &Feature, warning: &mut Option<String>) {
+    if feature_operation(f) != Some(Operation::Cut) {
+        return;
+    }
+    for was in &before.bodies {
+        let Some(now) = after.body(&was.name) else { continue };
+        // Only a body with more shells can have gained a void, and it is the cheap test.
+        if now.body.shell_count() <= was.body.shell_count() || now.body.same_shape(&was.body) {
+            continue;
+        }
+        let (old, new) = (was.body.void_volumes(), now.body.void_volumes());
+        if new.len() > old.len() {
+            let gained = new.iter().sum::<f64>() - old.iter().sum::<f64>();
+            append_warning(
+                warning,
+                format!(
+                    "the cut doesn't open on any face of `{}`: it leaves a closed cavity of {} mm³ inside it (extend the tool through the face to open it)",
+                    now.name,
+                    show_mm((gained * 100.0).round() / 100.0)
+                ),
+            );
+        }
+    }
+}
+
+/// The operation of a feature that makes or changes bodies with one.
+fn feature_operation(f: &Feature) -> Option<Operation> {
+    Some(match &f.kind {
+        FeatureKind::Extrude { operation, .. }
+        | FeatureKind::Revolve { operation, .. }
+        | FeatureKind::Box { operation, .. }
+        | FeatureKind::Cylinder { operation, .. }
+        | FeatureKind::Sphere { operation, .. }
+        | FeatureKind::Torus { operation, .. }
+        | FeatureKind::Cone { operation, .. }
+        | FeatureKind::Loft { operation, .. }
+        | FeatureKind::Sweep { operation, .. }
+        | FeatureKind::Pipe { operation, .. }
+        | FeatureKind::Coil { operation, .. }
+        | FeatureKind::BoundaryFill { operation, .. }
+        | FeatureKind::Thicken { operation, .. }
+        | FeatureKind::SurfaceNetwork { operation, .. } => *operation,
+        _ => return None,
+    })
 }
 
 /// Add tool bodies to the model according to the operation.
