@@ -599,11 +599,21 @@ impl OffscreenFrames {
 
     /// Draw one frame and wait for the GPU: milliseconds from `prepare` to the work finishing.
     pub(crate) fn frame(&mut self, frame: Frame) -> f64 {
+        let [prepare, paint, wait] = self.frame_parts(frame);
+        prepare + paint + wait
+    }
+
+    /// [`Self::frame`] in its parts, in milliseconds: the renderer's `prepare` (uploads, culling),
+    /// recording the draws (`paint`), and the GPU's work until it has finished.
+    pub(crate) fn frame_parts(&mut self, frame: Frame) -> [f64; 3] {
+        let ms = |t: std::time::Instant| t.elapsed().as_secs_f64() * 1000.0;
         let started = std::time::Instant::now();
         let cb = ViewportCallback(frame);
         let mut encoder = self.device.create_command_encoder(&Default::default());
         let screen = egui_wgpu::ScreenDescriptor { size_in_pixels: [self.size, self.size], pixels_per_point: 1.0 };
         let extra = egui_wgpu::CallbackTrait::prepare(&cb, &self.device, &self.queue, &screen, &mut encoder, &mut self.resources);
+        let prepare = ms(started);
+        let painted = std::time::Instant::now();
         {
             let mut pass = encoder
                 .begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -628,9 +638,11 @@ impl OffscreenFrames {
             let info = egui::PaintCallbackInfo { viewport: rect, clip_rect: rect, pixels_per_point: 1.0, screen_size_px: [self.size, self.size] };
             egui_wgpu::CallbackTrait::paint(&cb, info, &mut pass, &self.resources);
         }
+        let paint = ms(painted);
+        let waited = std::time::Instant::now();
         self.queue.submit(extra.into_iter().chain([encoder.finish()]));
         let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
-        started.elapsed().as_secs_f64() * 1000.0
+        [prepare, paint, ms(waited)]
     }
 
     /// What the model scene's last change uploaded.

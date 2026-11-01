@@ -130,7 +130,7 @@ pub struct ViewportState {
     lowered_noted: bool,
     /// The graphics backend and adapter, as the frame-rate details show them.
     pub(crate) adapter: String,
-    slot: SceneSlot,
+    pub(crate) slot: SceneSlot,
     pub(crate) key: u64,
     sketch_slot: SceneSlot,
     sketch_key: u64,

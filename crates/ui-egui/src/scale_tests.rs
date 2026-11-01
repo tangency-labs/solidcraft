@@ -745,3 +745,113 @@ fn sketch_scene_cost_while_the_camera_moves() {
         }
     }
 }
+
+/// Orbiting a large design with the right button, as a person turns the view: per frame, the
+/// window thread's frame (the model scene built, as the app builds it once a renderer is there),
+/// its named steps, and the renderer's prepare, draw recording and GPU work on an offscreen device
+/// (skipped without an adapter, as with `WGPU_BACKEND=metal` on Linux, to time the window thread
+/// alone). The design is `SOLIDCRAFT_SCALE_STEP` (inserted as the app opens a STEP file),
+/// `SOLIDCRAFT_SCALE_DESIGN` (opened), or the generated assembly of 300 parts and 500 placements.
+/// `SOLIDCRAFT_SCALE_LOOP` frames (default 60). `painted` fingerprints the window's picture once
+/// the view rests, to compare two builds. Run with `--ignored --nocapture`.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+#[ignore = "manual measurement on a design file"]
+fn orbit_frame_cost() {
+    const SIZE: u32 = 1024;
+    let mut h = if let Some(path) = std::env::var_os("SOLIDCRAFT_SCALE_STEP") {
+        let mut h = Harness::new();
+        h.app.run("file.insert_step", json!({"path": path.to_string_lossy()})).unwrap();
+        h
+    } else if let Some(path) = std::env::var_os("SOLIDCRAFT_SCALE_DESIGN") {
+        let mut h = Harness::new();
+        h.app.run("doc.open", json!({"path": path.to_string_lossy()})).unwrap();
+        h
+    } else {
+        assembly(300, 500)
+    };
+    let st = h.app.session.world_state();
+    st.warm_meshes(|| true);
+    for b in &st.bodies {
+        let _ = b.display_plan();
+    }
+    let bodies = st.bodies.len();
+    let triangles: usize = st.bodies.iter().map(|b| b.mesh().triangles.len()).sum();
+    drop(st);
+    let mut frames = crate::gpu::OffscreenFrames::new(SIZE, true);
+    h.app.viewport.gpu = match &frames {
+        Some(f) => f.target(),
+        None => Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false }),
+    };
+    h.app.fit_view();
+    h.frames(5);
+    let rect = h.app.viewport.rect.unwrap();
+    let at = rect.center();
+    let draw = |h: &Harness, frames: &mut Option<crate::gpu::OffscreenFrames>| -> [f64; 3] {
+        let Some(f) = frames.as_mut() else { return [0.0; 3] };
+        let v = &h.app.viewport;
+        f.frame_parts(view_frame(&h.app, SIZE, (v.key, &v.slot), (v.hl_key, &v.hl_slot)))
+    };
+    let cold = draw(&h, &mut frames);
+    let none = egui::Modifiers::NONE;
+    h.frame_with(vec![egui::Event::PointerMoved(at)]);
+    h.frame_with(vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed: true, modifiers: none }]);
+    let yaw = h.app.cam.yaw;
+    let n = std::env::var("SOLIDCRAFT_SCALE_LOOP").ok().and_then(|v| v.parse().ok()).unwrap_or(60usize);
+    let mut ui = Vec::new();
+    let mut parts = Vec::new();
+    let mut tess = Vec::new();
+    let mut steps: std::collections::BTreeMap<&'static str, Vec<f64>> = Default::default();
+    let mut scene_builds = 0;
+    for i in 0..n {
+        let key = h.app.viewport.key;
+        let p = at + egui::vec2(4.0 * ((i % 80) as f32 - 40.0).abs(), 0.0) - egui::vec2(160.0, 0.0);
+        ui.push(ms(|| h.frame_with(vec![egui::Event::PointerMoved(p)])));
+        let shapes = std::mem::take(&mut h.shapes);
+        tess.push(ms(|| drop(h.ctx.tessellate(shapes, 1.0))));
+        scene_builds += usize::from(h.app.viewport.key != key);
+        for (name, t) in h.app.frame_watch.steps() {
+            steps.entry(name).or_default().push(*t);
+        }
+        parts.push(draw(&h, &mut frames));
+    }
+    h.frame_with(vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed: false, modifiers: none }]);
+    assert_ne!(h.app.cam.yaw, yaw, "the right drag turned the view");
+    // What the window painted once the view rests, tessellated: positions, colours and
+    // triangles, the same between builds that only save work. Not the glyphs' places in the
+    // font atlas, which follow the order the text was first drawn in.
+    h.frames(3);
+    let painted = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        for clipped in h.ctx.tessellate(std::mem::take(&mut h.shapes), 1.0) {
+            [clipped.clip_rect.min.x, clipped.clip_rect.min.y, clipped.clip_rect.max.x, clipped.clip_rect.max.y].map(f32::to_bits).hash(&mut hasher);
+            if let egui::epaint::Primitive::Mesh(mesh) = clipped.primitive {
+                mesh.indices.hash(&mut hasher);
+                for v in &mesh.vertices {
+                    [v.pos.x.to_bits(), v.pos.y.to_bits()].hash(&mut hasher);
+                    v.color.to_array().hash(&mut hasher);
+                }
+            }
+        }
+        hasher.finish()
+    };
+    let median = |mut v: Vec<f64>| {
+        v.sort_by(f64::total_cmp);
+        v.get(v.len() / 2).copied().unwrap_or(0.0)
+    };
+    let mut line = format!(
+        "ORBIT bodies={bodies} triangles={triangles} frames={n} scene_builds={scene_builds} ui_ms={:.2} egui_tessellate_ms={:.2} prepare_ms={:.2} paint_ms={:.2} gpu_ms={:.2} cold_prepare_ms={:.1} drawn_triangles={} painted={painted:016x}",
+        median(ui),
+        median(tess),
+        median(parts.iter().map(|p| p[0]).collect()),
+        median(parts.iter().map(|p| p[1]).collect()),
+        median(parts.iter().map(|p| p[2]).collect()),
+        cold[0],
+        frames.as_ref().map_or(0, |f| f.stats().triangles),
+    );
+    for (name, t) in steps {
+        line.push_str(&format!(" [{name}]={:.2}", median(t)));
+    }
+    println!("{line}");
+}
