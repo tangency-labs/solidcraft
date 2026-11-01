@@ -10,18 +10,25 @@
 //!   reads as lost; an id the design never gave, or one of a component, folder, canvas or other
 //!   item that is not a feature, is an error. A point the feature doesn't drill is lost, since a
 //!   callout can't tell a deleted point from one that was never there.
-//! - The values come from the feature record, evaluated with the design's parameters as the
-//!   model evaluates it, so the callout follows edits. Through or blind comes from the feature
-//!   and the hole's own named faces (`F<id>:bore:…`): a hole with a depth is blind while its
-//!   bore keeps a floor on its axis, and through when the depth reaches past the material. A
-//!   hole whose bore is in the model the feature made but not in the model as it is now was
-//!   removed by a later feature, and reads as failed with that reason. The depth is the
-//!   feature's, measured from the face the hole starts on. A later `solid.move` of the hole's
-//!   body is followed, so the hole is looked for where the move put it, and `start` and
-//!   `direction` are in the frame of the model as it is now (of the hole's own component, the
-//!   same for every placement of it). A body moved any other way reads as failed.
+//! - The numbers (diameter, depth, thread, form) come from the feature record, evaluated with
+//!   the design's parameters as the model evaluates it, so the callout follows edits. Only
+//!   through or blind is read from the model as it is now, from the hole's own named faces
+//!   (`F<id>:bore:…`): a hole with a depth is blind while its bore keeps a floor on its axis, and
+//!   through when the depth reaches past the material. A hole whose bore is in the model the
+//!   feature made but not in the model as it is now was removed by a later feature, and reads as
+//!   failed with that reason. A bore whose wall is no longer of the feature's diameter, or whose
+//!   flat floor is no longer at its depth, was changed by a later feature that kept its faces'
+//!   names (an offset face, a scale), and reads as failed too; a drill point's cone and the
+//!   counterbore or countersink are not checked. The depth is the feature's, measured from the
+//!   face the hole starts on. A later `solid.move` of the hole's body is followed, so the hole is
+//!   looked for where the move put it, and `start` and `direction` are in the frame of the model
+//!   as it is now (of the hole's own component, the same for every placement of it). A body
+//!   moved any other way reads as failed.
 //! - A tapped hole takes any thread the Hole feature takes (ISO metric, UNC/UNF, G, Rp). With
-//!   its own thread depth, the drill gets a line of its own and the thread line that depth.
+//!   its own thread depth, the drill gets a line of its own and the thread line that depth, both
+//!   from the face the hole starts on: the feature counts its thread from below any counterbore
+//!   or countersink, so the callout adds that recess. A thread that reaches the floor of a blind
+//!   hole is one line.
 //! - A hole in sheet metal reads as failed, not supported yet: the sheet is rebuilt from its own
 //!   record with the hole in it, so no face is named after the hole.
 //! - `count` is the feature's; the extent is this hole's. One feature can drill through on one
@@ -43,11 +50,11 @@ use crate::{DocError, Document, Feature, FeatureKind, HoleKind, Mat, Model, Mode
 /// The decimals a callout's numbers get unless asked for others: the one default dimensions take
 /// too, so a callout and a dimension on one sheet read alike.
 pub use super::dimension::DEFAULT_DECIMALS;
+/// The most decimals a callout's numbers take: as many as a dimension's.
+pub use super::dimension::MAX_DECIMALS;
 
 /// The most bytes of a sketch point id a callout takes.
 pub const MAX_POINT_BYTES: usize = 256;
-/// The most decimals a callout's numbers take.
-pub const MAX_DECIMALS: u8 = 6;
 /// The most holes one Hole feature drills (as the feature itself takes).
 const MAX_HOLES: usize = 10_000;
 /// The largest length or diameter a callout shows, in millimetres.
@@ -93,8 +100,10 @@ pub struct HoleCallout {
     /// The thread of a tapped hole (`M8`, `1/4-20 UNC`, `G 1/4`), shown in place of the diameter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
-    /// The thread's own depth, from where it starts, when the feature gives one; otherwise the
-    /// thread runs the hole's length.
+    /// The thread's depth when the feature gives it one, from the face the hole starts on as the
+    /// drill depth is: the feature's own thread depth (from where the thread starts) plus any
+    /// counterbore depth or countersink depth above it. Without one, the thread runs the hole's
+    /// length.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread_depth: Option<f64>,
     pub extent: Extent,
@@ -334,7 +343,7 @@ fn measure(
     // Any thread the feature takes; a metric one as written, a catalogued one by its designation.
     let thread = match thread {
         Some(t) => match crate::parse_tapped_thread(t).filter(|_| t.trim().len() <= 32) {
-            Some(tapped) if tapped.family == crate::TappedThreadFamily::Metric => Some(t.trim().to_string()),
+            Some(tapped) if tapped.family == crate::TappedThreadFamily::Metric => Some(metric_as_written(t)),
             Some(tapped) => Some(tapped.designation),
             None => return Err(DocError::Invalid("the hole's thread is not one a tapped hole takes (ISO metric, UNC, UNF, G or Rp)".into())),
         },
@@ -350,7 +359,17 @@ fn measure(
         None => None,
     };
     let r = diameter / 2.0;
-    let Some(made) = bore_floor(own, f.id, at, dir, r) else {
+    // The thread's depth from the start face, as the drill's: the feature's runs from where the
+    // thread starts, below any counterbore or countersink, so that recess is added.
+    let recess = match form {
+        Form::Counterbore { depth, .. } => depth,
+        Form::Countersink { diameter: sink, angle } => ((sink - diameter) / 2.0).max(0.0) / (angle / 2.0).tan(),
+        Form::Simple | Form::Drilled { .. } => 0.0,
+    };
+    let thread_depth = thread_depth.map(|t| t + recess).filter(|t| t.is_finite());
+    // The face it starts on, named in the model before it (where the feature drilled it).
+    let start_face = crate::naming::face_names_at(before, &[at]).into_iter().next().unwrap_or_default();
+    let Some(made) = bore_floor(own, f.id, at, dir, r, depth) else {
         // A sheet is rebuilt from its own record with the hole in it, so the hole's faces aren't
         // named after it.
         let reason = if in_sheet(before, at, dir, r) {
@@ -360,26 +379,46 @@ fn measure(
         };
         return Ok(Resolution::Failed { reason: reason.into() });
     };
-    // Where later moves of its body put it.
+    // Where later moves of its body put it, and the feature's other holes with it.
     let m = motion(&made.body)?;
-    let (at, dir) = (crate::apply_point(&m, at), crate::apply_vector(&m, dir));
-    let Some(now) = bore_floor(after, f.id, at, dir, r) else {
-        let reason = if has_bore(after, f.id) {
+    let (start, direction) = (crate::apply_point(&m, at), crate::apply_vector(&m, dir));
+    let Some(now) = bore_floor(after, f.id, start, direction, r, depth) else {
+        let holes: Vec<Vec3> = spots.iter().map(|p| crate::apply_point(&m, *p)).collect();
+        let reason = if stray_bore(after, f.id, &holes, direction, r) {
             "a later feature removed or moved the hole (only a Move of its body is followed)"
         } else {
             "a later feature removed the hole"
         };
         return Ok(Resolution::Failed { reason: reason.into() });
     };
+    if now.changed {
+        return Ok(Resolution::Failed { reason: "a later feature changed the hole: its diameter or depth no longer is the feature's".into() });
+    }
     let extent = match depth {
         Some(depth) if now.floor => Extent::Blind { depth },
         _ => Extent::Through,
     };
-    let start = spots.get(index).copied().unwrap_or(at);
-    let start_face = crate::naming::face_names_at(before, &[start]).into_iter().next().unwrap_or_default();
-    let callout =
-        HoleCallout { count: spots.len(), diameter, thread, thread_depth, extent, form, start: at.into(), start_face, direction: dir.into() };
+    let callout = HoleCallout {
+        count: spots.len(),
+        diameter,
+        thread,
+        thread_depth,
+        extent,
+        form,
+        start: start.into(),
+        start_face,
+        direction: direction.into(),
+    };
     Ok(Resolution::Resolved { callout })
+}
+
+/// A metric thread as written, with the `M` in capitals (`m8x1` → `M8x1`).
+fn metric_as_written(t: &str) -> String {
+    let t = t.trim();
+    match t.strip_prefix('m') {
+        Some(rest) => format!("M{rest}"),
+        None => t.to_string(),
+    }
 }
 
 /// The bore of a hole as a model has it.
@@ -388,6 +427,9 @@ struct Bore {
     floor: bool,
     /// The first body it is in.
     body: String,
+    /// Its wall is not of the feature's diameter, or its flat floor not at the feature's depth: a
+    /// later feature changed it and kept its faces' names (an offset face, a scale).
+    changed: bool,
 }
 
 /// Whether the hole drilled at `at` along `dir` (of radius `r`) starts in a sheet-metal body of
@@ -397,19 +439,35 @@ fn in_sheet(st: &ModelState, at: Vec3, dir: Vec3, r: f64) -> bool {
     st.sheets.iter().filter_map(|sh| st.body(&sh.body)).any(|b| !b.body.is_mesh() && b.body.contains(inside))
 }
 
-/// Whether any body of `st` has a face of a bore of feature `id`.
-fn has_bore(st: &ModelState, id: u64) -> bool {
+/// Whether a body of `st` has a face of a bore of feature `id` that lies on none of the axes of
+/// its holes at `holes` (drilled along `dir`, of radius `r`): one of them is somewhere else now.
+/// The feature's other holes, still in place, don't count.
+fn stray_bore(st: &ModelState, id: u64, holes: &[Vec3], dir: Vec3, r: f64) -> bool {
     let prefix = format!("F{id}:bore:");
-    st.bodies.iter().filter(|b| !b.body.is_mesh()).any(|b| crate::naming::face_names(b).iter().any(|n| n.starts_with(&prefix)))
+    let on_an_axis = |p: Vec3| {
+        holes.iter().any(|at| {
+            let v = p - *at;
+            (v - dir * v.dot(dir)).len() <= r * 1.001 + 1e-6
+        })
+    };
+    st.bodies.iter().filter(|b| !b.body.is_mesh()).any(|b| {
+        let names = crate::naming::face_names(b);
+        if !names.iter().any(|n| n.starts_with(&prefix)) {
+            return false;
+        }
+        let spots = crate::naming::face_spots(b);
+        names.iter().zip(spots.iter()).any(|(name, spot)| name.starts_with(&prefix) && spot.is_some_and(|s| !on_an_axis(s.point)))
+    })
 }
 
-/// The bore of feature `id` at `at` (drilled along `dir`, of radius `r`) in `st`, and whether it
-/// keeps a floor: a face of the bore (`F<id>:bore:…`) across its axis below the start, the flat
-/// bottom or the drill point. `None` when no face of that bore is there at all.
-fn bore_floor(st: &ModelState, id: u64, at: Vec3, dir: Vec3, r: f64) -> Option<Bore> {
+/// The bore of feature `id` at `at` (drilled along `dir`, of radius `r`, `depth` deep when blind)
+/// in `st`, and whether it keeps a floor: a face of the bore (`F<id>:bore:…`) across its axis
+/// below the start, the flat bottom or the drill point. `None` when no face of that bore is there
+/// at all.
+fn bore_floor(st: &ModelState, id: u64, at: Vec3, dir: Vec3, r: f64, depth: Option<f64>) -> Option<Bore> {
     use solidcraft_kernel::FaceSurface;
     let prefix = format!("F{id}:bore:");
-    let (mut wall, mut floor) = (false, false);
+    let (mut wall, mut floor, mut changed) = (false, false, false);
     let mut body = None;
     for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
         let names = crate::naming::face_names(b);
@@ -431,8 +489,15 @@ fn bore_floor(st: &ModelState, id: u64, at: Vec3, dir: Vec3, r: f64) -> Option<B
             // it. Only a face of no known surface is told by where its spot is: the wall at the
             // radius (a facet of a curved face lies inside it by its sag, so this is a fallback).
             let across = match spot.surface {
-                Some(FaceSurface::Cylinder { axis, .. }) if axis.dot(dir).abs() > 1.0 - 1e-6 => false,
-                Some(FaceSurface::Plane { normal, .. }) if normal.dot(dir).abs() > 1.0 - 1e-6 => true,
+                Some(FaceSurface::Cylinder { axis, radius, .. }) if axis.dot(dir).abs() > 1.0 - 1e-6 => {
+                    changed |= (radius - r).abs() > 1e-4 * (1.0 + r);
+                    false
+                }
+                Some(FaceSurface::Plane { normal, .. }) if normal.dot(dir).abs() > 1.0 - 1e-6 => {
+                    // A flat floor lies at the depth (a drill point's cone, below it, isn't checked).
+                    changed |= depth.is_some_and(|d| (along - d).abs() > 1e-4 * (1.0 + d));
+                    true
+                }
                 Some(FaceSurface::Cone { axis, .. }) if axis.dot(dir).abs() > 1.0 - 1e-6 => true,
                 _ => off < r * 0.999 - 1e-6,
             };
@@ -444,19 +509,21 @@ fn bore_floor(st: &ModelState, id: u64, at: Vec3, dir: Vec3, r: f64) -> Option<B
             body.get_or_insert_with(|| b.name.clone());
         }
     }
-    body.filter(|_| wall || floor).map(|body| Bore { floor, body })
+    body.filter(|_| wall || floor).map(|body| Bore { floor, body, changed })
 }
 
 /// The callout's text, one line each: the hole, then (for a thread of its own depth, shorter
-/// than the hole) the thread, then its counterbore or countersink. A tapped hole whose thread
-/// runs its length is one line, the thread in place of the drill.
+/// than the hole) the thread, then its counterbore or countersink. Both depths read from the
+/// face the hole starts on. A tapped hole whose thread runs its length is one line, the thread in
+/// place of the drill.
 pub fn text(c: &HoleCallout, style: &TextStyle) -> Result<Vec<String>> {
     style.validate()?;
     let len = |mm: f64| display_units::length_number(mm, &style.units, style.decimals);
     let count = if c.count > 1 { format!("{}× ", c.count) } else { String::new() };
-    // A thread as deep as a blind hole runs its length: one line, as with no depth of its own.
+    // A thread at least as deep as a blind hole runs its length: one line, as with no depth of
+    // its own (the feature keeps a thread within the hole's wall, so it is never deeper).
     let thread_depth = match (c.thread_depth, &c.extent) {
-        (Some(t), Extent::Blind { depth }) if (t - depth).abs() <= 1e-9 * depth.max(1.0) => None,
+        (Some(t), Extent::Blind { depth }) if t >= depth - 1e-9 * depth.max(1.0) => None,
         (t, _) => t,
     };
     let size = match (&c.thread, thread_depth) {
@@ -540,13 +607,24 @@ mod tests {
         assert_eq!(text(&c, &style("mm", 2, "en")).unwrap(), ["2× M8 ↧ 15.00"]);
         c.thread_depth = Some(10.0);
         assert_eq!(text(&c, &style("mm", 2, "en")).unwrap(), ["2× Ø6.75 ↧ 15.00", "M8 ↧ 10.00"]);
-        // As deep as the hole: the thread runs its length, one line as before.
-        c.thread_depth = Some(15.0);
-        assert_eq!(text(&c, &style("mm", 2, "en")).unwrap(), ["2× M8 ↧ 15.00"]);
-        c.thread_depth = Some(10.0);
+        // As deep as the hole, or (never from the model, which keeps a thread within the wall)
+        // deeper: the thread runs its length, one line as before, never two that disagree.
+        for t in [15.0, 16.0] {
+            c.thread_depth = Some(t);
+            assert_eq!(text(&c, &style("mm", 2, "en")).unwrap(), ["2× M8 ↧ 15.00"]);
+        }
+        // Through: the thread's line keeps its own depth (from the start face, the counterbore's
+        // 4 included), and no blind depth is shown anywhere.
+        c.thread_depth = Some(14.0);
         c.extent = Extent::Through;
         c.form = Form::Counterbore { diameter: 14.0, depth: 4.0 };
-        assert_eq!(text(&c, &style("mm", 2, "de")).unwrap(), ["2× Ø6.75 DURCH", "M8 ↧ 10.00", "⌴ Ø14.00 ↧ 4.00"]);
+        assert_eq!(text(&c, &style("mm", 2, "de")).unwrap(), ["2× Ø6.75 DURCH", "M8 ↧ 14.00", "⌴ Ø14.00 ↧ 4.00"]);
+    }
+
+    #[test]
+    fn a_metric_thread_is_shown_with_a_capital_m() {
+        assert_eq!(metric_as_written(" m8x1 "), "M8x1");
+        assert_eq!(metric_as_written("M8"), "M8");
     }
 
     #[test]
