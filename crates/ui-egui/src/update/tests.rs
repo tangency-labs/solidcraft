@@ -674,20 +674,103 @@ fn the_version_links_to_its_release_notes() {
 }
 
 #[test]
-fn web_preferences_explain_reload_without_update_controls() {
-    let mut h = crate::scenario::Harness::new();
-    h.app.updater.kind = Some(InstallKind::Web);
-    let mut texts = Vec::new();
-    for _ in 0..2 {
-        let mut output = h.ctx.run_ui(egui::RawInput::default(), |ui| prefs_rows(&mut h.app, ui));
-        output.textures_delta.clear();
-        texts =
-            output.shapes.iter().filter_map(|s| if let egui::Shape::Text(t) = &s.shape { Some(t.galley.text().to_string()) } else { None }).collect();
+fn unavailable_preferences_show_disabled_update_controls_and_real_values() {
+    use egui::accesskit::{Role, Toggled};
+    let _language = crate::i18n::scope("en");
+    for kind in [InstallKind::Dev, InstallKind::Web, InstallKind::Flatpak("io.solidcraft.SolidCraft".into())] {
+        for checked in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.language = "en".into();
+            h.app.preferences.check_updates = checked;
+            h.app.updater.kind = Some(kind.clone());
+            h.app.updater.feed = None;
+            assert!(!available(&mut h.app));
+            let memo = h.app.preferences.update.clone();
+            let launch_checked = h.app.updater.launch_checked;
+            let last_manual = h.app.updater.last_manual;
+            h.call("ui.prefs", json!({"open":"General"}));
+            crate::prefs::reveal_preference(&mut h, "prefs:check_updates");
+            let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+            let button = crate::scenario::rect_of("prefs:check_now").unwrap();
+            assert!(body.contains_rect(button));
+            assert!(body.contains_rect(crate::scenario::rect_of("prefs:check_updates").unwrap()));
+            let tree = h.output.accesskit_update.as_ref().unwrap();
+            for (label, role) in [("Check now", Role::Button), ("Check at start and once a day", Role::CheckBox)] {
+                let controls: Vec<_> = tree.nodes.iter().filter(|(_, node)| node.role() == role && node.label() == Some(label)).collect();
+                assert_eq!(controls.len(), 1, "{kind:?}: one {label} control");
+                assert!(controls[0].1.is_disabled(), "{kind:?}: {label} is disabled");
+                if role == Role::CheckBox {
+                    assert_eq!(controls[0].1.toggled(), Some(if checked { Toggled::True } else { Toggled::False }));
+                }
+            }
+            let reason = crate::i18n::tr("update.check_unavailable");
+            assert_eq!(tree.nodes.iter().filter(|(_, node)| node.role() == Role::Label && node.value() == Some(reason)).count(), 1);
+            let texts: Vec<_> = h
+                .shapes
+                .iter()
+                .filter_map(|shape| if let egui::Shape::Text(text) = &shape.shape { Some(text.galley.text()) } else { None })
+                .collect();
+            assert!(texts.contains(&reason), "{kind:?}: the unavailable reason is painted");
+            assert!(h.widget("Up to date").is_none(), "unavailability is not a successful check");
+            let note = match &kind {
+                InstallKind::Web => crate::i18n::tr("update.prefs_web").to_string(),
+                InstallKind::Flatpak(id) => {
+                    crate::i18n::format("update.prefs_flatpak", &[("version", current_version()), ("command", &format!("flatpak update {id}"))])
+                }
+                _ => crate::i18n::format("update.prefs_dev", &[("version", current_version())]),
+            };
+            assert!(
+                tree.nodes.iter().any(|(_, node)| node.role() == Role::Label && node.value() == Some(note.as_str())),
+                "the platform help stays accessible"
+            );
+            assert!(!texts.contains(&note.as_str()), "the longer explanation stays in hover help");
+            assert!(crate::scenario::rect_of("prefs:updates_help").is_some());
+            h.step(&json!({"click":{"handle":"prefs:check_now"}})).unwrap();
+            h.step(&json!({"widget":"Check at start and once a day"})).unwrap();
+            assert_eq!(h.app.preferences.check_updates, checked);
+            assert_eq!(h.app.preferences.update, memo);
+            assert_eq!(h.app.updater.status, Status::Idle);
+            assert_eq!(h.app.updater.launch_checked, launch_checked);
+            assert_eq!(h.app.updater.last_manual, last_manual);
+            assert!(h.app.updater.rx.is_none() && h.app.updater.job.is_none() && h.app.updater.release.is_none());
+            assert!(!h.app.updater.open, "attempting the disabled action does not open the checker");
+        }
     }
-    assert!(!texts.iter().any(|t| t.contains("development build")), "{texts:?}");
-    assert!(!texts.iter().any(|t| t == crate::i18n::tr("update.check_automatically")), "{texts:?}");
-    assert!(!texts.iter().any(|t| t == crate::i18n::tr("update.check_now")), "{texts:?}");
-    assert!(texts.iter().any(|t| t == crate::i18n::tr("update.prefs_web")), "{texts:?}");
+}
+
+#[test]
+fn general_updates_show_real_status_and_time_and_check_now_uses_the_existing_feed() {
+    let dir = scratch();
+    let (feed, version) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.language = "en".into();
+    h.app.preferences.check_updates = false;
+    h.app.preferences.update.last_check = 1_700_000_000.0;
+    h.app.updater.feed = Some(feed);
+    h.app.updater.kind = Some(InstallKind::WindowsMsi);
+    h.app.updater.managed = Some(None);
+    h.app.updater.status = Status::UpToDate;
+    h.call("ui.prefs", json!({"open":"General"}));
+    crate::prefs::reveal_preference(&mut h, "prefs:check_now");
+    let tree = h.output.accesskit_update.as_ref().unwrap();
+    for (label, role) in [("Check now", egui::accesskit::Role::Button), ("Check at start and once a day", egui::accesskit::Role::CheckBox)] {
+        let controls: Vec<_> = tree.nodes.iter().filter(|(_, node)| node.role() == role && node.label() == Some(label)).collect();
+        assert_eq!(controls.len(), 1);
+        assert!(!controls[0].1.is_disabled(), "available update controls stay enabled");
+        if role == egui::accesskit::Role::CheckBox {
+            assert_eq!(controls[0].1.toggled(), Some(egui::accesskit::Toggled::False));
+        }
+    }
+    let checked = crate::i18n::format("prefs.general.last_check", &[("time", &solidcraft_engine::crash::utc(1_700_000_000))]);
+    assert!(h.widget(&checked).is_some(), "the persisted check time is shown");
+    let button = crate::scenario::rect_of("prefs:check_now").unwrap();
+    h.step(&json!({"click":[button.center().x, button.center().y]})).unwrap();
+    wait_for_check(&mut h);
+    assert_eq!(h.app.updater.release.as_ref().map(|r| r.version().to_string()), Some(version));
+    assert!(h.app.preferences.update.last_check > 1_700_000_000.0);
+    assert!(!h.app.preferences.check_updates, "a manual check keeps the schedule preference");
 }
 
 fn no_env(_: &str) -> Option<String> {

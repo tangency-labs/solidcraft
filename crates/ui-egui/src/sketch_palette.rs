@@ -942,6 +942,7 @@ mod tests {
     #[test]
     fn feature_options_show_every_mode_of_the_running_tool_and_switch_between_them() {
         let mut h = crate::scenario::Harness::new();
+        h.app.preferences.language = "en".into();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         h.app.start("sketch.circle.center");
         h.settle();
