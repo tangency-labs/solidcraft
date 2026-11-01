@@ -319,8 +319,8 @@ fn a_variable_round_follows_its_law() {
 }
 
 /// A law with a corner (4 → 2 → 4, straight on both halves) on the 20 cube's edge y = z = 20: the
-/// union of the balls, where the two halves' rounds cross and each ends, takes 39.542073 (the
-/// halves' great circles would take 40.0590).
+/// union of the balls, with the corner ball's sphere between the halves' touch circles, takes
+/// 39.542073 (the halves' great circles would take 40.0590).
 #[test]
 fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
     let c = cube(20.0);
