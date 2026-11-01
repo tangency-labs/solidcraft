@@ -1628,3 +1628,25 @@ fn timeline_joint_folders_reject_hostile_joint_references_atomically() {
         }
     }
 }
+
+/// A reference image is shared, not copied, by every edit after it: each undo state holds the
+/// design as it was, and a copied image of up to 16 MiB per state would hold gigabytes.
+#[test]
+fn edits_after_a_canvas_share_its_image_with_every_undo_state() {
+    let mut s = Session::default();
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    png.resize(64 << 10, 0);
+    run(&mut s, "canvas.insert", json!({"data": solidcraft_doc::canvas::base64_encode(&png), "plane": "XY", "width": 40}));
+    for i in 0..20 {
+        run(&mut s, "parameters.add", json!({"name": format!("p{i}"), "expression": "10 mm"}));
+    }
+    let image = s.doc.canvases[0].data.as_ptr();
+    let copies = s.undo.iter().filter_map(|u| u.doc.canvases.first()).filter(|c| c.data.as_ptr() != image).count();
+    assert_eq!(copies, 0, "undo states holding their own copy of the image");
+    for _ in 0..20 {
+        run(&mut s, "edit.undo", json!({}));
+    }
+    assert_eq!(s.doc.canvases[0].data.as_ptr(), image, "undo brings back the same image");
+    assert_eq!(s.doc.canvases[0].bytes().as_deref(), Some(png.as_slice()));
+}

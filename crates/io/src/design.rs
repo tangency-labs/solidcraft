@@ -857,7 +857,7 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         if bytes.len() > solidcraft_doc::canvas::MAX_CANVAS_BYTES {
             return Err(invalid("canvas too large"));
         }
-        canvas.data = solidcraft_doc::canvas::base64_encode(bytes);
+        canvas.data = solidcraft_doc::canvas::base64_encode(bytes).into();
     }
     for (index, cloud) in doc.point_clouds.iter_mut().enumerate() {
         if !cloud.points.is_empty() || !cloud.colors.is_empty() {
@@ -1591,7 +1591,7 @@ mod tests {
             id,
             name: "Reference".into(),
             format: "png".into(),
-            data: solidcraft_doc::canvas::base64_encode(b"original image bytes"),
+            data: solidcraft_doc::canvas::base64_encode(b"original image bytes").into(),
             pixels: [1, 1],
             plane: solidcraft_doc::PlaneRef::Origin { name: "XY".into() },
             center: Vec2::new(0.0, 0.0),
