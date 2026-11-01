@@ -1,0 +1,10 @@
+{
+  "en": {
+    "config.rule_parameter_columns": "Only parameters with a column in the table are listed. Add one with Add Column (+) to use it here.",
+    "config.rule_suppression_columns": "Only features with a Suppress column in the table are listed. Add one with Add Column (+) to drive it here."
+  },
+  "de": {
+    "config.rule_parameter_columns": "Hier stehen nur Parameter mit einer Spalte in der Tabelle. Fügen Sie eine mit „Spalte hinzufügen“ (+) hinzu, um den Parameter hier zu verwenden.",
+    "config.rule_suppression_columns": "Hier stehen nur Funktionen mit einer Spalte „Unterdrücken“ in der Tabelle. Fügen Sie eine mit „Spalte hinzufügen“ (+) hinzu, um die Funktion hier zu steuern."
+  }
+}
