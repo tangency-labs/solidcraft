@@ -29,6 +29,8 @@ use crate::SolveApp;
 use crate::theme::Tokens;
 use crate::viewport::Proj;
 
+pub(crate) mod window;
+
 /// A dimension as drawn this frame (screen space), for hit testing.
 #[derive(Clone, Debug)]
 struct Drawn {
@@ -144,6 +146,7 @@ fn shown_error(id: &str, e: &str) -> String {
 pub fn cancel() {
     EDIT.with(|edit| *edit.borrow_mut() = None);
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
+    window::forget();
 }
 
 /// Infer the measured value through the same command as scripts, without creating a real
@@ -181,6 +184,11 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
 /// it. Midpoint pairs and dimensions that would only be driven keep the place-first flow:
 /// the pointer chooses the orientation, and a click places the text before entering a value.
 pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos2>) -> Result<bool, String> {
+    // The value window opens on placed text (`window`): a window following the pointer could
+    // not be reached.
+    if window::on(app) {
+        return Ok(false);
+    }
     // A midpoint pair chooses its orientation and text position before entering a value.
     // This also permits switching freely between driving and reference spans.
     let midpoint_pair = entities.len() == 2 && entities.iter().all(|id| id.starts_with("mid:"));
@@ -826,6 +834,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         }
     }
     DRAWN.with(|d| *d.borrow_mut() = drawn);
+    window::paint(app, painter, proj);
     edit_box(app, ui.ctx());
 }
 
@@ -959,6 +968,10 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
         }
         return;
     };
+    if window::on(app) {
+        let (done, escaped) = window::show(app, ctx, &mut e, at);
+        return settle(app, e, done, escaped);
+    }
     let id = egui::Id::new("sc_dim_edit");
     let mut done: Option<bool> = None;
     let mut escaped = false;
@@ -1023,6 +1036,12 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
             });
         });
     });
+    settle(app, e, done, escaped);
+}
+
+/// Apply or drop the edit as the box or the window answered (`done`: Some(true) applies, Some(false)
+/// drops it, and `escaped` the Dimension tool's picks with it), or keep it open.
+fn settle(app: &mut SolveApp, mut e: Edit, done: Option<bool>, escaped: bool) {
     e.fresh = e.fresh.saturating_sub(1);
     match done {
         Some(true) => {

@@ -720,39 +720,39 @@ pub fn build(before: &ModelState, after: &ModelState, c: Colors) -> Built {
             replaced.push(b.name.clone());
         }
     }
-    let sketches = after
-        .sketches
-        .iter()
-        .filter_map(|sketch| {
-            let old = before.sketch(sketch.feature);
-            let old_curves =
-                old.into_iter().flat_map(|s| s.sketch.curves.iter().map(|c| (c.id.as_str(), c))).collect::<std::collections::HashMap<_, _>>();
-            let old_points =
-                old.into_iter().flat_map(|s| s.sketch.points.iter().map(|p| (p.id.as_str(), p.pos))).collect::<std::collections::HashMap<_, _>>();
-            let indices = sketch
-                .sketch
-                .curves
-                .iter()
-                .enumerate()
-                .filter_map(|(index, curve)| {
-                    let unchanged = old_curves.get(curve.id.as_str()).is_some_and(|previous| {
-                        previous.kind == curve.kind
-                            && curve.kind.point_ids().iter().all(|i| old.and_then(|s| s.sketch.point(*i)) == sketch.sketch.point(*i))
-                    });
-                    if unchanged { None } else { Some(index) }
-                })
-                .collect::<Vec<_>>();
-            let points = sketch
-                .sketch
-                .points
-                .iter()
-                .enumerate()
-                .filter_map(|(i, p)| if old_points.get(p.id.as_str()) == Some(&p.pos) { None } else { Some(i) })
-                .collect::<Vec<_>>();
-            if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
-        })
-        .collect();
+    let sketches = after.sketches.iter().filter_map(|sketch| sketch_changes(before.sketch(sketch.feature), sketch)).collect();
     Built { scene: sc, sketches, replaced, error: None, bounds: Aabb3::EMPTY, applied: None, tapered: Vec::new(), stopped: None }
+}
+
+/// What of `sketch` differs from `old`, the same sketch before a change: the curves whose shape
+/// or points moved and the points that moved (`None`: nothing did).
+pub(crate) fn sketch_changes(
+    old: Option<&solidcraft_engine::doc::SolvedSketch>,
+    sketch: &std::sync::Arc<solidcraft_engine::doc::SolvedSketch>,
+) -> Option<SketchPreview> {
+    let old_curves = old.into_iter().flat_map(|s| s.sketch.curves.iter().map(|c| (c.id.as_str(), c))).collect::<std::collections::HashMap<_, _>>();
+    let old_points =
+        old.into_iter().flat_map(|s| s.sketch.points.iter().map(|p| (p.id.as_str(), p.pos))).collect::<std::collections::HashMap<_, _>>();
+    let indices = sketch
+        .sketch
+        .curves
+        .iter()
+        .enumerate()
+        .filter_map(|(index, curve)| {
+            let unchanged = old_curves.get(curve.id.as_str()).is_some_and(|previous| {
+                previous.kind == curve.kind && curve.kind.point_ids().iter().all(|i| old.and_then(|s| s.sketch.point(*i)) == sketch.sketch.point(*i))
+            });
+            if unchanged { None } else { Some(index) }
+        })
+        .collect::<Vec<_>>();
+    let points = sketch
+        .sketch
+        .points
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| if old_points.get(p.id.as_str()) == Some(&p.pos) { None } else { Some(i) })
+        .collect::<Vec<_>>();
+    if indices.is_empty() && points.is_empty() { None } else { Some(SketchPreview { sketch: sketch.clone(), curves: indices, points }) }
 }
 
 /// Which of the `nf` faces of `m` are new surface, i.e. not on the old mesh? Each is decided by
@@ -883,22 +883,30 @@ pub fn paint_sketches(app: &SolveApp, painter: &egui::Painter, proj: &crate::vie
     {
         return;
     }
-    let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);
     let mut budget = solidcraft_engine::render::SamplingBudget::new(32_768, 65_536);
-    let mut curves = 0;
-    for preview in &app.preview.sketches {
-        let sketch = &preview.sketch;
-        for index in &preview.curves {
-            crate::tools::paint_curve(&sketch.sketch, *index, &sketch.plane, painter, proj, stroke, &mut budget);
-            curves += 1;
-        }
-        for index in &preview.points {
-            if let Some(point) = sketch.sketch.point(*index).and_then(|p| proj.to_screen(sketch.plane.to_world(p))) {
-                painter.circle_filled(point, 3.0, stroke.color);
-            }
+    let curves: usize = app.preview.sketches.iter().map(|preview| paint_sketch(preview, painter, proj, &mut budget)).sum();
+    crate::scenario::publish_count("sketch_preview_curves", curves as f64);
+}
+
+/// Draw what a change moves in a sketch, its curves and points, in the preview colour; returns
+/// how many curves it drew.
+pub(crate) fn paint_sketch(
+    preview: &SketchPreview,
+    painter: &egui::Painter,
+    proj: &crate::viewport::Proj,
+    budget: &mut solidcraft_engine::render::SamplingBudget,
+) -> usize {
+    let stroke = egui::Stroke::new(2.5, Tokens::get().preview_sketch);
+    let sketch = &preview.sketch;
+    for index in &preview.curves {
+        crate::tools::paint_curve(&sketch.sketch, *index, &sketch.plane, painter, proj, stroke, budget);
+    }
+    for index in &preview.points {
+        if let Some(point) = sketch.sketch.point(*index).and_then(|p| proj.to_screen(sketch.plane.to_world(p))) {
+            painter.circle_filled(point, 3.0, stroke.color);
         }
     }
-    crate::scenario::publish_count("sketch_preview_curves", curves as f64);
+    preview.curves.len()
 }
 
 #[cfg(test)]

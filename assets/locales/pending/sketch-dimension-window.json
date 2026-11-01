@@ -1,0 +1,110 @@
+{
+  "en": {
+    "dialog.dimension_step_down": "Down by {step}",
+    "dialog.dimension_step_expression": "Only a number steps; an expression stays as typed",
+    "dialog.dimension_step_up": "Up by {step}",
+    "prefs.dimension_step_angle": "What the window's arrows, Up/Down and the wheel add to an angle",
+    "prefs.dimension_step_length": "What the window's arrows, Up/Down and the wheel add to a length",
+    "prefs.dimension_steps": "Window steps",
+    "prefs.dimension_values": "Dimension values",
+    "prefs.dimension_values_note": "Where you type a dimension's value. A window has arrows that step it; the Dimension tool places the text first.",
+    "prefs.dimension_values_view": "In the view",
+    "prefs.dimension_values_window": "In a window"
+  },
+  "ja": {
+    "dialog.dimension_step_down": "{step} 減らす",
+    "dialog.dimension_step_expression": "増減できるのは数値だけです。式はそのまま残ります",
+    "dialog.dimension_step_up": "{step} 増やす",
+    "prefs.dimension_step_angle": "ウィンドウの矢印、上下キー、ホイールで角度に加える量",
+    "prefs.dimension_step_length": "ウィンドウの矢印、上下キー、ホイールで長さに加える量",
+    "prefs.dimension_steps": "ウィンドウの増減量",
+    "prefs.dimension_values": "寸法値の入力",
+    "prefs.dimension_values_note": "寸法値を入力する場所です。ウィンドウでは矢印で値を増減でき、寸法ツールは先に文字を配置します。",
+    "prefs.dimension_values_view": "ビュー内",
+    "prefs.dimension_values_window": "ウィンドウ"
+  },
+  "zh": {
+    "dialog.dimension_step_down": "减少 {step}",
+    "dialog.dimension_step_expression": "只有数字可以增减；表达式保持不变",
+    "dialog.dimension_step_up": "增加 {step}",
+    "prefs.dimension_step_angle": "窗口的箭头、上下方向键和滚轮给角度增减的量",
+    "prefs.dimension_step_length": "窗口的箭头、上下方向键和滚轮给长度增减的量",
+    "prefs.dimension_steps": "窗口步长",
+    "prefs.dimension_values": "尺寸值",
+    "prefs.dimension_values_note": "输入尺寸值的位置。窗口带有可增减数值的箭头；尺寸工具会先放置文字。",
+    "prefs.dimension_values_view": "在视图中",
+    "prefs.dimension_values_window": "在窗口中"
+  },
+  "de": {
+    "dialog.dimension_step_down": "Um {step} verringern",
+    "dialog.dimension_step_expression": "Nur eine Zahl lässt sich schrittweise ändern; ein Ausdruck bleibt, wie er eingegeben ist",
+    "dialog.dimension_step_up": "Um {step} erhöhen",
+    "prefs.dimension_step_angle": "Was die Pfeile des Fensters, Auf/Ab und das Mausrad zu einem Winkel addieren",
+    "prefs.dimension_step_length": "Was die Pfeile des Fensters, Auf/Ab und das Mausrad zu einer Länge addieren",
+    "prefs.dimension_steps": "Schritte im Fenster",
+    "prefs.dimension_values": "Bemaßungswerte",
+    "prefs.dimension_values_note": "Wo der Wert einer Bemaßung eingegeben wird. Ein Fenster hat Pfeile, die ihn schrittweise ändern; das Bemaßungswerkzeug platziert zuerst den Text.",
+    "prefs.dimension_values_view": "In der Ansicht",
+    "prefs.dimension_values_window": "In einem Fenster"
+  },
+  "ko": {
+    "dialog.dimension_step_down": "{step} 줄이기",
+    "dialog.dimension_step_expression": "숫자만 증감할 수 있으며 수식은 입력한 그대로 유지됩니다",
+    "dialog.dimension_step_up": "{step} 늘리기",
+    "prefs.dimension_step_angle": "창의 화살표, 위/아래 키와 휠이 각도에 더하는 값",
+    "prefs.dimension_step_length": "창의 화살표, 위/아래 키와 휠이 길이에 더하는 값",
+    "prefs.dimension_steps": "창의 증감 단위",
+    "prefs.dimension_values": "치수 값",
+    "prefs.dimension_values_note": "치수 값을 입력하는 위치입니다. 창에는 값을 증감하는 화살표가 있으며, 치수 도구는 텍스트를 먼저 배치합니다.",
+    "prefs.dimension_values_view": "뷰에서",
+    "prefs.dimension_values_window": "창에서"
+  },
+  "nl": {
+    "dialog.dimension_step_down": "{step} omlaag",
+    "dialog.dimension_step_expression": "Alleen een getal verspringt; een uitdrukking blijft zoals ingevoerd",
+    "dialog.dimension_step_up": "{step} omhoog",
+    "prefs.dimension_step_angle": "Wat de pijlen van het venster, Omhoog/Omlaag en het wieltje bij een hoek optellen",
+    "prefs.dimension_step_length": "Wat de pijlen van het venster, Omhoog/Omlaag en het wieltje bij een lengte optellen",
+    "prefs.dimension_steps": "Stappen in het venster",
+    "prefs.dimension_values": "Maatwaarden",
+    "prefs.dimension_values_note": "Waar de waarde van een maat wordt ingevoerd. Een venster heeft pijlen die de waarde laten verspringen; het maatgereedschap plaatst eerst de tekst.",
+    "prefs.dimension_values_view": "In de weergave",
+    "prefs.dimension_values_window": "In een venster"
+  },
+  "ar": {
+    "dialog.dimension_step_down": "إنقاص بمقدار {step}",
+    "dialog.dimension_step_expression": "يتغير الرقم فقط بالخطوات؛ يبقى التعبير كما كُتب",
+    "dialog.dimension_step_up": "زيادة بمقدار {step}",
+    "prefs.dimension_step_angle": "ما تضيفه أسهم النافذة وأعلى/أسفل والعجلة إلى الزاوية",
+    "prefs.dimension_step_length": "ما تضيفه أسهم النافذة وأعلى/أسفل والعجلة إلى الطول",
+    "prefs.dimension_steps": "خطوات النافذة",
+    "prefs.dimension_values": "قيم الأبعاد",
+    "prefs.dimension_values_note": "مكان كتابة قيمة البعد. للنافذة أسهم تغيّرها بخطوات؛ تضع أداة البعد النص أولًا.",
+    "prefs.dimension_values_view": "في العرض",
+    "prefs.dimension_values_window": "في نافذة"
+  },
+  "he": {
+    "dialog.dimension_step_down": "הפחתה ב־{step}",
+    "dialog.dimension_step_expression": "רק מספר משתנה בצעדים; ביטוי נשאר כפי שנכתב",
+    "dialog.dimension_step_up": "הוספה של {step}",
+    "prefs.dimension_step_angle": "מה שהחצים בחלון, למעלה/למטה והגלגלת מוסיפים לזווית",
+    "prefs.dimension_step_length": "מה שהחצים בחלון, למעלה/למטה והגלגלת מוסיפים לאורך",
+    "prefs.dimension_steps": "צעדי החלון",
+    "prefs.dimension_values": "ערכי מידות",
+    "prefs.dimension_values_note": "היכן מקלידים את ערך המידה. לחלון יש חצים שמשנים אותו בצעדים; כלי המידה מציב קודם את הטקסט.",
+    "prefs.dimension_values_view": "בתצוגה",
+    "prefs.dimension_values_window": "בחלון"
+  },
+  "vi": {
+    "dialog.dimension_step_down": "Giảm {step}",
+    "dialog.dimension_step_expression": "Chỉ số mới thay đổi theo bước; biểu thức giữ nguyên như đã nhập",
+    "dialog.dimension_step_up": "Tăng {step}",
+    "prefs.dimension_step_angle": "Lượng mà mũi tên của cửa sổ, Lên/Xuống và con lăn cộng vào một góc",
+    "prefs.dimension_step_length": "Lượng mà mũi tên của cửa sổ, Lên/Xuống và con lăn cộng vào một độ dài",
+    "prefs.dimension_steps": "Bước của cửa sổ",
+    "prefs.dimension_values": "Giá trị kích thước",
+    "prefs.dimension_values_note": "Nơi bạn nhập giá trị kích thước. Cửa sổ có mũi tên để thay đổi theo bước; công cụ Kích thước đặt văn bản trước.",
+    "prefs.dimension_values_view": "Trong khung nhìn",
+    "prefs.dimension_values_window": "Trong một cửa sổ"
+  }
+}

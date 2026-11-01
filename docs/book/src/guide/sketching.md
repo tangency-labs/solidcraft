@@ -344,6 +344,16 @@ nothing picked yet, click it once: its value box opens with the value selected, 
 and the tool stays on for the next dimension. The dimension's text always takes the click; its
 lines take it only away from sketch points and curves, which still start a new dimension.
 
+To type values in a small window instead, set **Preferences › Sketch › Dimension values** to
+**In a window**. The Dimension tool then places the text first: click what you want to
+measure, then where the text goes, and the window opens there (double-clicking a dimension
+opens it too). Its field takes the same numbers, units, expressions and parameter names as the
+box, and the sketch shows the value as you type. The arrows beside the field, Up and Down, and
+the mouse wheel over the field step a number by **Window steps** (1 mm and 1° unless you change
+them; Shift steps ten times as far, Alt a tenth), keeping the unit it is written in. The check
+(or Enter) applies the value as one undo step and the tool stays on for the next dimension; the
+cross (or Esc) drops this dimension only, and Esc with no window open puts the tool down.
+
 To have shapes dimensioned as you draw them, turn on **Dimension new shapes** in Preferences ›
 Sketch (it is off by default). Each line, rectangle, circle, arc, slot, polygon or ellipse you draw
 then gets all its dimensions at the sizes you drew: a line its length and angle, a rectangle its
