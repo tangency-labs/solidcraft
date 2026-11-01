@@ -3876,6 +3876,15 @@ fn body_at(st: &ModelState, body: &Option<crate::BodyName>, points: &[Vec3]) -> 
     if let Some(n) = body {
         return st.bodies.iter().position(|b| &b.name == n).ok_or_else(|| DocError::Unknown(format!("body `{n}`")));
     }
+    // Closed hollow (#4009): no face pick — the sole solid body, or name the body.
+    if points.is_empty() {
+        let solids: Vec<usize> = st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()).map(|(i, _)| i).collect();
+        return match solids.as_slice() {
+            &[i] => Ok(i),
+            [] => Err(DocError::Invalid("there is no body".into())),
+            _ => Err(DocError::Invalid("select a body (or a face) when more than one body is present".into())),
+        };
+    }
     let p = points.first().ok_or_else(|| DocError::Invalid("no faces selected".into()))?;
     st.bodies
         .iter()
@@ -7564,7 +7573,12 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     // The cavity's faces are the shell's inner walls, named after the faces they offset.
                     let inner = mb.before_as(crate::lineage::Operand::Inner(mb.name.clone()));
                     let cavity = if inn > 0.0 { Traced::step(kernel::offset_faces(&mb.body, &walls, -inn)?, &[&inner]) } else { inner };
-                    let cavity = Traced::step(kernel::offset_faces(&cavity.body, &open, 2.0 * t + 1.0)?, &[&cavity]);
+                    // Closed hollow (#4009): no open faces to push out of the way.
+                    let cavity = if open.is_empty() {
+                        cavity
+                    } else {
+                        Traced::step(kernel::offset_faces(&cavity.body, &open, 2.0 * t + 1.0)?, &[&cavity])
+                    };
                     let cut = kernel::boolean(&outer.body, &cavity.body, BoolOp::Cut)?
                         .ok_or_else(|| DocError::Invalid("the shell removed everything".into()))?;
                     (cut, vec![outer, cavity])
