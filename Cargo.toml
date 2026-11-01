@@ -23,6 +23,7 @@ solidcraft-gpu = { path = "crates/gpu" }
 solidcraft-doc = { path = "crates/doc" }
 solidcraft-io = { path = "crates/io" }
 solidcraft-engine = { path = "crates/engine" }
+solidcraft-ui-widgets = { path = "crates/ui-widgets" }
 solidcraft-ui-egui = { path = "crates/ui-egui" }
 solidcraft-space-mouse = { path = "crates/space-mouse" }
 solidcraft-mcp = { path = "crates/mcp" }

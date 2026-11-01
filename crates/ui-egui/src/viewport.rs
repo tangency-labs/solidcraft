@@ -3080,7 +3080,7 @@ fn section_clip(app: &SolveApp) -> [f32; 4] {
 /// Space kept free at the top right of the viewport for the axis view (docked dialogs start below).
 pub(crate) fn axis_view_size(style: crate::prefs::NavigatorStyle) -> f32 {
     match style {
-        crate::prefs::NavigatorStyle::Axes => 116.0,
+        crate::prefs::NavigatorStyle::Axes => solidcraft_ui_widgets::Navigator::SIZE,
         crate::prefs::NavigatorStyle::Cube => navigation_cube::SIZE,
     }
 }
@@ -6569,6 +6569,10 @@ pub(crate) fn refresh_layout(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+pub(crate) use solidcraft_ui_widgets::{AXIS_CENTER_LIFT, nearest_quarter_turn};
+#[cfg(test)]
+pub(crate) use solidcraft_ui_widgets::{axis_hit, axis_tips};
+
 /// Orientation controls share the layout reservation used by model fitting.
 fn axis_center(app: &SolveApp, rect: Rect) -> Pos2 {
     let c = axis_rect(app, rect).center();
@@ -6577,9 +6581,6 @@ fn axis_center(app: &SolveApp, rect: Rect) -> Pos2 {
     if app.preferences.navigator_style == crate::prefs::NavigatorStyle::Axes { c - vec2(0.0, AXIS_CENTER_LIFT) } else { c }
 }
 
-/// How far the signed-axis compass is lifted inside its reserved box.
-pub(crate) const AXIS_CENTER_LIFT: f32 = 4.0;
-
 pub(crate) fn axis_rect(app: &SolveApp, rect: Rect) -> Rect {
     app.viewport.layout.as_ref().filter(|l| l.viewport == rect).map(|l| l.axis_view).unwrap_or_else(|| {
         let size = axis_view_size(app.preferences.navigator_style);
@@ -6587,30 +6588,9 @@ pub(crate) fn axis_rect(app: &SolveApp, rect: Rect) -> Rect {
     })
 }
 
-const AXIS_LENGTH: f64 = 38.0;
-/// The artwork sits inside the pointer reach so the compass keeps breathing room in its circle.
-const AXIS_ART_SCALE: f64 = 0.84;
-use crate::icons::navigation::AXIS_RADIUS;
-
-/// Six signed world axes, sorted back to front so overlapping tips have one owner.
-fn axis_tips(cam: &Camera, c: Pos2) -> Vec<(&'static str, Vec3, Pos2, f64)> {
-    let (r, u, b) = cam.basis();
-    let mut tips: Vec<_> = [("x", Vec3::X), ("-x", -Vec3::X), ("y", Vec3::Y), ("-y", -Vec3::Y), ("z", Vec3::Z), ("-z", -Vec3::Z)]
-        .into_iter()
-        .map(|(name, d)| {
-            (name, d, c + vec2((d.dot(r) * AXIS_LENGTH * AXIS_ART_SCALE) as f32, -(d.dot(u) * AXIS_LENGTH * AXIS_ART_SCALE) as f32), d.dot(b))
-        })
-        .collect();
-    tips.sort_by(|a, b| a.3.total_cmp(&b.3));
-    tips
-}
-
-fn axis_hit(tips: &[(&str, Vec3, Pos2, f64)], p: Pos2) -> Option<usize> {
-    tips.iter().enumerate().rev().find(|(_, (_, _, at, _))| at.distance(p) <= AXIS_RADIUS).map(|(i, _)| i)
-}
-
-/// Dragging anywhere on the axis gizmo orbits about the view centre. A stationary press
-/// on a tip chooses its view. Floating windows own their input over the gizmo.
+/// Dragging anywhere on the navigation gizmo orbits about the view centre. The signed-axis
+/// compass runs its own gesture in `solidcraft-ui-widgets`; the cube still uses this app-side
+/// path. Floating windows own their input over the gizmo.
 fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
     let (pressed, down, decided, origin, pos, shift) = ui.input(|i| {
         let p = &i.pointer;
@@ -6649,90 +6629,61 @@ pub(crate) fn axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
 }
 
 fn signed_axis_view(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
-    if !axis_rect(app, rect).is_positive() || !axis_rect(app, rect).is_finite() {
+    let outer = axis_rect(app, rect);
+    if !outer.is_positive() || !outer.is_finite() {
         app.viewport.axis_drag = None;
         crate::scenario::publish_count("axis_view_highlights", 0.0);
         return;
     }
-    crate::scenario::publish_rect("axis_view:outer", axis_rect(app, rect));
+    crate::scenario::publish_rect("axis_view:outer", outer);
     let t = Tokens::get();
-    let c = axis_center(app, rect);
-    let orbiting = axis_view_orbit(app, ui, rect);
-    let tips = axis_tips(&app.cam, c);
-    let hover = ui.input(|i| i.pointer.hover_pos()).filter(|p| ui.is_enabled() && ui.rect_contains_pointer(rect) && !crate::shell::covered(app, *p));
-    let hovered = if orbiting { None } else { hover.and_then(|p| axis_hit(&tips, p)) };
-    let painter = ui.painter_at(rect);
-    // Anywhere in the compass circle drags the view; the circle turns fully opaque under the pointer.
-    let in_circle = hover.is_some_and(|p| p.distance(c) <= 49.5);
-    let fill = if in_circle || orbiting { 1.0 } else { 0.35 };
-    painter.circle(c, 49.5, t.overlay.gamma_multiply(fill), Stroke::new(1.0, t.border.gamma_multiply(0.75)));
-    for (i, (name, d, at, depth)) in tips.iter().enumerate() {
-        if i == 3 {
-            // The origin dot sits behind the three front axes and over the three back ones.
-            painter.circle(c, 3.6, t.text.gamma_multiply(0.9), Stroke::new(1.4, t.panel));
-        }
-        crate::icons::navigation::axis_tip(&painter, c, name, d, *at, *depth, hovered == Some(i), t);
+    let colours = crate::icons::navigation::navigator_colors(t);
+    let occluders = crate::shell::covered_rects(app);
+    let home_tooltip = crate::i18n::tr_label("Home view");
+    let icon_opacity = f32::from(t.icon.a()) / 255.0;
+    let paint_home = move |painter: &egui::Painter, home: Rect| icons::paint_icon(painter, home, "home", icon_opacity);
+    let options = solidcraft_ui_widgets::NavigatorOptions {
+        font_size: t.font_compass,
+        free_orbit: app.preferences.free_orbit,
+        home_tooltip,
+        center_offset: vec2(0.0, -AXIS_CENTER_LIFT),
+        occluders: &occluders,
+        paint_home: &paint_home,
+    };
+    let mut navigator = solidcraft_ui_widgets::Navigator::with_drag(app.viewport.axis_drag);
+    let (action, tips) = navigator.show(ui, outer, &app.cam, &colours, &options);
+    app.viewport.axis_drag = navigator.drag;
+    if navigator.drag_started() || navigator.drag_ended() {
+        app.viewport.orbit_free = None;
+    }
+    for (name, at) in &tips {
         crate::scenario::publish_handle(&format!("axis_view:{name}"), *at);
     }
-    crate::scenario::publish_count("axis_view_highlights", f64::from(u8::from(hovered.is_some())));
-    if let Some(i) = hovered
-        && let Some((name, d, _, _)) = tips.get(i)
+    if let Some(name) = navigator.hovered()
+        && let Some(at) = navigator.hover_at()
     {
-        crate::scenario::publish_handle(&format!("axis_view_hover:{name}"), hover.unwrap_or(c));
-        ui.interact(Rect::from_center_size(hover.unwrap_or(c), vec2(2.0, 2.0)), ui.id().with("axis_view_tip"), Sense::hover()).on_hover_text(
-            format!(
-                "View from {}. Click again to reverse. Drag to orbit{}.",
-                name.to_uppercase(),
-                if app.preferences.free_orbit { "" } else { "; hold Shift to snap" }
-            ),
-        );
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-        if ui.input(|i| i.pointer.primary_clicked()) {
-            let frame = app.cam.to_frame(*d);
-            let dir = if app.cam.back().dot(*d) > 0.9999 { -*d } else { *d };
+        crate::scenario::publish_handle(&format!("axis_view_hover:{name}"), at);
+    }
+    crate::scenario::publish_count("axis_view_highlights", f64::from(u8::from(navigator.hovered().is_some())));
+    crate::scenario::publish_target("axis_view:home", navigator.home_rect());
+
+    match action {
+        Some(solidcraft_ui_widgets::NavAction::LookFrom(dir)) => {
+            let frame = app.cam.to_frame(dir);
             let mut to = app.cam.looking_from(dir);
             if frame.z.abs() > 0.5 {
                 to.yaw = nearest_quarter_turn(app.cam.yaw);
             }
             app.animate_turn(to);
         }
-    }
-    let home = Rect::from_center_size(pos2(c.x - 37.0, c.y - 37.0), vec2(18.0, 18.0));
-    crate::scenario::publish_target("axis_view:home", home);
-    let hr = ui.interact(home, ui.id().with("axis_view_home"), Sense::click());
-    // The home button sits in its own small round chip.
-    painter.circle(home.center(), 12.0, t.overlay.gamma_multiply(if hr.hovered() { 0.9 } else { 0.5 }), Stroke::new(1.0, t.border));
-    icons::paint_icon(&painter, home, "home", f32::from(t.icon.a()) / 255.0);
-    // Cursors: a grabbing hand while orbiting, an open hand over the circle, a pointer on the home
-    // chip (the axis ends keep their pointing hand).
-    if hr.hovered() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-    } else if orbiting {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-    } else if in_circle && hovered.is_none() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
-    }
-    if hr.on_hover_text(crate::i18n::tr_label("Home view")).clicked() {
-        app.animate_view("home");
-    }
-}
-
-/// At a halfway tie, prefer the square heading nearer the standard plan view.
-pub(crate) fn nearest_quarter_turn(yaw: f64) -> f64 {
-    if !yaw.is_finite() {
-        return 0.0;
-    }
-    let q = std::f64::consts::FRAC_PI_2;
-    let lo = (yaw / q).floor() * q;
-    let hi = lo + q;
-    let (dlo, dhi) = (yaw - lo, hi - yaw);
-    if (dlo - dhi).abs() < 1e-6 {
-        let off_front = |a: f64| ((a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI).abs();
-        if off_front(lo) <= off_front(hi) { lo } else { hi }
-    } else if dlo < dhi {
-        lo
-    } else {
-        hi
+        Some(solidcraft_ui_widgets::NavAction::Home) => app.animate_view("home"),
+        Some(solidcraft_ui_widgets::NavAction::Orbit { dx, dy }) => {
+            app.cancel_view_animation();
+            let shift = ui.input(|i| i.modifiers.shift);
+            orbit_drag(app, rect, f64::from(dx), f64::from(dy), None, shift, false);
+            ui.ctx().request_repaint();
+        }
+        None => {}
     }
 }
 

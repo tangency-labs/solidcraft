@@ -4449,6 +4449,7 @@ dependencies = [
  "solidcraft-engine",
  "solidcraft-gpu",
  "solidcraft-space-mouse",
+ "solidcraft-ui-widgets",
  "syn 2.0.119",
  "sys-locale",
  "tiny-skia",
@@ -4458,6 +4459,14 @@ dependencies = [
  "web-time",
  "winreg",
  "zip",
+]
+
+[[package]]
+name = "solidcraft-ui-widgets"
+version = "0.29.0"
+dependencies = [
+ "egui",
+ "solidcraft-render",
 ]
 
 [[package]]

@@ -1,0 +1,13 @@
+[package]
+name = "solidcraft-ui-widgets"
+description = "Reusable egui widgets for SolidCraft: the signed-axis navigation compass"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+egui = { workspace = true }
+solidcraft-render = { workspace = true }
