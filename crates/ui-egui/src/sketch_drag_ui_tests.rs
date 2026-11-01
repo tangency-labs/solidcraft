@@ -54,6 +54,69 @@ fn text_move_drag_is_one_editable_unit_and_escape_restores_the_gesture() {
     }
 }
 
+/// A drag from inside the selected text's frame moves the text, also from the space between its
+/// letters, where only a press on a letter did before: one undo step, no selection box (#8835).
+#[test]
+fn a_selected_text_moves_when_dragged_from_between_its_letters() {
+    let (mut h, gap) = two_letters(true);
+    let undo = h.app.session.undo.len();
+    let a = screen(&mut h, gap.x, gap.y);
+    let b = screen(&mut h, gap.x + 3.0, gap.y + 2.0);
+    let mut path = vec![a];
+    path.extend(steps(a, b, 6));
+    press_and_move(&mut h, &path);
+    assert!(h.app.viewport.text_drag.is_some() && h.app.viewport.boxsel.is_none());
+    release(&mut h, b);
+    assert!(text_at(&h).dist(Vec2::new(3.0, 2.0)) < 0.02, "{:?}", text_at(&h));
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+}
+
+/// Empty space outside a selected text's frame, and between the letters of a text that isn't
+/// selected, still starts a selection box, and the text stays where it is.
+#[test]
+fn elsewhere_a_drag_from_empty_space_draws_a_selection_box() {
+    for selected in [true, false] {
+        let (mut h, gap) = two_letters(selected);
+        let from = if selected { gap + Vec2::new(12.0, 0.0) } else { gap };
+        let a = screen(&mut h, from.x, from.y);
+        let b = screen(&mut h, from.x + 3.0, from.y + 2.0);
+        let mut path = vec![a];
+        path.extend(steps(a, b, 6));
+        press_and_move(&mut h, &path);
+        assert!(h.app.viewport.boxsel.is_some() && h.app.viewport.text_drag.is_none(), "selected: {selected}");
+        release(&mut h, b);
+        assert_eq!(text_at(&h), Vec2::ZERO, "selected: {selected}");
+    }
+}
+
+/// "II" (10 mm) seen from the top, selected or not, and the middle of its outlines: the space
+/// between the two letters.
+fn two_letters(selected: bool) -> (Harness, Vec2) {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    run(&mut h, "sketch.create", json!({"plane":"XY"}));
+    let text = h.app.run("sketch.text", json!({"text":"II","at":[0,0],"height":10})).expect("the text");
+    h.call("ui.view", json!({"view":"top"}));
+    h.app.cam.distance = 35.0;
+    if selected {
+        h.app.session.selection = vec![Sel::SketchCurve { id: text["curves"][0].as_str().expect("a letter").into(), sketch: None }];
+    }
+    h.frames(3);
+    let sk = h.app.session.doc.sketch(1).expect("the sketch");
+    let outline: Vec<Vec2> = sk.link_curves(text["link"].as_str().expect("its link")).into_iter().flat_map(|ci| sk.polyline(ci)).collect();
+    let first = outline.first().copied().expect("outlines");
+    let (lo, hi) =
+        outline.iter().fold((first, first), |(lo, hi), p| (Vec2::new(lo.x.min(p.x), lo.y.min(p.y)), Vec2::new(hi.x.max(p.x), hi.y.max(p.y))));
+    (h, (lo + hi) * 0.5)
+}
+
+/// Where the text of sketch 1 is placed.
+fn text_at(h: &Harness) -> Vec2 {
+    let sk = h.app.session.doc.sketch(1).expect("the sketch");
+    let solidcraft_engine::sketch::LinkSource::Text { at, .. } = &sk.links[0].source else { panic!("a text") };
+    *at
+}
+
 fn run(h: &mut Harness, id: &str, p: Value) {
     if let Err(e) = h.app.run(id, p.clone()) {
         panic!("{id} {p}: {e}");

@@ -42,8 +42,8 @@
 </p>
 
 <p align="center">
-  <a href="https://trendshift.io/repositories/296178?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-296178" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/296178/daily" alt="tangency-labs%2Fsolidcraft | Trendshift" width="250" height="55"/></a>
-  <a href="https://trendshift.io/repositories/296178?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-296178" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/296178/daily?language=Rust" alt="tangency-labs%2Fsolidcraft | Trendshift (Rust)" width="250" height="55"/></a>
+  <a href="https://trendshift.io/repositories/296178?utm_source=trendshift-badge&utm_medium=badge&utm_campaign=badge-trendshift-296178" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/296178/daily" alt="tangency-labs%2Fsolidcraft | Trendshift" width="250" height="55"/></a>
+  <a href="https://trendshift.io/repositories/296178?utm_source=trendshift-badge&utm_medium=badge&utm_campaign=badge-trendshift-296178" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/296178/daily?language=Rust" alt="tangency-labs%2Fsolidcraft | Trendshift (Rust)" width="250" height="55"/></a>
 </p>
 
 ![SolidCraft: model a Raspberry Pi 4 case from an empty design: a sketch dimensioned with parameters, extrude, fillets and shell, a rim rounded in one pick, standoffs patterned on the board's mounting holes, port cut-outs, vent slots, "Pi 4" engraved in a font, a PETG material with its mass in Properties, and a height change in Parameters](docs/screenshots/demo.gif)
@@ -58,9 +58,9 @@
 - **Web:** [try it in your browser][web-app], no install.
 
 ARM64 and 32-bit builds, portable zip, .deb, .rpm, Flatpak and the other packages are on the
-[downloads page](docs/downloads.md). The downloads aren't signed yet: on Windows choose
-**More info**, then **Run anyway** in SmartScreen; on macOS right-click SolidCraft and choose **Open**
-the first time. On SolidCraft 0.11 to 0.14, download once by hand; see
+[downloads page](docs/downloads.md). The macOS app is signed with a Developer ID and notarized by
+Apple. The Windows downloads aren't signed yet: choose **More info**, then **Run anyway** in
+SmartScreen. On SolidCraft 0.11 to 0.14, download once by hand; see
 [updating](https://docs.solidcraft.io/guide/updates.html#updating-from-011-to-014).
 
 ## What works
@@ -98,7 +98,7 @@ More commands, the Windows cross-build and the browser build are in [docs/buildi
 runs its own design session, or with `--connect` it drives the running app so you can watch.
 Claude Code: `claude mcp add solidcraft -- solidcraft-cli mcp`. If a terminal doesn't find
 `solidcraft-cli` (older Windows installers don't put it on `PATH`), give its full path (by default
-`"C:\Program Files\SolidCraft\solidcraft-cli.exe"`). Tools, access rules and an example session:
+`"C:\\Program Files\\SolidCraft\\solidcraft-cli.exe"`). Tools, access rules and an example session:
 [docs/mcp.md](docs/mcp.md).
 
 ## Scripts
@@ -150,3 +150,4 @@ Tinkercad are trademarks of their respective owners, named only to describe comp
 [linux-appimage]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.AppImage
 [snap-store]: https://snapcraft.io/solidcraft
 [web-app]: https://solidcraft.io/app
+

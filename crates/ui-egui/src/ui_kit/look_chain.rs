@@ -30,9 +30,9 @@ impl LookStep {
 pub fn look_chain(ui: &mut Ui, id: &str, labels: [&str; 4], looks: [Option<Sphere>; 4], active: LookStep) -> Option<LookStep> {
     let t = Tokens::get();
     let width = ui.available_width().clamp(1.0, t.form_card_width * 2.0);
-    let side = t.space_24.min(width / 4.0);
+    let side = (t.control_height + t.space_6).min(width / 4.0);
     let ring_width = t.space_2.min(side / 8.0);
-    let height = side + t.space_8 + t.font_small + t.space_4;
+    let height = side + t.space_2 + t.font_small + t.space_2;
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     let mut clicked = None;
     for (index, ((step, label), look)) in LookStep::ALL.into_iter().zip(labels).zip(looks).enumerate() {
@@ -40,10 +40,12 @@ pub fn look_chain(ui: &mut Ui, id: &str, labels: [&str; 4], looks: [Option<Spher
         let cell = Rect::from_min_size(rect.min + vec2(index as f32 * cell_width, 0.0), vec2(cell_width, height));
         let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(cell));
         let center = pos2(cell.center().x, cell.top() + side / 2.0 + ring_width);
-        let radius = (side / 2.0 - ring_width * 2.0).max(0.0);
+        let radius = (side / 2.0 - ring_width).max(0.0);
         if index < 3 {
-            ui.painter()
-                .line_segment([center + vec2(side / 2.0, 0.0), center + vec2(cell_width - side / 2.0, 0.0)], Stroke::new(1.0, t.control_border));
+            ui.painter().line_segment(
+                [center + vec2(side / 2.0 + t.space_8, 0.0), center + vec2(cell_width - side / 2.0 - t.space_8, 0.0)],
+                Stroke::new(1.0, t.control_border),
+            );
         }
         let key = format!("{id}:{}", step.name());
         let response = ui.interact(cell, ui.make_persistent_id(&key), Sense::click());
@@ -72,11 +74,11 @@ pub fn look_chain(ui: &mut Ui, id: &str, labels: [&str; 4], looks: [Option<Spher
         if step == active {
             painter.circle_stroke(center, radius + ring_width, Stroke::new(ring_width, t.render_accent));
         }
-        let font = egui::FontId::proportional(t.font_small);
+        let font = if step == active { crate::fonts::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) };
         let label_width = ui.painter().layout_no_wrap(label.to_owned(), font.clone(), t.form_ink).size().x;
         let label_left = (cell.center().x - label_width / 2.0).max(cell.left());
-        let label_rect = Rect::from_min_max(pos2(label_left, cell.top() + side + t.space_4), cell.max);
-        super::text::paint_text(ui, label_rect, label, font, t.form_ink, false);
+        let label_rect = Rect::from_min_max(pos2(label_left, cell.top() + side + t.space_2), cell.max);
+        super::text::paint_text(ui, label_rect, label, font, if step == active { t.render_accent } else { t.form_dim }, false);
         scenario::publish_rect(&key, cell);
         scenario::publish_handle(&key, cell.center());
     }

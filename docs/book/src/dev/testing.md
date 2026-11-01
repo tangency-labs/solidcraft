@@ -17,8 +17,11 @@ profile and the wasm build check.
 
 ## Dependency advisories
 
-Scheduled and manually dispatched CI runs have a separate **Dependency advisories** job;
-new advisories do not fail unrelated pull requests. To run the same scan locally:
+Scheduled and manually dispatched CI runs have a separate **Dependency advisories** job that
+checks advisories, bans and sources. A pull request or merge group that changes `Cargo.lock` or
+any `Cargo.toml` runs the same job for advisories only, and `ci` requires it then; other pull
+requests skip it, so a new advisory does not fail an unrelated change. To run the nightly scan
+locally:
 
 ```sh
 cargo install cargo-deny --version 0.20.2 --locked

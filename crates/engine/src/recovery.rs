@@ -162,7 +162,7 @@ pub fn load(dir: &Path, id: &str) -> Result<(Document, Entry)> {
     }
     let entry = read_entry(&file(dir, id, "json")).filter(|e| e.id == id).ok_or_else(|| EngineError::Other(format!("no recovered design `{id}`")))?;
     let path = design_file(dir, id);
-    let bytes = solidcraft_io::vfs::read(&path.to_string_lossy(), solidcraft_io::MAX_DESIGN_BYTES)
+    let bytes = solidcraft_io::limits::read(&path.to_string_lossy(), solidcraft_io::limits::Kind::Design)
         .map_err(|e| EngineError::Other(format!("recovered design `{id}`: {e}")))?;
     Ok((solidcraft_io::read_design(&bytes)?, entry))
 }

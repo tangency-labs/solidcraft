@@ -3,9 +3,17 @@
 //! kept apart from the number parameters: a text has no unit and no number expression reads it.
 //! A parameter edit or a configuration row that sets one relabels every text built from it, and
 //! the features that use those texts follow in the same rebuild.
+//!
+//! The words can show a number parameter's value too (#9281): `'Width: ' + Width` reads
+//! `Width: 85 mm`, a length in the design's units, an angle in degrees (`30°`), up to three
+//! decimals without trailing zeros. `number(Width)` is the number alone (`85`) and
+//! `number(Width, 2)` gives it two decimals (`85.00`).
 
 use serde::{Deserialize, Serialize};
 
+use std::collections::BTreeMap;
+
+use crate::expr::Value;
 use crate::{DocError, Document, FeatureKind, MAX_PARAMS, Result};
 
 /// The unit that marks a text parameter where parameters are listed, added or imported.
@@ -23,9 +31,9 @@ pub struct TextParam {
     pub comment: String,
 }
 
-/// Is `unit` the text unit?
+/// Is `unit` the text unit, ignoring ASCII case and surrounding whitespace?
 pub fn is_text_unit(unit: &str) -> bool {
-    unit.trim() == TEXT_UNIT
+    unit.trim().eq_ignore_ascii_case(TEXT_UNIT)
 }
 
 /// A text as typed for a text parameter: inside matching quotes, what they hold (a quote doubled
@@ -49,7 +57,28 @@ pub fn unquote(s: &str) -> String {
 enum Term {
     Text(String),
     Name(String),
+    /// `number(name)` or `number(name, decimals)`, with the name's byte range.
+    Number {
+        name: String,
+        at: (usize, usize),
+        decimals: Option<u8>,
+    },
 }
+
+/// How the words show a number parameter.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Show {
+    /// As named: its value and unit, up to three decimals.
+    Named,
+    /// In `number(...)`: the number alone, with these decimals or up to three.
+    Number(Option<u8>),
+}
+
+/// The function that shows a number parameter's value without its unit.
+const NUMBER: &str = "number";
+
+/// Most decimals `number(name, decimals)` takes.
+const MAX_DECIMALS: u8 = 8;
 
 /// The terms of a words expression with their byte ranges: quoted texts (single or double
 /// quotes, a quote doubled inside stands for one) and parameter names, joined by `+`.
@@ -96,10 +125,16 @@ fn terms(s: &str) -> Result<Vec<(Term, usize, usize)>> {
             want_term = false;
         } else if c.is_alphabetic() || c == '_' {
             let start = i;
-            while cs.get(i).is_some_and(|x| x.1.is_alphanumeric() || x.1 == '_') {
-                i += 1;
+            i = word_end(&cs, i);
+            let word = s.get(at(start)..at(i)).unwrap_or_default().to_string();
+            let open = skip_blanks(&cs, i);
+            if word == NUMBER && cs.get(open).is_some_and(|x| x.1 == '(') {
+                let (term, end) = number_call(s, &cs, open + 1)?;
+                i = end;
+                out.push((term, at(start), at(i)));
+            } else {
+                out.push((Term::Name(word), at(start), at(i)));
             }
-            out.push((Term::Name(s.get(at(start)..at(i)).unwrap_or_default().to_string()), at(start), at(i)));
             want_term = false;
         } else {
             return Err(DocError::Expr(format!("unexpected `{c}`: a text expression joins quoted texts and text parameters with +")));
@@ -112,11 +147,88 @@ fn terms(s: &str) -> Result<Vec<(Term, usize, usize)>> {
     Ok(out)
 }
 
+fn word_end(cs: &[(usize, char)], mut i: usize) -> usize {
+    while cs.get(i).is_some_and(|x| x.1.is_alphanumeric() || x.1 == '_') {
+        i += 1;
+    }
+    i
+}
+
+fn skip_blanks(cs: &[(usize, char)], mut i: usize) -> usize {
+    while cs.get(i).is_some_and(|x| x.1.is_whitespace()) {
+        i += 1;
+    }
+    i
+}
+
+/// `number(` has been read up to `i`: the name, optional decimals and `)`; the term and where
+/// it ends.
+fn number_call(s: &str, cs: &[(usize, char)], i: usize) -> Result<(Term, usize)> {
+    let at = |i: usize| cs.get(i).map_or(s.len(), |x| x.0);
+    let usage = || DocError::Expr("number() takes a number parameter and, if wanted, its decimals: number(Width, 2)".into());
+    let start = skip_blanks(cs, i);
+    if !cs.get(start).is_some_and(|x| x.1.is_alphabetic() || x.1 == '_') {
+        return Err(usage());
+    }
+    let end = word_end(cs, start);
+    let name = s.get(at(start)..at(end)).unwrap_or_default().to_string();
+    let mut i = skip_blanks(cs, end);
+    let mut decimals = None;
+    if cs.get(i).is_some_and(|x| x.1 == ',') {
+        let from = skip_blanks(cs, i + 1);
+        let mut to = from;
+        while cs.get(to).is_some_and(|x| x.1.is_ascii_digit()) {
+            to += 1;
+        }
+        let digits = s.get(at(from)..at(to)).unwrap_or_default();
+        let n: u8 = digits.parse().map_err(|_| usage())?;
+        if n > MAX_DECIMALS {
+            return Err(DocError::Expr(format!("number() shows at most {MAX_DECIMALS} decimals")));
+        }
+        decimals = Some(n);
+        i = skip_blanks(cs, to);
+    }
+    if !cs.get(i).is_some_and(|x| x.1 == ')') {
+        return Err(usage());
+    }
+    Ok((Term::Number { name, at: (at(start), at(end)), decimals }, i + 1))
+}
+
+/// A number parameter's value as the words show it: `v` in millimetres, radians or no unit
+/// (`len`, `ang`: its dimension), lengths in `units`.
+pub fn show_number(v: f64, len: i8, ang: i8, units: &str, show: Show) -> Result<String> {
+    let (value, unit) = match (len, ang) {
+        (0, 0) => (v, ""),
+        (1, 0) => {
+            let (scale, name) = crate::display_units::unit_scale(units);
+            (v * scale, name)
+        }
+        (0, 1) => (v.to_degrees(), "°"),
+        _ => return Err(DocError::Expr("a text shows lengths, angles and plain numbers only".into())),
+    };
+    if !value.is_finite() || value.abs() > 1e12 {
+        return Err(DocError::Expr("the number is out of range for a text".into()));
+    }
+    let digits = match show {
+        Show::Number(Some(d)) => format!("{value:.*}", usize::from(d)),
+        Show::Named | Show::Number(None) => {
+            let t = format!("{value:.3}");
+            let t = t.trim_end_matches('0').trim_end_matches('.');
+            if t == "-0" { "0".to_string() } else { t.to_string() }
+        }
+    };
+    Ok(match (show, unit) {
+        (Show::Number(_), _) | (_, "") => digits,
+        (Show::Named, "°") => format!("{digits}°"),
+        (Show::Named, unit) => format!("{digits} {unit}"),
+    })
+}
+
 /// The parameters a words expression names (none when it does not parse).
 pub fn references(s: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for (t, _, _) in terms(s).unwrap_or_default() {
-        if let Term::Name(n) = t
+        if let Term::Name(n) | Term::Number { name: n, .. } = t
             && !out.contains(&n)
         {
             out.push(n);
@@ -131,23 +243,27 @@ pub fn rename_reference(s: &str, old: &str, new: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut last = 0;
     for (t, a, b) in terms {
-        if matches!(&t, Term::Name(n) if n == old) {
-            out.push_str(s.get(last..a).unwrap_or_default());
-            out.push_str(new);
-            last = b;
-        }
+        let at = match &t {
+            Term::Name(n) if n == old => (a, b),
+            Term::Number { name, at, .. } if name == old => *at,
+            _ => continue,
+        };
+        out.push_str(s.get(last..at.0).unwrap_or_default());
+        out.push_str(new);
+        last = at.1;
     }
     out.push_str(s.get(last..).unwrap_or_default());
     out
 }
 
 /// The words an expression comes to, each parameter's text from `lookup`.
-pub fn eval(s: &str, lookup: &dyn Fn(&str) -> Result<String>) -> Result<String> {
+pub fn eval(s: &str, lookup: &dyn Fn(&str, Show) -> Result<String>) -> Result<String> {
     let mut out = String::new();
     for (t, _, _) in terms(s)? {
         match t {
             Term::Text(text) => out.push_str(&text),
-            Term::Name(n) => out.push_str(&lookup(&n)?),
+            Term::Name(n) => out.push_str(&lookup(&n, Show::Named)?),
+            Term::Number { name, decimals, .. } => out.push_str(&lookup(&name, Show::Number(decimals))?),
         }
         if out.len() > MAX_LEN {
             return Err(DocError::Expr("the text is too long".into()));
@@ -161,12 +277,14 @@ impl Document {
         self.text_params.iter().find(|p| p.name == name)
     }
 
-    /// The words a words expression comes to in this design.
-    pub fn eval_words(&self, e: &str) -> Result<String> {
-        eval(e, &|n| match self.text_param(n) {
-            Some(p) => Ok(p.text.clone()),
-            None if self.name_taken(n) => Err(DocError::Expr(format!("`{n}` is a number parameter: a text's words take text parameters"))),
-            None => Err(DocError::Expr(format!("unknown text parameter `{n}`"))),
+    /// The words a words expression comes to in this design, number parameters from `vals`.
+    pub fn eval_words(&self, e: &str, vals: &BTreeMap<String, Value>) -> Result<String> {
+        eval(e, &|n, show| match (self.text_param(n), vals.get(n)) {
+            (Some(_), _) if show != Show::Named => Err(DocError::Expr(format!("`{n}` is a text parameter: number() takes a number parameter"))),
+            (Some(p), _) => Ok(p.text.clone()),
+            (None, Some(v)) => show_number(v.v, v.len, v.ang, &self.units, show).map_err(|error| DocError::Expr(format!("`{n}`: {error}"))),
+            (None, None) if self.name_taken(n) => Err(DocError::Expr(format!("`{n}` has no value"))),
+            (None, None) => Err(DocError::Expr(format!("unknown parameter `{n}`"))),
         })
     }
 
@@ -230,7 +348,7 @@ mod tests {
 
     #[test]
     fn words_expressions_join_quoted_texts_and_parameters() {
-        let look = |n: &str| match n {
+        let look = |n: &str, _: Show| match n {
             "Label" => Ok("TAG-1".to_string()),
             _ => Err(DocError::Expr(format!("unknown text parameter `{n}`"))),
         };
@@ -248,5 +366,31 @@ mod tests {
         assert_eq!(unquote("'it''s'"), "it's");
         assert_eq!(unquote("'a' + 'b'"), "'a' + 'b'");
         assert_eq!(unquote("TAG-1"), "TAG-1");
+    }
+
+    /// #9281: a number parameter in the words shows its value; `number()` drops the unit and
+    /// can fix the decimals; a rename reaches inside `number()`.
+    #[test]
+    fn number_parameters_show_their_value_in_the_words() {
+        let look = |n: &str, show: Show| match n {
+            "Width" => show_number(85.0, 1, 0, "mm", show),
+            "Gap" => show_number(12.7, 1, 0, "in", show),
+            "Tilt" => show_number(30f64.to_radians(), 0, 1, "mm", show),
+            "Count" => show_number(4.0, 0, 0, "mm", show),
+            "Area" => show_number(1.0, 2, 0, "mm", show),
+            _ => Err(DocError::Expr(format!("unknown parameter `{n}`"))),
+        };
+        assert_eq!(eval("'Width: ' + Width", &look).unwrap(), "Width: 85 mm");
+        assert_eq!(eval("Gap", &look).unwrap(), "0.5 in");
+        assert_eq!(eval("Tilt + ' / ' + Count", &look).unwrap(), "30° / 4");
+        assert_eq!(eval("number(Width) + 'x' + number( Width , 2 )", &look).unwrap(), "85x85.00");
+        assert_eq!(eval("number(Tilt, 1)", &look).unwrap(), "30.0");
+        for bad in ["number(Width", "number()", "number(Width, x)", "number(Width, 9)", "number(Width 2)", "Area", "number('a')"] {
+            assert!(eval(bad, &look).is_err(), "{bad}");
+        }
+        assert_eq!(references("number(Width, 1) + Count"), ["Width", "Count"]);
+        assert_eq!(rename_reference("number(Width, 1) + Width + 'Width'", "Width", "W"), "number(W, 1) + W + 'Width'");
+        assert_eq!(show_number(-0.0001, 1, 0, "mm", Show::Named).unwrap(), "0 mm");
+        assert!(show_number(f64::NAN, 0, 0, "mm", Show::Named).is_err());
     }
 }

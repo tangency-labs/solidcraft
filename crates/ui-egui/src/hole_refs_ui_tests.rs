@@ -162,6 +162,28 @@ fn a_number_typed_after_an_edge_pick_sets_its_distance() {
     assert_eq!(diameter, "5 mm", "the diameter is left as it was");
 }
 
+/// Without value boxes in the view (#9479), the distance's row in the command window takes the
+/// number typed after an edge pick, as its box would.
+#[test]
+fn without_value_boxes_a_number_typed_after_an_edge_pick_sets_its_distance() {
+    let mut h = plate();
+    h.app.preferences.value_boxes_in_view = false;
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = screen(&mut h, Vec3::new(30.0, 25.0, 10.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Reference 1"}})).unwrap();
+    let left = screen(&mut h, Vec3::new(0.0, 20.0, 10.0));
+    h.step(&json!({"click": left})).unwrap();
+    h.frames(2);
+    assert!(h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_hole_ref_area", 0usize)))).is_none(), "a distance box in the view");
+    h.step(&json!({"text": "7 mm"})).unwrap();
+    h.frames(2);
+    assert_eq!(distances(&h)[0], "7 mm");
+    assert!((place(&h).x - 7.0).abs() < 1e-6, "the hole is 7 mm from the left edge: {:?}", place(&h));
+    let Some(Kind::Hole { diameter, .. }) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("the hole dialog") };
+    assert_eq!(diameter, "5 mm", "the diameter is left as it was");
+}
+
 /// The open Cylinder dialog's reference distances and where it stands.
 fn cylinder_dialog(h: &Harness) -> ([String; 2], Vec3) {
     match h.app.dialog.as_ref().map(|d| &d.kind) {

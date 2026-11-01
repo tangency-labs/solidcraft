@@ -31,6 +31,19 @@ fn editor<'a>(app: &'a mut SolveApp, token: &Arc<()>) -> Option<&'a mut Ap> {
     Arc::ptr_eq(&k.local.token, token).then_some(k)
 }
 
+/// Parameterless UI activation of the existing export command. JSON execution never picks files.
+pub(crate) fn start_export(app: &mut SolveApp) {
+    let origin = app.session.doc.clone();
+    app.pick_save("my-library.solidcraft-library.json", &["json"], move |app, path| {
+        if let Some(path) = path
+            && Arc::ptr_eq(&origin, &app.session.doc)
+            && let Err(error) = app.run("library.export", json!({"path":path,"overwrite":false}))
+        {
+            app.set_status(error, true);
+        }
+    });
+}
+
 fn save_library(app: &mut SolveApp, token: Arc<()>, overwrite: bool) {
     let origin = app.session.doc.clone();
     app.pick_save("my-library.solidcraft-library.json", &["json"], move |app, path| {

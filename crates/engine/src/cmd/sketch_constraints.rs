@@ -6,6 +6,7 @@ use solidcraft_geom::Vec2;
 use solidcraft_sketch::{ConstraintKind, CurveKind, Sketch};
 
 use super::sketch::{add_c, constraint_result, dof_now, edit, listed, redundancy, residual_of};
+use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list, vec2};
 use crate::schema::sketch_constraints::{ToggleDiameterParams, ToggleDiameterResult};
@@ -86,7 +87,7 @@ fn curve(sk: &Sketch, v: Option<&Value>, cmd: &str) -> Result<usize> {
 
 fn c_polygon(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.polygon";
-    let ids = string_list(p, "lines");
+    let ids = string_list(cmd, p, "lines")?;
     if ids.len() < 3 || ids.len() > 200 {
         return Err(bad(cmd, "`lines` must list 3 to 200 lines of a closed chain"));
     }
@@ -361,7 +362,7 @@ fn guess(sk: &Sketch, ents: &[String], cmd: &str) -> Result<ConstraintKind> {
 
 fn smart_constrain(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constrainer";
-    let ents = string_list(p, "entities");
+    let ents = string_list(cmd, p, "entities")?;
     let (mut before, mut residual) = (None, None);
     let mut name = "";
     let (id, info) = edit(s, p, cmd, true, |sk, _| {
@@ -403,8 +404,8 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
     })?;
     if !driven {
         // Making it driving must not over-constrain: compare with the sketch without it.
-        let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch"))?;
-        let mut sk = s.doc.sketch(id)?.clone();
+        let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch"))?;
+        let mut sk = sketch_store::read(&s.doc, id)?.clone();
         if let Some(c) = sk.constraints.iter_mut().find(|c| c.id == cid) {
             c.driven = true;
         }
@@ -422,7 +423,7 @@ fn toggle_diameter(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.toggle_diameter";
     let cid = str_(p, "constraint").ok_or_else(|| bad(cmd, "`constraint` must be a dimension id"))?.to_string();
     let want = crate::params::bool_(p, "diameter");
-    let sketch = super::sketch::target_sketch(s, p, cmd)?;
+    let sketch = sketch_store::target(s, p, cmd)?;
     let (diameter, info) = edit(s, p, cmd, true, |sk, doc| {
         let c = sk.constraints.iter().find(|c| c.id == cid).cloned().ok_or_else(|| bad(cmd, format!("no constraint `{cid}`")))?;
         let round = |curve: usize| matches!(sk.curves.get(curve).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
@@ -520,12 +521,7 @@ fn anchor(sk: &Sketch, k: &ConstraintKind) -> Option<Vec2> {
 }
 
 fn glyphs(s: &mut Session, p: &Value) -> Result<Value> {
-    let id = match p.get("sketch") {
-        Some(Value::Number(n)) => n.as_u64(),
-        Some(Value::String(x)) => s.doc.find_feature(x).map(|f| f.id),
-        _ => s.active_sketch,
-    }
-    .ok_or_else(|| bad("sketch.glyphs", "no such sketch"))?;
+    let id = sketch_store::target(s, p, "sketch.glyphs")?;
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
     let failing = &ss.report.failing;
@@ -559,7 +555,7 @@ fn snap(s: &mut Session, p: &Value) -> Result<Value> {
     let at = req_vec2(cmd, p, "at")?;
     let from = p.get("from").and_then(vec2);
     let r = num(p, "radius").filter(|r| *r > 0.0).unwrap_or(1.0);
-    let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
+    let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("the sketch is not evaluated".into()))?;
     let sk = &ss.sketch;

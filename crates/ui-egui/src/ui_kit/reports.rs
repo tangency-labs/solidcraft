@@ -30,11 +30,16 @@ pub(crate) fn report_divider(ui: &mut Ui, key: &str) {
 
 /// List border around a caller-owned virtualised viewport. Tokens: dialog_rule, control_radius, space_10.
 pub(crate) fn list_frame<R>(ui: &mut Ui, key: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+    list_frame_filled(ui, key, egui::Color32::TRANSPARENT, 0.0, add)
+}
+
+pub(super) fn list_frame_filled<R>(ui: &mut Ui, key: &str, fill: egui::Color32, vertical: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
     let t = Tokens::get();
     let response = egui::Frame::NONE
+        .fill(fill)
         .stroke(t.container_border(t.dialog_rule))
         .corner_radius(t.control_radius)
-        .inner_margin(egui::Margin::symmetric(t.space_10 as i8, 0))
+        .inner_margin(egui::Margin::symmetric(t.space_10 as i8, vertical as i8))
         .show(ui, |ui| {
             // Frame already subtracts its border and padding from the content width.
             ui.set_min_width(ui.available_width().max(0.0));
@@ -69,6 +74,13 @@ pub(crate) fn path_chip(ui: &mut Ui, path: &str, add: impl FnOnce(&mut Ui)) {
 
 /// Empty-list dashed outline and centred caption. Retains the note rectangle.
 pub(crate) fn empty_box(ui: &mut Ui, key: &str, message: &str) {
+    if crate::prefs_search::querying(ui) {
+        if crate::prefs_search::texts_hit(ui, &[message]) {
+            crate::prefs_search::reveal(ui);
+        } else if !ui.is_visible() || crate::prefs_search::suppress_chrome(ui) {
+            return;
+        }
+    }
     let t = Tokens::get();
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width().max(0.0), t.control_height * 3.0), egui::Sense::hover());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), message));

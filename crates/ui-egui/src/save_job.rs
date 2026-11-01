@@ -18,6 +18,12 @@ pub struct Saving {
 /// taken up by [`tick`] (true: it is under way); in the browser, or when no thread can start, it
 /// runs here and is finished on return (false).
 pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
+    // An assembly reading its links for a part edited in place takes them up when the read is
+    // done: a save before then would record a design that is about to change as saved.
+    if let Some(name) = crate::edit_in_place::refreshing_assembly(app) {
+        app.set_status(crate::i18n::format("ui.edit_in_place_save_waits", &[("name", &name)]), true);
+        return false;
+    }
     #[cfg(not(target_arch = "wasm32"))]
     if app.saving.is_none() && app.file_picker.is_none() && !app.file_load.busy() {
         let mut copy = app.session.scratch();

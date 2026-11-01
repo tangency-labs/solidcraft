@@ -1,7 +1,7 @@
 //! Booleans of prisms in 2D: when the target is a prism (two caps square to one direction,
 //! walls of planes and cylinders along it) and the tool a prism along the same direction
 //! spanning the target's height, the result is the prism over the 2D boolean of their
-//! sections. Plates with holes, slots and patterns of them: exact, and immune to the mesh
+//! sections. Hole-free intersections may instead use the common height interval. Plates with holes, slots and patterns of them: exact, and immune to the mesh
 //! intersection's trouble with walls meeting along lines.
 //! Stepped extrusions (case floors and walls) use sections between every cap level, so a
 //! circular boss can meet the rim without shifting either operand off its exact plane.
@@ -2238,7 +2238,15 @@ fn simple_prism_indexed(a: &Body, b: &Body, op: BoolOp, [ia, ib]: [&LazyIndex; 2
     // Prisms of one section overlapping or touching end to end: one longer prism.
     let stacked = op == BoolOp::Union && !same && pb.lo <= pa.hi + tol && pa.lo <= pb.hi + tol;
     let ok = match op {
-        BoolOp::Cut | BoolOp::Intersect => spans,
+        BoolOp::Cut => spans,
+        // An intersection keeps only the common height. Unlike a through cut, its
+        // other operand need not span the target's entire extrusion.
+        BoolOp::Intersect => {
+            if pa.hi <= pb.lo || pb.hi <= pa.lo {
+                return Some(Ok(None));
+            }
+            true
+        }
         BoolOp::Union => same || stacked,
     };
     if !ok {
@@ -2248,6 +2256,11 @@ fn simple_prism_indexed(a: &Body, b: &Body, op: BoolOp, [ia, ib]: [&LazyIndex; 2
     let regions = &section.regions;
     if regions.is_empty() {
         return Some(Ok(None));
+    }
+    // Keep newly clipped perforated sections on the established B-rep route. Re-extruding
+    // a thin annulus with different circular seam splits can leave both cap meshes empty.
+    if op == BoolOp::Intersect && !spans && regions.iter().any(|r| !r.holes.is_empty()) {
+        return None;
     }
     let (u, x, y) = (area(regions), area(&pa.section.regions), area(&pb.section.regions));
     let alike = |v: f64| (u - v).abs() <= tol * (1.0 + u);
@@ -2269,6 +2282,8 @@ fn simple_prism_indexed(a: &Body, b: &Body, op: BoolOp, [ia, ib]: [&LazyIndex; 2
             return Some(Ok(Some(body)));
         }
         (pa.lo.min(pb.lo), pa.hi.max(pb.hi))
+    } else if op == BoolOp::Intersect {
+        (pa.lo.max(pb.lo), pa.hi.min(pb.hi))
     } else {
         (pa.lo, pa.hi)
     };
@@ -2584,6 +2599,37 @@ pub(crate) fn prism_union_between_caps(a: &Body, b: &Body, op: BoolOp) -> Option
 #[cfg(test)]
 mod planar_tests {
     use super::*;
+    #[test]
+    fn single_prism_intersection_uses_common_height_in_both_orders() {
+        for k in [1.0, 0.05] {
+            for (lo, height, expected) in [
+                (7.5, 10.0, Some((7.5, 17.5))),
+                (15.0, 10.0, Some((15.0, 22.5))),
+                (-5.0, 15.0, Some((5.0, 10.0))),
+                (22.5, 10.0, None),
+                (25.0, 10.0, None),
+            ] {
+                let a = crate::cylinder(Vec3::new(12.5, 5.0, 5.0) * k, Vec3::Z, 2.5 * k, 17.5 * k).unwrap();
+                let b = crate::box_solid(Vec3::new(10.0, 5.0, lo) * k, Vec3::new(22.5, 10.0, lo + height) * k).unwrap();
+                for (lhs, rhs) in [(&a, &b), (&b, &a)] {
+                    let result = simple_prism_boolean(lhs, rhs, BoolOp::Intersect).expect("the exact prism route applies").unwrap();
+                    if let Some((bottom, top)) = expected {
+                        let body = result.expect("a positive-height half disc is a solid");
+                        assert!(body.validity().is_empty());
+                        assert!(body.history().is_some(), "clipped caps and walls retain their operand history");
+                        let expected = std::f64::consts::PI * (2.5 * k).powi(2) * (top - bottom) * k / 2.0;
+                        let actual = crate::measure(&body).unwrap().volume;
+                        assert!((actual - expected).abs() < expected * 2e-3, "{lo} {height} {k}: {actual} != {expected}");
+                        let bounds = body.tessellate(k * 1e-3).unwrap().bounds();
+                        assert!((bounds.min.z - bottom * k).abs() < k * 1e-7);
+                        assert!((bounds.max.z - top * k).abs() < k * 1e-7);
+                    } else {
+                        assert!(result.is_none(), "touching or separated caps have no intersection volume");
+                    }
+                }
+            }
+        }
+    }
     #[test]
     fn shared_arc_line_endpoint_roundoff_does_not_open_a_union() {
         let a = Region2 { outer: Loop2::polygon(&[Vec2::new(-2., 0.), Vec2::new(2., 0.), Vec2::new(2., 2.), Vec2::new(-2., 2.)]), holes: vec![] };

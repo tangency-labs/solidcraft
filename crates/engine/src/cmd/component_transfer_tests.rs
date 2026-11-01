@@ -290,3 +290,205 @@ fn edited_transfer_destination_updates_history_owner_copy_and_reopen() {
     assert_eq!(reopened.model.state().body("Block").unwrap().component, b);
     assert_eq!(reopened.model.state().body("Block (2)").unwrap().component, copied);
 }
+
+/// A 10 × 10 × 5 block (sketch `S`, extrude `Extrude1`, body `Block`) in the design with a sketch
+/// `Top` on its top face, and a component `Part` placed 100 mm along X. The design is active.
+fn block_and_part() -> (Session, u64) {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "S", "distance": 5, "body_name": "Block"}));
+    run(&mut s, "sketch.create", json!({"plane": {"face": [5, 5, 5]}, "name": "Top"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [4, 4]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let part = run(&mut s, "component.create", json!({"name": "Part"}))["component"].as_u64().unwrap();
+    let first = s.doc.occurrence_of(part).map(|o| o.id).unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": first, "translate": [100, 0, 0], "capture": true, "move_grounded": true}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    (s, part)
+}
+
+/// The lowest corner of every body in the world, rounded.
+fn world_corners(s: &Session) -> Vec<Vec<f64>> {
+    s.world_state()
+        .bodies
+        .iter()
+        .map(|b| {
+            let min = b.mesh().bounds().min;
+            vec![min.x.round(), min.y.round(), min.z.round()]
+        })
+        .collect()
+}
+
+#[test]
+fn move_features_keeps_the_world_and_the_attachment_in_the_active_component() {
+    let (mut s, part) = block_and_part();
+    let ids: Vec<u64> = s.doc.features.iter().map(|f| f.id).collect();
+    let names: Vec<String> = s.doc.features.iter().map(|f| f.name.clone()).collect();
+    let corners = world_corners(&s);
+    // No `component`: the features go to the active one.
+    run(&mut s, "component.activate", json!({"component": part}));
+    let r = run(&mut s, "component.move_features", json!({"features": ["S", "Extrude1"]}));
+    assert_eq!(r["moved"], json!(["S", "Extrude1"]), "{r}");
+    // Nothing was added or renamed.
+    assert_eq!(s.doc.features.iter().map(|f| f.id).collect::<Vec<_>>(), ids);
+    assert_eq!(s.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>(), names);
+    for name in ["S", "Extrude1"] {
+        assert_eq!(s.doc.find_feature(name).map(|f| f.component), Some(part));
+    }
+    assert_eq!(s.doc.find_feature("Top").map(|f| f.component), Some(0));
+    assert_eq!(world_corners(&s), corners, "the block is where it was in the world");
+    // The sketch left behind follows the body into its new component and still evaluates.
+    let top = s.doc.find_feature("Top").unwrap();
+    assert!(s.model.result(top.id).is_some_and(|r| r.error.is_none()));
+    let anchor = match top.kind.clone() {
+        FeatureKind::Sketch { mut plane, .. } => crate::cmd::sketch::face::anchor_mut(&mut plane).cloned(),
+        _ => None,
+    };
+    assert_eq!(anchor.map(|a| (a.component, a.path)), Some((part, s.doc.first_path(part))));
+}
+
+/// Moved without its body, or with the body moved from under it, a feature would break: the move
+/// is refused and nothing changes.
+#[test]
+fn move_features_refuses_a_move_that_would_break_a_feature() {
+    for moves in [["S2", "Cut1"], ["S1", "Extrude1"]] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S1"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "S1", "distance": 10, "body_name": "Block"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S2"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "S2", "distance": 4, "operation": "cut", "name": "Cut1"}));
+        let part = run(&mut s, "component.create", json!({"name": "Part", "activate": false}))["component"].as_u64().unwrap();
+        let (before, steps) = (s.doc.to_json(), s.undo.len());
+        let e = s.execute("component.move_features", &json!({"features": moves, "component": part})).unwrap_err().to_string();
+        assert!(e.contains("moving would"), "{moves:?}: {e}");
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, steps), "{moves:?}");
+    }
+}
+
+#[test]
+fn move_features_refusals_change_nothing() {
+    let (mut s, part) = block_and_part();
+    let refused = |s: &mut Session, params: Value, why: &str| {
+        let (before, steps) = (s.doc.to_json(), s.undo.len());
+        let e = s.execute("component.move_features", &params).unwrap_err().to_string();
+        assert!(e.contains(why), "{e}");
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, steps));
+    };
+    refused(&mut s, json!({"features": ["S"], "component": 0}), "already in that component");
+    refused(&mut s, json!({"features": ["Nope"], "component": part}), "no feature");
+    refused(&mut s, json!({"features": [], "component": part}), "1…1000");
+    refused(&mut s, json!({"features": ["S"], "component": "Nowhere"}), "no component");
+    // A component placed twice.
+    run(&mut s, "occurrence.copy", json!({"component": part}));
+    refused(&mut s, json!({"features": ["S", "Extrude1"], "component": part}), "more than once");
+    // Rolled back.
+    run(&mut s, "timeline.roll_to", json!({"position": 1}));
+    refused(&mut s, json!({"features": ["S"], "component": part}), "rollback");
+}
+
+#[test]
+fn move_features_refuses_a_boolean_whose_inputs_would_be_split() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "A", "name": "BoxA"}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 10, "width": 10, "height": 10, "corner": [10, 0, 0], "operation": "new_body", "body_name": "B", "name": "BoxB"}),
+    );
+    run(&mut s, "solid.combine", json!({"target": "A", "tools": ["B"], "operation": "join", "name": "Joined"}));
+    let part = run(&mut s, "component.create", json!({"name": "Part", "activate": false}))["component"].as_u64().unwrap();
+    let before = s.doc.to_json();
+    let e = s.execute("component.move_features", &json!({"features": ["BoxA"], "component": part})).unwrap_err().to_string();
+    assert!(e.contains("split between components"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// Each kind moves by its own step, all or nothing, as one undo step: a block's features without
+/// the cut that works on it break, so the first call changes nothing; with it, the second moves
+/// the placement, the features and the body that is not made by them, and skips the block they carry.
+#[test]
+fn reparent_items_moves_each_kind_all_or_nothing() {
+    let (mut s, part) = block_and_part();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S2"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [10, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "S2", "distance": 4, "operation": "cut", "name": "Cut1"}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 10, "width": 10, "height": 10, "corner": [50, 0, 0], "operation": "new_body", "body_name": "Plate", "name": "PlateBox"}),
+    );
+    let sub = run(&mut s, "component.create", json!({"name": "Sub", "activate": false}));
+    let sub_occurrence = sub["occurrence"].as_u64().unwrap();
+    let (before, steps, corners) = (s.doc.to_json(), s.undo.len(), world_corners(&s));
+    let moves = |features: Value| json!({"occurrences": [sub_occurrence], "features": features, "bodies": ["Block", "Plate"], "component": part});
+    // Cut1 would be left without its body: nothing moves, the placement included.
+    let e = s.execute("browser.reparent", &moves(json!(["S", "Extrude1"]))).unwrap_err().to_string();
+    assert!(e.contains("moving would"), "{e}");
+    assert_eq!((s.doc.to_json(), s.undo.len()), (before, steps));
+    let r = run(&mut s, "browser.reparent", moves(json!(["S", "Extrude1", "S2", "Cut1"])));
+    assert_eq!(r["occurrences"], json!([sub_occurrence]), "{r}");
+    assert_eq!(r["features"], json!(["S", "Extrude1", "S2", "Cut1"]), "{r}");
+    assert_eq!(r["bodies"], json!(["Plate"]), "Block went with its features: {r}");
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == sub_occurrence).map(|o| o.parent), Some(part));
+    assert_eq!(world_corners(&s), corners, "everything is where it was in the world");
+}
+
+#[test]
+fn reparent_items_leaves_the_contents_of_a_moved_component_alone() {
+    let (mut s, part) = block_and_part();
+    let dest = run(&mut s, "component.create", json!({"name": "Dest", "activate": false}))["component"].as_u64().unwrap();
+    let occurrence = s.doc.occurrence_of(part).map(|o| o.id).unwrap();
+    // A feature inside Part is named as well as Part: it travels with Part, not on its own.
+    run(&mut s, "component.activate", json!({"component": part}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "Inner", "name": "InnerBox"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let r = run(&mut s, "browser.reparent", json!({"occurrences": [occurrence], "features": ["InnerBox"], "bodies": ["Inner"], "component": dest}));
+    assert_eq!(r["features"], json!([]), "{r}");
+    assert_eq!(r["bodies"], json!([]), "{r}");
+    assert_eq!(s.doc.find_feature("InnerBox").map(|f| f.component), Some(part));
+}
+
+#[test]
+fn reparent_items_refusals_change_nothing() {
+    let (mut s, part) = block_and_part();
+    let refused = |s: &mut Session, params: Value, why: &str| {
+        let (before, steps) = (s.doc.to_json(), s.undo.len());
+        let e = s.execute("browser.reparent", &params).unwrap_err().to_string();
+        assert!(e.contains(why), "{e}");
+        assert_eq!((s.doc.to_json(), s.undo.len()), (before, steps));
+    };
+    refused(&mut s, json!({"component": part}), "give `occurrences`");
+    refused(&mut s, json!({"features": ["S"], "component": 0}), "already in that component");
+    refused(&mut s, json!({"bodies": ["Nope"], "component": part}), "no body");
+    refused(&mut s, json!({"occurrences": [9999], "component": part}), "no occurrence");
+    refused(&mut s, json!({"occurrences": ["x"], "component": part}), "occurrence ids");
+    let many: Vec<u64> = (0..1001).collect();
+    refused(&mut s, json!({"occurrences": many, "component": part}), "at most 1000");
+    run(&mut s, "timeline.roll_to", json!({"position": 1}));
+    refused(&mut s, json!({"features": ["S"], "component": part}), "rollback");
+}
+
+/// Placements hidden inside a moved component are still hidden under their new path.
+#[test]
+fn reparent_items_keeps_hidden_placements_hidden() {
+    let (mut s, part) = block_and_part();
+    let made = run(&mut s, "component.create", json!({"name": "Dest", "activate": false}));
+    let (dest, dest_occurrence) = (made["component"].as_u64().unwrap(), made["occurrence"].as_u64().unwrap());
+    let outer = run(&mut s, "component.create", json!({"name": "Outer", "activate": false}));
+    let (outer_component, outer_occurrence) = (outer["component"].as_u64().unwrap(), outer["occurrence"].as_u64().unwrap());
+    let inner =
+        run(&mut s, "component.create", json!({"name": "Inner", "parent": outer_component, "activate": false}))["occurrence"].as_u64().unwrap();
+    s.visibility.hidden_occurrences.push(vec![outer_occurrence, inner]);
+    run(&mut s, "browser.reparent", json!({"occurrences": [outer_occurrence], "component": dest}));
+    assert_eq!(s.visibility.hidden_occurrences, vec![vec![dest_occurrence, outer_occurrence, inner]]);
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == outer_occurrence).map(|o| o.parent), Some(dest));
+    let _ = part;
+}

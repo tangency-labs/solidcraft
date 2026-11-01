@@ -245,10 +245,20 @@ pub(crate) fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: 
         let Some(k) = d.inputs.get(i).filter(|inp| !inp.items.is_empty()).and_then(|inp| REFERENCES.iter().position(|l| *l == inp.label)) else {
             continue;
         };
+        let mut keyboard = None;
         if let Some(refs) = refs_mut(d)
             && let (Some(label), Some(value)) = (DISTANCES.get(k), refs.distance.get_mut(k))
         {
             enter |= crate::ui_kit::expr_row(ui, label, value);
+            // Without value boxes in the view (#9479), a newly picked edge's distance takes the
+            // keyboard here, as its box would.
+            if refs.focus == Some(k) && !crate::canvas::boxes_shown(ui.ctx()) {
+                refs.focus = None;
+                keyboard = crate::ui_kit::last_value_field(ui.ctx());
+            }
+        }
+        if let Some(id) = keyboard {
+            d.give_keyboard(id);
         }
     }
     sync(s, d);
@@ -342,7 +352,8 @@ pub(crate) fn canvas(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter,
         }
         dimension(painter, a, b, t.dimension);
         let (Some(label), Some(refs)) = (DISTANCES.get(*k), refs_mut(d)) else { continue };
-        let focus = refs.focus == Some(*k);
+        // Without boxes in the view, the distance's row in the command window takes it (#9479).
+        let focus = refs.focus == Some(*k) && crate::canvas::boxes_shown(ui.ctx());
         if focus {
             refs.focus = None;
             took = true;

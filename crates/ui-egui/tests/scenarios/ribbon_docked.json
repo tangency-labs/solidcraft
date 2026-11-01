@@ -1,11 +1,13 @@
 [
   {"note":"Docked ribbon entry points keep the existing workspace menu, section menus, command search and Sketch exit usable after resizing."},
   {"expect":{"shown_handles":["ribbon:workspace","ribbon:search","ribbon:section:MODEL:CREATE","tab:MODEL"],"spans":{"inner":"ribbon:workspace","outer":"toolbar","axis":"y","tol":1}}},
+  {"call":"ui.prefs","params":{"language":"ru"}},
   {"click":{"handle":"ribbon:workspace"}},
   {"call":"ui.menuPick","params":{"item":"ui.workspace.render"}},
   {"expect":{"shown_handles":["render:stage:look","render:stage:light","render:stage:frame","render:stage:output","ribbon:search","ribbon:workspace"]}},
   {"click":{"handle":"ribbon:workspace"}},
   {"call":"ui.menuPick","params":{"item":"ui.workspace.design"}},
+  {"call":"ui.prefs","params":{"language":"en"}},
   {"click":{"handle":"ribbon:section:MODEL:CREATE"}},
   {"expect":{"shown_handles":["dropdown:solid.extrude"]}},
   {"key":"Escape"},

@@ -4,6 +4,8 @@
 //!
 //! - Holding the left button still (or a finger, on touch screens) for [`HOLD_SECS`], or the
 //!   viewport menu's "Select Other…", opens a list at the cursor of every pickable thing there,
+//!   including hidden geometry in a six-point radius without changing its visibility by default.
+//!   The `select_other_hidden` preference restores the visible-only list. It is
 //!   in the selection filter's and the open dialog's terms, front to back like layers: sketch
 //!   points and curves first (drawn over the model), then what belongs to a body, one body at a
 //!   time and the nearest body first (its vertices, edges, face, then the body itself), then
@@ -35,6 +37,7 @@ use crate::viewport::{Hit, Proj};
 pub const HOLD_SECS: f64 = 0.5;
 /// How far (screen points) a repeat click may be from the last one and still cycle.
 const CYCLE_SLOP: f32 = 4.0;
+const ROW_HEIGHT: f32 = 24.0;
 /// The most rows kept per kind of thing (vertices, edges, faces, …). The list exists to tell a
 /// handful of overlapping things apart; nearest first, farther ones of the same kind are dropped
 /// so it stays readable and bounded.
@@ -61,6 +64,7 @@ pub struct Popup {
     /// The model and dialog it was made for: it closes when they change.
     revision: u64,
     dialog: bool,
+    include_hidden: bool,
     /// The browser's body highlight is ours to clear.
     lit_body: bool,
     /// The keys held at the press or click that opened it.
@@ -94,12 +98,12 @@ pub struct State {
 /// Every pickable thing under `pos`, front to back (the sketch being edited first): see
 /// [`order`].
 pub fn rows(app: &SolveApp, proj: &Proj, pos: Pos2) -> Vec<Row> {
-    rows_capped(app, proj, pos).0
+    rows_capped(app, proj, pos, app.preferences.select_other_hidden).0
 }
 
 /// [`rows`], with how many things were under the cursor in all.
-fn rows_capped(app: &SolveApp, proj: &Proj, pos: Pos2) -> (Vec<Row>, usize) {
-    let hits = crate::viewport::pick_all(app, proj, pos);
+fn rows_capped(app: &SolveApp, proj: &Proj, pos: Pos2, through: bool) -> (Vec<Row>, usize) {
+    let hits = if through { crate::viewport::pick_through(app, proj, pos) } else { crate::viewport::pick_all(app, proj, pos) };
     let mut found = crate::viewport::candidates(app, &hits);
     let dialog = app.dialog.as_ref().is_some_and(|d| d.wants_picks());
     // A body behind each face (body picking already turns faces into bodies).
@@ -194,7 +198,7 @@ fn hit_depth(
     let along = |p: solidcraft_engine::geom::Vec3| Some((p - o).dot(d)).filter(|t| t.is_finite());
     match h {
         Hit::Vertex { point, .. } | Hit::Face { point, .. } => along(*point),
-        Hit::Edge { body, index: ei, mid } => {
+        Hit::Edge { body, index: ei, mid, .. } => {
             let under = index.get(body.as_str()).and_then(|i| st.bodies.get(*i)).and_then(|b| {
                 let (m, place) = b.mesh_in_place();
                 let at = |p: solidcraft_engine::geom::Vec3| solidcraft_engine::doc::apply_point(&place, p);
@@ -267,13 +271,14 @@ fn sketch_name(app: &SolveApp, sketch: u64) -> String {
 }
 
 /// "Line 3" (its kind and number), with what kind of geometry it is when that matters.
-fn curve_label(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> String {
+pub(crate) fn curve_label(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> String {
     if let Some((i, c)) = sk.curves.iter().enumerate().find(|(_, c)| c.id == id) {
         let kind = curve_kind_name(&c.kind);
         let n = id_number(id).unwrap_or_else(|| sk.curves.iter().take(i + 1).filter(|x| curve_kind_name(&x.kind) == kind).count() as u64);
         let mut s = format!("{kind} {n}");
-        if c.link.is_some() {
-            s.push_str(" (projected)");
+        if let Some(link) = &c.link {
+            let kind = sk.links.iter().find(|l| &l.id == link).map(|l| l.kind);
+            s.push_str(if kind == Some(solidcraft_engine::sketch::LinkKind::Intersect) { " (intersected)" } else { " (projected)" });
         } else if c.construction {
             s.push_str(" (construction)");
         }
@@ -386,14 +391,23 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: Held) -> bool {
 }
 
 fn open_with(app: &mut SolveApp, proj: &Proj, at: Pos2, held: Held) -> bool {
-    let (rows, total) = rows_capped(app, proj, at);
+    let (rows, total) = rows_capped(app, proj, at, app.preferences.select_other_hidden);
+    close(app);
     if rows.is_empty() {
         app.set_status("Nothing to select here", false);
         return false;
     }
-    close(app);
-    app.viewport.select_other.popup =
-        Some(Popup { at, rows, total, hovered: None, revision: app.session.revision, dialog: app.dialog.is_some(), lit_body: false, held });
+    app.viewport.select_other.popup = Some(Popup {
+        at,
+        rows,
+        total,
+        hovered: None,
+        revision: app.session.revision,
+        dialog: app.dialog.is_some(),
+        include_hidden: app.preferences.select_other_hidden,
+        lit_body: false,
+        held,
+    });
     true
 }
 
@@ -456,8 +470,8 @@ pub fn control(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
         return Ok(describe(app));
     }
     if let (Some(x), Some(y)) = (p.get("x").and_then(Value::as_f64), p.get("y").and_then(Value::as_f64)) {
-        if !(x.is_finite() && y.is_finite()) {
-            return Err("x and y must be numbers".into());
+        if !(x.is_finite() && y.is_finite()) || x.abs() > 1e6 || y.abs() > 1e6 {
+            return Err("x and y must be finite screen points within ±1000000".into());
         }
         if app.viewport.rect.is_none() {
             return Err("no viewport".into());
@@ -582,7 +596,7 @@ pub fn cycle_click(app: &mut SolveApp, proj: &Proj, at: Pos2) -> bool {
     if c.at.distance(at) > CYCLE_SLOP || c.key != cycle_key(app) || c.selection != app.session.selection {
         return false;
     }
-    let rows = rows(app, proj, at);
+    let rows = rows_capped(app, proj, at, false).0;
     if rows.len() < 2 {
         return false;
     }
@@ -601,24 +615,38 @@ pub fn cycle_click(app: &mut SolveApp, proj: &Proj, at: Pos2) -> bool {
 /// Draw the open list; handle its hover, clicks, and a press elsewhere (which closes it).
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(p) = app.viewport.select_other.popup.clone() else { return };
-    if p.revision != app.session.revision || p.dialog != app.dialog.is_some() || app.tool.is_some() {
+    if p.revision != app.session.revision
+        || p.dialog != app.dialog.is_some()
+        || p.include_hidden != app.preferences.select_other_hidden
+        || app.tool.is_some()
+    {
         close(app);
         return;
     }
     let t = Tokens::get();
     let mut hovered = None;
     let mut picked = None;
-    let w = crate::context_menu::LIST_W - 10.0;
-    // Title, rows up to the scroll height, margins and border.
-    let size = vec2(w + 10.0, 30.0 + (p.rows.len() as f32 * 24.0).min(360.0));
+    let screen = ctx.content_rect();
+    let margins = crate::ui_kit::Menu::frame().total_margin().sum();
+    let width = crate::context_menu::LIST_W.min(screen.width());
+    let w = (width - margins.x).max(0.0);
+    let header = 20.0;
+    let gap = vec2(12.0, 12.0);
+    let at = pos2(p.at.x.clamp(screen.left(), screen.right()), p.at.y.clamp(screen.top(), screen.bottom()));
+    let rows_height = p.rows.len() as f32 * ROW_HEIGHT;
+    let overhead = header + margins.y;
+    let scroll_height = (screen.height() - overhead).max(0.0);
+    let size = vec2(width, overhead + rows_height.min(scroll_height));
     let resp = Container::new(ctx, Surface::Popup)
         .area(egui::Id::new("sc_select_other"))
-        .fixed_pos(crate::context_menu::place(p.at, vec2(12.0, 12.0), size, ctx.content_rect()))
+        .fixed_pos(crate::context_menu::place(at, gap, size, screen))
         .constrain(true)
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
-            crate::context_menu::menu_frame(ui, |ui| {
-                let (r, _) = ui.allocate_exact_size(vec2(w, 20.0), Sense::hover());
+            // Area remembers the preceding list's size, which must not limit a longer list.
+            ui.set_max_height(size.y);
+            crate::ui_kit::Menu::show(ui, width, |ui| {
+                let (r, _) = ui.allocate_exact_size(vec2(w, header), Sense::hover());
                 let title = crate::i18n::tr_label("Select Other").to_uppercase();
                 let title = if p.total > p.rows.len() { format!("{title} · {} / {}", p.rows.len(), p.total) } else { title };
                 ui.painter().text(
@@ -628,9 +656,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                     FontId::proportional(crate::theme::Tokens::get().font_panel),
                     t.text_dim,
                 );
-                egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().min_scrolled_height(0.0).max_height(scroll_height).show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
                     for (i, row) in p.rows.iter().enumerate() {
-                        let (r, resp) = ui.allocate_exact_size(vec2(w, 24.0), Sense::click());
+                        let (r, resp) = ui.allocate_exact_size(vec2(w, ROW_HEIGHT), Sense::click());
                         crate::scenario::publish_handle(&format!("select_other:{i}"), r.center());
                         if resp.hovered() {
                             hovered = Some(i);
@@ -662,6 +691,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 });
             });
         });
+    crate::scenario::publish_rect("select_other", resp.response.rect);
     if let Some(pop) = app.viewport.select_other.popup.as_mut()
         && pop.hovered != hovered
     {

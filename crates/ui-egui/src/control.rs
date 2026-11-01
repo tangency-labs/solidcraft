@@ -31,8 +31,8 @@
 //!   `ui.rename {text?, commit?}` finishes the rename box
 //! - `ui.window {action: minimize|maximize|restore|toggle|close}`: what the title bar's buttons do
 //! - `ui.confirm {accept?}`: the Delete confirmation (without `accept`: what it lists)
-//! - `ui.shortcut {command, key?, replace?}`: a command's key, or bind one ("" clears)
-//! - `ui.help {item?: about|shortcuts|report}`: the Help menu; returns the version and diagnostics
+//! - `ui.shortcut {command, key?, slot?, replace?}`: a command's keys, or bind one ("" clears)
+//! - `ui.help {item?: about|updates|shortcuts|report}`: the Help menu; returns the version and diagnostics
 //! - `ui.prefs {...}`: the preferences (default_units, nav, zoom_reverse, orbit_around, msaa,
 //!   length_decimals, angle_decimals); returns them all
 //! - `ui.capture {action?: capture|revert|cancel}`: the Capture Position question
@@ -48,7 +48,8 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use solidcraft_engine::io::vfs;
-use solidcraft_engine::render::StandardView;
+use solidcraft_engine::render::{Camera, StandardView};
+use solidcraft_engine::schema::ParamCheck;
 use solidcraft_engine::{batch_params, timing};
 
 use crate::SolveApp;
@@ -215,6 +216,18 @@ fn key_from(name: &str) -> Option<egui::Key> {
 /// Run one command as `engine.execute` does: through `app.run`, then the first-body fit and the
 /// camera the command asked for.
 fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String> {
+    // User bindings live in the UI. A bridged agent needs the same key the menus show,
+    // including null for a cleared binding; the standalone engine keeps its defaults.
+    if id == "engine.commands" {
+        let mut commands = app.session.execute(id, &params).map_err(|e| e.to_string())?;
+        if let Some(rows) = commands.as_array_mut() {
+            for row in rows.iter_mut().filter_map(Value::as_object_mut) {
+                let key = row.get("id").and_then(Value::as_str).and_then(|id| crate::keymap::effective(app, id));
+                row.insert("shortcut".into(), json!(key));
+            }
+        }
+        return Ok(commands);
+    }
     // `view.pick` is answered by the viewport, not the engine: pixels and rays need the
     // window's camera and pick index, and the command must not touch the document, the
     // selection or the undo stack. Intercepted here so `engine.execute` and `engine.batch`
@@ -223,6 +236,10 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
         return crate::view_pick::pick_command(app, &params);
     }
     let r = app.run(id, params);
+    // Update Links in a part edited in place reads the assembly around it too, as its button does.
+    if r.is_ok() && is_command(Some(id), "component.update_links") && app.edit_in_place.active.is_some() {
+        crate::edit_in_place::refresh(app);
+    }
     if r.is_ok()
         && !matches!(
             id,
@@ -234,15 +251,20 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
                 | "view.grid"
                 | "view.ground_shadow"
                 | "view.navigation_bar"
+                | "view.next_tab"
+                | "view.previous_tab"
                 | "view.layout"
                 | "view.navigate"
                 | "view.ambient_occlusion"
                 | "view.perspective"
+                | "view.angle_readout"
                 | "view.graphics_preset"
                 | "view.history_layout"
+                | "timeline.play"
                 | "browser.expand_all"
                 | "browser.collapse_all"
         )
+        && !id.starts_with("settings.")
         && app.session.active_sketch.is_none()
         && app.session.world_state().bodies.len() == 1
         && app.session.undo.len() <= 2
@@ -265,11 +287,28 @@ const MAX_BATCH: usize = 10_000;
 /// Commands that load a file: through `engine.execute` they go to the app's file loader
 /// (`file_load::control`: off the window thread, with progress and Cancel), which a batch would
 /// bypass.
-const LOADS_A_FILE: [&str; 3] = ["doc.open", "file.insert_step", "file.insert_mesh"];
+const LOADS_A_FILE: [&str; 4] = ["doc.open", "file.insert_step", "file.insert_mesh", "pointcloud.insert"];
 
-/// Why `engine.batch` refuses these steps before running any: a step loads a file (send such
-/// steps one by one).
+/// Edit in Place, Finish Edit and the next or previous tab go to another design's tab: a batch's
+/// rollback, or a script's later steps, would land in the wrong design.
+const SWITCHES_DESIGN: [&str; 4] = ["component.edit_in_place", "component.finish_edit", "view.next_tab", "view.previous_tab"];
+
+/// `command` names the command `id`, in any of the spellings the engine takes.
+fn is_command(command: Option<&str>, id: &str) -> bool {
+    command.and_then(solidcraft_engine::find_command).is_some_and(|spec| spec.id == id)
+}
+
+/// The command of `step` when it goes to another design's tab.
+fn switches_design(step: &Value) -> Option<&'static str> {
+    SWITCHES_DESIGN.into_iter().find(|id| is_command(command(step), id))
+}
+
+/// Why `engine.batch` refuses these steps before running any: a step loads a file or switches
+/// to another design (send such steps one by one).
 pub(crate) fn batch_refusal(steps: &[Value]) -> Option<String> {
+    if let Some((i, c)) = steps.iter().enumerate().find_map(|(i, step)| switches_design(step).map(|c| (i, c))) {
+        return Some(format!("engine.batch unavailable: step {i} ({c}) switches to another design"));
+    }
     let (i, c) = steps.iter().enumerate().find_map(|(i, step)| command(step).filter(|c| LOADS_A_FILE.contains(c)).map(|c| (i, c)))?;
     Some(format!("engine.batch unavailable: step {i} ({c}) loads a file"))
 }
@@ -366,24 +405,38 @@ fn with_timings(mut reply: Value, timed: bool, rows: Vec<Value>, total_ms: f64) 
 /// file the request reaches must lie inside them (docs/mcp.md). `None`: it names none.
 pub fn request_scope(app: &SolveApp, params: &Value) -> Result<Option<vfs::PathScope>, String> {
     let Some(allowed) = params.get("allow_paths") else { return Ok(None) };
-    let Some(roots) = allowed.as_array().and_then(|a| a.iter().map(|r| r.as_str().map(std::path::PathBuf::from)).collect::<Option<Vec<_>>>()) else {
+    let folders = |v: &Value| v.as_array().and_then(|a| a.iter().map(|r| r.as_str().map(std::path::PathBuf::from)).collect::<Option<Vec<_>>>());
+    let Some(roots) = folders(allowed) else {
         return Err("`allow_paths` must be a list of folders".into());
+    };
+    // The folders the agent opened or saved a design in (#7181), judged as the open design's is.
+    let designs = match params.get("design_folders") {
+        None => Vec::new(),
+        Some(v) => folders(v)
+            .filter(|d| d.len() <= vfs::MAX_DESIGN_FOLDERS)
+            .ok_or_else(|| format!("`design_folders` must be a list of at most {} folders", vfs::MAX_DESIGN_FOLDERS))?,
     };
     // Plus the app's own recovery folder and, when it is a safe one, the open design's folder.
     let roots = roots.into_iter().chain(solidcraft_engine::recovery::default_dir());
-    Ok(Some(vfs::PathScope::new(roots).with_design(app.session.path.as_deref())))
+    let scope = designs.iter().fold(vfs::PathScope::new(roots), |s, d| s.with_design_folder(d));
+    Ok(Some(scope.with_design(app.session.path.as_deref())))
 }
 
 /// What a picture of the view shows: the model as the window shows it (theme and colour vision
 /// mode, the section the viewport shows: an open Section Analysis dialog's preview, a sketch's
 /// Slice), with the grid and the origin's axes as `guides` says.
 pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides) -> solidcraft_engine::render::Scene {
+    let mut palette = crate::viewport::scene_palette(app.viewport_dark(), app.preferences.color_vision);
+    // The view's own background colour (#7688).
+    if let Some([r, g, b]) = app.preferences.viewport_background {
+        palette.background = (solidcraft_engine::render::Rgb(r, g, b), solidcraft_engine::render::Rgb(r, g, b));
+    }
     let mut scene = solidcraft_engine::view::scene_with_thread_markings(
         &app.session,
         &app.cam,
         crate::viewport::section_plane(app),
         solidcraft_engine::view::world_curve_parts,
-        &crate::viewport::scene_palette(app.viewport_dark(), app.preferences.color_vision),
+        &palette,
         guides,
         app.preferences.cosmetic_threads,
     );
@@ -394,7 +447,7 @@ pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides
 /// The grid and the origin's axes as the window shows them (the Grid and Origin switches).
 pub(crate) fn window_guides(app: &SolveApp) -> solidcraft_engine::view::Guides {
     solidcraft_engine::view::Guides {
-        grid: app.session.active_sketch.is_some() || (app.ui.show_grid && !crate::viewport::active_view(app).hide_grid),
+        grid: (app.session.active_sketch.is_some() || app.ui.show_grid) && !crate::viewport::active_view(app).hide_grid,
         axes: app.origin_visible(),
     }
 }
@@ -412,16 +465,88 @@ pub fn view_png(app: &SolveApp, w: u32, h: u32) -> Result<Vec<u8>, String> {
 }
 
 pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
-    let scope = match request_scope(app, &req.params) {
-        Ok(Some(scope)) => scope,
-        Ok(None) => return dispatch(app, ctx, &req.method, &req.params),
+    crate::agent_chat::with_tool_request(app, req.chat_turn.as_ref(), |app| handle_request(app, ctx, req))
+}
+
+fn handle_request(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
+    let level = match request_param_check(&req.method, &req.params) {
+        Ok(level) => level,
         Err(e) => return err(e),
     };
+    let scope = match request_scope(app, &req.params) {
+        Ok(scope) => scope,
+        Err(e) => return err(e),
+    };
+    if scope.is_none() && level.is_none() {
+        return dispatch(app, ctx, &req.method, &req.params);
+    }
     let mut p = req.params.clone();
     if let Some(o) = p.as_object_mut() {
         o.remove("allow_paths");
+        o.remove("design_folders");
+        o.remove("param_check");
     }
-    vfs::scoped(Some(scope), || dispatch(app, ctx, &req.method, &p))
+    let run = |app: &mut SolveApp| match level {
+        Some(level) => dispatch_checked(app, ctx, &req.method, &p, level),
+        None => dispatch(app, ctx, &req.method, &p),
+    };
+    match scope {
+        Some(scope) => vfs::scoped(Some(scope), || run(app)),
+        None => run(app),
+    }
+}
+
+/// The request's `param_check` (#9184): how the commands of an `engine.execute`, `engine.batch`
+/// or `engine.script` are checked against their contracts, whatever the app's own session level;
+/// `None` when it names none (other methods ignore the field).
+pub(crate) fn request_param_check(method: &str, params: &Value) -> Result<Option<ParamCheck>, String> {
+    if !matches!(method, "engine.execute" | "command" | "engine.batch" | "engine.script") {
+        return Ok(None);
+    }
+    match params.get("param_check") {
+        None => Ok(None),
+        Some(v) => v.as_str().and_then(ParamCheck::parse).map(Some).ok_or_else(|| "`param_check` must be off, warn or strict".to_string()),
+    }
+}
+
+/// `dispatch` of an `engine.execute`, `engine.batch` or `engine.script` with its commands checked
+/// at `level`, echoed in the reply as `param_check`, so a client can tell an app that checked
+/// from an older one that ignored the field. The session goes back to its own level afterwards.
+fn dispatch_checked(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value, level: ParamCheck) -> Outcome {
+    let mut out = if switches_design(p).is_some() {
+        switch_checked(app, ctx, method, p, level)
+    } else {
+        let own = app.session.param_check;
+        app.session.param_check = level;
+        let out = dispatch(app, ctx, method, p);
+        app.session.param_check = own;
+        out
+    };
+    if let Outcome::Done(Value::Object(o)) = &mut out {
+        o.insert("param_check".into(), json!(level.name()));
+    }
+    out
+}
+
+/// A command that switches to another design, checked at `level` before it runs: it runs at the
+/// app's own level, since the session it leaves and the one it brings in each keep theirs.
+fn switch_checked(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value, level: ParamCheck) -> Outcome {
+    let id = command(p).unwrap_or_default();
+    let issues: Vec<String> = solidcraft_engine::schema::issues(id, p.get("params").unwrap_or(&Value::Null)).into_iter().map(|i| i.message).collect();
+    if level == ParamCheck::Strict
+        && let Some(first) = issues.first()
+    {
+        return err(solidcraft_engine::params::bad(id, first.as_str()));
+    }
+    let mut out = dispatch(app, ctx, method, p);
+    if level == ParamCheck::Warn
+        && !issues.is_empty()
+        && let Outcome::Done(v) = &mut out
+        && let Some(o) = v.get_mut("result").and_then(Value::as_object_mut)
+    {
+        o.insert("param_warnings".into(), json!(issues));
+    }
+    out
 }
 
 fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) -> Outcome {
@@ -430,6 +555,44 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
     let f = |k: &str| p.get(k).and_then(Value::as_f64).filter(|x| x.is_finite());
     let b = |k: &str| p.get(k).and_then(Value::as_bool).unwrap_or(false);
     match method {
+        "ui.blur" => {
+            // Internal rendering harness; deliberately no saved preference or product UI.
+            let radius = if let Some(radius) = p.get("radius_px") {
+                let Some(radius) = radius.as_f64().filter(|v| v.is_finite() && (0.0..=40.0).contains(v)) else {
+                    return err("radius_px must be finite and between 0 and 40");
+                };
+                Some(radius as f32)
+            } else {
+                None
+            };
+            let alpha = if let Some(alpha) = p.get("surface_alpha") {
+                let alpha = if alpha.is_null() {
+                    None
+                } else {
+                    let Some(alpha) = alpha.as_f64().filter(|v| v.is_finite() && (0.0..=1.0).contains(v)) else {
+                        return err("surface_alpha must be null or between 0 and 1");
+                    };
+                    Some((alpha * 255.0).round() as u8)
+                };
+                Some(alpha)
+            } else {
+                None
+            };
+            if let Some(radius) = radius {
+                if let Err(error) = app.blur.set_radius(radius) {
+                    return err(error);
+                }
+                ctx.request_repaint();
+            }
+            if let Some(alpha) = alpha {
+                app.blur.set_surface_alpha(alpha);
+                ctx.request_repaint();
+            }
+            ok(
+                json!({"radius_px":app.blur.radius(), "max_radius_px":40, "capability":app.blur.capability_for(ctx.viewport_id()), "counters":app.blur.counters()}),
+            )
+        }
+        "ui.status_fixture" => wrap(crate::viewport_status_fixture::control(app, p)),
         "ui.workspace" => {
             if let Some(workspace) = s("workspace") {
                 if !matches!(workspace, "design" | "render") {
@@ -464,6 +627,9 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "engine.script" => {
             let steps = p.as_array().or_else(|| p.get("commands").and_then(Value::as_array));
+            if let Some(c) = steps.and_then(|steps| steps.iter().find_map(switches_design)) {
+                return err(format!("engine.script unavailable: {c} switches to another design (send it on its own)"));
+            }
             let mut replaced = false;
             let r = app
                 .session
@@ -476,11 +642,12 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             // A successful replacement still happened if a later script step failed.
             if replaced {
                 crate::documents::reset_chat(app);
+                app.edit_in_place.active = None;
             }
             app.follow_view_request(false);
             wrap(r)
         }
-        "engine.commands" => wrap(app.session.execute("engine.commands", &json!({})).map_err(|e| e.to_string())),
+        "engine.commands" => wrap(execute(app, "engine.commands", json!({}))),
         "document.inspect" => wrap(app.session.execute("document.inspect", p).map_err(|e| e.to_string())),
         "document.revision" => wrap(app.session.execute("document.revision", p).map_err(|e| e.to_string())),
         // The connection already counts as subscribed (`DesignWatch::join`), and its events start
@@ -539,8 +706,17 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 Some(false) => app.home.open = false,
                 None => {}
             }
-            if let Some(i) = p.get("sample").and_then(Value::as_u64) {
-                crate::home::open_sample(app, i as usize);
+            if let Some(sample) = p.get("sample") {
+                // The index is checked here: `open_sample` drops an index that names no sample
+                // and says nothing, so the request would look like it had worked (#9087).
+                let count = solidcraft_engine::sample::samples().len();
+                let Some(index) = sample.as_i64() else {
+                    return err(format!("`sample` must be an index from 0 to {}", count - 1));
+                };
+                if !(0..count as i64).contains(&index) {
+                    return err(format!("`sample` must be an index from 0 to {}, not {index}", count - 1));
+                }
+                crate::home::open_sample(app, index as usize);
             }
             ok(json!({"open": app.home.open, "recent": app.home.recent}))
         }
@@ -713,8 +889,22 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 app.synthetic.push(egui::Event::PointerMoved(a));
             }
             let steps = f("steps").unwrap_or(10.0).clamp(1.0, 200.0) as usize;
-            for k in 1..=steps {
-                app.synthetic.push(egui::Event::PointerMoved(a + (z - a) * (k as f32 / steps as f32)));
+            // `via`: [[x, y], ...] the pointer passes through on its way (a lasso's loop, #4376).
+            let via: Vec<egui::Pos2> = p
+                .get("via")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .take(500)
+                .filter_map(|q| Some(egui::pos2(q.get(0)?.as_f64()? as f32, q.get(1)?.as_f64()? as f32)))
+                .filter(|q| q.is_finite())
+                .collect();
+            let mut from = a;
+            for to in via.into_iter().chain([z]) {
+                for k in 1..=steps {
+                    app.synthetic.push(egui::Event::PointerMoved(from + (to - from) * (k as f32 / steps as f32)));
+                }
+                from = to;
             }
             // `hold_end`: frames to keep the button down at the end (to look at a drag's snap).
             for _ in 0..f("hold_end").unwrap_or(0.0).clamp(0.0, 600.0) as usize {
@@ -878,17 +1068,40 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         }
         "ui.scroll" => {
             let (Some(x), Some(y)) = (f("x"), f("y")) else { return err("missing x/y") };
-            app.synthetic.push(egui::Event::PointerMoved(egui::pos2(x as f32, y as f32)));
             // Mouse-wheel semantics (lines): zooms regardless of the trackpad pan
             // preference, so scripts and agents keep working. Trackpads report points.
+            // `ctrl: true` replays a Ctrl+wheel pinch in points (#8480). An explicit `unit`
+            // overrides that choice; without ctrl the default remains a line wheel.
             let speed = ctx.options(|o| o.input_options.line_scroll_speed).max(1.0);
-            let lines = f("delta").unwrap_or(-100.0) / f64::from(speed);
-            app.synthetic.push(egui::Event::MouseWheel {
-                unit: egui::MouseWheelUnit::Line,
-                delta: egui::vec2(0.0, lines as f32),
-                modifiers: Default::default(),
-                phase: egui::TouchPhase::Move,
-            });
+            let points = f("delta").unwrap_or(-100.0);
+            let ctrl = b("ctrl");
+            let unit = match p.get("unit") {
+                Some(Value::String(unit)) if unit == "point" => egui::MouseWheelUnit::Point,
+                Some(Value::String(unit)) if unit == "line" => egui::MouseWheelUnit::Line,
+                Some(_) => return err("`unit` must be point or line"),
+                None if ctrl => egui::MouseWheelUnit::Point,
+                None => egui::MouseWheelUnit::Line,
+            };
+            let delta = match unit {
+                // A point wheel reaches the app as points; a line wheel is scaled up by the
+                // line scroll speed, so divide it out and both land on the same points.
+                egui::MouseWheelUnit::Line => points / f64::from(speed),
+                _ => points,
+            };
+            let (x, y, delta) = (x as f32, y as f32, delta as f32);
+            if !x.is_finite() || !y.is_finite() || !delta.is_finite() {
+                return err("x, y and delta must fit finite screen coordinates");
+            }
+            let modifiers = if ctrl { egui::Modifiers::CTRL } else { Default::default() };
+            let explicit = p.get("ctrl").is_some();
+            app.synthetic.push(egui::Event::PointerMoved(egui::pos2(x, y)));
+            if explicit {
+                app.synthetic.push(egui::Event::ModifiersChanged(modifiers));
+            }
+            app.synthetic.push(egui::Event::MouseWheel { unit, delta: egui::vec2(0.0, delta), modifiers, phase: egui::TouchPhase::Move });
+            if explicit {
+                app.synthetic.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+            }
             ok(Value::Null)
         }
         "ui.key" => {
@@ -959,12 +1172,14 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         },
         "ui.shortcut" => {
             let Some(id) = s("command") else { return err("missing `command`") };
+            let slot = p.get("slot").and_then(Value::as_u64).map(|n| usize::try_from(n).unwrap_or(usize::MAX));
+            let report = |app: &SolveApp| ok(json!({"command": id, "key": crate::keymap::effective(app, id), "keys": crate::keymap::keys(app, id)}));
             match s("key") {
-                Some(k) => match crate::keymap::bind(app, id, k, b("replace")) {
-                    Ok(()) => ok(json!({"command": id, "key": crate::keymap::effective(app, id)})),
+                Some(k) => match crate::keymap::bind_at(app, id, slot, k, b("replace")) {
+                    Ok(()) => report(app),
                     Err(e) => err(e),
                 },
-                None => ok(json!({"command": id, "key": crate::keymap::effective(app, id)})),
+                None => report(app),
             }
         }
         "ui.browser" => ok(json!({
@@ -983,7 +1198,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "ui.prefs" => wrap(crate::prefs::control(app, p)),
         "ui.agent_chat" => wrap(crate::agent_chat::control(app, ctx, p)),
         "ui.help" => match s("item") {
-            Some(i @ ("about" | "shortcuts" | "report" | "crashes")) => {
+            Some(i @ ("about" | "updates" | "shortcuts" | "report" | "crashes")) => {
                 crate::help::run(app, ctx, i);
                 ok(
                     json!({"diagnostics": crate::help::diagnostics(app), "version": crate::help::VERSION, "commit": crate::help::COMMIT, "built": crate::help::BUILD_DATE}),
@@ -1065,7 +1280,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
 
 /// `ui.camera`: the viewport's orbit camera (`target`, `yaw`, `pitch`, `roll` in radians,
 /// `distance` in mm, `fov`, `up`), or a new one. A field left out keeps its value, so a reply
-/// passed back sets the same view again. `fit`: frame the listed occurrences (ids or names;
+/// passed back sets the same view again. `fov` is the angle the window draws with (see [`drawn`]). `fit`: frame the listed occurrences (ids or names;
 /// `root`: the bodies outside every component), or everything (`true`), keeping the direction;
 /// `false` frames nothing.
 /// Nothing changes when a field is refused.
@@ -1079,10 +1294,10 @@ fn camera(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     if let Some(k) = o.keys().find(|k| !FIELDS.contains(&k.as_str())) {
         return Err(format!("unknown camera field `{k}` (it takes {})", FIELDS.join(", ")));
     }
-    let mut cam = app.cam;
+    let mut cam = drawn(app);
     let sets = o.keys().any(|k| k != "fit");
     if sets {
-        let mut v = serde_json::to_value(app.cam).map_err(|e| e.to_string())?;
+        let mut v = serde_json::to_value(cam).map_err(|e| e.to_string())?;
         for (k, x) in o.iter().filter(|(k, _)| *k != "fit") {
             v[k] = x.clone();
         }
@@ -1094,10 +1309,11 @@ fn camera(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
         // Straight up or down keeps a heading, as the standard views do.
         let lim = std::f64::consts::FRAC_PI_2 - 1e-6;
         cam.pitch = cam.pitch.clamp(-lim, lim);
-        // Perspective and the up axis are settings the camera follows, not its own.
-        if cam.fov != app.cam.fov {
-            return Err("`fov` follows the perspective setting (ui.set {perspective})".into());
+        // Perspective, its angle and the up axis are settings the camera follows, not its own.
+        if cam.fov != drawn(app).fov {
+            return Err("`fov` follows Perspective view (ui.set {perspective}) and its angle (ui.prefs {perspective_fov})".into());
         }
+        cam.fov = app.cam.fov;
         if cam.up != app.cam.up {
             return Err("`up` follows the up axis preference (ui.prefs {up_axis})".into());
         }
@@ -1120,7 +1336,7 @@ fn camera(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
     };
     // A read leaves a view change that is animating alone.
     if !sets && fit.is_none() {
-        return serde_json::to_value(app.cam).map_err(|e| e.to_string());
+        return serde_json::to_value(drawn(app)).map_err(|e| e.to_string());
     }
     app.cancel_view_animation();
     app.viewport.orbit_free = None;
@@ -1130,7 +1346,17 @@ fn camera(app: &mut SolveApp, p: &Value) -> Result<Value, String> {
         Some(Some(b)) => app.fit_bounds(b),
         None => {}
     }
-    serde_json::to_value(app.cam).map_err(|e| e.to_string())
+    serde_json::to_value(drawn(app)).map_err(|e| e.to_string())
+}
+
+/// The camera as the window draws it: with the view's angle ([`SolveApp::view_fov`]), or in Render
+/// with the Render camera's own.
+fn drawn(app: &SolveApp) -> Camera {
+    let mut cam = app.cam;
+    if !crate::render_workspace::active(app) {
+        cam.fov = app.view_fov();
+    }
+    cam
 }
 
 /// An occurrence by id or name (or a component's name: its first occurrence); 0 is the root.
@@ -1181,11 +1407,55 @@ pub(crate) fn write_screenshot(image: &egui::ColorImage, path: &str) -> Result<(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn blur_control_validates_before_mutation_and_reports_no_gpu() {
+        let mut h = crate::scenario::Harness::new();
+        for invalid in [json!(-1), json!(41), json!("18"), json!(null)] {
+            let reply = h.call("ui.blur", json!({"radius_px":invalid}));
+            assert_eq!(reply["ok"], false, "{reply}");
+            assert_eq!(h.app.blur.radius(), 0.0);
+        }
+        let reply = h.call("ui.blur", json!({"radius_px":18,"surface_alpha":2}));
+        assert_eq!(reply["ok"], false);
+        assert_eq!(h.app.blur.radius(), 0.0);
+        let reply = h.call("ui.blur", json!({"radius_px":18,"surface_alpha":0.7}));
+        assert_eq!(reply["ok"], true);
+        assert!(matches!(h.app.blur.capability(), crate::blur::Capability::Unavailable(_)));
+        h.frames(2);
+        assert_eq!(h.app.blur.counters().textures_created, 0);
+        assert_eq!(h.app.blur.counters().markers_emitted, 0);
+        h.call("ui.blur", json!({"radius_px":0,"surface_alpha":null}));
+        assert_eq!(h.app.blur.radius(), 0.0);
+    }
+
     use serde_json::json;
     use solidcraft_engine::{Sel, Session};
 
     use super::*;
     use crate::Services;
+
+    #[test]
+    fn viewport_status_fixture_rejects_hostile_presets_without_mutating_the_session() {
+        let mut h = crate::scenario::Harness::new();
+        let revision = h.app.session.revision;
+        for params in [Value::Null, json!([]), json!({}), json!({"preset":false}), json!({"preset":[]}), json!({"preset":"unknown"})] {
+            let reply = h.call("ui.status_fixture", params);
+            assert_eq!(reply["ok"], false, "{reply}");
+            assert_eq!(h.app.session.revision, revision);
+        }
+        let reply = h.call("ui.status_fixture", json!({"preset":"mode"}));
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert_eq!(h.app.session.revision, revision);
+        assert!(h.app.session.analysis.is_none());
+        for preset in ["off", "mode"] {
+            h.call("ui.status_fixture", json!({"preset":preset}));
+            h.call("ui.resize", json!({"width":200,"height":600}));
+            h.frames(4);
+            assert_eq!(h.app.session.revision, revision);
+            h.call("ui.resize", json!({"width":1400,"height":900}));
+            h.frames(4);
+        }
+    }
 
     #[test]
     fn touchpad_automation_moves_with_modifiers_and_releases_without_buttons() {
@@ -1208,6 +1478,79 @@ mod tests {
         assert!(h.ctx.input(|i| i.modifiers.is_none()));
         assert!(h.app.session.selection.is_empty());
         assert!(h.app.viewport.boxsel.is_none());
+    }
+
+    /// #8480: `ui.scroll` with `ctrl: true` replays a Ctrl+wheel pinch in points. Without
+    /// `ctrl` the wheel stays a line wheel on the mouse path.
+    #[test]
+    fn scroll_sends_a_native_pinch_with_ctrl() {
+        let mut app = SolveApp::new(Session::default(), Services::default());
+        let ctx = crate::fonts::test_context();
+        let (req, _) = ControlRequest::new("ui.scroll", json!({"x":200,"y":300,"delta":40,"ctrl":true}));
+        assert!(matches!(handle(&mut app, &ctx, &req), Outcome::Done(_)));
+        // The pointer event is delivered a frame before the wheel (one pointer event per frame).
+        let mut events = Vec::new();
+        for _ in 0..3 {
+            let mut raw = egui::RawInput::default();
+            app.raw_input_hook(&mut raw);
+            events.extend(raw.events);
+        }
+        let wheels: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::MouseWheel { unit, delta, modifiers, .. } => Some((*unit, *delta, *modifiers)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(wheels.len(), 1, "one wheel event: {wheels:?}");
+        let (unit, delta, modifiers) = wheels[0];
+        assert_eq!(unit, egui::MouseWheelUnit::Point, "the pinch replay uses points");
+        assert!((delta.y - 40.0).abs() < 1e-6, "points pass through: {delta:?}");
+        assert!(modifiers.matches_any(egui::Modifiers::COMMAND), "Ctrl is held: {modifiers:?}");
+        let changes: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::ModifiersChanged(m) => Some(*m),
+                _ => None,
+            })
+            .collect();
+        assert!(changes.iter().any(|m| m.matches_any(egui::Modifiers::COMMAND)), "Ctrl is set for the wheel: {changes:?}");
+        assert_eq!(changes.last().copied(), Some(egui::Modifiers::NONE), "Ctrl is released after it: {changes:?}");
+        app.synthetic.clear();
+
+        let (req, _) = ControlRequest::new("ui.scroll", json!({"x":200,"y":300,"delta":40}));
+        assert!(matches!(handle(&mut app, &ctx, &req), Outcome::Done(_)));
+        let mut events = Vec::new();
+        for _ in 0..2 {
+            let mut raw = egui::RawInput::default();
+            app.raw_input_hook(&mut raw);
+            events.extend(raw.events);
+        }
+        let wheel = events.iter().find_map(|e| match e {
+            egui::Event::MouseWheel { unit, delta, modifiers, .. } => Some((*unit, *delta, *modifiers)),
+            _ => None,
+        });
+        let (unit, delta, modifiers) = wheel.expect("a wheel event");
+        assert_eq!(unit, egui::MouseWheelUnit::Line, "without ctrl the wheel stays a mouse wheel");
+        assert!((delta.y * ctx.options(|o| o.input_options.line_scroll_speed) - 40.0).abs() < 1e-3, "lines land on the same points: {delta:?}");
+        assert!(!modifiers.matches_any(egui::Modifiers::COMMAND), "no modifier without ctrl");
+        assert!(app.synthetic.is_empty());
+    }
+
+    #[test]
+    fn scroll_rejects_invalid_input_without_queuing_events() {
+        let mut app = SolveApp::new(Session::default(), Services::default());
+        let ctx = crate::fonts::test_context();
+        for invalid in
+            [json!({"unit":"invalid"}), json!({"unit":42}), json!({"unit":null}), json!({"x":1e300}), json!({"y":-1e300}), json!({"delta":1e300})]
+        {
+            let mut params = json!({"x":200,"y":300,"delta":40,"ctrl":true});
+            params.as_object_mut().unwrap().extend(invalid.as_object().unwrap().clone());
+            let (req, _) = ControlRequest::new("ui.scroll", params.clone());
+            let Outcome::Done(reply) = handle(&mut app, &ctx, &req) else { panic!("not a scroll reply") };
+            assert_eq!(reply["ok"], false, "{params}: {reply}");
+            assert!(app.synthetic.is_empty(), "a rejected scroll must not queue input: {params}");
+        }
     }
 
     #[test]
@@ -1729,6 +2072,60 @@ mod tests {
         assert!(!v["result"]["failed"]["error"].as_str().is_some_and(|e| e.starts_with("unknown command")), "{v}");
     }
 
+    /// A request's own `param_check` (#9184): `engine.execute`, `engine.batch` and `engine.script`
+    /// run at it and say so in the reply, whatever the app's session level, which is its own again
+    /// afterwards. A command that switches designs keeps the app's level.
+    #[test]
+    fn a_request_carries_its_own_param_check_level() {
+        use solidcraft_engine::schema::ParamCheck;
+        let mut h = crate::scenario::Harness::new();
+        let before = inspect(&mut h);
+        let warning = "unknown key `operaton`; did you mean `operation`?";
+        let misspelt = |level: &str| json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "operaton": "cut"}, "param_check": level});
+
+        let v = h.call("engine.execute", misspelt("strict"));
+        assert_eq!((&v["ok"], &v["param_check"]), (&json!(false), &json!("strict")), "{v}");
+        assert!(v["error"].as_str().is_some_and(|e| e.contains(warning)), "{v}");
+        assert_eq!(inspect(&mut h)["bodies"], before["bodies"], "refused unrun");
+        assert_eq!(h.app.session.param_check, ParamCheck::Off, "the app's own level again");
+
+        let v = h.call("engine.execute", misspelt("warn"));
+        assert_eq!((&v["ok"], &v["param_check"], &v["result"]["param_warnings"]), (&json!(true), &json!("warn"), &json!([warning])), "{v}");
+        assert_eq!(h.app.session.param_check, ParamCheck::Off);
+
+        let steps = json!([
+            {"command": "solid.sphere", "params": {"radius": 3, "center": [50, 0, 0]}},
+            {"command": "solid.box", "params": {"lenght": 10, "width": 10, "height": 10}},
+        ]);
+        let shown = inspect(&mut h)["bodies"].clone();
+        let v = h.call("engine.batch", json!({"commands": steps, "param_check": "strict"}));
+        assert_eq!((&v["result"]["completed"], &v["result"]["failed"]["index"], &v["param_check"]), (&json!(0), &json!(1), &json!("strict")), "{v}");
+        assert_eq!(inspect(&mut h)["bodies"], shown, "nothing ran");
+        let step = json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "operaton": "cut"}});
+        let v = h.call("engine.script", json!({"commands": [step], "param_check": "warn"}));
+        assert_eq!((&v["param_check"], &v["result"][0]["param_warnings"]), (&json!("warn"), &json!([warning])), "{v}");
+
+        // Asked nothing, told nothing; a word that is no level is refused.
+        let v = h.call("engine.execute", json!({"command": "inspect.measure", "params": {}}));
+        assert_eq!((&v["ok"], v.get("param_check")), (&json!(true), None), "{v}");
+        let v = h.call("engine.execute", json!({"command": "inspect.measure", "params": {}, "param_check": "loud"}));
+        assert!(v["ok"] == false && v["error"].as_str().is_some_and(|e| e.contains("`param_check` must be off, warn or strict")), "{v}");
+        // The level is this request's, not another design's.
+        let v = h.call("engine.execute", json!({"command": "view.next_tab", "params": {}, "param_check": "strict"}));
+        assert_eq!((&v["ok"], &v["param_check"]), (&json!(true), &json!("strict")), "{v}");
+        assert_eq!(h.app.session.param_check, ParamCheck::Off);
+        // Its own parameters are still checked at the request's level, before it runs.
+        let v = h.call("engine.execute", json!({"command": "view.next_tab", "params": {"nonsense": 1}, "param_check": "strict"}));
+        assert!(v["ok"] == false && v["error"].as_str().is_some_and(|e| e.contains("nonsense")), "{v}");
+        assert_eq!(v["param_check"], "strict", "{v}");
+        let v = h.call("engine.execute", json!({"command": "view.next_tab", "params": {"nonsense": 1}, "param_check": "warn"}));
+        assert!(v["result"]["param_warnings"].as_array().is_some_and(|w| !w.is_empty()), "{v}");
+        assert_eq!(h.app.session.param_check, ParamCheck::Off);
+        // Other methods ignore the field, whatever it holds.
+        let v = h.call("ui.inspect", json!({"param_check": "loud"}));
+        assert_eq!((&v["ok"], v.get("param_check")), (&json!(true), None), "{v}");
+    }
+
     #[test]
     fn engine_batch_is_refused_when_a_step_loads_a_file() {
         let mut h = crate::scenario::Harness::new();
@@ -1916,6 +2313,47 @@ mod tests {
         assert!(path.is_file());
     }
 
+    /// A request's `design_folders` (where its MCP agent opened or saved a design, #7181) count
+    /// as the open design's folder does: their files are reachable, their hidden files and the
+    /// folders beside them are not, and a list that is not one of at most
+    /// `vfs::MAX_DESIGN_FOLDERS` folders is refused.
+    #[test]
+    fn a_requests_design_folders_count_as_the_open_designs() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let mut app = SolveApp::new(s, Services::default());
+        let base = vfs::temp_dir().join(format!("solidcraft-control-design-folders-{}", std::process::id()));
+        let (root, proj, out) = (base.join("root"), base.join("proj"), base.join("out"));
+        for d in [&root, &proj.join(".git"), &out] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let at = |d: &std::path::Path, f: &str| d.join(f).to_string_lossy().to_string();
+        let mut call = |path: String, designs: Value| {
+            let params =
+                json!({"command": "file.export", "params": {"path": path}, "allow_paths": [root.to_string_lossy()], "design_folders": designs});
+            let (req, _rx) = ControlRequest::new("engine.execute", params);
+            match handle(&mut app, &crate::fonts::test_context(), &req) {
+                Outcome::Done(v) => v,
+                Outcome::Screenshot { path } => json!({"ok": true, "screenshot": path}),
+            }
+        };
+        let designs = json!([proj.to_string_lossy()]);
+        assert_eq!(call(at(&proj, "a.step"), designs.clone())["ok"], true);
+        for p in [at(&proj, ".secret.step"), at(&proj, ".git/a.step"), at(&out, "a.step")] {
+            let v = call(p.clone(), designs.clone());
+            assert!(v["ok"] == false && v.to_string().contains("outside the folders this agent may use"), "{p}: {v}");
+        }
+        assert!(!proj.join(".secret.step").exists() && !proj.join(".git/a.step").exists());
+        assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0, "nothing written beside it");
+        let too_many = json!(vec![proj.to_string_lossy(); vfs::MAX_DESIGN_FOLDERS + 1]);
+        for bad in [json!(proj.to_string_lossy()), json!([1]), too_many] {
+            let v = call(at(&proj, "b.step"), bad);
+            assert!(v["error"].as_str().is_some_and(|e| e.contains("design_folders")), "{v}");
+        }
+        assert!(!proj.join("b.step").exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// `ui.camera` reads the camera and sets it; its reply, passed back, sets the same view
     /// again. Fields left out keep their values, `fit` frames occurrences, and a refused field
     /// changes nothing.
@@ -1996,6 +2434,25 @@ mod tests {
         assert!(r["ok"] == false && empty.app.cam == before, "{r}");
     }
 
+    /// With Perspective view on, `ui.camera` reports the angle the window draws with (#5364) and
+    /// its reply replays; another angle is refused, naming the preference. A sketch draws parallel.
+    #[test]
+    fn ui_camera_reports_the_drawn_angle_and_its_reply_replays() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.set", json!({"perspective": true}));
+        h.call("ui.prefs", json!({"perspective_fov": 1.0}));
+        let read = h.call("ui.camera", Value::Null);
+        assert_eq!(read["result"]["fov"], json!(1.0), "{read}");
+        let stored = h.app.cam.fov;
+        let again = h.call("ui.camera", read["result"].clone());
+        assert_eq!(again["result"], read["result"], "the reply replays");
+        assert_eq!(h.app.cam.fov, stored, "the camera's own angle is left as it was");
+        let refused = h.call("ui.camera", json!({"fov": 0.6}));
+        assert!(refused["ok"] == false && refused["error"].as_str().unwrap().contains("ui.prefs {perspective_fov}"), "{refused}");
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        assert_eq!(h.call("ui.camera", Value::Null)["result"]["fov"], json!(0.0), "a sketch draws parallel");
+    }
+
     /// `ui.start` params set what a dialog opens on: Drive Joints on a joint (by name or id) at
     /// the given values, driving nothing yet. A param it doesn't take is refused and closes it.
     #[test]
@@ -2037,5 +2494,24 @@ mod tests {
             assert!(r["ok"] == false && r["error"].as_str().unwrap().contains("takes no ui.start params"), "{r}");
             assert!(h.app.dialog.is_none() && h.app.tool.is_none() && h.app.session.analysis.is_none(), "{command} started nothing");
         }
+    }
+
+    /// #9087: a sample index that names no sample is refused, so an agent can tell a typo from
+    /// a sample that opened. The index is checked before it reaches `open_sample`, which would
+    /// otherwise drop it and reply `ok`.
+    #[test]
+    fn ui_home_refuses_a_sample_index_that_names_no_sample() {
+        let mut h = crate::scenario::Harness::new();
+        let count = solidcraft_engine::sample::samples().len();
+        for bad in [json!({"sample": count}), json!({"sample": 99}), json!({"sample": -1})] {
+            let r = h.call("ui.home", bad.clone());
+            assert_eq!(r["ok"], false, "{bad}: {r}");
+            let error = r["error"].as_str().unwrap_or_default();
+            assert!(error.contains(&format!("0 to {}", count - 1)), "the error names the valid range: {bad}: {r}");
+        }
+        // A sample that exists still opens.
+        let r = h.call("ui.home", json!({"sample": 0}));
+        assert_eq!(r["ok"], true, "{r}");
+        assert_eq!(r["result"]["open"], true, "the sample was asked for: {r}");
     }
 }

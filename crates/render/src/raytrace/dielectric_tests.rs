@@ -43,6 +43,7 @@ pub(in crate::raytrace) fn request(options: RaytraceOptions) -> ImageRequest {
     let mut camera = crate::Camera { distance: 50.0, ..Default::default() };
     camera.set_view(crate::StandardView::Top);
     ImageRequest {
+        studio_weights: None,
         environment: None,
         textures: None,
         integrator: Integrator::Raytrace,

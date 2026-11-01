@@ -1,4 +1,6 @@
 {
+  "order": 230,
+  "provenance": "Original warm paper and charcoal palette",
   "base": "light",
   "colors": {
     "accent": "#bf5634",
@@ -50,8 +52,8 @@
     "dialog_footer": "#f4eee3",
     "dialog_label": "#423e36",
     "dialog_rule": "#e0d8c9",
-    "dimension": "#423e36",
-    "dimension_driven": "#726a5d",
+    "dimension": "#006a70",
+    "dimension_driven": "#4a8688",
     "error": "#c71529",
     "field": "#fdfaf3",
     "form_accent": "#5844bc",

@@ -117,7 +117,8 @@ The [architecture page](docs/architecture.md) has the layer table. The short ver
    not.) Permissive
    dependencies are fine. Note which one you're adding and why in the PR. THIRD-PARTY-LICENSES.txt
    lists it once the change lands: the Generated files workflow rewrites it on `main`.
-   Nightly/manual CI also scans advisories, bans and sources with cargo-deny; see
+   Nightly/manual CI also scans advisories, bans and sources with cargo-deny, and a PR that
+   changes Cargo.lock or a Cargo.toml checks the advisories; see
    [the local command and coverage limits](docs/book/src/dev/testing.md#dependency-advisories).
 3. **Every asset is original or openly licensed and has a row in
    [ATTRIBUTION.md](ATTRIBUTION.md).** Icons are drawn in code (`crates/ui-egui/src/icons.rs`).
@@ -268,7 +269,9 @@ a conflict. `crates/doc/src/format/pending/README.md` has an example.
 
 **At release time** the maintainer runs `scripts/fold-format-pending.sh`, which moves the pending
 files into `crates/doc/src/format/v<N>/` and fixes that number for good (see
-[docs/releasing.md](docs/releasing.md)). Never add a file to a `v<N>/` folder afterwards.
+[docs/releasing.md](docs/releasing.md)). Never add a file to a `v<N>/` folder afterwards. Drawings
+follow the same rules with their own numbers, from 1, in `crates/doc/src/drawing/format/` (see its
+`pending/README.md`), and the same script folds them.
 
 ## Lists many changes add to
 
@@ -276,6 +279,11 @@ Some files gain an item in many pull requests at once. They are kept so that two
 each add an item only meet when their items are neighbours, which spares everyone a conflict
 and a fresh CI run:
 
+- **Growing Rust lists**: use slices (`const ITEMS: &[Item] = &[...];`) without a written
+  length. `cargo xtask lists` rejects non-test const/static arrays with more than ten lines
+  of entries, except fixed standard or algorithm tables listed with reasons in `xtask/src/lists.rs`.
+  Built-in themes need only a JSON file in `assets/styles/ui/themes/`, with a unique nonnegative
+  integer `order` (the picker order) and its own `provenance` line; keep existing order values.
 - **Message catalogs** (`assets/locales/*.json`): one message per line, sorted by id. Add your
   message anywhere and run `cargo xtask lists --fix`; `cargo xtask lists` (in `cargo xtask ci`
   and the Lists workflow) fails on an unsorted catalog or an id that appears twice.
@@ -287,6 +295,9 @@ and a fresh CI run:
 - **Toolbar commands without help** (`BACKLOG` in `crates/ui-egui/src/command_help.rs`): sorted,
   one id per line, and it only shrinks. Writing a command's help removes its line; a new command
   is never added to it.
+- **`ui.prefs` settings** (`docs/control-protocol.md`): one line per setting, sorted by name, in
+  the list under the protocol table; add a new setting on its own line rather than editing a shared
+  row.
 - **Languages** (`crates/ui-egui/src/i18n.rs`): one per line, English first, then by id (a test
   checks it).
 - **Generated files**: `THIRD-PARTY-LICENSES.txt` and `docs/features.md` are rewritten on `main`
@@ -295,7 +306,9 @@ and a fresh CI run:
 - **Design format**: one file per change, never an edit to a shared number (above).
 - **New UI strings and attribution rows**: one new file per change, `assets/locales/pending/<slug>.json`
   and `attribution/pending/<slug>.md`, instead of editing the catalogs or the ATTRIBUTION.md table;
-  `cargo xtask fold-pending` folds them on `main` (see the README in each folder).
+  `cargo xtask fold-pending` folds them on `main` (see the README in each folder). A new English
+  message also needs every catalog delivered complete (`COMPLETE` in `crates/ui-egui/src/i18n.rs`:
+  today ar, he, ja, vi, and zh) in the same pending file; `cargo xtask i18n --check` reports any gap.
 
 ## Sending a change
 

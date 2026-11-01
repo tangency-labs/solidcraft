@@ -454,3 +454,68 @@ fn installed_families_are_listed_by_name_once_without_the_built_in_one() {
     }
     assert!(crate::families_in(&[folder.0.join("missing")]).is_empty());
 }
+
+/// The left and right ends of a text's outline, from every point its curves give (the same points move with the text,
+/// so a letter's ends in a word are its ends alone, moved along).
+fn reach(geometry: &[LinkGeom]) -> (f64, f64) {
+    let xs: Vec<f64> = geometry
+        .iter()
+        .flat_map(|g| match g {
+            LinkGeom::Line(a, b) => vec![a.x, b.x],
+            LinkGeom::Conic { a, apex, b, .. } => vec![a.x, apex.x, b.x],
+            LinkGeom::Spline { pts, .. } => pts.iter().map(|p| p.x).collect(),
+            _ => Vec::new(),
+        })
+        .collect();
+    (xs.iter().copied().fold(f64::INFINITY, f64::min), xs.iter().copied().fold(f64::NEG_INFINITY, f64::max))
+}
+
+/// Checks a right-to-left word set in `font` at 10 mm: the letters stand from right to left in reading order, so the
+/// first letter is the line's right end and the last one its left end, and the line is as wide as its letters side by
+/// side.
+fn check_right_to_left(font: Option<&str>, word: &str) {
+    let data = font_data(font).unwrap();
+    let m = TextMetrics::new(&data, &TextStyle::default()).unwrap();
+    let draw = |text: &str| text_geometry_in(font, text, Vec2::ZERO, 10.0, 0.0).unwrap();
+    let (first, last) = (word.chars().next().unwrap().to_string(), word.chars().next_back().unwrap().to_string());
+    let (width, first_width) = (m.line_width(word, 10.0).unwrap(), m.line_width(&first, 10.0).unwrap());
+    let (left, right) = reach(&draw(word));
+    // The first letter's right end, moved to where it stands at the right end of the line; the last letter at the start.
+    assert!((right - (width - first_width + reach(&draw(&first)).1)).abs() < 1e-6, "right end {right}");
+    assert!((left - reach(&draw(&last)).0).abs() < 1e-6, "left end {left}");
+}
+
+#[test]
+fn hebrew_reads_right_to_left_in_the_built_in_font() {
+    // Shalom in reading order: shin first, final mem last.
+    check_right_to_left(None, "\u{5E9}\u{5DC}\u{5D5}\u{5DD}");
+    // A left-to-right word before it keeps its place; the Hebrew after it still ends at the line's right end.
+    let font = font_data(None).unwrap();
+    let m = TextMetrics::new(&font, &TextStyle::default()).unwrap();
+    let line = "ab \u{5E9}\u{5DC}\u{5D5}\u{5DD}";
+    let (_, right) = reach(&text_geometry_in(None, line, Vec2::ZERO, 10.0, 0.0).unwrap());
+    let shin = reach(&text_geometry_in(None, "\u{5E9}", Vec2::ZERO, 10.0, 0.0).unwrap()).1;
+    let shin_width = m.line_width("\u{5E9}", 10.0).unwrap();
+    assert!((right - (m.line_width(line, 10.0).unwrap() - shin_width + shin)).abs() < 1e-6);
+    let (left, _) = reach(&text_geometry_in(None, line, Vec2::ZERO, 10.0, 0.0).unwrap());
+    assert!((left - reach(&text_geometry_in(None, "a", Vec2::ZERO, 10.0, 0.0).unwrap()).0).abs() < 1e-6, "a stays first");
+    // Text without right-to-left characters keeps its width.
+    assert!(m.line_width("ab", 10.0).unwrap() > 0.0);
+    // A line break inside the line ends a paragraph of the bidirectional algorithm; the text after it still counts.
+    let after = "\u{5D1}\u{5D1}\u{5D1}\u{5D1}";
+    assert!(m.line_width(&format!("\u{5D0}\n{after}"), 10.0).unwrap() > m.line_width(after, 10.0).unwrap());
+}
+
+#[test]
+fn arabic_letters_join_in_an_arabic_font() {
+    // An installed Arabic font; a machine without one has nothing to check.
+    let Ok(font) = font_data(Some("Noto Naskh Arabic")) else { return };
+    let m = TextMetrics::new(&font, &TextStyle::default()).unwrap();
+    // "Algeria" in reading order. Set one letter at a time every letter takes its isolated form and width.
+    let word = "\u{627}\u{644}\u{62C}\u{632}\u{627}\u{626}\u{631}";
+    let isolated: f64 = word.chars().map(|c| m.line_width(&c.to_string(), 10.0).unwrap()).sum();
+    let joined = m.line_width(word, 10.0).unwrap();
+    assert!(joined > 0.0 && joined < isolated, "joined {joined} isolated {isolated}");
+    // Its first letter, an alef, never joins to the one after it: it stands at the line's right end.
+    check_right_to_left(Some("Noto Naskh Arabic"), word);
+}

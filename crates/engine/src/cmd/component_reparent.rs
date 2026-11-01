@@ -92,16 +92,22 @@ pub(super) fn reparent(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     s.accept_computed(scratch);
+    follow_visibility(s, &old_path, &new_path);
+    Ok(json!({"occurrence": id, "parent": to, "path": new_path, "transform": transform}))
+}
+
+/// Hidden placements and folders under `old_path` follow it to `new_path`. `accept_computed` does
+/// not carry them, so whoever accepts a computed move into a session does this after.
+pub(super) fn follow_visibility(s: &mut Session, old_path: &[u64], new_path: &[u64]) {
     for hidden in &mut s.visibility.hidden_occurrences {
-        if let Some(moved) = rebased(hidden, &old_path, &new_path) {
+        if let Some(moved) = rebased(hidden, old_path, new_path) {
             *hidden = moved;
         }
     }
-    let (old_scope, new_scope) = (Session::folder_scope(&old_path), Session::folder_scope(&new_path));
+    let (old_scope, new_scope) = (Session::folder_scope(old_path), Session::folder_scope(new_path));
     for key in &mut s.visibility.hidden_folders {
         if let Some(rest) = key.strip_prefix(&old_scope).filter(|rest| rest.starts_with('/')) {
             *key = format!("{new_scope}{rest}");
         }
     }
-    Ok(json!({"occurrence": id, "parent": to, "path": new_path, "transform": transform}))
 }
