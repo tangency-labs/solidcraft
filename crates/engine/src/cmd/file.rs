@@ -1967,7 +1967,8 @@ mod tests {
         let mut whole = Session::default();
         let opened = whole.execute("doc.open", &json!({"path": path, "read_only": true})).unwrap();
 
-        let mut steps = OpenSteps::start(&json!({"path": path, "read_only": true})).unwrap().expect("a design is opened in steps");
+        let mut steps =
+            OpenSteps::start(&json!({"path": path, "read_only": true}), Default::default()).unwrap().expect("a design is opened in steps");
         assert_eq!(steps.path(), path);
         assert_eq!(steps.progress(), (0, features - 1), "the saved marker is where evaluation stops");
         let mut imports = 0;
@@ -2001,9 +2002,53 @@ mod tests {
 
         // Other files, and STEP-only options, are opened by `doc.open`.
         for p in [json!({"path": step}), json!({"path": "part.stl"}), json!({"path": path, "up": "y"}), json!({})] {
-            assert!(OpenSteps::start(&p).unwrap().is_none(), "{p}");
+            assert!(OpenSteps::start(&p, Default::default()).unwrap().is_none(), "{p}");
         }
-        assert!(OpenSteps::start(&json!({"path": dir.join("missing.sc").to_string_lossy()})).is_err());
+        assert!(OpenSteps::start(&json!({"path": dir.join("missing.sc").to_string_lossy()}), Default::default()).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// A design opened a feature at a time is evaluated under the session's check mode, as
+    /// `doc.open` is. Started under another mode than the session's (the mode changed meanwhile),
+    /// nothing evaluated under it stands: every feature is evaluated again. The bar's last round
+    /// is one the check refuses on solidcore (kernel case
+    /// fillets/1207-fillet-bar-top-edge-after-boss-arc-round-r0-5), so there the modes differ in
+    /// their errors too.
+    #[test]
+    fn a_design_opened_a_feature_at_a_time_is_checked_under_the_sessions_mode() {
+        use super::open_steps::OpenSteps;
+        use solidcraft_kernel::Validation;
+        let dir = std::env::temp_dir().join(format!("solidcraft-open-steps-mode-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("steps.sc").to_string_lossy().to_string();
+        let mut s = Session::default();
+        s.set_validation(Validation::Off);
+        s.execute("solid.box", &json!({"length": 100, "width": 30, "height": 10, "corner": [0, -15, 0], "body_name": "Arm"})).unwrap();
+        s.execute("solid.cylinder", &json!({"diameter": 40, "height": 20, "base": [0, 0, 0], "operation": "join", "targets": ["Arm"]})).unwrap();
+        s.execute("solid.fillet", &json!({"edges": [[16, 12, 10]], "radius": 2})).unwrap();
+        s.execute("solid.fillet", &json!({"edges": [[60, -15, 10]], "radius": 0.5})).unwrap();
+        s.execute("file.save", &json!({"path": path, "cache": false})).unwrap();
+        let errors = |s: &Session| s.model.results.iter().filter(|r| r.error.is_some()).count();
+        let open = |mode: Validation| {
+            let mut whole = Session::default();
+            whole.set_validation(mode);
+            whole.execute("doc.open", &json!({"path": path})).unwrap();
+            errors(&whole)
+        };
+        for mode in Validation::ALL {
+            for started in [mode, Validation::EachFeature, Validation::Off] {
+                let mut steps = OpenSteps::start(&json!({"path": path}), started).unwrap().expect("a design is opened in steps");
+                while steps.step() {}
+                let mut stepped = Session::default();
+                stepped.set_validation(mode);
+                steps.finish(&mut stepped).unwrap();
+                assert_eq!(stepped.validation(), mode);
+                assert_eq!(errors(&stepped), open(mode), "started under {started:?}, the session's mode {mode:?}");
+                let again = if started == mode { 0 } else { stepped.doc.features.len() };
+                assert_eq!(stepped.model.last_recomputed, again, "started under {started:?}, the session's mode {mode:?}");
+                assert!(stepped.model.is_current(&stepped.doc));
+            }
+        }
         std::fs::remove_dir_all(dir).unwrap();
     }
 
