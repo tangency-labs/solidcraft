@@ -1492,9 +1492,11 @@ preference_settings! {
     hole_several: bool = false, PAGE_TOOLS => check_id("prefs.design_tools.hole_several");
     /// The browser's Origin folder starts hidden in designs that don't keep its eye themselves.
     hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
-    /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit): a marker that
-    /// drags it across the model and a ring that turns it. Off by default: the feature is then placed
-    /// by its click only, as before, and its Position input takes faces only.
+    /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit, and the Box,
+    /// Cylinder, Cone, Sphere, Torus and Coil): a marker that drags it across the model and, where
+    /// it can turn in the face, a ring that turns it. Off by default: a Rest, Boss or Snap Fit is
+    /// then placed by its click only, as before, and its Position input takes faces only; a
+    /// primitive by its fields, its inputs or the selection it opened with.
     placement_handles: bool = false, PAGE_TOOLS => check_tr("ui.placement_handles");
     /// The files a design names (linked designs, font files) may be on any network location, for
     /// organisations that keep their designs on file servers. Off (the default): only on the

@@ -14,7 +14,7 @@ use serde_json::{Map, Value, json};
 use solidcore_record::Vec3;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::geom::PlaneGeom as _;
+use solidcraft_engine::geom::prelude::*;
 
 use crate::i18n::tr;
 use crate::selection::{EDGES, EXTERNAL_POINTS, FACES, ORIGIN, POINTS, SelInput, VERTICES};
@@ -136,6 +136,32 @@ pub(crate) fn picked(s: &Session, cmd: &str, at: &mut Option<(Vec3, Option<Vec3>
     let Some((index, _)) = current(s, cmd, extra) else { return };
     store(cmd, extra, index, &[coord(s, point.x), coord(s, point.y), coord(s, point.z)]);
     *at = None;
+}
+
+/// A Box dropped by its placement marker at `p` on a face with normal `n`: the current placement
+/// (the corner or the centre) written so the box stands on the face, centred on `p` across it
+/// (only centred on `p` on a face square to no axis), as a pre-selected face places it. `size` is
+/// the box's length, width and height (mm). Returns the point written.
+pub(crate) fn dropped(extra: &mut Map<String, Value>, p: Vec3, n: Vec3, size: Vec3) -> Option<Value> {
+    if !p.is_finite() {
+        return None;
+    }
+    // How much of the size lies behind `p` along each axis: none (or all) along the face's
+    // normal, half across it.
+    let back = |c: f64, size: f64, axis: Vec3| match n.dot(axis) {
+        d if d > 1.0 - 1e-9 => c,
+        d if d < -1.0 + 1e-9 => c - size,
+        _ => c - size * 0.5,
+    };
+    let corner = Vec3::new(back(p.x, size.x, Vec3::X), back(p.y, size.y, Vec3::Y), back(p.z, size.z, Vec3::Z));
+    let index = keys("solid.box").iter().position(|k| extra.contains_key(*k)).unwrap_or(0);
+    let at = if index == 0 { corner } else { corner + size * 0.5 };
+    // A drop is only as exact as the pointer: to the micrometre, so the fields read 45 mm, not
+    // 44.999991 mm.
+    let um = |v: f64| mm((v * 1e3).round() / 1e3);
+    let coords = [um(at.x), um(at.y), um(at.z)];
+    store("solid.box", extra, index, &coords);
+    Some(json!(coords))
 }
 
 /// The typed placement into the command's parameters: a bare number typed into a field is in the
