@@ -117,3 +117,208 @@ fn what_it_cant_write_is_refused() {
     run(&mut s, "drawing.close", json!({}));
     assert!(refused(&mut s, json!({"sheet": id})).contains("open a drawing first"));
 }
+
+/// The drawing milestone's plate (acceptance case 84, #4894) by commands alone: modelled from its
+/// parameters, a top view at 1:2 and the views projected below and right of it, its length, width
+/// and first bore dimensioned, with each dimension's id, value and text.
+fn milestone_plate() -> (Session, Vec<(Value, Value, Value)>) {
+    let mut s = Session::default();
+    let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/drawing_m2.json")).unwrap();
+    let made = s.run_script(&script).unwrap();
+    let size = |reply: &Value| {
+        let b = &reply["boundary_mm"];
+        [0, 1].map(|i| b["max"][i].as_f64().unwrap() - b["min"][i].as_f64().unwrap())
+    };
+    let top = made.last().unwrap();
+    let below = run(&mut s, "drawing.view.projected", json!({"parent": top["view"], "side": "below"}));
+    let right = run(&mut s, "drawing.view.projected", json!({"parent": top["view"], "side": "right"}));
+    // 100 x 80 x 20 at half size: the top shows length by width, below it length by thickness,
+    // right of it thickness by width.
+    for (view, expected) in [(top, [50.0, 40.0]), (&below, [50.0, 10.0]), (&right, [10.0, 40.0])] {
+        let [w, h] = size(view);
+        assert!((w - expected[0]).abs() < 1e-6 && (h - expected[1]).abs() < 1e-6, "{view}");
+    }
+    // The first bore's rim, by a point on it.
+    let mut dimensions = Vec::new();
+    for (kind, value) in [
+        (json!({"length": {"edge": [50, 0, 20]}}), 100.0),
+        (json!({"length": {"edge": [0, 40, 20]}}), 80.0),
+        (json!({"radial": {"edge": [25, 20, 20]}}), 10.0),
+    ] {
+        let added = run(&mut s, "drawing.dimension.add", json!({"view": top["view"], "kind": kind}));
+        assert!((added["value"].as_f64().unwrap() - value).abs() < 1e-9, "{added}");
+        dimensions.push((added["dimension"].clone(), added["value"].clone(), added["text"].clone()));
+    }
+    (s, dimensions)
+}
+
+/// Saved with the design and opened again, the plate's sheet exports the same SVG, byte for byte,
+/// and each dimension reads the same.
+#[test]
+fn the_milestone_plate_exports_the_same_after_it_is_saved_and_opened() {
+    let (mut s, dimensions) = milestone_plate();
+    let svg = run(&mut s, CMD, json!({"sheet": "Sheet 1"}))["svg"].clone();
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+    let folder = Folder::new("drawing-m2-plate");
+    run(&mut s, "file.save", json!({"path": folder.path("plate.solidcraft")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("plate.solidcraft")}));
+    run(&mut opened, "drawing.open", json!({"drawing": drawing}));
+    assert_eq!(run(&mut opened, CMD, json!({"sheet": "Sheet 1"}))["svg"], svg);
+    for (dimension, value, text) in dimensions {
+        let read = run(&mut opened, "drawing.dimension.inspect", json!({"dimension": dimension}));
+        assert_eq!((&read["value"], &read["text"], &read["status"]), (&value, &text, &json!("ok")), "{read}");
+    }
+}
+
+/// What each view on the open drawing's first sheet fills, in sheet mm, sorted.
+fn view_sizes(s: &Session) -> Vec<[f64; 2]> {
+    let d = s.drawing("test").unwrap().clone();
+    let scene = crate::drawing_scene::build(s, &d, d.sheets[0].id).unwrap().scene;
+    let views = scene.groups.iter().filter(|group| group.kind == solidcraft_geom::paper::ObjectKind::View);
+    let mut sizes: Vec<[f64; 2]> = views
+        .map(|view| {
+            let paths =
+                view.items.iter().filter_map(|item| if let solidcraft_geom::paper::Item::Stroke { path, .. } = item { Some(path) } else { None });
+            let points: Vec<solidcraft_geom::Vec2> = paths.flatten().flat_map(|seg| (0..=16).map(|i| seg.point_at(f64::from(i) / 16.0))).collect();
+            let extent = |along: fn(&solidcraft_geom::Vec2) -> f64| {
+                points.iter().map(along).fold(f64::NEG_INFINITY, f64::max) - points.iter().map(along).fold(f64::INFINITY, f64::min)
+            };
+            [extent(|p| p.x), extent(|p| p.y)]
+        })
+        .collect();
+    sizes.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    sizes
+}
+
+/// The plate's model edited with its drawing closed (acceptance cases 85 to 87, #4894): the views
+/// and the model follow with the hand values, and each edit saved and opened again exports the same
+/// SVG. Undo brings back the sheet before it byte for byte, and redo the one after it. What the
+/// dimensions read across these edits is E2E-01 to E2E-04, on #8288.
+#[test]
+fn the_milestone_plate_follows_its_model_and_undo_brings_its_sheet_back() {
+    let (mut s, _) = milestone_plate();
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+    let on_the_model = |s: &mut Session, id: &str, p: Value| {
+        run(s, "drawing.close", json!({}));
+        run(s, id, p);
+        run(s, "drawing.open", json!({"drawing": drawing}));
+    };
+    let sheet = |s: &mut Session| run(s, CMD, json!({"sheet": "Sheet 1"}))["svg"].clone();
+    let folder = Folder::new("drawing-m2-edits");
+    let before = sheet(&mut s);
+    let wide = [[10.0, 50.0], [50.0, 10.0], [50.0, 50.0]];
+    let plate = [[10.0, 40.0], [50.0, 10.0], [50.0, 40.0]];
+    let bores = |one: f64, two: f64| 100.0 * 80.0 * 20.0 - std::f64::consts::PI * (one * one + two * two) / 4.0 * 20.0;
+    for (case, id, edit, sizes, volume) in [
+        (85, "parameters.change", json!({"name": "width", "expression": "100 mm"}), wide, 196_858.41),
+        (86, "parameters.change", json!({"name": "bore1_d", "expression": "12 mm"}), plate, bores(12.0, 10.0)),
+        (87, "timeline.delete", json!({"feature": "Bore1"}), plate, bores(0.0, 10.0)),
+    ] {
+        on_the_model(&mut s, id, edit);
+        for (size, expected) in view_sizes(&s).iter().zip(sizes) {
+            assert!((size[0] - expected[0]).abs() < 1e-6 && (size[1] - expected[1]).abs() < 1e-6, "case {case}: {size:?}");
+        }
+        run(&mut s, "drawing.close", json!({}));
+        let measured = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+        run(&mut s, "drawing.open", json!({"drawing": drawing}));
+        // Measured over facets, so a bore comes a little short of the hand's circle.
+        assert!((measured - volume).abs() < 1.0, "case {case}: {measured}");
+        // The sheet the edit gives, and the same from the file.
+        let after = sheet(&mut s);
+        assert_ne!(after, before, "case {case}");
+        let path = folder.path(&format!("case-{case}.solidcraft"));
+        run(&mut s, "file.save", json!({"path": path}));
+        let mut opened = Session::default();
+        run(&mut opened, "doc.open", json!({"path": path}));
+        run(&mut opened, "drawing.open", json!({"drawing": drawing}));
+        assert_eq!(sheet(&mut opened), after, "case {case}: opened again");
+        on_the_model(&mut s, "edit.undo", json!({}));
+        assert_eq!(sheet(&mut s), before, "case {case}: undone");
+        on_the_model(&mut s, "edit.redo", json!({}));
+        assert_eq!(sheet(&mut s), after, "case {case}: redone");
+        on_the_model(&mut s, "edit.undo", json!({}));
+    }
+}
+
+/// A small assembly's sheet (W23-5, #4894), by commands alone: a plate, and a hinge placed twice
+/// holding a block with a hole. Each copy has its own dimensions through its occurrence path. Moving
+/// a copy moves its lines and values with the hand answers, and the other copy's stay; the sheet
+/// saved and opened again is the same SVG, and undo brings back the sheet before it, byte for byte.
+/// Deleting a copy loses what names it, each with the value it last had.
+#[test]
+fn an_assembly_sheet_follows_its_occurrences() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": 10, "body_name": "Plate", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let first = run(&mut s, "component.create", json!({"name": "Hinge", "activate": false}))["occurrence"].clone();
+    let block = run(&mut s, "component.create", json!({"name": "Block", "parent": "Hinge"}))["occurrence"].clone();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 20, "corner": [10, 10, 10], "body_name": "Block", "operation": "new"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 6, "height": 22, "base": [15, 15, 9], "operation": "cut", "targets": ["Block"]}));
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [60, 0, 0]}))["occurrence"].clone();
+    run(&mut s, "drawing.create", json!({}));
+    let top = run(&mut s, "drawing.view.base", json!({"sheet": "Sheet 1", "view": "top", "scale": "1:1", "position_mm": [150, 150]}))["view"].clone();
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+    // The blocks' top corners across the copies, and each copy's hole.
+    let radial = |x: f64, path: &Value| json!({"radial": {"edge": {"point": [x, 15, 30], "path": [path, block]}}});
+    let corner = |x: f64, path: &Value| json!({"point": [x, 10, 30], "path": [path, block]});
+    let apart = json!({"linear": {"a": corner(20.0, &first), "b": corner(70.0, &second), "direction": "horizontal"}});
+    let mut dimensions = Vec::new();
+    for kind in [apart, radial(18.0, &first), radial(78.0, &second)] {
+        dimensions.push(run(&mut s, "drawing.dimension.add", json!({"view": top, "kind": kind}))["dimension"].clone());
+    }
+    let on_the_model = |s: &mut Session, id: &str, p: Value| {
+        run(s, "drawing.close", json!({}));
+        run(s, id, p);
+        run(s, "drawing.open", json!({"drawing": drawing}));
+    };
+    let sheet = |s: &mut Session| run(s, CMD, json!({"sheet": "Sheet 1"}))["svg"].clone();
+    // The view's size on paper, and each dimension's status with its value, or the last it had.
+    let reads_as = |s: &mut Session, w: f64, h: f64, want: [(&str, f64); 3]| {
+        let sizes = view_sizes(s);
+        assert!(matches!(sizes.as_slice(), [[a, b]] if (a - w).abs() < 1e-6 && (b - h).abs() < 1e-6), "{sizes:?}");
+        for (dimension, (status, value)) in dimensions.iter().zip(want) {
+            let read = run(s, "drawing.dimension.inspect", json!({"dimension": dimension}));
+            let got = if status == "ok" { &read["value"] } else { &read["last_good"] };
+            assert!(read["status"] == status && (got.as_f64().unwrap() - value).abs() < 1e-9, "{read}");
+        }
+    };
+    let same_opened = |s: &mut Session, name: &str, svg: &Value| {
+        let folder = Folder::new(name);
+        let path = folder.path("assembly.solidcraft");
+        run(s, "file.save", json!({"path": path}));
+        let mut opened = Session::default();
+        run(&mut opened, "doc.open", json!({"path": path}));
+        run(&mut opened, "drawing.open", json!({"drawing": drawing}));
+        assert_eq!(&sheet(&mut opened), svg, "{name}: opened again");
+    };
+    let placed = [("ok", 50.0), ("ok", 6.0), ("ok", 6.0)];
+
+    // As placed: the plate fills the view, with both blocks on it.
+    let before = sheet(&mut s);
+    reads_as(&mut s, 100.0, 60.0, placed);
+    same_opened(&mut s, "drawing-assembly-placed", &before);
+
+    // The second copy 60 mm along X: past the plate's end, the view 140 wide; only the gap changes.
+    on_the_model(&mut s, "occurrence.move", json!({"occurrence": second, "space": "world", "translate": [60, 0, 0]}));
+    reads_as(&mut s, 140.0, 60.0, [("ok", 110.0), ("ok", 6.0), ("ok", 6.0)]);
+    let moved = sheet(&mut s);
+    assert_ne!(moved, before);
+    same_opened(&mut s, "drawing-assembly-moved", &moved);
+    on_the_model(&mut s, "edit.undo", json!({}));
+    assert_eq!(sheet(&mut s), before, "the move undone");
+    on_the_model(&mut s, "edit.redo", json!({}));
+    assert_eq!(sheet(&mut s), moved, "the move done again");
+    on_the_model(&mut s, "edit.undo", json!({}));
+    reads_as(&mut s, 100.0, 60.0, placed);
+
+    // The second copy deleted: the gap and its hole are lost, the first copy's hole stays.
+    on_the_model(&mut s, "selection.delete", json!({"occurrences": [second]}));
+    reads_as(&mut s, 100.0, 60.0, [("lost", 50.0), ("ok", 6.0), ("lost", 6.0)]);
+    let gone = sheet(&mut s);
+    same_opened(&mut s, "drawing-assembly-deleted", &gone);
+    on_the_model(&mut s, "edit.undo", json!({}));
+    assert_eq!(sheet(&mut s), before, "the delete undone");
+    reads_as(&mut s, 100.0, 60.0, placed);
+}
