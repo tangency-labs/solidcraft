@@ -137,6 +137,8 @@ pub struct State {
     slot: SceneSlot,
     key: Option<u64>,
     scene_signature: Option<(u64, usize, u64, u64)>,
+    /// The product scene's palette slots and blocks, kept across scenes ([`gpu_scene_cached`]).
+    product_cache: ProductCache,
     scene: Option<ProductScene>,
     scene_error: Option<String>,
     preview_upload_bytes: Option<usize>,
@@ -466,6 +468,7 @@ impl Default for State {
             slot: Arc::new(Mutex::new(None)),
             key: None,
             scene_signature: None,
+            product_cache: ProductCache::default(),
             scene: None,
             scene_error: None,
             preview_upload_bytes: None,
@@ -1660,13 +1663,19 @@ fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 impl State {
-    fn prepare_preview(&mut self, signature: (u64, usize, u64, u64), capture: impl FnOnce() -> Result<ProductScene, String>) -> Result<(), String> {
+    fn prepare_preview(
+        &mut self,
+        signature: (u64, usize, u64, u64),
+        capture: impl FnOnce() -> Result<(ProductScene, Vec<Option<Placement>>), String>,
+    ) -> Result<(), String> {
         if self.scene_signature != Some(signature) {
-            let prepared = capture().and_then(|scene| gpu_scene_with_budget(&scene, signature.3).map(|(key, gpu)| (scene, key, gpu)));
+            let cache = &mut self.product_cache;
+            let prepared = capture()
+                .and_then(|(scene, placements)| gpu_scene_cached(&scene, &placements, signature.3, cache).map(|(key, gpu)| (scene, key, gpu)));
             self.scene_signature = Some(signature);
             match prepared {
                 Ok((scene, key, gpu)) => {
-                    let bytes = gpu.pbr.len() + gpu.tris.len() + gpu.glass.len();
+                    let bytes = gpu.pbr.len() + gpu.tris.len() + gpu.glass.len() + gpu.blocks.iter().map(|b| b.bytes.vertices.len()).sum::<usize>();
                     if self.key != Some(key) {
                         let uploaded = match self.slot.lock() {
                             Ok(mut slot) => {
@@ -1772,14 +1781,35 @@ struct PreviewUploadPlan {
     pbr: usize,
     tris: usize,
     glass: usize,
+    /// Instanced bodies: each shared mesh's triangles once, and a placement for each body.
+    instanced: usize,
     source_triangles: usize,
 }
 impl PreviewUploadPlan {
     fn bytes(self) -> Result<usize, String> {
+        self.block_bytes()?.checked_add(self.instanced).ok_or_else(|| crate::i18n::tr("render.error_geometry_size").into())
+    }
+    /// The bytes built into blocks (everything not instanced).
+    fn block_bytes(self) -> Result<usize, String> {
         self.pbr.checked_add(self.tris).and_then(|n| n.checked_add(self.glass)).ok_or_else(|| crate::i18n::tr("render.error_geometry_size").into())
     }
+    /// One more instanced body, and its shared mesh's `triangles` the first time it is placed.
+    fn add_instanced(&mut self, triangles: Option<usize>, limit: usize) -> Result<(), String> {
+        let shared =
+            triangles.map_or(Some(0), |t| t.checked_mul(3 * (crate::gpu::SHARED_SIZE + 4))).ok_or(crate::i18n::tr("render.error_geometry_size"))?;
+        self.instanced = self
+            .instanced
+            .checked_add(shared)
+            .and_then(|n| n.checked_add(crate::gpu::INSTANCE_SIZE))
+            .ok_or(crate::i18n::tr("render.error_geometry_size"))?;
+        if self.bytes()? > limit {
+            return Err(crate::i18n::format("render.error_vertex_envelope", &[("limit", &(limit / (1024 * 1024)).to_string())]));
+        }
+        Ok(())
+    }
     fn add(&mut self, pbr: bool, glass: bool, triangles: usize, limit: usize) -> Result<(), String> {
-        let stride = if pbr { crate::gpu::PBR_SIZE } else { crate::gpu::TRI_SIZE };
+        // PBR triangles are built triangles too; their materials are in the palette.
+        let stride = crate::gpu::TRI_SIZE;
         let bytes = triangles.checked_mul(3).and_then(|n| n.checked_mul(stride)).ok_or(crate::i18n::tr("render.error_geometry_size"))?;
         let count = if pbr {
             &mut self.pbr
@@ -1793,12 +1823,55 @@ impl PreviewUploadPlan {
     }
 }
 
+#[cfg(test)]
 fn preview_upload_plan(scene: &ProductScene, limit: usize) -> Result<PreviewUploadPlan, String> {
+    preview_upload_plan_with(scene, &[], &[], limit)
+}
+
+/// The meshes drawn as instances of a shared mesh: placed copies ([`Placement`]) of a mesh that
+/// two or more bodies are drawn from, in one look (no face looks) and visible; a PBR body only
+/// where `pbr_ok` says its shared mesh can be drawn so (smooth, with unit-able normals).
+fn instanced_bodies(
+    scene: &ProductScene,
+    placements: &[Option<Placement>],
+    pbr_ok: &dyn Fn(&Arc<solidcraft_engine::geom::Mesh>) -> bool,
+) -> Vec<bool> {
+    let eligible = |b: &solidcraft_engine::render::ProductMesh, p: &Option<Placement>| {
+        let Some((source, _)) = p else { return false };
+        let pbr = b.surface.is_some() && b.transmission.is_none();
+        b.faces.is_empty() && b.opacity > 0.0 && (!pbr || (b.opacity == 1.0 && pbr_ok(source)))
+    };
+    let mut uses: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for (b, p) in scene.meshes.iter().zip(placements) {
+        if let Some((source, _)) = p.as_ref().filter(|_| eligible(b, p)) {
+            *uses.entry(Arc::as_ptr(source) as usize).or_default() += 1;
+        }
+    }
+    scene
+        .meshes
+        .iter()
+        .enumerate()
+        .map(|(i, b)| {
+            let p = placements.get(i).cloned().flatten();
+            eligible(b, &p) && p.is_some_and(|(source, _)| uses.get(&(Arc::as_ptr(&source) as usize)).is_some_and(|n| *n > 1))
+        })
+        .collect()
+}
+
+/// [`preview_upload_plan`] with the meshes `instanced` drawn as instances of their `placements`'
+/// shared meshes.
+fn preview_upload_plan_with(
+    scene: &ProductScene,
+    placements: &[Option<Placement>],
+    instanced: &[bool],
+    limit: usize,
+) -> Result<PreviewUploadPlan, String> {
     if scene.meshes.len() > solidcraft_engine::render::job::MAX_CPU_BODIES {
         return Err(crate::i18n::tr("render.error_body_bound").into());
     }
     let mut plan = PreviewUploadPlan::default();
-    for body in &scene.meshes {
+    let mut shared = std::collections::HashSet::new();
+    for (i, body) in scene.meshes.iter().enumerate() {
         plan.source_triangles = plan.source_triangles.checked_add(body.mesh.triangles.len()).ok_or(crate::i18n::tr("render.error_triangle_count"))?;
         if plan.source_triangles > solidcraft_engine::render::job::MAX_CPU_TRIANGLES {
             return Err(crate::i18n::tr("render.error_triangle_bound").into());
@@ -1815,6 +1888,13 @@ fn preview_upload_plan(scene: &ProductScene, limit: usize) -> Result<PreviewUplo
         let looks: std::collections::BTreeMap<_, _> = body.faces.iter().map(|face| (face.face, face)).collect();
         if looks.len() != body.faces.len() {
             return Err(crate::i18n::tr("render.error_duplicate_face").into());
+        }
+        if instanced.get(i).copied().unwrap_or(false)
+            && let Some(Some((source, _))) = placements.get(i)
+        {
+            let first = shared.insert(Arc::as_ptr(source) as usize);
+            plan.add_instanced(first.then_some(source.triangles.len()), limit)?;
+            continue;
         }
         for index in 0..body.mesh.triangles.len() {
             let face = body.mesh.tri_face.get(index).and_then(|id| looks.get(id));
@@ -1833,94 +1913,312 @@ fn preview_upload_plan(scene: &ProductScene, limit: usize) -> Result<PreviewUplo
     Ok(plan)
 }
 
-/// Convert all captured surfaces, without decimation. The finite, exact payload
-/// plan is admitted first; each output vector is reserved once rather than grown
-/// once per triangle. Device uploads retain their existing chunked buffer path.
+/// Convert all captured surfaces, without decimation, under the previous fixed budget (a fresh
+/// [`ProductCache`]: everything is built). The live preview keeps its cache across scenes and
+/// uses the device's budget ([`gpu_scene_cached`]).
 #[cfg(test)]
 fn gpu_scene(scene: &ProductScene) -> Result<(u64, GpuScene), String> {
-    gpu_scene_with_budget(scene, MAX_GEOMETRY_BYTES as u64)
+    gpu_scene_cached(scene, &[], MAX_GEOMETRY_BYTES as u64, &mut ProductCache::default())
 }
 
-fn gpu_scene_with_budget(scene: &ProductScene, budget: u64) -> Result<(u64, GpuScene), String> {
-    let limit = usize::try_from(budget).unwrap_or(usize::MAX);
-    let plan = preview_upload_plan(scene, limit)?;
-    let mut hash = std::collections::hash_map::DefaultHasher::new();
-    let mut gpu = GpuScene::default();
-    for (buffer, bytes) in [(&mut gpu.pbr, plan.pbr), (&mut gpu.tris, plan.tris), (&mut gpu.glass, plan.glass)] {
-        buffer.try_reserve_exact(bytes).map_err(|_| crate::i18n::tr("render.error_vertex_allocation").to_string())?;
+/// A product mesh as a placed copy of a shared mesh: the shared mesh and the move that places it
+/// ([`solidcraft_engine::product_scene::placements`]).
+pub type Placement = (Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::doc::Mat);
+
+/// Bodies in one product block: an edit rebuilds the blocks of the bodies whose geometry it
+/// changes, never more.
+const PRODUCT_BLOCK_BODIES: usize = 64;
+
+/// The product preview's palette slots and blocks, kept from one scene to the next as the model
+/// scene keeps its own (#6970): a colour or opacity edit rewrites palette entries and uploads no
+/// vertex, a change of opacity class rewrites a block's runs, and only a change of geometry (a
+/// mesh, which faces have looks of their own, which are PBR or not drawn) builds a block again.
+#[derive(Default)]
+pub struct ProductCache {
+    arena: crate::scene_palette::PaletteArena,
+    /// The PBR material of each palette slot (none for a plain colour).
+    materials: Vec<crate::gpu::Material>,
+    blocks: std::collections::HashMap<u64, ProductBlock>,
+    /// Shared meshes drawn as instances and their triangles (uploaded once while kept), by
+    /// address.
+    shared: std::collections::HashMap<usize, (Arc<solidcraft_engine::geom::Mesh>, Arc<crate::gpu::SharedTris>)>,
+    /// Whether a shared mesh can be drawn as PBR instances (smooth, normals made unit), by
+    /// address, held.
+    pbr_ok: std::collections::HashMap<usize, (Arc<solidcraft_engine::geom::Mesh>, bool)>,
+}
+
+struct ProductBlock {
+    /// The bodies' opacity classes the runs were made for.
+    classes: u64,
+    bytes: Arc<crate::gpu::BlockBytes>,
+    /// The meshes the block's key names, held so their addresses are not reused.
+    _meshes: Vec<Arc<solidcraft_engine::geom::Mesh>>,
+}
+
+/// How a product triangle is drawn: in a block (opaque, see-through or PBR, its palette slot
+/// holding its colour and material), or not at all (opacity 0).
+#[derive(Clone, Copy, PartialEq)]
+enum ProductDraw {
+    Block(crate::gpu::TriClass, crate::gpu::PaletteIndex),
+    Hidden,
+}
+
+/// A product body's looks resolved for drawing: the body's own and each face look's, by face.
+struct BodyLooks<'a> {
+    body: &'a solidcraft_engine::render::ProductMesh,
+    slots: crate::scene_palette::BodySlots,
+    /// Drawn as an instance of a shared mesh, not in a block.
+    instanced: bool,
+    /// Face index → its look and its place among the body's face looks (its palette slot).
+    faces: std::collections::BTreeMap<u32, (usize, &'a solidcraft_engine::render::FaceAppearance)>,
+}
+
+impl BodyLooks<'_> {
+    fn draw(&self, triangle: usize) -> ProductDraw {
+        if self.instanced {
+            return ProductDraw::Hidden;
+        }
+        let face = self.body.mesh.tri_face.get(triangle).and_then(|f| self.faces.get(f));
+        let (opacity, surface, slot) = match face {
+            Some((k, l)) => (l.opacity, l.surface.filter(|_| l.transmission.is_none()), self.slots.face(*k)),
+            None => (self.body.opacity, self.body.surface.filter(|_| self.body.transmission.is_none()), self.slots.body),
+        };
+        if opacity <= 0.0 {
+            ProductDraw::Hidden
+        } else if surface.is_some() {
+            ProductDraw::Block(crate::gpu::TriClass::Pbr, slot)
+        } else if opacity < 0.999 {
+            ProductDraw::Block(crate::gpu::TriClass::Glass, slot)
+        } else {
+            ProductDraw::Block(crate::gpu::TriClass::Opaque, slot)
+        }
     }
-    for body in &scene.meshes {
-        if body.faces.len() > 262_144 {
-            return Err(crate::i18n::tr("render.error_face_cap").into());
+
+    /// What a block keeps of this body: its mesh, its slots, and for the body and each face
+    /// look whether it is drawn at all, and whether as PBR (whose normals are made unit).
+    fn geometry(&self, h: &mut impl Hasher) {
+        (Arc::as_ptr(&self.body.mesh) as usize, self.slots.body.0, self.slots.faces, self.instanced).hash(h);
+        let drawn = |opacity: f64, pbr: bool| (opacity > 0.0, pbr);
+        drawn(self.body.opacity, self.body.surface.is_some() && self.body.transmission.is_none()).hash(h);
+        for (face, (_, l)) in &self.faces {
+            (face, drawn(l.opacity, l.surface.is_some() && l.transmission.is_none())).hash(h);
         }
-        if !body.opacity.is_finite()
-            || !(0.0..=1.0).contains(&body.opacity)
-            || body.faces.iter().any(|f| !f.opacity.is_finite() || !(0.0..=1.0).contains(&f.opacity))
-        {
-            return Err(crate::i18n::tr("render.error_opacity").into());
+    }
+
+    /// The opacity classes of the body and its face looks (which runs its triangles join).
+    fn classes(&self, h: &mut impl Hasher) {
+        (self.body.opacity < 0.999).hash(h);
+        for l in self.faces.values() {
+            (l.1.opacity < 0.999).hash(h);
         }
-        (Arc::as_ptr(&body.mesh) as usize).hash(&mut hash);
-        body.name.hash(&mut hash);
-        body.color.hash(&mut hash);
-        body.opacity.to_bits().hash(&mut hash);
-        body.transmission.is_some().hash(&mut hash);
-        hash_surface(body.surface, &mut hash);
-        let looks: std::collections::BTreeMap<_, _> = body.faces.iter().map(|l| (l.face, l)).collect();
-        for face in &body.faces {
-            face.face.hash(&mut hash);
-            face.color.hash(&mut hash);
-            face.opacity.to_bits().hash(&mut hash);
-            face.transmission.is_some().hash(&mut hash);
-            hash_surface(face.surface, &mut hash);
+    }
+}
+
+/// [`gpu_scene`], reusing `cache`'s palette slots, blocks and shared meshes, and drawing the
+/// meshes that are placed copies of a shared one (`placements`, by mesh; may be empty) as
+/// instances of it: one copy of the triangles for every placement. The geometry is admitted under a
+/// budget of `budget` bytes.
+pub fn gpu_scene_cached(
+    scene: &ProductScene,
+    placements: &[Option<Placement>],
+    budget: u64,
+    cache: &mut ProductCache,
+) -> Result<(u64, GpuScene), String> {
+    use crate::gpu::{BlockBuilder, TriClass};
+    // A PBR body is drawn as an instance only of a smooth shared mesh whose normals can all be
+    // made unit (as the blocks' PBR triangles are). Asked only of meshes two or more PBR bodies
+    // are drawn from, and remembered for each.
+    let mut pbr_uses: std::collections::HashMap<usize, (&Arc<solidcraft_engine::geom::Mesh>, usize)> = std::collections::HashMap::new();
+    for (b, p) in scene.meshes.iter().zip(placements) {
+        if let (Some((source, _)), true) = (p, b.surface.is_some() && b.transmission.is_none()) {
+            pbr_uses.entry(Arc::as_ptr(source) as usize).or_insert((source, 0)).1 += 1;
         }
-        for (index, triangle) in body.mesh.triangles.iter().enumerate() {
-            let face = body.mesh.tri_face.get(index).and_then(|f| looks.get(f));
-            let (color, opacity, surface) = face.map_or((body.color, body.opacity, body.surface.filter(|_| body.transmission.is_none())), |l| {
-                (l.color, l.opacity, l.surface.filter(|_| l.transmission.is_none()))
-            });
-            if surface.is_some() && opacity != 1.0 {
-                return Err(crate::i18n::tr("render.error_pbr_opacity").into());
-            }
-            if opacity <= 0.0 {
-                continue;
-            }
-            let vertices = triangle.map(|i| {
-                let p = body.mesh.positions.get(i as usize)?.to_f32();
-                let n = *body.mesh.normals.get(i as usize)?;
-                let n = if surface.is_some() { solidcraft_engine::render::surface::unit_direction(n).ok()? } else { n }.to_f32();
-                p.into_iter().chain(n).all(f32::is_finite).then_some((p, n))
-            });
-            let [Some(a), Some(b), Some(c)] = vertices else { return Err(crate::i18n::tr("render.error_product_triangle").into()) };
-            let rgba = [color[0], color[1], color[2], (opacity * 255.0).round() as u8];
-            let index = gpu.color(rgba);
-            for (p, n) in [a, b, c] {
-                if let Some(surface) = surface {
-                    if n.iter().all(|v| *v == 0.0) {
-                        return Err(crate::i18n::tr("render.error_surface_normals").into());
-                    }
-                    gpu.pbr_tri(p, n, surface);
-                } else if opacity < 0.999 {
-                    gpu.glass_tri(p, n, index);
-                } else {
-                    gpu.tri(p, n, index);
+    }
+    let mut pbr_ok = std::collections::HashMap::new();
+    for (address, (source, _)) in pbr_uses.into_iter().filter(|(_, (_, n))| *n > 1) {
+        let ok = match cache.pbr_ok.get(&address).filter(|(mesh, _)| Arc::ptr_eq(mesh, source)) {
+            Some((_, ok)) => *ok,
+            None => {
+                let tris = cache.shared.entry(address).or_insert_with(|| (source.clone(), Arc::new(crate::gpu::SharedTris::new(source))));
+                if !Arc::ptr_eq(&tris.0, source) {
+                    *tris = (source.clone(), Arc::new(crate::gpu::SharedTris::new(source)));
                 }
+                let ok = !tris.1.flat && source.normals.iter().all(|n| solidcraft_engine::render::surface::unit_direction(*n).is_ok());
+                cache.pbr_ok.insert(address, (source.clone(), ok));
+                ok
             }
-        }
+        };
+        pbr_ok.insert(address, ok);
     }
-    if (gpu.pbr.len(), gpu.tris.len(), gpu.glass.len()) != (plan.pbr, plan.tris, plan.glass) {
+    cache.pbr_ok.retain(|k, _| pbr_ok.contains_key(k));
+    let instanced = instanced_bodies(scene, placements, &|source| pbr_ok.get(&(Arc::as_ptr(source) as usize)).copied().unwrap_or(false));
+    let limit = usize::try_from(budget).unwrap_or(usize::MAX);
+    let plan = preview_upload_plan_with(scene, placements, &instanced, limit)?;
+    let mut gpu = GpuScene::default();
+    // Stable slots for every body and face look, allocated before the palette is copied.
+    cache.arena.sync(scene.meshes.iter().map(|b| b.name.as_str()));
+    let mut looks = Vec::with_capacity(scene.meshes.len());
+    for body in &scene.meshes {
+        let faces: std::collections::BTreeMap<u32, (usize, &solidcraft_engine::render::FaceAppearance)> =
+            body.faces.iter().enumerate().map(|(k, l)| (l.face, (k, l))).collect();
+        let slots = cache.arena.body(&body.name, body.faces.len());
+        let alpha = |opacity: f64| (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
+        cache.arena.set(slots.body, [body.color[0], body.color[1], body.color[2], alpha(body.opacity)]);
+        let material = |surface: Option<solidcraft_engine::render::surface::OpaqueSurface>, opaque: bool| {
+            surface.filter(|_| opaque).map(|s| crate::gpu::Material::of(&s)).unwrap_or_default()
+        };
+        let materials = &mut cache.materials;
+        let mut set_material = |slot: crate::gpu::PaletteIndex, m: crate::gpu::Material| {
+            let at = slot.0 as usize;
+            if materials.len() <= at {
+                materials.resize(at + 1, crate::gpu::Material::default());
+            }
+            if let Some(entry) = materials.get_mut(at) {
+                *entry = m;
+            }
+        };
+        set_material(slots.body, material(body.surface, body.transmission.is_none()));
+        for (k, l) in body.faces.iter().enumerate() {
+            cache.arena.set(slots.face(k), [l.color[0], l.color[1], l.color[2], alpha(l.opacity)]);
+            set_material(slots.face(k), material(l.surface, l.transmission.is_none()));
+        }
+        looks.push(BodyLooks { body, slots, instanced: instanced.get(looks.len()).copied().unwrap_or(false), faces });
+    }
+    let mut key = std::collections::hash_map::DefaultHasher::new();
+    let mut used = std::collections::HashSet::new();
+    let mut block_bytes = 0usize;
+    for chunk in looks.chunks(PRODUCT_BLOCK_BODIES) {
+        let (mut geometry, mut classes) = (std::collections::hash_map::DefaultHasher::new(), std::collections::hash_map::DefaultHasher::new());
+        for b in chunk {
+            b.geometry(&mut geometry);
+            b.classes(&mut classes);
+        }
+        let (block_key, classes) = (geometry.finish(), classes.finish());
+        let reused = match cache.blocks.get(&block_key) {
+            Some(block) if block.classes == classes => Some(block.bytes.clone()),
+            // The same triangles in other runs: the runs again, the vertices kept.
+            Some(block) => {
+                let mut runs: [Vec<std::ops::Range<u32>>; 3] = Default::default();
+                let mut at = 0u32;
+                for b in chunk {
+                    for t in 0..b.body.mesh.triangles.len() {
+                        if let ProductDraw::Block(class, _) = b.draw(t) {
+                            let list = match class {
+                                TriClass::Glass => 1,
+                                TriClass::Pbr => 2,
+                                TriClass::Opaque | TriClass::Faded => 0,
+                            };
+                            if let Some(list) = runs.get_mut(list) {
+                                crate::gpu::extend_runs(list, at);
+                            }
+                            at = at.saturating_add(3);
+                        }
+                    }
+                }
+                let [opaque, glass, pbr] = runs;
+                let old = &block.bytes;
+                Some(Arc::new(crate::gpu::BlockBytes {
+                    vertices: old.vertices.clone(),
+                    bodies: old.bodies.clone(),
+                    opaque: Arc::new(opaque),
+                    glass: Arc::new(glass),
+                    faded: old.faded.clone(),
+                    pbr: Arc::new(pbr),
+                    lines: old.lines.clone(),
+                    hidden: old.hidden.clone(),
+                }))
+            }
+            None => None,
+        };
+        let bytes = match reused {
+            Some(bytes) => bytes,
+            None => {
+                let mut builder = BlockBuilder::default();
+                builder.reserve_triangles(chunk.iter().map(|b| b.body.mesh.triangles.len()).sum());
+                for b in chunk {
+                    for (t, triangle) in b.body.mesh.triangles.iter().enumerate() {
+                        let ProductDraw::Block(class, slot) = b.draw(t) else { continue };
+                        let mut p = [[0.0f32; 3]; 3];
+                        let mut n = [[0.0f32; 3]; 3];
+                        for (k, i) in triangle.iter().enumerate() {
+                            let (Some(position), Some(normal)) = (b.body.mesh.positions.get(*i as usize), b.body.mesh.normals.get(*i as usize))
+                            else {
+                                return Err(crate::i18n::tr("render.error_product_triangle").into());
+                            };
+                            // PBR shades with unit normals; plain colours keep the mesh's.
+                            let normal = if class == TriClass::Pbr {
+                                solidcraft_engine::render::surface::unit_direction(*normal)
+                                    .map_err(|_| crate::i18n::tr("render.error_surface_normals").to_string())?
+                            } else {
+                                *normal
+                            };
+                            let (position, normal) = (position.to_f32(), normal.to_f32());
+                            if !position.iter().chain(&normal).all(|v| v.is_finite()) {
+                                return Err(crate::i18n::tr("render.error_product_triangle").into());
+                            }
+                            (p[k], n[k]) = (position, normal);
+                        }
+                        builder.triangle(p, n, slot, class);
+                    }
+                }
+                builder.freeze()
+            }
+        };
+        block_bytes = block_bytes.saturating_add(bytes.vertices.len());
+        (block_key, classes).hash(&mut key);
+        gpu.blocks.push(crate::gpu::SceneBlock { key: block_key, bytes: bytes.clone() });
+        used.insert(block_key);
+        cache.blocks.insert(block_key, ProductBlock { classes, bytes, _meshes: chunk.iter().map(|b| b.body.mesh.clone()).collect() });
+    }
+    cache.blocks.retain(|k, _| used.contains(k));
+    // Placed copies of a shared mesh: its triangles once (kept while it is placed), a placement
+    // and the body's palette slot for each.
+    let mut by_look: std::collections::HashMap<(usize, crate::gpu::InstanceLook), usize> = std::collections::HashMap::new();
+    let mut shared_used = std::collections::HashSet::new();
+    for (b, p) in looks.iter().zip(placements.iter().chain(std::iter::repeat(&None))) {
+        let (true, Some((source, m))) = (b.instanced, p) else { continue };
+        let address = Arc::as_ptr(source) as usize;
+        let tris = match cache.shared.get(&address).filter(|(mesh, _)| Arc::ptr_eq(mesh, source)) {
+            Some((_, tris)) => tris.clone(),
+            None => {
+                let tris = Arc::new(crate::gpu::SharedTris::new(source));
+                cache.shared.insert(address, (source.clone(), tris.clone()));
+                tris
+            }
+        };
+        shared_used.insert(address);
+        let look = if b.body.surface.is_some() && b.body.transmission.is_none() {
+            crate::gpu::InstanceLook::Pbr
+        } else if b.body.opacity < 0.999 {
+            crate::gpu::InstanceLook::Glass
+        } else {
+            crate::gpu::InstanceLook::Opaque
+        };
+        let at = *by_look.entry((address, look)).or_insert_with(|| {
+            gpu.instanced.push(crate::gpu::InstancedMesh { key: address as u64, tris, instances: Vec::new(), look, levels: Vec::new() });
+            gpu.instanced.len() - 1
+        });
+        let rows = [0, 1, 2].map(|r| [m[0][r] as f32, m[1][r] as f32, m[2][r] as f32, m[3][r] as f32]);
+        if !rows.iter().flatten().all(|v| v.is_finite()) {
+            return Err(crate::i18n::tr("render.error_product_placement").into());
+        }
+        if let Some(mesh) = gpu.instanced.get_mut(at) {
+            mesh.place(rows, b.slots.body);
+        }
+        (address, look, rows.map(|r| r.map(f32::to_bits))).hash(&mut key);
+    }
+    cache.shared.retain(|k, _| shared_used.contains(k));
+    if block_bytes != plan.block_bytes()? {
         return Err(crate::i18n::tr("render.error_vertex_packing").into());
     }
-    Ok((hash.finish(), gpu))
-}
-
-fn hash_surface(surface: Option<solidcraft_engine::render::surface::OpaqueSurface>, hash: &mut impl Hasher) {
-    surface.is_some().hash(hash);
-    if let Some(s) = surface {
-        let c = s.base_color();
-        for value in [c.x, c.y, c.z, s.metallic(), s.roughness(), s.dielectric_ior()] {
-            value.to_bits().hash(hash);
-        }
+    let mut materials = cache.materials.clone();
+    materials.truncate(cache.arena.entries().len());
+    gpu.palette = Arc::new(crate::gpu::Palette::with_stable(cache.arena.entries()).with_materials(materials));
+    gpu.palette.entries().hash(&mut key);
+    for m in gpu.palette.materials() {
+        (m.base.map(f32::to_bits), m.metallic.to_bits(), m.roughness.to_bits(), m.ior.to_bits(), m.pbr).hash(&mut key);
     }
+    Ok((key.finish(), gpu))
 }
 
 /// The image's width over its height.
@@ -2062,7 +2360,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.render_workspace.prepare_preview(signature, || {
             let mut scene = solidcraft_engine::product_scene::extract(&app.session).map_err(|error| error.to_string())?;
             assign::preview_scene(&mut scene, preview.as_ref())?;
-            Ok(scene)
+            let placements = solidcraft_engine::product_scene::placements(&app.session, &scene);
+            Ok((scene, placements))
         })?;
         if app.render_workspace.key != previous_key {
             ui.ctx().request_repaint();
