@@ -348,8 +348,9 @@ fn locate_in<'a>(bodies: impl Iterator<Item = (usize, &'a ModelBody)>, name: &st
         }
     }
     let (level, faces) = best?;
+    let unique = faces.len() == 1 && level >= Match::Piece;
     let mut nearest: Option<(f64, usize, &ModelBody, usize, Vec3)> = None;
-    for &(bi, b, face) in &faces {
+    for (bi, b, face) in faces {
         if let Some((d, q)) = nearest_on_face(&b.mesh(), face, p)
             && nearest.as_ref().is_none_or(|n| d < n.0)
         {
@@ -358,10 +359,6 @@ fn locate_in<'a>(bodies: impl Iterator<Item = (usize, &'a ModelBody)>, name: &st
     }
     let (distance, body, b, face, point) = nearest?;
     let on_point = distance <= (b.body.size() * 1e-3).max(1e-3);
-    // The same name on several bodies (two bodies one extrude made, the pieces of a split body)
-    // is one face on each, not a face split in pieces: the one the point lies on is it (#10699).
-    let on_its_body = faces.iter().filter(|(bi, ..)| *bi == body).count();
-    let unique = level >= Match::Piece && (faces.len() == 1 || (on_point && on_its_body == 1));
     Some(FaceHit {
         body,
         face,
