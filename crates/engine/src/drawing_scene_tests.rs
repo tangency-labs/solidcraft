@@ -377,7 +377,7 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
     // The first leaves 20 records; the second needs 32; the third takes the last 20.
     let views = [lines(left - 22), lines(30), lines(18)];
     let centre = Vec2::new(100.0, 100.0);
-    let (scene, states) = assemble(record, views.iter().enumerate().map(|(i, v)| (i as u64, centre, v))).unwrap();
+    let (scene, states) = assemble(record, &[], views.iter().enumerate().map(|(i, v)| (i as u64, centre, v))).unwrap();
     let statuses: Vec<&'static str> = states.iter().map(|v| v.status.name()).collect();
     assert_eq!(statuses, ["drawn", "failed", "drawn"]);
     assert_eq!((scene.groups.len(), scene.groups.iter().map(Group::records).sum::<usize>()), (5, MAX_RECORDS));
