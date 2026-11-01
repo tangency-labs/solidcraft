@@ -28,6 +28,15 @@ The control channel is **on by default**. SolidCraft listens on `127.0.0.1` only
 so agents can drive the app without a launch flag. Every connection still needs this launch's
 token (below); nothing else on the machine, and nothing off it, can send a command.
 
+Internal rendering harness: `ui.blur {radius_px?, surface_alpha?}` queries or sets
+session-only panel blur. Radius is finite physical pixels in 0..40; the optional
+capture tint is 0..1 (`null` restores ordinary fills). This is not a saved
+preference. The reply contains requested radius, capability/reason and cumulative
+actual effect counters, including live resources and encoded passes. Unsupported
+software/web/source contexts stay on ordinary painting. Use `ui.screenshot` for
+panel evidence; `ui.render` remains a model-only capture. Activation, full egui GPU
+fixture and manager-run evidence commands are in [blur-behind.md](blur-behind.md).
+
 | Launch | What listens |
 |---|---|
 | `solidcraft --control PORT`, or `SOLIDCRAFT_CONTROL_PORT=PORT` | exactly `127.0.0.1:PORT` (the flag wins over the variable), whatever the setting |
@@ -370,7 +379,7 @@ no box selection.
 | `ui.start` | `command`, `params?` | like a toolbar click: starts the sketch tool or dialog for the command. `params` sets what the dialog opens on, and nothing runs until OK: `joint.drive` takes `joint` (id or name; without it, the joint picked in the browser, else the first joint that moves; a rigid joint opens to say why it has nothing to drive, with an Edit Joint button, handle `drive:edit_joint`) and `values` (numbers in degrees or millimetres, or expressions); `motion.study` takes `study` (id or name), which opens that study to edit and chart. A command that takes no params is refused before it starts; a param the dialog doesn't take is refused and the dialog closes |
 | `ui.click` | `x`, `y` (screen points), `button?`: left/right/middle, `shift?`, `ctrl?`, `double?` | real pointer input |
 | `ui.move` | `x`, `y`, `shift?`, `alt?`, `ctrl?`, `cmd?` | pointer movement without a button; modifiers apply until the next synthetic move/click; a move with omitted modifiers releases them. With `nav: "touchpad"`, Shift pans and Alt/Option orbits. |
-| `ui.drag` | `x0`, `y0`, `x1`, `y1`, `button?`, `shift?`, `ctrl?`, `steps?`, `hold?`, `hold_end?` | press, move, release; a left drag on the model is a box selection (left to right: window, right to left: crossing); with OpenSCAD navigation, plain left-drag on empty space orbits, Shift+left-drag box-selects, and drags starting on sketch geometry edit it; `hold` keeps the button down that many frames first (a right press-and-hold opens the marking menu, releasing over a direction picks it), `hold_end` that many frames at the end (a sketch drag shows its snap) |
+| `ui.drag` | `x0`, `y0`, `x1`, `y1`, `via?`, `button?`, `shift?`, `ctrl?`, `steps?`, `hold?`, `hold_end?` | press, move, release; `via` is a list of `[x, y]` points passed through on the way (`steps` moves to each); a left drag on the model is a box selection (left to right: window, right to left: crossing), or with `lassoSelect` on (`ui.set`, the SELECT panel's Lasso) a freehand lasso that takes what is wholly inside it; with OpenSCAD navigation, plain left-drag on empty space orbits, Shift+left-drag box-selects, and drags starting on sketch geometry edit it; `hold` keeps the button down that many frames first (a right press-and-hold opens the marking menu, releasing over a direction picks it), `hold_end` that many frames at the end (a sketch drag shows its snap) |
 | `ui.menu` | `x?`, `y?`, `target?`, `close?` | with a point: open a context menu there as a right-click would (the viewport's marking menu, or a browser menu with `target: {"type": "body", "name"} \| {"type": "sketch", "id"} \| {"type": "component", "id"}`); without: the open menu (`radial` and `items`: id, label, shortcut, enabled, icon, placeholder; blank icons on headings/separators have `placeholder: false`) |
 | `ui.icon_audit` | `reset?`, `stop?` | `reset: true` enables collection on the UI thread and clears previous requests; returns `{requested: [{name, master, placeholder}]}` sorted by requested id. Each read drains names collected since the previous read/reset. Collection stays enabled until `stop: true` (which returns pending names before disabling it). Includes aliases, variable/table ids and cached paints. |
 | `ui.menuPick` | `item`: id or label | runs an item of the open menu, as clicking it does |
@@ -442,8 +451,10 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `history_sketches` (`in_order` (default), `under_feature`: the History at the left lists a sketch under the first feature built from it, #6489; the timeline at the bottom keeps the creation order)
 - `hole_moves` (default false: a placed Single hole has a drag handle (`hole:<n>`), and a pick on a face that has a hole moves it there)
 - `hole_snaps` (default false: a Single hole snaps to its face's middle and round edges' centres)
+- `home_fit_size` (0.1…1, default 1: how much of the view the model fills when Home, Fit, an opened design or a navigator view change frames it, with `navigator_fit` on or off; 1 fills the room between the panels, the compass and the navigation bar, as before; #10091)
 - `joint_rotation_coarse` (default 10°): coarse Assembly Move rotation step, in 0.001…180°.
 - `joint_rotation_fine` (default 0.1°): fine Assembly Move rotation step, in 0.001…180°.
+- `keep_work_on_tab_switch` (default false: each design tab keeps its open dialog or tool, with what was picked and typed in it, and its toolbar tab while another design is shown, and has them back when it is shown again; off, a switch cancels them and shows MODEL, #9360)
 - `language` (`en`, `ar`, `ja`, `de`, `fr`, `he`, `ko`, `ms`, `ru`, `uk`, `zh`; see [localization](localization.md))
 - `length_decimals`
 - `line_drag_draws_one` (default false: in the Line tool, a press, a drag and the release draw one line from the press to the release and end there, snapping as clicks do; clicks still chain, and a drag under 24 points is a click; off, a drag places a point where it is let go, #7247)
@@ -457,6 +468,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `msaa`
 - `nav` (`fusion`, `solidworks`, `inventor`, `alias`, `blender`, `tinkercad`, `openscad`, `touchpad`)
 - `nav_bridge_enabled` (default false) and `nav_bridge_port` (default 8765: a device's own app on this computer moves the view, [the navigation bridge](3d-mouse.md#device-apps-the-navigation-bridge))
+- `navigator_fit` (default false: a view chosen on the view cube or the axis gizmo also looks at the middle of the model from the one distance that fits its bounding sphere in the free part of the view, at `home_fit_size`; Home and an opened design use the same zoom and centre while it is on, so views chosen after them only turn; #10091)
 - `offer_stand_up`
 - `orbit_around` (`view_centre` (default: what Pan moves and Fit frames), `origin` (the world origin stays still on screen), `cursor` (the model point under the pointer when the drag began); the older `orbit_cursor` boolean still sets `cursor` when true)
 - `orbit_reverse` (default false: Shift with two-finger scrolling orbits the other way)
@@ -508,6 +520,16 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `zoom_stop_at_model` (default false: the 3D mouse and navigation bridge stop zoom at the surface in the middle of the view; drag-zoom holds its press point; independent of `zoom_to_cursor`)
 - `zoom_to_cursor`
 
+The built-in `gruvbox-dark` and `gruvbox-light` themes each expose the `contrast`
+choice (`soft`, `standard` default, `hard`). For example:
+`{"theme":"gruvbox-dark","theme_options":{"gruvbox-dark":{"contrast":"soft"}}}`.
+The former `gruvbox-dark-soft`, `gruvbox-dark-hard`, `gruvbox-light-soft` and
+`gruvbox-light-hard` ids remain accepted for compatibility and select the matching
+family and contrast; replies and `theme_ids` expose only the two canonical families.
+An explicit canonical option change or reset in the same call wins over the legacy
+selection. Legacy option-map keys are also accepted; canonical keys take precedence
+when both occur in a call. Imported themes cannot claim the retired built-in ids.
+
 Theme option values persist per theme, including a followed file's own id, through the same
 preference store in the browser and on desktop. Switching themes restores their saved values;
 Interface's Restore Defaults clears them. Preference exports and settings profiles carry values;
@@ -527,7 +549,7 @@ and output schema types live in `solidcraft_engine::schema::ui_prefs` (`PrefsPar
 
 Other `ui.prefs` parameters:
 
-- `open` (a page: General, Interface, Design, Navigation, Keyboard Shortcuts, Sketch, Graphics, AI, Plugins; Shortcuts, Assistant and Sketch & selection are aliases, and the former Selection page opens Sketch) opens the Preferences dialog there
+- `open` opens Preferences at General; Look: Appearance, Layout, Graphics; Work: Design, Sketch, Tools; Input: Navigation, 3D mouse, Shortcuts; or Extend: Assistant, Plugins. Names are case-insensitive. Legacy aliases remain accepted: Interface → Appearance, Interface/navigation bar → Layout, Keyboard Shortcuts → Shortcuts, AI → Assistant, and Selection, Sketch & selection or Sketch and selection → Sketch. Replies use the canonical page name. The corresponding legacy `prefs:page:<name>` scenario handles also remain aliases of the canonical page rows.
 - `button`: `ok`, `cancel`, `apply`, `defaults`
 - `stand_up: true` stands up a just-opened Y-up file, `stand_up: false` leaves it as it is ("Leave it": the offer, dialog or note, closes and `offer_stand_up` stays on)
 - the dialog's buttons are the handles `stand_up:stand`, `stand_up:leave` and `stand_up:never`
@@ -605,8 +627,12 @@ animated view changes is enabled (the default), at the configured animation spee
 
 The cube runs `view.navigate` through the command engine. Programmatic callers pass `camera`
 and either `direction: [x,y,z]` in the camera's up-axis frame or `action` (`left`, `right`, `up`,
-`down`, `clockwise`, `counterclockwise`, `home`, `fit`). The result contains `camera` and `fit`;
-UI callers apply the camera with their animation preference, without editing the design.
+`down`, `clockwise`, `counterclockwise`, `home`, `fit`). `fit: true` with a `direction` or a
+turn asks for the whole model to be framed from the new direction as well, as `home` does. The
+result contains `camera` and `fit`; UI callers apply the camera with their animation
+preference, without editing the design. The Navigation preference `navigator_fit` (off by
+default) makes every view chosen on the cube or on the axis gizmo frame the model this way:
+looking at its middle from the one distance that fits its bounding sphere, which Home then shares.
 
 Shift-orbit snapping includes 45-degree edge views and isometric corner views, with a
 lightly damped spring transition and a small boundary margin to prevent flicker.

@@ -215,6 +215,10 @@ fn midpoint_at(app: &SolveApp, proj: &Proj, pos: Pos2, radius: f32) -> Option<(V
 
 pub fn on_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     crate::sketch3d::on_hover(app, proj, pos);
+    if let Some(mut tool) = app.tool.take() {
+        crate::sketch_line_arc::rejoin(app, &mut tool);
+        app.tool = Some(tool);
+    }
     let midpoint = (shift && app.tool.as_ref().is_some_and(|t| t.kind == Kind::HorizontalVertical))
         .then(|| midpoint_at(app, proj, pos, f32::INFINITY))
         .flatten();
@@ -501,6 +505,7 @@ fn dimension_picks(tool: &Tool, id: String, midpoint: Option<&str>, midpoint_tar
 /// the typed values as dimension constraints).
 pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
     let Some(mut tool) = app.tool.take() else { return };
+    crate::sketch_line_arc::rejoin(app, &mut tool);
     if tool.kind == Kind::Ext {
         crate::sketch_tools::place_point(app, &mut tool, p);
         // A placed text opens Edit Text, which ends the tool.
@@ -551,7 +556,7 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
                     tool.pts[last].1 = Some(format!("{id}.end"));
                     // The chain needs only its current endpoint, even after many segments.
                     tool.pts = vec![tool.pts[last].clone()];
-                    tool.chain.placed(id);
+                    tool.chain.placed(id, a.clone());
                 }
                 crate::sketch_dims::reset(&mut tool);
             } else {
@@ -739,13 +744,11 @@ pub(crate) fn constraint_preselection(
             point_line_alignment(sketch?, &json!(id), line)
         }
         ("sketch.constraint.horizontal_vertical", _) => crate::selection::alignment_points(selection).map(|points| json!({"points": points})),
-        ("sketch.constraint.coincident", [a, b]) => {
-            let entity = |s: &solidcraft_engine::Sel| match s {
-                SketchPoint { id } | SketchCurve { id, .. } => Some(id.clone()),
-                _ => None,
-            };
-            let (a, b) = (entity(a)?, entity(b)?);
-            (a != b).then(|| json!({"a":a,"b":b}))
+        ("sketch.constraint.coincident", [_, _]) => crate::selection::coincident_operands(selection),
+        ("sketch.constraint.concentric", [SketchCurve { id: a, .. }, SketchPoint { id: b }] | [SketchPoint { id: a }, SketchCurve { id: b, .. }])
+            if a != b =>
+        {
+            Some(json!({"a":a,"b":b}))
         }
         (
             "sketch.constraint.midpoint",

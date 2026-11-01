@@ -208,7 +208,9 @@ fn dimension_held_points(sk: &Sketch, kind: &ConstraintKind) -> Vec<usize> {
 /// changes, so a rectangle's side grows from its first corner, not from both ends (#6070). A
 /// point-to-line distance keeps the line and moves the point. The sketch is solved here with
 /// those points held, before the design evaluates from its stored positions. Where holding them
-/// can't solve (a symmetry moves both ends), evaluation solves as before.
+/// can't solve (a symmetry moves both ends), evaluation solves as before. A sketch that already
+/// has offset curves pins that dimension's first point and runs the full solve, so a tangent cap
+/// does not jump to another branch (#4823).
 fn keep_dimension_start(s: &mut Session, name: &str) {
     let targets: Vec<(u64, Vec<usize>)> = s
         .doc
@@ -240,8 +242,20 @@ fn keep_dimension_start(s: &mut Session, name: &str) {
             continue;
         }
         let reference: Vec<_> = stored.points.iter().map(|p| p.pos).collect();
-        let hold = Hold { points, radii: Vec::new() };
-        if !solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation() {
+        let solved = if trial.offsets.is_empty() && trial.freeform_offsets.is_empty() {
+            let hold = Hold { points, radii: Vec::new() };
+            solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation()
+        } else {
+            // A solve against stale offset points can stretch an attached cap into a different
+            // tangency branch. Keep the start through the complete solve/refresh sequence.
+            let Some(&start) = points.first() else { continue };
+            let Some(p) = trial.points.get_mut(start) else { continue };
+            p.fixed = true;
+            s.doc
+                .solve_sketch_with_analysis(&vals, &mut trial, &stored.driving_values(), Some(stored), Analysis::StatusOnly)
+                .is_ok_and(|report| report.keeps_orientation())
+        };
+        if !solved {
             continue;
         }
         if stored.points.len() == trial.points.len() {

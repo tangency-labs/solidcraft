@@ -404,7 +404,7 @@ impl Nested {
         });
         if outer {
             let inner = if id == "timeline.redefine" { None } else { Some(id) };
-            MAPPED.with(|m| m.set(inner.is_none_or(|i| !table(i).is_empty())));
+            MAPPED.with(|m| m.set(inner.is_none_or(|i| !table(i).is_empty() || i == "construct.plane.axis_point")));
         }
         (Nested, outer)
     }
@@ -486,6 +486,20 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
         && (params.get("plane").and_then(|plane| plane.get("face")).is_some() || params.get("frame").and_then(Value::as_str) == Some("component"))
     {
         return None;
+    }
+    if id == "construct.plane.axis_point" && placed(s) {
+        // Construction references include tagged saved forms as well as pick wrappers.
+        // Map the parsed definition once at the boundary, including a nested Edit Feature.
+        // The constructor can then name local model picks and retain their exact references.
+        let mut kind = crate::cmd::plane_axis_point_kind(s, params).ok()?;
+        kind.transform_geometry(&mat_inverse(&s.active_component_frame())?);
+        let solidcraft_doc::FeatureKind::ConstructionPlane { plane: solidcraft_doc::PlaneRef::AxisPoint { axis, point } } = kind else {
+            return None;
+        };
+        let mut out = params.clone();
+        out["axis"] = serde_json::to_value(axis).ok()?;
+        out["point"] = serde_json::to_value(point).ok()?;
+        return Some(out);
     }
     let keys = table(id);
     if keys.is_empty() || !placed(s) {

@@ -3,7 +3,12 @@ use super::*;
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    ui_kit::settings_heading(ui, app.tr("prefs.sketch_selection_heading"), app.tr("prefs.sketch_selection_note"));
+    ui_kit::settings_heading_with_tag(
+        ui,
+        app.tr("prefs.structure.sketch"),
+        app.tr("prefs.sketch_selection_note"),
+        Some(crate::settings_profiles::tag),
+    );
     ui_kit::settings_section(ui, "sketch", app.tr("prefs.sketching"), |ui| {
         ui_kit::checkbox(ui, app.tr("prefs.sketch_tracking_guides"), &mut app.preferences.sketch_tracking_guides)
             .on_hover_text(app.tr("prefs.sketch_tracking_guides_note"));
@@ -19,12 +24,16 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         if ui_kit::checkbox(ui, crate::i18n::tr_label("Project face edges into new sketches"), &mut auto).changed() {
             let _ = app.run("sketch.auto_project", json!({"value": auto}));
         }
+        let owner = setting::sketch_face_activates_part(app, ui).on_hover_text(app.tr("prefs.sketch_face_activates_part_note"));
+        crate::scenario::publish_target("prefs:sketch_face_activates_part", owner.rect);
         ui_kit::checkbox(ui, app.tr("prefs.project_options_dialog"), &mut app.preferences.project_options_dialog)
             .on_hover_text(app.tr("prefs.project_options_dialog_note"));
         ui_kit::checkbox(ui, crate::i18n::tr_label("Pressing a tool's shortcut again switches its mode"), &mut app.preferences.shortcut_cycles_modes)
             .on_hover_text(crate::i18n::tr_label(
                 "Before the first point, pressing a sketch tool's shortcut again steps through its creation modes. Off: it starts the tool again.",
             ));
+        let ends_tool = setting::ribbon_click_ends_tool(app, ui).on_hover_text(app.tr("prefs.ribbon_click_ends_tool_note"));
+        crate::scenario::publish_target("prefs:ribbon_click_ends_tool", ends_tool.rect);
         // Sketch icons in the colour of their solve state (#7245).
         let check = setting::sketch_state_icons(app, ui).on_hover_text(app.tr("prefs.sketch_state_icons_note"));
         crate::scenario::publish_target("prefs:sketch_state_icons", check.rect);

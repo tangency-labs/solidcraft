@@ -994,6 +994,8 @@ fn tangent_circle(s: &mut Session, p: &Value, cmd: &str, n: usize, radius: Optio
 fn circle_tan_tan(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.circle.two_tangent";
     let r = match (crate::params::expr(p, "radius"), num(p, "diameter")) {
+        // A bare number typed as text reads in the design's unit, as in `sketch.dimension`.
+        (Some(r), _) if p.get("radius").is_some_and(Value::is_string) => s.doc.with_design_unit(r.as_str(), solidcraft_doc::expr::Kind::Length),
         (Some(r), _) => r.into_string(),
         (None, Some(d)) => format!("{}", d / 2.0),
         _ => return Err(bad(cmd, "needs `radius` or `diameter`")),

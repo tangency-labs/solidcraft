@@ -50,6 +50,8 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
         // The two points are a diameter's ends (#3278).
         ("sketch.circle.two_point", 1) => vec![b("Diameter", Length)],
         ("sketch.circle.two_tangent", 2) => vec![b("Radius", Length)],
+        ("sketch.ellipse", 1) => vec![b("Major radius", Length)],
+        ("sketch.ellipse", 2) => vec![b("Minor radius", Length)],
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 1) => vec![b("Radius", Length)],
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 2) => vec![b("Sweep", Angle)],
         ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => vec![b("Radius", Length), b("Sides", Unitless)],
@@ -129,6 +131,13 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
         ("sketch.circle.two_point", 1) => a + dir_or_x(h - a) * lk("Diameter").unwrap_or((h - a).len()),
         ("sketch.slot.center_point", 1) => a + dir_or_x(h - a) * lk("Length").map_or((h - a).len(), |l| l * 0.5),
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 1) => a + dir_or_x(h - a) * lk("Radius").unwrap_or((h - a).len()),
+        ("sketch.ellipse", 1) => a + dir_or_x(h - a) * lk("Major radius").unwrap_or((h - a).len()),
+        // A typed minor radius puts the third point on the minor axis, on the cursor's side.
+        ("sketch.ellipse", 2) => lk("Minor radius").map_or(h, |r| {
+            let c = t.pts.first().map(|p| p.0).unwrap_or(a);
+            let n = dir_or_x(a - c).perp();
+            c + n * (r * sign(n.dot(h - c)))
+        }),
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 2) => {
             let c = t.pts.first().map(|p| p.0).unwrap_or(a);
             let r = (a - c).len();
@@ -291,6 +300,17 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
         }
         ("sketch.circle.center", 1) => vec![(2.0 * (e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
         ("sketch.circle.two_point", 1) => vec![((e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
+        ("sketch.ellipse", 1) => vec![((e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
+        ("sketch.ellipse", 2) => {
+            // The minor radius of the ellipse through the cursor, as the preview draws it; the box
+            // sits beyond the cursor, away from the major axis (#2201).
+            let u = dir_or_x(a - first);
+            let d = e - first;
+            let y = u.cross(d).abs();
+            let k = 1.0 - (d.dot(u) / first.dist(a).max(1e-12)).powi(2);
+            let r = if k > 1e-12 { y / k.sqrt() } else { y };
+            vec![(r, e + u.perp() * (sign(u.perp().dot(d)) * 2.5 * off))]
+        }
         ("sketch.circle.two_tangent", 2) => {
             vec![(crate::sketch_tools::two_tangent_default_radius(app, t), (first + a) * 0.5 + dir_or_x(a - first).perp() * off)]
         }
@@ -407,6 +427,7 @@ pub fn sync(t: &mut Tool) {
             && matches!(
                 t.cmd,
                 "sketch.arc.center_point"
+                    | "sketch.ellipse"
                     | "sketch.slot.center_to_center"
                     | "sketch.slot.overall"
                     | "sketch.slot.center_point"
@@ -457,7 +478,7 @@ pub fn dimensions(t: &Tool) -> Value {
         .iter()
         .chain(&t.dims)
         .filter(|dimension| dimension.locked && is_dimension(t, dimension.label))
-        .map(|dimension| (dimension.label.to_ascii_lowercase(), json!(dimension.value)))
+        .map(|dimension| (dimension.label.to_ascii_lowercase().replace(' ', "_"), json!(dimension.value)))
         .collect::<serde_json::Map<_, _>>();
     Value::Object(values)
 }
@@ -597,11 +618,31 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let mut completed = false;
     let mut any_focused = false;
     let view = app.viewport.layout.as_ref().map(|l| l.drawable).filter(|r| r.is_finite() && r.is_positive());
-    for (i, b) in t.dims.iter_mut().enumerate() {
-        let Some((v, at)) = lv.get(i).copied() else { continue };
+    let field_frame = Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(tk.space_3 as i8, 1));
+    for (b, (v, _)) in t.dims.iter_mut().zip(&lv) {
         if !b.locked {
-            b.value = fmt(app, b.label, b.kind, v);
+            b.value = fmt(app, b.label, b.kind, *v);
         }
+    }
+    // Polygon values used to sit inside the radius, so both boxes covered a small polygon
+    // and each other. Place them together outside its projected outline, in screen space:
+    // their separation must not shrink with the shape or a tilted sketch plane.
+    let polygon_positions = if matches!(t.cmd, "sketch.polygon.inscribed" | "sketch.polygon.circumscribed") {
+        let corners = crate::tools::polygon_outline(t, e, locked(app, t, "Sides").unwrap_or(6.0))
+            .unwrap_or_else(|| t.pts.iter().map(|p| p.0).chain(std::iter::once(e)).collect());
+        let points: Vec<_> = corners.iter().filter_map(|p| proj.to_screen(plane.to_world(*p))).collect();
+        let bounds = egui::Rect::from_points(&points);
+        let sizes: Vec<_> = t
+            .dims
+            .iter()
+            .map(|b| crate::ui_kit::placement_field_content_size(ui, &b.value) + vec2(2.0 * tk.form_inset, 0.0) + field_frame.total_margin().sum())
+            .collect();
+        bounds.is_finite().then(|| polygon_input_positions(bounds, &sizes, view, tk.space_8))
+    } else {
+        None
+    };
+    for (i, b) in t.dims.iter_mut().enumerate() {
+        let Some((_, at)) = lv.get(i).copied() else { continue };
         let Some(sp) = proj.to_screen(plane.to_world(at)) else { continue };
         let id = egui::Id::new(("sc_dim", i));
         let has_focus = ui.ctx().memory(|m| m.has_focus(id));
@@ -612,13 +653,16 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             s.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));
             s.store(ui.ctx(), id);
         }
-        let pos = in_view(sp + vec2(-34.0, -11.0), view, ui.ctx().pointer_latest_pos());
+        let pos = polygon_positions
+            .as_ref()
+            .and_then(|positions| positions.get(i).copied())
+            .unwrap_or_else(|| in_view(sp + vec2(-34.0, -11.0), view, ui.ctx().pointer_latest_pos()));
         // Background: under Preferences and Report a bug (#9016), like canvas value boxes.
         Container::new(ui.ctx(), Surface::Canvas).area(egui::Id::new(("sc_dim_area", i))).fixed_pos(pos).order(egui::Order::Background).show(
             ui.ctx(),
             |ui| {
                 let fill = if b.locked { tk.accent_soft } else { tk.panel };
-                Container::popup_frame(ui.style()).fill(fill).inner_margin(egui::Margin::symmetric(tk.space_3 as i8, 1)).show(ui, |ui| {
+                field_frame.fill(fill).show(ui, |ui| {
                     let r = crate::ui_kit::placement_field(ui, id, &mut b.value, b.label);
                     // A completion gets first use of forward Tab. Shift+Tab always moves back;
                     // the box reached by egui's generic traversal must not complete its text.
@@ -654,6 +698,34 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
     let nothing = ui.ctx().memory(|m| m.focused().is_none());
     (enter && (any_focused || nothing)).then_some(e)
+}
+
+/// Stack the polygon inputs beside its screen bounds. Try each side before falling back to
+/// the drawing area's edge when the polygon fills the view; keep the boxes separate even then.
+fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Option<egui::Rect>, gap: f32) -> Vec<Pos2> {
+    let size =
+        vec2(sizes.iter().map(|s| s.x).fold(0.0, f32::max), sizes.iter().map(|s| s.y).sum::<f32>() + gap * sizes.len().saturating_sub(1) as f32);
+    let candidates = [
+        egui::pos2(bounds.center().x - size.x * 0.5, bounds.top() - gap - size.y),
+        egui::pos2(bounds.center().x - size.x * 0.5, bounds.bottom() + gap),
+        egui::pos2(bounds.left() - gap - size.x, bounds.center().y - size.y * 0.5),
+        egui::pos2(bounds.right() + gap, bounds.center().y - size.y * 0.5),
+    ];
+    let inside = |pos: Pos2| view.map_or(pos, |view| pos.clamp(view.min, (view.max - size).max(view.min)));
+    let start = candidates
+        .into_iter()
+        .map(inside)
+        .find(|pos| !egui::Rect::from_min_size(*pos, size).intersects(bounds.expand(gap * 0.5)))
+        .unwrap_or_else(|| inside(candidates[0]));
+    let mut y = start.y;
+    sizes
+        .iter()
+        .map(|size| {
+            let pos = egui::pos2(start.x, y);
+            y += size.y + gap;
+            pos
+        })
+        .collect()
 }
 
 /// About the size of a value box, for keeping it in view.

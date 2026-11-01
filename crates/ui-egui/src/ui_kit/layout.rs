@@ -678,6 +678,15 @@ pub(crate) fn note_height(ui: &Ui, text: &str) -> f32 {
 }
 
 pub(crate) fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
+    text_impl(ui, text, style, None)
+}
+
+/// One name-cell tooltip: the action hint, with the full name only if the cell clips it.
+pub(crate) fn name_cell_with_hint(ui: &mut Ui, name: &str, strong: bool, hint: &str) -> Response {
+    text_impl(ui, name, Text::NameCell(strong), Some(hint))
+}
+
+fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>) -> Response {
     if crate::prefs_search::querying(ui) {
         let heading = matches!(style, Text::Heading(_));
         if heading {
@@ -718,9 +727,16 @@ pub(crate) fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
             vec2(dimension(ui.available_width()), row_height()),
             if matches!(style, Text::Value(_, _)) { egui::Sense::hover() } else { egui::Sense::click() },
         );
+        let tooltip = hover_hint.map(|hint| {
+            if ui.painter().layout_no_wrap(text.to_owned(), font.clone(), ink).size().x > rect.width() {
+                format!("{text}\n{hint}")
+            } else {
+                hint.to_owned()
+            }
+        });
         paint_text(ui, rect, text, font, ink, false);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
-        response.on_hover_text(text)
+        response.on_hover_text(tooltip.as_deref().unwrap_or(text))
     } else if matches!(style, Text::Error(_)) {
         egui::Frame::NONE
             .fill(t.form_error_fill)

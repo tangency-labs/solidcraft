@@ -286,6 +286,31 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
     let st = s.world_state();
     let plain = |geo, dir, json| Some(Item { geo, dir, json, shape: Shape::Other, slot: None });
     match sel {
+        Sel::Plane { name } => {
+            let (point, normal) = plane_named(s, name)?;
+            Some(Item {
+                geo: Geo::Points(vec![point]),
+                dir: Some(normal),
+                json: json!({"type": "plane", "point": point, "normal": normal}),
+                shape: Shape::Plane { point, normal: UnitVec3::new(normal)? },
+                slot: None,
+            })
+        }
+        Sel::Axis { name } => {
+            let (origin, dir) = axis_named(s, name)?;
+            let (a, b) = (origin - dir * 1e6, origin + dir * 1e6);
+            Some(Item {
+                geo: Geo::Points(vec![origin, a, b]),
+                dir: Some(dir),
+                json: json!({"type": "axis", "origin": origin, "direction": dir}),
+                shape: Shape::Line { a, b },
+                slot: None,
+            })
+        }
+        Sel::ConstructionPoint { name } => {
+            let p = crate::view::construction_points(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p)?;
+            Some(Item { geo: Geo::Points(vec![p]), dir: None, json: json!({"type": "point", "position": p}), shape: Shape::Point(p), slot: None })
+        }
         Sel::Vertex { point, .. } => Some(Item {
             geo: Geo::Points(vec![*point]),
             dir: None,
@@ -397,6 +422,122 @@ fn sample<T: Copy>(v: &[T], max: usize) -> Vec<T> {
 }
 
 /// Closest pair of points between two pieces of geometry.
+/// An origin plane (XY, XZ, YZ) or a construction plane's point and normal.
+fn plane_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
+    match name {
+        "XY" => Some((Vec3::ZERO, Vec3::Z)),
+        "XZ" => Some((Vec3::ZERO, Vec3::Y)),
+        "YZ" => Some((Vec3::ZERO, Vec3::X)),
+        _ => crate::view::construction_planes(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| (p.origin, p.x.cross(p.y))),
+    }
+}
+
+/// An origin axis (X, Y, Z) or a construction axis's point and unit direction.
+fn axis_named(s: &Session, name: &str) -> Option<(Vec3, Vec3)> {
+    match name {
+        "X" => Some((Vec3::ZERO, Vec3::X)),
+        "Y" => Some((Vec3::ZERO, Vec3::Y)),
+        "Z" => Some((Vec3::ZERO, Vec3::Z)),
+        _ => crate::view::construction_axes(s).into_iter().find(|(_, n, _, _)| n == name).map(|(_, _, origin, dir)| (origin, dir)),
+    }
+}
+
+/// The closest points of two exact shapes, where the sampled points would be wrong: a plane or
+/// an axis runs on, so a point set of it is not the object.
+fn exact_min(a: &Shape, b: &Shape) -> Option<(f64, Vec3, Vec3)> {
+    use Shape::*;
+    let to_plane = |p: Vec3, point: Vec3, normal: UnitVec3| {
+        let n = normal.vec();
+        let h = (p - point).dot(n);
+        (h.abs(), p, p - n * h)
+    };
+    let to_line = |p: Vec3, a: Vec3, b: Vec3| {
+        let d = b - a;
+        let t = if d.len() > 1e-12 { ((p - a).dot(d) / d.dot(d)).clamp(0.0, 1.0) } else { 0.0 };
+        let q = a + d * t;
+        (p.dist(q), p, q)
+    };
+    match (a, b) {
+        (Point(p), Plane { point, normal }) => Some(to_plane(*p, *point, *normal)),
+        (Plane { point, normal }, Point(p)) => {
+            let (d, f, t) = to_plane(*p, *point, *normal);
+            Some((d, t, f))
+        }
+        (Point(p), Line { a: la, b: lb }) => Some(to_line(*p, *la, *lb)),
+        (Line { a: la, b: lb }, Point(p)) => {
+            let (d, f, t) = to_line(*p, *la, *lb);
+            Some((d, t, f))
+        }
+        (Point(p), Point(q)) => Some((p.dist(*q), *p, *q)),
+        (Plane { point: p1, normal: n1 }, Plane { point: p2, normal: n2 }) => {
+            let (v1, v2) = (n1.vec(), n2.vec());
+            if v1.cross(v2).len() < 1e-9 {
+                let h = (*p2 - *p1).dot(v1);
+                Some((h.abs(), *p1, *p2 - v1 * h))
+            } else {
+                // They meet: a point on the line of intersection has distance zero.
+                let dir = v1.cross(v2);
+                let t = -(*p1 - *p2).dot(v2) / dir.dot(v2);
+                let p = *p1 + dir * t;
+                Some((0.0, p, p))
+            }
+        }
+        (Plane { point, normal }, Line { a: la, b: lb }) => {
+            let d = *lb - *la;
+            let den = d.dot(normal.vec());
+            if den.abs() < 1e-9 {
+                let (dist, _, q) = {
+                    let h = (*la - *point).dot(normal.vec());
+                    (h.abs(), *la, *la - normal.vec() * h)
+                };
+                Some((dist, q, *la))
+            } else {
+                let t = (*point - *la).dot(normal.vec()) / den;
+                let p = *la + d * t;
+                Some((0.0, p, p))
+            }
+        }
+        (Line { a: la, b: lb }, Plane { point, normal }) => {
+            let d = *lb - *la;
+            let den = d.dot(normal.vec());
+            if den.abs() < 1e-9 {
+                let h = (*la - *point).dot(normal.vec());
+                Some((h.abs(), *la, *la - normal.vec() * h))
+            } else {
+                let t = (*point - *la).dot(normal.vec()) / den;
+                let p = *la + d * t;
+                Some((0.0, p, p))
+            }
+        }
+        (Line { a: a1, b: b1 }, Line { a: a2, b: b2 }) => {
+            let (d1, d2) = (*b1 - *a1, *b2 - *a2);
+            let n = d1.cross(d2);
+            if n.len() < 1e-9 {
+                let (dist, _, q) = {
+                    let dd = d1;
+                    let t = if dd.len() > 1e-12 { ((*a2 - *a1).dot(dd) / dd.dot(dd)).clamp(0.0, 1.0) } else { 0.0 };
+                    let q = *a1 + dd * t;
+                    ((*a2).dist(q), *a2, q)
+                };
+                Some((dist, q, *a2))
+            } else {
+                let w = *a1 - *a2;
+                let a = d1.dot(d1);
+                let b = d1.dot(d2);
+                let c = d2.dot(d2);
+                let d = d1.dot(w);
+                let e = d2.dot(w);
+                let den = a * c - b * b;
+                let (t, s) = if den.abs() < 1e-12 { (0.0, e / c) } else { ((b * e - c * d) / den, (a * e - b * d) / den) };
+                let p = *a1 + d1 * t;
+                let q = *a2 + d2 * s;
+                Some((p.dist(q), p, q))
+            }
+        }
+        _ => None,
+    }
+}
+
 fn closest(a: &Geo, b: &Geo) -> Option<(Vec3, Vec3)> {
     let pts_to_tris = |pts: &[Vec3], tris: &[[Vec3; 3]]| -> Option<(Vec3, Vec3)> {
         let pts = sample(pts, MAX_POINTS);
@@ -549,6 +690,13 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
             max = Some(exact);
         }
         if let (Some((p, q)), Some(d)) = (near, min) {
+            out["distance_mm"] = json!(d);
+            out["from"] = json!(p);
+            out["to"] = json!(q);
+            out["delta"] = json!(q - p);
+            out["min"] = json!(d);
+        }
+        if let Some((d, p, q)) = exact_min(&a.shape, &b.shape) {
             out["distance_mm"] = json!(d);
             out["from"] = json!(p);
             out["to"] = json!(q);

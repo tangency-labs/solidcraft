@@ -208,6 +208,7 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
         }
         PlaneRef::Midplane { .. }
         | PlaneRef::TwoEdges { .. }
+        | PlaneRef::AxisPoint { .. }
         | PlaneRef::ThreePoints { .. }
         | PlaneRef::AlongPath { .. }
         | PlaneRef::Perpendicular { .. } => {

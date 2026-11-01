@@ -471,8 +471,10 @@ pub struct ImageTask {
     looks: Vec<Look>,
     body: usize,
     triangle: usize,
-    face_cursor: usize,
-    chosen: Option<crate::FaceAppearance>,
+    /// The current body's face looks as (face, index into `faces`), sorted by
+    /// face with only the first entry per face, so each triangle is one lookup.
+    face_looks: Vec<(u32, usize)>,
+    face_looks_ready: bool,
     builder: Option<BvhBuilder>,
     bvh: Option<Bvh>,
     build_used: u64,
@@ -624,8 +626,8 @@ impl ImageTask {
             looks,
             body: 0,
             triangle: 0,
-            face_cursor: 0,
-            chosen: None,
+            face_looks: Vec::new(),
+            face_looks_ready: false,
             builder: None,
             bvh: None,
             build_used: 0,
@@ -682,8 +684,20 @@ impl ImageTask {
         let Some(indices) = body.mesh.triangles.get(self.triangle) else {
             self.body += 1;
             self.triangle = 0;
+            self.face_looks_ready = false;
             return Ok(());
         };
+        if !self.face_looks_ready {
+            // Built once per body instead of scanning `faces` for every triangle.
+            // The first entry for a face wins, as the scan this replaces did.
+            self.work.charge(body.faces.len() as u64, &self.cancel).map_err(error)?;
+            self.face_looks.clear();
+            self.face_looks.try_reserve_exact(body.faces.len()).map_err(|_| error(TraceError::AllocationFailed))?;
+            self.face_looks.extend(body.faces.iter().enumerate().map(|(index, look)| (look.face, index)));
+            self.face_looks.sort_unstable();
+            self.face_looks.dedup_by_key(|entry| entry.0);
+            self.face_looks_ready = true;
+        }
         let mut vertices = [Vec3::ZERO; 3];
         let mut normals = [Vec3::ZERO; 3];
         for ((p, n), i) in vertices.iter_mut().zip(normals.iter_mut()).zip(indices) {
@@ -693,20 +707,14 @@ impl ImageTask {
         let face = body.mesh.tri_face.get(self.triangle).copied();
         let mut color = body.color;
         let mut surface = body.surface;
-        if let Some(look) = body.faces.get(self.face_cursor) {
-            self.face_cursor += 1;
-            if Some(look.face) == face {
-                self.chosen = Some(look.clone());
-                self.face_cursor = body.faces.len();
-            } else {
-                return Ok(());
-            }
-        }
-        if let Some(look) = self.chosen.take() {
+        let look = face
+            .and_then(|face| self.face_looks.binary_search_by_key(&face, |entry| entry.0).ok())
+            .and_then(|at| self.face_looks.get(at))
+            .and_then(|entry| body.faces.get(entry.1));
+        if let Some(look) = look {
             color = look.color;
             surface = look.surface;
         }
-        self.face_cursor = 0;
         let surface = match surface {
             Some(s) => s,
             None => OpaqueSurface::new(Vec3::new(srgb8_to_linear(color[0]), srgb8_to_linear(color[1]), srgb8_to_linear(color[2])), 0.0, 0.7, 1.5)

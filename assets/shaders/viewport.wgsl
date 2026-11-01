@@ -20,6 +20,7 @@ struct U {
     sel: vec4<f32>,    // xyz a whole selected body's colour before lighting
     product_lights_meta: vec4<f32>, // explicit preview flag and bounded count
     product_lights: array<vec4<f32>,84>, // position/kind, radiance, axis/cone, attenuation
+    sky: vec4<f32>,    // xyz = world up; w = 1: shade in linear light with a sky fill (#7974)
 };
 
 fn reversed() -> bool {
@@ -550,6 +551,31 @@ fn lit(i: TOut, visibility: f32) -> vec4<f32> {
     return lit_color(i, visibility, i.c);
 }
 
+/// sRGB to linear light, exact (the straight segment too, which `to_linear` leaves out).
+fn srgb_decode(c: vec3<f32>) -> vec3<f32> {
+    return select(c / 12.92, pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4)), c > vec3<f32>(0.04045));
+}
+
+fn srgb_encode(c: vec3<f32>) -> vec3<f32> {
+    let l = clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+    return select(l * 12.92, 1.055 * pow(l, vec3<f32>(1.0 / 2.4)) - vec3<f32>(0.055), l > vec3<f32>(0.0031308));
+}
+
+/// The studio light summed in linear light, encoded once (#7974): the key and the eye fill as in
+/// [`lit_color`], over a sky fill that grows as the face turns up, and the 4% every dielectric
+/// reflects of that sky (a little more toward grazing), so a near-black face keeps a gradient. The sky
+/// and the fill are what ambient occlusion (`visibility`) takes away. sRGB out.
+fn sky_lit(base: vec3<f32>, n: vec3<f32>, diff: f32, fill: f32, visibility: f32) -> vec3<f32> {
+    let up = dot(n, normalize(u.sky.xyz)) * 0.5 + 0.5;
+    let sky = mix(0.18, 0.42, up);
+    // Schlick's rise toward grazing, tempered so mid-tones only gain a soft rim.
+    let fresnel = 0.04 + 0.2 * pow(1.0 - fill, 5.0);
+    let albedo = srgb_decode(base);
+    // Scaled so light and mid-grey faces land near where the sRGB shading puts them.
+    let light = albedo * (0.41 * diff + (0.66 * sky + 0.2 * fill) * visibility) + vec3<f32>(fresnel * sky * visibility);
+    return srgb_encode(light);
+}
+
 /// [`lit`] in a colour of its own: a whole highlighted body is lit in its colour lifted by the
 /// hover amount, or in the selection colour, from the model's own plan triangles.
 fn lit_color(i: TOut, visibility: f32, base: vec4<f32>) -> vec4<f32> {
@@ -576,6 +602,9 @@ fn lit_color(i: TOut, visibility: f32, base: vec4<f32>) -> vec4<f32> {
     let fill = max(dot(n, v), 0.0);
     let h = normalize(key + v);
     let spec = pow(max(dot(n, h), 0.0), 40.0) * 0.25;
+    if u.sky.w > 0.5 {
+        return out_color(vec4<f32>(min(sky_lit(base.rgb, n, diff, fill, visibility) + vec3<f32>(spec), vec3<f32>(1.0)), base.a));
+    }
     let k = 0.42 + 0.38 * diff + 0.25 * fill - (0.42 + 0.25 * fill) * (1.0 - visibility);
     return out_color(vec4<f32>(min(base.rgb * k + vec3<f32>(spec), vec3<f32>(1.0)), base.a));
 }

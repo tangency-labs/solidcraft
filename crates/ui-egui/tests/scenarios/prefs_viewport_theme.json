@@ -1,7 +1,7 @@
 [
   {"note": "#4146: under the theme tiles, Viewport draws the 3D view in the Light or Dark theme's colours whatever the window uses; it applies at once, and Cancel puts it back."},
   {"click": {"handle": "titlebar:preferences"}},
-  {"widget": "Interface"},
+  {"widget": "Appearance"},
   {"expect": {"prefs": {"theme": "dark", "dark": true, "viewport_theme": "theme", "viewport_dark": true}}},
   {"widget": "Light", "near": "Viewport"},
   {"expect": {"prefs": {"theme": "dark", "dark": true, "viewport_theme": "light", "viewport_dark": false}}},

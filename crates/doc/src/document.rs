@@ -97,6 +97,8 @@ pub enum PlaneRef {
     Midplane { a: Box<GeoRef>, b: Box<GeoRef> },
     /// Through two straight edges (lines) that lie in one plane.
     TwoEdges { a: Box<GeoRef>, b: Box<GeoRef> },
+    /// Through a line (axis) and a point not on that line.
+    AxisPoint { axis: Box<GeoRef>, point: Box<GeoRef> },
     /// Through three points.
     ThreePoints { a: Box<GeoRef>, b: Box<GeoRef>, c: Box<GeoRef> },
     /// Tangent to a face (cylinder, cone, sphere, torus) where the point `at` lies over it.
@@ -2019,7 +2021,7 @@ fn fair_keep_edges() -> bool {
 /// Triangles of one imported mesh body (millimetres). The arrays are shared by clones: every
 /// edit keeps the design as it was for undo, and a scanned part's triangles (hundreds of
 /// megabytes) are not copied for that.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MeshData {
     pub name: String,
     /// x, y, z per vertex.
@@ -2028,6 +2030,20 @@ pub struct MeshData {
     pub triangles: std::sync::Arc<[u32]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<[f32; 3]>,
+}
+
+/// The same mesh: shared arrays are the same without reading them, so the dirty check and
+/// autosave after an edit elsewhere do not walk a scan's millions of coordinates. Arrays that
+/// are not shared compare value by value, as before. Coordinates are finite (a design that
+/// holds others does not load), so the shortcut only skips work.
+impl PartialEq for MeshData {
+    fn eq(&self, other: &Self) -> bool {
+        use std::sync::Arc;
+        self.name == other.name
+            && self.color == other.color
+            && (Arc::ptr_eq(&self.triangles, &other.triangles) || self.triangles == other.triangles)
+            && (Arc::ptr_eq(&self.positions, &other.positions) || self.positions == other.positions)
+    }
 }
 
 /// Points of a sketch, by id.
@@ -3976,6 +3992,7 @@ impl Document {
             }
             PlaneRef::Midplane { .. }
             | PlaneRef::TwoEdges { .. }
+            | PlaneRef::AxisPoint { .. }
             | PlaneRef::ThreePoints { .. }
             | PlaneRef::Tangent { .. }
             | PlaneRef::AlongPath { .. }
@@ -4173,6 +4190,11 @@ impl Document {
         analysis: solidcraft_sketch::Analysis,
     ) -> Result<solidcraft_sketch::SolveReport> {
         self.apply_dimension_values(vals, sk)?;
+        // A text built anew since it was stored (an expression gave it other words) has other
+        // outline entities: the stored sketch is taken with this sketch's, so the points still
+        // pair up for the side checks and the walk below.
+        let paired = moved_from.and_then(|from| sk.stored_with_rebuilt_texts(from));
+        let moved_from = paired.as_ref().or(moved_from);
         let was = |sk: &Sketch| moved_from.and_then(|from| sk.positions_in(from));
         let offsets = !sk.offsets.is_empty() || !sk.freeform_offsets.is_empty();
         // Offsets always require another solve after refresh. Only that last report is
@@ -4211,6 +4233,14 @@ impl Document {
             } else {
                 solidcraft_sketch::solve_after_edit_with_analysis(sk, stored, was(sk).as_deref(), analysis)
             };
+            // An attachment to the old offset can prevent the source from moving at all.
+            // Retry from a source-only seed, adopting it only if every constraint still holds.
+            if !report.ok()
+                && report.oversized.is_none()
+                && let Some(retried) = sk.solve_after_offset_edit(stored, was(sk).as_deref(), analysis)
+            {
+                report = retried;
+            }
         }
         Ok(report)
     }

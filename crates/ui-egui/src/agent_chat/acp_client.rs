@@ -143,6 +143,11 @@ impl AcpBackend {
                             out.push(Event::ConfigOptionFinished { id: config_id, result });
                         }
                     }
+                    // `session/set_model` is still unstable in ACP: an agent can list `models` and
+                    // still not serve it (#9970). It keeps its own model; that is no error to show.
+                    (Pending::SetModel, Err((acp::METHOD_NOT_FOUND, message))) => {
+                        log::debug!("agent does not serve session/set_model: {message}");
+                    }
                     (what, Err((code, message))) => {
                         let config_error = what == Pending::SetConfig;
                         if what == Pending::SetConfig

@@ -3316,6 +3316,11 @@ fn apply_traced_with(
             // Not yet: a cut that splits one piece of such a body still splits all of them; keeping
             // the untouched ones together needs each new piece traced to the piece it came from.
             let mut taken: std::collections::BTreeSet<String> = state.bodies.iter().map(|b| b.name.clone()).collect();
+            // The pieces past the first belong to this feature, like a split's pieces (#10123):
+            // `body.rename` stores their names in this feature's `body_names`, in this order, so a
+            // renamed piece keeps its own name through a rebuild instead of landing on a sibling
+            // of the body it was cut from.
+            let mut extra = 0usize;
             let mut split: Vec<ModelBody> = Vec::new();
             for mb in std::mem::take(&mut state.bodies) {
                 let Some(&had) = affected.get(&mb.name).filter(|_| !state.sheets.iter().any(|s| s.body == mb.name)) else {
@@ -3331,13 +3336,18 @@ fn apply_traced_with(
                 // (so pieces of one face in different bodies are told apart).
                 let lineages = crate::lineage::Lineage::lumps(&mb.body, mb.lineage().as_deref(), &pieces);
                 for (k, (p, lineage)) in pieces.into_iter().zip(lineages).enumerate() {
-                    let name = if k == 0 {
-                        mb.name.clone()
+                    let (name, made_by) = if k == 0 {
+                        (mb.name.clone(), mb.feature)
                     } else {
-                        (k..=k + taken.len()).map(|j| format!("{} ({j})", mb.name)).find(|n| !taken.contains(n)).unwrap_or_default()
+                        let stored = f.body_names.get(extra).filter(|n| !n.trim().is_empty() && !taken.contains(*n)).cloned();
+                        extra += 1;
+                        let name = stored.unwrap_or_else(|| {
+                            (k..=k + taken.len()).map(|j| format!("{} ({j})", mb.name)).find(|n| !taken.contains(n)).unwrap_or_default()
+                        });
+                        (name, f.id)
                     };
                     taken.insert(name.clone());
-                    split.push(ModelBody::new(name, p, mb.feature).with_lineage(lineage));
+                    split.push(ModelBody::new(name, p, made_by).with_lineage(lineage));
                 }
             }
             state.bodies = split;
@@ -8188,6 +8198,7 @@ fn plane_reads_geometry(plane: &PlaneRef) -> bool {
         PlaneRef::ThroughPoint { .. }
         | PlaneRef::Midplane { .. }
         | PlaneRef::TwoEdges { .. }
+        | PlaneRef::AxisPoint { .. }
         | PlaneRef::ThreePoints { .. }
         | PlaneRef::Tangent { .. }
         | PlaneRef::AlongPath { .. }

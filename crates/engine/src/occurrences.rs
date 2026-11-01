@@ -32,10 +32,11 @@ pub(crate) struct VisibilityCache {
     bodies: std::collections::BTreeSet<String>,
 }
 
-/// The hidden joints and folders of the view, as sets: the browser asks about every joint
-/// and every folder of the design on every frame, and an answer that walked the hidden
-/// lists made a frame cost grow with the size of the design (#3892). The sets are built
-/// when the view changes and are kept until it changes again.
+/// The hidden joints, folders and bodies of the view, as sets: the browser asks about every
+/// joint and every folder of the design on every frame, the viewport about every body several
+/// times a frame, and an answer that walked the hidden lists made a frame cost grow with the
+/// size of the design (#3892). The sets are built when the view changes and are kept until it
+/// changes again.
 pub(crate) struct VisibilityIndex {
     /// The revision of the design the sets were built for.
     revision: u64,
@@ -49,11 +50,16 @@ pub(crate) struct VisibilityIndex {
     folders_at: ListId,
     /// The hidden folder keys.
     folder_keys: std::collections::HashSet<String>,
+    /// Where the hidden bodies were when the sets were built.
+    bodies_at: ListId,
+    /// The names of the bodies hidden themselves.
+    body_names: std::collections::HashSet<String>,
     /// The hidden joints and folders, as they were when the sets were built: they are
     /// compared with these to tell a change of the view from a change of the design alone
     /// (the design changes far more often than the view does).
     joints: Vec<u64>,
     folders: Vec<String>,
+    bodies: Vec<String>,
 }
 
 /// Where a list of hidden items was: the address of its buffer and how many items it held.
@@ -77,15 +83,19 @@ impl VisibilityIndex {
     fn new(revision: u64, v: &Visibility) -> VisibilityIndex {
         let joint_ids: std::collections::HashSet<u64> = v.hidden_joints.iter().copied().collect();
         let folder_keys: std::collections::HashSet<String> = v.hidden_folders.iter().cloned().collect();
-        visibility_work::built(joint_ids.len() as u64 + folder_keys.len() as u64);
+        let body_names: std::collections::HashSet<String> = v.hidden_bodies.iter().cloned().collect();
+        visibility_work::built(joint_ids.len() as u64 + folder_keys.len() as u64 + body_names.len() as u64);
         VisibilityIndex {
             revision,
             joints_at: ListId::of(&v.hidden_joints),
             joint_ids,
             folders_at: ListId::of(&v.hidden_folders),
             folder_keys,
+            bodies_at: ListId::of(&v.hidden_bodies),
+            body_names,
             joints: v.hidden_joints.clone(),
             folders: v.hidden_folders.clone(),
+            bodies: v.hidden_bodies.clone(),
         }
     }
 
@@ -103,12 +113,15 @@ impl VisibilityIndex {
             && self.joints.last() == v.hidden_joints.last()
             && self.folders.first() == v.hidden_folders.first()
             && self.folders.last() == v.hidden_folders.last()
+            && self.bodies_at == ListId::of(&v.hidden_bodies)
+            && self.bodies.first() == v.hidden_bodies.first()
+            && self.bodies.last() == v.hidden_bodies.last()
     }
 
     /// Are the hidden joints and folders the ones the sets were built from? A design that
     /// changed without touching the view leaves the sets alone.
     fn same_lists(&self, v: &Visibility) -> bool {
-        self.joints == v.hidden_joints && self.folders == v.hidden_folders
+        self.joints == v.hidden_joints && self.folders == v.hidden_folders && self.bodies == v.hidden_bodies
     }
 
     /// The lists are the ones the sets were built from, at another revision.
@@ -116,6 +129,7 @@ impl VisibilityIndex {
         self.revision = revision;
         self.joints_at = ListId::of(&v.hidden_joints);
         self.folders_at = ListId::of(&v.hidden_folders);
+        self.bodies_at = ListId::of(&v.hidden_bodies);
     }
 }
 
@@ -297,21 +311,31 @@ impl Session {
         }
         let hidden: std::collections::BTreeSet<_> = self.visibility.hidden_bodies.iter().map(String::as_str).collect();
         let mut names = std::collections::BTreeMap::new();
+        let mut destinations = std::collections::BTreeSet::new();
         let (before, after) = (solidcraft_doc::WorldNames::new(previous, state), solidcraft_doc::WorldNames::new(&self.doc, &renamed));
         for (component, path, _) in previous.placements() {
             for body in state.bodies.iter().filter(|body| previous.model_body_component(body) == component) {
                 let old = before.name(&body.name, component, &path);
+                let source = rename.filter(|(old, _)| *old == body.name).map_or(body.name.as_str(), |(_, new)| new);
+                let new = after.name(source, component, &path);
+                if old != new {
+                    destinations.insert(new.clone());
+                }
                 if hidden.contains(old.as_str()) || selected.contains(old.as_str()) {
-                    let source = rename.filter(|(old, _)| *old == body.name).map_or(body.name.as_str(), |(_, new)| new);
-                    names.insert(old, after.name(source, component, &path));
+                    names.insert(old, new);
                 }
             }
         }
-        for hidden in &mut self.visibility.hidden_bodies {
+        self.visibility.hidden_bodies.retain_mut(|hidden| {
             if let Some(new) = names.get(hidden) {
                 hidden.clone_from(new);
+                true
+            } else {
+                // A deleted body's hidden name can be reused (#10163). Only a current
+                // body's hide follows into that name; a stale entry must not hide it.
+                !destinations.contains(hidden)
             }
-        }
+        });
         for sel in &mut self.selection {
             let name = match sel {
                 Sel::Body { name } => name,
@@ -695,10 +719,10 @@ impl Session {
         Ok(count)
     }
 
-    /// The hidden joints and folders of the view, as sets: the browser asks about every joint
-    /// of the design on every frame, and an answer that walked the hidden lists made a frame
-    /// cost grow with the size of the design (#3892). The sets are built when the view changes
-    /// and are kept until it changes again.
+    /// The hidden joints, folders and bodies of the view, as sets: the browser asks about every
+    /// joint of the design on every frame, and an answer that walked the hidden lists made a
+    /// frame cost grow with the size of the design (#3892). The sets are built when the view
+    /// changes and are kept until it changes again.
     fn visibility_index(&self) -> Option<std::sync::MutexGuard<'_, Option<VisibilityIndex>>> {
         let mut cache = self.visibility_index_cache.lock().ok()?;
         let v = &self.visibility;
@@ -809,7 +833,7 @@ impl Session {
     }
 
     pub fn body_visible(&self, name: &str) -> bool {
-        if self.visibility.hidden_bodies.iter().any(|n| n == name) || self.body_removed_later(name) {
+        if self.body_hidden_itself(name) || self.body_removed_later(name) {
             return false;
         }
         let v = &self.visibility;
@@ -828,6 +852,16 @@ impl Session {
             return cache.as_ref().is_none_or(|c| !c.bodies.contains(name));
         }
         !self.bodies_hidden_by_parents().contains(name)
+    }
+
+    /// Is the body hidden itself (its own eye; a placement, folder or group may still hide it)?
+    fn body_hidden_itself(&self, name: &str) -> bool {
+        if let Some(cache) = self.visibility_index() {
+            return cache.as_ref().is_some_and(|c| c.body_names.contains(name));
+        }
+        // The lock is poisoned: answer from the list itself.
+        visibility_work::add(self.visibility.hidden_bodies.len() as u64);
+        self.visibility.hidden_bodies.iter().any(|n| n == name)
     }
 
     /// World names of the bodies a hidden placement, folder or group above them hides (their
