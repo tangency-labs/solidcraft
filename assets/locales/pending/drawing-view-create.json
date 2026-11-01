@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.drawing_view_base": "Base View",
+    "cmd.drawing_view_projected": "Projected View"
+  },
+  "ar": {
+    "cmd.drawing_view_base": "العرض الأساسي",
+    "cmd.drawing_view_projected": "العرض المُسقط"
+  },
+  "he": {
+    "cmd.drawing_view_base": "תצוגת בסיס",
+    "cmd.drawing_view_projected": "תצוגה מוטלת"
+  },
+  "ja": {
+    "cmd.drawing_view_base": "ベースビュー",
+    "cmd.drawing_view_projected": "投影ビュー"
+  },
+  "vi": {
+    "cmd.drawing_view_base": "Chế độ xem cơ sở",
+    "cmd.drawing_view_projected": "Chế độ xem chiếu"
+  },
+  "zh": {
+    "cmd.drawing_view_base": "基础视图",
+    "cmd.drawing_view_projected": "投影视图"
+  }
+}

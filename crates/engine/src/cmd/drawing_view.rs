@@ -11,6 +11,11 @@
 //! independent of the views it was copied from (Cameron, 2026-10-26). Each lists the views it puts
 //! outside the sheet's drawing space and moves none back in (#3875 S5).
 //!
+//! `drawing.view.base` and `drawing.view.projected` (#4816) make a saved view: a base view of the
+//! drawing's design on a sheet, or a view projected from another, lined up with it a gap past its
+//! boundary unless placed. Each is one undo step, refused whole by the record's rules, and lists
+//! itself when it lies outside the sheet's drawing space.
+//!
 //! The view's settings are `doc::drawing_view::ViewSettings`; its basis, scale and map onto
 //! paper are `geom::drawing_view`'s. Without a scale it takes the largest ISO 5455 scale at
 //! which the view, centred where it goes, lies inside the sheet's drawing border.
@@ -27,7 +32,7 @@ use solidcraft_doc::drawing_view::{Looking, TangentEdges, ViewDirection, ViewOve
 use solidcraft_doc::ids;
 use solidcraft_geom::Plane;
 use solidcraft_geom::drawing_sheet::{DrawingBorderProfile, Sheet};
-use solidcraft_geom::drawing_view::{NamedView, PRESETS, Scale};
+use solidcraft_geom::drawing_view::{NamedView, PRESETS, ProjectedSide, Scale};
 use solidcraft_geom::hlr::{Source, Visibility};
 use solidcraft_geom::paper::{MAX_COORDINATE_MM, Picture};
 use solidcraft_geom::section::CurveAccuracy;
@@ -39,9 +44,10 @@ use super::CommandSpec;
 use crate::drawing_view::{CHORD_RANGE, Extents, LineRequest, Lines, MAX_PATH_IDS, MAX_PATHS, OnSheet, ShownSet, Unmeasured};
 use crate::params::bad;
 use crate::schema::drawing_view::{
-    AccuracyResult, BoxResult, ChoicesResult, CopyParams, DPI_RANGE, EditParams, EditResult, ExtentsResult, FromResult, InspectParams, InspectResult,
-    LineResult, LineSourceResult, LinesStatusResult, MoveParams, OutsideResult, PathSegResult, PictureResult, PieceResult, PlaceParam, ScaleResult,
-    SceneResult, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult, ToSheetResult, ViewResult, ViewSet,
+    AccuracyResult, BaseParams, BoxResult, ChoicesResult, CopyParams, CreateResult, DPI_RANGE, EditParams, EditResult, ExtentsResult, FromResult,
+    InspectParams, InspectResult, LineResult, LineSourceResult, LinesStatusResult, MoveParams, OutsideResult, PathSegResult, PictureResult,
+    PieceResult, PlaceParam, ProjectedParams, ScaleResult, SceneResult, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult,
+    ToSheetResult, ViewResult, ViewSet,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -56,6 +62,14 @@ const MOVE: &str = "drawing.view.move_to_sheet";
 const MOVE_CONTRACT: TypedContract<MoveParams> = TypedContract::new();
 const COPY: &str = "drawing.view.copy_to_sheet";
 const COPY_CONTRACT: TypedContract<CopyParams> = TypedContract::new();
+const BASE: &str = "drawing.view.base";
+const BASE_CONTRACT: TypedContract<BaseParams> = TypedContract::new();
+const PROJECTED: &str = "drawing.view.projected";
+const PROJECTED_CONTRACT: TypedContract<ProjectedParams> = TypedContract::new();
+
+/// How far a new projected view's boundary is from its parent's, in paper millimetres, until a
+/// drawing style gives it.
+const DEFAULT_GAP_MM: f64 = 20.0;
 
 pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snapshot", crate::checked!("drawing.view.snapshot", snapshot))
     .icon("export")
@@ -92,6 +106,20 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .contract(&COPY_CONTRACT)
         .output(output_schema_for::<ToSheetResult>)
         .params("view: a saved view's id; sheet: id or name; position_mm?: [x, y] for the copy's centre (default the sheet's centre); with_linked?: the views lined up with it copied too, lined up with the copy (true), or not (false); needed when it has any → {view: the copy, sheet, views: [the copies, its first], outside?: [those whose boundary leaves the sheet's drawing space]}. A copy follows none of the views it was copied from: a projected view copied alone becomes a base view, looking the way it did, with the settings it had. Each view's dimensions and balloons are copied with it, with ids of their own. One undo step."),
+    CommandSpec::new(BASE, "Base View", crate::checked!("drawing.view.base", base))
+        .icon("new")
+        .in_drawing()
+        .doc_only()
+        .contract(&BASE_CONTRACT)
+        .output(output_schema_for::<CreateResult>)
+        .params("sheet: id or name; view?: as drawing.view.snapshot's (front by default); scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space, centred where it goes, or 1:1 with nothing to measure; saved either way); position_mm?: [x, y] for its centre (default the sheet's centre); display_style?, reference_style?, reference_hides_model?, reference_margin_mm?, tangent_edges?: settings it sets itself (each left out follows the default) → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?: [it, when its boundary leaves the sheet's drawing space]}. A view of the drawing's design. One undo step; no model is evaluated."),
+    CommandSpec::new(PROJECTED, "Projected View", crate::checked!("drawing.view.projected", projected))
+        .icon("new")
+        .in_drawing()
+        .doc_only()
+        .contract(&PROJECTED_CONTRACT)
+        .output(output_schema_for::<CreateResult>)
+        .params("parent: a saved view's id; side: left, right, above or below, where it sits (the drawing's projection says which side of the model it shows); place?: {at: [x, y]} or {aligned: n} (default: lined up with its parent, its boundary 20 mm past the parent's) → {view, sheet: its parent's, scale: its parent's, boundary_mm, outside?}. Its scale and display settings follow its parent; drawing.view.edit sets its own. One undo step; no model is evaluated."),
 ];
 
 fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
@@ -126,7 +154,7 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
     let position = request.position_mm.map_or(paper * 0.5, |p| p.0);
     let (scale, fitted) = match settings.scale {
         Some(scale) => (scale, false),
-        None => (fit(shown.size(), position, border)?, true),
+        None => (fit(shown.size(), position, border, CMD)?, true),
     };
     let frame = crate::drawing_view::frame(basis, scale, &shown, position, CMD)?;
     let boundary = frame.boundary(&shown).map_err(|e| bad(CMD, e.to_string()))?;
@@ -603,6 +631,103 @@ fn copy_to_sheet(s: &mut Session, p: &Value) -> Result<Value> {
     to_sheet_answer(first, sheet, &copies, outside)
 }
 
+fn base(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: BaseParams = crate::schema::read(BASE, p)?;
+    let record = s.drawing(BASE)?.clone();
+    let (sheet, middle) = sheet_named(&record, &request.sheet, BASE)?;
+    let source = record.sources.first().map(|source| source.id).ok_or_else(|| bad(BASE, "the drawing draws no design"))?;
+    let direction = request.view.unwrap_or_default().0;
+    let position = request.position_mm.map_or(middle, |p| p.0);
+    let id = record.allocate_id(&mut s.ids).map_err(|e| bad(BASE, e.to_string()))?;
+    let settings = ViewOverrides {
+        scale: request.scale.map(|scale| scale.0),
+        display_style: request.display_style.map(|style| style.0),
+        reference_style: request.reference_style.map(|style| style.0),
+        reference_hides_model: request.reference_hides_model,
+        tangent_edges: request.tangent_edges.map(|edges| edges.0),
+    };
+    let place = ViewPlace::At([position.x, position.y]);
+    let kind = ViewKind::Base { source, view: direction };
+    let mut view = View { id, sheet, kind, place, settings, reference_margin_mm: request.reference_margin_mm.unwrap_or(0.0) };
+    let mut fitted = false;
+    if view.settings.scale.is_none() {
+        // The record's rules first, at 1:1, so a bad direction, margin or place is refused as the
+        // record says; then the fitted scale, which is saved. With nothing to measure, 1:1.
+        let one = Scale::new(1.0, 1.0).map_err(|e| bad(BASE, e.to_string()))?;
+        let mut staged = Drawing::clone(&record);
+        staged.add_views([Arc::new(View { settings: ViewOverrides { scale: Some(one), ..view.settings }, ..view.clone() })]);
+        staged.validate().map_err(|e| bad(BASE, e.to_string()))?;
+        let space = crate::drawing_view::sheet(&staged, sheet, BASE)?.drawing_space().map_err(|e| bad(BASE, e.to_string()))?;
+        let basis = staged.resolve_view(id).map_err(|e| bad(BASE, e.to_string()))?.basis;
+        let measured = crate::drawing_view::shown(s).and_then(|set| crate::drawing_view::measure(&set, &basis)).ok();
+        fitted = measured.is_some();
+        view.settings.scale = Some(match measured {
+            Some(extents) => fit(extents.model.inflated(view.reference_margin_mm).size(), position, space, BASE)?,
+            None => one,
+        });
+    }
+    s.edit_drawing(BASE, |d| {
+        d.add_views([Arc::new(view)]);
+        Ok(())
+    })?;
+    created(s, BASE, id, fitted)
+}
+
+fn projected(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: ProjectedParams = crate::schema::read(PROJECTED, p)?;
+    let record = s.drawing(PROJECTED)?.clone();
+    let (parent, sheet) = find(&record, request.parent.0, PROJECTED).map(|v| (v.id, v.sheet))?;
+    let side = request.side.0;
+    let id = record.allocate_id(&mut s.ids).map_err(|e| bad(PROJECTED, e.to_string()))?;
+    let parent_centre = record.view_centre(parent).map_err(|e| bad(PROJECTED, e.to_string()))?;
+    let place = match request.place {
+        Some(PlaceParam::At(at)) => ViewPlace::At(at),
+        Some(PlaceParam::Aligned(along)) => ViewPlace::Aligned(along),
+        None => ViewPlace::Aligned(side.along(parent_centre)),
+    };
+    let kind = ViewKind::Projected { parent, side };
+    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_margin_mm: 0.0 };
+    if request.place.is_none() {
+        // Staged on its parent's centre to measure it, then moved along the free axis until its
+        // boundary is the gap past its parent's.
+        let mut staged = Drawing::clone(&record);
+        staged.add_views([Arc::new(view.clone())]);
+        staged.validate().map_err(|e| bad(PROJECTED, e.to_string()))?;
+        let theirs = crate::drawing_view::on_sheet(s, &staged, parent, PROJECTED)?.boundary;
+        let ours = crate::drawing_view::on_sheet(s, &staged, id, PROJECTED)?.boundary;
+        let half = (side.along(ours.max) - side.along(ours.min)) / 2.0;
+        view.place = ViewPlace::Aligned(match side {
+            ProjectedSide::Right | ProjectedSide::Above => side.along(theirs.max) + DEFAULT_GAP_MM + half,
+            ProjectedSide::Left | ProjectedSide::Below => side.along(theirs.min) - DEFAULT_GAP_MM - half,
+        });
+    }
+    s.edit_drawing(PROJECTED, |d| {
+        d.add_views([Arc::new(view)]);
+        Ok(())
+    })?;
+    created(s, PROJECTED, id, false)
+}
+
+/// The reply for view `id`, just made by `cmd`: its sheet, its scale (`fitted` when worked out),
+/// its boundary, and itself when it leaves its sheet's drawing space.
+fn created(s: &Session, cmd: &str, id: u64, fitted: bool) -> Result<Value> {
+    let d = s.drawing(cmd)?;
+    let sheet_id = find(d, id, cmd)?.sheet;
+    let sheet = crate::drawing_view::sheet(d, sheet_id, cmd)?;
+    let scale = d.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?.scale.value;
+    let placed = crate::drawing_view::on_sheet(s, d, id, cmd)?;
+    let outside = if crate::drawing_view::leaves(sheet, &placed, cmd)? { vec![(id, placed)] } else { Vec::new() };
+    let reply = CreateResult {
+        view: ids::encode(id),
+        sheet: ids::encode(sheet_id),
+        scale: ScaleResult { text: scale.to_string(), factor: scale.factor(), fitted },
+        boundary_mm: BoxResult { min: placed.boundary.min.into(), max: placed.boundary.max.into() },
+        outside: outside_results(outside),
+        param_warnings: Vec::new(),
+    };
+    serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
 fn to_sheet_answer(view: u64, sheet: u64, views: &[u64], outside: Vec<(u64, OnSheet)>) -> Result<Value> {
     let reply = ToSheetResult {
         view: ids::encode(view),
@@ -643,13 +768,13 @@ fn direction(basis: &Plane) -> ViewResult {
 /// The largest preset scale at which a view `size` (model mm), centred at `position`, lies inside
 /// the drawing border: the room is twice the distance from the position to the nearer side,
 /// each way.
-fn fit(size: Vec2, position: Vec2, border: Aabb2) -> Result<Scale> {
+fn fit(size: Vec2, position: Vec2, border: Aabb2, cmd: &str) -> Result<Scale> {
     let room =
         Vec2::new(2.0 * (position.x - border.min.x).min(border.max.x - position.x), 2.0 * (position.y - border.min.y).min(border.max.y - position.y));
     Scale::fit(size, room).ok_or_else(|| {
         let name = |s: Option<&Scale>| s.map(|s| s.to_string()).unwrap_or_default();
         let presets = format!("from {} to {}", name(PRESETS.first()), name(PRESETS.last()));
-        bad(CMD, format!("the view fits the sheet's drawing area at no preset scale {presets} here: give a scale, a position or a larger sheet"))
+        bad(cmd, format!("the view fits the sheet's drawing area at no preset scale {presets} here: give a scale, a position or a larger sheet"))
     })
 }
 
