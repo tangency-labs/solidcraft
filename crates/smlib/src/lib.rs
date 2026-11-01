@@ -85,6 +85,9 @@ pub enum Error {
     Solidcore(String),
     /// solidcore panicked; the guard caught it (the call, then the panic's message).
     Internal(String),
+    /// A step of the C++ kernel solidcore has not ported yet, refused rather than built another
+    /// way: what is missing, and the solidcore issue that ports it.
+    Unported(&'static str),
 }
 
 impl std::fmt::Display for Error {
@@ -124,6 +127,7 @@ impl std::fmt::Display for Error {
             Error::Record(u) => write!(f, "{u}"),
             Error::Solidcore(e) => write!(f, "solidcore: {e}"),
             Error::Internal(e) => write!(f, "solidcore failed internally in {e}"),
+            Error::Unported(what) => write!(f, "not supported yet: {what}"),
         }
     }
 }

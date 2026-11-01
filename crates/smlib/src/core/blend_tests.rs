@@ -107,11 +107,11 @@ fn case(name: &str) -> Case {
             }
             c(Op::Blend(BLOCK, Blend::Round, edges, r), Expect::Volume(v))
         }
-        // Each section of a curvature-continuous round is the quintic from contact to contact
-        // whose inner control points lie a third and two thirds of the way to the corner the
-        // contacts' tangents make (fork fd3b6a7). On the unit square's sides it takes
-        // ½∮(x dy - y dx) = 113/756 from the corner: abc - 113/756 r² L.
-        "fillet_curvature_one_edge" => c(Op::Blend(BLOCK, Blend::Curvature, vec![TOP_FRONT], r), Expect::Volume(ABC - 113.0 / 756.0 * r * r * 30.0)),
+        // The curvature section's default thumbweight is equal area (fork 6148773): on the
+        // round's rails it takes off what the ball's circle does, abc - (1 - π/4) r² L.
+        "fillet_curvature_one_edge" => {
+            c(Op::Blend(BLOCK, Blend::Curvature, vec![TOP_FRONT], r), Expect::Volume(ABC - (1.0 - PI / 4.0) * r * r * 30.0))
+        }
         // abc - d² L / 2.
         "chamfer_one_edge" => c(Op::Blend(BLOCK, Blend::Chamfer, vec![TOP_FRONT], r), Expect::Volume(ABC - r * r * 30.0 / 2.0)),
         // abc - d1 d2 L / 2: 2 back along the top (the face leaning most along +z), 3 down the
@@ -387,7 +387,7 @@ macro_rules! cases {
 cases!(
     fillet_one_edge,
     fillet_all_edges,
-    fillet_curvature_one_edge,
+    fillet_curvature_one_edge: ignore = "solidcore refuses the curvature section until it has the equal-area Gⁿ generator (solidcore#2250)",
     chamfer_one_edge,
     chamfer_two_distances,
     chamfer_distance_angle,
@@ -660,6 +660,21 @@ fn a_setback_corner_left_open_returns_its_hole() {
         blend_holes(&b, Blend::Round, &edges[..2], &[5.0; 2], 0.1, &[[60.0, 40.0, 20.0]], &[8.0], Corners::Open).err()
     });
     assert_eq!(refused, Some(Error::CornerRefused { corner: 0 }));
+}
+
+/// A curvature-continuous round is refused on solidcore, whose only curvature section is the
+/// blend-curve quintic (113/756 r² off a square corner, not the equal-area (1 - π/4) r²), until
+/// its pin has the Gⁿ section generator (solidcore#2250).
+#[test]
+fn a_curvature_round_is_refused_until_solidcore_has_the_equal_area_section() {
+    let b = BLOCK.core();
+    let r = blend(&b, Blend::Curvature, &[TOP_FRONT], &[2.0], TOL, &[], &[], Corners::Filled).err();
+    assert_eq!(r, Some(Error::Unported(super::blend::CURVATURE_SECTION)));
+    assert!(r.is_some_and(|e| e.to_string().contains("solidcore#2250")));
+    let set_back = blend(&b, Blend::Curvature, &[TOP_FRONT], &[2.0], TOL, &[[0.0, 0.0, 10.0]], &[3.0], Corners::Filled).err();
+    assert_eq!(set_back, Some(Error::Unported(super::blend::CURVATURE_SECTION)));
+    // A pick that misses is still named first.
+    assert_eq!(blend(&b, Blend::Curvature, &[[90.0; 3]], &[2.0], TOL, &[], &[], Corners::Filled).err(), Some(Error::NoMatch { point: 0 }));
 }
 
 /// The capi's argument checks, before any kernel call.

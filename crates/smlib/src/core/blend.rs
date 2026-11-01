@@ -235,10 +235,6 @@ fn chamfer_radius(k: &Kernel, b: &mut Brep, e: EdgeId, distance: f64) -> solidco
 #[derive(Clone, Copy, PartialEq)]
 enum Section<'a> {
     Round,
-    /// The curvature-continuous section (`SM_FSG_BLEND_CURVE`, continuity 2), the quintic whose
-    /// inner control points lie a third and two thirds of the way from each contact to the corner
-    /// its tangents make (`SetBlendCurveAtThirds`, fork fd3b6a7).
-    Curvature,
     Chord,
     /// A chamfer, with each edge's offset of its second surface (`chamfer_offsets`' `second`;
     /// the sizes are the first's).
@@ -334,7 +330,6 @@ fn blend_edges_stopping(
     let before = face_set(b)?;
     let done = {
         let mut s = FilletSession::new(k, b)?;
-        s.set_blend_curve_at_thirds(matches!(section, Section::Curvature));
         // `SetFilletParameters(b, es, sections, solvers, values, laws, -1, -1, -1, -1,
         // continuity 1, thumbweight 1)`: the session sets the executive's global merge first, as
         // `SmApiFilletEdges` does, and `SetFilletParameters` resets it, as in the capi.
@@ -345,7 +340,6 @@ fn blend_edges_stopping(
                 Some(&size) => s.prepare_variable_radius_edges(k, edges, size, law, 1, 1),
                 None => return Ok(Err(Err(Error::Argument))),
             },
-            (Section::Curvature, _) => s.prepare_per_edge_constant_radius(k, edges, sizes, &[FilletSurfaceGeneratorType::BlendCurve], 2, 1.0),
             (Section::Chord, _) => s.prepare_per_edge_constant_distance(k, edges, sizes, &[FilletSurfaceGeneratorType::Circular], 1, 1.0),
             (Section::Chamfer(second), _) => chamfer_parameters(k, &mut s, edges, sizes, second),
         };
@@ -658,6 +652,14 @@ fn untagged(mut b: Brep) -> Out<Brep> {
     Ok(b)
 }
 
+/// Why [`Blend::Curvature`] is refused. The capi's curvature section is the Gⁿ generator's order 2
+/// at the equal-area thumbweight (`SMLIB_BLEND_THUMBWEIGHT`, fork 6148773), which solidcore does
+/// not have yet; the blend-curve quintic it does have takes off another area, so it is not built
+/// in its place. The refusal comes off when the solidcore pin carries #2260 and 6148773 and its
+/// `fillet_gn_section_generator` flag is on.
+pub(crate) const CURVATURE_SECTION: &str = "a curvature-continuous fillet on solidcore: the curvature section's equal-area Gⁿ \
+generator is not in solidcore yet (solidcore#2250, port in progress as #2260)";
+
 /// [`blend_holes`] without its holes.
 #[allow(clippy::too_many_arguments)] // the capi's blend_call
 pub(crate) fn blend(
@@ -749,7 +751,7 @@ fn blend_call(
         let solid_in = brep_p2::is_manifold_solid(&w)?;
         let section = match kind {
             Blend::Round => Section::Round,
-            Blend::Curvature => Section::Curvature,
+            Blend::Curvature => return Ok(Err(Error::Unported(CURVATURE_SECTION))),
             Blend::Chord => Section::Chord,
             // `chamfer_edges`: each edge's offsets from its setback at its midpoint.
             Blend::Chamfer => {
