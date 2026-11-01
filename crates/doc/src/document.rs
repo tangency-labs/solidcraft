@@ -2019,7 +2019,7 @@ fn fair_keep_edges() -> bool {
 /// Triangles of one imported mesh body (millimetres). The arrays are shared by clones: every
 /// edit keeps the design as it was for undo, and a scanned part's triangles (hundreds of
 /// megabytes) are not copied for that.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MeshData {
     pub name: String,
     /// x, y, z per vertex.
@@ -2028,6 +2028,20 @@ pub struct MeshData {
     pub triangles: std::sync::Arc<[u32]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<[f32; 3]>,
+}
+
+/// The same mesh: shared arrays are the same without reading them, so the dirty check and
+/// autosave after an edit elsewhere do not walk a scan's millions of coordinates. Arrays that
+/// are not shared compare value by value, as before. Coordinates are finite (a design that
+/// holds others does not load), so the shortcut only skips work.
+impl PartialEq for MeshData {
+    fn eq(&self, other: &Self) -> bool {
+        use std::sync::Arc;
+        self.name == other.name
+            && self.color == other.color
+            && (Arc::ptr_eq(&self.triangles, &other.triangles) || self.triangles == other.triangles)
+            && (Arc::ptr_eq(&self.positions, &other.positions) || self.positions == other.positions)
+    }
 }
 
 /// Points of a sketch, by id.

@@ -851,3 +851,32 @@ fn saved_states_read_back_their_sketch_keys() {
         assert!(with_sets(sets).final_state().is_err(), "base {base}");
     }
 }
+
+/// The dirty check and autosave compare the whole document after every edit; a scanned
+/// part's shared triangles must not be read for that. A coordinate that equals nothing (not a
+/// number) shows whether the shared arrays were read: only reading them makes a mesh differ
+/// from its own copy.
+#[test]
+fn comparing_a_copied_mesh_does_not_read_its_shared_arrays() {
+    let mesh = MeshData {
+        name: "Scan".into(),
+        positions: Arc::from([0., 0., 0., 1., 0., 0., 0., 1., f64::NAN]),
+        triangles: Arc::from([0, 1, 2]),
+        color: None,
+    };
+    let copy = mesh.clone();
+    assert!(copy == mesh, "a copy shares the arrays and is the same mesh without reading them");
+    let mut renamed = mesh.clone();
+    renamed.name = "Other".into();
+    assert!(renamed != mesh);
+    let mut coloured = mesh.clone();
+    coloured.color = Some([0.2, 0.4, 0.6]);
+    assert!(coloured != mesh);
+    let unshared = MeshData { positions: Arc::from(mesh.positions.to_vec()), ..mesh.clone() };
+    assert!(unshared != mesh, "arrays that are not shared still compare value by value");
+    let finite = MeshData { positions: Arc::from([0., 0., 0., 1., 0., 0., 0., 1., 0.]), ..mesh.clone() };
+    let equal = MeshData { positions: Arc::from(finite.positions.to_vec()), triangles: Arc::from(finite.triangles.to_vec()), ..finite.clone() };
+    assert!(equal == finite, "equal values in other arrays are the same mesh");
+    let flipped = MeshData { triangles: Arc::from([0, 2, 1]), ..finite.clone() };
+    assert!(flipped != finite);
+}
