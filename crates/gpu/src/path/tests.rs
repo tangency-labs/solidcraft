@@ -289,6 +289,35 @@ fn engine_preflight_keeps_cpu_alpha_and_routes_physical_glass_to_the_native_host
     assert!(!solidcraft_engine::product_scene::extract(&s).unwrap().has_transmission());
 }
 
+/// #9814: a glass disc meshed finer for its picture is still one closed, outward shell, so the
+/// job certifies it as `closed_mesh` glass and renders it.
+#[test]
+fn glass_meshed_finer_for_its_picture_is_certified_closed_and_renders() {
+    use serde_json::json;
+    let Some(executor) = executor() else { return };
+    let mut s = solidcraft_engine::Session::default();
+    s.set_render_job_host(Some(solidcraft_render::job::CpuHost::cooperative())).unwrap();
+    s.register_render_job_host(ImageHost::with_executor(Arc::new(executor)).unwrap()).unwrap();
+    s.execute("solid.cylinder", &json!({"radius":120,"height":40,"body_name":"Glass"})).unwrap();
+    let camera = Camera {
+        target: solidcraft_geom::Vec3::new(0.0, 0.0, 20.0),
+        yaw: 25f64.to_radians(),
+        pitch: 28f64.to_radians(),
+        distance: 400.0,
+        fov: 0.5,
+        ..Default::default()
+    };
+    let params = json!({"progressive":true,"samples":1,"settings":{"width":640,"height":360,"camera":camera},
+        "raytrace":{"dielectrics":[{"body_index":0,"body_name":"Glass","ior":1.5,"absorption_per_mm":[0.01,0.01,0.01],"boundary":"closed_mesh","thickness_mm":0}]}});
+    let checked = s.execute("render.preflight", &params).unwrap();
+    assert!(checked["meshes"]["bodies"][0]["steps"].as_u64().unwrap() >= 1, "{}", checked["meshes"]);
+    assert_eq!(checked["refraction"], true);
+    let started = s.execute("render.start", &params).unwrap();
+    let id: solidcraft_render::job::JobId = serde_json::from_value(started["job"].clone()).unwrap();
+    let status = s.render_job_handle(id).unwrap().wait_timeout(std::time::Duration::from_secs(120)).unwrap();
+    assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
+}
+
 #[test]
 fn gpu_thin_lens_focus_and_defocus_match_geometric_oracle() {
     let Some(executor) = executor() else { return };
