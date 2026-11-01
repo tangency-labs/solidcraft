@@ -121,12 +121,16 @@ fn a_network_folder_is_listed_first_and_matches_the_output_schema() {
     *TEST_DETECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
         Some(vec![Slicer { id: "prusa".into(), name: "PrusaSlicer".into(), command: vec!["/opt/prusa".into()], icon: None, prusa_major: None }]);
     let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
-    s.network_folders = vec![crate::remote_slicers::RemoteTarget::folder_target("NAS", "/mnt/nas")];
+    use crate::remote_slicers::{RemoteTarget, SftpAddress};
+    let printer = SftpAddress::parse("pi@printer:2222").unwrap_or_else(|e| panic!("{e}"));
+    s.network_folders =
+        vec![RemoteTarget::folder_target("NAS", "/mnt/nas"), RemoteTarget::sftp_target("Pi", &printer, "gcodes", Some("/k/id"), Some("SHA256:abc"))];
     let listed = s.execute("file.slicers", &json!({})).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(
         listed,
         json!({"slicers": [
             {"id": "remote:NAS", "name": "NAS", "remote": true, "kind": "folder", "folder": "/mnt/nas"},
+            {"id": "remote:Pi", "name": "Pi", "remote": true, "kind": "sftp", "folder": "gcodes", "sftp": "pi@printer:2222", "key": "/k/id", "host_key": "SHA256:abc"},
             {"id": "prusa", "name": "PrusaSlicer", "program": "/opt/prusa", "icon": null},
         ]})
     );

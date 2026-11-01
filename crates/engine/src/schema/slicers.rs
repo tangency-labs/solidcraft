@@ -43,10 +43,20 @@ pub struct NetworkFolderInfo {
     pub name: String,
     /// Always true: this entry is a network folder, not a slicer.
     pub remote: bool,
-    /// `folder`: a folder on this computer, usually a mounted share.
+    /// `folder`: a folder on this computer, usually a mounted share; `sftp`: a folder on an SFTP
+    /// server.
     pub kind: String,
-    /// The folder the files go to.
+    /// The folder the files go to (on the server, for SFTP).
     pub folder: String,
+    /// For SFTP: the server, as `user@host`, with `:port` when it isn't 22.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sftp: Option<String>,
+    /// For SFTP: the private key file it logs in with; none for the keys of the user's ssh-agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// For SFTP: the SHA256 fingerprint of the server's key that the user confirmed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub host_key: Option<String>,
 }
 
 /// One installed slicer.

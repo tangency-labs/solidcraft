@@ -154,7 +154,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&SLICERS_CONTRACT)
         .output(output_schema_for::<SlicersResult>)
-        .params("→ the network folders the user added, then the slicers found on this machine: [{id, name, program, icon?}] for a slicer, [{id: remote:<name>, name, remote: true, kind: folder, folder}] for a network folder (file.slicers.add_remote); pass an id, a name or the program path as file.send_to_slicer's or file.save_mesh's `slicer`"),
+        .params("→ the network folders the user added, then the slicers found on this machine: [{id, name, program, icon?}] for a slicer, [{id: remote:<name>, name, remote: true, kind: folder|sftp, folder, sftp?, key?, host_key?}] for a network folder, on this computer or on an SFTP server (file.slicers.add_remote); pass an id, a name or the program path as file.send_to_slicer's or file.save_mesh's `slicer`"),
 ];
 
 fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
