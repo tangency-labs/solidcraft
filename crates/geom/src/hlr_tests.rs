@@ -2561,3 +2561,216 @@ fn chords_only_near_each_other_still_meet_their_crossings() {
     assert_eq!(crossings(&mut tracks, &ctx).unwrap(), 2);
     assert!(tracks.iter().all(|t| t.splits.len() == 2), "{:?}", tracks.iter().map(|t| &t.splits).collect::<Vec<_>>());
 }
+
+/// Whether two drawings of one view agree: the same lines with the same states, in the same places.
+fn assert_same_drawing(a: &Drawing, b: &Drawing, tol: f64) {
+    let states = |d: &Drawing| -> Vec<(Visibility, bool, usize)> { pieces(d).map(|p| (p.visibility, p.covered, p.geometry.len())).collect() };
+    assert_eq!(states(a), states(b));
+    for (p, q) in pieces(a).zip(pieces(b)) {
+        for (g, h) in p.geometry.iter().zip(&q.geometry) {
+            for s in [0., 0.5, 1.] {
+                assert!(g.point_at(s).dist(h.point_at(s)) < tol, "{g:?} vs {h:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn a_rigidly_placed_revolution_draws_as_the_cylinder_it_is() {
+    // The side of `cylinder` stored as a revolution of its seam, u along it or u the angle, in
+    // place and with the profile and axis 5 mm off, the placement bringing them back.
+    let o = Options::default();
+    let view = View::new(Vec3::new(1., 0.3, -0.3), Vec3::new(0., 0., 1.)).unwrap();
+    let draw = |b: &Brep| {
+        let def = prepare(b, &o).unwrap();
+        assert_eq!(def.report.surfaces.get("cylinder"), Some(&1), "{:?}", def.report);
+        hidden_lines(&[def], &[identity(0, [0.; 3])], &view, &o, &never).unwrap()
+    };
+    let want = draw(&cylinder(4., 10.));
+    let moved = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [5., 0., 0., 1.]];
+    for (x, matrix) in [(0., IDENTITY), (-5., moved)] {
+        for forward in [true, false] {
+            let mut placed = cylinder(4., 10.);
+            let profile = Box::new(Curve::Line { start: [4. + x, 0., 0.], end: [4. + x, 0., 10.] });
+            placed.shells[0].faces[0].surface = Surface::PlacedRevolution { profile, origin: [x, 0., 0.], axis: [0., 0., 1.], matrix, forward };
+            assert_same_drawing(&want, &draw(&placed), 1e-9);
+        }
+    }
+}
+
+#[test]
+fn a_placement_that_is_not_rigid_is_refused() {
+    let mut placed = cylinder(4., 10.);
+    let profile = Box::new(Curve::Line { start: [2., 0., 0.], end: [2., 0., 10.] });
+    let matrix = [[2., 0., 0., 0.], [0., 2., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+    placed.shells[0].faces[0].surface = Surface::PlacedRevolution { profile, origin: [0.; 3], axis: [0., 0., 1.], matrix, forward: true };
+    assert!(matches!(prepare(&placed, &Options::default()), Err(HlrError::Unsupported("placed revolution surface"))));
+}
+
+#[test]
+fn a_revolved_circle_is_a_torus_drawn_at_both_equators() {
+    // The halves of `torus` stored as revolutions of half circles.
+    let half = |a: [f64; 2]| Curve::CircleArc {
+        frame: crate::brep::Frame { origin: [20., 0., 0.], x_axis: [1., 0., 0.], y_axis: [0., 0., 1.] },
+        radius: 5.,
+        angle: a,
+    };
+    let mut body = torus(20., 5.);
+    let (pi, tau) = (std::f64::consts::PI, std::f64::consts::TAU);
+    for (f, a) in body.shells[0].faces.iter_mut().zip([[0., pi], [pi, tau]]) {
+        f.surface = Surface::Revolution { profile: Box::new(half(a)), origin: [0.; 3], axis: [0., 0., 1.], angle: [0., tau] };
+    }
+    let def = prepare(&body, &Options::default()).unwrap();
+    assert_eq!(def.report.surfaces.get("torus"), Some(&2), "{:?}", def.report);
+    let view = View::new(Vec3::new(0., 0., -1.), Vec3::new(0., 1., 0.)).unwrap();
+    let d = hidden_lines(&[def], &[identity(0, [0.; 3])], &view, &Options::default(), &never).unwrap();
+    assert_eq!(d.stats.silhouettes, 2, "{:?}", d.stats);
+    assert_eq!(d.stats.uncertain_uncovered, 0, "{:?}", d.stats);
+}
+
+/// A record's edge on `curve` over `interval`, its form `nurbs`.
+fn bounded_edge(curve: brep::Curve, nurbs: Option<brep::Curve>, interval: [f64; 2]) -> brep::Edge {
+    brep::Edge { curve, nurbs, interval, vertices: [0, 1], tolerance: 1e-6, uses: Vec::new() }
+}
+
+#[test]
+fn an_edge_is_cut_to_its_interval_on_its_unbounded_curve() {
+    let close = |a: Vec3, b: [f64; 3]| a.dist(Vec3::new(b[0], b[1], b[2])) < 1e-12;
+    // A line through two points, from t = 2 to 3, without and with a form.
+    let line = brep::Curve::Line { start: [0.; 3], end: [1., 0., 0.] };
+    let (c, acc) = C3::of_edge(&bounded_edge(line.clone(), None, [2., 3.])).unwrap();
+    assert_eq!(acc, CurveAccuracy::Analytic);
+    assert!(close(c.at(0.), [2., 0., 0.]) && close(c.at(1.), [3., 0., 0.]), "{c:?}");
+    let (form, interval) = brep::form::curve(&line, [2., 3.]).unwrap();
+    let (c, _) = C3::of_edge(&bounded_edge(line, Some(form), interval)).unwrap();
+    assert_eq!(c.domain(), [0., 1.]);
+    assert!(close(c.at(0.), [2., 0., 0.]) && close(c.at(1.), [3., 0., 0.]), "{c:?}");
+    // An ellipse's angles come back from its form's parameter.
+    let frame = frame_at([1., 2., 3.]);
+    let ellipse = brep::Curve::Ellipse { frame, radii: [4., 2.] };
+    let (form, interval) = brep::form::curve(&ellipse, [0.5, 2.5]).unwrap();
+    let (c, _) = C3::of_edge(&bounded_edge(ellipse, Some(form), interval)).unwrap();
+    let [a0, a1] = c.domain();
+    assert!((a0 - 0.5).abs() < 1e-12 && (a1 - 2.5).abs() < 1e-12, "{c:?}");
+    assert!(close(c.at(a0), [1. + 4. * 0.5f64.cos(), 2. + 2. * 0.5f64.sin(), 3.]), "{c:?}");
+    // A polyline between its second and fourth points' middles.
+    let points = vec![[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [1., 1., 1.]];
+    let (c, _) = C3::of_edge(&bounded_edge(brep::Curve::Polyline { points }, None, [0.5, 2.5])).unwrap();
+    assert_eq!(c.domain(), [0., 3.]);
+    assert!(
+        close(c.at(0.), [0.5, 0., 0.]) && close(c.at(1.), [1., 0., 0.]) && close(c.at(2.), [1., 1., 0.]) && close(c.at(3.), [1., 1., 0.5]),
+        "{c:?}"
+    );
+    // A cubic spline of two spans, cut across its inner knot: the same points, on its own domain
+    // and breaks, its hull and Bezier pieces of the part alone.
+    let (knots, points) = (vec![0., 0., 0., 0., 0.5, 1., 1., 1., 1.], vec![[0., 0., 0.], [1., 3., 0.], [2., -3., 1.], [3., 3., 0.], [4., 0., 2.]]);
+    let spline = brep::Curve::Spline { knots, points };
+    let (whole, _) = C3::of_edge(&bounded_edge(spline.clone(), None, [0., 1.])).unwrap();
+    let (part, _) = C3::of_edge(&bounded_edge(spline.clone(), None, [0.25, 0.75])).unwrap();
+    assert_eq!(part.domain(), [0.25, 0.75]);
+    assert_eq!(part.breaks(), vec![0.25, 0.5, 0.75]);
+    for k in 0..=20 {
+        let t = 0.25 + 0.5 * k as f64 / 20.;
+        assert!(part.at(t).dist(whole.at(t)) < 1e-12, "at {t}");
+    }
+    let hull = part.hull([0.25, 0.75]).unwrap();
+    let (first, last) = (hull.first().unwrap(), hull.last().unwrap());
+    assert!(first.dist(whole.at(0.25)) < 1e-12 && last.dist(whole.at(0.75)) < 1e-12, "{hull:?}");
+    // Inside one span.
+    let (part, _) = C3::of_edge(&bounded_edge(spline.clone(), None, [0.1, 0.2])).unwrap();
+    assert_eq!(part.breaks(), vec![0.1, 0.2]);
+    assert!(part.at(0.15).dist(whole.at(0.15)) < 1e-12);
+    // A traced intersection with a spline leader is that spline, good to its tolerance; with a
+    // polyline leader there is no curve to follow.
+    let plane = Box::new(brep::Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] });
+    let traced = |leader: brep::Curve| brep::Curve::SurfaceIntersection {
+        surfaces: [plane.clone(), plane.clone()],
+        leader: Box::new(leader),
+        tolerance: 1e-4,
+    };
+    let (c, acc) = C3::of_edge(&bounded_edge(traced(spline), None, [0.25, 0.75])).unwrap();
+    assert_eq!(acc, CurveAccuracy::Bounded { max_deviation_mm: 1e-4 });
+    assert!(c.at(0.5).dist(whole.at(0.5)) < 1e-12);
+    let leader = brep::Curve::Polyline { points: vec![[0.; 3], [1., 0., 0.]] };
+    assert!(matches!(C3::of_edge(&bounded_edge(traced(leader), None, [0., 1.])), Err(HlrError::Unsupported("surface intersection curve"))));
+}
+
+#[test]
+fn a_faces_chart_is_where_its_form_lies_on_its_label() {
+    // A torus face from a tube start of 0.3: the chart's second coordinate is the tube angle, a
+    // third of the way up the tube from there, whichever way round the frame's angle counts.
+    let frame = frame_at([1., 0., 0.]);
+    let label = brep::Surface::Torus { frame, major_radius: 20., minor_radius: 5., tube_start: 0.3 };
+    let (form, domain) = brep::form::surface(&label, [[-0.5, 1.], [0.2, 2.]]).unwrap();
+    let face = brep::Face { surface: label, nurbs: Some(form.clone()), domain, loops: Vec::new() };
+    let s = S3::of_face(&face).unwrap();
+    let [angle, tube] = s.domain();
+    assert!((angle[0] + 0.5).abs() < 1e-12 && (angle[1] - 1.).abs() < 1e-12, "{angle:?}");
+    assert!((tube[0] - 0.5).abs() < 1e-12 && (tube[1] - 2.3).abs() < 1e-12, "{tube:?}");
+    let eval = brep::eval::SurfaceEval::new(&form).unwrap();
+    let p = eval.point([0.5 * (domain[0][0] + domain[0][1]), 0.5 * (domain[1][0] + domain[1][1])]).unwrap();
+    let uv = s.inverse(p, None).unwrap();
+    assert!(s.point(uv).dist(p) < 1e-9, "{uv:?}");
+    // A whole turn comes to the periodic chart.
+    let label = brep::Surface::Cylinder { frame: frame_at([0.; 3]), radius: 2. };
+    let (form, domain) = brep::form::surface(&label, [[1., 1. + std::f64::consts::TAU], [-1., 3.]]).unwrap();
+    let s = S3::of_face(&brep::Face { surface: label, nurbs: Some(form), domain, loops: Vec::new() }).unwrap();
+    assert_eq!(s.periods()[0], Some(std::f64::consts::TAU));
+    assert!(s.point([0., 0.]).dist(Vec3::new(2., 0., -1.)) < 1e-12);
+    assert!(s.point([0., 1.]).dist(Vec3::new(2., 0., 3.)) < 1e-12);
+}
+
+#[test]
+fn a_form_turned_against_its_label_keeps_the_face_on_the_loops_side() {
+    // The north hemisphere, its form with u and v swapped so its natural normal points in: its
+    // loop, stored about that normal, runs the other way round the equator, and in a chart with
+    // both hemispheres (a recognised patch's would be) the face must still be the north one. The
+    // same loop on the unturned form is the south hemisphere's.
+    let tau = std::f64::consts::TAU;
+    let half = std::f64::consts::FRAC_PI_2;
+    let label = brep::Surface::Sphere { frame: frame_at([0.; 3]), radius: 10. };
+    let chart = S3::bounded(&label, [[0., tau], [-half, half]]).unwrap();
+    let circle = brep::Curve::Circle { frame: frame_at([0.; 3]), radius: 10. };
+    let (edge_form, interval) = brep::form::curve(&circle, [0., tau]).unwrap();
+    let edge = bounded_edge(circle, Some(edge_form), interval);
+    let curves = vec![C3::of_edge(&edge).unwrap().0];
+    let backward = brep::Loop::Edges {
+        edges: vec![brep::OrientedEdge {
+            edge: 0,
+            forward: false,
+            pcurve: brep::Curve2::Spline { knots: vec![interval[0], interval[0], interval[1], interval[1]], points: vec![[0., 0.], [1., 0.]] },
+        }],
+    };
+    let (form, domain) = brep::form::surface(&label, [[0., tau], [0., half]]).unwrap();
+    let brep::Surface::RationalSpline { u_knots, v_knots, homogeneous } = form.clone() else { panic!("a sphere's form is rational") };
+    let columns = homogeneous[0].len();
+    let swapped = (0..columns).map(|j| homogeneous.iter().map(|row| row[j]).collect()).collect();
+    let turned = brep::Face {
+        surface: label.clone(),
+        nurbs: Some(brep::Surface::RationalSpline { u_knots: v_knots, v_knots: u_knots, homogeneous: swapped }),
+        domain: [domain[1], domain[0]],
+        loops: vec![backward.clone()],
+    };
+    assert_eq!(turned.form_turns(), Some(true));
+    let north = trim::build(&turned, &curves, &chart, 64);
+    assert_eq!((north.contains([1., 1.]), north.contains([1., -1.])), (Some(true), Some(false)));
+    let (form, domain) = brep::form::surface(&label, [[0., tau], [-half, 0.]]).unwrap();
+    let plain = brep::Face { surface: label, nurbs: Some(form), domain, loops: vec![backward] };
+    assert_eq!(plain.form_turns(), Some(false));
+    let south = trim::build(&plain, &curves, &chart, 64);
+    assert_eq!((south.contains([1., 1.]), south.contains([1., -1.])), (Some(false), Some(true)));
+}
+
+#[test]
+fn an_edge_no_face_uses_is_drawn_like_any_other() {
+    // A wire beside a box, in the box's shell.
+    let mut b = cuboid([0.; 3], [1.; 3]);
+    let v = b.shells[0].vertices.len() as u32;
+    b.shells[0].vertices.extend([[3., 0., 0.], [3., 0., 1.]]);
+    b.shells[0].edges.push(Edge { vertices: [v, v + 1], curve: Curve::Line { start: [3., 0., 0.], end: [3., 0., 1.] } });
+    let def = prepare(&b, &Options::default()).unwrap();
+    assert_eq!(def.report.edges, 13);
+    let view = View::new(Vec3::new(0., 1., 0.), Vec3::new(0., 0., 1.)).unwrap();
+    let d = hidden_lines(&[def], &[identity(0, [0.; 3])], &view, &Options::default(), &never).unwrap();
+    assert!(edge_line(&d, 0, 12).pieces.iter().all(|p| p.visibility == Visibility::Visible), "{d:?}");
+}
