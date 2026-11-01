@@ -34,8 +34,7 @@ pub const MAX_ROWS: usize = 10_000;
 pub const MAX_COLUMNS: usize = 64;
 /// The most bytes of text a table and its rows may hold in all.
 pub const MAX_TEXT_BYTES: usize = 1 << 20;
-/// What a cell shows for a row field its row doesn't have.
-pub const MISSING: &str = "-";
+pub use crate::cell::MISSING;
 /// The distance between baselines, in cap heights: ISO 3098-0's line spacing.
 pub const LINE_PITCH: f64 = 10.0 / 7.0;
 /// The longest row key, row field key or field.

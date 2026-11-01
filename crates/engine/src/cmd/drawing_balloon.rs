@@ -71,7 +71,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
     let balloon = Balloon { id, view, edge, at: request.at };
     s.edit_drawing(ADD, |d| {
-        d.add_balloons([Arc::new(balloon)]);
+        d.balloons.add([Arc::new(balloon)]);
         Ok(())
     })?;
     answer(s, ADD, id)
@@ -81,7 +81,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let request: EditParams = crate::schema::read(EDIT, p)?;
     let id = request.balloon.0;
     let changed = s.edit_drawing(EDIT, |d| {
-        let at = d.balloon_index(id).ok_or_else(|| bad(EDIT, format!("the drawing has no balloon {}", ids::encode(id))))?;
+        let at = d.balloons.index_of(id).ok_or_else(|| bad(EDIT, format!("the drawing has no balloon {}", ids::encode(id))))?;
         let Some(balloon) = d.balloons.get_mut(at).map(Arc::make_mut) else { return Ok(Vec::new()) };
         let moved = request.set.at.filter(|place| *place != balloon.at);
         if let Some(place) = moved {
@@ -101,7 +101,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
 /// Balloon `id` of the open drawing as the model has it now.
 fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     let d = s.drawing(cmd)?;
-    let balloon = d.balloon(id).ok_or_else(|| bad(cmd, format!("the drawing has no balloon {}", ids::encode(id))))?;
+    let balloon = d.balloons.by_id(id).ok_or_else(|| bad(cmd, format!("the drawing has no balloon {}", ids::encode(id))))?;
     let resolved = s.doc.resolve_balloons(&s.model, d, &[id]).map_err(|e| bad(cmd, e.to_string()))?;
     let r = resolved.into_iter().next().ok_or_else(|| bad(cmd, format!("balloon {} wasn't read", ids::encode(id))))?;
     let (status, why, candidates) = status_words(r.status);

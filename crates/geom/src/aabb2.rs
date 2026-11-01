@@ -1,9 +1,12 @@
 //! A box in the plane, the 2D [`crate::Aabb3`].
 
+use serde::{Deserialize, Serialize};
+
 use crate::Vec2;
 
 /// Axis-aligned box in the plane; [`Aabb2::EMPTY`] (low +∞, high −∞) holds nothing.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Aabb2 {
     pub min: Vec2,
     pub max: Vec2,
@@ -65,6 +68,11 @@ impl Aabb2 {
     pub fn meets(&self, o: &Aabb2) -> bool {
         self.min.x <= o.max.x && o.min.x <= self.max.x && self.min.y <= o.max.y && o.min.y <= self.max.y
     }
+    /// Whether the two boxes share some area, not only an edge or a corner (never when either is
+    /// empty).
+    pub fn overlaps(&self, o: &Aabb2) -> bool {
+        self.min.x < o.max.x && o.min.x < self.max.x && self.min.y < o.max.y && o.min.y < self.max.y
+    }
     /// Where `p` sits in the box: (0, 0) at `min`, (1, 1) at `max`, each side taken as at least
     /// 1e-9 long so a flat box still divides.
     pub fn relative(&self, p: Vec2) -> Vec2 {
@@ -102,6 +110,9 @@ mod tests {
         assert!(Aabb2::EMPTY.inflated(1e9).is_empty() && !Aabb2::EMPTY.contains(Vec2::ZERO));
         let far = Aabb2 { min: Vec2::new(2.0, 0.0), max: Vec2::new(3.0, 1.0) };
         assert!(!b.meets(&far) && b.inflated(1.0).meets(&far) && !b.meets(&Aabb2::EMPTY));
+        let beside = Aabb2 { min: Vec2::new(1.0, 0.0), max: Vec2::new(2.0, 2.0) };
+        assert!(b.meets(&beside) && !b.overlaps(&beside), "an edge shared is no overlap");
+        assert!(b.inflated(0.5).overlaps(&beside) && !b.overlaps(&Aabb2::EMPTY) && !Aabb2::EMPTY.overlaps(&b));
         assert_eq!(b.union(&far).max, Vec2::new(3.0, 2.0));
         assert_eq!(b.relative(Vec2::new(0.0, 1.0)), Vec2::new(0.5, 0.5));
     }

@@ -2,6 +2,7 @@ use serde_json::json;
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
 use solidcraft_geom::drawing_sheet::{Margins, Orientation, PaperSize, SheetSize};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
+use solidcraft_geom::title_block::{Cell, CellKind, TextCell};
 
 use solidcraft_render::VisualStyle;
 
@@ -27,7 +28,7 @@ fn own_border() -> DrawingBorderProfile {
 /// tangent edges shown, with a 5 mm reference margin. On the front view, a dimension of each kind:
 /// between two corners, a placed copy's edge length along a direction, and an angle with its text
 /// given; and a balloon on the placed copy's top edge.
-fn plate() -> Drawing {
+pub(crate) fn plate() -> Drawing {
     let mut id_source = IdSource::seeded(SEED);
     let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
     let mut d = Drawing::new("Plate assembly", "en-GB", "Assembly", a3, Some(DrawingBorderProfile::iso()), &BTreeSet::new(), &mut id_source).unwrap();
@@ -40,6 +41,8 @@ fn plate() -> Drawing {
         name: "Bolt".into(),
         sheet: drawing_sheet::Sheet::standard(PaperSize::A4, Orientation::Portrait),
         border: Some(own_border()),
+        title_block: None,
+        title_block_overrides: BTreeMap::new(),
         dpi: 600.0,
         documents: Some(SheetComponent { source: plate_id, component: 0 }),
         excluded: Excluded { count: false, print: true },
@@ -88,7 +91,7 @@ fn plate() -> Drawing {
         d.add_dimensions([Arc::new(Dimension { id, view: front, kind, offset_mm: -10.0, text, decimals: 1, override_text, last_good: None })]);
     }
     let id = d.allocate_id(&mut id_source).unwrap();
-    d.add_balloons([Arc::new(Balloon { id, view: front, edge: edge("F1:front|F1:top"), at: [60.0, 45.0] })]);
+    d.balloons.add([Arc::new(Balloon { id, view: front, edge: edge("F1:front|F1:top"), at: [60.0, 45.0] })]);
     d.validate().unwrap();
     d
 }
@@ -309,6 +312,76 @@ fn a_sheets_drawing_space_is_inside_its_border_or_the_whole_paper() {
     let low = drawing_sheet::Sheet { size: SheetSize::Custom { sides_mm: [20.5, 297.0] }, ..d.sheets[0].sheet };
     let narrow = Sheet { sheet: low, ..(*d.sheets[0]).clone() };
     assert!(narrow.drawing_space().is_err(), "margins that leave no drawing space");
+}
+
+/// The most cells a block may have: 8 by 8 unlabelled cells of 20 x 6.75 mm, 160 x 54 mm in all.
+fn full_block() -> TitleBlock {
+    use solidcraft_geom::cell::{Content, Fit, HAlign, Part};
+    let cell = |i: usize| {
+        let (x, y) = ((i % 8) as f64 * 20.0 - 160.0, (i / 8) as f64 * 6.75);
+        let value = TextCell { content: Content(vec![Part::Text("-".into())]), cap_mm: 2.5, align: HAlign::Left, fit: Fit::default(), image: None };
+        Cell { name: format!("cell_{i}"), rect_mm: [x, y, x + 20.0, y + 6.75], label: None, kind: CellKind::Text(value) }
+    };
+    TitleBlock { size_mm: Vec2::new(160.0, 54.0), outline_line_mm: 0.7, cell_line_mm: 0.35, cells: (0..64).map(cell).collect() }
+}
+
+/// A sheet's title block is a copy saved with it, read back as it was and saved as the same bytes.
+/// A sheet without one saves as before, with no `title_block`, so an older drawing reads as one
+/// with none. A block needs a drawing border that holds it, and an unknown field is refused.
+#[test]
+fn a_sheets_title_block_is_a_copy_on_its_border() {
+    let mut d = plate();
+    assert!(!d.to_json().unwrap().contains("title_block"), "nothing saved for no block");
+    Arc::make_mut(&mut d.sheets[0]).title_block = Some(full_block());
+    let saved = d.to_json().unwrap();
+    let read = Drawing::from_json(&saved).unwrap();
+    assert_eq!(read, d);
+    assert_eq!(read.to_json().unwrap(), saved, "the same bytes");
+    let sheet = ids::encode(d.sheets[0].id);
+    let no_border = refused(&d, |v| v["sheets"][0]["border"] = Value::Null);
+    assert_eq!(no_border, format!("damaged drawing: sheet {sheet}: its title block sits on a drawing border, and it has none"));
+    // The A3 sheet's ISO border is 400 mm wide: a block as wide fits, one wider doesn't.
+    let wide = |width: f64| refused(&d, |v| v["sheets"][0]["title_block"]["size_mm"] = json!([width, 54.0]));
+    assert_eq!(wide(400.0), "read");
+    assert_eq!(wide(400.5), format!("damaged drawing: sheet {sheet}: title block: a title block fits inside the drawing border"));
+    let unknown = refused(&d, |v| v["sheets"][0]["title_block"]["colour"] = json!("red"));
+    assert!(unknown.starts_with("damaged drawing: unknown field `colour`"), "{unknown}");
+}
+
+/// A sheet's title block sits on its drawing border's lower-right corner: on A3 with the ISO
+/// border, (230, 10) to (410, 59); none without a block.
+#[test]
+fn a_sheets_title_block_outline() {
+    let mut d = Drawing::new(
+        "Outline",
+        "en",
+        "Sheet",
+        drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape),
+        Some(DrawingBorderProfile::iso()),
+        &BTreeSet::new(),
+        &mut IdSource::seeded(SEED),
+    )
+    .unwrap();
+    assert_eq!(d.sheets[0].title_block_outline().unwrap(), None);
+    Arc::make_mut(&mut d.sheets[0]).title_block = Some(solidcraft_geom::title_block::default_block());
+    let outline = d.sheets[0].title_block_outline().unwrap().unwrap();
+    assert_eq!((outline.min, outline.max), (Vec2::new(230.0, 10.0), Vec2::new(410.0, 59.0)));
+}
+
+/// The most a drawing's blocks can ask of every edit's check: 1000 sheets, each with a 64-cell block.
+#[test]
+fn a_thousand_sheets_of_full_blocks_are_checked() {
+    let mut id_source = IdSource::seeded(SEED);
+    let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
+    let mut d = Drawing::new("Blocks", "en", "Sheet", a3, Some(DrawingBorderProfile::iso()), &BTreeSet::new(), &mut id_source).unwrap();
+    Arc::make_mut(&mut d.sheets[0]).title_block = Some(full_block());
+    while d.sheets.len() < MAX_SHEETS {
+        let id = d.allocate_id(&mut id_source).unwrap();
+        d.sheets.push(Arc::new(Sheet { id, ..(*d.sheets[0]).clone() }));
+    }
+    let started = std::time::Instant::now();
+    d.validate().unwrap();
+    eprintln!("1000 sheets of 64-cell blocks checked in {:?}", started.elapsed());
 }
 
 /// What reading refuses: each damage the rules name, refused rather than patched, and files this

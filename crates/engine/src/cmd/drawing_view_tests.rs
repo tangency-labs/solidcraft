@@ -2,8 +2,10 @@ use std::sync::Arc;
 
 use serde_json::json;
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
+use solidcraft_doc::drawing::DEFAULT_DPI;
 use solidcraft_geom::cell::Projection;
 use solidcraft_geom::drawing_view::ProjectedSide;
+use solidcraft_geom::paper::NoPictures;
 
 use super::*;
 use crate::schema::tests::conforms;
@@ -855,7 +857,7 @@ fn strokes(v: &Value) -> Vec<(Vec<solidcraft_geom::Seg2>, bool, f64)> {
     items
         .filter_map(|item| match item {
             Item::Stroke { path, closed, width_mm } => Some((path, closed, width_mm)),
-            Item::Fill { .. } => None,
+            Item::Fill { .. } | Item::Picture(_) => None,
         })
         .collect()
 }
@@ -878,7 +880,7 @@ fn a_views_scene_is_its_visible_lines_as_strokes() {
     let length: f64 = strokes.iter().flat_map(|(path, _, _)| path).map(|seg| seg.start().dist(seg.end())).sum();
     assert!((length - 120.0).abs() < 1e-6, "{v}");
     let scene: solidcraft_geom::paper::Scene = serde_json::from_value(v["scene"].clone()).unwrap();
-    let (svg, _) = solidcraft_io::paper::paper_svg(&scene.prepare().unwrap()).unwrap();
+    let (svg, _) = solidcraft_io::paper::paper_svg(&scene.prepare().unwrap(), &NoPictures, DEFAULT_DPI).unwrap();
     let svg = String::from_utf8(svg).unwrap();
     let counts = (svg.matches("<g data-object=\"0\" data-kind=\"view\">").count(), svg.matches("<path").count());
     assert_eq!(counts, (1, strokes.len()), "{svg}");
