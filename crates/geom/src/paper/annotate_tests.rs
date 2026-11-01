@@ -22,12 +22,13 @@ fn drawn(item: &Item) -> (Vec<[i64; 4]>, bool, Option<f64>) {
     match item {
         Item::Stroke { path, closed, width_mm } => (ends(path), *closed, Some(*width_mm)),
         Item::Fill { region } => (ends(&region.outer.segs), true, None),
+        Item::Text(_) => panic!("an annotation draws no text"),
     }
 }
 
 /// The items on an A3 sheet pass the paper scene's own checks.
 fn valid(items: Vec<Item>) {
-    Scene { size_mm: p(420.0, 297.0), groups: vec![Group { object: 1, kind: ObjectKind::DrawingBorder, items }] }.validate().unwrap();
+    Scene::new(p(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::DrawingBorder, items }]).validate().unwrap();
 }
 
 fn arrow(shape: ArrowShape, length_mm: f64, angle: f64) -> Terminator {

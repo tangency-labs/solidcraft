@@ -146,7 +146,7 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
         certify(&drawn, max, scale)?;
     }
     let scene = if request.scene {
-        let scene = solidcraft_geom::paper::Scene { size_mm: paper, groups: vec![crate::drawing_view::paper_group(&drawn, 0)] };
+        let scene = solidcraft_geom::paper::Scene::new(paper, vec![crate::drawing_view::paper_group(&drawn, 0)]);
         scene.validate().map_err(|e| bad(CMD, format!("{e}: raise chord_mm, or choose a smaller view")))?;
         Some(SceneResult(scene))
     } else {

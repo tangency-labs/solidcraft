@@ -57,6 +57,7 @@ pub fn paper_svg(scene: &Prepared) -> Result<(Vec<u8>, SvgReport)> {
             match item {
                 Item::Stroke { path, closed, width_mm } => w.stroke(path, *closed, *width_mm)?,
                 Item::Fill { region } => w.fill(region)?,
+                Item::Text(_) => return Err(IoError::Invalid("not supported yet: text in an SVG (#4890 B2)".into())),
             }
             if w.out.len() > MAX_DRAWING_BYTES {
                 return Err(IoError::Invalid(format!("the SVG would be over {} MiB", MAX_DRAWING_BYTES >> 20)));
