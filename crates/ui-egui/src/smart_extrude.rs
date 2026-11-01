@@ -31,6 +31,9 @@ pub struct Smart {
     pub latch: Option<(usize, i8)>,
     /// The To Object target the distance was last set from.
     pub target: Option<Sel>,
+    /// The profiles the taper handle's limits were last worked out for, and their radii
+    /// (`canvas::taper_radii`): too slow to work out every frame on a profile with many holes.
+    pub taper_radii: Option<(Vec<solidcraft_engine::geom::Region2>, (f64, f64))>,
     /// Where the extrude starts (its From Object and start offset) when the latch was decided.
     pub start: serde_json::Value,
     /// The bodies shown when the latch was decided (None: every one), as `shown_scope` gives them.

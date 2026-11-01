@@ -614,7 +614,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let mut dir = dir;
     // Extrude taper: a handle beside the arrow tip; dragging it sideways tilts the walls.
     let cam_right = app.cam.basis().0;
-    if let (Kind::Extrude { direction: 0 | 1, distance, taper, taper_present, to_offset, .. }, Some(n)) = (&mut d.kind, dir) {
+    if let (Kind::Extrude { direction: 0 | 1, distance, taper, taper_present, to_offset, smart, .. }, Some(n)) = (&mut d.kind, dir) {
         let n = n * sign;
         let span =
             to_span.map(|span| span.abs() + crate::length_input::eval(&app.session.doc, to_offset, ValueKind::Length).unwrap_or(0.0)).or(all_span);
@@ -638,7 +638,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                     _ => None,
                 })
                 .collect();
-            let limits = taper_limits(&regions, l.abs());
+            let limits = taper_limits(taper_radii_kept(&mut smart.taper_radii, &regions), l.abs());
             taper_handle(ui, painter, proj, base - e * (40.0 * px), n * l, -e, ang, limits, taper);
             if *taper != before {
                 *taper_present = true;
@@ -1511,19 +1511,57 @@ fn measure_components(
     }
 }
 
-/// The tapers (degrees, least and most) a drag of the taper handle may reach for `regions`
-/// extruded `height` (#1602): going in, the sides close the material where they have moved its
-/// inradius; going out, they close the smallest hole. Each stops just short, so the drag ends at
-/// the largest taper that builds instead of one that fails. A typed angle is not limited.
-pub(crate) fn taper_limits(regions: &[&solidcraft_engine::geom::Region2], height: f64) -> (f64, f64) {
+/// The tapers (degrees, least and most) a drag of the taper handle may reach for profiles of
+/// `radii` ([`taper_radii`]) extruded `height` (#1602): going in, the sides close the material
+/// where they have moved its inradius; going out, they close the smallest hole. Each stops just
+/// short, so the drag ends at the largest taper that builds instead of one that fails. A typed
+/// angle is not limited.
+pub(crate) fn taper_limits((inward, outward): (f64, f64), height: f64) -> (f64, f64) {
     const MAX: f64 = 89.0;
-    if !(height > 1e-9) || regions.is_empty() {
+    if !(height > 1e-9) {
         return (-MAX, MAX);
     }
     let at = |r: f64| (0.99 * r / height).atan().to_degrees().min(MAX);
+    (if inward.is_finite() { -at(inward) } else { -MAX }, if outward.is_finite() { at(outward) } else { MAX })
+}
+
+/// The smallest inradius of `regions` and of their holes (infinite for none), which
+/// [`taper_limits`] turns into angles. A grid search over every side of every loop, so the
+/// extrude window keeps it while its profiles stay the same ([`taper_radii_kept`]).
+pub(crate) fn taper_radii(regions: &[&solidcraft_engine::geom::Region2]) -> (f64, f64) {
+    #[cfg(test)]
+    TAPER_RADII_WORKED_OUT.with(|n| n.set(n.get() + 1));
     let inward = regions.iter().map(|r| r.inradius(1e-3)).fold(f64::INFINITY, f64::min);
     let outward = regions.iter().flat_map(|r| &r.holes).map(|h| h.inradius(1e-3)).fold(f64::INFINITY, f64::min);
-    (if inward.is_finite() { -at(inward) } else { -MAX }, if outward.is_finite() { at(outward) } else { MAX })
+    (inward, outward)
+}
+
+/// [`taper_radii`] of `regions`, worked out again only when they differ from the ones `kept`
+/// holds: the extrude window draws its taper handle every frame, and only the height changes.
+fn taper_radii_kept(
+    kept: &mut Option<(Vec<solidcraft_engine::geom::Region2>, (f64, f64))>,
+    regions: &[&solidcraft_engine::geom::Region2],
+) -> (f64, f64) {
+    if let Some((was, radii)) = kept
+        && was.len() == regions.len()
+        && was.iter().zip(regions).all(|(a, b)| a == *b)
+    {
+        return *radii;
+    }
+    let radii = taper_radii(regions);
+    *kept = Some((regions.iter().map(|r| (*r).clone()).collect(), radii));
+    radii
+}
+
+#[cfg(test)]
+thread_local! {
+    static TAPER_RADII_WORKED_OUT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How often the taper handle's radii were worked out on this thread.
+#[cfg(test)]
+pub(crate) fn taper_radii_worked_out() -> usize {
+    TAPER_RADII_WORKED_OUT.with(std::cell::Cell::get)
 }
 
 /// The taper handle: a line from `foot` along the extrude (`span`) leaning by `angle` towards
@@ -2071,7 +2109,7 @@ mod tests {
 
 #[cfg(test)]
 mod taper_limit_tests {
-    use super::taper_limits;
+    use super::{taper_limits, taper_radii};
     use solidcraft_engine::geom::{Loop2, Region2, Vec2};
 
     /// #1602: a drag stops just short of the taper that closes the profile, either way.
@@ -2084,16 +2122,16 @@ mod taper_limit_tests {
             outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 4.0), Vec2::new(0.0, 4.0)]),
             holes: Vec::new(),
         };
-        let (lo, hi) = taper_limits(&[&rect], 26.0);
+        let (lo, hi) = taper_limits(taper_radii(&[&rect]), 26.0);
         assert!(close(lo, -deg(2.0, 26.0)) && hi == 89.0, "{lo} {hi}");
         // A ring 10 to 6, 10 high: in, its 4 mm wall; out, its hole of radius 6.
         let ring = Region2 { outer: Loop2::circle(Vec2::ZERO, 10.0), holes: vec![Loop2::circle(Vec2::ZERO, 6.0).reversed()] };
-        let (lo, hi) = taper_limits(&[&ring], 10.0);
+        let (lo, hi) = taper_limits(taper_radii(&[&ring]), 10.0);
         assert!(close(lo, -deg(2.0, 10.0)) && close(hi, deg(6.0, 10.0)), "{lo} {hi}");
         // The tightest of several profiles; no profile or no height, no limit.
-        let (lo, _) = taper_limits(&[&ring, &rect], 10.0);
+        let (lo, _) = taper_limits(taper_radii(&[&ring, &rect]), 10.0);
         assert!(close(lo, -deg(2.0, 10.0)));
-        assert_eq!(taper_limits(&[], 10.0), (-89.0, 89.0));
-        assert_eq!(taper_limits(&[&rect], 0.0), (-89.0, 89.0));
+        assert_eq!(taper_limits(taper_radii(&[]), 10.0), (-89.0, 89.0));
+        assert_eq!(taper_limits(taper_radii(&[&rect]), 0.0), (-89.0, 89.0));
     }
 }
