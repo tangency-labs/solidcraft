@@ -839,6 +839,20 @@ pub struct UpstreamFixes {
     pub fillet_through_extended_rail_end: bool,
     /// `SmFace::ComputePreciseProperties` scales the volume and moment error bounds by the body size (ten times the root of the estimated area, or the origin's distance when larger), not 1.0.1's tenth of it, so the integration converges at tight accuracies instead of returning `SM_ERR` (WR-472; the SolidCraft fork's tangency-labs/smlib@073d4740).
     pub precise_properties_body_length_scale: bool,
+    /// `SmIntegrator::IntegrateIt` ([`crate::mass::integrator::integrate_with_kernel`],
+    /// [`crate::mass::integrator::integrate_opt_in`]) propagates a non-`SM_SUCCESS`
+    /// status from `RungeKuttaODEIntegrate` (an evaluator error such as `SM_ERR`,
+    /// non-finite derivative or control, unachievable accuracy such as `0.0`, step
+    /// underflow below `minimum_step`, or exceeding `max_steps`) instead of setting the
+    /// scalar result to `0.0` and returning `SM_SUCCESS`, and `SmCurve::Length`
+    /// ([`crate::curve::curve::Curve::length`]) and `SmAreaIFEO::Evaluate`
+    /// (`SmAreaIntegrand::Evaluate`, [`crate::surface::surface::p1::AreaIntegrand::evaluate`])
+    /// forward the kernel's setting so failed span or strip integrals propagate instead
+    /// of silently dropping to `0.0` (WR-94, #2157;
+    /// `plan/upstream-issues/WR-94--addendum-2026-10-31-propagate-integration-failure.md`).
+    /// Degenerate intervals shorter than `SM_EFF_ZERO` still return `0.0` without
+    /// evaluating. Off by default for pinned C++ parity.
+    pub integrator_propagates_failure: bool,
     /// `SmFace::ComputePreciseProperties` integrates each UV trim curve piece by piece between its knots and its crossings of the surface's u knot lines, and each iso-u integral of `SmODEAreaIFEO` piece by piece between the surface's v knots, so no Runge-Kutta step crosses a knot of a B-spline surface (a NURB cylinder's, sphere's or torus's rational-circle double knots) where the integrand's derivatives jump and the step's error estimate does not bound its error; the requested accuracy then holds at 1e-8 (WR-494, #1435; the SolidCraft fork's tangency-labs/smlib@08d9a14).
     pub precise_properties_split_at_surface_knots: bool,
     /// With `precise_properties_split_at_surface_knots`, each iso-u piece of `SmODEAreaIFEO` evaluates the surface at its end from the knot span below it (`bVFromLeft = FALSE`), not the span above (upstream's `TRUE`, kept by the fork's tangency-labs/smlib@08d9a14): where the piece stops at a v knot with a derivative jump (a G2-not-C2 loft merged into one face across its 19 spans, #2091), the integrand's last point came from the next span, the Runge-Kutta steps shrank toward every knot, and each piece took about 5x the evaluations it needs: the #2091 model's precise volume took 26.7 s, 5.8 s with this fix (WR-670, #2091). No effect without `precise_properties_split_at_surface_knots`.

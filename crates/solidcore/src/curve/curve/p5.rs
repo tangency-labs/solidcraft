@@ -79,7 +79,8 @@
 //!   matrix, an upstream assert, could tell). Option vectors that upstream reads
 //!   without a `NULL` check are `InvalidInput` when missing.
 //! - **Length.** Spans of degree above 1 use the ported `SmIntegrator` (unit
-//!   `mass.integrator`). `Length` needs the
+//!   `mass.integrator`; with `Kernel::fixes.integrator_propagates_failure`, WR-94,
+//!   failed span integrals propagate instead of contributing zero). `Length` needs the
 //!   kernel (the cache tessellation reads its tolerances).
 //! - **Out-params.** Flags with outputs are `Option`s (`IsLine`: point and vector;
 //!   `IsArc`: frame, radius, start and end angle; the guesses); `IsLinear`'s
@@ -1805,7 +1806,9 @@ impl Curve {
     ///
     /// # Errors
     ///
-    /// Those of the length estimate and of the degree query;
+    /// Those of the length estimate and of the degree query (and of the span
+    /// integration when [`crate::kernel::UpstreamFixes::integrator_propagates_failure`]
+    /// is enabled, WR-94);
     /// [`SolidError::Unported`] from the tessellation or curve evaluator, and for an
     /// edge's curve borrowed from its record (`SmTol::GetZoneTol3d`: the cache's
     /// tolerance is the edge's, which the curve cannot reach; use
@@ -1893,7 +1896,8 @@ impl Curve {
             // Greater than degree 1 if make it to here
             // Do an integration to get the length of the
             // first derivatives integrated over the entire curve.
-            total_length += crate::mass::integrator::integrate(
+            total_length += crate::mass::integrator::integrate_with_kernel(
+                k,
                 seg_ivl.min(),
                 seg_ivl.max(),
                 crate::mass::integrator::IntegrationAlgorithm::Romberg,

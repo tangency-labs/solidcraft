@@ -3949,11 +3949,15 @@ impl AreaIntegrand<'_> {
     ///
     /// # Errors
     ///
-    /// Those of the surface evaluator; scalar numerical failures yield zero upstream.
+    /// [`SolidError::Unported`] from the surface evaluator, plus numerical and
+    /// surface-evaluator failures when
+    /// [`crate::kernel::UpstreamFixes::integrator_propagates_failure`] is enabled
+    /// (WR-94; off by default, where scalar failures yield zero as upstream does).
     pub fn evaluate(&self, k: &Kernel, t: f64) -> Result<f64> {
         // set up the strip integral of [deltaX, IntervalY]
         let eval = IsoCurveLengthIntegrand::new(self.surface, t);
-        crate::mass::integrator::integrate(
+        crate::mass::integrator::integrate_with_kernel(
+            k,
             self.uv_domain.min().y,
             self.uv_domain.max().y,
             crate::mass::integrator::IntegrationAlgorithm::Romberg,

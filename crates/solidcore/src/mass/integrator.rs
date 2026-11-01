@@ -4,7 +4,7 @@
 //!
 //! | Rust | Upstream |
 //! |------|----------|
-//! | [`integrate`] | `SmIntegrator::IntegrateIt`, `SmODEEval` |
+//! | [`integrate`], [`integrate_with_kernel`], [`integrate_opt_in`] | `SmIntegrator::IntegrateIt`, `SmODEEval` |
 //! | [`OdeIntegrator`] | `SmODEIntegrator` |
 //! | [`OdeIntegrator::integrate`] | `RungeKuttaODEIntegrate` |
 //! | [`OdeIntegrator::step`] | `RungeKutta5thOrderStep`, `RungeKuttaCashKarpAdvance` |
@@ -12,7 +12,11 @@
 //! Deviations: closures replace evaluator subclasses; component arrays are zero-based;
 //! out-parameters become return values. Like upstream, integration starts at zero
 //! regardless of the initial values (except its early return), and scalar integration
-//! returns zero on numerical failure. Unported callees still propagate. Algorithm
+//! returns zero on numerical failure by default; with
+//! [`crate::kernel::UpstreamFixes::integrator_propagates_failure`] / [`integrate_opt_in`]
+//! (WR-94) failures from [`OdeIntegrator::integrate`] propagate instead, while intervals
+//! shorter than `EFF_ZERO` still return zero without evaluating. Unported callees always
+//! propagate. Algorithm
 //! selection is ignored upstream. Disabled Romberg/Simpson and Bulirsch–Stoer paths
 //! are not exposed. No recursion; dimensions are bounded at 4096, steps at 1,000,000,
 //! and rejected step retries at 1024 to bound malformed caller input. Infinite error
@@ -23,7 +27,7 @@
 
 use crate::geom::tol::are_same;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ};
-use crate::{Result, SolidError};
+use crate::{Kernel, Result, SolidError};
 
 const OP: &str = "mass::integrator";
 const MAX_COMPONENTS: usize = 4096;
@@ -449,11 +453,58 @@ where
 /// `SmIntegrator::IntegrateIt`. Numerical/evaluator failure yields `Ok(0.0)` as
 /// upstream does; an unported evaluator is always propagated for differential coverage.
 /// Intervals shorter than `EFF_ZERO` return zero without evaluating the function.
+///
+/// Use [`integrate_with_kernel`] or [`integrate_opt_in`] to honour
+/// [`crate::kernel::UpstreamFixes::integrator_propagates_failure`] (WR-94).
 pub fn integrate<F>(
+    a: f64,
+    b: f64,
+    algorithm: IntegrationAlgorithm,
+    accuracy: f64,
+    evaluate: F,
+) -> Result<f64>
+where
+    F: FnMut(f64) -> Result<f64>,
+{
+    integrate_opt_in(a, b, algorithm, accuracy, false, evaluate)
+}
+
+/// [`integrate`] reading `k.fixes.integrator_propagates_failure` (WR-94).
+pub fn integrate_with_kernel<F>(
+    k: &Kernel,
+    a: f64,
+    b: f64,
+    algorithm: IntegrationAlgorithm,
+    accuracy: f64,
+    evaluate: F,
+) -> Result<f64>
+where
+    F: FnMut(f64) -> Result<f64>,
+{
+    integrate_opt_in(
+        a,
+        b,
+        algorithm,
+        accuracy,
+        k.fixes.integrator_propagates_failure,
+        evaluate,
+    )
+}
+
+/// `SmIntegrator::IntegrateIt` with explicit failure-propagation control (WR-94).
+///
+/// Intervals shorter than `EFF_ZERO` return `Ok(0.0)` without evaluating `evaluate`.
+/// When `propagate_failure` is `true`, any error returned by
+/// [`OdeIntegrator::integrate`] (an evaluator error, non-finite derivative or control,
+/// unachievable accuracy, step underflow below `minimum_step`, or exceeding `max_steps`)
+/// is returned instead of being hidden as `Ok(0.0)`. [`SolidError::Unported`] always
+/// propagates regardless of `propagate_failure`.
+pub fn integrate_opt_in<F>(
     a: f64,
     b: f64,
     _algorithm: IntegrationAlgorithm,
     accuracy: f64,
+    propagate_failure: bool,
     mut evaluate: F,
 ) -> Result<f64>
 where
@@ -477,7 +528,7 @@ where
         Ok(())
     }) {
         Ok(_) => Ok(y.into_iter().next().unwrap_or(0.0)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported() || propagate_failure => Err(e),
         Err(_) => Ok(0.0),
     }
 }
@@ -577,6 +628,319 @@ mod tests {
             ))
             .unwrap_err()
             .is_unported()
+        );
+    }
+
+    #[test]
+    fn wr94_zero_accuracy_and_evaluator_error_propagate_under_opt_in() {
+        let k_default = Kernel::default();
+        let mut k_fix = Kernel::default();
+        k_fix.fixes.integrator_propagates_failure = true;
+
+        // Zero, negative, and NaN accuracy fail inside OdeIntegrator; default hides as 0.0.
+        for bad_accuracy in [0.0, -1e-6, f64::NAN] {
+            assert_eq!(
+                integrate(
+                    0.0,
+                    1.0,
+                    IntegrationAlgorithm::Romberg,
+                    bad_accuracy,
+                    |_| Ok(1.0),
+                )
+                .unwrap(),
+                0.0
+            );
+            assert_eq!(
+                integrate_opt_in(
+                    0.0,
+                    1.0,
+                    IntegrationAlgorithm::Romberg,
+                    bad_accuracy,
+                    false,
+                    |_| Ok(1.0),
+                )
+                .unwrap(),
+                0.0
+            );
+            assert_eq!(
+                integrate_with_kernel(
+                    &k_default,
+                    0.0,
+                    1.0,
+                    IntegrationAlgorithm::Romberg,
+                    bad_accuracy,
+                    |_| Ok(1.0),
+                )
+                .unwrap(),
+                0.0
+            );
+            assert!(integrate_opt_in(
+                0.0,
+                1.0,
+                IntegrationAlgorithm::Romberg,
+                bad_accuracy,
+                true,
+                |_| Ok(1.0),
+            )
+            .is_err());
+            assert!(integrate_with_kernel(
+                &k_fix,
+                0.0,
+                1.0,
+                IntegrationAlgorithm::Romberg,
+                bad_accuracy,
+                |_| Ok(1.0),
+            )
+            .is_err());
+        }
+
+        // Evaluator failing partway through [0.0, 1.0] and evaluator returning NaN/Inf.
+        let partial_err = |t: f64| {
+            if t > 0.4 {
+                Err(SolidError::sm_err("test"))
+            } else {
+                Ok(1.0)
+            }
+        };
+        assert_eq!(
+            integrate_with_kernel(
+                &k_default,
+                0.0,
+                1.0,
+                IntegrationAlgorithm::Romberg,
+                1e-6,
+                partial_err,
+            )
+            .unwrap(),
+            0.0
+        );
+        assert_eq!(
+            integrate_with_kernel(
+                &k_fix,
+                0.0,
+                1.0,
+                IntegrationAlgorithm::Romberg,
+                1e-6,
+                partial_err,
+            )
+            .unwrap_err()
+            .sm_status(),
+            Some(crate::error::SM_ERR)
+        );
+        for non_finite in [f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                integrate_with_kernel(
+                    &k_default,
+                    0.0,
+                    1.0,
+                    IntegrationAlgorithm::Romberg,
+                    1e-6,
+                    |_| Ok(non_finite),
+                )
+                .unwrap(),
+                0.0
+            );
+            assert_eq!(
+                integrate_with_kernel(
+                    &k_fix,
+                    0.0,
+                    1.0,
+                    IntegrationAlgorithm::Romberg,
+                    1e-6,
+                    |_| Ok(non_finite),
+                )
+                .unwrap_err()
+                .sm_status(),
+                Some(crate::error::SM_ERR)
+            );
+        }
+
+        // Unported evaluators always propagate regardless of the flag.
+        for k in [&k_default, &k_fix] {
+            assert!(integrate_with_kernel(
+                k,
+                0.0,
+                1.0,
+                IntegrationAlgorithm::Romberg,
+                1e-6,
+                |_| Err(SolidError::unported("test", "test")),
+            )
+            .unwrap_err()
+            .is_unported());
+        }
+
+        // Degenerate intervals shorter than EFF_ZERO return Ok(0.0) without calling evaluate.
+        for k in [&k_default, &k_fix] {
+            for (a, b) in [(2.0, 2.0), (2.0, 2.0 + 0.5 * EFF_ZERO)] {
+                assert_eq!(
+                    integrate_with_kernel(k, a, b, IntegrationAlgorithm::Romberg, 0.0, |_| {
+                        panic!("degenerate interval must not evaluate")
+                    })
+                    .unwrap(),
+                    0.0
+                );
+            }
+        }
+
+        // Valid integrals agree bit-for-bit in both modes (including reversed bounds).
+        for (a, b, expected) in [(0.0, 2.0, 8.0), (2.0, 0.0, -8.0)] {
+            let v_def =
+                integrate_with_kernel(&k_default, a, b, IntegrationAlgorithm::Romberg, 1e-8, |t| {
+                    Ok(3.0 * t * t)
+                })
+                .unwrap();
+            let v_fix =
+                integrate_with_kernel(&k_fix, a, b, IntegrationAlgorithm::Romberg, 1e-8, |t| {
+                    Ok(3.0 * t * t)
+                })
+                .unwrap();
+            assert_eq!(v_def, v_fix);
+            assert!((v_def - expected).abs() < 1e-12, "{v_def} vs {expected}");
+        }
+    }
+
+    #[test]
+    fn wr94_curve_length_and_surface_area_propagate_failure() {
+        use crate::curve::curve::Curve;
+        use crate::curve::ellipse::Ellipse;
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::geom::extent2d::Extent2d;
+        use crate::math::{Point3, Vec3, PI, SQRT3};
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::surface::sphere::{Sphere, SphereOptions};
+        use crate::surface::surface::p1::AreaIntegrand;
+        use crate::surface::surface::Surface;
+
+        let k_default = Kernel::default();
+        let mut k_fix = Kernel::default();
+        k_fix.fixes.integrator_propagates_failure = true;
+
+        // Curved B-spline-derived Curve::length (radius-2 circle, circumference 4 * PI).
+        let circle = Curve::from(
+            Ellipse::create_canonical_circle(
+                &k_default,
+                &Axis2Placement::IDENTITY,
+                2.0,
+                None,
+                None,
+            )
+            .unwrap(),
+        );
+        let ivl = circle.natural_interval();
+        assert_eq!(circle.length(&k_default, &ivl, 0.0).unwrap(), 0.0);
+        assert!(circle.length(&k_fix, &ivl, 0.0).is_err());
+
+        let len_def = circle.length(&k_default, &ivl, 1e-8).unwrap();
+        let len_fix = circle.length(&k_fix, &ivl, 1e-8).unwrap();
+        assert_eq!(len_def, len_fix);
+        assert!(
+            (len_def - 4.0 * PI).abs() < 1e-7,
+            "circle length {len_def} vs {}",
+            4.0 * PI
+        );
+
+        // Curved Surface patch via AreaIntegrand::evaluate and outer integrate_with_kernel:
+        // a 90 deg x 60 deg patch on a sphere of radius 2 has area PI * sqrt(3).
+        let mut sphere = Sphere::new(
+            &k_default,
+            Point3::ZERO,
+            Vec3::X,
+            Vec3::Y,
+            Extent2d::from_bounds(0.0, 0.0, 90.0, 60.0),
+            2.0,
+            SphereOptions::default(),
+        )
+        .unwrap();
+        sphere.make_nurb(&k_default).unwrap();
+        let surface = Surface::from(sphere);
+        let dom = surface.natural_uv_domain_if_built();
+        let mid_u = 0.5 * (dom.min().x + dom.max().x);
+
+        let bad_inner = AreaIntegrand {
+            surface: &surface,
+            uv_domain: dom,
+            iso_curve_accuracy: 0.0,
+        };
+        assert_eq!(bad_inner.evaluate(&k_default, mid_u).unwrap(), 0.0);
+        assert!(bad_inner.evaluate(&k_fix, mid_u).is_err());
+        assert_eq!(
+            integrate_with_kernel(
+                &k_default,
+                dom.min().x,
+                dom.max().x,
+                IntegrationAlgorithm::Romberg,
+                1e-6,
+                |u| bad_inner.evaluate(&k_default, u),
+            )
+            .unwrap(),
+            0.0
+        );
+        assert!(integrate_with_kernel(
+            &k_fix,
+            dom.min().x,
+            dom.max().x,
+            IntegrationAlgorithm::Romberg,
+            1e-6,
+            |u| bad_inner.evaluate(&k_fix, u),
+        )
+        .is_err());
+
+        // Surface evaluator failure (an uninitialised BSplineSurface without a NURB).
+        let missing_nurb = Surface::from(BSplineSurface::new());
+        let bad_surface = AreaIntegrand {
+            surface: &missing_nurb,
+            uv_domain: Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+            iso_curve_accuracy: 1e-6,
+        };
+        assert_eq!(bad_surface.evaluate(&k_default, 0.5).unwrap(), 0.0);
+        assert!(bad_surface.evaluate(&k_fix, 0.5).is_err());
+
+        // Valid accuracies yield identical positive strip and patch areas.
+        let ok_area = AreaIntegrand {
+            surface: &surface,
+            uv_domain: dom,
+            iso_curve_accuracy: 1e-8,
+        };
+        let strip_def = ok_area.evaluate(&k_default, mid_u).unwrap();
+        let strip_fix = ok_area.evaluate(&k_fix, mid_u).unwrap();
+        assert_eq!(strip_def, strip_fix);
+        assert!(strip_def > 0.0);
+
+        let area_def = integrate_with_kernel(
+            &k_default,
+            dom.min().x,
+            dom.max().x,
+            IntegrationAlgorithm::Romberg,
+            1e-6,
+            |u| ok_area.evaluate(&k_default, u),
+        )
+        .unwrap();
+        let area_fix = integrate_with_kernel(
+            &k_fix,
+            dom.min().x,
+            dom.max().x,
+            IntegrationAlgorithm::Romberg,
+            1e-6,
+            |u| ok_area.evaluate(&k_fix, u),
+        )
+        .unwrap();
+        assert_eq!(area_def, area_fix);
+        let expected_area = PI * SQRT3;
+        assert!(
+            (area_def - expected_area).abs() < 1e-5,
+            "patch area {area_def} vs {expected_area}"
+        );
+    }
+
+    #[test]
+    fn wr94_flag_lookup() {
+        let mut fixes = crate::kernel::UpstreamFixes::default();
+        assert!(!fixes.integrator_propagates_failure);
+        *fixes.flag_mut("integrator_propagates_failure").unwrap() = true;
+        assert!(fixes.integrator_propagates_failure);
+        assert_eq!(
+            fixes.flag_mut("integrator_propagates_failure").copied(),
+            Some(true)
         );
     }
 }
