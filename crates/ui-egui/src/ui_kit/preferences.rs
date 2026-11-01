@@ -564,8 +564,10 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
         }
     }
     let t = Tokens::get();
-    let width = t.form_label_width + t.space_24 * 2.0 + t.space_6;
-    let preview_height = t.space_24 * 3.0 + t.space_3;
+    let (width, preview_height) = match figure {
+        PreferenceFigure::UpAxis(_) => (t.space_24 * 6.0 + t.space_6, t.space_24 * 4.0 + t.space_2),
+        PreferenceFigure::Pivot(_) => (t.form_label_width + t.space_24 * 2.0 + t.space_6, t.space_24 * 3.0 + t.space_3),
+    };
     let label_height = t.space_16;
     let height = preview_height + t.space_6 * 2.0 + t.space_4 + label_height + if note.is_some() { t.space_16 } else { 0.0 };
     let enabled = enabled && ui.is_enabled();
@@ -593,7 +595,12 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
         egui::StrokeKind::Inside,
     );
     let preview = Rect::from_min_size(rect.min + vec2(t.space_6, t.space_6), vec2((rect.width() - t.space_12).max(0.0), preview_height));
-    paint_preference_figure(ui.painter(), preview, figure);
+    let figure_rect = match figure {
+        // Keep the original right-handed orientation artwork's 120×80 canvas undistorted.
+        PreferenceFigure::UpAxis(_) => Rect::from_center_size(preview.center(), vec2(preview.width(), preview.width() * 80.0 / 120.0)),
+        PreferenceFigure::Pivot(_) => preview,
+    };
+    paint_preference_figure(ui.painter(), figure_rect, figure);
     let label_rect =
         Rect::from_min_size(pos2(rect.left() + t.space_4, preview.bottom() + t.space_4), vec2((rect.width() - t.space_8).max(0.0), label_height));
     centred_text_rows(

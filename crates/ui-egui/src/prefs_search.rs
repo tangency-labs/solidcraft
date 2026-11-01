@@ -576,6 +576,21 @@ fn keywords(text: &str) -> &'static [&'static str] {
         "single surface analysis" => &["use a single surface analysis"],
         "only while the view is still" => &["only when the view is still"],
         "supersampling" => &["supersampling (ssaa)"],
+        "design" => &["design defaults"],
+        "step values with arrows and wheel" => &["step values with the arrow keys and the wheel"],
+        "show values beside their handles" => &["show values beside their handles in the view"],
+        "files from unknown programs" => &["for files from unknown programs"],
+        "hide the origin folder in new designs" => &["hide origin by default"],
+        "update changed links when a tab comes back" => &["update changed linked designs when a tab comes back"],
+        "double-click a component to activate it" => &["double-click a component to activate it, or to edit a linked one in place"],
+        "insert design lists open designs first" => &["insert design lists the designs open in other tabs first"],
+        "snap to centers" | "snap to centres" => &["snap to face and edge centers", "snap to face and edge centres", "hole snapping"],
+        "move by click or drag" => &["move holes by clicking or dragging"],
+        "use joint motion handles for move" => &["use joint motion handles for assembly move"],
+        "near-axis step" => &["near-axis rotation step (°)", "coarse rotation"],
+        "far-axis step" => &["far-axis rotation step (°)", "fine rotation"],
+        "axis distances in measure" => &["show x/y/z distances"],
+        "tool at the cursor" => &["show tool at cursor"],
         _ => &[],
     }
 }
@@ -1207,6 +1222,42 @@ mod tests {
         h.frames(4);
         assert!(!drawn(&h, "Status bar"), "a miss shows nothing");
     }
+    #[test]
+    fn design_and_tools_short_labels_keep_legacy_search_and_reveal_the_real_control() {
+        for language in ["en", "ja"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", serde_json::json!({"language":language,"open":"General"}));
+            for (query, id, page, handle) in [
+                ("Step values with the arrow keys and the wheel", "ui.step_values", crate::prefs::PAGE_DESIGN, "prefs:step_values"),
+                ("For files from unknown programs", "prefs.stand_up_unknown", crate::prefs::PAGE_DESIGN, "prefs:stand_up_unknown"),
+                ("Hide origin by default", "ui.hide_origin_by_default", crate::prefs::PAGE_DESIGN, "prefs:hide_origin"),
+                ("Snap to face and edge centres", "Snap to face and edge centres", crate::prefs::PAGE_TOOLS, "prefs:hole_snaps"),
+                ("Move holes by clicking or dragging", "Move holes by clicking or dragging", crate::prefs::PAGE_TOOLS, "prefs:hole_moves"),
+                ("Show moved parts' old place as a ghost", "prefs.design_tools.ghost", crate::prefs::PAGE_TOOLS, "prefs:drive_joints_ghost"),
+                ("Near-axis rotation step (°)", "joint_move.coarse", crate::prefs::PAGE_TOOLS, "prefs:joint_rotation_coarse"),
+                ("Far-axis rotation step (°)", "joint_move.fine", crate::prefs::PAGE_TOOLS, "prefs:joint_rotation_fine"),
+                ("Show X/Y/Z distances", "settings.measure_axis_distances", crate::prefs::PAGE_TOOLS, "prefs:measure_axis_distances"),
+                ("Show tool at cursor", "Show tool at cursor", crate::prefs::PAGE_TOOLS, "view:tool_cursor"),
+            ] {
+                h.app.prefs_window.filter = query.into();
+                h.frames(5);
+                let (_, _, hits) = nav(&h.ctx);
+                let label = h.app.tr(id);
+                let matches: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == page && hit.label == label).collect();
+                assert_eq!(matches.len(), 1, "{language}: {query} has one real setting");
+                set_cursor(&h.ctx, matches[0].0);
+                h.frames(2);
+                h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+                h.frames(3);
+                assert_eq!(h.app.prefs_window.section, page);
+                assert!(h.app.prefs_window.filter.is_empty());
+                let body = crate::scenario::rect_of("dialog:page_body").unwrap();
+                assert!(body.contains_rect(crate::scenario::rect_of(handle).unwrap()), "{language}: {query} reveals {handle}");
+            }
+        }
+    }
+
     #[test]
     fn moved_preferences_search_paths_and_enter_follow_window_groups() {
         for (query, path, page) in [

@@ -1011,7 +1011,7 @@ preference_settings! {
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
     radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
     /// Work on the model directly in the viewport (pull a face to extrude or cut); off by default.
-    direct_interaction: bool = false, PAGE_TOOLS => check("Direct interaction", "Work on the model directly in the viewport. Press a flat face or a profile and pull: up extrudes, down into a body cuts, and sideways movement sets the step size");
+    direct_interaction: bool = false, PAGE_TOOLS;
     /// Mouse gestures: a ring of tools on the right button.
     mouse_gestures: crate::mouse_gesture::Config = Default::default(), PAGE_NAVIGATION;
     /// The wheel zooms out when turned forward.
@@ -1120,7 +1120,7 @@ preference_settings! {
     /// Off by default; View ▸ View angles and `view.angle_readout` turn it on.
     show_view_angles: bool = false, PAGE_GRAPHICS;
     /// Show world X/Y/Z component dimensions beside the total distance in Measure.
-    measure_axis_distances: bool = true, PAGE_TOOLS => check_id("settings.measure_axis_distances");
+    measure_axis_distances: bool = true, PAGE_TOOLS;
     /// Perspective view's vertical field of view in radians (#5364), 15° to 90°. The view reads a
     /// saved value outside that range as the default ([`perspective_fov`]).
     perspective_fov: f64 = PERSPECTIVE_FOV, PAGE_GRAPHICS, accept(15f64.to_radians()..=90f64.to_radians());
@@ -1322,13 +1322,13 @@ preference_settings! {
     /// Default modelling orientation: `z` (Z up) or `y` (Y up) (#3).
     up_axis: String = "z".into(), PAGE_DESIGN;
     /// After a STEP or IGES file opens, offer to stand a Y-up part up (`stand_up`).
-    offer_stand_up: bool = true, PAGE_DESIGN => check("Offer to stand up Y-up files", "After a STEP or IGES file opens with Z up, offer a quarter turn about X");
+    offer_stand_up: bool = true, PAGE_DESIGN => check_tr("ui.offer_to_stand_up_y_up_files");
     /// How the offer is made for a file whose header names no program known to save Y up: a note
     /// over the view (the default), the dialog, or nothing (#7717).
     stand_up_unknown: StandUpUnknown = StandUpUnknown::default(), PAGE_DESIGN;
     /// Extrude: with a profile picked, a face, vertex or parallel plane picked off its plane
     /// switches the extent to To Object (off: picks only add profiles, as before).
-    extrude_auto_to_object: bool = false, PAGE_TOOLS => check("Extrude to a picked target", "In Extrude, with a profile picked, picking a face, vertex or parallel plane off its plane switches the extent to To Object");
+    extrude_auto_to_object: bool = false, PAGE_TOOLS => check_tr("ui.extrude_auto_to_object");
     /// Extrude turns the view to isometric each time it opens, so the depth can be seen (#9176).
     /// Off (the default): the view stays as it is.
     extrude_view_isometric: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_isometric");
@@ -1350,7 +1350,7 @@ preference_settings! {
     /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit): a marker that
     /// drags it across the model and a ring that turns it. Off by default: the feature is then placed
     /// by its click only, as before, and its Position input takes faces only.
-    placement_handles: bool = false, PAGE_TOOLS => check("Placement handles", "Handles on the preview of a Rest, Boss or Snap Fit: drag the marker to move it across the model, turn it by its ring");
+    placement_handles: bool = false, PAGE_TOOLS => check_tr("ui.placement_handles");
     /// The files a design names (linked designs, font files) may be on any network location, for
     /// organisations that keep their designs on file servers. Off (the default): only on the
     /// servers in `network_hosts`, or one the user allows when asked (`network_prompt`).
@@ -1540,7 +1540,7 @@ preference_settings! {
     /// fixed screen size at every zoom, as before.
     hide_constraint_glyphs_zoomed_out: bool = true, PAGE_SKETCH => check_id("prefs.hide_constraint_glyphs_zoomed_out");
     /// Drive Joints shows the moved parts' old place as a ghost (its Show ghost box, #5905).
-    drive_joints_ghost: bool = true, PAGE_TOOLS;
+    drive_joints_ghost: bool = true, PAGE_TOOLS => check_tr("prefs.design_tools.ghost");
     /// Plugin ids turned off (Preferences › Plugins). An installed plugin whose id is absent is on.
     disabled_plugins: std::collections::BTreeSet<String> = std::collections::BTreeSet::new(), PAGE_PLUGINS;
 }
@@ -5805,12 +5805,181 @@ mod tests {
     }
 
     #[test]
+    fn design_precision_controls_use_preferred_units_and_keep_document_and_transactions() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", json!({"language":"en", "theme":theme}));
+            // A nonblank document keeps its units while the new-design defaults are edited.
+            h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+            let doc = h.app.session.doc.to_json();
+            let original = h.app.preferences.clone();
+            h.call("ui.prefs", json!({"open":"General"}));
+            h.step(&json!({"click":{"handle":"prefs:page:Design"}})).unwrap();
+            h.app.prefs_window.filter = "Units and precision".into();
+            h.frames(5);
+            for unit in UNITS {
+                h.step(&json!({"click":{"handle":format!("prefs:default_units:{unit}")}})).unwrap();
+                h.frames(2);
+                let sample = format_length(12.5 * unit_scale(unit).0, unit, 2);
+                assert!(h.widget(&sample).is_some(), "{theme}: {unit} uses the real unit-aware sample {sample}");
+                assert_eq!(h.app.session.doc.to_json(), doc);
+            }
+            for (key, text) in [("length_decimals", "4"), ("angle_decimals", "3"), ("parameter_list_rows", "75")] {
+                let handle = format!("prefs:{key}");
+                super::reveal_preference(&mut h, &handle);
+                h.step(&json!({"click":{"handle":handle},"double":true})).unwrap();
+                h.step(&json!({"key":"A","cmd":true})).unwrap();
+                h.step(&json!({"text":text})).unwrap();
+                h.step(&json!({"key":"Enter"})).unwrap();
+                h.frames(2);
+            }
+            assert_eq!((h.app.preferences.length_decimals, h.app.preferences.angle_decimals, h.app.preferences.parameter_list_rows), (4, 3, 75));
+            assert!(h.widget(&format_length(12.5 * unit_scale("ft").0, "ft", 4)).is_some());
+            assert!(h.widget("45.000°").is_some());
+            assert_eq!(saved_prefs(&h.app)["preferences"]["length_decimals"], original.length_decimals);
+            h.call("ui.prefs", json!({"button":"apply"}));
+            let applied = h.app.preferences.clone();
+            let mut restarted = SolveApp::new(Default::default(), Default::default());
+            restarted.load_prefs(&h.app.prefs());
+            assert_eq!(
+                (
+                    restarted.preferences.default_units.as_str(),
+                    restarted.preferences.length_decimals,
+                    restarted.preferences.angle_decimals,
+                    restarted.preferences.parameter_list_rows
+                ),
+                ("ft", 4, 3, 75)
+            );
+            h.call("ui.prefs", json!({"button":"defaults"}));
+            assert_eq!((h.app.preferences.length_decimals, h.app.preferences.angle_decimals, h.app.preferences.parameter_list_rows), (2, 1, 50));
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.preferences, applied);
+            assert_eq!(h.app.session.doc.to_json(), doc);
+        }
+    }
+
+    #[test]
+    fn design_unknown_program_dropdown_keeps_note_default_and_stand_up_dependency() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"language":"en","open":"Design"}));
+        assert_eq!(h.app.preferences.stand_up_unknown, StandUpUnknown::Note);
+        h.app.prefs_window.filter = "Files from unknown programs".into();
+        h.frames(5);
+        super::reveal_preference(&mut h, "prefs:stand_up_unknown");
+        h.step(&json!({"click":{"handle":"prefs:stand_up_unknown"}})).unwrap();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"dialog:list:prefs.stand_up_unknown.ask"}})).unwrap();
+        assert_eq!(h.app.preferences.stand_up_unknown, StandUpUnknown::Ask);
+        h.app.prefs_window.filter = "Offer to stand up Y-up files".into();
+        h.frames(5);
+        super::reveal_preference(&mut h, "prefs:offer_stand_up");
+        h.step(&json!({"click":{"handle":"prefs:offer_stand_up"}})).unwrap();
+        assert!(!h.app.preferences.offer_stand_up);
+        h.app.prefs_window.filter = "Files from unknown programs".into();
+        h.frames(5);
+        let tree = h.output.accesskit_update.as_ref().unwrap();
+        let dropdown =
+            tree.nodes.iter().find(|(_, node)| node.role() == egui::accesskit::Role::ComboBox && node.label() == Some("Files from unknown programs"));
+        assert!(dropdown.expect("unknown-program dropdown").1.is_disabled());
+        assert_eq!(h.app.preferences.stand_up_unknown, StandUpUnknown::Ask, "disabling the offer keeps the stored choice");
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.offer_stand_up);
+        assert_eq!(h.app.preferences.stand_up_unknown, StandUpUnknown::Note);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.preferences.stand_up_unknown, StandUpUnknown::Note);
+    }
+
+    #[test]
+    fn tools_ghost_and_pointer_tiles_edit_only_their_state_and_preserve_transactions() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", json!({"language":"en","theme":theme,"quick_measure":true}));
+            let original = h.app.preferences.clone();
+            h.call("ui.prefs", json!({"open":"General"}));
+            h.step(&json!({"click":{"handle":"prefs:page:Tools"}})).unwrap();
+            let mut expected = serde_json::to_value(&original).unwrap();
+            for (query, field) in [
+                ("Show moved parts' old place as a ghost", "drive_joints_ghost"),
+                ("Axis distances in Measure", "measure_axis_distances"),
+                ("Direct interaction", "direct_interaction"),
+            ] {
+                h.app.prefs_window.filter = query.into();
+                h.frames(5);
+                let handle = format!("prefs:{field}");
+                super::reveal_preference(&mut h, &handle);
+                h.step(&json!({"click":{"handle":handle}})).unwrap();
+                expected[field] = json!(!expected[field].as_bool().unwrap());
+                assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "{theme}: {field} edits only its own preference");
+            }
+            h.app.prefs_window.filter = "Tool at the cursor".into();
+            h.frames(5);
+            super::reveal_preference(&mut h, "view:tool_cursor");
+            h.step(&json!({"click":{"handle":"view:tool_cursor"}})).unwrap();
+            assert!(h.app.ui.tool_cursor);
+            assert_eq!(serde_json::to_value(&h.app.preferences).unwrap(), expected, "cursor stays app UI state");
+            assert_eq!(saved_prefs(&h.app)["preferences"], serde_json::to_value(&original).unwrap());
+            h.call("ui.prefs", json!({"button":"apply"}));
+            let applied = h.app.preferences.clone();
+            let mut restarted = SolveApp::new(Default::default(), Default::default());
+            restarted.load_prefs(&h.app.prefs());
+            assert_eq!(restarted.preferences, applied);
+            assert!(restarted.ui.tool_cursor);
+            h.call("ui.prefs", json!({"button":"defaults"}));
+            assert!(h.app.preferences.drive_joints_ghost && h.app.preferences.measure_axis_distances);
+            assert!(!h.app.preferences.direct_interaction && !h.app.ui.tool_cursor);
+            assert!(h.app.preferences.quick_measure, "Tools defaults leave Graphics quick measurement alone");
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.preferences, applied);
+            assert!(h.app.ui.tool_cursor);
+        }
+    }
+
+    #[test]
+    fn tools_extrude_view_controls_keep_their_dependency_without_clearing_the_saved_choice() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"language":"en","open":"Tools"}));
+        h.app.prefs_window.filter = "Extrude".into();
+        h.frames(5);
+        for (key, isometric, returns) in [
+            ("extrude_view_return", false, false),
+            ("extrude_view_isometric", true, false),
+            ("extrude_view_return", true, true),
+            ("extrude_view_isometric", false, true),
+            ("extrude_view_return", false, true),
+        ] {
+            let handle = format!("prefs:{key}");
+            super::reveal_preference(&mut h, &handle);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            h.frames(2);
+            assert_eq!((h.app.preferences.extrude_view_isometric, h.app.preferences.extrude_view_return), (isometric, returns));
+            assert!(h.app.preferences.auto_operation);
+            assert!(!h.app.preferences.extrude_auto_to_object);
+        }
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(!h.app.preferences.extrude_view_isometric && !h.app.preferences.extrude_view_return);
+    }
+
+    #[test]
     fn moved_preferences_reset_only_on_their_new_page() {
         use super::*;
         let fields = [
             ("default_units", json!("ft"), PAGE_DESIGN),
             ("length_decimals", json!(5), PAGE_DESIGN),
             ("angle_decimals", json!(4), PAGE_DESIGN),
+            ("parameter_list_rows", json!(75), PAGE_DESIGN),
+            ("step_values", json!(true), PAGE_DESIGN),
+            ("value_boxes_in_view", json!(false), PAGE_DESIGN),
+            ("up_axis", json!("y"), PAGE_DESIGN),
+            ("offer_stand_up", json!(false), PAGE_DESIGN),
+            ("stand_up_unknown", json!("ask"), PAGE_DESIGN),
+            ("hide_origin", json!(true), PAGE_DESIGN),
+            ("update_changed_links", json!(false), PAGE_DESIGN),
+            ("double_click_components", json!(false), PAGE_DESIGN),
+            ("insert_lists_open_designs", json!(false), PAGE_DESIGN),
             ("theme", json!("light"), PAGE_APPEARANCE),
             ("ui_scale", json!(1.25), PAGE_APPEARANCE),
             ("ui_font", json!("test font"), PAGE_APPEARANCE),
@@ -5978,10 +6147,12 @@ mod tests {
     #[test]
     fn preferences_moved_controls_have_one_drawn_home() {
         let cases = [
-            ("Show tool at cursor", PAGE_TOOLS),
+            ("Tool at the cursor", PAGE_TOOLS),
             ("Direct interaction", PAGE_TOOLS),
-            ("Show X/Y/Z distances", PAGE_TOOLS),
-            ("Move holes by clicking or dragging", PAGE_TOOLS),
+            ("Axis distances in Measure", PAGE_TOOLS),
+            ("Move by click or drag", PAGE_TOOLS),
+            ("Snap to centers", PAGE_TOOLS),
+            ("Show moved parts' old place as a ghost", PAGE_TOOLS),
             ("Extrude to a picked target", PAGE_TOOLS),
             ("Turn the view to isometric when Extrude opens", PAGE_TOOLS),
             ("Go back to the earlier view when Extrude closes", PAGE_TOOLS),
