@@ -1,0 +1,18 @@
+[package]
+name = "solidcraft-collab-wire"
+description = "SolidCraft co-editing wire format: the compact mesh codec, pure and bounded (no I/O, builds for wasm)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+solidcraft-geom = { workspace = true }
+thiserror = { workspace = true }
+sha2 = { workspace = true }
+miniz_oxide = { workspace = true }
+
+[dev-dependencies]
+solidcraft-testkit = { workspace = true }

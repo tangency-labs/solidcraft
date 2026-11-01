@@ -52,6 +52,8 @@ web-time = { workspace = true }
 solidcraft-io = { workspace = true, features = ["trust-unknown-source"] }
 # Normal CI exercises profiling assertions without enabling the production feature.
 solidcraft-sketch = { workspace = true, features = ["solver-profiling"] }
+# The co-editing mesh codec measured on real bodies (collab_wire_size_tests.rs).
+solidcraft-collab-wire = { workspace = true }
 
 [[example]]
 name = "render_resource_workflow"
