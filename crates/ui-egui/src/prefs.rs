@@ -1415,6 +1415,16 @@ preference_settings! {
     save_mesh_quality: String = "standard".into();
     /// The programs the user added to the slicer list, newest first.
     custom_slicers: Vec<String> = Vec::new();
+    /// The network folders the user added to Send to Slicer (#2304), in the order added: a folder,
+    /// usually a mounted share, that a slicer on another computer reads. No page reset discards
+    /// this user-made list; the engine gets it before each slicer command.
+    network_folders: Vec<solidcraft_engine::remote_slicers::RemoteTarget> = Vec::new();
+    /// Send to Slicer: the last format (`3mf`, `stl` or `stl-ascii`). 3MF, as before the
+    /// dialog had a Format row.
+    send_format: String = "3mf".into();
+    /// Send to Slicer: the last quality (`standard`, `fine` or `finest`). Standard, as before the
+    /// dialog had a Quality row.
+    send_quality: String = "standard".into();
     /// AI features (docs/agent-chat.md): the master switch. Off: no AI button, shortcut, menu
     /// entry or panel, and nothing is looked for or started.
     ai_features: bool = true, PAGE_ASSISTANT;
