@@ -1196,9 +1196,15 @@ pub(crate) fn continue_in_document(app: &mut SolveApp) {
         turn.start_doc = app.session.doc.clone();
         turn.start_undo = app.session.undo.len();
     }
-    app.agent_chat.picked.clear();
-    app.agent_chat.picked_context = Context::default();
-    app.agent_chat.selected_count = None;
+    let chat = &mut app.agent_chat;
+    // The pills stand for the old design's geometry: take them and their marks out of the box.
+    for span in pills::spans(&chat.input).into_iter().rev() {
+        if chat.pills.iter().any(|p| p.id == span.id) {
+            chat.input = pills::remove(&chat.input, span.start, span.end);
+        }
+    }
+    chat.pills.clear();
+    chat.selected_count = None;
 }
 
 /// A newly opened tab has no conversation to displace. Move the initiating chat into it,

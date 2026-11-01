@@ -3649,6 +3649,20 @@ fn a_deleted_mark_drops_its_pick() {
     assert_eq!(context.items.len(), 1);
 }
 
+/// The agent replaced the design: the pills stood for the old one's geometry, so they and their
+/// marks leave the box, and the words around them stay.
+#[test]
+fn replacing_the_design_takes_the_pills_out_of_the_box() {
+    let (mut app, _script, _ctx) = app_with_script();
+    let sels = box_selection(&mut app);
+    app.agent_chat.input = "make  round".into();
+    pick_pill(&mut app, 5, &sels[3..]);
+    assert_eq!(app.agent_chat.pills.len(), 1);
+    continue_in_document(&mut app);
+    assert!(app.agent_chat.pills.is_empty());
+    assert_eq!(app.agent_chat.input, "make  round");
+}
+
 /// Queued messages that go as one prompt keep their picks apart: the second message's marks follow
 /// the first one's numbers.
 #[test]
