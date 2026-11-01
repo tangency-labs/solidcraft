@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "a pocket 20 x 10 x 5 in a plate, its floor edges rounded R1 and its vertical corners left sharp: the default turn, Mitre: at each corner the two floor rounds run on to the corner's bisector plane and meet there",
+ "source": "analytic",
+ "method": "plate 40x30x10 less the pocket 20x10x5: V0 = 11000. Each floor round adds the spandrel A = (1 - pi/4) r^2 along its edge; at a corner the bisector plane cuts it where x - 10 = u, u its distance from its own wall, so an edge of length L adds the integral of (L - 2u) dA = L A - 2 M, M = r^3 (5/6 - pi/4) the spandrel's first moment about its wall. Four edges (20, 10, 20, 10): 60 A - 8 M = 12.492628837. V = 11012.492628837. The rounds meet each other at the mitre G0 and their faces G1. Graded to 1e-7 relative: the Mitre and Swept turns differ by (8 - 2 pi) M = 0.0823 mm^3 at these four corners, 6.6e-6 of the volume.",
+ "body_count": 1,
+ "volume_mm3": 11012.492628836666,
+ "tolerance": {
+  "rel": 1e-07
+ }
+}
