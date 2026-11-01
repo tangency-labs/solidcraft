@@ -78,6 +78,7 @@
     "hover_edge_halo": "#021007",
     "hover_profile": "#4dff7926",
     "hover_profile_edge": "#4dff79",
+    "hover_feature_edge": "#39d45c",
     "icon": "#8def9f",
     "icon_fill": "#57b875",
     "icons.access": [

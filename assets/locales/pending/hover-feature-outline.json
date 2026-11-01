@@ -1,0 +1,10 @@
+{
+  "en": {
+    "prefs.hover_feature_outline": "Outline the feature under the pointer",
+    "prefs.hover_feature_outline_help": "With no command running, the faces of the feature that made the face under the pointer get a thin outline in their own colour. When off, only the face under the pointer lights up, as before."
+  },
+  "de": {
+    "prefs.hover_feature_outline": "Feature unter dem Zeiger umranden",
+    "prefs.hover_feature_outline_help": "Ohne laufenden Befehl bekommen die Flächen des Features, das die Fläche unter dem Zeiger erzeugt hat, einen feinen Umriss in eigener Farbe. Wenn deaktiviert, wird wie bisher nur die Fläche unter dem Zeiger hervorgehoben."
+  }
+}
