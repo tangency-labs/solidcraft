@@ -1,0 +1,10 @@
+{
+  "en": {
+    "prefs.hover_edge_lit": "Fillet and Chamfer: colour the edges under the pointer",
+    "prefs.hover_edge_lit_help": "In Fillet and Chamfer the edges a click would take are drawn in their own colour: the edge under the pointer, or the edges of the face under it. When off, the edge or face is lit as everywhere else."
+  },
+  "de": {
+    "prefs.hover_edge_lit": "Verrundung und Fase: Kanten unter dem Zeiger einfärben",
+    "prefs.hover_edge_lit_help": "In Verrundung und Fase werden die Kanten, die ein Klick nehmen würde, in eigener Farbe gezeichnet: die Kante unter dem Zeiger oder die Kanten der Fläche darunter. Wenn deaktiviert, werden Kante oder Fläche wie überall sonst hervorgehoben."
+  }
+}
