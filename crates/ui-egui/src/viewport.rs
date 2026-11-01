@@ -9737,7 +9737,7 @@ mod tests {
         app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false });
         app.run("solid.box", json!({"length": 4, "width": 4, "height": 4, "center": [40, 0, 2], "operation": "new", "name": "Seed"})).unwrap();
         app.run("solid.pattern.rectangular", json!({"features": ["Seed"], "dir1": [1, 0, 0], "count1": 6, "spacing1": 6, "name": "Row"})).unwrap();
-        let st = app.session.world_state();
+        let st = app.session.world_state().unwrap();
         assert_eq!(st.bodies.len(), 7);
         let mut by_name = BodiesByName::new(&st);
         for b in &st.bodies {

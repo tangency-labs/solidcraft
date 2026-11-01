@@ -628,7 +628,7 @@ fn many_selected_bodies_hover_cost() {
         }
         None => grid(1440),
     };
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     st.warm_meshes(|| true);
     for b in &st.bodies {
         let _ = b.display_plan();

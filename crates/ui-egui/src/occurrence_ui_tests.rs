@@ -569,7 +569,7 @@ fn dragging_an_occurrence_row_onto_the_top_of_a_sibling_reorders_them() {
 fn sketches_folder_moves_its_sketches_to_the_part_they_are_on() {
     let (mut h, component, occurrence) = crate::test_support::component_box();
     h.app.session.auto_project = false;
-    let world = h.app.session.world_state();
+    let world = h.app.session.world_state().unwrap();
     let body = world.bodies.iter().find(|b| h.app.session.doc.model_body_component(b) == component).unwrap().name.clone();
     let face = world.body(&body).unwrap().body.faces(0.01).unwrap().into_iter().max_by(|a, b| a.centroid.z.total_cmp(&b.centroid.z)).unwrap();
     let pick = json!({"face":[face.centroid.x,face.centroid.y,face.centroid.z],"body":body,"index":face.index,"path":[occurrence]});

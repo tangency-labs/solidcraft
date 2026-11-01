@@ -190,7 +190,7 @@ fn an_ellipse_takes_a_typed_major_and_minor_radius() {
     assert_focus(&h, 0);
     type_value(&mut h, "8");
     h.step(&json!({"key": "Enter"})).unwrap();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status);
     let CurveKind::Ellipse { c, m, r } = sk.curves[0].kind.clone() else { panic!("{:?}", sk.curves[0].kind) };
