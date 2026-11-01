@@ -28,6 +28,15 @@ The control channel is **on by default**. SolidCraft listens on `127.0.0.1` only
 so agents can drive the app without a launch flag. Every connection still needs this launch's
 token (below); nothing else on the machine, and nothing off it, can send a command.
 
+Internal rendering harness: `ui.blur {radius_px?, surface_alpha?}` queries or sets
+session-only panel blur. Radius is finite physical pixels in 0..40; the optional
+capture tint is 0..1 (`null` restores ordinary fills). This is not a saved
+preference. The reply contains requested radius, capability/reason and cumulative
+actual effect counters, including live resources and encoded passes. Unsupported
+software/web/source contexts stay on ordinary painting. Use `ui.screenshot` for
+panel evidence; `ui.render` remains a model-only capture. Activation, full egui GPU
+fixture and manager-run evidence commands are in [blur-behind.md](blur-behind.md).
+
 | Launch | What listens |
 |---|---|
 | `solidcraft --control PORT`, or `SOLIDCRAFT_CONTROL_PORT=PORT` | exactly `127.0.0.1:PORT` (the flag wins over the variable), whatever the setting |
@@ -370,7 +379,7 @@ no box selection.
 | `ui.start` | `command`, `params?` | like a toolbar click: starts the sketch tool or dialog for the command. `params` sets what the dialog opens on, and nothing runs until OK: `joint.drive` takes `joint` (id or name; without it, the joint picked in the browser, else the first joint that moves; a rigid joint opens to say why it has nothing to drive, with an Edit Joint button, handle `drive:edit_joint`) and `values` (numbers in degrees or millimetres, or expressions); `motion.study` takes `study` (id or name), which opens that study to edit and chart. A command that takes no params is refused before it starts; a param the dialog doesn't take is refused and the dialog closes |
 | `ui.click` | `x`, `y` (screen points), `button?`: left/right/middle, `shift?`, `ctrl?`, `double?` | real pointer input |
 | `ui.move` | `x`, `y`, `shift?`, `alt?`, `ctrl?`, `cmd?` | pointer movement without a button; modifiers apply until the next synthetic move/click; a move with omitted modifiers releases them. With `nav: "touchpad"`, Shift pans and Alt/Option orbits. |
-| `ui.drag` | `x0`, `y0`, `x1`, `y1`, `button?`, `shift?`, `ctrl?`, `steps?`, `hold?`, `hold_end?` | press, move, release; a left drag on the model is a box selection (left to right: window, right to left: crossing); with OpenSCAD navigation, plain left-drag on empty space orbits, Shift+left-drag box-selects, and drags starting on sketch geometry edit it; `hold` keeps the button down that many frames first (a right press-and-hold opens the marking menu, releasing over a direction picks it), `hold_end` that many frames at the end (a sketch drag shows its snap) |
+| `ui.drag` | `x0`, `y0`, `x1`, `y1`, `via?`, `button?`, `shift?`, `ctrl?`, `steps?`, `hold?`, `hold_end?` | press, move, release; `via` is a list of `[x, y]` points passed through on the way (`steps` moves to each); a left drag on the model is a box selection (left to right: window, right to left: crossing), or with `lassoSelect` on (`ui.set`, the SELECT panel's Lasso) a freehand lasso that takes what is wholly inside it; with OpenSCAD navigation, plain left-drag on empty space orbits, Shift+left-drag box-selects, and drags starting on sketch geometry edit it; `hold` keeps the button down that many frames first (a right press-and-hold opens the marking menu, releasing over a direction picks it), `hold_end` that many frames at the end (a sketch drag shows its snap) |
 | `ui.menu` | `x?`, `y?`, `target?`, `close?` | with a point: open a context menu there as a right-click would (the viewport's marking menu, or a browser menu with `target: {"type": "body", "name"} \| {"type": "sketch", "id"} \| {"type": "component", "id"}`); without: the open menu (`radial` and `items`: id, label, shortcut, enabled, icon, placeholder; blank icons on headings/separators have `placeholder: false`) |
 | `ui.icon_audit` | `reset?`, `stop?` | `reset: true` enables collection on the UI thread and clears previous requests; returns `{requested: [{name, master, placeholder}]}` sorted by requested id. Each read drains names collected since the previous read/reset. Collection stays enabled until `stop: true` (which returns pending names before disabling it). Includes aliases, variable/table ids and cached paints. |
 | `ui.menuPick` | `item`: id or label | runs an item of the open menu, as clicking it does |
@@ -397,7 +406,7 @@ no box selection.
 | `ui.home` | `open?`: bool; `sample?`: index | the start page: show or hide it, open a built-in sample (once built); returns `open` and the recent designs |
 | `ui.shortcut` | `command`, `key?`, `slot?`, `replace?` | a command's keys (`key`: the first, shown in menus; `keys`: all), or rebinds it: `key` becomes its only key, or with `slot` replaces its key there (one past the last adds a key, `""` there removes that key); `""` without `slot` clears them; key names are case-insensitive and modifiers are normalized (`shift+ctrl+t` becomes `Ctrl+Shift+T`); unknown and reserved keys are refused; a key another command uses is refused unless `replace` |
 | `ui.help` | `item?`: `about`, `updates` (checks for updates and shows the result), `shortcuts` (read only), `report` (opens a report draft for review), `crashes` (the Crash Reports window) | the version, commit, build date and diagnostic text |
-| `ui.prefs` | any of the [`ui.prefs` settings](#uiprefs-settings) below; also `open`, `button` and `stand_up` (listed there) | sets preferences (kept between runs), returns them all plus `dialog` (the open page or null), `apply_enabled` (whether the dialog's Apply has a change to keep), `dark`, `viewport_dark` (whether the 3D view is dark), `stand_up_offer` (the offered bodies, or null), `stand_up_note` (whether that offer is the note), `theme_followed` and `theme_follow_error` |
+| `ui.prefs` | any of the [`ui.prefs` settings](#uiprefs-settings) below; also `open`, `button` and `stand_up` (listed there) | sets preferences (kept between runs), returns them all plus `dialog` (the open page or null), `apply_enabled` (whether the dialog's Apply has a change to keep), `dark`, `viewport_dark` (whether the 3D view is dark), `stand_up_offer` (the offered bodies, or null), `stand_up_note` (whether that offer is the note), `theme_followed`, `theme_follow_error`, `theme_option_defs`, `theme_option_values` and `theme_option_notices` |
 | `ui.capture` | `action?`: `capture`, `revert`, `cancel` | answers the Capture Position question (asked when a command starts or the design is saved while components were moved without capturing); without `action`, what waits |
 | `ui.window` | `action`: minimize, maximize, restore, toggle, close | what the title bar's caption buttons do (on Windows and Linux the application bar is the title bar); close asks about unsaved designs first |
 | `ui.agent_cursor` | `show` (bool), `speed`: a number from 1 to 5 (times the normal speed) or `"instant"` (no animation: the command runs at once and the pointer jumps to where it acted), `follow_camera` (bool); all optional | the settings. While the cursor is shown, `engine.execute` first glides to the command's toolbar button and to each pick, then runs and replies; later requests wait their turn. The pointer shows the command's localized name, including commands inside a closed toolbar group; an animated batch names each command it visits. It also follows the pointer input sent with `ui.move`, `ui.click`, `ui.drag` and `ui.scroll`, as each event reaches the app, and a press leaves a ripple. `"animate": false` on a call skips it |
@@ -405,7 +414,7 @@ no box selection.
 | `engine.execute` → `browser.expand_all` | `path?`: occurrence ids; `component?`: id; omit both for the whole tree | Open every Browser row under that scope, including folders that start closed (Origin, Named Views, Features). Display only: not saved in the design, not an undo step. |
 | `engine.execute` → `browser.collapse_all` | same | Close those rows. The design row stays open when the whole tree is collapsed. |
 | `engine.execute` → `view.history_layout` | `width?`, `dock?`: `bottom`, `left`, `under_browser`, `collapsed?` | Resize/dock the history without opening a dialog or changing the design. Contents respond to measured width; browser-stacked history shares its width and splits the height at the remembered share (`browser_share`, half until the seam between the two cards is dragged). One folded header gives the expanded card the rest; two folded headers stay at the top. |
-| `ui.agent_chat` | `features?`, `toolbar_button?`, `connect_at_start?` and `open_at_start?` (connect the agent started last, and open the panel, when SolidCraft starts; both off by default, never with `--control`), `permissions?` (`ask`, `edits`, `all`), `add_agent?` ({`name`, `kind`: `acp`, `api` or `anthropic` (`api` is OpenAI-compatible, `anthropic` Anthropic-compatible), `command` or `base_url` + `model` + `request_timeout_s?` (seconds one model request may take, 300 by default, rounded and clamped to 30 to 3600)}; no keys), `add_dialog?` (`installed`, `custom`, `api`, `anthropic`, or `false` to close), `default_agent?`, `agent?` (the conversation's agent, by id), `mode?` (the agent's own mode), `provider?` (which provider's models the model picker lists, when they come from several), `model?` (one of its models), `open?`, `side?` (`left`, `right`), `minimized?`, `popped?` (in its own window), `width?`, `picker?`, `refresh?`, `connect?`, `stop?`, `attach?`: a file's path (a picture, a text file or a CAD file, for the next message; CAD files are imported at once), `remove_file?` (index of a file on the next message), `send?`: text (files alone make a message too), `attach_view?`, `attach_selection?`, `pick?` (true: open the context picker), `permission?`: an option id or `"cancel"` (the newest question of the agent's own), `approve?`: true, false or `"always"` (the oldest request held for Allow/Deny), `cancel?` (Stop: the queue stays), `send_now?` (stop the running step, then send the queued messages), `remove_pending?` (index), `new_chat?` (clear the chat, new session), `undo?` (the last message's changes) | the chat's state: `features`, `agents` (found and added), `currentAgent`, `state` (off, starting, ready, busy, auth, exited, failed: the agent never got ready, and Connect reads Retry), `connectAtStart`, `openAtStart`, `lastAgent` (the agent started last), `popped`, `window` (its place and size), `agent`, `modes`, `mode`, `models`, `model`, `modelWarning` (the model capability warning text, or `null` when unknown or tool support is reported; checked asynchronously and never blocks sending), `turnWarning` (the latest completed turn's no-tool notice, otherwise `null`; cleared on the next turn or new chat), `providers` (`name` and `count` of each, empty with one provider), `provider` (the one listed), `authMethods`, `toolsPort`, `pid`, `waiting`, `turn`, `pending` (queued messages, with their `files`), `attachments` (the files on the next message, by name), `loading` (pictures still being read for it, by name), `stopped`, `detection` and the conversation (`items`). With `features` off only the settings apply. Desktop only; see [Agent chat](agent-chat.md) |
+| `ui.agent_chat` | `features?`, `toolbar_button?`, `connect_at_start?` and `open_at_start?` (connect the agent started last, and open the panel, when SolidCraft starts; both off by default, never with `--control`), `permissions?` (`ask`, `edits`, `all`), `add_agent?` ({`name`, `kind`: `acp`, `api` or `anthropic` (`api` is OpenAI-compatible, `anthropic` Anthropic-compatible), `command` or `base_url` + `model` + `request_timeout_s?` (seconds one model request may take, 300 by default, rounded and clamped to 30 to 3600)}; no keys), `add_dialog?` (`installed`, `custom`, `api`, `anthropic`, or `false` to close), `edit_dialog?` (the id of an agent you added: the same dialog filled with what it holds, as its **Edit** button opens it; the key is never shown), `default_agent?`, `agent?` (the conversation's agent, by id), `mode?` (the agent's own mode), `provider?` (which provider's models the model picker lists, when they come from several), `model?` (one of its models), `open?`, `side?` (`left`, `right`), `minimized?`, `popped?` (in its own window), `width?`, `picker?`, `refresh?`, `connect?`, `stop?`, `attach?`: a file's path (a picture, a text file or a CAD file, for the next message; CAD files are imported at once), `remove_file?` (index of a file on the next message), `send?`: text (files alone make a message too), `attach_view?`, `attach_selection?`, `pick?` (true: open the context picker), `permission?`: an option id or `"cancel"` (the newest question of the agent's own), `approve?`: true, false or `"always"` (the oldest request held for Allow/Deny), `cancel?` (Stop: the queue stays), `send_now?` (stop the running step, then send the queued messages), `remove_pending?` (index), `new_chat?` (clear the chat, new session), `undo?` (the last message's changes) | the chat's state: `features`, `agents` (found and added), `currentAgent`, `state` (off, starting, ready, busy, auth, exited, failed: the agent never got ready, and Connect reads Retry), `connectAtStart`, `openAtStart`, `lastAgent` (the agent started last), `popped`, `window` (its place and size), `agent`, `modes`, `mode`, `models`, `model`, `modelWarning` (the model capability warning text, or `null` when unknown or tool support is reported; checked asynchronously and never blocks sending), `turnWarning` (the latest completed turn's no-tool notice, otherwise `null`; cleared on the next turn or new chat), `providers` (`name` and `count` of each, empty with one provider), `provider` (the one listed), `authMethods`, `toolsPort`, `pid`, `waiting`, `turn`, `pending` (queued messages, with their `files`), `attachments` (the files on the next message, by name), `loading` (pictures still being read for it, by name), `stopped`, `detection` and the conversation (`items`). With `features` off only the settings apply. Desktop only; see [Agent chat](agent-chat.md) |
 | `ui.resize` | `width`, `height` | |
 | `app.quit` | `force?` (quit without asking about unsaved designs) | `quitting` (the window closes), `asking` (a "save changes?" prompt is open) |
 
@@ -433,7 +442,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `check_updates` (default true; [updates](book/src/guide/updates.md))
 - `color_vision` (`off` (default), `protan`, `deutan`, `tritan`: colour vision modes, #778)
 - `default_units`
-- `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's)
+- `dialog_buttons` (`bottom` (default), `top`: a feature dialog's OK, Cancel and Apply sit in its title row instead of under its inputs, #6708; the buttons keep their handles, and `dialog:close` is then Cancel's; the Sketch panel's Finish Sketch row moves above its options, #9860)
 - `dialog_place` (`edge` (default) or `left_column`: command dialogs open in the left column in place of the browser and the History, #6707)
 - `extrude_auto_to_object` (default false: in the Extrude dialog, with a profile picked, a face, vertex or parallel plane picked off its plane switches the extent to To Object; it applies to Extrude dialogs opened afterwards)
 - `frame_rate_details` (default false: with the frame rate, a frame-time graph of the frames drawn with the triangles over it, a frame-time histogram and what the GPU drew; clicking the readout switches it)
@@ -442,11 +451,14 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `history_sketches` (`in_order` (default), `under_feature`: the History at the left lists a sketch under the first feature built from it, #6489; the timeline at the bottom keeps the creation order)
 - `hole_moves` (default false: a placed Single hole has a drag handle (`hole:<n>`), and a pick on a face that has a hole moves it there)
 - `hole_snaps` (default false: a Single hole snaps to its face's middle and round edges' centres)
+- `home_fit_size` (0.1…1, default 1: how much of the view the model fills when Home, Fit, an opened design or a navigator view change frames it, with `navigator_fit` on or off; 1 fills the room between the panels, the compass and the navigation bar, as before; #10091)
 - `joint_rotation_coarse` (default 10°): coarse Assembly Move rotation step, in 0.001…180°.
 - `joint_rotation_fine` (default 0.1°): fine Assembly Move rotation step, in 0.001…180°.
+- `keep_work_on_tab_switch` (default false: each design tab keeps its open dialog or tool, with what was picked and typed in it, and its toolbar tab while another design is shown, and has them back when it is shown again; off, a switch cancels them and shows MODEL, #9360)
 - `language` (`en`, `ar`, `ja`, `de`, `fr`, `he`, `ko`, `ms`, `ru`, `uk`, `zh`; see [localization](localization.md))
 - `length_decimals`
 - `line_drag_draws_one` (default false: in the Line tool, a press, a drag and the release draw one line from the press to the release and end there, snapping as clicks do; clicks still chain, and a drag under 24 points is a click; off, a drag places a point where it is let go, #7247)
+- `line_hover_tangent_arc` (default false: in the Line tool, after a segment, moving away from the chain's last point and resting back on it for about a third of a second makes the next click a tangent arc, and the same again goes back to lines; off, resting there does nothing, #9489)
 - `logo_accent` (bool, default false: the application bar's logo in shades of the theme's accent instead of the theme's logo colours)
 - `look_at_anim`
 - `look_at_speed`
@@ -454,8 +466,9 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `max_step_file_mb` (default 512): the largest STEP or import file opened, in MB, from the default up to 16384 (16 GB) (Preferences › General › Largest file to open, #4086; a `--max-file-size` launch flag overrides both for that run; the web app keeps the defaults and refuses other values; [large files](book/src/guide/files.md#large-files))
 - `middle_double_click` (`home` (default), `fit`, `off`)
 - `msaa`
-- `nav` (`fusion`, `solidworks`, `inventor`, `alias`, `blender`, `tinkercad`, `openscad`, `touchpad`)
+- `nav` (`fusion`, `solidworks`, `creo`, `inventor`, `alias`, `blender`, `tinkercad`, `openscad`, `touchpad`)
 - `nav_bridge_enabled` (default false) and `nav_bridge_port` (default 8765: a device's own app on this computer moves the view, [the navigation bridge](3d-mouse.md#device-apps-the-navigation-bridge))
+- `navigator_fit` (default false: a view chosen on the view cube or the axis gizmo also looks at the middle of the model from the one distance that fits its bounding sphere in the free part of the view, at `home_fit_size`; Home and an opened design use the same zoom and centre while it is on, so views chosen after them only turn; #10091)
 - `offer_stand_up`
 - `orbit_around` (`view_centre` (default: what Pan moves and Fit frames), `origin` (the world origin stays still on screen), `cursor` (the model point under the pointer when the drag began); the older `orbit_cursor` boolean still sets `cursor` when true)
 - `orbit_reverse` (default false: Shift with two-finger scrolling orbits the other way)
@@ -487,10 +500,11 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `status_bar` (default false: a thin bar along the window's bottom edge, below History, handle `status:bar`: what is being edited (`status:editing`), the open sketch's state in its colour (`status:sketch`) and the design's units (`status:units`, a click opens the Units menu, whose rows run `document.units`); the sketch's state then leaves the view's top-left corner, #7243)
 - `step_values` (default false: Up/Down and the wheel step a plain number in a focused value field)
 - `theme` (`dark`, `light`, `system` or a theme file's id: a built-in one such as `gruvbox-dark`, or an imported one; the reply's `theme_ids` lists them)
-- `theme_export: true` (the reply's `theme_file` is the theme on now as a complete file; see [colour themes](book/src/guide/ui-tour.md#colour-themes))
+- `theme_export: true` (the reply's `theme_file` is the active theme, including a followed file; themes with options retain their authored definitions, defaults and overlays, while older themes keep the complete snapshot shape; saved option values are excluded; see [colour themes](book/src/guide/ui-tour.md#colour-themes))
 - `theme_follow` (desktop only, default `""`: a `solidcraft-theme/1` file's path to follow as the theme, reloaded within about a second whenever it changes and when the window gains the focus; the file is read at once, and a file that doesn't read keeps the last good theme; `""` stops following, as does setting `theme`; in the browser it is an error; the launch flag `--theme-file PATH` follows a file for one run without saving it; the reply's `theme_followed` is the path followed now or null, and `theme_follow_error` why its last read was not applied, or null)
 - `theme_import` (a `solidcraft-theme/1` file's JSON or text: adds the theme and turns it on; the reply's `theme_imported` is its id)
-- `theme_remove` (an imported theme's id)
+- `theme_options` (default `{}`): a map of theme id to option-id/value map, merged per theme; `{"theme_options":{"my-theme":{"enabled":true,"amount":5}}}` changes those options, `null` resets one option, and an empty map resets that theme. Unknown themes or option ids, wrong types, unknown choices and out-of-range numbers refuse the entire call and name the key, before imports, removals, dialogs or other preference effects occur.
+- `theme_remove` (an imported theme's id; also removes its saved option values)
 - `timeline_origin_bodies` (default false: the History on the left or under the browser starts with the active component's Bodies folder and the Origin, the browser's rows with their eyes, folds and menus; the bottom History is unchanged)
 - `toast_place` (`corner` (default: notices and offers stack in one column in the view's bottom-right corner, each 360 points wide, buttons right-aligned with the main action right-most, #7893), `centre` (at the bottom centre above the view toolbar, each as wide as its text, as before))
 - `trackpad_pan` (default true: two-finger scroll pans, except Touchpad always zooms; pinch zooms)
@@ -506,9 +520,36 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `zoom_stop_at_model` (default false: the 3D mouse and navigation bridge stop zoom at the surface in the middle of the view; drag-zoom holds its press point; independent of `zoom_to_cursor`)
 - `zoom_to_cursor`
 
+The built-in `gruvbox-dark` and `gruvbox-light` themes each expose the `contrast`
+choice (`soft`, `standard` default, `hard`). For example:
+`{"theme":"gruvbox-dark","theme_options":{"gruvbox-dark":{"contrast":"soft"}}}`.
+The former `gruvbox-dark-soft`, `gruvbox-dark-hard`, `gruvbox-light-soft` and
+`gruvbox-light-hard` ids remain accepted for compatibility and select the matching
+family and contrast; replies and `theme_ids` expose only the two canonical families.
+An explicit canonical option change or reset in the same call wins over the legacy
+selection. Legacy option-map keys are also accepted; canonical keys take precedence
+when both occur in a call. Imported themes cannot claim the retired built-in ids.
+
+Theme option values persist per theme, including a followed file's own id, through the same
+preference store in the browser and on desktop. Switching themes restores their saved values;
+Interface's Restore Defaults clears them. Preference exports and settings profiles carry values;
+`theme_export` carries the author's defaults. Saved entries that no longer fit a definition remain
+stored and use the default with a notice; unknown ids have a notice and no effective value.
+
+For the active theme, `theme_option_defs` lists the declared options in `ordered_options` order:
+`id`, `type`, `default`, type-specific `min`, `max`, `step`, `unit` or choice `values` (each with
+`id` and `label`), `parent`, `advanced`, `section`, `label`, `help`, `standard` and `available`.
+Labels, help and choice labels use the current language with English fallback. Unavailable
+definitions include `reason`; standard options currently have `available: false` and
+`reason: "not implemented"`. `theme_option_values` contains the effective values, including
+defaults and values of inactive children. `theme_option_notices` contains `{id, kind}` entries,
+where `kind` is `unknown_option`, `wrong_type`, `unknown_choice`, `non_finite` or `out_of_range`.
+Without an active theme file these fields are `[]`, `{}` and `[]`. Portable input
+and output schema types live in `solidcraft_engine::schema::ui_prefs` (`PrefsParams`, `PrefsReply`).
+
 Other `ui.prefs` parameters:
 
-- `open` (a page: General, Interface, Design, Navigation, Keyboard Shortcuts, Sketch, Graphics, AI, Plugins; Shortcuts, Assistant and Sketch & selection are aliases, and the former Selection page opens Sketch) opens the Preferences dialog there
+- `open` opens Preferences at General; Look: Appearance, Layout, Graphics; Work: Design, Sketch, Tools; Input: Navigation, 3D mouse, Shortcuts; or Extend: Assistant, Plugins. Names are case-insensitive. Legacy aliases remain accepted: Interface → Appearance, Interface/navigation bar → Layout, Keyboard Shortcuts → Shortcuts, AI → Assistant, and Selection, Sketch & selection or Sketch and selection → Sketch. Replies use the canonical page name. The corresponding legacy `prefs:page:<name>` scenario handles also remain aliases of the canonical page rows.
 - `button`: `ok`, `cancel`, `apply`, `defaults`
 - `stand_up: true` stands up a just-opened Y-up file, `stand_up: false` leaves it as it is ("Leave it": the offer, dialog or note, closes and `offer_stand_up` stays on)
 - the dialog's buttons are the handles `stand_up:stand`, `stand_up:leave` and `stand_up:never`
@@ -586,8 +627,12 @@ animated view changes is enabled (the default), at the configured animation spee
 
 The cube runs `view.navigate` through the command engine. Programmatic callers pass `camera`
 and either `direction: [x,y,z]` in the camera's up-axis frame or `action` (`left`, `right`, `up`,
-`down`, `clockwise`, `counterclockwise`, `home`, `fit`). The result contains `camera` and `fit`;
-UI callers apply the camera with their animation preference, without editing the design.
+`down`, `clockwise`, `counterclockwise`, `home`, `fit`). `fit: true` with a `direction` or a
+turn asks for the whole model to be framed from the new direction as well, as `home` does. The
+result contains `camera` and `fit`; UI callers apply the camera with their animation
+preference, without editing the design. The Navigation preference `navigator_fit` (off by
+default) makes every view chosen on the cube or on the axis gizmo frame the model this way:
+looking at its middle from the one distance that fits its bounding sphere, which Home then shares.
 
 Shift-orbit snapping includes 45-degree edge views and isometric corner views, with a
 lightly damped spring transition and a small boundary margin to prevent flicker.

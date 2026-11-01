@@ -172,6 +172,39 @@ fn two_point_circle_takes_a_typed_diameter() {
     assert!((c - dir * 15.0).len() < 1e-6, "{c:?}");
 }
 
+/// #10279: the Ellipse tool shows a Major radius box after the centre and a Minor radius box after
+/// the end of the major axis. The typed values size the ellipse and become its two dimensions,
+/// the major radius one kept from the first stage.
+#[test]
+fn an_ellipse_takes_a_typed_major_and_minor_radius() {
+    use solidcraft_engine::doc::expr::Kind;
+    use solidcraft_engine::sketch::CurveKind;
+    let labels = |h: &Harness| h.app.tool.as_ref().unwrap().dims.iter().map(|b| b.label).collect::<Vec<_>>();
+    let mut h = drawing("sketch.ellipse");
+    assert_eq!(labels(&h), ["Major radius"]);
+    type_value(&mut h, "25");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.step(&json!({"move": {"world": [0, 30, 0]}})).unwrap();
+    assert_eq!(labels(&h), ["Minor radius"]);
+    assert_focus(&h, 0);
+    type_value(&mut h, "8");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    let state = h.app.session.world_state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status);
+    let CurveKind::Ellipse { c, m, r } = sk.curves[0].kind.clone() else { panic!("{:?}", sk.curves[0].kind) };
+    let (c, m) = (sk.point(c).unwrap(), sk.point(m).unwrap());
+    // From the centre (the origin) toward the cursor at (20, 10).
+    let dir = solidcraft_engine::geom::Vec2::new(20.0, 10.0).normalized().unwrap();
+    assert!(c.len() < 1e-6 && (m - dir * 25.0).len() < 1e-6, "{c:?} {m:?}");
+    assert!((r - 8.0).abs() < 1e-6, "{r}");
+    let doc = &h.app.session.doc;
+    let mut sizes: Vec<f64> = doc.params.iter().filter(|p| p.model).filter_map(|p| doc.eval(&p.name, Kind::Length).ok()).collect();
+    sizes.sort_by(f64::total_cmp);
+    assert_eq!(sizes.len(), 2, "{sizes:?}");
+    assert!((sizes[0] - 8.0).abs() < 1e-6 && (sizes[1] - 25.0).abs() < 1e-6, "{sizes:?}");
+}
+
 #[test]
 fn inch_live_lengths_use_design_units_and_typed_four_digits_commit_in_inches() {
     let mut h = Harness::new();
@@ -566,6 +599,61 @@ fn value_boxes_stay_in_view_and_off_the_cursor() {
     // No room on either side: inside the view all the same.
     let tiny = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(80.0, 30.0));
     assert!(tiny.contains_rect(egui::Rect::from_min_size(in_view(egui::pos2(-200.0, -200.0), Some(tiny), Some(egui::pos2(40.0, 15.0))), BOX)));
+}
+
+#[test]
+fn polygon_inputs_clear_each_other_and_the_preview() {
+    for command in ["sketch.polygon.inscribed", "sketch.polygon.circumscribed"] {
+        for (view, corner) in [("top", false), ("iso", false), ("top", true)] {
+            let mut h = Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.call("ui.view", json!({"view":view}));
+            h.step(&json!({"start":command})).unwrap();
+            if corner {
+                let view = h.app.viewport.layout.as_ref().unwrap().drawable.shrink(20.0);
+                let center = view.left_top();
+                let end = center + egui::vec2(16.0, 0.0);
+                h.step(&json!({"click":[center.x,center.y]})).unwrap();
+                h.step(&json!({"move":[end.x,end.y],"alt":true})).unwrap();
+            } else {
+                h.step(&json!({"click":{"sketch":[0,0]}})).unwrap();
+                h.step(&json!({"move":{"sketch":[2,0]},"alt":true})).unwrap();
+            }
+            h.frames(3);
+            let boxes: Vec<_> = (0..2usize)
+                .map(|i| {
+                    h.ctx
+                        .memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", i))))
+                        .unwrap_or_else(|| panic!("{command}, {view}, {corner:?}: input {i} missing"))
+                })
+                .collect();
+            assert!(!boxes[0].intersects(boxes[1]), "{command}: inputs overlap: {boxes:?}");
+            let tool = h.app.tool.as_ref().unwrap();
+            let end = crate::sketch_dims::shown(&h.app, tool, tool.hover.as_ref().unwrap());
+            let outline = crate::tools::polygon_outline(tool, end, 6.0).unwrap();
+            let state = h.app.session.world_state();
+            let plane = state.sketch(h.app.session.active_sketch.unwrap()).unwrap().plane;
+            let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+            let points: Vec<_> = outline.iter().map(|p| proj.to_screen(plane.to_world(*p)).unwrap()).collect();
+            let bounds = egui::Rect::from_points(&points);
+            for rect in boxes {
+                assert!(!rect.intersects(bounds), "{command}: input {rect:?} covers polygon {bounds:?}");
+                assert!(h.app.viewport.layout.as_ref().unwrap().drawable.contains_rect(rect));
+            }
+            assert_focus(&h, 0);
+            type_value(&mut h, "2");
+            tab(&mut h, false);
+            assert_focus(&h, 1);
+            type_value(&mut h, "6");
+            h.step(&json!({"key":"Enter"})).unwrap();
+            let state = h.app.session.world_state();
+            let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+            assert_eq!(sketch.sketch.curves.iter().filter(|c| !c.construction).count(), 6);
+            assert_eq!(sketch.profiles.len(), 1);
+            let expected = if command == "sketch.polygon.inscribed" { 6.0 * 3f64.sqrt() } else { 8.0 * 3f64.sqrt() };
+            assert!((sketch.profiles[0].area - expected).abs() < 1e-6, "{command}: {}", sketch.profiles[0].area);
+        }
+    }
 }
 
 /// `name = expression` in a value box, as in the Dimension tool's: the shape takes the

@@ -9,6 +9,9 @@ mod easyprint;
 #[path = "file_import.rs"]
 pub(crate) mod import;
 
+#[path = "file_open_steps.rs"]
+pub(crate) mod open_steps;
+
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "file_send.rs"]
 mod send;
@@ -81,6 +84,8 @@ pub static COMMANDS: &[CommandSpec] = &[
 fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_(p, "name").unwrap_or("Untitled");
     s.replace_design(Session::new(Document::new(name)));
+    // A name given here is the user's own, so Save As keeps it (#4907); "Untitled" is none.
+    s.user_named = !name.trim().is_empty() && name.trim() != DEFAULT_NAME;
     Ok(json!({"name": name}))
 }
 
@@ -337,11 +342,29 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let read_only = bool_(p, "read_only").unwrap_or(false);
     // Stamped before it is read: a write while it is being read is a change too.
     let disk = solidcraft_io::design_lock::stamp(path);
+    let (doc, saved) = read_design(s, path)?;
+    opened_design(s, Session::opened_at(doc, saved.as_ref(), Some(path)), path, read_only, disk)
+}
+
+/// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.
+fn read_design(s: &mut Session, path: &str) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
     let (mut doc, saved) = solidcraft_io::read_design_file(path, s.open_preview.take()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     if let Some(stem) = default_name_for(&doc.name, path) {
         doc.name = stem;
     }
-    s.replace_design(Session::opened_at(doc, saved.as_ref(), Some(path)));
+    Ok((doc, saved))
+}
+
+/// `doc.open` of a design: `opened`, the design read from `path` and evaluated, takes `s`'s
+/// place, and the reply says what it is.
+fn opened_design(
+    s: &mut Session,
+    opened: Session,
+    path: &str,
+    read_only: bool,
+    disk: Option<solidcraft_io::design_lock::FileStamp>,
+) -> Result<Value> {
+    s.replace_design(opened);
     s.disk = disk;
     s.read_only = read_only;
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
@@ -370,17 +393,22 @@ fn default_name_for(name: &str, path: &str) -> Option<String> {
     (!stem.is_empty()).then_some(stem)
 }
 
-/// The name a design takes when saved to `path`, if it changes: its file's name while it has
-/// none of its own ([`default_name_for`]), or while it still has the name it took from the file
-/// it was saved as before, so Save As under another name renames it too (#1710). A name the
-/// user chose is kept.
-fn saved_name(name: &str, old_path: Option<&str>, path: &str) -> Option<String> {
+/// The name a design takes when saved to `path`, if it changes. A design with no name of its
+/// own takes the file's ([`default_name_for`]). Otherwise a name the user chose is kept, while
+/// a borrowed one — taken from the file it was saved as before (#1710), from a sample, or from
+/// a file that stored another design's name — follows a Save As to the new file's name, so
+/// after Save As the open design *is* the new file (#4907). A plain Save to the same file
+/// never renames.
+fn saved_name(name: &str, old_path: Option<&str>, path: &str, user_named: bool) -> Option<String> {
     if let Some(stem) = default_name_for(name, path) {
         return Some(stem);
     }
+    if user_named {
+        return None;
+    }
     let stem = |p: &str| std::path::Path::new(p).file_stem().map(|x| x.to_string_lossy().trim().to_string()).filter(|x| !x.is_empty());
-    let (old, new) = (stem(old_path?)?, stem(path)?);
-    (name.trim() == old && new != old).then_some(new)
+    let new = stem(path)?;
+    (old_path != Some(path) && name.trim() != new).then_some(new)
 }
 
 /// Rename the design, and the undo and redo states that still carry the old name, so undo
@@ -427,9 +455,9 @@ fn write(s: &mut Session, path: &str, format: &str, compression: &str, preview: 
             )));
         }
     }
-    // Saving an unnamed design, or one named after the file it was saved as, names it after its
-    // file (not an undoable edit).
-    let renamed = saved_name(&s.doc.name, s.path.as_deref(), path).map(|stem| (s.doc.name.clone(), stem));
+    // Saving an unnamed or borrowed-named design to a new file names it after that file
+    // (not an undoable edit); a name the user chose is kept (#4907).
+    let renamed = saved_name(&s.doc.name, s.path.as_deref(), path, s.user_named).map(|stem| (s.doc.name.clone(), stem));
     if let Some((from, to)) = &renamed {
         rename_design(s, from, to);
     }
@@ -478,7 +506,12 @@ impl Session {
     /// them. Absolute in-memory targets survive Save As, undo, redo and recovery unchanged.
     pub fn opened_at(mut doc: Document, saved: Option<&solidcraft_doc::SavedModel>, path: Option<&str>) -> Self {
         super::component_link::resolve_design_links(&mut doc, path);
-        let mut session = Self::opened(doc, saved);
+        Self::opened(doc, saved).located(path)
+    }
+
+    /// This session, just opened, as the design in the file at `path`.
+    pub(crate) fn located(self, path: Option<&str>) -> Self {
+        let mut session = self;
         session.path = path.map(str::to_owned);
         // A design saved before body names were pinned (#6403) is pinned now, as its first
         // command would pin it: that command pinned them as part of itself, so undoing it went
@@ -1449,6 +1482,41 @@ mod tests {
         assert!(d.rejected.is_empty());
     }
 
+    /// The model a save keeps writes each distinct sheet-metal body once, and every state names
+    /// the records of exactly the sheets it holds (found by the sheet's text, not by building its
+    /// record again for every state, which took most of a large sheet-metal design's save).
+    #[test]
+    fn a_saved_model_writes_each_sheet_once_for_the_states_that_hold_it() {
+        let mut s = Session::new(Document::new("Sheets"));
+        let sheet_rule = json!({"name": "AL2", "thickness": "2 mm", "k_factor": "0.5", "bend_radius": "1 mm", "active": true});
+        s.execute("sheet.manage_rules", &sheet_rule).unwrap();
+        for (i, x) in [0.0, 200.0, 400.0].into_iter().enumerate() {
+            s.execute("sketch.create", &json!({"plane": "XY", "name": format!("Base{i}")})).unwrap();
+            s.execute("sketch.rectangle.two_point", &json!({"p0": [x, 0], "p1": [x + 150.0, 100]})).unwrap();
+            s.execute("sketch.finish", &json!({})).unwrap();
+            s.execute("sheet.flange", &json!({"sketch": format!("Base{i}")})).unwrap();
+            s.execute("sheet.flange", &json!({"edges": [[x + 75.0, 0, 2]], "height": 20})).unwrap();
+        }
+        let saved = saved_geometry(&s, &s.doc).unwrap();
+        let records = &saved.records;
+        let sheets = records["sheets"].as_array().unwrap();
+        let texts: std::collections::HashSet<String> = sheets.iter().map(Value::to_string).collect();
+        assert_eq!(texts.len(), sheets.len(), "each sheet once");
+        let mut held = std::collections::HashSet::new();
+        for (r, feature) in s.model.results.iter().zip(records["features"].as_array().unwrap()) {
+            let state = &records["states"][feature["state"].as_u64().unwrap() as usize];
+            let named = state["sheets"].as_array().unwrap();
+            assert_eq!(named.len(), r.state.sheets.len());
+            for (i, sheet) in named.iter().zip(&r.state.sheets) {
+                let written = &sheets[i.as_u64().unwrap() as usize];
+                assert_eq!(*written, serde_json::to_value(sheet).unwrap(), "{}: the record of its own sheet", r.name);
+                held.insert(written.to_string());
+            }
+        }
+        assert_eq!(held, texts, "every record written is one a state holds");
+        assert!(sheets.len() >= 6, "each part's base, then with its flange: {}", sheets.len());
+    }
+
     /// A design whose saved model would give a body back with other topology opens with the
     /// bodies it was saved with. A pattern copy cut by an automatic extrude came back from the
     /// native codec with two loose vertices more (10 faces, 18 edges, 12 vertices instead of 10);
@@ -1785,6 +1853,44 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    /// #4907: after Save As the open design *is* the new file — tab, browser and the name stored
+    /// in the file — whenever its name didn't come from its current file: a sample's name, or a
+    /// file renamed outside SolidCraft or named by someone else. A plain Save never renames.
+    #[test]
+    fn save_as_names_a_borrowed_name_after_the_new_file() {
+        let dir = name_dir("borrowed");
+        // The issue's steps: the sample "Sample Plate" saved as "Bracket v2.solidcraft".
+        let mut s = Session::default();
+        s.doc_mut().name = "Sample Plate".into();
+        s.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
+        let path = dir.join("Bracket v2.solidcraft");
+        let r = s.execute("file.save_as", &json!({"path":path})).unwrap();
+        assert_eq!(r["name"], "Bracket v2");
+        assert_eq!(s.doc.name, "Bracket v2");
+        assert!(!s.is_dirty(), "taking the new file's name is part of the save");
+        assert_eq!(solidcraft_io::read_design(&std::fs::read(&path).unwrap()).unwrap().name, "Bracket v2");
+        // Undoing the box does not bring the sample's name back.
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc.name, "Bracket v2");
+        // Reopening shows the new name too.
+        let mut reopened = Session::default();
+        reopened.execute("doc.open", &json!({"path":path})).unwrap();
+        assert_eq!(reopened.doc.name, "Bracket v2");
+        // A file whose stored name is not its own (renamed outside SolidCraft, or saved by a
+        // version before #1710): Save As names the design after the new file, while a plain
+        // Save to the file it has leaves the name alone.
+        let odd = dir.join("renamed.solidcraft");
+        std::fs::write(&odd, solidcraft_io::write_design(&Document::new("Sample Plate"))).unwrap();
+        let mut s = Session::default();
+        s.execute("doc.open", &json!({"path":odd})).unwrap();
+        assert_eq!(s.doc.name, "Sample Plate");
+        s.execute("file.save", &json!({})).unwrap();
+        assert_eq!(s.doc.name, "Sample Plate", "a plain Save does not rename behind the user's back");
+        s.execute("file.save_as", &json!({"path":dir.join("Bracket v3.solidcraft")})).unwrap();
+        assert_eq!(s.doc.name, "Bracket v3");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn opening_an_untitled_file_shows_its_file_name() {
         let dir = name_dir("open");
@@ -1864,6 +1970,68 @@ mod tests {
         watch(progress, || stopped.execute("doc.open", &json!({"path":path}))).unwrap();
         assert!(stopped.model.results.iter().all(|r| r.skipped), "no feature was rebuilt after Cancel");
         assert!(stopped.world_state().bodies.is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// #10198: a design opened a feature at a time ([`OpenSteps`]) is the design `doc.open`
+    /// opens: the same features, results, bodies and history marker, with its file and name. Its
+    /// import is offered before the step that evaluates it, and other files are left to `doc.open`.
+    #[test]
+    fn a_design_opened_a_feature_at_a_time_is_the_one_doc_open_opens() {
+        use super::open_steps::OpenSteps;
+        let dir = std::env::temp_dir().join(format!("solidcraft-open-steps-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("steps.sc").to_string_lossy().to_string();
+        let step = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/step-conformance/cylinder_seam.step");
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+        s.execute("file.insert_step", &json!({"path": step})).unwrap();
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[40,0,0]})).unwrap();
+        s.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[60,0,0]})).unwrap();
+        let features = s.doc.features.len();
+        s.execute("timeline.rollback", &json!({"position": features - 1})).unwrap();
+        s.execute("file.save", &json!({"path": path, "cache": false})).unwrap();
+
+        let mut whole = Session::default();
+        let opened = whole.execute("doc.open", &json!({"path": path, "read_only": true})).unwrap();
+
+        let mut steps = OpenSteps::start(&json!({"path": path, "read_only": true})).unwrap().expect("a design is opened in steps");
+        assert_eq!(steps.path(), path);
+        assert_eq!(steps.progress(), (0, features - 1), "the saved marker is where evaluation stops");
+        let mut imports = 0;
+        let mut n = 0;
+        while !steps.done() {
+            if let Some(text) = steps.next_import() {
+                assert!(text.contains("ISO-10303-21"));
+                imports += 1;
+            }
+            steps.step();
+            n += 1;
+            assert_eq!(steps.progress().0, n);
+        }
+        assert_eq!((imports, n), (1, features - 1));
+        assert!(!steps.step(), "nothing is left to evaluate");
+        let mut stepped = Session::default();
+        let reply = steps.finish(&mut stepped).unwrap();
+
+        assert_eq!(reply, opened);
+        assert_eq!(stepped.doc, whole.doc);
+        assert_eq!(stepped.doc.marker, Some(features - 1));
+        assert_eq!((stepped.path.as_deref(), stepped.read_only), (Some(path.as_str()), true));
+        let summary = |s: &Session| -> Vec<(u64, bool, bool)> { s.model.results.iter().map(|r| (r.id, r.skipped, r.error.is_some())).collect() };
+        assert_eq!(summary(&stepped), summary(&whole));
+        let bodies =
+            |s: &Session| -> Vec<(String, usize)> { s.world_state().bodies.iter().map(|b| (b.name.clone(), b.mesh().triangles.len())).collect() };
+        assert_eq!(bodies(&stepped), bodies(&whole));
+        assert_eq!(stepped.world_state().bodies.len(), 3, "the box, the cylinder and the box before the marker");
+        assert!(stepped.model.is_current(&stepped.doc));
+
+        // Other files, and STEP-only options, are opened by `doc.open`.
+        for p in [json!({"path": step}), json!({"path": "part.stl"}), json!({"path": path, "up": "y"}), json!({})] {
+            assert!(OpenSteps::start(&p).unwrap().is_none(), "{p}");
+        }
+        assert!(OpenSteps::start(&json!({"path": dir.join("missing.sc").to_string_lossy()})).is_err());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

@@ -32,7 +32,7 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::doc::Document;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::geom::{Vec2, Vec3};
-use solidcraft_engine::sketch::PatternAlignment;
+use solidcraft_engine::sketch::{PatternAlignment, VariableUnit};
 
 use crate::SolveApp;
 use crate::dialogs::{CHAMFER_TYPES, Dialog, Kind};
@@ -142,7 +142,7 @@ pub enum Mod {
     /// `sketch.equation_curve` (or `.edit` on the curve the window's `curve` extra names): the
     /// form (an index into [`EQUATION_FORMS`]), x(t) and y(t) (or y(x)), the variable's range and
     /// how far the curve may stray from the formulas.
-    Equation { form: usize, x: String, y: String, start: String, end: String, tolerance: String },
+    Equation { form: usize, x: String, y: String, start: String, end: String, tolerance: String, range_unit: bool },
 }
 
 impl Mod {
@@ -204,11 +204,10 @@ fn inputs(k: &Mod) -> Vec<SelInput> {
         Mod::PatternCirc { .. } => {
             vec![SelInput::new("Entities", CURVES | SKETCH_POINTS | PROFILES, true), SelInput::new("Center", SKETCH_POINTS, false)]
         }
-        // A fillet rounds any number of corners to one radius (`points`). Each chamfer command
-        // cuts one corner: its point, or its two lines. Two lines name the corner between them
-        // where more lines meet at its point (#1824), for both.
-        Mod::Corner { chamfer: false, .. } => vec![SelInput::new("Corners", SKETCH_POINTS | CURVES, true)],
-        Mod::Corner { .. } => vec![SelInput::new("Corner", SKETCH_POINTS | CURVES, true)],
+        // A fillet rounds any number of corners to one radius, and a chamfer cuts any number
+        // alike (`points`). Two lines name the corner between them where more lines meet at its
+        // point (#1824), for both.
+        Mod::Corner { .. } => vec![SelInput::new("Corners", SKETCH_POINTS | CURVES, true)],
         Mod::Equation { .. } => Vec::new(),
     }
 }
@@ -271,6 +270,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             start: "0".into(),
             end: "2 * pi".into(),
             tolerance: "0.01 mm".into(),
+            range_unit: false,
         },
         _ => return None,
     };
@@ -291,6 +291,7 @@ pub fn edit_equation(app: &mut SolveApp, id: &str) -> bool {
         start: eq.start,
         end: eq.end,
         tolerance: format!("{} mm", eq.tolerance),
+        range_unit: eq.variable_unit == VariableUnit::Range,
     };
     let mut dialog = Dialog::new(Kind::SketchModify(kind), Vec::new());
     dialog.extra.insert("curve".into(), json!(id));
@@ -584,7 +585,7 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             alignment(ui, "Alignment", a, reversed);
             pattern_hint(ui);
         }
-        Mod::Equation { form, x, y, start, end, tolerance } => {
+        Mod::Equation { form, x, y, start, end, tolerance, range_unit } => {
             ui_kit::choice_row(ui, "Form", "equation_form", form, &EQUATION_FORMS);
             if *form == 0 {
                 enter |= number(ui, "x(t)", x);
@@ -595,7 +596,9 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Mod, doc: &Document) -> bool {
             enter |= number(ui, "Start", start);
             enter |= number(ui, "End", end);
             enter |= number(ui, "Tolerance", tolerance);
-            ui_kit::text(ui, crate::i18n::tr("ui.equation_note"), ui_kit::Text::Note("equation"));
+            ui_kit::checkbox_grid(ui, &mut [(crate::i18n::tr("ui.equation_variable_unit"), range_unit)], 1);
+            let note = if *range_unit { "ui.equation_note_range" } else { "ui.equation_note" };
+            ui_kit::text(ui, crate::i18n::tr(note), ui_kit::Text::Note("equation"));
         }
         Mod::Corner { chamfer, ctype, size, distance2, angle, flip } => {
             if *chamfer {
@@ -1046,11 +1049,15 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             let flipped = *flip && *ctype > 0;
             let mut p = match (corner_ids(app, inputs, 0).as_slice(), line_ids(inputs, 0).as_slice()) {
                 ([point], []) => corner_ref(app, point, flipped)?,
+                // Several corners are cut alike, each flipped as one alone would be.
+                (points, []) if !points.is_empty() => {
+                    json!({"points": points.iter().map(|point| corner_ref(app, point, flipped)).collect::<Result<Vec<_>, _>>()?})
+                }
                 // Flip swaps the lines, so `distance` applies to the other leg.
                 ([], [a, b]) if flipped => json!({"a": b, "b": a}),
                 ([], [a, b]) => json!({"a": a, "b": b}),
                 ([], []) => return Err("select the corner to cut first".into()),
-                _ => return Err("select one corner point, or the two lines of one corner".into()),
+                _ => return Err("select corner points, or the two lines of one corner".into()),
             };
             p["distance"] = json!(corner_size(app, size_label(true, *ctype), size, ValueKind::Length)?);
             match ctype {
@@ -1066,7 +1073,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                 _ => ("sketch.chamfer.equal_distance", p),
             }
         }
-        Mod::Equation { form, x, y, start, end, tolerance } => {
+        Mod::Equation { form, x, y, start, end, tolerance, range_unit } => {
             let filled = |label: &str, text: &str| -> Result<String, String> {
                 let text = text.trim();
                 if text.is_empty() { Err(format!("{label} is empty")) } else { Ok(text.to_string()) }
@@ -1081,6 +1088,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
             } else {
                 p["explicit"] = json!(true);
             }
+            p["variable_unit"] = json!(if *range_unit { "range" } else { "number" });
             (if extra.contains_key("curve") { "sketch.equation_curve.edit" } else { "sketch.equation_curve" }, p)
         }
     };

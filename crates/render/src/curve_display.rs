@@ -7,6 +7,8 @@ use crate::Mat4;
 const MAX_VERTICES: usize = 4096;
 const MAX_DEPTH: u8 = 24;
 const PIXEL_ERROR: f64 = 0.5;
+/// The vertices a new part has room for before it grows.
+const PART_CAPACITY: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PixelCurveView {
@@ -54,20 +56,44 @@ fn mix(a: H, b: H, t: f64) -> H {
     std::array::from_fn(|i| a[i] * (1.0 - t) + b[i] * t)
 }
 
-fn halves(c: &[H]) -> (Vec<H>, Vec<H>) {
-    let mut work = c.to_vec();
-    let mut l = Vec::with_capacity(c.len());
-    let mut r = Vec::with_capacity(c.len());
-    while let (Some(a), Some(b)) = (work.first(), work.last()) {
-        l.push(*a);
-        r.push(*b);
-        if work.len() == 1 {
-            break;
-        }
-        work = work.windows(2).map(|p| mix(p[0], p[1], 0.5)).collect();
+/// The most control points of one span: a Bézier of the highest degree.
+const MAX_CONTROLS: usize = solidcraft_geom::MAX_BEZIER_DEGREE + 1;
+
+/// One span's homogeneous control points, kept inline: the sampler splits and projects
+/// thousands of them per curve and view, and a `Vec` each was most of its allocations.
+#[derive(Clone, Copy)]
+struct Hull {
+    len: usize,
+    p: [H; MAX_CONTROLS],
+}
+
+impl Hull {
+    fn new(points: &[H]) -> Option<Hull> {
+        let mut p = [[0.0; 4]; MAX_CONTROLS];
+        p.get_mut(..points.len())?.copy_from_slice(points);
+        Some(Hull { len: points.len(), p })
     }
-    r.reverse();
-    (l, r)
+
+    fn points(&self) -> &[H] {
+        &self.p[..self.len]
+    }
+
+    /// The two halves at t = 0.5 (de Casteljau), each level's midpoints worked out in place
+    /// with the same `mix` as one level at a time.
+    fn halves(&self) -> (Hull, Hull) {
+        let n = self.len;
+        let mut work = self.p;
+        let (mut l, mut r) = (Hull { len: n, p: [[0.0; 4]; MAX_CONTROLS] }, Hull { len: n, p: [[0.0; 4]; MAX_CONTROLS] });
+        for level in 0..n {
+            let last = n - 1 - level;
+            l.p[level] = work[0];
+            r.p[last] = work[last];
+            for i in 0..last {
+                work[i] = mix(work[i], work[i + 1], 0.5);
+            }
+        }
+        (l, r)
+    }
 }
 
 fn world(h: H) -> Option<Vec3> {
@@ -98,7 +124,7 @@ fn distance_segment(p: Vec2, a: Vec2, b: Vec2) -> f64 {
     p.dist(a + d * t)
 }
 
-fn controls(segment: &Seg2, plane: &Plane) -> Option<(Vec<Vec<H>>, H)> {
+fn controls(segment: &Seg2, plane: &Plane) -> Option<(Vec<Hull>, H)> {
     let mut terms: H = [0.0; 4];
     let mut h = |p: Vec2, w: f64| {
         for (r, (o, x, y)) in [(plane.origin.x, plane.x.x, plane.y.x), (plane.origin.y, plane.x.y, plane.y.y), (plane.origin.z, plane.x.z, plane.y.z)]
@@ -112,30 +138,34 @@ fn controls(segment: &Seg2, plane: &Plane) -> Option<(Vec<Vec<H>>, H)> {
         [p.x * w, p.y * w, p.z * w, w]
     };
     let spans = match *segment {
-        Seg2::Line { a, b } => vec![vec![h(a, 1.0), h(b, 1.0)]],
-        Seg2::Cubic { p0, p1, p2, p3 } => vec![vec![h(p0, 1.0), h(p1, 1.0), h(p2, 1.0), h(p3, 1.0)]],
-        Seg2::Conic { a, apex, b, w } if w > 0.0 => vec![vec![h(a, 1.0), h(apex, w), h(b, 1.0)]],
+        Seg2::Line { a, b } => vec![Hull::new(&[h(a, 1.0), h(b, 1.0)])?],
+        Seg2::Cubic { p0, p1, p2, p3 } => vec![Hull::new(&[h(p0, 1.0), h(p1, 1.0), h(p2, 1.0), h(p3, 1.0)])?],
+        Seg2::Conic { a, apex, b, w } if w > 0.0 => vec![Hull::new(&[h(a, 1.0), h(apex, w), h(b, 1.0)])?],
         Seg2::Bezier { n, p } if (1..=solidcraft_geom::MAX_BEZIER_DEGREE as u8).contains(&n) => {
-            vec![p[..=n as usize].iter().map(|p| h(*p, 1.0)).collect()]
+            let mut hull = Hull { len: n as usize + 1, p: [[0.0; 4]; MAX_CONTROLS] };
+            for (out, p) in hull.p.iter_mut().zip(&p[..=n as usize]) {
+                *out = h(*p, 1.0);
+            }
+            vec![hull]
         }
         Seg2::Arc { center, radius, start, sweep }
             if radius > 0.0 && start.is_finite() && sweep.is_finite() && sweep.abs() <= std::f64::consts::TAU + 1e-9 =>
         {
             let count = (sweep.abs() / std::f64::consts::FRAC_PI_2).ceil().max(1.0) as usize;
-            (0..count)
-                .map(|i| {
-                    let a = start + sweep * i as f64 / count as f64;
-                    let b = start + sweep * (i + 1) as f64 / count as f64;
-                    let mid = (a + b) * 0.5;
-                    let w = ((b - a) * 0.5).cos();
-                    let p = |t: f64, r: f64| center + Vec2::new(t.cos(), t.sin()) * r;
-                    vec![h(p(a, radius), 1.0), h(p(mid, radius / w), w), h(p(b, radius), 1.0)]
-                })
-                .collect()
+            let mut spans = Vec::with_capacity(count);
+            for i in 0..count {
+                let a = start + sweep * i as f64 / count as f64;
+                let b = start + sweep * (i + 1) as f64 / count as f64;
+                let mid = (a + b) * 0.5;
+                let w = ((b - a) * 0.5).cos();
+                let p = |t: f64, r: f64| center + Vec2::new(t.cos(), t.sin()) * r;
+                spans.push(Hull::new(&[h(p(a, radius), 1.0), h(p(mid, radius / w), w), h(p(b, radius), 1.0)])?);
+            }
+            spans
         }
         _ => return None,
     };
-    spans.iter().flatten().all(|p| p.iter().all(|x| x.is_finite()) && p[3] > 0.0).then_some((spans, terms))
+    spans.iter().flat_map(Hull::points).all(|p| p.iter().all(|x| x.is_finite()) && p[3] > 0.0).then_some((spans, terms))
 }
 
 /// Samples one exact segment to a conservative 0.5 physical-pixel control-hull
@@ -168,29 +198,41 @@ fn sample(segment: &Seg2, plane: &Plane, view: &PixelCurveView, budget: &mut Sam
         out.quality = SamplingQuality::Invalid;
         return out;
     };
-    let mut stack: Vec<_> = spans
-        .into_iter()
-        .rev()
-        .map(|c| {
-            let magnitude: H = std::array::from_fn(|i| c.iter().map(|p| p[i].abs()).fold(source_terms[i], f64::max));
-            let terms: H = std::array::from_fn(|r| (0..4).map(|i| view.vp.0[i][r].abs() * magnitude[i]).sum());
-            (c, 0u8, terms)
-        })
-        .collect();
+    // Depth first: the spans not yet started, and one right half per level below.
+    let mut stack = Vec::with_capacity(spans.len() + usize::from(MAX_DEPTH) + 1);
+    for hull in spans.into_iter().rev() {
+        let c = hull.points();
+        let magnitude: H = std::array::from_fn(|i| c.iter().map(|p| p[i].abs()).fold(source_terms[i], f64::max));
+        let terms: H = std::array::from_fn(|r| (0..4).map(|i| view.vp.0[i][r].abs() * magnitude[i]).sum());
+        stack.push((hull, 0u8, terms));
+    }
     let mut connected = false;
     let mut nodes = 0usize;
-    while let Some((c, depth, terms)) = stack.pop() {
+    // Each point's projection and clip distances, worked out once per node (they were
+    // recomputed for every clip plane a test looked at).
+    let mut q: [H; MAX_CONTROLS] = [[0.0; 4]; MAX_CONTROLS];
+    let mut dist = [[0.0; 7]; MAX_CONTROLS];
+    while let Some((hull, depth, terms)) = stack.pop() {
         if budget.remaining_nodes == 0 || nodes == 32_768 {
             out.quality = SamplingQuality::BudgetLimited;
             break;
         }
         budget.remaining_nodes -= 1;
         nodes += 1;
-        let q: Vec<H> = c.iter().map(|h| project_h(view.vp, *h)).collect();
+        let c = hull.points();
+        let n = c.len();
+        for (q, h) in q.iter_mut().zip(c) {
+            *q = project_h(view.vp, *h);
+        }
+        let q = &q[..n];
         if q.iter().flatten().any(|x| !x.is_finite()) {
             out.quality = SamplingQuality::Invalid;
             break;
         }
+        for (d, p) in dist.iter_mut().zip(q) {
+            *d = distances(*p, view, clip_xy);
+        }
+        let dist = &dist[..n];
         let e: H = terms.map(|t| t * f64::EPSILON * (f64::from(depth) + 4.0) * 64.0);
         let clip_error = [
             e[0] + e[3] * (1.0 + 2.0 / view.width_px),
@@ -201,33 +243,61 @@ fn sample(segment: &Seg2, plane: &Plane, view: &PixelCurveView, budget: &mut Sam
             e[2] + e[3],
             e[3],
         ];
-        if (0..7).any(|i| q.iter().all(|p| distances(*p, view, clip_xy)[i] < -clip_error[i])) {
+        if (0..7).any(|i| dist.iter().all(|d| d[i] < -clip_error[i])) {
             connected = false;
             continue;
         }
         let positive = q.iter().all(|p| p[3] > 1e-12);
-        let depth_safe = c.len() == 2 || (4..7).all(|i| q.iter().all(|p| distances(*p, view, clip_xy)[i] >= 0.0));
+        let depth_safe = n == 2 || (4..7).all(|i| dist.iter().all(|d| d[i] >= 0.0));
         let flat = positive
             && q.first().zip(q.last()).is_some_and(|(a, b)| {
                 let (a, b) = (screen(*a, view), screen(*b, view));
-                let magnitude = q.iter().map(|p| screen(*p, view).len()).fold(1.0, f64::max);
+                let mut on_screen = [Vec2::ZERO; MAX_CONTROLS];
+                for (s, p) in on_screen.iter_mut().zip(q) {
+                    *s = screen(*p, view);
+                }
+                let on_screen = &on_screen[..n];
+                let mut off_chord = [0.0; MAX_CONTROLS];
+                for (d, s) in off_chord.iter_mut().zip(on_screen) {
+                    *d = distance_segment(*s, a, b);
+                }
+                let off_chord = &off_chord[..n];
+                // The allowance below is never negative (nor NaN), so a point already more than
+                // the bound off the chord fails the test whatever it is: most nodes the sampler
+                // visits are split, and this skips their roundoff estimate.
+                if off_chord.iter().any(|d| *d > PIXEL_ERROR) {
+                    return false;
+                }
+                let magnitude = on_screen.iter().map(|s| s.len()).fold(1.0, f64::max);
                 // Keep floating-point roundoff inside the advertised bound.
                 // Absolute summands also cover cancellation in VP multiplication.
                 // Subdivision propagates roundoff from the original homogeneous hull.
-                let projection_error = q
-                    .iter()
-                    .map(|p| {
-                        let safe_w = p[3] - e[3];
-                        if safe_w <= 0.0 {
-                            return f64::INFINITY;
-                        }
-                        let x = (e[0] + (p[0] / p[3]).abs() * e[3]) / safe_w * view.width_px * 0.5;
-                        let y = (e[1] + (p[1] / p[3]).abs() * e[3]) / safe_w * view.height_px * 0.5;
-                        x.hypot(y)
-                    })
-                    .fold(0.0, f64::max);
-                let allowance = projection_error + magnitude * f64::EPSILON * 128.0;
-                allowance < PIXEL_ERROR && q.iter().all(|p| distance_segment(screen(*p, view), a, b) + allowance <= PIXEL_ERROR)
+                let mut roundoff = [(0.0, 0.0); MAX_CONTROLS];
+                for (r, p) in roundoff.iter_mut().zip(q) {
+                    let safe_w = p[3] - e[3];
+                    if safe_w <= 0.0 {
+                        // An infinite allowance: never flat.
+                        return false;
+                    }
+                    let x = (e[0] + (p[0] / p[3]).abs() * e[3]) / safe_w * view.width_px * 0.5;
+                    let y = (e[1] + (p[1] / p[3]).abs() * e[3]) / safe_w * view.height_px * 0.5;
+                    *r = (x, y);
+                }
+                let roundoff = &roundoff[..n];
+                let margin = magnitude * f64::EPSILON * 128.0;
+                // |x| + |y| is never less than hypot(x, y), and twice it leaves far more room
+                // than the rounding of either. Rounding keeps sums in order, so when the test
+                // passes with this larger allowance it passes with the exact one too: the
+                // costly `hypot`s are only needed for nodes near the bound.
+                if roundoff.iter().all(|(x, y)| x.is_finite() && y.is_finite()) {
+                    let upper = roundoff.iter().map(|(x, y)| (x.abs() + y.abs()) * 2.0).fold(0.0, f64::max) + margin;
+                    if upper.is_finite() && upper < PIXEL_ERROR && off_chord.iter().all(|d| d + upper <= PIXEL_ERROR) {
+                        return true;
+                    }
+                }
+                let projection_error = roundoff.iter().map(|(x, y)| x.hypot(*y)).fold(0.0, f64::max);
+                let allowance = projection_error + margin;
+                allowance < PIXEL_ERROR && off_chord.iter().all(|d| d + allowance <= PIXEL_ERROR)
             });
         if !flat || !depth_safe {
             if depth == MAX_DEPTH || out.vertex_count >= MAX_VERTICES {
@@ -235,15 +305,15 @@ fn sample(segment: &Seg2, plane: &Plane, view: &PixelCurveView, budget: &mut Sam
                 connected = false;
                 continue;
             }
-            let (l, r) = halves(&c);
+            let (l, r) = hull.halves();
             stack.push((r, depth + 1, terms));
             stack.push((l, depth + 1, terms));
             continue;
         }
-        let (Some(a), Some(b), Some(qa), Some(qb)) = (c.first(), c.last(), q.first(), q.last()) else { continue };
+        let (Some(a), Some(b), Some(da), Some(db)) = (c.first(), c.last(), dist.first(), dist.last()) else { continue };
         let mut lo: f64 = 0.0;
         let mut hi: f64 = 1.0;
-        for (a, b) in distances(*qa, view, clip_xy).into_iter().zip(distances(*qb, view, clip_xy)) {
+        for (a, b) in da.iter().copied().zip(db.iter().copied()) {
             if a < 0.0 && b < 0.0 {
                 hi = -1.0;
                 break;
@@ -276,7 +346,11 @@ fn sample(segment: &Seg2, plane: &Plane, view: &PixelCurveView, budget: &mut Sam
                 part.push(b);
             }
         } else {
-            out.parts.push(vec![a, b]);
+            // Room for a few chords: most visible pieces take several, and growing from two
+            // reallocated each part twice.
+            let mut part = Vec::with_capacity(PART_CAPACITY);
+            part.extend([a, b]);
+            out.parts.push(part);
         }
         connected = hi == 1.0;
     }

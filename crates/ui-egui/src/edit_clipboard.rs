@@ -17,7 +17,10 @@
 //! and copied components as independent copies with their history (Paste and Paste New alike),
 //! where they were in the world (`component.paste_from_design`); completed sketches paste as
 //! independent features with their parameters (`timeline.paste`); cut ones paste there as copies,
-//! the originals staying. The last copy or cut in any design is what pastes: a design's own
+//! the originals staying. Sketch geometry copied or cut in a sketch pastes into a sketch of
+//! another design (`sketch.paste`), at the cursor or at the copied coordinates, with the
+//! constraints and dimensions among it; a dimension that named the copied design's parameters
+//! keeps its value instead (#9258). The last copy or cut in any design is what pastes: a design's own
 //! clipboard empties when another design copied after it.
 //!
 //! The window system turns Ctrl+C / Ctrl+V into clipboard events, not key presses, and only sends
@@ -106,6 +109,17 @@ fn foreign(app: &SolveApp) -> Option<&std::sync::Arc<solidcraft_engine::ForeignC
     app.foreign_copy.as_ref().filter(|_| app.own_clipboard_stamp != app.clipboard_stamp)
 }
 
+/// Sketch geometry another design copied or cut last, when that is what pastes here.
+fn foreign_sketch(app: &SolveApp) -> Option<&solidcraft_engine::cmd::sketch_clipboard::SketchClip> {
+    app.foreign_sketch_clip.as_ref().filter(|_| app.own_clipboard_stamp != app.clipboard_stamp)
+}
+
+/// Is there sketch geometry to paste into the active sketch: this design's, or another's copied
+/// last?
+pub fn can_paste_sketch(app: &SolveApp) -> bool {
+    app.session.sketch_clipboard.is_some() || foreign_sketch(app).is_some()
+}
+
 /// Bodies another design copied or cut last: they paste here as imported bodies.
 fn foreign_bodies(app: &SolveApp) -> bool {
     foreign(app).is_some_and(|c| !c.bodies.is_empty())
@@ -126,7 +140,7 @@ pub(crate) fn drop_stale(app: &mut SolveApp) {
 /// Is there something Paste would paste here?
 pub fn can_paste(app: &SolveApp) -> bool {
     if app.session.active_sketch.is_some() {
-        app.session.sketch_clipboard.is_some()
+        can_paste_sketch(app)
     } else if app.linked_design_clipboard.is_some() {
         // A copied design is what pastes, and never into itself.
         !design_copied_here(app)
@@ -241,6 +255,7 @@ fn replace_clipboard(app: &mut SolveApp) {
     app.clipboard_stamp += 1;
     app.own_clipboard_stamp = app.clipboard_stamp;
     app.foreign_copy = None;
+    app.foreign_sketch_clip = None;
     app.copied_bodies.clear();
     app.copied_placements.clear();
     app.cut = CutSet::default();
@@ -290,6 +305,7 @@ pub fn copy(app: &mut SolveApp) -> bool {
         // The command says why when it fails.
         let Ok(out) = app.run("sketch.copy", json!({ "entities": entities })) else { return copy_failed(app, None) };
         replace_clipboard(app);
+        app.foreign_sketch_clip = app.session.sketch_clipboard.clone();
         let n = out.get("curves").and_then(Value::as_u64).unwrap_or(0) + out.get("points").and_then(Value::as_u64).unwrap_or(0);
         let k = out.get("constraints").and_then(Value::as_u64).unwrap_or(0);
         let text = format!("SolidCraft sketch geometry: {n} entities, {k} constraints and dimensions");
@@ -460,6 +476,7 @@ pub fn cut(app: &mut SolveApp) -> bool {
     }
     let Ok(out) = app.run("sketch.cut", json!({ "entities": entities })) else { return copy_failed(app, None) };
     replace_clipboard(app);
+    app.foreign_sketch_clip = app.session.sketch_clipboard.clone();
     let n = out.get("curves").and_then(Value::as_u64).unwrap_or(0) + out.get("points").and_then(Value::as_u64).unwrap_or(0);
     app.set_status(format!("Cut {n} sketch entities"), false);
     leave_text(app, format!("SolidCraft sketch geometry: {n} entities"));
@@ -500,6 +517,11 @@ pub fn paste_into(app: &mut SolveApp, at: Option<Pos2>, new_copy: bool, into: Op
         (active, app.session.active_occurrence_path.clone().unwrap_or_else(|| app.session.doc.first_path(active)))
     });
     if app.session.active_sketch.is_some() {
+        // Another design copied sketch geometry last: it pastes here at the same sketch
+        // coordinates, its dimensions keeping their values rather than that design's parameters.
+        if let Some(clip) = foreign_sketch(app).map(|c| c.for_another_design()) {
+            app.session.sketch_clipboard = Some(clip);
+        }
         if app.session.sketch_clipboard.is_none() {
             app.set_status("Nothing to paste: copy sketch geometry first", true);
             return false;

@@ -1287,6 +1287,87 @@ fn hidden_joints_still_drive_and_are_saved_with_the_design() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #3892: a large nested STEP assembly hides thousands of joints, and the browser asks about
+/// every joint of the design on every frame: the answer must not walk the hidden-joint list,
+/// so the work must not grow with the number of hidden joints. The hidden joint stays hidden,
+/// the shown one stays shown, and undo and redo keep the hiding right.
+#[test]
+fn hidden_joint_lookups_do_not_walk_the_hidden_joint_list() {
+    use crate::occurrences::visibility_work;
+
+    let mut s = hinged();
+    let (hinge, glue) = (joint(&s, "Hinge"), joint(&s, "Glue"));
+
+    // The hidden joints of an imported assembly: thousands of ids (#3892).
+    let hide_many = |s: &mut Session, n: u64| {
+        s.visibility.hidden_joints.clear();
+        for id in 0..n {
+            s.visibility.hidden_joints.push(id);
+        }
+    };
+    // The entries one lookup walked, for a joint that is not hidden.
+    let walked_by = |s: &Session, id: u64| {
+        visibility_work::take();
+        let visible = s.joint_visible(id);
+        let walked = visibility_work::take();
+        assert!(visible, "joint {id} is not hidden here");
+        walked
+    };
+
+    hide_many(&mut s, 10);
+    let few = walked_by(&s, 9_000_001);
+    hide_many(&mut s, 10_000);
+    let many = walked_by(&s, 9_000_001);
+    assert!(
+        many <= few + 4,
+        "a joint lookup walked {many} entries of a 10,000-entry hidden-joint list and {few} of a \
+         10-entry one: the work must not grow with the number of hidden joints"
+    );
+
+    // The behaviour is unchanged: the hidden joint is hidden, the shown one is shown, and undo
+    // and redo keep the hiding right.
+    s.visibility.hidden_joints.clear();
+    run(&mut s, "browser.visibility", json!({"joints": ["Hinge"], "visible": false}));
+    assert!(!s.joint_visible(hinge) && s.joint_visible(glue));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.joint_visible(hinge), "undo shows the hinge again");
+    run(&mut s, "edit.redo", json!({}));
+    assert!(!s.joint_visible(hinge), "redo hides it again");
+}
+
+/// The cost of a frame's worth of joint questions, with few and with many hidden joints: the
+/// manual measurement behind #3892. Run it with `--ignored --nocapture`.
+#[test]
+#[ignore = "manual scaling measurement"]
+fn joint_visibility_lookup_cost_by_hidden_joint_count() {
+    use crate::occurrences::visibility_work;
+
+    let joints = 1_000u64;
+    for hidden in [0u64, 10, 100, 1_000, 10_000] {
+        let mut s = Session::default();
+        for id in 0..hidden {
+            s.visibility.hidden_joints.push(id);
+        }
+        let mut times = Vec::new();
+        for _ in 0..11 {
+            let start = std::time::Instant::now();
+            for id in 0..joints {
+                let _ = s.joint_visible(id + hidden + 1);
+            }
+            times.push(start.elapsed().as_secs_f64() * 1e3);
+        }
+        times.sort_by(f64::total_cmp);
+        // The index is built once per change of the view, apart from the answers themselves.
+        println!(
+            "hidden_joints={hidden:>6} questions={joints} median_ms={:.3} min_ms={:.3} max_ms={:.3} built_entries={}",
+            times[times.len() / 2],
+            times[0],
+            times[times.len() - 1],
+            visibility_work::built_take()
+        );
+    }
+}
+
 /// #1160: a design saved before joints could be hidden (format 19, no `hidden_joints`) opens
 /// with every joint shown; and a new joint that takes a deleted hidden joint's id starts shown.
 #[test]
@@ -1410,8 +1491,52 @@ fn quiet_joint_answers_and_a_drive_to_where_it_is() {
     assert!(r["dof"].is_array() && r["moved"] == false && r.get("reason").is_none(), "{r}");
     // A suppressed joint with no motion link moves nothing, and says why.
     run(&mut s, "joint.edit", json!({"joint": "Rail", "suppressed": true}));
+    let (doc, undo) = (s.doc.clone(), s.undo.len());
     let r = run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 8}));
     assert!(r["moved"] == false && r["reason"] == "Rail is suppressed" && r.get("unconnected").is_none(), "{r}");
+    // Nor does it store the value, as it did with an undo step: unsuppressed, the part jumped to
+    // it (#9742). The reply keeps what was asked apart from what the joint holds.
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc) && s.undo.len() == undo, "a drive of a suppressed joint changed the design");
+    assert_eq!((&r["requested"][0]["value"], &r["values"][0]["value"]), (&json!(8.0), &json!(5.0)), "{r}");
+    assert!(r.get("held").is_none(), "{r}");
+}
+
+/// A screw's travel follows its turn, so a distance asked of it is not reached: the reply says
+/// what was asked and why the joint holds another value, and a drive of the distance alone,
+/// which moves nothing, says why. A limit is named the same way (#9742).
+#[test]
+fn a_drive_says_which_values_a_motion_link_or_a_limit_held() {
+    let mut s = two_cubes();
+    run(&mut s, "joint.create", json!({"type": "cylindrical", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Cy"}));
+    run(&mut s, "joint.screw", json!({"joint": "Cy", "pitch": 2}));
+    let follows = json!("distance follows its angle through a motion link (screw)");
+    let r = run(&mut s, "joint.drive", json!({"joint": "Cy", "values": [90, 5]}));
+    assert!(r["moved"] == true && r.get("reason").is_none(), "{r}");
+    assert_eq!((&r["requested"][0]["value"], &r["requested"][1]["value"]), (&json!(90.0), &json!(5.0)), "{r}");
+    let held = r["held"].as_array().cloned().unwrap_or_default();
+    assert_eq!(held.len(), 1, "only the distance is held: {r}");
+    assert_eq!(
+        (&held[0]["name"], &held[0]["requested"], &held[0]["unit"], &held[0]["why"]),
+        (&json!("distance"), &json!(5.0), &json!("mm"), &follows),
+        "{r}"
+    );
+    assert!((held[0]["value"].as_f64().unwrap_or(f64::NAN) - 0.5).abs() < 1e-9, "a quarter turn at pitch 2 travels 0.5 mm: {r}");
+    // The distance alone: nothing moves, and the reply says why.
+    let r = run(&mut s, "joint.drive", json!({"joint": "Cy", "index": 1, "value": 4}));
+    assert_eq!((&r["moved"], &r["reason"], &r["held"][0]["requested"]), (&json!(false), &follows, &json!(4.0)), "{r}");
+
+    let mut s = two_cubes();
+    run(&mut s, "joint.as_built", json!({"type": "slider", "a": "A", "b": "B", "name": "Rail", "limits": [[0, 5]]}));
+    let r = run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 20}));
+    assert!(r["moved"] == true && r.get("reason").is_none(), "{r}");
+    assert_eq!(
+        r["held"],
+        json!([{"name": "distance", "requested": 20.0, "value": 5.0, "unit": "mm", "why": "distance is held to its limits, 0 to 5 mm"}]),
+        "{r}"
+    );
+    // Within the limits, nothing is held.
+    let r = run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 3}));
+    assert!(r.get("held").is_none() && r["requested"][0]["value"] == 3.0, "{r}");
 }
 
 /// An as-built joint takes a name and limits like any other joint.

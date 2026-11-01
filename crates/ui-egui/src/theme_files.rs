@@ -85,6 +85,9 @@ pub struct ThemeFile {
     /// SVG display roles and three-colour semantic ramps; omitted values keep compiled defaults.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub icon_palette: BTreeMap<String, Value>,
+    /// Optional surface overrides for known ribbon tabs. Accents retain their existing tokens.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tabs: BTreeMap<String, BTreeMap<String, Value>>,
     /// Theme-owned declarations, in file order; standard ids are normalized on import.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<OptionDef>,
@@ -120,6 +123,7 @@ impl Default for ThemeFile {
             radii: BTreeMap::new(),
             borders: BTreeMap::new(),
             icon_palette: BTreeMap::new(),
+            tabs: BTreeMap::new(),
             options: Vec::new(),
             overlays: Vec::new(),
             requires: REQUIREMENTS_LEVEL,
@@ -258,10 +262,26 @@ fn radius_slot<'a>(t: &'a mut Tokens, key: &str) -> Option<&'a mut u8> {
 }
 
 impl ThemeFile {
+    /// Shared by import and preference restoration; invalid saved maps are dropped as a unit.
+    pub(crate) fn set_tabs(&mut self, source: &Value) -> Result<(), String> {
+        self.tabs = parse_tabs(source.get("tabs"))?;
+        Ok(())
+    }
+
     /// A newer format level keeps the authored base tables but disables options and overlays.
     /// Computed from `requires` so it also works after restoring saved preferences.
     pub fn needs_newer(&self) -> bool {
         self.requires > REQUIREMENTS_LEVEL
+    }
+
+    /// Read option tables from a stored or directly supplied theme with the import parser.
+    /// Base tables are deliberately left alone; only completely valid declarations replace these.
+    pub(crate) fn set_option_tables(&mut self, source: &Value) -> Result<(), String> {
+        let options = if self.needs_newer() { Vec::new() } else { parse_options(source.get("options"))? };
+        let overlays = if self.needs_newer() { Vec::new() } else { parse_overlays(source.get("overlays"), &options)? };
+        self.options = options;
+        self.overlays = overlays;
+        Ok(())
     }
 
     /// Validate direct control-channel preference updates as strictly as file imports.
@@ -556,6 +576,7 @@ pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
         Some(value) => value.as_u64().ok_or("`requires` must be a nonnegative integer")?,
     };
     let layer = parse_layer(v)?;
+    let tabs = parse_tabs(v.get("tabs"))?;
     let options = if requires > REQUIREMENTS_LEVEL { Vec::new() } else { parse_options(v.get("options"))? };
     let overlays = if requires > REQUIREMENTS_LEVEL { Vec::new() } else { parse_overlays(v.get("overlays"), &options)? };
     Ok(ThemeFile {
@@ -566,10 +587,39 @@ pub fn from_value(v: &Value) -> Result<ThemeFile, String> {
         radii: layer.radii,
         borders: layer.borders,
         icon_palette: layer.icon_palette,
+        tabs,
         options,
         overlays,
         requires,
     })
+}
+
+/// Keep the accepted vocabulary at the same boundary as the existing accent mapping.
+fn parse_tabs(v: Option<&Value>) -> Result<BTreeMap<String, BTreeMap<String, Value>>, String> {
+    let Some(v) = v else { return Ok(BTreeMap::new()) };
+    let tabs = v.as_object().ok_or("`tabs` must be an object")?;
+    if tabs.len() > crate::theme::TAB_NAMES.len() {
+        return Err("`tabs` has too many entries".into());
+    }
+    let mut parsed = BTreeMap::new();
+    for (tab, surfaces) in tabs {
+        if !crate::theme::TAB_NAMES.contains(&tab.as_str()) {
+            return Err(format!("`tabs.{tab}` is not a ribbon tab"));
+        }
+        let surfaces = surfaces.as_object().ok_or_else(|| format!("`tabs.{tab}` must be an object"))?;
+        let mut values = BTreeMap::new();
+        for (key, value) in surfaces {
+            if !matches!(key.as_str(), "panel" | "viewport_top" | "viewport_bottom") {
+                return Err(format!("`tabs.{tab}.{key}` is not a tab surface"));
+            }
+            if value.as_str().and_then(parse_color).is_none() {
+                return Err(format!("`tabs.{tab}.{key}` must be #rrggbb or #rrggbbaa"));
+            }
+            values.insert(key.clone(), value.clone());
+        }
+        parsed.insert(tab.clone(), values);
+    }
+    Ok(parsed)
 }
 
 fn parse_layer(v: &Value) -> Result<ThemeLayer, String> {
@@ -700,11 +750,17 @@ fn parse_option(v: &Value) -> Result<OptionDef, String> {
         if reserved && (min < floor || max > ceiling) {
             return Err(format!("`min` / `max` for {id} must stay inside {floor} to {ceiling}"));
         }
-        let step = if reserved { 1.0 } else { option_number(v, "step")? };
+        let step = if id == "tab_fade_ms" {
+            20.0
+        } else if reserved {
+            1.0
+        } else {
+            option_number(v, "step")?
+        };
         if step <= 0.0 {
             return Err("`step` must be greater than zero".into());
         }
-        let default = option_number(v, "default")?;
+        let default = if id == "opacity" && v.get("default").is_none() { 100.0 } else { option_number(v, "default")? };
         let default = if reserved {
             default.clamp(min, max)
         } else {
@@ -987,7 +1043,13 @@ pub fn resolve(theme: &ThemeFile) -> Tokens {
 /// Resolve base tables, then matching overlays in file order. Later tables replace earlier
 /// entries by key. Saved values are normalized here too, so callers cannot bypass finite checks.
 pub fn resolve_with(theme: &ThemeFile, saved: &BTreeMap<String, OptionValue>) -> Tokens {
-    if theme.needs_newer() || theme.overlays.is_empty() || theme.overlays.len() > MAX_OVERLAYS {
+    resolve_for_tab(theme, saved, None)
+}
+
+/// Resolve a tab and its base/overlays in one pass. Providers run last so opacity also protects
+/// tab-authored panels. Restored/direct Rust values are revalidated before they affect tokens.
+pub(crate) fn resolve_for_tab(theme: &ThemeFile, saved: &BTreeMap<String, OptionValue>, tab: Option<&str>) -> Tokens {
+    if theme.needs_newer() || (theme.options.is_empty() && theme.overlays.is_empty()) || theme.overlays.len() > MAX_OVERLAYS {
         return resolve_base(theme);
     }
     let options = usable_options(theme);
@@ -1012,7 +1074,27 @@ pub fn resolve_with(theme: &ThemeFile, saved: &BTreeMap<String, OptionValue>) ->
         merged.borders.extend(overlay.values.borders);
         merged.icon_palette.extend(overlay.values.icon_palette);
     }
-    resolve_base(&merged)
+    let mut tokens = resolve_base(&merged);
+    let mut tab_panel = false;
+    if crate::theme_options::tab_settings(theme, &values).0
+        && let Some(tab) = tab
+        && let Ok(tabs) = serde_json::to_value(&theme.tabs).map_err(|e| e.to_string()).and_then(|v| parse_tabs(Some(&v)))
+        && let Some(surfaces) = tabs.get(tab)
+    {
+        for (key, value) in surfaces {
+            if let Some(slot) = slot(&mut tokens, key)
+                && let Ok(colors) = colors_for_key(key, value, 1)
+            {
+                slot.copy_from_slice(&colors);
+            }
+        }
+        tab_panel = surfaces.contains_key("panel");
+    }
+    crate::theme_options::apply(theme, &values, &mut tokens);
+    if tab_panel {
+        tokens.protect_tab_panel();
+    }
+    tokens
 }
 
 /// A colour the saved preferences hold that this version cannot read is skipped safely.
@@ -1177,6 +1259,9 @@ pub fn export_file(theme: &ThemeFile) -> Value {
         if !theme.icon_palette.is_empty() {
             obj.insert("icon_palette".into(), json!(theme.icon_palette));
         }
+        if !theme.tabs.is_empty() {
+            obj.insert("tabs".into(), json!(theme.tabs));
+        }
         if !theme.options.is_empty() {
             obj.insert("options".into(), json!(theme.options));
         }
@@ -1198,6 +1283,12 @@ include!(concat!(env!("OUT_DIR"), "/builtin_themes.rs"));
 #[cfg(test)]
 pub(crate) fn is_two_colour(id: &str) -> bool {
     matches!(id, "1-bit" | "1-bit-dark")
+}
+
+#[cfg(test)]
+pub(crate) fn tab_fixture(base: &str) -> ThemeFile {
+    let catalog: Value = serde_json::from_str(include_str!("../tests/fixtures/theme-tabs.json")).unwrap();
+    from_value(&catalog[base]).unwrap()
 }
 
 /// The built-in themes, validated and ordered once; a test checks every shipped file.
@@ -1247,11 +1338,24 @@ pub fn find<'a>(id: &str, custom: &'a [ThemeFile]) -> Option<&'a ThemeFile> {
     builtin().iter().find(|t| t.id == id).or_else(|| custom.iter().find(|t| t.id == id))
 }
 
+/// Retired built-in cards now select a contrast value on their light/dark family.
+/// Keep these ids reserved so importing a theme cannot take a saved built-in identity.
+pub(crate) const GRUVBOX_ALIASES: [(&str, &str, &str); 4] = [
+    ("gruvbox-dark-hard", "gruvbox-dark", "hard"),
+    ("gruvbox-dark-soft", "gruvbox-dark", "soft"),
+    ("gruvbox-light-hard", "gruvbox-light", "hard"),
+    ("gruvbox-light-soft", "gruvbox-light", "soft"),
+];
+
+pub(crate) fn legacy_gruvbox(id: &str) -> Option<(&'static str, &'static str)> {
+    GRUVBOX_ALIASES.iter().find(|(old, _, _)| *old == id).map(|(_, family, contrast)| (*family, *contrast))
+}
+
 /// Add an imported theme to `custom`, replacing one with the same id (importing a file again
 /// updates it). Its id never takes a built-in one's or the modes' (dark, light, system).
 /// Returns the id it is kept under.
 pub fn add(custom: &mut Vec<ThemeFile>, mut theme: ThemeFile) -> Result<String, String> {
-    if ["dark", "light", "system"].contains(&theme.id.as_str()) || builtin().iter().any(|t| t.id == theme.id) {
+    if ["dark", "light", "system"].contains(&theme.id.as_str()) || builtin().iter().any(|t| t.id == theme.id) || legacy_gruvbox(&theme.id).is_some() {
         theme.id = format!("custom-{}", theme.id);
     }
     let id = theme.id.clone();
@@ -1394,6 +1498,71 @@ impl Follow {
 mod tests {
     use super::*;
 
+    #[test]
+    fn tabs_import_is_strict_and_roundtrips_authored_surfaces() {
+        for base in ["dark", "light"] {
+            let file = tab_fixture(base);
+            assert_eq!(from_value(&export_file(&file)).unwrap(), file);
+            let mut source = export_file(&file);
+            source["tabs"] = json!(crate::theme::TAB_NAMES.iter().map(|tab| (*tab, json!({"panel":"#18202aff"}))).collect::<BTreeMap<_, _>>());
+            assert_eq!(from_value(&source).unwrap().tabs.len(), crate::theme::TAB_NAMES.len());
+            for (tabs, offending) in [
+                (json!(null), "tabs"),
+                (json!([]), "tabs"),
+                (json!({"sketch":{}}), "sketch"),
+                (json!({"MISSING":{}}), "MISSING"),
+                (json!({"SKETCH":null}), "SKETCH"),
+                (json!({"SKETCH":{"panel":"#bad"}}), "panel"),
+                (json!({"SKETCH":{"panel":["#ffffff"]}}), "panel"),
+                (json!({"SKETCH":{"panel":12}}), "panel"),
+            ] {
+                source["tabs"] = tabs;
+                assert!(from_value(&source).unwrap_err().contains(offending));
+            }
+            // Refuse every known non-surface token, not only status colours.
+            for key in keys().into_iter().filter(|key| !matches!(*key, "panel" | "viewport_top" | "viewport_bottom")) {
+                source["tabs"] = json!({"SKETCH":{key:"#ffffff"}});
+                assert!(from_value(&source).unwrap_err().contains(key), "{key}");
+            }
+            source["tabs"] = json!({"SKETCH":{"viewport_top":"#12345678"}});
+            let file = from_value(&source).unwrap();
+            assert_eq!(export_file(&file)["tabs"], source["tabs"]);
+        }
+    }
+
+    #[test]
+    fn tabs_resolve_only_surfaces_and_off_is_exactly_base() {
+        for base in ["dark", "light"] {
+            let file = tab_fixture(base);
+            let defaults = BTreeMap::new();
+            let base = resolve_with(&file, &defaults);
+            for tab in crate::theme::TAB_NAMES {
+                let mut want = base;
+                if let Some(surfaces) = file.tabs.get(*tab) {
+                    for (key, value) in surfaces {
+                        slot(&mut want, key).unwrap().copy_from_slice(&colors_of(value, 1).unwrap());
+                    }
+                }
+                let effective = resolve_for_tab(&file, &defaults, Some(tab));
+                assert_eq!(effective, want, "{tab}");
+                assert_eq!(crate::theme::TabAccent::for_tab(&effective, tab), crate::theme::TabAccent::for_tab(&base, tab));
+                let off = BTreeMap::from([("tab_colours".into(), OptionValue::Bool(false))]);
+                assert_eq!(resolve_for_tab(&file, &off, Some(tab)), resolve_with(&file, &off));
+            }
+            let mut damaged = file.clone();
+            damaged.tabs.get_mut("SKETCH").unwrap().insert("error".into(), json!("#ffffff"));
+            assert_eq!(resolve_for_tab(&damaged, &defaults, Some("SKETCH")), base);
+            let mut absent = file.clone();
+            absent.tabs.clear();
+            assert_eq!(resolve_for_tab(&absent, &defaults, Some("SKETCH")), base);
+            assert_eq!(export_file(&file)["options"][1]["default"], 240.0);
+        }
+        for file in builtin() {
+            assert!(file.tabs.is_empty(), "{}", file.id);
+            assert_eq!(resolve_for_tab(file, &BTreeMap::new(), Some("SKETCH")), resolve(file));
+        }
+    }
+
     fn option_theme(options: Value, overlays: Value) -> Value {
         json!({"format":FORMAT,"name":"Options","base":"dark","options":options,"overlays":overlays})
     }
@@ -1533,7 +1702,7 @@ mod tests {
         assert_eq!(values["tab_fade_ms"], OptionValue::Num(500.0));
         let fade = file.options.iter().find(|o| o.id == "tab_fade_ms").unwrap();
         assert_eq!(fade.parent.as_deref(), Some("tab_colours"));
-        assert!(matches!(&fade.kind, OptionKind::Range { min:100.0, max:500.0, step:1.0, unit:Some(unit), .. } if unit == "ms"));
+        assert!(matches!(&fade.kind, OptionKind::Range { min:100.0, max:500.0, step:20.0, unit:Some(unit), .. } if unit == "ms"));
         assert!(
             file.options
                 .iter()
@@ -1738,15 +1907,98 @@ mod tests {
     }
 
     #[test]
+    fn theme_options_opacity_only_changes_floating_fill_roles_and_full_is_exact() {
+        for base in ["light", "dark"] {
+            let mut source = json!({"format":FORMAT,"name":"Opacity","base":base,"options":[{"id":"opacity","type":"range"}]});
+            let file = from_value(&source).unwrap();
+            let original = resolve_base(&file);
+            assert_eq!(resolve(&file), original, "omitted default is 100");
+            assert_eq!(resolve_with(&file, &BTreeMap::from([("opacity".into(), OptionValue::Num(100.0))])), original);
+            let faded = resolve_with(&file, &BTreeMap::from([("opacity".into(), OptionValue::Num(60.0))]));
+            let mut only_fills = original;
+            only_fills.panel = faded.panel;
+            only_fills.panel_header = faded.panel_header;
+            only_fills.dialog_bg = faded.dialog_bg;
+            only_fills.dialog_body = faded.dialog_body;
+            only_fills.dialog_footer = faded.dialog_footer;
+            only_fills.overlay = faded.overlay;
+            only_fills.nav_tip = faded.nav_tip;
+            assert_eq!(faded, only_fills, "every other token (including text/icons/borders) stays exact");
+            assert!(faded.panel.a() < original.panel.a(), "the effect must actually change a panel");
+            source["options"] = json!([]);
+            let without = from_value(&source).unwrap();
+            assert_eq!(resolve_with(&without, &BTreeMap::from([("opacity".into(), OptionValue::Num(40.0))])), resolve_base(&without));
+        }
+    }
+
+    #[test]
+    fn theme_options_opacity_contrast_protects_text_at_40_over_viewport_extremes() {
+        use crate::theme::{composite, contrast_ratio};
+        for base in ["light", "dark"] {
+            let file = from_value(&json!({"format":FORMAT,"name":"Contrast","base":base,
+                "options":[{"id":"opacity","type":"range","default":40}]}))
+            .unwrap();
+            let full = resolve_base(&file);
+            let faded = resolve(&file);
+            for (role, fill) in [
+                ("panel", faded.panel),
+                ("panel_header", faded.panel_header),
+                ("dialog_bg", faded.dialog_bg),
+                ("dialog_body", faded.dialog_body),
+                ("dialog_footer", faded.dialog_footer),
+                ("overlay", faded.overlay),
+            ] {
+                for background in [Color32::BLACK, Color32::WHITE, full.viewport_top, full.viewport_bottom] {
+                    let ground = composite(fill, background);
+                    for ink in [faded.text, faded.form_ink, faded.dialog_label] {
+                        assert!(contrast_ratio(composite(ink, ground), ground) >= 4.5, "{base} {role} {ink:?} on {background:?}: {fill:?}");
+                    }
+                }
+            }
+            for background in [Color32::BLACK, Color32::WHITE] {
+                let ground = composite(faded.nav_tip, background);
+                assert!(contrast_ratio(composite(faded.nav_tip_ink, ground), ground) >= 4.5);
+            }
+            assert!(faded.panel.a() > (f32::from(full.panel.a()) * 0.4).round() as u8, "raise the floor when requested alpha is unreadable");
+            assert!(faded.panel.a() < 255, "do not make all options effectively opaque");
+            assert_eq!(resolve_with(&file, &BTreeMap::from([("opacity".into(), OptionValue::Num(-10.0))])), faded, "theme API still clamps");
+            assert_eq!(
+                resolve_with(&file, &BTreeMap::from([("opacity".into(), OptionValue::Num(f32::NAN))])),
+                faded,
+                "non-finite values use defaults"
+            );
+        }
+    }
+
+    #[test]
+    fn theme_options_opacity_is_applied_after_overlays_and_uses_the_theme_default() {
+        let file = from_value(&json!({"format":FORMAT,"name":"Overlay opacity","base":"dark",
+            "options":[{"id":"opacity","type":"range","default":60},{"id":"warm","type":"bool","default":true}],
+            "overlays":[{"when":{"opt":"warm","eq":true},"colors":{"panel":"#111111"}}]}))
+        .unwrap();
+        let faded = resolve(&file);
+        let full = resolve_with(&file, &BTreeMap::from([("opacity".into(), OptionValue::Num(100.0))]));
+        assert_eq!(full.panel, Color32::from_rgb(17, 17, 17));
+        assert!(faded.panel.a() < full.panel.a());
+        assert_eq!(faded.text, full.text);
+        // Premultiplied Color32 storage can quantize unmultiplied channels by one byte.
+        assert!(faded.panel.to_srgba_unmultiplied()[..3].iter().all(|c| c.abs_diff(17) <= 1));
+    }
+
+    #[test]
     fn all_shipped_themes_keep_the_original_resolver_output_and_serialization() {
         assert_eq!(builtin().len(), BUILTIN.len());
         for theme in builtin() {
-            assert!(theme.options.is_empty() && theme.overlays.is_empty() && !theme.needs_newer());
+            let gruvbox = matches!(theme.id.as_str(), "gruvbox-dark" | "gruvbox-light");
+            assert!(!theme.needs_newer());
+            assert_eq!(!theme.options.is_empty(), gruvbox);
+            assert_eq!(!theme.overlays.is_empty(), gruvbox);
             assert_eq!(resolve(theme), resolve_base(theme), "{}", theme.id);
             assert_eq!(resolve_with(theme, &BTreeMap::from([("opacity".into(), OptionValue::Num(40.0))])), resolve_base(theme), "{}", theme.id);
             let stored = serde_json::to_value(theme).unwrap();
-            for key in ["options", "overlays", "requires"] {
-                assert!(stored.get(key).is_none(), "{}: {key}", theme.id);
+            assert!(stored.get("requires").is_none(), "{}", theme.id);
+            for key in ["options", "overlays"] {
+                assert_eq!(stored.get(key).is_some(), gruvbox, "{}: {key}", theme.id);
             }
         }
     }
@@ -1856,7 +2108,7 @@ mod tests {
         assert_eq!(resolve(&file).borders, crate::theme::Borders::LEGACY);
         assert!(parse_borders(&BTreeMap::from([("primary".into(), json!({"width":null,"color":"#ffffff"}))])).is_err());
         assert_eq!(resolve(find("blueprint", &[]).unwrap()).borders.primary.unwrap().color, Color32::WHITE);
-        for id in ["gruvbox-dark", "gruvbox-light", "gruvbox-dark-soft", "gruvbox-light-soft"] {
+        for id in ["gruvbox-dark", "gruvbox-light"] {
             assert_eq!(resolve(find(id, &[]).unwrap()).borders, crate::theme::Borders::LEGACY);
         }
     }
@@ -1920,17 +2172,22 @@ mod tests {
         use crate::theme::{TabAccent, contrast_ratio};
         assert_eq!(builtin().len(), BUILTIN.len(), "all shipped themes must be valid");
         for file in builtin() {
-            let t = resolve(file);
-            assert!(t.icon_palette.is_some(), "{} has no icon palette", file.id);
-            // A two-colour theme (1-bit, 1-bit Dark) can't give each workspace its own fill; it
-            // still has to keep every tab readable, below.
-            let two_colour = is_two_colour(&file.id);
-            let mut fills = std::collections::HashSet::new();
-            for tab in ["MODEL", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER", "SKETCH"] {
-                let accent = TabAccent::for_tab(&t, tab);
-                assert!(fills.insert(accent.color) || two_colour, "{} repeats {tab}", file.id);
-                assert!(contrast_ratio(accent.ink, accent.soft) >= 4.5, "{} {tab} soft text", file.id);
-                assert!(contrast_ratio(accent.on_fill(&t), accent.color) >= 4.5, "{} {tab} pill text", file.id);
+            let gruvbox = matches!(file.id.as_str(), "gruvbox-dark" | "gruvbox-light");
+            let contrasts: &[&str] = if gruvbox { &["soft", "standard", "hard"] } else { &["standard"] };
+            for contrast in contrasts {
+                let options = if gruvbox { BTreeMap::from([("contrast".into(), OptionValue::Choice((*contrast).into()))]) } else { BTreeMap::new() };
+                let t = resolve_with(file, &options);
+                assert!(t.icon_palette.is_some(), "{} {contrast} has no icon palette", file.id);
+                // A two-colour theme (1-bit, 1-bit Dark) can't give each workspace its own fill; it
+                // still has to keep every tab readable, below.
+                let two_colour = is_two_colour(&file.id);
+                let mut fills = std::collections::HashSet::new();
+                for tab in ["MODEL", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER", "SKETCH"] {
+                    let accent = TabAccent::for_tab(&t, tab);
+                    assert!(fills.insert(accent.color) || two_colour, "{} {contrast} repeats {tab}", file.id);
+                    assert!(contrast_ratio(accent.ink, accent.soft) >= 4.5, "{} {contrast} {tab} soft text", file.id);
+                    assert!(contrast_ratio(accent.on_fill(&t), accent.color) >= 4.5, "{} {contrast} {tab} pill text", file.id);
+                }
             }
         }
     }
@@ -2016,14 +2273,55 @@ mod tests {
     }
 
     #[test]
+    fn gruvbox_contrast_choices_keep_six_appearances() {
+        let families: Vec<_> = builtin().iter().filter(|f| f.id.starts_with("gruvbox-")).map(|f| f.id.as_str()).collect();
+        assert_eq!(families, ["gruvbox-dark", "gruvbox-light"]);
+        for (id, panels, tops, bottoms, inks) in [
+            (
+                "gruvbox-dark",
+                ["#32302f", "#282828", "#1d2021"],
+                ["#373432", "#32302f", "#2c2c2c"],
+                ["#373432", "#32302f", "#2c2c2c"],
+                ["#1d2021", "#1d2021", "#141617"],
+            ),
+            ("gruvbox-light", ["#f2e5bc", "#fbf1c7", "#f9f5d7"], ["#f6edd0", "#fcf5d8", "#fbf8e3"], ["#ebdbb2"; 3], ["#3c3836"; 3]),
+        ] {
+            let file = find(id, &[]).unwrap();
+            assert_eq!(file.options.len(), 1);
+            let option = &file.options[0];
+            assert_eq!(option.id, "contrast");
+            let OptionKind::Choice { default, values } = &option.kind else { panic!("contrast must be a choice") };
+            assert_eq!(default, "standard");
+            assert_eq!(values.iter().map(|v| v.id.as_str()).collect::<Vec<_>>(), ["soft", "standard", "hard"]);
+            for (index, contrast) in ["soft", "standard", "hard"].into_iter().enumerate() {
+                let options = BTreeMap::from([("contrast".into(), OptionValue::Choice(contrast.into()))]);
+                let tokens = resolve_with(file, &options);
+                assert_eq!(tokens.panel, parse_color(panels[index]).unwrap(), "{id}: {contrast}");
+                assert_eq!(tokens.viewport_top, parse_color(tops[index]).unwrap(), "{id}: {contrast}");
+                assert_eq!(tokens.viewport_bottom, parse_color(bottoms[index]).unwrap(), "{id}: {contrast}");
+                assert_eq!(export_icon_palette(tokens.icon_palette)["ink"], inks[index], "{id}: {contrast}");
+                assert_eq!(tokens.borders, crate::theme::Borders::LEGACY);
+                assert_eq!(resolve_with(&from_value(&export_file(file)).unwrap(), &options), tokens);
+            }
+            assert_eq!(resolve(file), resolve_base(file), "the Standard default keeps the old family palette");
+        }
+    }
+
+    #[test]
+    fn gruvbox_retired_ids_stay_reserved_for_imported_names() {
+        let mut custom = Vec::new();
+        for (old, _, _) in GRUVBOX_ALIASES {
+            let file = from_value(&json!({"format":FORMAT,"name":old,"base":"dark"})).unwrap();
+            assert_eq!(add(&mut custom, file).unwrap(), format!("custom-{old}"));
+            assert!(find(old, &custom).is_none(), "retired ids are not duplicate theme cards");
+        }
+    }
+
+    #[test]
     fn builtin_order_preserves_the_existing_picker_sequence() {
         let original: &[&str] = &[
             "gruvbox-dark",
-            "gruvbox-dark-hard",
-            "gruvbox-dark-soft",
             "gruvbox-light",
-            "gruvbox-light-hard",
-            "gruvbox-light-soft",
             "solidcraft-95",
             "1-bit",
             "1-bit-dark",
@@ -2356,9 +2654,11 @@ mod tests {
         }
         let defaults = radius_values(Tokens::dark());
         assert_eq!(defaults, radius_values(Tokens::light()));
-        for suffix in ["", "-hard", "-soft"] {
-            assert_eq!(values(&format!("gruvbox-dark{suffix}")), defaults);
-            assert_eq!(values(&format!("gruvbox-light{suffix}")), defaults);
+        for id in ["gruvbox-dark", "gruvbox-light"] {
+            for contrast in ["soft", "standard", "hard"] {
+                let options = BTreeMap::from([("contrast".into(), OptionValue::Choice(contrast.into()))]);
+                assert_eq!(radius_values(resolve_with(find(id, &[]).unwrap(), &options)), defaults);
+            }
         }
         for file in builtin().iter().filter(|file| file.radii.is_empty()) {
             assert_eq!(radius_values(resolve(file)), defaults, "{}", file.id);

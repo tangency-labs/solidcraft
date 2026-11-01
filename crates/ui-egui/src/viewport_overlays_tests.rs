@@ -869,8 +869,8 @@ fn sketch_previews_selection_band_and_number_focus_follow_sketch_accent() {
             assert!(output.shapes.iter().any(|s| sketch_stroke(&s.shape, t.sketch_accent)));
             for sketch in [false, true] {
                 for crossing in [false, true] {
-                    let bx = BoxSel { rect: Rect::from_min_size(pos2(20.0, 20.0), vec2(100.0, 80.0)), crossing };
-                    let output = draw(&h.ctx, |ui| paint_box_selection(ui.painter(), bx, sketch));
+                    let bx = BoxSel { rect: Rect::from_min_size(pos2(20.0, 20.0), vec2(100.0, 80.0)), crossing, lasso: Vec::new() };
+                    let output = draw(&h.ctx, |ui| paint_box_selection(ui.painter(), &bx, sketch));
                     let color = if sketch {
                         t.sketch_accent
                     } else if crossing {
@@ -1304,6 +1304,63 @@ fn view_angles_readout_shows_only_when_on_and_applies_typed_angles() {
     }
 }
 
+/// The card's zero buttons and per-axis locks (#4581): zero turns one angle to 0° at once, and a
+/// locked angle stays put through orbit turns and Apply, so a symmetrical view can hold its yaw
+/// while only the pitch is adjusted.
+#[test]
+fn view_angles_card_zero_buttons_and_axis_locks() {
+    use solidcraft_engine::render::ViewAngles;
+    let mut h = Harness::new();
+    h.app.preferences.look_at_anim = false;
+    h.call("engine.execute", json!({"command": "view.angle_readout", "params": {"enabled": true}}));
+    h.call("ui.view", json!({"view": "iso"}));
+    h.settle();
+    let readout = crate::scenario::rect_of("view_angles:readout").expect("the readout shows once it is on");
+    h.call("ui.click", json!({"x": readout.center().x, "y": readout.center().y}));
+    assert!(crate::scenario::rect_of("view_angles:card").is_some());
+    // The iso view has a non-zero yaw; its zero button turns it to the front view at once.
+    let before = h.app.cam.view_angles();
+    assert!(before.yaw.abs() > 1.0, "{before:?}");
+    let zero = crate::scenario::handle_at("view_angles:zero:yaw").expect("a zero button per axis");
+    h.call("ui.click", json!({"x": zero.x, "y": zero.y}));
+    h.settle();
+    let after = h.app.cam.view_angles();
+    assert!(after.yaw.abs() < 1e-6, "{after:?}");
+    assert!((after.pitch - before.pitch).abs() < 1e-6, "only yaw zeroed: {after:?}");
+    // Lock yaw: an orbit turn moves the pitch but never the locked yaw, and the locked axis's
+    // zero button goes inert.
+    let lock = crate::scenario::handle_at("view_angles:lock:yaw").expect("a lock per axis");
+    h.call("ui.click", json!({"x": lock.x, "y": lock.y}));
+    assert!(h.app.ui.view_angles_lock_yaw);
+    let yaw = h.app.cam.view_angles().yaw;
+    h.app.run("view.navigate", json!({"camera": h.app.cam, "action": "up", "degrees": 20.0})).unwrap();
+    let turned = h.app.cam.view_angles();
+    assert!((turned.yaw - yaw).abs() < 1e-6, "a locked yaw survives an orbit turn: {turned:?}");
+    assert!(turned.pitch > before.pitch + 10.0, "the turn moved the pitch: {turned:?}");
+    let zero = crate::scenario::handle_at("view_angles:zero:yaw").unwrap();
+    h.call("ui.click", json!({"x": zero.x, "y": zero.y}));
+    h.settle();
+    assert!((h.app.cam.view_angles().yaw - yaw).abs() < 1e-6, "the locked axis's zero button is inert");
+    // Apply keeps the locked angle whatever the card holds for it.
+    h.ctx.data_mut(|d| d.insert_temp(crate::view_angles::draft_id(), ViewAngles { yaw: 40.0, pitch: 20.0, roll: 0.0 }));
+    h.frame();
+    let apply = crate::scenario::handle_at("dialog:button:Apply").unwrap();
+    h.call("ui.click", json!({"x": apply.x, "y": apply.y}));
+    h.settle();
+    let applied = h.app.cam.view_angles();
+    assert!((applied.yaw - yaw).abs() < 1e-6, "Apply keeps the locked yaw: {applied:?}");
+    assert!((applied.pitch - 20.0).abs() < 1e-6, "{applied:?}");
+    // Unlocking lets the zero button work again.
+    let lock = crate::scenario::handle_at("view_angles:lock:yaw").unwrap();
+    h.call("ui.click", json!({"x": lock.x, "y": lock.y}));
+    assert!(!h.app.ui.view_angles_lock_yaw);
+    let zero = crate::scenario::handle_at("view_angles:zero:yaw").unwrap();
+    h.call("ui.click", json!({"x": zero.x, "y": zero.y}));
+    h.settle();
+    assert!(h.app.cam.view_angles().yaw.abs() < 1e-6);
+    assert!(h.app.session.undo.is_empty(), "view angles never touch the design");
+}
+
 /// In the corner (#7893) the buttons sit as in the dialogs: right-aligned, dismissals first and the
 /// main action right-most; when they wrap, the row with the main action is the bottom one.
 #[test]
@@ -1484,6 +1541,37 @@ fn a_huge_extrude_distance_draws_its_handles_at_once() {
     h.frames(4);
     assert!(crate::scenario::handle_at("taper").is_some(), "the taper handle is drawn");
     assert!(started.elapsed().as_secs_f64() < 10.0, "{:?}", started.elapsed());
+}
+
+/// The taper handle's limits come from the profiles' inradii, a grid search over every side:
+/// an open extrude works them out once for its profiles, not every frame, and again when the
+/// profiles change.
+#[test]
+fn an_open_extrude_keeps_its_taper_limits_while_the_profiles_stay() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[-20,-20],"p1":[20,20]})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":6})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("select.clear", json!({})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"home"}})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"solid.extrude"})).unwrap();
+    h.step(&json!({"click":{"world":[15,15,0]}})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::handle_at("taper").is_some(), "the taper handle is drawn");
+    let once = crate::canvas::taper_radii_worked_out();
+    h.frames(20);
+    assert_eq!(crate::canvas::taper_radii_worked_out(), once, "the same profile: not worked out again");
+    h.step(&json!({"text":"25"})).unwrap();
+    h.frames(4);
+    assert_eq!(crate::canvas::taper_radii_worked_out(), once, "only the height changed");
+    // The disc in the hole joins the extrude: other profiles, other limits.
+    h.step(&json!({"click":{"world":[-3,-3,0]}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().map(|d| d.inputs[0].items.len()), Some(2), "{:?}", h.app.dialog.as_ref().map(|d| &d.inputs[0].items));
+    assert!(crate::canvas::taper_radii_worked_out() > once, "new profiles are worked out");
 }
 
 fn point_overlays(app: &SolveApp) -> Vec<Shape> {

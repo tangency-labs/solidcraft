@@ -776,6 +776,8 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         dims_focus: false,
         arc_turn: 0.0,
         lined: Vec::new(),
+        chain: Default::default(),
+        normal: false,
     })
 }
 
@@ -791,7 +793,7 @@ pub fn hint(id: &str) -> Option<String> {
     Some(
         match id {
             "sketch.project" => "Project: click edges, faces, vertices, other sketches' curves, axes or planes",
-            "sketch.intersect" => "Intersect: click faces or edges to cut with the sketch plane",
+            "sketch.intersect" => "Intersect: click faces, edges or other sketches' curves to cut with the sketch plane",
             "sketch.include_3d" => "Include 3D Geometry: click edges or vertices",
             "sketch.fit_curves_to_section" => "Fit Curves to Mesh Section: click a body",
             "sketch.isoparametric_curve" => "Isoparametric Curve: click a point on a face (Shift: along)",
@@ -1246,6 +1248,10 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
         }
         return;
     }
+    if crate::sketch_line_arc::in_arc_mode(tool) {
+        crate::sketch_line_arc::place_arc(app, tool, &p);
+        return;
+    }
     let Some(Mode::Points(n)) = mode(tool.cmd) else { return };
     if let Err(error) = crate::sketch_dims::validate(app, tool) {
         app.set_status(error, true);
@@ -1466,6 +1472,13 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) {
                 crate::tools::paint_sketch_path(&[ss.plane.to_world(first.0), hw], mode, painter, proj, faint);
             }
             crate::tools::paint_sketch_path(&[ss.plane.to_world(last.0), hw], mode, painter, proj, faint);
+        } else if crate::sketch_line_arc::in_arc_mode(t) {
+            // The Line tool switched to tangent arcs: the arc a click makes, or (straight ahead,
+            // where there is none) only a faint guide.
+            match crate::sketch_line_arc::preview_arc(&ss.sketch, t, *h) {
+                Some(arc) => crate::tools::paint_preview_curve(arc, &ss.plane, painter, proj, stroke, mode),
+                None => crate::tools::paint_sketch_path(&[ss.plane.to_world(last.0), hw], mode, painter, proj, faint),
+            }
         } else {
             crate::tools::paint_sketch_path(&[ss.plane.to_world(last.0), hw], mode, painter, proj, stroke);
         }

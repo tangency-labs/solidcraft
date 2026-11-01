@@ -130,12 +130,50 @@ pub fn is_supported(id: &str) -> bool {
     LOCALES.iter().any(|catalog| catalog.id == id)
 }
 
+/// The `language` preference value that follows the system (#10138). Not a catalog id: it
+/// resolves through [`system_language`] wherever a catalog is needed.
+pub const SYSTEM: &str = "system";
+
+/// Match the system's preferred locale tags against the catalogs: the exact tag first
+/// (`zh-TW`, `pt-BR`, `en-GB`), then the tag's base language (`zh-CN` → `zh`, `de-AT` → `de`),
+/// then English. Tags come in the system's order of preference; the first one that matches wins.
+pub fn match_system_tags(tags: &[String]) -> &'static str {
+    for tag in tags {
+        let tag = tag.replace('_', "-");
+        if let Some(catalog) = LOCALES.iter().find(|catalog| catalog.id.eq_ignore_ascii_case(&tag)) {
+            return catalog.id;
+        }
+        let base = tag.split('-').next().unwrap_or(&tag);
+        if let Some(catalog) = LOCALES.iter().find(|catalog| catalog.id.eq_ignore_ascii_case(base)) {
+            return catalog.id;
+        }
+    }
+    ENGLISH.id
+}
+
+/// The catalog id the system asks for, read once per process: the OS locale on desktop
+/// (Windows, macOS, Linux/BSD) and `navigator.languages` in the browser.
+pub fn system_language() -> &'static str {
+    static CACHED: OnceLock<&'static str> = OnceLock::new();
+    CACHED.get_or_init(|| match_system_tags(&sys_locale::get_locales().collect::<Vec<_>>()))
+}
+
+/// The catalog id a `language` preference resolves to: the saved choice, or the system's for
+/// [`SYSTEM`]. For callers that need the id as text (font fallbacks), not a [`Locale`].
+pub fn effective_language(preference: &str) -> &'static str {
+    Locale::for_language(preference).0.id
+}
+
 /// Immutable locale reference. Catalogs parse once; lookups are logarithmic.
 #[derive(Clone, Copy)]
 pub struct Locale(&'static Catalog);
 
 impl Locale {
     pub fn for_language(id: &str) -> Self {
+        if id == SYSTEM {
+            let system = system_language();
+            return Self(LOCALES.iter().copied().find(|catalog| catalog.id == system).unwrap_or(&ENGLISH));
+        }
         Self(LOCALES.iter().copied().find(|catalog| catalog.id == id).unwrap_or(&ENGLISH))
     }
 
@@ -204,9 +242,11 @@ impl Locale {
     }
 
     /// A name someone gave (a body, sketch, component, …): shown as typed, even when it matches
-    /// a UI label ("Fillet", "Boss"); only the default names are translated.
+    /// a UI label ("Fillet", "Boss"); only the default names are translated. A right-to-left name
+    /// is given in display order like a catalog message (see [`crate::bidi`]), so a multi-word
+    /// Hebrew or Arabic name reads from the right like the interface's own labels (#10471).
     pub fn given_name(self, text: &str) -> String {
-        self.default_name(text).unwrap_or_else(|| text.to_string())
+        self.default_name(text).unwrap_or_else(|| crate::bidi::visual(text).into_owned())
     }
 
     /// Evaluation errors stay English for scripts; the empty Cut/Intersect hint that names
@@ -277,6 +317,26 @@ thread_local! {
     // Helpers without an app reference share a render scope. Nested renders restore
     // their caller's locale; no owned language strings or persistent global setting.
     static CURRENT: Cell<Locale> = const { Cell::new(Locale(&ENGLISH)) };
+    /// Theme-authored language maps are already resolved and are not catalog source labels.
+    static RESOLVED_LABELS: Cell<bool> = const { Cell::new(false) };
+}
+
+#[must_use]
+pub(crate) struct ResolvedLabels {
+    previous: bool,
+    _thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+/// Shared controls can render supplied translations verbatim while retaining catalog messages.
+pub(crate) fn resolved_labels() -> ResolvedLabels {
+    let previous = RESOLVED_LABELS.with(|labels| labels.replace(true));
+    ResolvedLabels { previous, _thread: std::marker::PhantomData }
+}
+
+impl Drop for ResolvedLabels {
+    fn drop(&mut self) {
+        RESOLVED_LABELS.with(|labels| labels.set(self.previous));
+    }
 }
 
 #[must_use]
@@ -306,7 +366,7 @@ pub fn tr(id: &str) -> &str {
     CURRENT.with(|current| current.get().text(id))
 }
 pub fn tr_label(label: &str) -> &str {
-    CURRENT.with(|current| current.get().label(label))
+    if RESOLVED_LABELS.with(Cell::get) { label } else { CURRENT.with(|current| current.get().label(label)) }
 }
 
 /// Every English catalog entry `(id, text)`, for Preferences search to match a translation
@@ -331,6 +391,59 @@ pub fn tr_diagnostic(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// The system's locale tags pick a catalog: exact tag, then base language, then English (#10138).
+    #[test]
+    fn system_tags_match_the_catalog_exact_then_base_then_english() {
+        let tags = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(super::match_system_tags(&tags(&["zh-TW"])), "zh-TW", "exact tag");
+        assert_eq!(super::match_system_tags(&tags(&["pt-BR"])), "pt-BR");
+        assert_eq!(super::match_system_tags(&tags(&["en-GB"])), "en-GB");
+        assert_eq!(super::match_system_tags(&tags(&["zh-CN"])), "zh", "base language of zh-CN");
+        assert_eq!(super::match_system_tags(&tags(&["de-AT"])), "de");
+        assert_eq!(super::match_system_tags(&tags(&["zh_CN"])), "zh", "underscores normalize");
+        assert_eq!(super::match_system_tags(&tags(&["FR"])), "fr", "case-insensitive");
+        assert_eq!(super::match_system_tags(&tags(&["nl"])), "nl", "bare base tag");
+        assert_eq!(super::match_system_tags(&tags(&["pt-PT"])), "en", "pt has no catalog: English");
+        assert_eq!(super::match_system_tags(&tags(&["xx-YY"])), "en", "unknown: English");
+        assert_eq!(super::match_system_tags(&tags(&[])), "en", "nothing: English");
+        assert_eq!(super::match_system_tags(&tags(&["xx-YY", "de-DE"])), "de", "the first tag that matches wins");
+    }
+
+    /// A saved language is never overridden: only `system` resolves through the OS (#10138).
+    #[test]
+    fn a_saved_language_choice_is_never_overridden() {
+        assert_eq!(super::Locale::for_language("de").name(), "Deutsch");
+        assert_eq!(super::Locale::for_language("zh-TW").name(), "繁體中文");
+        assert_eq!(super::effective_language("de"), "de");
+        assert_eq!(super::effective_language("ja"), "ja");
+        // A first start has no saved language: the default follows the system.
+        assert_eq!(crate::prefs::Prefs::default().language, super::SYSTEM);
+        // A saved choice in the settings file wins over the default.
+        let saved: crate::prefs::Prefs = serde_json::from_str(r#"{"language":"ja"}"#).unwrap();
+        assert_eq!(saved.language, "ja");
+        // `system` is a preference value, not a catalog: it never enters the language list.
+        assert!(!super::is_supported(super::SYSTEM));
+        assert!(super::is_supported(super::effective_language(super::SYSTEM)), "system resolves to a catalog");
+    }
+
+    #[test]
+    fn theme_options_resolved_labels_are_verbatim_and_restore_catalog_adapters() {
+        let _language = super::scope("de");
+        assert_eq!(super::tr_label("Profile"), "Profil");
+        {
+            let _labels = super::resolved_labels();
+            assert_eq!(super::tr_label("Profile"), "Profile");
+            assert_eq!(super::tr_label("ui.cancel"), "ui.cancel");
+            assert_ne!(super::tr("ui.cancel"), "ui.cancel", "stable catalog messages remain translated");
+            {
+                let _nested = super::resolved_labels();
+                assert_eq!(super::tr_label("Profile"), "Profile");
+            }
+            assert_eq!(super::tr_label("Profile"), "Profile");
+        }
+        assert_eq!(super::tr_label("Profile"), "Profil");
+    }
+
     use super::*;
 
     /// Strings a pull request adds under `assets/locales/pending/` work before they are folded
@@ -348,6 +461,19 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A name someone gave is shown in display order, like a catalog message: a multi-word
+    /// Hebrew name must read from the right, not with its words backwards (#10471).
+    #[test]
+    fn given_names_are_shown_in_display_order() {
+        let _language = scope("he");
+        assert_eq!(tr_name("לוח עליון קטן"), "קטן עליון לוח");
+        assert_eq!(tr_name("לוח"), "לוח", "one word is shown as it is");
+        assert_eq!(tr_name("Top plate"), "Top plate", "Latin is shown as it is");
+        assert_eq!(tr_name("Body2"), tr("browser.body_name").replace("{number}", "2"), "default names stay translated");
+        let _arabic = scope("ar");
+        assert_eq!(tr_name("لوحة علوية صغيرة"), "صغيرة علوية لوحة");
     }
 
     #[test]

@@ -818,6 +818,24 @@ fn msaa() -> Option<u16> {
 /// (`solidcraft_ui_egui::titlebar`). macOS keeps its traffic lights over the integrated bar.
 const CUSTOM_TITLEBAR: bool = !cfg!(target_os = "macos");
 
+/// Linux: the window manager's own decorations (server-side, or the compositor's frame) can be
+/// asked for instead of the application bar ([`titlebar_choice`]). Elsewhere always `true`.
+fn app_titlebar_wanted() -> bool {
+    if !cfg!(all(unix, not(target_os = "macos"))) {
+        return true;
+    }
+    let setting = graphics().and_then(|v| v.get("titlebar").and_then(serde_json::Value::as_str).map(str::to_string));
+    titlebar_choice(solidcraft_engine::geom::env::var("TITLEBAR").as_deref(), setting.as_deref())
+}
+
+/// Linux: whether the application bar is the title bar. `SOLIDCRAFT_TITLEBAR` (else
+/// `graphics.json`'s `titlebar`) set to `system` gives the window the desktop's own title bar and
+/// buttons; `app` (or anything else, or nothing) keeps the application bar as the title bar.
+fn titlebar_choice(env: Option<&str>, setting: Option<&str>) -> bool {
+    let choice = env.map(str::trim).filter(|v| !v.is_empty()).or(setting.map(str::trim));
+    !choice.is_some_and(|v| v.eq_ignore_ascii_case("system"))
+}
+
 const DEPTH_BITS: u8 = 24;
 /// A 32-bit float depth buffer, drawn with reversed depth (1 near, 0 far) so its precision follows
 /// the distance from the eye (#1434). Only where every adapter offers it with a stencil
@@ -988,7 +1006,7 @@ fn main() -> eframe::Result {
         eframe::egui_wgpu::WgpuSetup::CreateNew(setup) => setup.instance_descriptor.backends,
         _ => eframe::wgpu::Backends::all(),
     };
-    let custom_titlebar = CUSTOM_TITLEBAR && !startup::system_title_bar(cfg!(target_os = "windows"), started);
+    let custom_titlebar = CUSTOM_TITLEBAR && app_titlebar_wanted() && !startup::system_title_bar(cfg!(target_os = "windows"), started);
     eframe::egui_wgpu::set_startup_hook(startup_step);
     solidcraft_engine::crash::phase("window");
     let options = eframe::NativeOptions {
@@ -1108,6 +1126,12 @@ fn main() -> eframe::Result {
                     })
                     .collect();
                 let info = rs.adapter.get_info();
+                if !app.preferences.graphics_adapter.is_empty() && !info.name.eq_ignore_ascii_case(app.preferences.graphics_adapter.as_str()) {
+                    eprintln!(
+                        "SolidCraft graphics: preferred adapter {:?} was not used; using {:?} instead",
+                        app.preferences.graphics_adapter, info.name
+                    );
+                }
                 let samples = scene_msaa_request(saved_samples);
                 let supported = scene_sample_choices(depth_bits, STENCIL_BITS, |depth| {
                     eframe::egui_wgpu::supported_msaa_samples(&rs.adapter, &rs.device, rs.target_format, depth)
@@ -1404,6 +1428,22 @@ mod backend_tests {
         // Wayland chosen on GNOME keeps native Wayland; X11 chosen on niri goes through XWayland.
         assert!(!prefer_x11(true, true, Some("GNOME"), over(Some("wayland"))));
         assert!(prefer_x11(true, true, Some("niri"), over(Some("x11"))));
+    }
+
+    #[test]
+    fn the_desktops_title_bar_only_when_asked_for() {
+        use super::titlebar_choice;
+        // Nothing set: the application bar is the title bar, as before.
+        assert!(titlebar_choice(None, None));
+        // graphics.json's `titlebar`.
+        assert!(!titlebar_choice(None, Some("system")));
+        assert!(titlebar_choice(None, Some("app")));
+        // SOLIDCRAFT_TITLEBAR wins over the file; empty counts as unset; case and spaces don't matter.
+        assert!(!titlebar_choice(Some(" System "), Some("app")));
+        assert!(titlebar_choice(Some("app"), Some("system")));
+        assert!(!titlebar_choice(Some(""), Some("system")));
+        // Anything unknown keeps the application bar.
+        assert!(titlebar_choice(Some("ssd"), None));
     }
 }
 

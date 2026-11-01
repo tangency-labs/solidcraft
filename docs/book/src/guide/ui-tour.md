@@ -6,7 +6,10 @@
   the File menu (New, Open, Save, Save As, Export…), undo and redo, the Home tab (the start page)
   and one tab per open design (each with its own undo history, selection and camera; a dot marks
   unsaved changes). On the right: Report a bug, Help (?), Preferences (which hold the theme) and the
-  window's buttons.
+  window's buttons. On Linux, to have your desktop's own title bar and window buttons instead, set
+  `SOLIDCRAFT_TITLEBAR=system` or put `"titlebar": "system"` in `graphics.json` in the settings
+  folder (see [Troubleshooting](troubleshooting.md#reset-the-settings)) and restart; `app` (the
+  default) puts the application bar back.
 - **Toolbar.** The workspace switcher (DESIGN) sits on the left. The tabs (MODEL, SURFACE,
   ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW and SHEET METAL) hold sections of commands. SKETCH appears while
   editing a sketch; SHEET METAL is always there and is highlighted for the active sheet body. Both select automatically
@@ -121,7 +124,8 @@
   wide as that column; the column comes back as it was when the dialog closes.
   Interface › **Dialog buttons** › **Top** puts OK, Cancel and Apply in
   the dialog's title row, right of the title, where they stay while sections open and close;
-  Cancel then also takes the place of the close button. Enter and Esc work as before.
+  Cancel then also takes the place of the close button. Enter and Esc work as before. The Sketch
+  panel's Finish Sketch, Look at and Slice move up under its title, above the options.
 - **Timeline** (bottom). Every feature in order. Double-click to edit, drag the marker to roll
   back, and drag features to reorder them. A sketch's icon, here and in the browser, takes the
   colour of its state: the sketch colour while it is under constrained, the fully constrained
@@ -294,10 +298,27 @@ vision modes still apply on top of any theme.
 
 #### Theme-file options and overlays
 
-Theme authors can add `options` and `overlays` to `solidcraft-theme/1`. This is a file-format
-and resolver API; this version has no controls for changing or saving option values. Import
-uses the declared defaults. Existing files need no changes, and **Export…** still writes a
-complete snapshot of the resolved colours, radii, borders and icon palette.
+Theme authors can add `options` and `overlays` to `solidcraft-theme/1`. Offered options appear
+below the theme cards in Interface, with the theme's name. Switches, sliders, segmented choices
+and dropdowns apply immediately and are saved per theme, including a followed theme file.
+**Reset** appears when an offered value differs from its default and restores that theme's
+defaults through the same preference update path. Cancel retains its existing behaviour of
+restoring the Preferences window's opening snapshot. Themes with no offered options add no
+options block or badge. Existing theme files need no changes or appearance changes.
+
+Options flow left to right into two columns. A parent and its child occupy one cell; turning
+the parent off disables its child without forgetting the child's value. Choices with four or
+five values and long labels take a full row; choices with more than five values use a dropdown.
+The first ten non-advanced top-level entries appear before **More · N**; advanced entries and
+overflow always appear inside it. Section labels appear only above six top-level entries.
+Help is available on hover. A registered behaviour unavailable on the current device stays
+disabled in its place with a reason; unimplemented standard behaviours and their children
+are absent. Theme cards show an Options badge only when the theme offers controls.
+
+**Export…** preserves the authored definitions and overlays for a theme that declares them.
+Older themes still export a complete token snapshot. The resolver API clamps numeric values;
+invalid saved preference values instead fall back to the theme's defaults, retaining the raw
+saved values for compatibility.
 
 For example, add these two keys alongside a theme's `colors`:
 
@@ -336,7 +357,8 @@ For example, add these two keys alongside a theme's `colors`:
 ```
 
 A file can declare up to 16 options. Each `id` is unique and matches
-`[a-z][a-z0-9_]{0,31}`. Every option has a `type` and `default`:
+`[a-z][a-z0-9_]{0,31}`. Every option has a `type` and a `default` (opacity may omit its
+default to use 100):
 
 - `bool`: the default is `true` or `false`.
 - `choice`: `values` contains 2 to 12 entries, each with a unique `id` in the same syntax
@@ -366,12 +388,67 @@ Four ids are reserved for definitions owned by the app:
 
 A theme declares these with their required type and a default; it may also narrow a range's
 `min` and `max`. The default is clamped to those bounds. Other fields are ignored, including
-presentation text, `step` (fixed at 1 for standard ranges), unit and parent. A wrong type or
+presentation text, `step` (fixed at 20 for `tab_fade_ms`, 1 for other standard ranges), unit and parent. A wrong type or
 bounds outside the standard range are import errors. Declaring `tab_fade_ms` also requires
 declaring its boolean parent, `tab_colours`. Custom options cannot redefine reserved ids.
-These declarations alone do not change opacity, blur or tab behaviour in this version.
+`opacity`, `tab_colours` and `tab_fade_ms` have registered standard behaviours. `blur` remains
+absent from the list until its behaviour is registered.
 The resolver exposes declared standard options in the order `opacity`, `blur`, `tab_colours`,
 each immediately followed by its child, then custom options in declared order.
+
+Opacity scales only these floating surface fill tokens: `panel`, `panel_header`, `dialog_bg`,
+`dialog_body`, `dialog_footer`, `overlay` and `nav_tip`. Scaling is applied after matching
+overlays. All other tokens, including text, icons, borders, controls, viewport and document
+colours, retain their resolved values. At 100%, with the implicit 100% default, or without
+offered opacity, every token is exactly the original resolved value. The supported range is
+40–100%; the theme may narrow it. To keep normal text at 4.5:1 against a panel over black and
+white viewport extremes, each fill's actual alpha rises as necessary. This also protects
+against background overrides and busy models. A theme whose authored foreground and opaque
+fill already fail contrast receives full alpha; opacity never rewrites the theme's text colours.
+
+Imported themes can also declare `tabs`, using exact ribbon registry names. Only `panel`,
+`viewport_top` and `viewport_bottom` are accepted; an unknown tab or any other token is an
+import error. Tabs without an entry keep the base surfaces. Existing tab accent fills, inks
+and tints keep their own tokens. For example, save this original theme as a JSON file and import it:
+
+```json
+{
+  "format": "solidcraft-theme/1",
+  "name": "Garden tabs",
+  "base": "dark",
+  "options": [
+    {"id": "tab_colours", "type": "bool", "default": true},
+    {"id": "tab_fade_ms", "type": "range", "default": 240}
+  ],
+  "tabs": {
+    "SKETCH": {"panel": "#123028", "viewport_top": "#103128", "viewport_bottom": "#204a3c"},
+    "RENDER": {"panel": "#302039", "viewport_top": "#30203d", "viewport_bottom": "#493252"}
+  }
+}
+```
+
+The [imported light/dark fixtures](../../../../crates/ui-egui/tests/fixtures/theme-tabs.json)
+also provide Model surfaces. No built-in theme declares tab surfaces. With `tab_colours`
+off or absent, every tab keeps the base palette. With it on, `tab_fade_ms` blends panel and
+viewport surfaces together in Oklab with an ease-out cubic curve; zero switches instantly.
+A tab change during a fade starts from the colours currently displayed. Opacity readability
+floors also apply to tab panels and interpolated alpha. A viewport set to the opposite light/dark
+palette keeps that palette; a flat background preference takes precedence over tab gradients. Definitions and authored defaults
+roundtrip through theme export; saved option values are excluded.
+
+Render's untouched, unsaved preview also uses these animated surfaces, including viewport
+palette and flat-colour preferences. Explicit scene backplates, transparency, environments,
+gradient backdrops and saved setups keep their existing background instead. Saved setups do
+not record whether their background was explicitly chosen, so even a setup saved only for its
+camera conservatively retains its scene backplate. With tab surfaces absent/off, Render keeps
+its original flat scene background. Theme surfaces never change rendered images or exports.
+
+Gruvbox has two cards, **Gruvbox Dark** and **Gruvbox Light**. Each offers a
+**Contrast** choice: **Soft**, **Standard** (the default), or **Hard**. These are the
+same six palettes as the former separate cards, including their icon colours.
+Saved selections and settings profiles using the former `-soft` and `-hard` ids
+select the corresponding family and contrast. Selecting a family again restores its
+last contrast; Reset returns it to Standard.
 
 Up to 32 overlays apply in file order, after the base palette and the theme's own value tables.
 Later matching entries win by key. Every overlay has one `when`: `{"opt":"id","eq":value}`

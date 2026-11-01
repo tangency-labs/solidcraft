@@ -104,6 +104,28 @@ fn cancel_while_computing_applies_nothing() {
 }
 
 #[test]
+fn removing_the_edited_feature_discards_its_pending_result() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":"Block"})).unwrap();
+    h.call("ui.editFeature", json!({"feature":"Block"}));
+    h.frames(2);
+    let prepared = result(&h);
+    let finish = hold_result(&mut h, false);
+    let progress = h.app.applying.as_ref().unwrap().progress.clone();
+    h.app.run("edit.undo", json!({})).unwrap();
+    let document = h.app.session.doc.clone();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    h.frames(2);
+    assert!(h.app.dialog.is_none() && h.app.applying.is_none() && h.app.editing_state.is_none());
+    assert!(progress.is_cancelled());
+    assert!(finish.send(prepared).is_err(), "the removed editor cannot adopt a late result");
+    h.frames(2);
+    assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+}
+
+#[test]
 fn a_ready_transaction_waits_one_frame_before_adoption() {
     let mut h = square_on_a_block();
     let features = h.app.session.doc.features.len();
@@ -323,7 +345,7 @@ fn cancelling_an_edit_restores_pinned_geometry_without_evaluating_an_evicted_suf
     let history = (h.app.session.undo.len(), h.app.session.redo.len());
     let visibility = h.app.session.visibility.clone();
     h.call("ui.editFeature", json!({"feature":target}));
-    crate::dialogs::sync_feature_edit_sketch(&mut h.app);
+    crate::dialogs::sync_feature_edit(&mut h.app);
     let sketch = h.app.session.feature_edit_sketch.expect("edited Extrude exposes its sketch");
     assert!(solidcraft_engine::view::sketch_shown(&h.app.session, sketch));
     let prepared = result(&h);

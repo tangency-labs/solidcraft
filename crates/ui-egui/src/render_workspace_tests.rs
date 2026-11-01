@@ -1,5 +1,6 @@
 use super::*;
 use crate::scenario::Harness;
+use egui::Color32;
 use solidcraft_engine::Session;
 
 fn environment_editor_frame(h: &mut Harness, events: Vec<egui::Event>) {
@@ -867,6 +868,52 @@ mod async_path_host {
         h.frames(3);
     }
 
+    /// Choose the GPU path image method, which is what starts the deferred setup.
+    fn choose_gpu_path(h: &mut Harness) {
+        select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
+        h.frames(1);
+    }
+
+    /// Entering Render and moving its view with the Raster (or CPU) image method never compiles
+    /// the GPU path tracer: on Vulkan drivers that compile takes gigabytes (#9041). Choosing the
+    /// GPU path method starts it, once.
+    #[test]
+    fn render_with_another_image_method_never_starts_the_path_setup() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1200,"height":900}));
+        h.app.render_workspace.defer_path_host("selected viewport".into(), move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            job::ImageHost::with_executor(Arc::new(TestExecutor)).map_err(|e| e.to_string())
+        });
+        enter(&mut h.app, true).unwrap();
+        assert_eq!(h.app.render_workspace.view.method, ImageMethod::Raster);
+        for step in 0..20 {
+            h.call("ui.camera", json!({"yaw": f64::from(step) * 0.1, "pitch": 0.3}));
+            h.frames(1);
+        }
+        select_image_method(&mut h.app, ImageMethod::CpuRaytrace);
+        h.frames(5);
+        enter(&mut h.app, false).unwrap();
+        enter(&mut h.app, true).unwrap();
+        h.frames(5);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        assert!(matches!(h.app.render_workspace.path_host, PathHost::NotStarted));
+        assert!(h.app.render_workspace.pending_setup.is_some());
+        choose_gpu_path(&mut h);
+        finish_setup(&mut h);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(matches!(h.app.render_workspace.path_host, PathHost::Ready(_)));
+        // The GPU method chosen in Design (a loaded setup) waits for Render.
+        let mut h = Harness::new();
+        h.app.render_workspace.defer_path_host("selected viewport".into(), || Err("not opened".into()));
+        select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
+        h.frames(5);
+        assert!(matches!(h.app.render_workspace.path_host, PathHost::NotStarted));
+    }
+
     #[test]
     fn design_frames_and_document_reset_never_start_the_deferred_path_host() {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -884,6 +931,7 @@ mod async_path_host {
         assert!(matches!(h.app.render_workspace.path_host, PathHost::NotStarted));
         assert!(h.app.render_workspace.pending_setup.is_some());
         enter(&mut h.app, true).unwrap();
+        choose_gpu_path(&mut h);
         finish_setup(&mut h);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(matches!(h.app.render_workspace.path_host, PathHost::Ready(_)));
@@ -905,6 +953,8 @@ mod async_path_host {
             Err("deliberate device refusal".into())
         });
         sync_backend(&mut h.app);
+        assert!(matches!(h.app.render_workspace.path_host, PathHost::NotStarted));
+        choose_gpu_path(&mut h);
         finish_setup(&mut h);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
         assert!(matches!(h.app.render_workspace.path_host, PathHost::Failed(_)));
@@ -923,6 +973,7 @@ mod async_path_host {
         h.frames(5);
         assert_eq!(h.app.render_workspace.setup_key.as_deref(), Some("selected safe-mode adapter"));
         enter(&mut h.app, true).unwrap();
+        choose_gpu_path(&mut h);
         finish_setup(&mut h);
         let PathHost::Failed(message) = &h.app.render_workspace.path_host else { panic!("expected selected adapter result") };
         assert_eq!(message, "selected adapter unavailable");
@@ -1297,6 +1348,150 @@ fn saved_camera_survives_frames_and_product_fit_ignores_selection() {
     assert_eq!(h.app.cam, selected_fit, "Fit Product ignores the selected subset");
     enter(&mut h.app, false).unwrap();
     assert_eq!(h.app.cam, design);
+}
+
+/// Inspect the mesh submitted by the actual Render canvas, including its GPU-unavailable path.
+/// This is a headless colour handoff assertion, not a rendered-pixel or screenshot comparison.
+fn render_preview_background_frame(h: &mut Harness, time: f64) -> [Color32; 4] {
+    let app = &mut h.app;
+    let mut viewport = egui::Rect::NOTHING;
+    let mut output = h.ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0))),
+            time: Some(time),
+            ..Default::default()
+        },
+        |ui| {
+            app.logic(ui.ctx());
+            viewport = ui.max_rect();
+            show(app, ui);
+        },
+    );
+    let corners = [viewport.left_top(), viewport.right_top(), viewport.right_bottom(), viewport.left_bottom()];
+    let colors = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Mesh(mesh) if mesh.vertices.len() == 4 && mesh.vertices.iter().zip(corners).all(|(vertex, corner)| vertex.pos == corner) => {
+                Some(std::array::from_fn(|i| mesh.vertices[i].color))
+            }
+            _ => None,
+        })
+        .expect("Render must paint a background mesh over the full viewport");
+    output.textures_delta.clear();
+    colors
+}
+
+#[test]
+fn render_preview_tab_surfaces_use_published_gradient_through_fade() {
+    for base in ["dark", "light"] {
+        let mut h = Harness::new();
+        let file = crate::theme_files::tab_fixture(base);
+        crate::prefs::control(&mut h.app, &json!({"theme_import":crate::theme_files::export_file(&file)})).unwrap();
+        let app = &mut h.app;
+        h.ctx.run_ui(egui::RawInput { time: Some(1.0), ..Default::default() }, |ui| app.logic(ui.ctx())).textures_delta.clear();
+        let model = Tokens::get();
+        enter(&mut h.app, true).unwrap();
+        assert!(h.app.session.doc.render.setups.is_empty());
+        let document = h.app.session.doc.clone();
+        let request = image_request(&h.app).unwrap();
+        let history = (h.app.session.revision, h.app.session.undo.len());
+        let end = crate::theme_files::resolve_for_tab(&file, &Default::default(), Some("RENDER"));
+        let expected_start = [model.viewport_top, model.viewport_top, model.viewport_bottom, model.viewport_bottom];
+        let expected_end = [end.viewport_top, end.viewport_top, end.viewport_bottom, end.viewport_bottom];
+        let mut previous = expected_start;
+        for progress in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let colors = render_preview_background_frame(&mut h, 2.0 + 0.24 * progress);
+            let shown = Tokens::get();
+            assert_eq!(colors, [shown.viewport_top, shown.viewport_top, shown.viewport_bottom, shown.viewport_bottom]);
+            if progress == 0.0 {
+                assert_eq!(colors, expected_start);
+            } else if progress == 1.0 {
+                assert_eq!(colors, expected_end);
+            } else if progress <= 0.5 {
+                assert_ne!(colors, expected_start, "the Render canvas must leave the starting colours at {progress}");
+                assert_ne!(colors, expected_end, "the Render canvas must receive intermediate fade colours at {progress}");
+                assert_ne!(colors, previous, "the Render canvas fade must advance between early samples at {progress}");
+            }
+            // At 75% elapsed time, ease-out cubic is already 98.4375% of the way to the
+            // destination. Byte quantization can legitimately produce the exact final colours.
+            previous = colors;
+            assert!(Arc::ptr_eq(&document, &h.app.session.doc));
+            assert_eq!((h.app.session.revision, h.app.session.undo.len()), history);
+            assert_eq!(image_request(&h.app).unwrap(), request, "UI themes never modify rendered image settings");
+        }
+        assert_eq!(render_preview_background_frame(&mut h, 3.0), expected_end);
+    }
+}
+
+#[test]
+fn render_preview_tab_surfaces_preserve_scene_backplates_and_viewport_overrides() {
+    for base in ["dark", "light"] {
+        let mut h = Harness::new();
+        let file = crate::theme_files::tab_fixture(base);
+        crate::prefs::control(
+            &mut h.app,
+            &json!({
+                "theme_import":crate::theme_files::export_file(&file),
+                "theme_options":{&file.id:{"tab_fade_ms":0}}
+            }),
+        )
+        .unwrap();
+        enter(&mut h.app, true).unwrap();
+        let scene_rgb = h.app.render_workspace.view.draft.background;
+        let scene = [Color32::from_rgb(scene_rgb[0], scene_rgb[1], scene_rgb[2]); 4];
+        let gradient = render_preview_background_frame(&mut h, 1.0);
+        assert_ne!(gradient, scene);
+
+        crate::prefs::control(&mut h.app, &json!({"theme_options":{&file.id:{"tab_colours":false}}})).unwrap();
+        assert_eq!(render_preview_background_frame(&mut h, 2.0), scene);
+        crate::prefs::control(
+            &mut h.app,
+            &json!({"theme_options":{&file.id:{"tab_colours":true}},"viewport_theme":if base == "dark" {"light"} else {"dark"}}),
+        )
+        .unwrap();
+        let opposite = if base == "dark" { Tokens::light() } else { Tokens::dark() };
+        assert_eq!(
+            render_preview_background_frame(&mut h, 3.0),
+            [opposite.viewport_top, opposite.viewport_top, opposite.viewport_bottom, opposite.viewport_bottom]
+        );
+        crate::prefs::control(&mut h.app, &json!({"viewport_theme":"theme","viewport_background":[3,7,11]})).unwrap();
+        assert_eq!(render_preview_background_frame(&mut h, 4.0), [Color32::from_rgb(3, 7, 11); 4]);
+
+        // Authored scene intent takes priority even over a viewport preference. Test temporary
+        // drafts as well as saved setups, without persisting any theme colour into the scene.
+        let original = h.app.render_workspace.view.clone();
+        for case in 0..6 {
+            h.app.render_workspace.view = original.clone();
+            match case {
+                0 => h.app.render_workspace.view.draft.background = [21, 43, 65],
+                1 => h.app.render_workspace.view.transparent = true,
+                2 => h.app.render_workspace.view.studio.backdrop_enabled = true,
+                3 => h.app.render_workspace.view.studio.environment = studio::Environment::Sky,
+                4 => h.app.render_workspace.view.cpu.environment = cpu::Environment::Constant,
+                _ => {
+                    h.app.render_workspace.view.raytrace.environment =
+                        Some(solidcraft_engine::render::job::RaytraceEnvironmentOptions { color: [0.2, 0.3, 0.4], intensity: 1.0 })
+                }
+            }
+            let expected = if case == 0 { [Color32::from_rgb(21, 43, 65); 4] } else { scene };
+            assert_eq!(render_preview_background_frame(&mut h, 5.0 + f64::from(case)), expected);
+        }
+        h.app.render_workspace.view = original;
+        h.app.run("render.settings.set", json!({"name":"Studio","set":{"camera":h.app.cam}})).unwrap();
+        setups::load(&mut h.app);
+        let authored = h.app.session.doc.clone();
+        assert_eq!(render_preview_background_frame(&mut h, 11.0), scene, "even a saved default-colour backplate is scene-owned");
+        assert!(Arc::ptr_eq(&authored, &h.app.session.doc));
+
+        // A theme without tabs keeps the legacy Render background, as do built-in themes.
+        h.app.render_workspace.view.name = "Unsaved".into();
+        setups::load(&mut h.app);
+        crate::prefs::control(&mut h.app, &json!({"theme_import":{"format":"solidcraft-theme/1","name":"No tabs","base":base}})).unwrap();
+        assert_eq!(render_preview_background_frame(&mut h, 12.0), scene);
+        crate::prefs::control(&mut h.app, &json!({"theme":base})).unwrap();
+        assert_eq!(render_preview_background_frame(&mut h, 13.0), scene);
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

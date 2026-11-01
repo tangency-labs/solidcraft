@@ -30,7 +30,8 @@ pub static COMMANDS: &[CommandSpec] = &[
         "type: rigid|revolute|slider|cylindrical|pin_slot|planar|ball, or a relation: parallel|perpendicular|angle|point_on_plane|point_on_line|line_on_plane \
          (ties only some directions or points, made where the parts are; several between two parts add up); a, b: joint origins ({occurrence, face|circle|edge|point: [x,y,z] in world, or face|circle: \"<face name>\"; z? for a point, end?, x? as joint.origin} | origin name); \
          values?: [angles in deg or expressions, distances]; limits?: [[min, max] | null…]; flip?: bool (default false: the origins are mated, \
-         b's z against a's as two faces meet; true: b's z along a's, so two origins given at one point with the same z stay as they are); \
+         b's z against a's as two faces meet; true: b's z along a's, so two origins given at one point with the same z and x stay as they are; \
+         a point origin without x takes its x from z, so give x on both, or use joint.as_built, to keep a turned part where it is); \
          offset?: mm or an expression; angle?: deg or an expression (an angle relation's tilt from mated; for other joints the default \
          is none, or a half turn where that turns b less, so faces that already meet stay as they are); name?; quiet?: bool (leave \
          out dof and fixed). An expression (text) is \
@@ -45,9 +46,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("joint.drive", "Drive Joints", drive).at("SOLID", "ASSEMBLE").icon("drive").params(
         "joint: id|name; value | values: [angles in deg or expressions, distances] (values not given keep theirs; a value driven drops the expression joint.create gave it; clamped to the limits; the other joints of a \
          closed loop follow, and the motion stops where the loop can no longer close → stopped_by_loop); quiet?: bool (leave out dof \
-         and fixed) → values: [{name, value, unit: deg|mm, limits}] as joint.list gives them; moved: whether any occurrence moved; \
-         reason: why the joint can move nothing (suppressed, its origins lost, or its chain joined to nothing grounded → unconnected: \
-         the occurrence named); index?: zero-based coordinate to drive with value (the other coordinates follow); continuous?: bool (drag frame, suppress UI echo)",
+         and fixed) → values: [{name, value, unit: deg|mm, limits}] as joint.list gives them; requested: the values asked for, in the same form; \
+         held: [{name, requested, value, unit, why}] for each driven value that ended up elsewhere (a motion link sets it, as a screw's \
+         travel follows its turn; a limit; contact; a closed loop); moved: whether any occurrence moved; \
+         reason: why the joint can move nothing (suppressed: nothing is stored; its origins lost; its chain joined to nothing grounded → unconnected: \
+         the occurrence named; or, when nothing moved, the first held value's why); index?: zero-based coordinate to drive with value (the other coordinates follow); continuous?: bool (drag frame, suppress UI echo)",
     ),
     CommandSpec::new("joint.reach", "Reach Point", reach).icon("reach").params(
         "occurrence: id|name; point: [x,y,z] (where its point goes, world); at?: [x,y,z] (its point, in the world where it is now; default: the centre of          its bodies' box); z?: [x,y,z] (the way its axis then points); axis?: [x,y,z] (that axis, in the world now; default: its own z); joints?: [ids          or names] (only these move toward the point; the other joints of a closed loop they are in follow); quiet?: bool; continuous?: bool (a frame          of a drag: the answer says continuous, and the app's command line doesn't echo it). Moves the values of the joints          on its chain from where they are to the nearest pose, within their limits, through motion links, keeping closed loops closed as joint.drive does          (contact sets are not checked) → reached; error_mm (and error_deg with z): how close it got; point: where its point is; values: [{joint, name,          values}] of the joints that moved, as joint.list gives them; moved; stopped_by_limit: [{joint, value, limit: min|max}]: the limits it rests on          short of the point; stopped_by_loop: {joint}: the closed loop that stopped it (its chain alone gets closer); reason: why nothing can move",
@@ -104,7 +107,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("joint.solve", "Solve Joints", solve_cmd).icon("compute").params("re-place the occurrences from the joints → conflicts, errors, dof"),
     CommandSpec::new("inspect.interference", "Interference", super::interference::interference).at("SOLID", "INSPECT").icon("interference").noundo().params(
-        "bodies?: [names] (default: all, in world placement); budget_s?: seconds (default 240, at most 86400: pairs not finished by then are listed in unchecked as \"not checked: the time budget … ran out\" and the call returns) → interferences: pairs that overlap with the overlap volume, area, bounding box and centre (a pin a hair off the axis of a hole of its size also has near_coaxial: {offset_mm, length_mm}, its volume the crescent the walls share); unchecked: [{a, b, reason}], the pairs that could not be checked, with the reason, and each mesh body (STL, 3MF or OBJ import: not intersected) as {a: name, b: null, reason: \"mesh body: not checked\"}, so count: 0 is not read as no overlap (checked counts the solid bodies). Bodies are pruned by bounding box first, then by their display meshes (pairs whose meshes stay apart by more than their chord tolerances, neither inside the other, are clear without a boolean), so any number of bodies is fine; the pairs left are intersected exactly, in parallel on desktop, the slowest first; at most 20000 pairs whose boxes overlap are intersected per call (truncated: true and skipped_pairs: n say when more were left out). Also: pairs_candidate (boxes overlap), pairs_cleared (by the meshes), pairs_intersected, pairs_not_checked, budget_exceeded, threads (worker threads; 0: on the calling thread), boolean_ms and tessellate_ms (kernel time summed over the pairs), slowest: [{a, b, ms, boolean_ms, tessellate_ms}] and ms",
+        "bodies?: [names] (default: all, in world placement; a name that is no body is refused); budget_s?: seconds (default 240, at most 86400: pairs not finished by then are listed in unchecked as \"not checked: the time budget … ran out\" and the call returns) → interferences: pairs that overlap with the overlap volume, area, bounding box and centre (a pin a hair off the axis of a hole of its size also has near_coaxial: {offset_mm, length_mm}, its volume the crescent the walls share); unchecked: [{a, b, reason}], the pairs that could not be checked, with the reason, and each mesh body (STL, 3MF or OBJ import: not intersected) as {a: name, b: null, reason: \"mesh body: not checked\"}, so count: 0 is not read as no overlap (checked counts the solid bodies). Bodies are pruned by bounding box first, then by their display meshes (pairs whose meshes stay apart by more than their chord tolerances, neither inside the other, are clear without a boolean), so any number of bodies is fine; the pairs left are intersected exactly, in parallel on desktop, the slowest first; at most 20000 pairs whose boxes overlap are intersected per call (truncated: true and skipped_pairs: n say when more were left out). Also: pairs_candidate (boxes overlap), pairs_cleared (by the meshes), pairs_intersected, pairs_not_checked, budget_exceeded, threads (worker threads; 0: on the calling thread), boolean_ms and tessellate_ms (kernel time summed over the pairs), slowest: [{a, b, ms, boolean_ms, tessellate_ms}] and ms",
     ),
 ];
 
@@ -897,32 +900,43 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("values").is_none() && p.get("value").is_none() {
         return Err(bad(cmd, "give `value` or `values`"));
     }
-    let doc = s.doc_mut();
-    let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == id) else { return Err(bad(cmd, "joint")) };
     // Values not given (after `value`'s first, or past the end of `values`) keep theirs.
     let given = match p.get("values") {
         Some(Value::Array(a)) => a.len(),
         _ => 1,
     };
+    let joint = s.doc.assembly.joints.iter().find(|j| j.id == id).ok_or_else(|| bad(cmd, "joint"))?;
     if index.is_none() {
         for (i, v) in q.iter_mut().enumerate().skip(given) {
-            *v = j.values.get(i).copied().unwrap_or(*v);
+            *v = joint.values.get(i).copied().unwrap_or(*v);
         }
     }
-    joints::clamp(j, &mut q);
-    // Moved as far toward `q` as contact sets and closed loops allow. Values left out of
-    // `values` are not driven: in a closed loop they follow.
-    // Driving moves the joint by hand: the values driven drop their expressions (an expression
-    // given here is worked out once, as contact or a loop may stop the motion short of it).
-    if let Some(index) = index {
-        j.exprs.set_value(index, None);
+    // What was asked for, before limits and motion links have their say.
+    let requested = q.clone();
+    let driven: Vec<usize> = match index {
+        Some(index) => vec![index],
+        None => (0..given.min(kind.dofs().len())).collect(),
+    };
+    // A suppressed joint places nothing: a value stored now would move the part only when the
+    // joint is unsuppressed, and leave an undo step for a drive whose reply says nothing moved
+    // (#9742). A joint in a motion link still carries its value to the joints it drives.
+    let hold = joint.suppressed && !s.doc.assembly.links.iter().any(|l| l.a == id || l.b == id);
+    let before = super::motion::positions(s);
+    let r = if hold {
+        json!({"stopped_by_contact": null, "stopped_by_loop": null})
     } else {
-        for i in 0..given.min(kind.dofs().len()) {
+        let doc = s.doc_mut();
+        let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == id) else { return Err(bad(cmd, "joint")) };
+        joints::clamp(j, &mut q);
+        // Moved as far toward `q` as contact sets and closed loops allow. Values left out of
+        // `values` are not driven: in a closed loop they follow.
+        // Driving moves the joint by hand: the values driven drop their expressions (an expression
+        // given here is worked out once, as contact or a loop may stop the motion short of it).
+        for &i in &driven {
             j.exprs.set_value(i, None);
         }
-    }
-    let before = super::motion::positions(s);
-    let r = if let Some(index) = index { super::motion::drive_joint_index(s, id, q, index)? } else { super::motion::drive_joint(s, id, q, given)? };
+        if let Some(index) = index { super::motion::drive_joint_index(s, id, q, index)? } else { super::motion::drive_joint(s, id, q, given)? }
+    };
     let sol = solution(s, &BTreeMap::new(), response_analysis(p));
     let mut out = sol_json(&sol, p);
     out["joint"] = json!(id);
@@ -932,7 +946,20 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
     }
     out["stopped_by_contact"] = r["stopped_by_contact"].clone();
     out["stopped_by_loop"] = r["stopped_by_loop"].clone();
-    out["moved"] = json!(super::motion::moved(&before, &super::motion::positions(s)).next().is_some());
+    let moved = super::motion::moved(&before, &super::motion::positions(s)).next().is_some();
+    out["moved"] = json!(moved);
+    if let Some(j) = s.doc.assembly.joints.iter().find(|j| j.id == id) {
+        out["requested"] = json!(named_values(j, &requested));
+        let held = if hold { Vec::new() } else { held_values(s, j, &requested, &driven, &r) };
+        if let Some(first) = held.first()
+            && !moved
+        {
+            out["reason"] = first["why"].clone();
+        }
+        if !held.is_empty() {
+            out["held"] = json!(held);
+        }
+    }
     if let Some((why, unconnected)) = cannot_move(s, &sol, id) {
         out["reason"] = json!(why);
         if let Some(o) = unconnected {
@@ -940,6 +967,52 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     Ok(out)
+}
+
+/// The driven values of `j` that ended up other than `requested`, each with why: a motion link
+/// sets it from another coordinate (a screw's travel follows its turn), a limit holds it, or
+/// contact or a closed loop stopped the motion short. Degrees and mm, as `values` (#9742).
+fn held_values(s: &Session, j: &Joint, requested: &[f64], driven: &[usize], r: &Value) -> Vec<Value> {
+    let now = joints::joint_values(&s.doc.assembly).remove(&j.id).unwrap_or_else(|| j.values.clone());
+    let names = j.kind.dofs();
+    let mut out = Vec::new();
+    for &i in driven {
+        let (Some(&want), Some(&got)) = (requested.get(i), now.get(i)) else { continue };
+        if (want - got).abs() <= 1e-9 * want.abs().max(got.abs()).max(1.0) {
+            continue;
+        }
+        let angle = j.kind.is_angle(i);
+        let shown = |v: f64| if angle { v.to_degrees() } else { v };
+        let name = names.get(i).copied().unwrap_or("value");
+        let why = if let Some(l) = s.doc.assembly.links.iter().find(|l| l.b == j.id && l.ib == i) {
+            let coupling = match &l.coupling {
+                Some(joints::Coupling::Gear { .. }) => " (gears)",
+                Some(joints::Coupling::RackPinion { .. }) => " (rack and pinion)",
+                Some(joints::Coupling::Screw { .. }) => " (screw)",
+                Some(joints::Coupling::Cam(_)) => " (cam)",
+                None => "",
+            };
+            let from = s.doc.assembly.joints.iter().find(|o| o.id == l.a);
+            let coordinate = from.and_then(|o| o.kind.dofs().get(l.ia).copied()).unwrap_or("value");
+            if l.a == j.id {
+                format!("{name} follows its {coordinate} through a motion link{coupling}")
+            } else {
+                format!("{name} follows {}'s {coordinate} through a motion link{coupling}", from.map_or("another joint", |o| o.name.as_str()))
+            }
+        } else if let Some(Some((lo, hi))) = j.limits.get(i)
+            && (want < lo.min(*hi) || want > hi.max(*lo))
+        {
+            format!("{name} is held to its limits, {} to {} {}", shown(lo.min(*hi)), shown(hi.max(*lo)), if angle { "deg" } else { "mm" })
+        } else if r["stopped_by_contact"].is_object() {
+            format!("{name} stopped at contact")
+        } else if r["stopped_by_loop"].is_object() {
+            format!("{name} stopped where a closed loop can no longer close")
+        } else {
+            continue;
+        };
+        out.push(json!({"name": name, "requested": shown(want), "value": shown(got), "unit": if angle { "deg" } else { "mm" }, "why": why}));
+    }
+    out
 }
 
 /// Joints `joint.reach` takes at most in `joints`.

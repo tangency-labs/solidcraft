@@ -521,7 +521,13 @@ fn text_hit(ui: &Ui, text: &str) -> bool {
 }
 
 fn text_matches(query: &str, text: &str) -> bool {
-    setting_score(query, text) > 0 || english_hit(query, text) || keywords(text).iter().any(|word| setting_score(query, word) > 0)
+    // A right-to-left label reaches here in display order (see `Catalog::shown`), while the query
+    // is typed in reading order: compare the query in display order too, so a multi-word Hebrew
+    // or Arabic label is found as it is typed (#10471; #7532 fixed only the test's half).
+    setting_score(query, text) > 0
+        || setting_score(&crate::bidi::visual(query), text) > 0
+        || english_hit(query, text)
+        || keywords(text).iter().any(|word| setting_score(query, word) > 0)
 }
 
 /// Prefix, the start of a word, or a run of at least three characters. Scattered letters are not
@@ -749,6 +755,22 @@ mod tests {
         assert!(!matches_text("dark", &["Units of new designs"]));
     }
 
+    /// A multi-word right-to-left label reaches the search in display order while the query is
+    /// typed in reading order: typing the label's words as written must find the row (#10471).
+    #[test]
+    fn search_finds_right_to_left_labels_typed_in_reading_order() {
+        let _language = crate::i18n::scope("he");
+        let label = crate::i18n::tr("prefs.bodies_folders");
+        assert!(matches_text("תיקיות גופים", &[label]), "the label as it is typed");
+        assert!(matches_text("גופים תיקיות", &[label]), "the words swapped still match");
+        assert!(matches_text("תיקיות", &[label]), "one word still matches");
+        let _language = crate::i18n::scope("ar");
+        let label = crate::i18n::tr("prefs.bodies_folders");
+        assert!(matches_text("مجلدات الأجسام", &[label]), "the label as it is typed");
+        assert!(matches_text("الأجسام مجلدات", &[label]), "the words swapped still match");
+        assert!(matches_text("مجلدات", &[label]), "one word still matches");
+    }
+
     /// The search field and its empty result name the window they search (#8318): "Search
     /// settings" under a "Preferences" title read as two names for one window.
     #[test]
@@ -783,6 +805,13 @@ mod tests {
         h.step(&serde_json::json!({"key": "ArrowUp"})).expect("previous match");
         h.frames(1);
         assert_eq!(crate::scenario::handle_at("prefs:search:current"), first, "Up moves back");
+        let (_, _, hits) = nav(&h.ctx);
+        let cursor = hits
+            .iter()
+            .position(|hit| hit.page == crate::prefs::PAGE_NAVIGATION && hit.label == "Reverse zoom direction")
+            .expect("the Navigation setting remains keyboard reachable");
+        set_cursor(&h.ctx, cursor);
+        h.frames(2);
         h.step(&serde_json::json!({"key": "Enter"})).expect("open");
         h.frames(2);
         assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_NAVIGATION, "Enter opens the match's page");
@@ -905,7 +934,7 @@ mod tests {
     fn preferences_search_finds_settings_in_rows_without_a_label() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_INTERFACE);
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_LAYOUT);
         h.frames(2);
         // Drawn, not merely present: a hidden row's controls still exist, far off screen.
         let drawn = |h: &crate::scenario::Harness, label: &str| {
@@ -938,5 +967,30 @@ mod tests {
         h.app.prefs_window.filter = "zzzz-no-setting".into();
         h.frames(4);
         assert!(!drawn(&h, "Status bar"), "a miss shows nothing");
+    }
+    #[test]
+    fn moved_preferences_search_paths_and_enter_follow_window_groups() {
+        for (query, path, page) in [
+            ("Direct interaction", "Work > Tools", crate::prefs::PAGE_TOOLS),
+            ("Navigate with the 3D mouse", "Input > 3D mouse", crate::prefs::PAGE_MOUSE3D),
+            ("Origin plane names", "Work > Design", crate::prefs::PAGE_DESIGN),
+            ("Status bar", "Look > Layout", crate::prefs::PAGE_LAYOUT),
+        ] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
+            h.app.prefs_window.filter = query.into();
+            h.frames(4);
+            assert!(h.widget(path).is_some(), "{query} shows {path}");
+            let (_, _, hits) = nav(&h.ctx);
+            let index = hits.iter().position(|hit| hit.page == page && hit.label == query).expect("moved control is keyboard reachable");
+            set_cursor(&h.ctx, index);
+            h.frames(2);
+            h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.prefs_window.section, page);
+            assert!(h.app.prefs_window.filter.is_empty());
+            assert!(h.widget(query).is_some());
+        }
     }
 }

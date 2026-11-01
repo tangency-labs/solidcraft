@@ -21,7 +21,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("timeline.export_script", "Export Command Script", export_script).icon("export").noundo().doc_only().params(
         "path?: write the script to this file → script: {commands: [...]} that rebuilds the design (solidcraft-cli eval/run), \
-         steps, omitted: what the script leaves out (appearances, folders, views, configurations); components and assemblies \
+         steps, omitted: what the script leaves out (appearances, folders, views, configurations, print-face assignments); components and assemblies \
          are not supported yet",
     ),
 ];
@@ -198,6 +198,7 @@ pub(crate) fn script_steps(doc: &Document) -> Result<(Vec<Value>, Vec<String>)> 
         (doc.configs.is_empty(), "configurations"),
         (doc.canvases.is_empty(), "canvases (reference images)"),
         (doc.point_clouds.is_empty(), "point clouds"),
+        (doc.print_faces.is_empty(), "print-face assignments (body.print_face)"),
         (doc.named_views.is_empty(), "named views"),
         (doc.browser_groups.is_empty() && doc.browser_order.is_empty(), "Browser folders and order"),
         (doc.timeline_groups.is_empty(), "timeline folders"),

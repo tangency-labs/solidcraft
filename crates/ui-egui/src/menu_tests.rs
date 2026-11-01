@@ -673,6 +673,26 @@ fn delete_key_handles_every_kind_and_asks_about_dependents() {
     assert_eq!(app.session.doc.features.len(), n);
 }
 
+/// #9079: Modify ▸ Delete with nothing selected says what to pick, not the command's parameter
+/// error, and changes nothing; with something selected it deletes it, as the Delete key does.
+#[test]
+fn modify_delete_with_nothing_selected_asks_for_a_pick() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"})).unwrap();
+    app.run("construct.plane.offset", json!({"base": "XY", "offset": 10})).unwrap();
+    let n = app.session.doc.features.len();
+    app.run("select.clear", json!({})).unwrap();
+    app.start("timeline.delete");
+    let (message, _, error) = app.status.clone().expect("a hint");
+    assert!(!error && message == app.tr("ui.delete_select_first"), "{message:?} error: {error}");
+    assert!(!message.contains('`'), "no parameter names: {message}");
+    assert_eq!(app.session.doc.features.len(), n, "nothing deleted");
+    app.run("select.set", json!({"items": [{"type": "plane", "name": "Plane1"}]})).unwrap();
+    app.start("timeline.delete");
+    assert!(app.session.doc.find_feature("Plane1").is_none(), "the selection goes");
+    assert_eq!(app.session.doc.features.len(), n - 1);
+}
+
 #[test]
 fn browser_feature_menu_deletes_its_target_and_supports_undo() {
     let mut app = SolveApp::new(Session::default(), Services::default());
@@ -1079,6 +1099,88 @@ fn f2_renames_the_selected_item() {
     assert!(app.session.model.state().body("Base").is_some());
     app.run("select.clear", json!({})).unwrap();
     assert!(!context_menu::rename_selection(&mut app, pos2(0.0, 0.0)), "nothing selected");
+}
+
+/// Rename shows F2 wherever F2 renames (bodies, sketches and features, construction geometry,
+/// components and placements, groups, canvases), as Cut, Copy, Delete and Show/Hide show their
+/// keys; joints and saved views, which F2 does not rename, show none. F2 pressed with such a
+/// menu open renames what the menu is for, as its row says: a group or canvas is not selected by
+/// the right-click that opens its menu, so F2 would rename the selection instead.
+#[test]
+fn rename_shows_f2_and_f2_with_a_menu_open_renames_what_the_menu_is_for() {
+    use crate::context_menu::RenameWhat;
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 10, "width": 20, "height": 30})).unwrap();
+    let b = body(&h.app);
+    let feature = h.app.session.doc.features[0].id;
+    h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 5})).unwrap();
+    let plane = h.app.session.doc.features.last().unwrap().id;
+    let part = h.app.run("component.create", json!({"name": "Menu part"})).unwrap()["component"].as_u64().unwrap();
+    let occurrence = h.app.session.doc.occurrence_of(part).unwrap().id;
+    let group = h.app.run("browser.group", json!({"component": 0, "folder": "bodies", "items": [b]})).unwrap()["group"].as_u64().unwrap();
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend(400u32.to_be_bytes());
+    png.extend(200u32.to_be_bytes());
+    png.extend([8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    let data = solidcraft_engine::doc::canvas::base64_encode(&png);
+    let canvas = h.app.run("canvas.insert", json!({"data": data, "plane": "XY", "width": 80})).unwrap()["canvas"].as_u64().unwrap();
+    let rename_key = |app: &SolveApp, target: &Target| {
+        context_menu::items(app, target)
+            .into_iter()
+            .find(|i| i.id == "ui.rename")
+            .map(|i| i.shortcut)
+            .unwrap_or_else(|| panic!("no Rename row: {target:?}"))
+    };
+    for target in [
+        Target::Body { name: b.clone() },
+        Target::Sketch { id: feature },
+        Target::Feature { id: feature },
+        Target::Plane { id: plane },
+        Target::Component { id: part },
+        Target::Occurrence { path: vec![occurrence] },
+        Target::Group { id: group, scope: "c0".into() },
+        Target::Canvas { id: canvas },
+    ] {
+        assert_eq!(rename_key(&h.app, &target), "F2", "Rename shows F2: {target:?}");
+    }
+    assert_eq!(rename_key(&h.app, &Target::NamedView { name: "Top".into() }), "", "F2 does not rename a saved view");
+    let sample = solidcraft_engine::sample::samples().into_iter().find(|s| s.name == "Hinge Assembly").unwrap();
+    let mut assembly = SolveApp::new(Session::default(), Services::default());
+    assembly.session.run_script(&(sample.script)()).unwrap();
+    let joint = assembly.session.doc.assembly.joints[0].id;
+    assert_eq!(rename_key(&assembly, &Target::Joint { id: joint }), "", "F2 does not rename a joint");
+
+    let press_f2 = |h: &mut crate::scenario::Harness| {
+        for pressed in [true, false] {
+            h.app.synthetic.push(egui::Event::Key { key: egui::Key::F2, physical_key: None, pressed, repeat: false, modifiers: Default::default() });
+        }
+        while !h.app.synthetic.is_empty() {
+            h.frame();
+        }
+    };
+    // A body selected elsewhere is not what the group's or the canvas's menu is for.
+    h.app.run("select.set", json!({"items": [{"type": "body", "name": b}]})).unwrap();
+    for (target, what) in
+        [(Target::Group { id: group, scope: "c0".into() }, RenameWhat::Group(group)), (Target::Canvas { id: canvas }, RenameWhat::Canvas(canvas))]
+    {
+        context_menu::open_for(&mut h.app, pos2(300.0, 200.0), target.clone());
+        h.frames(2);
+        press_f2(&mut h);
+        let renaming = h.app.menu.rename.as_ref().map(|r| r.what.clone());
+        assert_eq!(renaming, Some(what), "F2 on the menu of {target:?}");
+        assert!(h.app.viewport.context_menu.is_none(), "the menu closes as after a click");
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.frames(2);
+        assert!(h.app.menu.rename.is_none());
+    }
+    // With no menu open, F2 still renames the selection.
+    h.app.run("select.set", json!({"items": [{"type": "body", "name": b}]})).unwrap();
+    h.frames(2);
+    press_f2(&mut h);
+    assert_eq!(h.app.menu.rename.as_ref().map(|r| r.what.clone()), Some(RenameWhat::Body(b)), "F2 without a menu renames the selection");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert!(h.app.menu.rename.is_none());
 }
 
 /// A double-click on a body's browser row edits its name in the row, like F2 (no floating box);

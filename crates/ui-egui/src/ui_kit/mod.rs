@@ -28,6 +28,7 @@ pub(crate) mod panel;
 mod preferences;
 mod preferences_assistant;
 mod preferences_figures;
+mod preferences_layout;
 mod preferences_navigation;
 mod preferences_small;
 mod radial;

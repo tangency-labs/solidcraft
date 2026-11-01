@@ -6,6 +6,24 @@ use crate::*;
 
 mod mesh_convert;
 
+/// Counts the copies `Session::doc_mut` makes of a shared document.
+pub(crate) mod doc_copies {
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNT: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub fn record() {
+        COUNT.with(|c| c.set(c.get() + 1));
+    }
+
+    /// The count since the last call.
+    pub fn take() -> usize {
+        COUNT.with(|c| c.replace(0))
+    }
+}
+
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     match s.execute(id, &p) {
         Ok(v) => v,
@@ -1618,6 +1636,23 @@ fn auto_extrude_starts_new_body_in_empty_component() {
 
 /// Measuring picked geometry: distance between faces, angle, edge length.
 #[test]
+fn measure_origin_planes_axes_and_points() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    let at = |p: [f64; 3]| json!({"type": "vertex", "body": "Body1", "point": p});
+    // A point 10 above the XY plane.
+    let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "plane", "name": "XY"}, at([5.0, 5.0, 10.0])]}));
+    assert!((r["distance_mm"].as_f64().unwrap() - 10.0).abs() < 1e-9, "{r}");
+    assert_eq!(r["from"], json!([5.0, 5.0, 0.0]));
+    // The point's distance from the Z axis.
+    let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "axis", "name": "Z"}, at([3.0, 4.0, 7.0])]}));
+    assert!((r["distance_mm"].as_f64().unwrap() - 5.0).abs() < 1e-9, "{r}");
+    // The XY plane and the Z axis meet: nothing between them.
+    let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "plane", "name": "XY"}, {"type": "axis", "name": "Z"}]}));
+    assert!(r["distance_mm"].as_f64().unwrap().abs() < 1e-9, "{r}");
+}
+
+#[test]
 fn measure_items() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
@@ -1928,6 +1963,24 @@ fn checkpoint_restores_with_a_full_undo_history() {
     run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": id, "forget": true}));
     assert!(s.doc.find_feature("Kept").is_some());
     assert!(s.execute("edit.restore_checkpoint", &json!({"checkpoint": id})).is_err());
+}
+
+/// Regression (#9746): a checkpoint restored already, or one of more than the 16 kept, was
+/// refused with only "no checkpoint N", so a script that restores twice could not tell why.
+#[test]
+fn a_used_up_or_dropped_checkpoint_says_why() {
+    let mut s = Session::default();
+    let id = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": id}));
+    let used = s.execute("edit.restore_checkpoint", &json!({"checkpoint": id})).unwrap_err().to_string();
+    assert!(used.contains("used up") && used.contains("16"), "{used}");
+    let first = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    for _ in 0..MAX_CHECKPOINTS {
+        run(&mut s, "edit.checkpoint", json!({}));
+    }
+    let dropped = s.execute("edit.restore_checkpoint", &json!({"checkpoint": first})).unwrap_err().to_string();
+    assert!(dropped.contains("16"), "{dropped}");
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": first + 1}));
 }
 
 /// Regression (#3242): `file.new` replaced the session and its checkpoints with it, so a
@@ -3419,6 +3472,48 @@ fn computed_import_preserves_file_and_earlier_undo_history() {
     assert!(s.model.state().bodies.is_empty());
 }
 
+/// The unsaved-changes answer is worked out once per pair of documents and revision, and stays
+/// right through every way the design changes: an edit in place (`doc_mut`, which stays in
+/// place), one that bypasses it, a new document equal to the saved one, Save, a change of what
+/// is hidden, and undo back to the saved design. Each answer is checked against the plain
+/// comparison it stands for.
+#[test]
+fn the_unsaved_changes_answer_follows_every_change() {
+    let plain = |s: &Session| (!std::sync::Arc::ptr_eq(&s.doc, &s.saved) && *s.doc != *s.saved) || s.visibility != s.saved_visibility;
+    let check = |s: &Session, want: bool, why: &str| {
+        for _ in 0..2 {
+            assert_eq!(s.is_dirty(), want, "{why}");
+            assert_eq!(plain(s), want, "{why}: the plain comparison");
+        }
+    };
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    s.mark_saved();
+    check(&s, false, "saved");
+    // An edit in place: the cached answer holds the document, yet the edit is not a copy.
+    s.doc = std::sync::Arc::new((*s.doc).clone());
+    check(&s, false, "an equal copy of the saved design");
+    let at = std::sync::Arc::as_ptr(&s.doc);
+    s.doc_mut().name = "Renamed".into();
+    assert_eq!(std::sync::Arc::as_ptr(&s.doc), at, "doc_mut edits in place");
+    check(&s, true, "renamed in place, same revision");
+    s.doc_mut().name = s.saved.name.clone();
+    check(&s, false, "named back in place");
+    // An edit that goes around doc_mut while the answer holds the document copies it.
+    std::sync::Arc::make_mut(&mut s.doc).name = "Elsewhere".into();
+    check(&s, true, "edited past doc_mut");
+    s.mark_saved();
+    check(&s, false, "saved again");
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]}));
+    check(&s, true, "a command");
+    run(&mut s, "edit.undo", json!({}));
+    check(&s, false, "undone back to the saved design");
+    s.visibility.hidden_bodies.push("Body1".into());
+    check(&s, true, "a body hidden");
+    s.visibility.hidden_bodies.clear();
+    check(&s, false, "shown again");
+}
+
 /// Commands evaluated ahead (off the window thread) and then run for real take what was
 /// evaluated: on a design whose states are past the shared cache's budget the second run
 /// evaluated everything again, so an off-thread command cost twice its time.
@@ -4421,10 +4516,10 @@ fn renaming_a_body_later_features_change_evaluates_nothing() {
     assert_eq!(s.evaluations, 0, "nor do its undo and redo");
 }
 
-/// A body whose name later bodies' names are worked out from (`X` patterned into `X (2)`) is still
-/// renamed by evaluating the design, so the copies follow it as they would on opening it.
+/// A body whose name later bodies' names are worked out from (`X` patterned into `X (2)`) keeps
+/// the same copies and face names as opening the renamed design.
 #[test]
-fn renaming_a_body_whose_copies_take_its_name_evaluates_the_design() {
+fn renaming_a_body_keeps_its_copies_consistent_with_rebuilding() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "X"}));
     run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["X"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20}));
@@ -4434,6 +4529,9 @@ fn renaming_a_body_whose_copies_take_its_name_evaluates_the_design() {
     let mut fresh = Session::new((*s.doc).clone());
     fresh.refresh();
     assert_eq!(names(&fresh), names(&s));
+    for (a, b) in fresh.model.state().bodies.iter().zip(&s.model.state().bodies) {
+        assert_eq!(solidcraft_doc::naming::face_names(a), solidcraft_doc::naming::face_names(b));
+    }
 }
 
 /// #3044: on a design with thousands of bodies the cheap commands stay cheap: showing, hiding,

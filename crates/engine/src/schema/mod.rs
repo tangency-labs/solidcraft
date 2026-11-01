@@ -60,6 +60,7 @@ pub mod edit;
 pub mod features;
 pub mod inspect;
 pub mod joints;
+pub mod mass_properties;
 pub mod print_face;
 pub mod render;
 pub mod render_lights;
@@ -70,6 +71,7 @@ pub mod sketch_constraints;
 pub mod sketch_create;
 pub mod sketch_equation;
 pub mod surface_analysis;
+pub mod ui_prefs;
 pub mod view_navigation;
 
 pub use check::{Contract, Issue, ParamCheck, TypedContract, input_schema_for, issues, output_schema_for, run_checked, run_checked_as};

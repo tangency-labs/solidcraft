@@ -548,10 +548,15 @@ pub fn reset(app: &mut SolveApp, id: Option<&str>) {
 pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     let filtering = crate::prefs_search::querying(ui);
+    // A Preferences search lists the matching shortcuts too, and one recorded from there takes
+    // the key like one on this page (#10043). Only a search field that has the keyboard keeps
+    // its keys: going back to it to type stops the recording.
+    if ctx.memory(|m| m.has_focus(egui::Id::new("prefs_search"))) && app.keymap.capturing.is_some() {
+        stop_capture(app);
+    }
     // Keep a pending chord until it has settled and all keys are released. Modifier-only
     // input never starts the timer, so modifiers can be assembled at the user's own pace.
-    // A Preferences search is using the keyboard; don't swallow those keys to finish a capture.
-    if !filtering && let Some(id) = app.keymap.capturing.clone() {
+    if let Some(id) = app.keymap.capturing.clone() {
         match ctx.input(|i| app.keymap.recorder.update(i)) {
             Recording::Waiting => {
                 if app.keymap.recorder.key.is_some() {
@@ -627,20 +632,8 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                     },
                 ));
             }
-            if let Some(m) = &app.keymap.message {
-                ui_kit::text(ui, m, ui_kit::Text::Report("keymap_message", true));
-            }
-            if let Some((_, key, _, _)) = app.keymap.conflict.clone() {
-                ui.horizontal_wrapped(|ui| {
-                    let replace = ui_kit::button(ui, crate::i18n::format("keymap.use_anyway", &[("key", &display(&key))]), ui_kit::Button::Normal);
-                    crate::scenario::publish_target("keymap:replace", replace.rect);
-                    if replace.clicked() {
-                        action = Some((String::new(), "replace"));
-                    }
-                    if ui_kit::button(ui, app.tr_label("Cancel"), ui_kit::Button::Normal).clicked() {
-                        action = Some((String::new(), "cancel"));
-                    }
-                });
+            if let Some(chosen) = outcome(app, ui) {
+                action = Some((String::new(), chosen));
             }
             ui_kit::text(ui, app.tr_label("Select Other: hold the left button still on the model (or right-click › Select Other…) to list everything under the cursor; click again on the same spot to select the next thing there. Double-click the middle button to go Home (Preferences › Navigation)."), ui_kit::Text::Note("navigation"));
         }
@@ -702,6 +695,16 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::Column::new("Keyboard Shortcuts", 1.0).flex().min_content_width(key_width),
                 ui_kit::Column::new("", 0.0).icon_only().min_content_width(action_width),
             ];
+            // A search shows a recording's outcome and its next step above the shortcuts it found.
+            if filtering {
+                if let Some(chosen) = outcome(app, ui) {
+                    action = Some((String::new(), chosen));
+                }
+                if app.keymap.capturing.is_some() {
+                    let hint = ctx.input(|input| app.keymap.recorder.hint(input));
+                    ui_kit::text(ui, app.tr(hint), ui_kit::Text::Hint("shortcut_capture_state"));
+                }
+            }
             ui_kit::table(ui, "keymap", &columns, crate::i18n::tr("keymap.empty"), |ui, table| {
                 for (c, keys, translated_label) in commands {
                     table.row_visible(ui, c.id, app.keymap.capturing.as_deref() == Some(c.id), false, |row| {
@@ -826,6 +829,28 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
+/// A recording's outcome: its message, and for a key another command uses, Replace and Cancel
+/// (the one chosen).
+fn outcome(app: &SolveApp, ui: &mut egui::Ui) -> Option<&'static str> {
+    let mut chosen = None;
+    if let Some(m) = &app.keymap.message {
+        ui_kit::text(ui, m, ui_kit::Text::Report("keymap_message", true));
+    }
+    if let Some((_, key, _, _)) = app.keymap.conflict.clone() {
+        ui.horizontal_wrapped(|ui| {
+            let replace = ui_kit::button(ui, crate::i18n::format("keymap.use_anyway", &[("key", &display(&key))]), ui_kit::Button::Normal);
+            crate::scenario::publish_target("keymap:replace", replace.rect);
+            if replace.clicked() {
+                chosen = Some("replace");
+            }
+            if ui_kit::button(ui, app.tr_label("Cancel"), ui_kit::Button::Normal).clicked() {
+                chosen = Some("cancel");
+            }
+        });
+    }
+    chosen
+}
+
 /// Stop waiting for a key (the dialog closed).
 pub fn stop_capture(app: &mut SolveApp) {
     app.keymap.capturing = None;
@@ -834,9 +859,13 @@ pub fn stop_capture(app: &mut SolveApp) {
     app.keymap.message = None;
 }
 
-/// Is the page waiting for a key (so the key must not also run a command)?
+/// Is the page waiting for a key (so the key must not also run a command)? On the Shortcuts page,
+/// or in a Preferences search, which shows the matching shortcuts on the page it started from
+/// (#10043).
 pub fn capturing(app: &SolveApp) -> bool {
-    app.prefs_window.open && app.prefs_window.section == crate::prefs::PAGE_SHORTCUTS && app.keymap.capturing.is_some()
+    app.prefs_window.open
+        && app.keymap.capturing.is_some()
+        && (app.prefs_window.section == crate::prefs::PAGE_SHORTCUTS || !app.prefs_window.filter.trim().is_empty())
 }
 
 #[cfg(test)]
@@ -1160,6 +1189,47 @@ mod tests {
         h.frames(1);
         h.step(&json!({"text": "z"})).expect("key while recording");
         assert!(h.app.prefs_window.filter.is_empty(), "a shortcut being recorded keeps the key");
+    }
+
+    /// A shortcut recorded from a Preferences search result takes the key, as on the Shortcuts
+    /// page (#10043): the search keeps its query, and the key runs no command behind
+    /// Preferences (P is Project's, which would open Create Sketch). P being Project's is
+    /// reported there with the choice to use it anyway, as on the page. Going back to the search
+    /// field to type stops a recording.
+    #[test]
+    fn a_shortcut_recorded_from_a_preferences_search_takes_the_key() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"open": "General"}));
+        h.frames(3);
+        h.step(&json!({"text": "fix"})).expect("search");
+        h.frames(3);
+        h.step(&json!({"click": {"handle": "prefs:search:shortcuts"}})).expect("unfold the shortcut matches");
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "shortcut:sketch.constraint.fix"}})).expect("record Fix/UnFix's key");
+        assert!(capturing(&h.app), "recording from a search result");
+        h.step(&json!({"key": "P", "pressed": true})).unwrap();
+        h.step(&json!({"text": "p"})).unwrap();
+        h.step(&json!({"key": "P", "pressed": false})).unwrap();
+        h.frames(65);
+        assert_eq!(h.app.prefs_window.filter, "fix", "the key went to the search");
+        assert!(h.app.dialog.is_none() && h.app.session.active_sketch.is_none(), "the key ran a command");
+        assert!(h.app.keymap.capturing.is_none());
+        let conflict = h.app.keymap.conflict.as_ref().map(|(id, key, ..)| (id.as_str(), key.as_str()));
+        assert_eq!(conflict, Some(("sketch.constraint.fix", "P")), "{:?}", h.app.keymap.message);
+        // The search shows why, and the choice, above the shortcuts it found.
+        let message = h.app.keymap.message.clone().unwrap_or_default();
+        assert!(h.widget(&message).is_some() && h.widget("Use P here anyway").is_some(), "{message}");
+        h.step(&json!({"click": {"handle": "keymap:replace"}})).expect("use P anyway");
+        assert_eq!(effective(&h.app, "sketch.constraint.fix").as_deref(), Some("P"));
+
+        h.step(&json!({"click": {"handle": "shortcut:sketch.constraint.fix:1"}})).expect("record a second key");
+        assert!(capturing(&h.app));
+        h.step(&json!({"click": {"handle": "prefs:search"}})).expect("back to the search");
+        h.step(&json!({"text": "x"})).unwrap();
+        h.frames(2);
+        assert!(h.app.keymap.capturing.is_none(), "typing in the search stops the recording");
+        assert_eq!(h.app.prefs_window.filter, "fixx");
     }
 
     #[test]

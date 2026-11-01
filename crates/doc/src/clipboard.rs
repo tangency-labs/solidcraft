@@ -316,7 +316,7 @@ fn checked_plane(p: &PlaneRef, depth: usize) -> crate::Result<()> {
                 checked_geo(g, depth + 1)?;
             }
         }
-        PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } => {
+        PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } | PlaneRef::AxisPoint { axis: a, point: b } => {
             checked_geo(a, depth + 1)?;
             checked_geo(b, depth + 1)?;
         }
