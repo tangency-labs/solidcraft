@@ -547,7 +547,6 @@ pub(crate) fn settings_badge(ui: &mut Ui, text: &str, warning: bool) {
 
 #[derive(Clone, Copy)]
 pub(crate) enum PreferenceFigure {
-    Pivot(usize),
     UpAxis(bool),
 }
 
@@ -564,10 +563,7 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
         }
     }
     let t = Tokens::get();
-    let (width, preview_height) = match figure {
-        PreferenceFigure::UpAxis(_) => (t.space_24 * 6.0 + t.space_6, t.space_24 * 4.0 + t.space_2),
-        PreferenceFigure::Pivot(_) => (t.form_label_width + t.space_24 * 2.0 + t.space_6, t.space_24 * 3.0 + t.space_3),
-    };
+    let (width, preview_height) = (t.space_24 * 6.0 + t.space_6, t.space_24 * 4.0 + t.space_2);
     let label_height = t.space_16;
     let height = preview_height + t.space_6 * 2.0 + t.space_4 + label_height + if note.is_some() { t.space_16 } else { 0.0 };
     let enabled = enabled && ui.is_enabled();
@@ -595,11 +591,8 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
         egui::StrokeKind::Inside,
     );
     let preview = Rect::from_min_size(rect.min + vec2(t.space_6, t.space_6), vec2((rect.width() - t.space_12).max(0.0), preview_height));
-    let figure_rect = match figure {
-        // Keep the original right-handed orientation artwork's 120×80 canvas undistorted.
-        PreferenceFigure::UpAxis(_) => Rect::from_center_size(preview.center(), vec2(preview.width(), preview.width() * 80.0 / 120.0)),
-        PreferenceFigure::Pivot(_) => preview,
-    };
+    // Keep the original right-handed orientation artwork's 120×80 canvas undistorted.
+    let figure_rect = Rect::from_center_size(preview.center(), vec2(preview.width(), preview.width() * 80.0 / 120.0));
     paint_preference_figure(ui.painter(), figure_rect, figure);
     let label_rect =
         Rect::from_min_size(pos2(rect.left() + t.space_4, preview.bottom() + t.space_4), vec2((rect.width() - t.space_8).max(0.0), label_height));
@@ -653,10 +646,8 @@ fn paint_preference_figure(p: &egui::Painter, rect: Rect, figure: PreferenceFigu
     let p = p.with_clip_rect(rect);
     p.rect_filled(rect, t.control_radius, t.viewport_top);
     t.container_rect(&p, rect, t.control_radius, egui::Color32::TRANSPARENT, t.dialog_rule);
-    match figure {
-        PreferenceFigure::UpAxis(y_up) => super::preferences_figures::paint_orientation(&p, rect, y_up),
-        PreferenceFigure::Pivot(pivot) => super::preferences_figures::paint_orbit(&p, rect, pivot),
-    }
+    let PreferenceFigure::UpAxis(y_up) = figure;
+    super::preferences_figures::paint_orientation(&p, rect, y_up);
 }
 
 /// Clockwise rounded boundary shared by dashed outlines and clipped palette specimens.

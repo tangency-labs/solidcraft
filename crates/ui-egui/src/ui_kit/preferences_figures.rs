@@ -1,7 +1,7 @@
 //! Deliberately composed preference illustrations. A shared orthographic projection keeps
 //! faces, ground contact, rotation cues and axes consistent at their small display size.
 use crate::theme::Tokens;
-use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, Vec2, vec2};
+use egui::{Color32, Painter, Pos2, Rect, Shape, Stroke, vec2};
 
 struct Canvas {
     rect: Rect,
@@ -13,35 +13,10 @@ impl Canvas {
     fn width(&self, width: f32) -> f32 {
         width * (self.rect.width() / 120.0).min(self.rect.height() / 80.0)
     }
-    fn project(&self, origin: (f32, f32), x: f32, y: f32, z: f32, scale: f32) -> Pos2 {
-        self.at(origin.0 + (x - y) * 0.866_025_4 * scale, origin.1 + ((x + y) * 0.5 - z) * scale)
-    }
 }
 
 fn face(p: &Painter, points: [Pos2; 4], fill: Color32) {
     p.add(Shape::convex_polygon(points.to_vec(), fill, Stroke::NONE));
-}
-
-/// Face order follows the actual orthographic camera: top, screen-left and screen-right.
-fn solid(p: &Painter, c: &Canvas, centre: (f32, f32), size: f32, height: f32, scale: f32, t: &Tokens) -> [Pos2; 4] {
-    let h = size * 0.5;
-    let at = |x, y, z| c.project(centre, x, y, z, scale);
-    let back = at(-h, -h, height);
-    let left = at(-h, h, height);
-    let front = at(h, h, height);
-    let right = at(h, -h, height);
-    let bottom_left = at(-h, h, 0.0);
-    let bottom_front = at(h, h, 0.0);
-    let bottom_right = at(h, -h, 0.0);
-    face(p, [left, front, bottom_front, bottom_left], t.body.lerp_to_gamma(t.body_edge, 0.15));
-    face(p, [front, right, bottom_right, bottom_front], t.body.lerp_to_gamma(t.body_edge, 0.30));
-    face(p, [back, right, front, left], t.body);
-    let edge = t.body_edge.lerp_to_gamma(t.form_dim, 0.35);
-    let stroke = Stroke::new(c.width(1.2), edge);
-    p.add(Shape::closed_line(vec![back, right, bottom_right, bottom_front, bottom_left, left], stroke));
-    p.add(Shape::line(vec![left, front, right], stroke));
-    p.line_segment([front, bottom_front], stroke);
-    [at(-h, -h, 0.0), bottom_right, bottom_front, bottom_left]
 }
 
 fn arrow(p: &Painter, a: Pos2, b: Pos2, ink: Color32, width: f32, head: f32) {
@@ -50,75 +25,6 @@ fn arrow(p: &Painter, a: Pos2, b: Pos2, ink: Color32, width: f32, head: f32) {
     let base = b - tangent * head;
     p.line_segment([a, base + tangent * width], Stroke::new(width, ink));
     p.add(Shape::convex_polygon(vec![b, base + normal * head * 0.44, base - normal * head * 0.44], ink, Stroke::NONE));
-}
-
-fn radial_shadow(p: &Painter, centre: Pos2, radius: Vec2, ink: Color32) {
-    const SEGMENTS: u32 = 40;
-    let mut mesh = egui::Mesh::default();
-    mesh.colored_vertex(centre, ink);
-    for i in 0..=SEGMENTS {
-        let angle = std::f32::consts::TAU * i as f32 / SEGMENTS as f32;
-        mesh.colored_vertex(centre + vec2(angle.cos() * radius.x, angle.sin() * radius.y), Color32::TRANSPARENT);
-    }
-    for i in 1..=SEGMENTS {
-        mesh.add_triangle(0, i, i + 1);
-    }
-    p.add(Shape::mesh(mesh));
-}
-
-/// Orbit cards share a deliberately positioned model; only the pivot and its explanatory
-/// cue move. The arc's arrowhead is tangent to the projected ground-plane ellipse.
-pub(crate) fn paint_orbit(p: &Painter, rect: Rect, pivot: usize) {
-    let t = Tokens::get();
-    let c = Canvas { rect };
-    let p = p.with_clip_rect(rect);
-    let model_centre = (61.0, 53.0);
-    radial_shadow(&p, c.at(61.0, 59.0), vec2(c.width(25.0), c.width(5.0)), t.body_edge.gamma_multiply(0.12));
-    solid(&p, &c, model_centre, 24.0, 24.0, 0.9, &t);
-    let (x, y) = match pivot {
-        0 => (22.0, 60.0),
-        2 => (88.0, 31.0),
-        _ => (61.0, 42.0),
-    };
-    let centre = c.at(x, y);
-    let orange = t.surface_ink;
-    if pivot == 0 {
-        let grey = Stroke::new(c.width(1.3), t.form_dim);
-        p.line_segment([centre, c.at(x, y - 11.0)], grey);
-        p.line_segment([centre, c.at(x + 11.0, y + 5.5)], grey);
-        p.line_segment([centre, c.at(x - 11.0, y + 5.5)], grey);
-    }
-    if pivot == 1 {
-        // A restrained screen-space crosshair makes "View center" distinct from origin.
-        let guide = Stroke::new(c.width(1.0), t.form_dim.gamma_multiply(0.7));
-        for (a, b) in [((x - 9.0, y), (x - 5.0, y)), ((x + 5.0, y), (x + 9.0, y)), ((x, y - 9.0), (x, y - 5.0))] {
-            p.line_segment([c.at(a.0, a.1), c.at(b.0, b.1)], guide);
-        }
-    }
-    let mut arc = Vec::with_capacity(33);
-    for i in 0..=32 {
-        let angle = std::f32::consts::PI * (0.88 - 0.76 * i as f32 / 32.0);
-        arc.push(c.at(x + 15.0 * angle.cos(), y + 5.0 + 8.5 * angle.sin()));
-    }
-    let end_angle = std::f32::consts::PI * 0.12;
-    let end = c.at(x + 15.0 * end_angle.cos(), y + 5.0 + 8.5 * end_angle.sin());
-    let direction = vec2(15.0 * end_angle.sin(), -8.5 * end_angle.cos()).normalized();
-    p.add(Shape::line(arc, Stroke::new(c.width(1.8), orange)));
-    arrow(&p, end - direction * c.width(5.0), end + direction * c.width(1.0), orange, c.width(1.8), c.width(5.5));
-    p.circle_filled(centre, c.width(4.4), t.viewport_top);
-    p.circle_filled(centre, c.width(3.0), orange);
-    if pivot == 2 {
-        // Seven straight vertices describe a cursor with a clean neck and substantial stem.
-        let points = [(88.0, 35.0), (88.0, 49.0), (91.5, 45.8), (95.2, 53.0), (98.2, 51.5), (94.4, 44.5), (99.0, 44.5)].map(|(x, y)| c.at(x, y));
-        let mut mesh = egui::Mesh::default();
-        for point in points {
-            mesh.colored_vertex(point, t.form_ink);
-        }
-        for [a, b, d] in [[0, 1, 2], [0, 2, 5], [0, 5, 6], [2, 3, 4], [2, 4, 5]] {
-            mesh.add_triangle(a, b, d);
-        }
-        p.add(Shape::mesh(mesh));
-    }
 }
 
 /// Axis tips of the orientation figure on its 120 x 100 canvas, as `(x, y, triad index, label)`,

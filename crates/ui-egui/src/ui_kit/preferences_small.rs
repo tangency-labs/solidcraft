@@ -294,28 +294,51 @@ pub(crate) fn settings_bindings(ui: &mut Ui, bindings: &[(&[&str], &str)]) {
         return;
     }
     let t = Tokens::get();
+    let font = FontId::proportional(t.font_small);
+    let key_width = bindings
+        .iter()
+        .map(|(keys, _)| {
+            keys.iter()
+                .map(|key| ui.painter().layout_no_wrap((*key).to_owned(), font.clone(), t.form_ink).size().x.ceil() + t.space_12 + t.space_4)
+                .sum::<f32>()
+        })
+        .fold(t.space_24 * 8.0 + t.space_8, f32::max);
     for (keys, action) in bindings {
         let width = super::metrics::dimension(ui.available_width());
-        let (r, _) = ui.allocate_exact_size(vec2(width, t.control_height + t.space_2), Sense::hover());
-        t.secondary_hline(ui.painter(), r.x_range(), r.bottom(), t.dialog_rule);
-        let mut left = r.left();
+        let action_width = super::ContentWidth::label(ui, action);
+        let beside = key_width + t.space_10 + action_width <= width;
+        let limit = if beside { key_width } else { width };
+        let cap_height = t.control_height - t.space_8;
+        let mut caps = Vec::new();
+        let (mut x, mut y) = (0.0, t.space_4);
         for key in *keys {
-            let galley = ui.painter().layout_no_wrap((*key).into(), FontId::proportional(t.font_small), t.form_ink);
-            let key_rect = Rect::from_center_size(
-                pos2(left + (galley.size().x + t.space_12) * 0.5, r.center().y),
-                vec2(galley.size().x + t.space_12, t.control_height - t.space_8),
-            );
-            ui.painter().rect(key_rect, t.radius_sm, t.control_fill, t.container_border(t.control_border), egui::StrokeKind::Inside);
-            ui.painter().galley(key_rect.center() - galley.size() * 0.5, galley, t.form_ink);
-            left = key_rect.right() + t.space_4;
+            let galley = ui.painter().layout_no_wrap((*key).to_owned(), font.clone(), t.form_ink);
+            let cap_width = (galley.size().x.ceil() + t.space_12).min(limit);
+            if x > 0.0 && x + cap_width > limit {
+                x = 0.0;
+                y += cap_height + t.space_4;
+            }
+            caps.push((*key, Rect::from_min_size(pos2(x, y), vec2(cap_width, cap_height))));
+            x += cap_width + t.space_4;
         }
-        let text_rect = Rect::from_min_max(pos2(r.left() + (t.space_24 * 8.0 + t.space_8).min(width * 0.45) + t.space_10, r.top()), r.max);
-        ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect).layout(Layout::left_to_right(Align::Center)), |ui| {
-            super::text(ui, action, super::Text::Inline);
-        });
+        let keys_bottom = y + cap_height + t.space_4;
+        let action_left = if beside { key_width + t.space_10 } else { 0.0 };
+        let action_top = if beside { 0.0 } else { keys_bottom };
+        let action = ui.painter().layout((*action).to_owned(), FontId::proportional(t.font_label), t.form_ink, (width - action_left).max(0.0));
+        let height = (action_top + action.size().y + t.space_4).max(keys_bottom).max(t.control_height + t.space_2);
+        let (r, response) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
+        response
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), format!("{}: {}", keys.join(" + "), action.text())));
+        t.secondary_hline(ui.painter(), r.x_range(), r.bottom(), t.dialog_rule);
+        for (key, cap) in caps {
+            let cap = cap.translate(r.min.to_vec2());
+            ui.painter().rect(cap, t.radius_sm, t.control_fill, t.container_border(t.control_border), egui::StrokeKind::Inside);
+            super::text::paint_text(ui, cap.shrink2(vec2(t.space_6.min(cap.width() / 2.0), 0.0)), key, font.clone(), t.form_ink, false);
+        }
+        let action_y = if beside { r.center().y - action.size().y / 2.0 } else { r.top() + action_top };
+        ui.painter().with_clip_rect(r.intersect(ui.clip_rect())).galley(pos2(r.left() + action_left, action_y), action, t.form_ink);
     }
 }
-
 /// Natural-width, dim monospaced numeric specimen beside a precision control.
 pub(crate) fn settings_precision_sample(ui: &mut Ui, text: &str) {
     let t = Tokens::get();

@@ -160,30 +160,56 @@ const MAX_POINTS: usize = 512;
 struct Ctx<'a> {
     t: &'a Tokens,
     sample: Option<&'a ThemeSample>,
-    /// Only the Appearance samples interpret the legacy SVG colour roles semantically.
-    colour_vision: Option<usize>,
+    /// Scoped Figure, ColourVision and Navigator palettes interpret the canonical SVG colour roles.
+    palette: Palette,
     origin: Pos2,
     scale: f32,
+}
+
+#[derive(Clone, Copy)]
+enum Palette {
+    Figure,
+    ColourVision(usize),
+    Navigator,
 }
 
 impl Ctx<'_> {
     fn ink(&self, ink: Ink, a: f32) -> Color32 {
         let t = self.t;
-        let semantic = match (self.colour_vision, ink) {
-            (Some(0), Ink::Cv0) => Some(t.sketch_locked),
-            (Some(1), Ink::Cv1) => Some(t.sketch_projected),
-            (Some(2), Ink::Cv2 | Ink::AxisX) => Some(t.axis_x),
-            (Some(2), Ink::Cv0 | Ink::AxisY) => Some(t.axis_y),
-            (Some(2), Ink::AxisZ) => Some(t.axis_z),
-            (Some(3), Ink::Cv1) => Some(t.bend_up),
-            (Some(3), Ink::Cv3) => Some(t.bend_down),
-            (Some(4), Ink::Cv3) => Some(crate::theme::srgb(t.analysis.draft[0])),
-            (Some(4), Ink::Cv1) => Some(crate::theme::srgb(t.analysis.draft[1])),
-            (Some(4), Ink::Cv4) => Some(crate::theme::srgb(t.analysis.draft[2])),
-            (Some(4), Ink::Black) => Some(crate::theme::srgb(t.analysis.draft[2].map(|c| c * 0.6))),
-            (Some(5), Ink::Cv2) => Some(t.error),
-            (Some(5), Ink::NoteFill) => Some(t.timeline_item_error),
+        let colour_vision = match self.palette {
+            Palette::ColourVision(index) => Some(index),
             _ => None,
+        };
+        let semantic = if matches!(self.palette, Palette::Navigator) {
+            match ink {
+                Ink::Ground | Ink::Top => Some(t.cube_face),
+                Ink::Left => Some(t.cube_face.lerp_to_gamma(t.cube_border, 0.12)),
+                Ink::Right => Some(t.cube_face.lerp_to_gamma(t.cube_border, 0.24)),
+                Ink::Line => Some(t.cube_border),
+                Ink::Text => Some(t.cube_text),
+                Ink::Accent => Some(t.cube_hover),
+                Ink::AxisX => Some(t.axis_x),
+                Ink::AxisY => Some(t.axis_y),
+                Ink::AxisZ => Some(t.axis_z),
+                _ => None,
+            }
+        } else {
+            match (colour_vision, ink) {
+                (Some(0), Ink::Cv0) => Some(t.sketch_locked),
+                (Some(1), Ink::Cv1) => Some(t.sketch_projected),
+                (Some(2), Ink::Cv2 | Ink::AxisX) => Some(t.axis_x),
+                (Some(2), Ink::Cv0 | Ink::AxisY) => Some(t.axis_y),
+                (Some(2), Ink::AxisZ) => Some(t.axis_z),
+                (Some(3), Ink::Cv1) => Some(t.bend_up),
+                (Some(3), Ink::Cv3) => Some(t.bend_down),
+                (Some(4), Ink::Cv3) => Some(crate::theme::srgb(t.analysis.draft[0])),
+                (Some(4), Ink::Cv1) => Some(crate::theme::srgb(t.analysis.draft[1])),
+                (Some(4), Ink::Cv4) => Some(crate::theme::srgb(t.analysis.draft[2])),
+                (Some(4), Ink::Black) => Some(crate::theme::srgb(t.analysis.draft[2].map(|c| c * 0.6))),
+                (Some(5), Ink::Cv2) => Some(t.error),
+                (Some(5), Ink::NoteFill) => Some(t.timeline_item_error),
+                _ => None,
+            }
         };
         let c = semantic.unwrap_or_else(|| match ink {
             Ink::Ground => t.figure_ground,
@@ -220,6 +246,32 @@ impl Ctx<'_> {
         if a >= 1.0 { c } else { c.gamma_multiply(a.clamp(0.0, 1.0)) }
     }
 
+    fn text_ink(&self, ink: Ink, a: f32, text: &str) -> Color32 {
+        if matches!(self.palette, Palette::Navigator) {
+            let t = self.t;
+            let axis = match text.trim_start_matches('-') {
+                "X" => Some(t.axis_x),
+                "Y" => Some(t.axis_y),
+                "Z" => Some(t.axis_z),
+                _ => None,
+            };
+            if let Some(axis) = axis {
+                let ground = if matches!(ink, Ink::White) { axis } else { t.cube_face };
+                let intended = if matches!(ink, Ink::White) { t.on_accent } else { axis };
+                if crate::theme::contrast_ratio(intended, ground) >= 4.5 {
+                    return intended;
+                }
+                // Lettering has its own foreground role. Preserve the actual axis colour on
+                // discs and strokes, choosing a legible token only for the tiny glyph.
+                return [intended, t.cube_text, t.on_accent, t.tab_on_fill_dark]
+                    .into_iter()
+                    .max_by(|a, b| crate::theme::contrast_ratio(*a, ground).total_cmp(&crate::theme::contrast_ratio(*b, ground)))
+                    .unwrap_or(intended);
+            }
+        }
+        self.ink(ink, a)
+    }
+
     fn at(&self, p: [f32; 2]) -> Pos2 {
         self.origin + vec2(p[0] * self.scale, p[1] * self.scale)
     }
@@ -235,7 +287,7 @@ impl Ctx<'_> {
 
 /// Paints `figure` into `rect`, scaled to fit and centred, with `Tokens::get()` colours.
 pub(super) fn paint(p: &Painter, rect: Rect, figure: &Figure, sample: Option<&ThemeSample>, clip: Option<&[[f32; 2]]>) {
-    paint_with_tokens(p, rect, figure, sample, clip, &Tokens::get(), None);
+    paint_with_tokens(p, rect, figure, sample, clip, &Tokens::get(), Palette::Figure);
 }
 
 /// Reuse the six canonical figures with the semantic palette being previewed, without global state.
@@ -250,7 +302,16 @@ pub(super) fn paint_colour_vision(p: &Painter, rect: Rect, index: usize, t: &Tok
         5 => &figures::COLOUR_VISION_FAILED,
         _ => return,
     };
-    paint_with_tokens(p, rect, figure, None, None, t, Some(index));
+    paint_with_tokens(p, rect, figure, None, None, t, Palette::ColourVision(index));
+}
+
+/// Canonical navigator geometry with the real navigator palette; no global theme mutation.
+pub(crate) fn paint_navigation_axes(p: &Painter, rect: Rect) {
+    paint_with_tokens(p, rect, &super::preferences_figure_data::NAVIGATOR_AXES, None, None, &Tokens::get(), Palette::Navigator);
+}
+
+pub(crate) fn paint_navigation_cube(p: &Painter, rect: Rect) {
+    paint_with_tokens(p, rect, &super::preferences_figure_data::NAVIGATOR_CUBE, None, None, &Tokens::get(), Palette::Navigator);
 }
 
 fn paint_with_tokens(
@@ -260,7 +321,7 @@ fn paint_with_tokens(
     sample: Option<&ThemeSample>,
     clip: Option<&[[f32; 2]]>,
     t: &Tokens,
-    colour_vision: Option<usize>,
+    palette: Palette,
 ) {
     let size = rect.size();
     if !rect.min.is_finite() || !size.is_finite() || size.x < 1.0 || size.y < 1.0 || size.x > MAX_SIDE || size.y > MAX_SIDE {
@@ -272,7 +333,7 @@ fn paint_with_tokens(
     }
     let scale = (size.x / fw).min(size.y / fh);
     let fitted = Rect::from_center_size(rect.center(), vec2(fw * scale, fh * scale));
-    let ctx = Ctx { t, sample, colour_vision, origin: fitted.min, scale };
+    let ctx = Ctx { t, sample, palette, origin: fitted.min, scale };
     let p = p.with_clip_rect(fitted.intersect(p.clip_rect()));
     let outer: Option<Vec<Pos2>> = clip.map(|c| c.iter().map(|&q| ctx.at(q)).collect());
     // Nested clips are inside one another in every figure, so the innermost one is the clip.
@@ -355,7 +416,7 @@ fn draw(p: &Painter, ctx: &Ctx, op: &Op, clip: Option<&[Pos2]>) {
             };
             let size = (size * ctx.scale * grow).clamp(7.0, 256.0);
             let at = ctx.at(*at) - vec2(0.0, size * 0.36);
-            p.text(at, align, s, FontId::monospace(size), ctx.ink(*ink, *a));
+            p.text(at, align, s, FontId::monospace(size), ctx.text_ink(*ink, *a, s));
         }
         Op::Clip(_) | Op::Unclip => {}
     }
@@ -612,6 +673,23 @@ fn clip_path(path: &[Pos2], clip: &[Pos2]) -> Vec<Vec<Pos2>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn navigator_palette_preserves_axis_hues_and_uses_legible_lettering() {
+        for t in [Tokens::light(), Tokens::dark()] {
+            let ctx = Ctx { t: &t, sample: None, palette: Palette::Navigator, origin: Pos2::ZERO, scale: 1.0 };
+            assert_eq!(ctx.ink(Ink::Ground, 1.0), t.cube_face);
+            assert_eq!(ctx.ink(Ink::Line, 1.0), t.cube_border);
+            assert_eq!(ctx.ink(Ink::Text, 1.0), t.cube_text);
+            for (ink, axis, label) in [(Ink::AxisX, t.axis_x, "X"), (Ink::AxisY, t.axis_y, "Y"), (Ink::AxisZ, t.axis_z, "Z")] {
+                assert_eq!(ctx.ink(ink, 1.0), axis, "the navigator's real axis palette");
+                assert!(crate::theme::contrast_ratio(ctx.text_ink(Ink::White, 1.0, label), axis) >= 4.5);
+                assert!(crate::theme::contrast_ratio(ctx.text_ink(ink, 1.0, label), t.cube_face) >= 4.5);
+            }
+            let ordinary = Ctx { palette: Palette::Figure, ..ctx };
+            assert_eq!(ordinary.ink(Ink::AxisX, 1.0), t.figure_axis_x, "other illustrations keep their palette");
+        }
+    }
 
     fn square() -> Vec<Pos2> {
         vec![pos2(0.0, 0.0), pos2(10.0, 0.0), pos2(10.0, 10.0), pos2(0.0, 10.0)]

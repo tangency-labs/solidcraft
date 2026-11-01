@@ -613,6 +613,19 @@ fn keywords(text: &str) -> &'static [&'static str] {
         "prefer movable points where they overlap" => &["prefer movable sketch points when points overlap"],
         "select other reaches hidden geometry" => &["select hidden geometry with select other"],
         "whole bodies" => &["click selects whole bodies"],
+        "free" => &["free orbit"],
+        "turn about the world's up axis" => &["turn around the vertical axis"],
+        "reverse horizontal pan" => &["reverse horizontal pan direction"],
+        "reverse vertical pan" => &["reverse vertical pan direction"],
+        "reverse trackpad orbit" => &["reverse trackpad orbit direction"],
+        "two-finger zoom while holding" => &["zoom with two-finger scroll while holding"],
+        "show it in the 3d view" => &["show the 3d mouse in the 3d view"],
+        "picture position" => &["position"],
+        "turn the view while a sketch is edited" => &["turn sketches with the 3d mouse"],
+        "model" => &["traced"],
+        "view center" | "view centre" => &["classic"],
+        "axes (signed)" => &["axes", "signed axes"],
+        "cube (compact)" => &["cube"],
         _ => &[],
     }
 }
@@ -818,6 +831,45 @@ mod tests {
                     let centre = egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32);
                     assert!(crate::scenario::rect_of(target).unwrap().contains(centre));
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn navigation_and_mouse3d_search_hits_reveal_the_actual_cards_and_controls() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", serde_json::json!({"width":1600,"height":1100}));
+            h.call("ui.prefs", serde_json::json!({"language":"en","theme":theme}));
+            for (query, page, target) in [
+                ("Orbit around", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:View center"),
+                ("Under the cursor", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:Under the cursor"),
+                ("Origin", crate::prefs::PAGE_NAVIGATION, "prefs:orbit_around:Origin"),
+                ("View navigator", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
+                ("Axes (signed)", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Signed axes"),
+                ("Cube (compact)", crate::prefs::PAGE_NAVIGATION, "prefs:navigator:Cube"),
+                ("Turntable", crate::prefs::PAGE_NAVIGATION, "prefs:turntable"),
+                ("Wheel zoom speed", crate::prefs::PAGE_NAVIGATION, "prefs:wheel_zoom_speed"),
+                ("Two-finger zoom while holding", crate::prefs::PAGE_NAVIGATION, "prefs:trackpad_zoom_modifier"),
+                ("Overall speed", crate::prefs::PAGE_MOUSE3D, "prefs:space_mouse_speed"),
+                ("Traced", crate::prefs::PAGE_MOUSE3D, "prefs:3d_mouse_orbit_traced"),
+                ("Picture position", crate::prefs::PAGE_MOUSE3D, "prefs:space_mouse_ghost_position"),
+            ] {
+                h.call("ui.prefs", serde_json::json!({"open":"General"}));
+                h.app.prefs_window.filter = query.into();
+                h.frames(5);
+                let (_, _, hits) = nav(&h.ctx);
+                let matching: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == page).collect();
+                assert_eq!(matching.len(), 1, "{theme}: {query} has one indexed setting");
+                set_cursor(&h.ctx, matching[0].0);
+                h.frames(2);
+                h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+                h.frames(3);
+                assert_eq!(h.app.prefs_window.section, page);
+                assert!(h.app.prefs_window.filter.is_empty());
+                let body = crate::scenario::rect_of("dialog:page_body").unwrap();
+                assert!(body.contains_rect(crate::scenario::rect_of(target).unwrap()), "{query} reveals its live control");
             }
         }
     }

@@ -534,6 +534,33 @@ const ELEMENTS: &[Element] = &[
             settings_tab_chip(ui, "SURFACE", "Surface", crate::workspace::tab_icon("SURFACE"), false);
         });
     }),
+    element!("settings_picture_choices_sized", |ui, _| {
+        settings_picture_choices_sized(
+            ui,
+            "gallery_pivots",
+            "Orbit around",
+            &[
+                PictureChoice { key: "origin", label: "Origin", figure: paint_orbit_origin },
+                PictureChoice { key: "centre", label: "View center", figure: paint_orbit_centre },
+                PictureChoice { key: "cursor", label: "Under the cursor", figure: paint_orbit_cursor },
+            ],
+            1,
+            true,
+            PictureChoiceSize { width: 196.0, aspect: 184.0 / 99.5, caption: false },
+        );
+        settings_picture_choices_sized(
+            ui,
+            "gallery_navigator",
+            "View navigator",
+            &[
+                PictureChoice { key: "axes", label: "Axes (signed)", figure: paint_navigation_axes },
+                PictureChoice { key: "cube", label: "Cube (compact)", figure: paint_navigation_cube },
+            ],
+            0,
+            true,
+            PictureChoiceSize { width: 190.0, aspect: 178.0 / 115.0, caption: true },
+        );
+    }),
     element!("settings_permission_choices", |ui, state| {
         settings_choices(
             ui,
@@ -763,7 +790,7 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("preference_option_cards", |ui, _| {
         ui.horizontal_wrapped(|ui| {
-            for figure in [PreferenceFigure::Pivot(2), PreferenceFigure::UpAxis(true)] {
+            for figure in [PreferenceFigure::UpAxis(false), PreferenceFigure::UpAxis(true)] {
                 option_card(ui, "Choice", Some("Example"), true, true, figure);
             }
             let t = Tokens::get();
@@ -811,7 +838,25 @@ const ELEMENTS: &[Element] = &[
         status_palette_sample(ui, crate::theme::ColorVision::Deutan);
         colour_vision_sample(ui, &Tokens::get());
         settings_autosave_timeline(ui, 5.0);
-        settings_axis_row(ui, "Push X", 0.6, [0.1, 0.2], |_| {}, |_| {}, |_| {});
+        let mut invert = false;
+        let mut gain = 1.0;
+        let mut source = 0;
+        settings_axis_header(ui);
+        settings_axis_row(
+            ui,
+            "Push X",
+            0.6,
+            [0.1, 0.2],
+            |ui| {
+                checkbox(ui, "Invert", &mut invert);
+            },
+            |ui| {
+                settings_axis_gain(ui, &mut gain);
+            },
+            |ui| {
+                dropdown(ui, "gallery_axis_source", &mut source, &["Translation X", "Translation Y", "Translation Z"]);
+            },
+        );
         settings_mouse_mapping(ui, &[(vec!["Shift".into(), "Middle drag".into()], "Orbit".into())], |_| {});
     }),
     element!("assistant_entry", |ui, _| {

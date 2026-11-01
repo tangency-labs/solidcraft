@@ -5,6 +5,197 @@ use crate::{scenario, theme::Tokens};
 use egui::Ui;
 
 #[test]
+fn navigation_cards_keep_their_proportions_and_native_targets_at_narrow_widths() {
+    let previous = crate::theme::is_dark();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        for available in [140.0, 280.0, 646.0] {
+            for (label, width, aspect, options) in [
+                (
+                    "Orbit around",
+                    196.0,
+                    184.0 / 99.5,
+                    vec![
+                        PictureChoice { key: "origin", label: "Origin", figure: paint_orbit_origin },
+                        PictureChoice { key: "centre", label: "View center", figure: paint_orbit_centre },
+                        PictureChoice { key: "cursor", label: "Under the cursor", figure: paint_orbit_cursor },
+                    ],
+                ),
+                (
+                    "View navigator",
+                    190.0,
+                    178.0 / 115.0,
+                    vec![
+                        PictureChoice { key: "axes", label: "Axes (signed)", figure: paint_navigation_axes },
+                        PictureChoice { key: "cube", label: "Cube (compact)", figure: paint_navigation_cube },
+                    ],
+                ),
+            ] {
+                let ctx = crate::fonts::test_context();
+                let draw = |ui: &mut Ui| {
+                    ui.set_width(available);
+                    settings_picture_choices_sized(ui, "nav_geometry", label, &options, 0, true, PictureChoiceSize { width, aspect, caption: true })
+                };
+                frame(&ctx, vec![], |ui| {
+                    draw(ui);
+                });
+                let row = scenario::rect_of(&format!("dialog:row:{label}")).unwrap();
+                for option in &options {
+                    let card = scenario::rect_of(&format!("prefs:nav_geometry:{}", option.key)).unwrap();
+                    assert!(row.expand(0.5).contains_rect(card), "{available}: {card:?} outside {row:?}");
+                    assert!(card.width() <= available + 0.5);
+                    if available == 646.0 {
+                        assert!((card.width() - width).abs() < 0.5);
+                    }
+                }
+                let at = scenario::handle_at(&format!("prefs:nav_geometry:{}", options[1].key)).unwrap();
+                for down in [true, false] {
+                    frame(&ctx, pointer(at, down), |ui| {
+                        let picked = draw(ui);
+                        if !down {
+                            assert_eq!(picked, Some(1));
+                        }
+                    });
+                }
+            }
+        }
+    }
+    crate::theme::set_dark(previous);
+}
+
+#[test]
+fn axis_gain_invert_and_source_stay_inside_the_same_row_when_it_stacks() {
+    let previous = crate::theme::is_dark();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        for width in [180.0, 280.0, 646.0] {
+            let ctx = crate::fonts::test_context();
+            let mut reverse = false;
+            let mut gain = 1.0;
+            let mut source = 0;
+            let (mut inverted, mut speed, mut motion) = (egui::Rect::NOTHING, egui::Rect::NOTHING, egui::Rect::NOTHING);
+            let (mut invert_clip, mut speed_clip, mut source_clip) = (egui::Rect::NOTHING, egui::Rect::NOTHING, egui::Rect::NOTHING);
+            let output = crate::test_support::frame(
+                &ctx,
+                egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 1200.0))), ..Default::default() },
+                |ui| {
+                    scope(ui, |ui| {
+                        ui.set_width(width);
+                        settings_axis_row(
+                            ui,
+                            "Pan X",
+                            0.5,
+                            [0.2, 0.3],
+                            |ui| {
+                                inverted = checkbox(ui, "Invert", &mut reverse).rect;
+                                invert_clip = ui.clip_rect();
+                            },
+                            |ui| {
+                                speed = settings_axis_gain(ui, &mut gain).rect;
+                                speed_clip = ui.clip_rect();
+                            },
+                            |ui| {
+                                motion = dropdown(ui, "axis_containment", &mut source, &["Translation X", "Translation Y"]).rect;
+                                source_clip = ui.clip_rect();
+                            },
+                        );
+                    });
+                },
+            );
+            let row = scenario::rect_of("prefs:axis:Pan X").unwrap();
+            let controls = [inverted, speed, motion];
+            assert!(controls.into_iter().all(|control| row.expand(0.5).contains_rect(control)), "{width}: {controls:?} in {row:?}");
+            for (control, clip) in controls.into_iter().zip([invert_clip, speed_clip, source_clip]) {
+                assert!(clip.expand(0.5).contains_rect(control), "{width}: control {control:?} is clipped by {clip:?}");
+            }
+            assert_eq!(row, scenario::rect_of("dialog:control:Pan X").unwrap(), "paint bounds use the allocated row, not its centered cursor");
+            let mut bars = 0;
+            for clipped in &output.shapes {
+                crate::test_support::each_shape(&clipped.shape, &mut |shape| match shape {
+                    egui::Shape::Text(text) => {
+                        let painted = text.galley.rect.translate(text.pos.to_vec2());
+                        assert!(
+                            clipped.clip_rect.expand(1.0).contains_rect(painted),
+                            "{width}: text {} clipped at {painted:?} by {:?}",
+                            text.galley.text(),
+                            clipped.clip_rect
+                        );
+                    }
+                    egui::Shape::Rect(rect)
+                        if rect.fill == Tokens::get().dialog_rule && (rect.rect.height() - Tokens::get().space_14).abs() < 0.5 =>
+                    {
+                        bars += 1;
+                        assert!(clipped.clip_rect.contains_rect(rect.rect), "{width}: live bar must be fully painted");
+                    }
+                    _ => {}
+                });
+            }
+            assert_eq!(bars, 1, "inspect the actual live-meter background");
+            assert!(crate::test_support::text_shapes(&output).any(|text| text.galley.text() == "Pan X" && !text.galley.elided));
+            assert_eq!((reverse, gain, source), (false, 1.0, 0));
+        }
+    }
+    crate::theme::set_dark(previous);
+}
+
+#[test]
+fn mouse_mapping_chords_and_actions_wrap_without_overpainting_each_other() {
+    let previous = crate::theme::is_dark();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        for width in [160.0, 280.0, 528.0] {
+            let ctx = crate::fonts::test_context();
+            let mut bounds = egui::Rect::NOTHING;
+            let output = crate::test_support::frame(
+                &ctx,
+                egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 1600.0))), ..Default::default() },
+                |ui| {
+                    ui.set_width(width);
+                    let group = ui.vertical(|ui| {
+                        settings_bindings(
+                            ui,
+                            &[
+                                (&["Ctrl/Cmd", "Shift", "Middle drag"], "Zoom toward the cursor"),
+                                (&["Alt/Option"], "Orbit"),
+                                (&["Right drag"], "Orbit"),
+                                (&["Wheel"], "Zoom"),
+                                (&["Left click"], "Select"),
+                                (&["Right click"], "Menu"),
+                                (&["Click"], "Select one"),
+                                (&["Shift", "Click"], "Add"),
+                                (&["Ctrl/Cmd", "Click"], "Toggle"),
+                            ],
+                        )
+                    });
+                    bounds = group.response.rect;
+                },
+            );
+            for label in ["Ctrl/Cmd", "Shift", "Middle drag", "Alt/Option", "Right drag", "Wheel", "Left click", "Right click", "Click"] {
+                let caps: Vec<_> = crate::test_support::text_shapes(&output).filter(|text| text.galley.text() == label).collect();
+                assert!(!caps.is_empty(), "{width}: the {label} keycap must be painted");
+                assert!(caps.iter().all(|text| !text.galley.elided), "{width}: {label} must be complete");
+            }
+            for clipped in &output.shapes {
+                crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                    if let egui::Shape::Text(text) = shape {
+                        assert!(
+                            clipped.clip_rect.expand(1.0).contains_rect(text.galley.rect.translate(text.pos.to_vec2())),
+                            "{width}: text must fit its real paint clip"
+                        );
+                    }
+                });
+            }
+            let text: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.rect.translate(text.pos.to_vec2())).collect();
+            assert!(text.iter().all(|rect| bounds.expand(1.0).contains_rect(*rect)), "{width}: {text:?} outside {bounds:?}");
+            for (index, rect) in text.iter().enumerate() {
+                assert!(text.iter().skip(index + 1).all(|other| !rect.intersects(*other)), "{width}: binding text must not overlap");
+            }
+        }
+    }
+    crate::theme::set_dark(previous);
+}
+
+#[test]
 fn layout_picture_choices_wrap_inside_the_indexed_row_and_keep_real_targets() {
     let previous = crate::theme::is_dark();
     for dark in [false, true] {
