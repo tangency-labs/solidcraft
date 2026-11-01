@@ -156,7 +156,9 @@
         "ladder/07-fillets/003-tangent-chain-r3",
         "ladder/07-fillets/017-part-rounds",
         "ladder/07-fillets/019-concave-corner-g2-patch",
-        "ladder/07-fillets/015-corner-g2-patch"
+        "ladder/07-fillets/015-corner-g2-patch",
+        "ladder/07-fillets/020-corner-three-sequential-r5-r3-r7-partial-chain",
+        "ladder/07-fillets/021-corner-three-sequential-r5-r3-r2-partial-chain"
       ],
       "tier": "07-fillets",
       "what": "constant, variable and corner fillets"
