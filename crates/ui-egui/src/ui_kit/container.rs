@@ -316,6 +316,7 @@ pub struct Container {
     surface: Surface,
     layout: LayoutMode,
     joined: Option<DockEdges>,
+    clear_backdrop: bool,
 }
 
 impl Container {
@@ -324,7 +325,14 @@ impl Container {
     }
 
     pub(crate) fn for_layout(layout: LayoutMode, surface: Surface) -> Self {
-        Self { surface, layout, joined: None }
+        Self { surface, layout, joined: None, clear_backdrop: false }
+    }
+
+    /// Keep this host's translucent fill clear, independently of the theme's blur radius.
+    /// Newly constructed popup and tooltip hosts retain their own ordinary blur policy.
+    pub(crate) fn clear_backdrop(mut self, clear: bool) -> Self {
+        self.clear_backdrop = clear;
+        self
     }
 
     /// Floating workspace cards retain their shared chrome even in compact ribbon layouts.
@@ -468,7 +476,7 @@ impl Container {
 
     /// Tokenised outer chrome. Callers may supply content padding, not another card surface.
     pub fn frame(self, ctx: &Context, fill: Color32, side: crate::frame::Side) -> Frame {
-        let fill = if self.adaptive() { crate::blur::panel_fill(fill) } else { fill };
+        let fill = if self.adaptive() && !self.clear_backdrop { crate::blur::panel_fill(fill) } else { fill };
         let t = Tokens::get();
         let flat = Frame::NONE.fill(fill);
         match self.surface {
@@ -502,7 +510,7 @@ impl Container {
     /// Surface of an allocated dock or internal pinned band. Floating card decoration is
     /// supplied by `frame`; edge-hosted panes must not acquire outer shadows or card gaps.
     pub fn edge_frame(self, fill: Color32) -> Frame {
-        let fill = if self.adaptive() { crate::blur::panel_fill(fill) } else { fill };
+        let fill = if self.adaptive() && !self.clear_backdrop { crate::blur::panel_fill(fill) } else { fill };
         if self.adaptive() && !self.floating() {
             Self::compact_frame(fill, Tokens::get().primary_border(Tokens::get().border), self.joined.unwrap_or(DockEdges::ALL))
         } else {
@@ -592,7 +600,11 @@ impl Container {
 
     fn background(self, ctx: &Context, frame: Frame) -> Option<Background> {
         // Keep the off path to boundary checks only: no painter, shape slot or allocation.
-        if crate::blur::enabled() && ctx.viewport_id() == egui::ViewportId::ROOT && frame.fill.a() > 0 { Some(crate::blur::decorate) } else { None }
+        if !self.clear_backdrop && crate::blur::enabled() && ctx.viewport_id() == egui::ViewportId::ROOT && frame.fill.a() > 0 {
+            Some(crate::blur::decorate)
+        } else {
+            None
+        }
     }
 
     pub(super) fn show_frame_background<R>(
@@ -668,7 +680,7 @@ impl Container {
     /// Semantic manually painted workspace surface; HUDs keep `paint_frame`.
     pub(crate) fn paint_background(self, painter: &egui::Painter, frame: Frame, content: egui::Rect) {
         let shape = frame.paint(content);
-        painter.add(if crate::blur::enabled() { crate::blur::decorate(painter, frame, content, shape) } else { shape });
+        painter.add(if !self.clear_backdrop && crate::blur::enabled() { crate::blur::decorate(painter, frame, content, shape) } else { shape });
     }
 
     pub(crate) fn paint_panel_frame(painter: &egui::Painter, frame: Frame, content: egui::Rect) {

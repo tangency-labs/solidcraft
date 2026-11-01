@@ -201,7 +201,12 @@ Blur eligibility follows actual backing UI surfaces rather than a workspace-surf
 whitelist. Panels, ribbon and application bars, History, system windows, modal
 dialogs and their dimming backdrops, menus/submenus, popovers, canvas editors,
 notifications, file-loading shields, and tooltips use the same marker policy.
-Nested backing cards participate too. Zero-alpha layout frames stay transparent;
+Nested backing cards participate too. The existing Translucent browser preference is
+an explicit clear-backdrop exception for the floating Design Browser and floating
+History stacked beneath it while the Browser is shown. Their existing translucent
+fills remain sharp. Docked Browser, separate History, Render Browser and other
+surfaces keep their ordinary policy. This host-local choice leaves the saved blur
+radius and independently constructed menus and tooltips unchanged. Zero-alpha layout frames stay transparent;
 text, strokes, selection/hover tints and model geometry do not create backing markers.
 The effective fill alpha includes inherited painter opacity, so a normally opaque
 surface fading in can participate without treating its text as another surface.

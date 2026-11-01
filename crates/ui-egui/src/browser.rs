@@ -987,6 +987,8 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
     let stacked = crate::timeline_left::stacked(app);
     let container =
         Container::new(ui.ctx(), Surface::Panel).joined(crate::ui_kit::DockEdges { left: true, top: true, bottom: stacked, ..Default::default() });
+    let clear_backdrop = container.floating() && app.preferences.browser_float;
+    let container = container.clear_backdrop(clear_backdrop);
     let gap = container.gap();
     let width = browser_width(app.preferences.browser_width);
     let vertical = app.ui.show_timeline && app.preferences.timeline_left;
@@ -1019,7 +1021,7 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
     let min_height = HEADER_H + 2.0 * (CARD_INSET + 1.0);
     // A dialog in the left column holds the browser's place (`dialog_column`).
     if !crate::dialog_column::holds(app) && bounds.is_positive() && bounds.height() >= min_height {
-        let fill = if container.floating() && app.preferences.browser_float { t.panel.gamma_multiply(BROWSER_FLOAT_ALPHA) } else { t.panel };
+        let fill = if clear_backdrop { t.panel.gamma_multiply(BROWSER_FLOAT_ALPHA) } else { t.panel };
         let frame = container.frame(ui.ctx(), fill, crate::frame::Side::Left).inner_margin(CARD_INSET as i8);
         let inner_width = (bounds.width() - frame.total_margin().sum().x).max(0.0);
         let inner_height = (bounds.height() - frame.total_margin().sum().y).max(0.0);

@@ -242,6 +242,8 @@ pub fn left_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
             return;
         }
         let container = Container::new(ui.ctx(), Surface::Panel).joined(crate::ui_kit::DockEdges { left: true, top: true, ..Default::default() });
+        let clear_backdrop = container.floating() && stacked(app) && app.ui.show_browser && app.preferences.browser_float;
+        let container = container.clear_backdrop(clear_backdrop);
         let fill = card_fill(app, container.floating());
         let frame = container.frame(ui.ctx(), fill, crate::frame::Side::Left).inner_margin(t.space_4);
         let inner = (bounds.size() - frame.total_margin().sum()).max(egui::Vec2::ZERO);
