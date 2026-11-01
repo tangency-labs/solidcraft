@@ -84,6 +84,27 @@ pub fn tick(app: &mut SolveApp) {
     }
 }
 
+/// Checkpoint every open design before the host suspends, waiting for all writes.
+/// Keep the live recovery entries and their locks: resuming is not a new launch.
+/// A failed tab does not prevent the others from saving; return the first error.
+pub fn flush(app: &mut SolveApp) -> Result<()> {
+    let Some(a) = app.autosave.as_mut() else { return Ok(()) };
+    let mut error = None;
+    for slot in app.docs.background_mut() {
+        if let Err(e) = save_slot(&a.dir, &mut slot.autosave, &slot.session, true, true) {
+            error.get_or_insert(e);
+        }
+    }
+    // The active design alone may update the crash-journal checkpoint.
+    if let Err(e) = a.save(&app.session) {
+        error.get_or_insert(e);
+    }
+    match error {
+        Some(error) => Err(error),
+        None => Ok(()),
+    }
+}
+
 /// Start autosaving into `dir` and queue the designs that crashed apps left there.
 pub fn start(app: &mut SolveApp, dir: &std::path::Path, interval: std::time::Duration) {
     match Autosaver::new(dir, SHARED_CADENCE) {
@@ -307,6 +328,40 @@ mod tests {
         let mut app = SolveApp::new(Session::default(), Services::default());
         start(&mut app, dir, Duration::ZERO);
         app
+    }
+
+    #[test]
+    fn suspension_flush_saves_dirty_background_and_active_tabs_without_releasing_locks() {
+        let (mut app, dir) = app("suspend", Duration::MAX);
+        name(&mut app, "Design A");
+        edit(&mut app);
+        let background = app.session.doc.clone();
+        documents::new_tab(&mut app);
+        name(&mut app, "Design B");
+        edit(&mut app);
+        let active = app.session.doc.clone();
+        assert!(entries(&dir).is_empty(), "neither tab has reached its autosave interval");
+        let recoverable = app.recoverable.clone();
+
+        flush(&mut app).unwrap();
+        let saved = entries(&dir);
+        assert_eq!(saved.len(), 2);
+        for (entry, expected) in saved.iter().zip([background, active]) {
+            assert_eq!(recovery::load(&dir, &entry.id).unwrap().0, *expected);
+        }
+        assert!(app.autosave.as_ref().unwrap().active.is_some());
+        assert!(app.docs.background_mut().all(|slot| slot.autosave.is_some()));
+        assert!(recovery::orphans(&dir).is_empty(), "suspension keeps every live entry locked");
+        assert_eq!(app.recoverable, recoverable, "suspension must not queue a new recovery prompt");
+
+        flush(&mut app).unwrap();
+        assert_eq!(entries(&dir), saved, "repeated suspension preserves entry identity");
+        drop(app); // An OS termination after suspension need not call on_exit.
+        let mut restarted = restart(&dir);
+        restarted.recoverable.sort_by(|a, b| a.name.cmp(&b.name));
+        assert_eq!(restarted.recoverable, saved);
+        drop(restarted);
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
