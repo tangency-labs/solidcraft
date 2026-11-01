@@ -823,6 +823,17 @@ fn c1_collect_points(
         ) {
             Ok(()) => {}
             Err(e) if e.is_unported() => return Err(e),
+            // SolidCraft (tangency-labs/solidcore#1952, WR-641, under
+            // `fillet_through_extended_rail_end`): an extended rail end's knot is a
+            // through point only where its section can be solved. Where the edge's end
+            // meets the wall obliquely, or the section's rail lies past the side face's
+            // edge, the guess is off the face and no section is found there: the trace
+            // goes on without that point, as it does without the flag, rather than
+            // failing the fillet.
+            Err(_) if k >= ops.solver().g1_knots.len() => {
+                k += 1;
+                continue;
+            }
             Err(_) => return Err(SolidError::sm_err(OP)),
         }
         // add new TsectPnt to sAllTsectPnts array (and sDeletePnts)

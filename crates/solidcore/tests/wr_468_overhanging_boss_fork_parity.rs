@@ -14,9 +14,9 @@
 //!   (WR-641): without WR-468 the round succeeds, 18807.824471783 here and
 //!   18807.824471782 in the fork's main without the hunk. With WR-468 the trace point
 //!   it adds at the edge's end cannot be solved (`sm_FindFilletTsectPnt` from a guess
-//!   point past the wall) and the round fails with 1001 "Fillet Surface Computation
-//!   Failure", as it does in the fork's main C++. This test pins that parity; it is the
-//!   fork's defect (`plan/upstream-issues/WR-641--*.md`), not the port's.
+//!   point past the wall). The fork's main C++ then fails the round with 1001 "Fillet
+//!   Surface Computation Failure" (WR-641, the fork's defect). Under the same flag the
+//!   port now skips that knot (#1952), so the round builds as it does without WR-468.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -35,7 +35,7 @@ use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore::sweep::api_brep::create_linear_sweep;
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::topology::{edge, EdgeId};
-use solidcore::{Brep, Kernel, SolidError};
+use solidcore::{Brep, Kernel};
 
 fn volume(k: &Kernel, b: &mut Brep) -> f64 {
     let store = AttributeStore::default();
@@ -182,14 +182,15 @@ fn wr_641_wall_boss_rounds_without_wr468() {
     assert!((v - 18807.824471782).abs() < 1e-9 * v, "{v}");
 }
 
-/// WR-641: the fork's main C++ (with d33890f) fails on this boss with 1001, and so does the
-/// port with WR-468 on. Pinned for parity; the defect is the fork's.
+/// WR-641: the fork's main C++ (with d33890f) fails on this boss with 1001. With WR-468
+/// the port skips the end knot whose section it cannot solve (#1952) and rounds the boss
+/// as it does without WR-468.
 #[test]
-fn wr_641_wr468_fails_the_wall_boss_as_the_fork_does() {
-    let (_, b, r) = wall_boss(true);
-    assert!(
-        matches!(r, Err(SolidError::Upstream { code: 1001, .. })),
-        "{r:?}"
-    );
-    assert!(is_manifold_solid(&b).unwrap(), "the body is left as it was");
+fn wr_641_wr468_rounds_the_wall_boss_as_without_it() {
+    let (k, mut b, r) = wall_boss(true);
+    r.unwrap();
+    assert!(is_manifold_solid(&b).unwrap());
+    let v = volume(&k, &mut b);
+    // the fork's main without d33890f's hunk: 18807.824471782
+    assert!((v - 18807.824471782).abs() < 1e-9 * v, "{v}");
 }
