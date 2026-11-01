@@ -206,7 +206,7 @@ pub use step::step_export;
 pub use step_in::{
     ImportedBody, StepImport, StepNode, StepReading, step_cache_alive, step_import, step_import_shared, step_orientation_errors, step_validate,
 };
-pub use step_out::{ExportBody, ExportProduct, StepHeader, step_export_bodies, step_export_products};
+pub use step_out::{ExportBody, ExportProduct, StepHeader, step_export_bodies, step_export_products, string as step_string};
 pub use surface_extend::{ExtendLimit, ExtendMode, ExtendOptions, extend_surface};
 pub use surface_kind::{EdgeCircle, FaceSurface, edge_circle, face_surface};
 pub use surface_offset::offset_surface;
