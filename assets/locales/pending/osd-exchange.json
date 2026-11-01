@@ -1,0 +1,56 @@
+{
+  "ar": {
+    "osd.export": "تصدير OSD…",
+    "osd.export_hint": "تدفق مثلثات تجريبي؛ لم يتم التحقق من التوافق مع برنامج الشركة المصنّعة",
+    "osd.import_solids": "استيراد OSD كمجسمات قابلة للتحرير",
+    "osd.import_solids_hint": "تتحول الهندسة المغلقة إلى مجسم؛ وتبقى الهندسة غير المدعومة شبكة مع تحذير. عطّل الخيار للاحتفاظ بالشبكة الأصلية."
+  },
+  "de": {
+    "osd.export": "OSD exportieren…",
+    "osd.export_hint": "Experimenteller Dreiecksdatenstrom; Herstellerkompatibilität ungeprüft",
+    "osd.import_solids": "OSD als bearbeitbare Volumenkörper importieren",
+    "osd.import_solids_hint": "Geschlossene Geometrie wird zum Volumenkörper; nicht unterstützte Geometrie bleibt mit einer Warnung ein Netz. Aus behält das ursprüngliche Netz."
+  },
+  "en": {
+    "osd.export": "Export OSD…",
+    "osd.export_hint": "Experimental triangle stream; vendor compatibility unverified",
+    "osd.import_solids": "Import OSD as editable solids",
+    "osd.import_solids_hint": "Closed geometry becomes a solid; unsupported geometry stays a mesh with a warning. Off keeps the original mesh."
+  },
+  "he": {
+    "osd.export": "ייצוא OSD…",
+    "osd.export_hint": "זרם משולשים ניסיוני; התאימות לתוכנת היצרן לא נבדקה",
+    "osd.import_solids": "ייבוא OSD כגופים מוצקים הניתנים לעריכה",
+    "osd.import_solids_hint": "גאומטריה סגורה הופכת לגוף מוצק; גאומטריה לא נתמכת נשארת רשת עם אזהרה. כיבוי שומר על הרשת המקורית."
+  },
+  "ja": {
+    "osd.export": "OSD をエクスポート…",
+    "osd.export_hint": "実験的な三角形ストリーム。ベンダーとの互換性は未検証",
+    "osd.import_solids": "OSD を編集可能なソリッドとして読み込む",
+    "osd.import_solids_hint": "閉じた形状をソリッドに変換します。未対応の形状は警告付きでメッシュとして保持します。オフにすると元のメッシュを保持します。"
+  },
+  "ko": {
+    "osd.export": "OSD 내보내기…",
+    "osd.export_hint": "실험적 삼각형 스트림; 공급업체 호환성 미검증",
+    "osd.import_solids": "OSD를 편집 가능한 솔리드로 가져오기",
+    "osd.import_solids_hint": "닫힌 형상을 솔리드로 변환합니다. 지원하지 않는 형상은 경고와 함께 메시로 유지됩니다. 끄면 원본 메시를 유지합니다."
+  },
+  "ru": {
+    "osd.export": "Экспорт OSD…",
+    "osd.export_hint": "Экспериментальный формат: совместимость со SprutCAM не проверена",
+    "osd.import_solids": "Импортировать OSD как редактируемые тела",
+    "osd.import_solids_hint": "Замкнутая геометрия становится телом; неподдерживаемая остаётся сеткой с предупреждением. Выключите, чтобы сохранить исходную сетку."
+  },
+  "vi": {
+    "osd.export": "Xuất OSD…",
+    "osd.export_hint": "Luồng tam giác thử nghiệm; chưa xác minh khả năng tương thích với phần mềm của nhà cung cấp",
+    "osd.import_solids": "Nhập OSD thành khối rắn có thể chỉnh sửa",
+    "osd.import_solids_hint": "Hình học kín được chuyển thành khối rắn; hình học không được hỗ trợ vẫn là lưới kèm cảnh báo. Tắt để giữ lưới gốc."
+  },
+  "zh": {
+    "osd.export": "导出 OSD…",
+    "osd.export_hint": "实验性三角形流；尚未验证厂商兼容性",
+    "osd.import_solids": "将 OSD 导入为可编辑实体",
+    "osd.import_solids_hint": "闭合几何体转换为实体；不支持的几何体保留为网格并显示警告。关闭后保留原始网格。"
+  }
+}

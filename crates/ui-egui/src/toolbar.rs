@@ -727,6 +727,10 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     FileAction::Export("obj").run(app);
                     close = true;
                 }
+                if item_if(ui, app.tr("osd.export"), "", "export", shown) {
+                    FileAction::Export("osd").run(app);
+                    close = true;
+                }
                 if item_if(ui, "Export URDF…", "", "export", shown) {
                     FileAction::Export("urdf").run(app);
                     close = true;

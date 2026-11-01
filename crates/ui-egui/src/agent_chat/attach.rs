@@ -48,7 +48,7 @@ const PICTURE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif
 const TEXT_EXTS: &[&str] = &["svg", "txt", "md", "markdown", "json", "csv", "tsv", "yaml", "yml", "toml", "xml", "log", "ini", "cfg"];
 /// CAD files and meshes, imported into the design (the file picker's list; [`kind`] asks the
 /// importers themselves).
-const CAD_EXTS: &[&str] = &["step", "stp", "igs", "iges", "FCStd", "3dm", "stl", "3mf", "obj", "glb", "gltf"];
+const CAD_EXTS: &[&str] = &["step", "stp", "igs", "iges", "FCStd", "3dm", "stl", "3mf", "obj", "osd", "glb", "gltf"];
 
 /// Every extension the file picker lists first, pictures first (any other file can be chosen too).
 pub fn extensions() -> Vec<&'static str> {

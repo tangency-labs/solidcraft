@@ -49,6 +49,8 @@ mod gltf_in;
 pub use gltf_in::{GltfImport, Loader, MAX_GLTF_BYTES, MeshPlan, PlanPlace, glb_container, is_gltf_path, read_gltf};
 mod obj;
 pub use obj::read_obj;
+mod osd;
+pub use osd::{OsdImportMode, read_osd, write_osd};
 pub use threemf::{
     MAX_3MF_BYTES, MeshObject, model_xml, model_xml_parts, model_xml_with, read_3mf, weld, write_3mf, write_3mf_parts, write_3mf_with,
 };
@@ -93,7 +95,7 @@ pub const MAX_DESIGN_BYTES: usize = 256 << 20;
 
 #[derive(Debug, thiserror::Error)]
 pub enum IoError {
-    #[error("unsupported format `{0}` (use stl, obj, step, 3mf, urdf or sc)")]
+    #[error("unsupported format `{0}` (use stl, obj, osd, step, 3mf, urdf or sc)")]
     Format(String),
     #[error("nothing to export: the design has no bodies")]
     Empty,
@@ -268,15 +270,16 @@ pub fn step_import_feature_named(bytes: &[u8], file: &str, names: StepNames) -> 
     })
 }
 
-/// Is this a mesh file we import (`.3mf`, `.stl`, `.obj`, `.glb`, `.gltf`, any case)?
+/// Is this a mesh file we import (`.3mf`, `.stl`, `.obj`, `.osd`, `.glb`, `.gltf`, any case)?
 pub fn is_mesh_path(path: &str) -> bool {
     std::path::Path::new(path)
         .extension()
         .and_then(|e| e.to_str())
-        .is_some_and(|e| ["3mf", "stl", "obj", "glb", "gltf"].iter().any(|x| e.eq_ignore_ascii_case(x)))
+        .is_some_and(|e| ["3mf", "stl", "obj", "osd", "glb", "gltf"].iter().any(|x| e.eq_ignore_ascii_case(x)))
 }
 
-/// A 3MF, STL, OBJ or glTF file read as a mesh import feature.
+/// A mesh-format file's import feature. OSD reconstruction may produce an Import
+/// base feature containing B-rep geometry instead of MeshImport.
 pub struct MeshFeature {
     /// Timeline name: the only mesh's name, else the file name.
     pub name: String,
@@ -285,10 +288,17 @@ pub struct MeshFeature {
     pub warnings: Vec<String>,
 }
 
-/// Read 3MF, STL, OBJ, PLY or glTF bytes (the format from `file`'s extension) into a MeshImport
+/// Read 3MF, STL, OBJ, OSD, PLY or glTF bytes (the format from `file`'s extension) into a MeshImport
 /// feature. A glTF file's bodies are all built where they are (see [`read_gltf`] for its node
 /// tree), and it can't read buffers in other files.
 pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
+    mesh_import_feature_with_osd_mode(bytes, file, OsdImportMode::Auto)
+}
+
+/// As [`mesh_import_feature`], with explicit control over OSD solid reconstruction.
+/// Other formats are unaffected. Auto keeps unconvertible OSD geometry as meshes
+/// and explains the reason in the import warnings; Solid fails instead.
+pub fn mesh_import_feature_with_osd_mode(bytes: &[u8], file: &str, osd_mode: OsdImportMode) -> Result<MeshFeature> {
     if is_gltf_path(file) {
         let mut no_files = |name: &str| Err(format!("`{name}` can't be read here"));
         let mut g = read_gltf(bytes, file, &mut no_files)?;
@@ -301,8 +311,10 @@ pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
     let path = std::path::Path::new(file);
     let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "Mesh".into());
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-    let (objects, warnings) = if ext == "obj" {
+    let (objects, mut warnings) = if ext == "obj" {
         obj::read_obj(bytes, &stem)?
+    } else if ext == "osd" {
+        osd::read_osd(bytes, &stem)?
     } else if ext == "ply" {
         ply::read_ply_mesh(bytes, &stem)?
     } else if ext == "stl" {
@@ -317,6 +329,22 @@ pub fn mesh_import_feature(bytes: &[u8], file: &str) -> Result<MeshFeature> {
     } else {
         read_3mf(bytes)?
     };
+    if ext == "osd" && osd_mode != OsdImportMode::Mesh {
+        match osd::solid_feature(&objects, file) {
+            Ok(mut feature) => {
+                warnings.append(&mut feature.warnings);
+                feature.warnings = warnings;
+                return Ok(feature);
+            }
+            Err(e) if osd_mode == OsdImportMode::Auto => {
+                warnings.insert(
+                    0,
+                    format!("OSD imported as a mesh, not an editable solid: {e}. Use osd_mode=mesh to keep the original mesh explicitly."),
+                );
+            }
+            Err(e) => return Err(e),
+        }
+    }
     // Check every mesh now, so the command fails rather than the timeline.
     let mut meshes = Vec::with_capacity(objects.len());
     for o in &objects {
@@ -347,6 +375,7 @@ pub enum Format {
     StlBinary,
     StlAscii,
     Obj,
+    Osd,
     Step,
     Iges,
     ThreeMf,
@@ -368,6 +397,7 @@ impl Format {
             "stl" => Format::StlBinary,
             "stla" | "stl-ascii" => Format::StlAscii,
             "obj" => Format::Obj,
+            "osd" => Format::Osd,
             "step" | "stp" => Format::Step,
             "igs" | "iges" => Format::Iges,
             "3mf" => Format::ThreeMf,
@@ -729,6 +759,10 @@ pub fn export_with_parts(
             // would come out in the reader's default grey.
             let meshes: Vec<(String, Mesh)> = sel.iter().map(|b| Ok((b.name.clone(), export_mesh_at(&b.body, quality)?))).collect::<Result<_>>()?;
             obj(&meshes).into_bytes()
+        }
+        Format::Osd => {
+            let objects = sel.iter().map(|b| mesh_object(b, false, quality)).collect::<Result<Vec<_>>>()?;
+            write_osd(&objects)?
         }
         Format::Step => {
             let bs: Vec<solidcraft_kernel::ExportBody> =

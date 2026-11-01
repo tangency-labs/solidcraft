@@ -2339,7 +2339,9 @@ impl SolveApp {
         }
         self.home.open = false;
         documents::prepare_open(self);
-        if let Ok(r) = self.run("doc.open", json!({ "path": path })) {
+        let mut params = serde_json::Map::from_iter([("path".into(), json!(path))]);
+        file_load::apply_osd_preference(&self.preferences, path, &mut params);
+        if let Ok(r) = self.run("doc.open", Value::Object(params)) {
             // An opened design comes up at the home view, not at the angle the design before it
             // was left at: `prepare_open` keeps the camera when it reuses a blank design.
             self.cam.set_view(StandardView::Iso);
@@ -2371,7 +2373,9 @@ impl SolveApp {
     pub fn insert_path(&mut self, path: &str) {
         let cmd = if solidcraft_engine::io::is_point_cloud_path(path) { "pointcloud.insert" } else { file_load::insert_command(path) };
         let before: Vec<String> = self.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
-        if let Ok(r) = self.run(cmd, json!({ "path": path })) {
+        let mut params = serde_json::Map::from_iter([("path".into(), json!(path))]);
+        file_load::apply_osd_preference(&self.preferences, path, &mut params);
+        if let Ok(r) = self.run(cmd, Value::Object(params)) {
             self.fit_view();
             stand_up::offer(self, path, &before, Some(&r));
             if let Some(w) = r["warnings"].as_array().filter(|w| !w.is_empty()) {

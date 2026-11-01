@@ -1034,12 +1034,15 @@ fn export_content(app: &SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAct
         ("mesh", "Mesh", Some("home.export_mesh_hint")),
         ("view_dxf", "DXF", None),
         ("obj", "OBJ", None),
+        ("osd", "OSD", Some("osd.export_hint")),
         ("urdf", "URDF", None),
         ("json", "JSON", Some("home.export_json_hint")),
     ];
     FileView::grid(ui, "home_exports", FileView::tile_min_width(), formats.len(), |ui, index, width| {
         let Some((id, format, hint)) = formats.get(index) else { return };
-        let label = if *id == "view_dxf" {
+        let label = if *id == "osd" {
+            app.tr("osd.export").to_string()
+        } else if *id == "view_dxf" {
             app.tr_label("Export Current View as DXF…").to_string()
         } else {
             format!("{} {}…", app.tr("home.export"), app.tr_label(format))
@@ -1053,6 +1056,7 @@ fn export_content(app: &SolveApp, ui: &mut egui::Ui, action: &mut Option<FileAct
                 "mesh" => FileAction::Mesh,
                 "view_dxf" => FileAction::ViewDxf,
                 "obj" => FileAction::Export("obj"),
+                "osd" => FileAction::Export("osd"),
                 "urdf" => FileAction::Export("urdf"),
                 _ => FileAction::Export("json"),
             });
@@ -1084,7 +1088,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
             }
         }),
         FileAction::Import => {
-            app.pick_open_for(&["step", "stp", "iges", "igs", "stl", "obj", "3mf", "gltf", "glb", "ply", "xyz", "pts"], |app, path| {
+            app.pick_open_for(&["step", "stp", "iges", "igs", "stl", "obj", "osd", "3mf", "gltf", "glb", "ply", "xyz", "pts"], |app, path| {
                 if let Some(path) = path {
                     app.open_path_async(&path);
                 }
@@ -1576,6 +1580,54 @@ mod tests {
         assert!(!h.app.home.open);
         assert!(h.dir.join(format!("{}.json", h.app.session.doc.name)).is_file());
         assert_eq!(h.app.session.doc.to_json(), original, "export leaves the design unchanged");
+    }
+
+    #[test]
+    fn file_view_osd_import_and_export_use_the_normal_pickers() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", serde_json::json!({"length":10,"width":10,"height":10})).unwrap();
+        let source = h.dir.join("Cube.OSD");
+        h.app.run("file.export", serde_json::json!({"path": source})).unwrap();
+        let source_path = source.to_string_lossy().into_owned();
+        h.app.services.pick_open = Some(Box::new(move |extensions| {
+            assert!(extensions.contains(&"osd"), "File > Import must offer OSD");
+            let path = source_path.clone();
+            Box::pin(async move { Some(path) })
+        }));
+        h.app.home.show(0);
+        click_file(&mut h, "home:import");
+        h.settle();
+        assert!(!h.app.home.open);
+        let state = h.app.session.world_state();
+        assert_eq!(state.bodies.len(), 1);
+        assert!(!state.bodies[0].body.is_mesh(), "closed OSD imports directly as an editable solid");
+        let volume = h.app.run("inspect.measure", serde_json::json!({})).unwrap()["bodies"][0]["volume_mm3"].as_f64().unwrap();
+        assert!((volume - 1000.).abs() < 1e-8, "{volume}");
+        let destination = h.dir.join("Exported.osd");
+        let destination_path = destination.to_string_lossy().into_owned();
+        h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+            assert!(name.ends_with(".osd"));
+            assert_eq!(extensions, &["osd"]);
+            let path = destination_path.clone();
+            Box::pin(async move { Some(path) })
+        }));
+        h.app.home.show(0);
+        click_file(&mut h, "home:export");
+        click_file(&mut h, "home:export:osd");
+        h.settle();
+        let (objects, _) = solidcraft_engine::io::read_osd(&std::fs::read(&destination).unwrap(), "Exported").unwrap();
+        assert_eq!(objects.iter().map(|o| o.triangles.len()).sum::<usize>(), 12);
+        h.app.preferences.osd_import_solids = false;
+        h.app.open_path_async(&destination.to_string_lossy());
+        h.settle();
+        assert!(h.app.session.world_state().bodies[0].body.is_mesh(), "preference retains the original mesh import");
+        let forced = h.dir.join("Forced.osd");
+        std::fs::copy(&destination, &forced).unwrap();
+        let mut request = crate::file_load::Request::new(&forced.to_string_lossy(), crate::file_load::Kind::Open);
+        request.options.insert("osd_mode".into(), serde_json::json!("solid"));
+        crate::file_load::begin_request(&mut h.app, request).unwrap();
+        h.settle();
+        assert!(!h.app.session.world_state().bodies[0].body.is_mesh(), "an explicit mode overrides the UI preference");
     }
 
     #[test]
