@@ -9,15 +9,26 @@ use crate::params::{bad, bool_, expr, vec3};
 use crate::schema::{TypedContract, output_schema_for, section as contract};
 use crate::{Result, Session};
 const SECTION: TypedContract<contract::SectionParams> = TypedContract::new();
+const SECTION_CURVES: TypedContract<contract::SectionCurvesParams> = TypedContract::new();
 
-pub static COMMANDS: &[CommandSpec] =
-    &[CommandSpec::new("inspect.section", "Section Analysis", crate::checked!("inspect.section", section))
+#[path = "section_curves.rs"]
+mod curves;
+
+pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("inspect.section", "Section Analysis", crate::checked!("inspect.section", section))
     .contract(&SECTION).output(output_schema_for::<contract::SectionResult>)
     .at("SOLID", "INSPECT").icon("section").noundo().params(
         "plane: XY|XZ|YZ | construction plane name or id | {origin, normal}; offset?: expr along the plane's normal (XY: +Z, XZ: +Y, YZ: +X); \
          at?: expr, the cut's world coordinate on the named plane's axis (XY: Z, XZ: Y, YZ: X), instead of offset; \
          flip?: bool; hatch?: bool (hatch the cut faces, in each body's colour; default true); or clear: true. Returns the cut's origin and normal, and for a named plane its axis and at",
-    )];
+    ),
+    CommandSpec::new(curves::CMD, "Section Curves", crate::checked!("inspect.section_curves", curves::section_curves))
+        .contract(&SECTION_CURVES)
+        .output(output_schema_for::<contract::SectionCurvesResult>)
+        .icon("section")
+        .noundo()
+        .params(curves::PARAMS),
+];
 
 fn section(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.section";
@@ -27,15 +38,36 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
         s.revision += 1;
         return serde_json::to_value(contract::SectionResult { section: None, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()));
     }
+    let (plane, axis) = cut_plane(s, p, cmd)?;
+    let (origin, normal) = (plane.origin, plane.normal());
+    s.section = Some((origin, normal));
+    s.section_hatch = bool_(p, "hatch").unwrap_or(true);
+    s.status_slot(crate::status_items::StatusId::Section, true);
+    s.status_activated(crate::status_items::StatusId::Section);
+    s.revision += 1;
+    let section = contract::Section {
+        origin: [origin.x, origin.y, origin.z],
+        normal: [normal.x, normal.y, normal.z],
+        hatch: s.section_hatch,
+        axis: axis.and_then(|i| ["X", "Y", "Z"].get(i).map(|v| (*v).to_owned())),
+        at: axis.map(|i| axis_component(origin, i)),
+    };
+    serde_json::to_value(contract::SectionResult { section: Some(section), param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// The cut plane of `plane`, `offset` | `at` and `flip`, with its in-plane axes (the named or
+/// construction plane's own, else chosen from the normal; `flip` reverses y), and for a named
+/// plane the index of its world axis.
+pub(super) fn cut_plane(s: &Session, p: &Value, cmd: &str) -> Result<(Plane, Option<usize>)> {
     // A named plane's world axis: which component of a point lies along its normal.
-    let (origin, normal, axis) = match p.get("plane") {
+    let (base, axis) = match p.get("plane") {
         Some(Value::String(n)) if Plane::named(n.trim()).is_some() => {
             // Apply the same ambiguity check as modelling commands before treating a name as an origin alias.
             super::features::plane_param(s, p.get("plane"), cmd)?;
             let pl = Plane::named(n.trim()).ok_or_else(|| bad(cmd, format!("unknown plane `{n}`")))?;
             let normal = pl.normal();
             let axis = [normal.x, normal.y, normal.z].iter().position(|c| c.abs() > 0.5);
-            (pl.origin, normal, axis)
+            (pl, axis)
         }
         // A construction plane (name or id): where it is now.
         Some(v @ (Value::String(_) | Value::Number(_))) => {
@@ -50,15 +82,19 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
             let solidcraft_doc::construct::ConstructGeom::Plane(pl) = &c.geom else {
                 return Err(bad(cmd, format!("construction plane `{}` is not built (rolled back, suppressed or failed)", c.name)));
             };
-            (pl.origin, pl.normal(), None)
+            (*pl, None)
         }
         Some(o @ Value::Object(_)) => {
             let origin = o.get("origin").and_then(vec3).unwrap_or(Vec3::ZERO);
             let n = o.get("normal").and_then(vec3).and_then(|n| n.normalized()).ok_or_else(|| bad(cmd, "the plane needs a non-zero `normal`"))?;
-            (origin, n, None)
+            if !origin.is_finite() {
+                return Err(bad(cmd, "the plane must be finite"));
+            }
+            (Plane::from_normal(origin, n).ok_or_else(|| bad(cmd, "the plane needs a non-zero `normal`"))?, None)
         }
         _ => return Err(bad(cmd, "`plane` must be XY, XZ, YZ, a construction plane name or id, or {origin, normal}")),
     };
+    let (origin, normal) = (base.origin, base.normal());
     let length = |key: &str| -> Result<Option<f64>> {
         match expr(p, key) {
             Some(e) => s.doc.eval(&e, solidcraft_doc::expr::Kind::Length).map(Some).map_err(|e| bad(cmd, format!("{key}: {e}"))),
@@ -76,21 +112,8 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     if !origin.is_finite() || !offset.is_finite() {
         return Err(bad(cmd, "the plane must be finite"));
     }
-    let normal = if bool_(p, "flip").unwrap_or(false) { -normal } else { normal };
-    let origin = origin + normal * offset * if bool_(p, "flip").unwrap_or(false) { -1.0 } else { 1.0 };
-    s.section = Some((origin, normal));
-    s.section_hatch = bool_(p, "hatch").unwrap_or(true);
-    s.status_slot(crate::status_items::StatusId::Section, true);
-    s.status_activated(crate::status_items::StatusId::Section);
-    s.revision += 1;
-    let section = contract::Section {
-        origin: [origin.x, origin.y, origin.z],
-        normal: [normal.x, normal.y, normal.z],
-        hatch: s.section_hatch,
-        axis: axis.and_then(|i| ["X", "Y", "Z"].get(i).map(|v| (*v).to_owned())),
-        at: axis.map(|i| axis_component(origin, i)),
-    };
-    serde_json::to_value(contract::SectionResult { section: Some(section), param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
+    let plane = Plane { origin: origin + normal * offset, ..base };
+    Ok((if bool_(p, "flip").unwrap_or(false) { plane.flipped(false) } else { plane }, axis))
 }
 
 fn axis_component(v: Vec3, i: usize) -> f64 {

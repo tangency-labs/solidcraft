@@ -26,6 +26,9 @@ const MAX_CHAIN: usize = 4000;
 
 #[path = "project_order.rs"]
 mod order;
+#[path = "project_section.rs"]
+mod section_loops;
+pub use section_loops::{SectionLoop, SectionSeg, section_loops};
 
 /// A resolved link: its geometry in sketch coordinates and the (possibly moved) reference.
 #[derive(Clone, Debug)]
