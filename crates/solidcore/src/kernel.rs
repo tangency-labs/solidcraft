@@ -436,6 +436,15 @@ pub struct UpstreamFixes {
     /// instead of removing the first member (WR-81). Off by default for pinned
     /// C++ parity.
     pub cpoly_remove_poly_face_check_member: bool,
+    /// `SmTrackTopologyChanges::StopTracking` clears the context's system notify
+    /// callback and records post-edit dependencies only when the context's currently
+    /// installed callback is this tracker's own (`IsTracking`), instead of whenever
+    /// `m_pLastNotifyCallback == NULL` — which also fires when a tracker was
+    /// constructed with `bStartNow = FALSE` and never started, or when another caller
+    /// replaced this tracker's callback before `StopTracking` ran (WR-17, #2149; see
+    /// `plan/upstream-issues/WR-17--addendum-2026-10-31-stop-tracking-own-callback.md`).
+    /// Off by default for pinned C++ parity.
+    pub stop_tracking_checks_own_callback: bool,
     /// `SmCone::RebuildSTEPFromNURBParameters` gives a cylinder the mean of near-equal radii (semi-angle 0) where upstream's own copy within `SM_EFF_ZERO` does not apply, as the fork's 5df5b27 (WR-385, #713).
     pub cylinder_rebuild_mean_radius: bool,
     /// `SmCylinder::IsNurbSurfaceCylinder` gives an inside-out NURB (its iso circles turning against the line through their centres) the frame `IsNurbSurfaceCone` gives one: Z against the NURB's linear direction, origin at its top-knot circle; upstream keeps the bottom-knot circle and the NURB's direction, so the cylinder's Z is reversed and its STEP evaluation is mirrored in height (WR-496, #1463).

@@ -35,7 +35,7 @@
 //! | [`NotifyCallback::owner_link`] for `TopologyChangeCallback` | the `GetOwner()` / `GetEdge()` its geometry walk reads |
 //! | `add_unique`, `remove_key` (private) | `SmTopologyChangeCallback::AddUnique`, `Remove` |
 //! | [`TrackTopologyChanges`]                     | `SmTrackTopologyChanges`                         |
-//! | [`TrackTopologyChanges::new`]                | `SmTrackTopologyChanges::SmTrackTopologyChanges` |
+//! | [`TrackTopologyChanges::new`], [`TrackTopologyChanges::new_with_kernel`] | `SmTrackTopologyChanges::SmTrackTopologyChanges` |
 //! | [`TrackTopologyChanges::start_tracking`]     | `SmTrackTopologyChanges::StartTracking`          |
 //! | [`TrackTopologyChanges::stop_tracking`], [`TrackTopologyChanges::stop_tracking_with_brep`] | `SmTrackTopologyChanges::StopTracking` |
 //! | [`TopologyChangeLists::record_dependencies`] | `SmTopologyChangeCallback::RecordDependencies`   |
@@ -86,6 +86,13 @@
 //!   keys: the caller translates keys and B-rep entities. `StopTracking` without the
 //!   B-rep ([`TrackTopologyChanges::stop_tracking`], [`TrackTopologyChanges::finish`])
 //!   records none; [`TrackTopologyChanges::stop_tracking_with_brep`] is the full one.
+//!   By default both stop methods follow upstream's `!last_notify_callback` test
+//!   (`m_pLastNotifyCallback == NULL`); when opted in via
+//!   [`TrackTopologyChanges::new_with_kernel`] or
+//!   [`TrackTopologyChanges::set_stop_checks_own_callback`]
+//!   ([`crate::kernel::UpstreamFixes::stop_tracking_checks_own_callback`], WR-17),
+//!   they clear the callback and record post-edit dependencies only when
+//!   [`TrackTopologyChanges::is_tracking`] holds.
 //! - `AssertValid`, `CheckPointerChain`, `Dump`, the obsolete `NewMark*` / `Mark2`
 //!   helpers, `UnMark`, `IsUnMarked`, `IsMarkLocked`, the flag bit helpers and the
 //!   placement `operator new` / `delete` are not part of this unit.
@@ -99,6 +106,7 @@ use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::context::{Context, MarkType, NotifyCallback};
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::tol;
+use crate::kernel::Kernel;
 use crate::topology::brep::p1::is_live_topology_member;
 use crate::topology::{edge, vertex, Brep, BrepId, EdgeId, FaceId};
 
@@ -1014,6 +1022,10 @@ pub struct TrackTopologyChanges {
     /// `m_pLastNotifyCallback != NULL`: a system callback was already installed when
     /// tracking last started.
     last_notify_callback: bool,
+    /// Whether `stop_tracking` and `stop_tracking_with_brep` verify `is_tracking`
+    /// before clearing the context's system notify callback and recording post-edit
+    /// dependencies (`UpstreamFixes::stop_tracking_checks_own_callback`, WR-17).
+    stop_checks_own_callback: bool,
 }
 
 impl TrackTopologyChanges {
@@ -1027,11 +1039,40 @@ impl TrackTopologyChanges {
         start_now: bool,
         context: Option<&mut Context>,
     ) -> Self {
+        Self::new_inner(brep, key, start_now, false, context)
+    }
+
+    /// [`TrackTopologyChanges::new`] configured from `k.fixes`
+    /// ([`crate::kernel::UpstreamFixes::stop_tracking_checks_own_callback`], WR-17).
+    pub fn new_with_kernel(
+        k: &Kernel,
+        brep: Option<BrepId>,
+        key: u64,
+        start_now: bool,
+        context: Option<&mut Context>,
+    ) -> Self {
+        Self::new_inner(
+            brep,
+            key,
+            start_now,
+            k.fixes.stop_tracking_checks_own_callback,
+            context,
+        )
+    }
+
+    fn new_inner(
+        brep: Option<BrepId>,
+        key: u64,
+        start_now: bool,
+        stop_checks_own_callback: bool,
+        context: Option<&mut Context>,
+    ) -> Self {
         let mut t = Self {
             brep,
             key,
             state: Arc::new(Mutex::new(ChangeState::default())),
             last_notify_callback: false,
+            stop_checks_own_callback,
         };
         // when asked start tracking now - else just init the Rm and Add arrays.
         if start_now {
@@ -1040,6 +1081,24 @@ impl TrackTopologyChanges {
             t.reset_arrays();
         }
         t
+    }
+
+    /// Whether [`TrackTopologyChanges::stop_tracking`] and
+    /// [`TrackTopologyChanges::stop_tracking_with_brep`] check
+    /// [`TrackTopologyChanges::is_tracking`] before clearing the context's system
+    /// notify callback and recording post-edit dependencies
+    /// ([`crate::kernel::UpstreamFixes::stop_tracking_checks_own_callback`], WR-17).
+    #[must_use]
+    pub const fn stop_checks_own_callback(&self) -> bool {
+        self.stop_checks_own_callback
+    }
+
+    /// Sets whether [`TrackTopologyChanges::stop_tracking`] and
+    /// [`TrackTopologyChanges::stop_tracking_with_brep`] check
+    /// [`TrackTopologyChanges::is_tracking`] before clearing the context's system
+    /// notify callback and recording post-edit dependencies (WR-17).
+    pub fn set_stop_checks_own_callback(&mut self, on: bool) {
+        self.stop_checks_own_callback = on;
     }
 
     /// The tracked B-rep.
@@ -1098,11 +1157,21 @@ impl TrackTopologyChanges {
     }
 
     /// When the B-rep and its context exist and this tracker found no callback
-    /// installed when it started, clears the context's system notify callback
-    /// (`StopTracking`); otherwise does nothing (upstream asserts). Without the B-rep
-    /// no dependencies are recorded: [`TrackTopologyChanges::stop_tracking_with_brep`]
-    /// is the full `StopTracking`.
+    /// installed when it started (or, with
+    /// [`TrackTopologyChanges::stop_checks_own_callback`] enabled, when
+    /// [`TrackTopologyChanges::is_tracking`] holds), clears the context's system
+    /// notify callback (`StopTracking`); otherwise does nothing (upstream asserts).
+    /// Without the B-rep no dependencies are recorded:
+    /// [`TrackTopologyChanges::stop_tracking_with_brep`] is the full `StopTracking`.
     pub fn stop_tracking(&mut self, context: Option<&mut Context>) {
+        if self.stop_checks_own_callback {
+            if let Some(context) = context {
+                if self.is_tracking(Some(&*context)) {
+                    context.set_sys_notify_callback(None);
+                }
+            }
+            return;
+        }
         // when m_pBrep and its Context exist
         if let (Some(_), Some(context)) = (self.brep, context) {
             // when LastNotifyCallback was NULL (it was turned on by this object)
@@ -1114,10 +1183,13 @@ impl TrackTopologyChanges {
     }
 
     /// `StopTracking` with the tracked B-rep `b`: [`TrackTopologyChanges::stop_tracking`],
-    /// then, when this tracker had installed the callback, its lists record the
-    /// dependencies of the completed edit ([`TopologyChangeLists::record_dependencies`];
-    /// notifications can occur midway through rewiring edge uses, so they are traversed
-    /// only now). `entity_of` / `key_of` translate the notification keys.
+    /// then, when this tracker had installed the callback (or, with
+    /// [`TrackTopologyChanges::stop_checks_own_callback`] enabled, when
+    /// [`TrackTopologyChanges::is_tracking`] held before stopping), its lists record
+    /// the dependencies of the completed edit
+    /// ([`TopologyChangeLists::record_dependencies`]; notifications can occur midway
+    /// through rewiring edge uses, so they are traversed only now). `entity_of` /
+    /// `key_of` translate the notification keys.
     ///
     /// # Errors
     ///
@@ -1129,6 +1201,18 @@ impl TrackTopologyChanges {
         entity_of: &dyn Fn(ObjectKey) -> Option<EntityRef>,
         key_of: &dyn Fn(EntityRef) -> ObjectKey,
     ) -> Result<()> {
+        if self.stop_checks_own_callback {
+            let was_tracking = self.is_tracking(context.as_deref());
+            self.stop_tracking(context);
+            if was_tracking {
+                // Notifications can occur midway through rewiring edgeuses. Traverse
+                // dependencies only now, after the caller has completed its edit.
+                change_state(&self.state)
+                    .lists
+                    .record_dependencies(b, entity_of, key_of)?;
+            }
+            return Ok(());
+        }
         // when m_pBrep and its Context exist
         if let (Some(_), Some(context)) = (self.brep, context) {
             // when LastNotifyCallback was NULL (it was turned on by this object)
@@ -1223,7 +1307,7 @@ mod tests {
     fn stop_tracking_records_the_dependencies_of_an_edge_split() {
         use crate::topology::brep::p3 as brep_p3;
         use crate::topology::brep::p9;
-        let mut k = crate::kernel::Kernel::default();
+        let mut k = Kernel::default();
         let mut b = crate::primitive::api_primitives::create_box(
             &mut k,
             crate::math::Point3::new(0.0, 0.0, 0.0),
@@ -1283,7 +1367,7 @@ mod tests {
 
     #[test]
     fn record_dependencies_adds_a_box_vertex_s_edges_and_faces() {
-        let mut k = crate::kernel::Kernel::default();
+        let mut k = Kernel::default();
         let b = crate::primitive::api_primitives::create_box(
             &mut k,
             crate::math::Point3::new(0.0, 0.0, 0.0),
@@ -1754,5 +1838,328 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, SolidError::InvalidInput { .. }));
         assert!(cb.failure().is_some());
+    }
+
+    #[derive(Debug)]
+    struct ForeignCb(Arc<Mutex<usize>>);
+
+    impl NotifyCallback for ForeignCb {
+        fn execute(
+            &mut self,
+            _operation: NotifyOperation,
+            _caller: ObjectRef,
+            _data1: Option<ObjectRef>,
+            _data2: Option<ObjectRef>,
+            _data3: Option<ObjectRef>,
+        ) -> Result<()> {
+            *self.0.lock().unwrap() += 1;
+            Ok(())
+        }
+    }
+
+    /// WR-17: a tracker constructed with `start_now = false` (`last_notify_callback == false`)
+    /// wipes out a later-installed callback on `StopTracking` by default, whereas opting in
+    /// (`stop_tracking_checks_own_callback`) leaves the foreign callback installed and live.
+    #[test]
+    fn wr17_unstarted_tracker_preserves_foreign_callback() {
+        let mut k = Kernel::default();
+        let brep = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            1.0,
+            2.0,
+            3.0,
+        )
+        .unwrap();
+        let v_key = dep_key(EntityRef::Vertex(brep.vertex_list()[0]));
+        let v_ref = topo(16021, v_key.0);
+
+        // Default C++ parity: `a` was never started (`last_notify_callback == false`), so
+        // `a.stop_tracking` clears `b`'s callback.
+        let mut ctx_def = Context::default();
+        let mut a_def =
+            TrackTopologyChanges::new(Some(BrepId::from_index(0)), 1, false, Some(&mut ctx_def));
+        assert!(!a_def.last_notify_callback());
+        assert!(!a_def.stop_checks_own_callback());
+        let b_def =
+            TrackTopologyChanges::new(Some(BrepId::from_index(0)), 2, true, Some(&mut ctx_def));
+        assert!(b_def.is_tracking(Some(&ctx_def)));
+        a_def.stop_tracking(Some(&mut ctx_def));
+        assert!(ctx_def.sys_notify_callback().is_none());
+        assert!(!b_def.is_tracking(Some(&ctx_def)));
+
+        // Opt-in: `a` is not the installed callback, so neither `stop_tracking` nor
+        // `stop_tracking_with_brep` clears `b`'s callback, and notifications still reach `b`.
+        let mut k_on = Kernel::default();
+        k_on.fixes.stop_tracking_checks_own_callback = true;
+        let mut ctx_opt = Context::default();
+        let mut a_opt = TrackTopologyChanges::new_with_kernel(
+            &k_on,
+            Some(BrepId::from_index(0)),
+            1,
+            false,
+            Some(&mut ctx_opt),
+        );
+        assert!(!a_opt.last_notify_callback());
+        assert!(a_opt.stop_checks_own_callback());
+        let b_opt = TrackTopologyChanges::new_with_kernel(
+            &k_on,
+            Some(BrepId::from_index(0)),
+            2,
+            true,
+            Some(&mut ctx_opt),
+        );
+        assert!(b_opt.is_tracking(Some(&ctx_opt)));
+        a_opt.stop_tracking(Some(&mut ctx_opt));
+        assert!(b_opt.is_tracking(Some(&ctx_opt)));
+        a_opt
+            .stop_tracking_with_brep(Some(&mut ctx_opt), &brep, &dep_entity, &dep_key)
+            .unwrap();
+        assert!(b_opt.is_tracking(Some(&ctx_opt)));
+        ctx_opt
+            .sys_notify_callback_mut()
+            .unwrap()
+            .execute(
+                NotifyOperation::AddToBrep,
+                topo(16001, 1),
+                Some(v_ref),
+                None,
+                None,
+            )
+            .unwrap();
+        assert_eq!(b_opt.add_list(), vec![v_key]);
+
+        // Also holds when the installed callback is a custom `NotifyCallback` rather than
+        // another `TrackTopologyChanges`.
+        let hits = Arc::new(Mutex::new(0usize));
+        ctx_opt.set_sys_notify_callback(Some(Box::new(ForeignCb(Arc::clone(&hits)))));
+        a_opt.stop_tracking(Some(&mut ctx_opt));
+        assert!(ctx_opt.sys_notify_callback().is_some());
+        ctx_opt
+            .sys_notify_callback_mut()
+            .unwrap()
+            .execute(NotifyOperation::PostEdit, v_ref, Some(v_ref), None, None)
+            .unwrap();
+        assert_eq!(*hits.lock().unwrap(), 1);
+    }
+
+    /// WR-17: when tracker `a` starts on an empty context and another caller replaces
+    /// `sys_notify_callback` before `a` stops, default `stop_tracking_with_brep` clears the
+    /// foreign callback and runs `record_dependencies` on `a`, whereas opt-in preserves the
+    /// foreign callback and skips post-edit dependency expansion on `a`.
+    #[test]
+    fn wr17_replaced_callback_preserved_on_stop() {
+        let mut k = Kernel::default();
+        let brep = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            1.0,
+            2.0,
+            3.0,
+        )
+        .unwrap();
+        let v = brep.vertex_list()[0];
+        let v_key = dep_key(EntityRef::Vertex(v));
+        let v_ref = topo(16021, v_key.0);
+
+        // Default C++ parity: `a_def` clears foreign callback and records 3 edges + 3 faces.
+        let mut ctx_def = Context::default();
+        let mut a_def =
+            TrackTopologyChanges::new(Some(BrepId::from_index(0)), 10, true, Some(&mut ctx_def));
+        assert!(a_def.is_tracking(Some(&ctx_def)));
+        assert!(!a_def.last_notify_callback());
+        ctx_def
+            .sys_notify_callback_mut()
+            .unwrap()
+            .execute(
+                NotifyOperation::AddToBrep,
+                topo(16001, 1),
+                Some(v_ref),
+                None,
+                None,
+            )
+            .unwrap();
+        let hits_def = Arc::new(Mutex::new(0usize));
+        ctx_def.set_sys_notify_callback(Some(Box::new(ForeignCb(Arc::clone(&hits_def)))));
+        assert!(!a_def.is_tracking(Some(&ctx_def)));
+        a_def
+            .stop_tracking_with_brep(Some(&mut ctx_def), &brep, &dep_entity, &dep_key)
+            .unwrap();
+        assert!(ctx_def.sys_notify_callback().is_none());
+        assert_eq!(a_def.rm_list().len(), 6);
+        assert_eq!(a_def.add_list().len(), 7);
+
+        // Opt-in via `new_with_kernel`: foreign callback stays installed and post-edit
+        // `record_dependencies` does not run on `a_opt`.
+        let mut k_on = Kernel::default();
+        k_on.fixes.stop_tracking_checks_own_callback = true;
+        let mut ctx_opt = Context::default();
+        let mut a_opt = TrackTopologyChanges::new_with_kernel(
+            &k_on,
+            Some(BrepId::from_index(0)),
+            10,
+            true,
+            Some(&mut ctx_opt),
+        );
+        assert!(a_opt.is_tracking(Some(&ctx_opt)));
+        assert!(!a_opt.last_notify_callback());
+        ctx_opt
+            .sys_notify_callback_mut()
+            .unwrap()
+            .execute(
+                NotifyOperation::AddToBrep,
+                topo(16001, 1),
+                Some(v_ref),
+                None,
+                None,
+            )
+            .unwrap();
+        let hits_opt = Arc::new(Mutex::new(0usize));
+        ctx_opt.set_sys_notify_callback(Some(Box::new(ForeignCb(Arc::clone(&hits_opt)))));
+        assert!(!a_opt.is_tracking(Some(&ctx_opt)));
+        a_opt
+            .stop_tracking_with_brep(Some(&mut ctx_opt), &brep, &dep_entity, &dep_key)
+            .unwrap();
+        assert!(ctx_opt.sys_notify_callback().is_some());
+        assert!(a_opt.rm_list().is_empty());
+        assert_eq!(a_opt.add_list(), vec![v_key]);
+        ctx_opt
+            .sys_notify_callback_mut()
+            .unwrap()
+            .execute(NotifyOperation::PostEdit, v_ref, Some(v_ref), None, None)
+            .unwrap();
+        assert_eq!(*hits_opt.lock().unwrap(), 1);
+
+        // Opt-in via `set_stop_checks_own_callback` when replaced by another tracker's callback.
+        let mut ctx_set = Context::default();
+        let mut a_set =
+            TrackTopologyChanges::new(Some(BrepId::from_index(0)), 11, true, Some(&mut ctx_set));
+        a_set.set_stop_checks_own_callback(true);
+        assert!(a_set.stop_checks_own_callback());
+        ctx_set
+            .sys_notify_callback_mut()
+            .unwrap()
+            .execute(
+                NotifyOperation::AddToBrep,
+                topo(16001, 1),
+                Some(v_ref),
+                None,
+                None,
+            )
+            .unwrap();
+        ctx_set.set_sys_notify_callback(Some(Box::new(TopologyChangeCallback::new(99))));
+        assert!(!a_set.is_tracking(Some(&ctx_set)));
+        a_set
+            .stop_tracking_with_brep(Some(&mut ctx_set), &brep, &dep_entity, &dep_key)
+            .unwrap();
+        let installed = ctx_set
+            .sys_notify_callback()
+            .and_then(NotifyCallback::as_any)
+            .and_then(|any| any.downcast_ref::<TopologyChangeCallback>())
+            .unwrap();
+        assert_eq!(installed.tracker(), 99);
+        assert!(a_set.rm_list().is_empty());
+        assert_eq!(a_set.add_list(), vec![v_key]);
+    }
+
+    /// WR-17: with `stop_tracking_checks_own_callback` enabled, an active tracker still
+    /// clears its own callback and records connected edge/face dependencies identically to
+    /// upstream, and nested trackers (`last_notify_callback == true`) still leave the outer
+    /// tracker active under both default and opt-in modes.
+    #[test]
+    fn wr17_active_tracker_still_clears_and_records_dependencies() {
+        let mut k_on = Kernel::default();
+        k_on.fixes.stop_tracking_checks_own_callback = true;
+        let brep = crate::primitive::api_primitives::create_box(
+            &mut k_on,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            1.0,
+            2.0,
+            3.0,
+        )
+        .unwrap();
+        let v = brep.vertex_list()[0];
+        let v_key = dep_key(EntityRef::Vertex(v));
+        let v_ref = topo(16021, v_key.0);
+        let edges = vertex::edges(&brep, v, None).unwrap();
+        let faces = vertex::faces(&brep, v).unwrap();
+        let mut expected_deps: Vec<ObjectKey> =
+            edges.iter().map(|&e| dep_key(EntityRef::Edge(e))).collect();
+        expected_deps.extend(faces.iter().map(|&f| dep_key(EntityRef::Face(f))));
+
+        let mut context = Context::default();
+        let mut outer = TrackTopologyChanges::new_with_kernel(
+            &k_on,
+            Some(BrepId::from_index(0)),
+            21,
+            true,
+            Some(&mut context),
+        );
+        assert!(outer.is_tracking(Some(&context)));
+
+        // Nested trackers leave `outer` active when stopped under both default and opt-in.
+        let mut nested_def =
+            TrackTopologyChanges::new(Some(BrepId::from_index(0)), 22, true, Some(&mut context));
+        assert!(nested_def.last_notify_callback());
+        assert!(!nested_def.is_tracking(Some(&context)));
+        nested_def.stop_tracking(Some(&mut context));
+        assert!(outer.is_tracking(Some(&context)));
+
+        let mut nested_opt = TrackTopologyChanges::new_with_kernel(
+            &k_on,
+            Some(BrepId::from_index(0)),
+            23,
+            true,
+            Some(&mut context),
+        );
+        assert!(nested_opt.last_notify_callback());
+        assert!(!nested_opt.is_tracking(Some(&context)));
+        nested_opt
+            .stop_tracking_with_brep(Some(&mut context), &brep, &dep_entity, &dep_key)
+            .unwrap();
+        assert!(outer.is_tracking(Some(&context)));
+
+        context
+            .sys_notify_callback_mut()
+            .unwrap()
+            .execute(
+                NotifyOperation::AddToBrep,
+                topo(16001, 1),
+                Some(v_ref),
+                None,
+                None,
+            )
+            .unwrap();
+        outer
+            .stop_tracking_with_brep(Some(&mut context), &brep, &dep_entity, &dep_key)
+            .unwrap();
+        assert!(context.sys_notify_callback().is_none());
+        assert!(!outer.is_tracking(Some(&context)));
+        assert_eq!(outer.rm_list(), expected_deps);
+        let mut expected_add = vec![v_key];
+        expected_add.extend(expected_deps);
+        assert_eq!(outer.add_list(), expected_add);
+    }
+
+    #[test]
+    fn wr17_flag_lookup() {
+        let mut k = Kernel::default();
+        assert!(!k.fixes.stop_tracking_checks_own_callback);
+        assert!(!k
+            .fixes
+            .flags()
+            .any(|f| f == ("stop_tracking_checks_own_callback", true)));
+        assert!(k
+            .fixes
+            .flags()
+            .any(|f| f == ("stop_tracking_checks_own_callback", false)));
+        *k.fixes
+            .flag_mut("stop_tracking_checks_own_callback")
+            .unwrap() = true;
+        assert!(k.fixes.stop_tracking_checks_own_callback);
+        assert!(k
+            .fixes
+            .flags()
+            .any(|f| f == ("stop_tracking_checks_own_callback", true)));
     }
 }
