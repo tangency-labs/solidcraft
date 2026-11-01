@@ -689,6 +689,18 @@ pub struct UpstreamFixes {
     pub uv_trim_corner_end_points_only: bool,
     /// `SmEdgeuse::CreateUVTrimCurve` takes a drop that came back in pieces as the longest run of pieces that meet end to end (the same edge parameter and `(u, v)`), joined exactly on the edge parameters it was dropped from, where upstream reparameterizes a piece covering 90% of the edge onto the whole edge interval, which runs the trim at the wrong pace (up to 5 mm off its edge) (WR-543, #1383; the fork's tangency-labs/smlib@e36feb1).
     pub uv_trim_joins_drop_pieces: bool,
+    /// `SmNewMarkAndLock(SmContext*, SmContext*)` ([`crate::geom::context::MarkLock::new_pair_with_fixes`])
+    /// with distinct contexts (`ctx1 != ctx2`) advances `contexts[ctx2]`'s claimed mark
+    /// `mark_type2` (`NewMark(m_eMarkType2)`) and locks `mark_type2` on `contexts[ctx2]`
+    /// (`LockMark(m_pContext2, m_eMarkType2)`), so each context is advanced once on its
+    /// own free mark type and [`crate::geom::context::MarkLock::release`] (`~SmNewMarkAndLock`)
+    /// unlocks both without leaving a stray lock. Pinned v1.0.1 calls
+    /// `m_pContext1->NewMark(m_eMarkType1)` (advancing `ctx1` twice and leaving
+    /// `(ctx2, mark_type2)` unadvanced) and `LockMark(m_pContext2, m_eMarkType1)` (locking
+    /// `mark_type1` on `ctx2` while the destructor unlocks `mark_type2`) (WR-1, #2204;
+    /// `plan/upstream-issues/WR-1--addendum-2026-11-01-two-context-mark-lock.md`). Off by
+    /// default for pinned C++ parity.
+    pub mark_lock_pair_advances_and_locks_second_context: bool,
     /// `BSplineCurve::trim` removes short end spans only for model-space curves
     /// (dimension 3), preserving exact UV trims in surface parameter units
     /// (WR-441, #1114). A short UV end span whose control points all lie within check

@@ -1826,35 +1826,39 @@ mod tests {
 
     #[test]
     fn paired_mark_contexts_survive_a_failing_action() {
-        let mut first = Kernel::default();
-        let mut second = Kernel::default();
-        first.context.set_doing_boolean(true);
-        let mut kernels = BooleanKernels {
-            primary: &mut first,
-            other: Some(&mut second),
-        };
-        let mut lock = kernels
-            .mark_action(|contexts| MarkLock::new_pair(contexts, 0, 1))
-            .unwrap();
-        let marks = (lock.mark_type1(), lock.mark_type2());
-        let before = (
-            kernels.primary.context.current_mark(marks.0),
-            kernels.other().context.current_mark(marks.1),
-        );
-        let result: Result<()> = kernels.mark_action(|contexts| {
-            lock.new_mark(contexts)?;
-            Err(SolidError::sm_err("test"))
-        });
-        assert!(result.is_err());
-        assert!(kernels.primary.context.doing_boolean());
-        assert!(!kernels.other().context.doing_boolean());
-        assert_ne!(kernels.primary.context.current_mark(marks.0), before.0);
-        assert_ne!(kernels.other().context.current_mark(marks.1), before.1);
-        kernels
-            .mark_action(|contexts| lock.release(contexts))
-            .unwrap();
-        assert!(!kernels.primary.context.is_mark_locked(marks.0));
-        assert!(!kernels.other().context.is_mark_locked(marks.1));
+        for opt_in in [false, true] {
+            let mut first = Kernel::default();
+            let mut second = Kernel::default();
+            first.fixes.mark_lock_pair_advances_and_locks_second_context = opt_in;
+            first.context.set_doing_boolean(true);
+            let mut kernels = BooleanKernels {
+                primary: &mut first,
+                other: Some(&mut second),
+            };
+            let fixes = kernels.primary.fixes;
+            let mut lock = kernels
+                .mark_action(|contexts| MarkLock::new_pair_with_fixes(contexts, 0, 1, &fixes))
+                .unwrap();
+            let marks = (lock.mark_type1(), lock.mark_type2());
+            let before = (
+                kernels.primary.context.current_mark(marks.0),
+                kernels.other().context.current_mark(marks.1),
+            );
+            let result: Result<()> = kernels.mark_action(|contexts| {
+                lock.new_mark(contexts)?;
+                Err(SolidError::sm_err("test"))
+            });
+            assert!(result.is_err());
+            assert!(kernels.primary.context.doing_boolean());
+            assert!(!kernels.other().context.doing_boolean());
+            assert_ne!(kernels.primary.context.current_mark(marks.0), before.0);
+            assert_ne!(kernels.other().context.current_mark(marks.1), before.1);
+            kernels
+                .mark_action(|contexts| lock.release(contexts))
+                .unwrap();
+            assert!(!kernels.primary.context.is_mark_locked(marks.0));
+            assert!(!kernels.other().context.is_mark_locked(marks.1));
+        }
     }
 
     #[test]

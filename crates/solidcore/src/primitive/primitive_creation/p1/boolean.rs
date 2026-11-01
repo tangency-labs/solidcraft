@@ -152,7 +152,9 @@ fn finish_with(
         b,
         session.attributes,
     )?;
-    let mut lock = MarkLock::new_pair(core::slice::from_mut(&mut k.context), 0, 0)?;
+    let fixes = k.fixes;
+    let mut lock =
+        MarkLock::new_pair_with_fixes(core::slice::from_mut(&mut k.context), 0, 0, &fixes)?;
     let mark_a = lock.mark_type1();
     let mark_b = lock.mark_type2();
     let (marks_a, marks_b) = marks;
