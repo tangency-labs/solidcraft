@@ -343,12 +343,9 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
         }
         Kind::Pick(n) => {
             let hits = pick(app, proj, pos);
-            // Symmetry's third pick may be an origin axis lying along the sketch's own x or y
-            // (#1075); the command names those `x` / `y`.
-            let axis_ok = tool.cmd == "sketch.constraint.symmetry" && tool.picks.len() == 2;
             let entity = hits.iter().find_map(|h| match h {
                 Hit::SketchPoint { id, .. } | Hit::SketchCurve { id, .. } => Some(id.clone()),
-                Hit::Axis { name } if axis_ok => sketch_axis_of(app, name).map(str::to_string),
+                Hit::Axis { name } => axis_pick(app, &tool, name),
                 _ => None,
             });
             // With nothing of the sketch there, a body's edge or vertex is picked (kept as its
@@ -420,6 +417,9 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                     hits.iter().find_map(|h| match h {
                         Hit::Edge { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), true, false)),
                         Hit::Vertex { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), false, false)),
+                        // An origin axis is projected too; it has no length of its own, so it
+                        // waits for the entity measured to it (a line's distance to the axis).
+                        Hit::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => Some((json!({"axis": name}).to_string(), false, false)),
                         _ => None,
                     })
                 });
@@ -843,6 +843,57 @@ fn symmetry_args(picks: &[Value], sketch: Option<&solidcraft_engine::sketch::Ske
     let mut rest = (0..3).filter(|i| *i != line).filter_map(|i| picks.get(i));
     let (a, b, line) = (rest.next()?, rest.next()?, picks.get(line)?);
     (a != b).then(|| json!({"a": a, "b": b, "line": line}))
+}
+
+/// An origin axis as a pick of `tool`, or None when the tool does not take it. Symmetry's third
+/// pick may be an axis along the sketch's own x or y (#1075), which the command names `x` / `y`;
+/// either Coincident pick may be any origin axis: the sketch's own `x` / `y`, otherwise its
+/// reference, which the command projects.
+fn axis_pick(app: &SolveApp, tool: &Tool, name: &str) -> Option<String> {
+    match tool.cmd {
+        "sketch.constraint.symmetry" if tool.picks.len() == 2 => sketch_axis_of(app, name).map(str::to_string),
+        "sketch.constraint.coincident" => {
+            sketch_axis_of(app, name).map(str::to_string).or_else(|| matches!(name, "X" | "Y" | "Z").then(|| json!({"axis": name}).to_string()))
+        }
+        _ => None,
+    }
+}
+
+/// An origin axis picked in the browser while a pick tool that takes it runs: the same as
+/// clicking it in the view. False when there is no such tool.
+pub(crate) fn pick_axis_from_browser(app: &mut SolveApp, name: &str) -> bool {
+    let Some(mut tool) = app.tool.take() else { return false };
+    // A dimension measures the axis's projection against the other pick, as a click in the view does.
+    if matches!(tool.kind, Kind::Dimension) && matches!(name, "X" | "Y" | "Z") && tool.picks.len() < 2 {
+        let id = json!({"axis": name}).to_string();
+        if !tool.picks.contains(&id) {
+            tool.picks.push(id);
+            if tool.picks.len() == 2 {
+                match crate::dim_view::begin_live(app, tool.picks.clone(), None) {
+                    Ok(true) => {}
+                    Ok(false) => crate::dim_view::cancel(),
+                    Err(error) => app.set_status(error, true),
+                }
+            }
+        }
+        app.tool = Some(tool);
+        return true;
+    }
+    let picked = match tool.kind {
+        Kind::Pick(n) => axis_pick(app, &tool, name).map(|id| (n, id)),
+        _ => None,
+    };
+    let Some((n, id)) = picked else {
+        app.tool = Some(tool);
+        return false;
+    };
+    tool.picks.push(id);
+    if tool.picks.len() >= n {
+        run_pick(app, &tool);
+        tool.picks.clear();
+    }
+    app.tool = Some(tool);
+    true
 }
 
 fn run_pick(app: &mut SolveApp, t: &Tool) {

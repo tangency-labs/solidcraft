@@ -194,6 +194,39 @@ fn other_line_constraints_take_sketch_axes() {
     assert_eq!(names, ["x", "y"]);
 }
 
+/// A point picked with an origin axis (in the view or the browser) goes onto the axis's
+/// projection, either pick order, and stays on it when the point is dragged.
+#[test]
+fn coincident_takes_an_origin_axis_reference() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.point", json!({"point": [7, 9], "id": "u"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "u", "b": {"axis": "X"}}));
+    assert!(pt(&sketch(&s), "u").y.abs() < 1e-7, "on X");
+    run(&mut s, "sketch.point", json!({"point": [3, 4], "id": "v"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": {"axis": "Y"}, "b": "v"}));
+    assert!(pt(&sketch(&s), "v").x.abs() < 1e-7, "on Y");
+    // Z is seen end on: the point goes to where it pierces the sketch.
+    run(&mut s, "sketch.point", json!({"point": [5, -2], "id": "w"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "w", "b": {"axis": "Z"}}));
+    assert!(pt(&sketch(&s), "w").len() < 1e-7, "on Z");
+    let from = pt(&sketch(&s), "u");
+    run(&mut s, "sketch.drag", json!({"entity": "u", "from": [from.x, from.y], "to": [12, 6]}));
+    assert!(pt(&sketch(&s), "u").y.abs() < 1e-7, "still on X after a drag");
+}
+
+/// A line dimensioned to an origin axis is their distance, not the line's length, and the
+/// line stays parallel to the axis.
+#[test]
+fn dimension_measures_a_line_to_an_origin_axis() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l", {"axis": "X"}], "value": "12"}));
+    let sk = sketch(&s);
+    assert!((pt(&sk, "l.start").y.abs() - 12.0).abs() < 1e-7, "12 from X");
+    assert!((pt(&sk, "l.end").y - pt(&sk, "l.start").y).abs() < 1e-7, "kept parallel to X, so all of it is 12 from X");
+    assert!((pt(&sk, "l.end").dist(pt(&sk, "l.start")) - 12.0).abs() > 1.0, "not the line's length");
+}
+
 #[test]
 fn the_axis_survives_save_and_load() {
     let mut s = on(json!("YZ"));
