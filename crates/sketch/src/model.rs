@@ -1525,7 +1525,12 @@ impl Sketch {
                         .collect(),
                 )
             }
-            CurveKind::Conic { a, b, apex, rho } => Some(vec![Seg2::Conic { a: pt(a)?, apex: pt(apex)?, b: pt(b)?, w: rho / (1.0 - rho).max(1e-9) }]),
+            CurveKind::Conic { a, b, apex, rho } => Some(vec![Seg2::Conic {
+                a: pt(a)?,
+                apex: pt(apex)?,
+                b: pt(b)?,
+                w: rho / (1.0 - rho).max(solidcraft_geom::bspline::MIN_CONIC_RHO_GAP),
+            }]),
             CurveKind::Spline { pts, control: false, periodic, .. } => {
                 let p: Vec<Vec2> = pts.iter().map(pt).collect::<Option<_>>()?;
                 Some(

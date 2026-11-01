@@ -3,9 +3,10 @@
 use std::collections::HashMap;
 
 use serde_json::{Value, json};
-use solidcraft_geom::Vec2;
+use solidcraft_geom::bspline::{self, Fit, HPoint, NurbsCurve};
+use solidcraft_geom::{MAX_BEZIER_DEGREE, Vec2, Vec3};
 use solidcraft_io::{Geom2, MAX_DRAWING_BYTES};
-use solidcraft_sketch::{CurveKind, LinkKind, LinkSource, Sketch};
+use solidcraft_sketch::{CurveKind, LinkKind, LinkSource, MAX_SPLINE_POINTS, Sketch};
 
 use super::CommandSpec;
 use super::sketch::{edit, ids_of};
@@ -70,8 +71,9 @@ fn drawing_error(p: &Value, svg: bool, msg: String) -> EngineError {
 
 /// Add imported geometry to a sketch, sharing end points that meet.
 /// Adds the geometry; end points closer than `q` (mm) become one point, so drawings whose
-/// ends almost meet still make closed profiles.
-pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> Vec2, k: f64, q: f64) -> Result<(Vec<usize>, Vec<Geom2>)> {
+/// ends almost meet still make closed profiles. Also returns how far that moved the end of a
+/// spline or conic, which otherwise keeps the shape it was given (mm).
+pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> Vec2, k: f64, q: f64) -> Result<(Vec<usize>, Vec<Geom2>, f64)> {
     let mut map: HashMap<(i64, i64), Vec<(Vec2, usize)>> = HashMap::new();
     let mut pt = |sk: &mut Sketch, p: Vec2| -> Result<usize> {
         let p = f(p);
@@ -89,6 +91,9 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
         map.entry(key).or_default().push((p, i));
         Ok(i)
     };
+    // How far the point an end joined is from where the end was.
+    let shift = |sk: &Sketch, p: Vec2, i: usize| sk.point(i).map_or(0.0, |o| o.dist(f(p)));
+    let mut moved = 0.0f64;
     let mut curves = Vec::new();
     let mut texts = Vec::new();
     for g in geom {
@@ -108,18 +113,39 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
             }
             Geom2::Ellipse { c, major, minor } => Some(CurveKind::Ellipse { c: pt(sk, *c)?, m: pt(sk, *major)?, r: minor * k }),
             Geom2::Spline { pts, control, degree } => {
-                let mut idx = Vec::new();
-                for p in pts.iter().take(solidcraft_sketch::MAX_SPLINE_POINTS) {
-                    let i = pt(sk, *p)?;
-                    if idx.last() != Some(&i) {
-                        idx.push(i);
-                    }
+                // Only the ends join other curves: an inner point moved would reshape the curve. A
+                // through-point spline keeps one of two equal points in a row; a control point
+                // repeated shapes the curve (a Bézier [A, A, B, C] pulls towards A), so stays.
+                let mut pts: Vec<Vec2> = pts.iter().take(MAX_SPLINE_POINTS).copied().collect();
+                if !*control {
+                    pts.dedup();
                 }
-                (idx.len() >= 2).then_some(CurveKind::Spline { pts: idx, control: *control, degree: *degree, periodic: false })
+                match (pts.first(), pts.last()) {
+                    (Some(&first), Some(&last)) if pts.iter().any(|q| *q != first) => {
+                        let (a, b) = (pt(sk, first)?, pt(sk, last)?);
+                        moved = moved.max(shift(sk, first, a)).max(shift(sk, last, b));
+                        let inner = pts.get(1..pts.len() - 1).unwrap_or_default();
+                        if inner.is_empty() && a == b {
+                            None
+                        } else {
+                            let mut idx = vec![a];
+                            for q in inner {
+                                idx.push(sk.add_point(f(*q), None)?);
+                            }
+                            idx.push(b);
+                            Some(CurveKind::Spline { pts: idx, control: *control, degree: *degree, periodic: false })
+                        }
+                    }
+                    _ => None,
+                }
             }
+            Geom2::Nurbs(_) => return Err(EngineError::Other("a B-spline must be brought in as sketch curves first (split_nurbs)".into())),
             Geom2::Conic { a, apex, b, rho } => {
-                let (a, x, b) = (pt(sk, *a)?, pt(sk, *apex)?, pt(sk, *b)?);
-                (a != b && x != a && x != b).then_some(CurveKind::Conic { a, b, apex: x, rho: *rho })
+                // The apex shapes the curve: it joins nothing.
+                let (a0, b0) = (*a, *b);
+                let (a, b) = (pt(sk, a0)?, pt(sk, b0)?);
+                moved = moved.max(shift(sk, a0, a)).max(shift(sk, b0, b));
+                if a == b { None } else { Some(CurveKind::Conic { a, b, apex: sk.add_point(f(*apex), None)?, rho: *rho }) }
             }
             Geom2::Text { text, at, height, angle } => {
                 texts.push(Geom2::Text { text: text.clone(), at: f(*at), height: height * k, angle: *angle });
@@ -132,7 +158,7 @@ pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> 
             curves.push(c);
         }
     }
-    Ok((curves, texts))
+    Ok((curves, texts, moved))
 }
 
 /// The box around a drawing's geometry (arcs, circles and curves by their extent).
@@ -166,6 +192,8 @@ fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
                 pts.extend([*c + Vec2::new(r, r), *c - Vec2::new(r, r)]);
             }
             Geom2::Spline { pts: sp, .. } => pts.extend(sp.iter().copied()),
+            // A B-spline lies within its control points' hull.
+            Geom2::Nurbs(curve) => pts.extend(curve.ctrl().filter_map(|h| h.project()).map(|q| Vec2::new(q.x, q.y))),
             // Points along the curve, not its apex, which can lie well outside it (an elliptical
             // arc of a DXF comes in as conics, #8155).
             Geom2::Conic { a, apex, b, rho } if *rho > 0.0 && *rho < 1.0 => {
@@ -191,6 +219,128 @@ fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<(Vec<Geom2>, (Vec2, V
         return Err(drawing_error(p, svg, why));
     };
     Ok((geom, bounds))
+}
+
+/// Within this (mm, in the sketch) of the file's curve, a B-spline comes in: half of it for the
+/// curves that follow it, half for joining their ends to other curves. An end moved further to
+/// join another (a join tolerance above that) is reported.
+const FIT_TOLERANCE: f64 = 1e-3;
+/// Most sketch curves one Bézier piece of a B-spline may become.
+const MAX_PIECE_CURVES: usize = 4096;
+/// Most sketch curves a drawing's B-splines may become together: a bound on the work and memory
+/// a hostile file can ask for.
+const MAX_SPLINE_CURVES: usize = 200_000;
+
+/// A drawing's B-splines as the curves a sketch holds. One that is the sketch's own spline
+/// ([`sketch_own`]) comes in as that one editable spline. Any other is split into Bézier pieces,
+/// each followed within `tolerance` (mm, in the drawing) of the file's curve with the bound proven
+/// ([`bspline::follow`]): a polynomial piece of degree at most 9 as a control-point spline (a line
+/// at degree 1), a rational quadratic one as a conic, any other as cubic control-point splines.
+/// That is every [`Geom2::Nurbs`], and every control-point spline with more points than a sketch
+/// spline holds, which would otherwise lose the rest. Also what the import should say about them,
+/// its distances in the sketch's millimetres (`k` per drawing millimetre), and how many curves
+/// they became. A B-spline that can't be followed within the tolerance refuses the drawing, with
+/// the reason, rather than bringing in another curve.
+fn split_nurbs(geom: Vec<Geom2>, tolerance: f64, k: f64) -> std::result::Result<(Vec<Geom2>, Vec<String>, usize), String> {
+    let bad = |e: &dyn std::fmt::Display| format!("a spline can't be brought in within {FIT_TOLERANCE} mm: {e}");
+    let mut out = Vec::with_capacity(geom.len());
+    let (mut fitted, mut worst, mut made) = (0usize, 0.0f64, 0usize);
+    for g in geom {
+        let curve = match g {
+            Geom2::Nurbs(curve) => match sketch_own(&curve) {
+                Some(own) => {
+                    made += 1;
+                    out.push(own);
+                    continue;
+                }
+                None => curve,
+            },
+            Geom2::Spline { pts, control: true, degree } if pts.len() > MAX_SPLINE_POINTS => sketch_spline(&pts, degree).map_err(|e| bad(&e))?,
+            g => {
+                out.push(g);
+                continue;
+            }
+        };
+        for piece in curve.pieces().map_err(|e| bad(&e))? {
+            if made >= MAX_SPLINE_CURVES {
+                return Err(format!("the drawing's splines make more than {MAX_SPLINE_CURVES} curves"));
+            }
+            let fits = bspline::follow(&piece, tolerance, MAX_BEZIER_DEGREE, MAX_PIECE_CURVES.min(MAX_SPLINE_CURVES - made)).map_err(|e| bad(&e))?;
+            // The piece itself: over its own control points, or a conic.
+            let own_points: Vec<Vec3> = piece.ctrl().filter_map(|h| h.project()).collect();
+            let own = match &fits[..] {
+                [c] => matches!(c.value(), Fit::Conic { .. }) || *c.value() == Fit::Bezier(own_points),
+                _ => false,
+            };
+            if !own {
+                fitted += 1;
+                worst = fits.iter().fold(worst, |w, c| w.max(c.bound()));
+            }
+            made += fits.len();
+            out.extend(fits.into_iter().map(|c| sketch_curve(c.into_value())));
+        }
+    }
+    let mut warnings = Vec::new();
+    if fitted > 0 {
+        warnings.push(format!(
+            "{fitted} spline piece(s) have no exact sketch curve: each comes in as cubic splines, at most {:.1e} mm from the file's curve",
+            worst * k
+        ));
+    }
+    Ok((out, warnings, made))
+}
+
+/// The knots of the sketch's spline of degree `p` over `n > p` points on `[lo, hi]`: each end
+/// `p + 1` times, the inner ones evenly spaced.
+fn sketch_knots(p: usize, n: usize, lo: f64, hi: f64) -> Vec<f64> {
+    let spans = n.saturating_sub(p).max(1);
+    (0..n + p + 1).map(|i| lo + (hi - lo) * (i.saturating_sub(p).min(spans) as f64 / spans as f64)).collect()
+}
+
+/// The sketch's own spline of `degree` over `pts` (clamped, its inner knots evenly spaced, at the
+/// degree its points allow), as a B-spline.
+fn sketch_spline(pts: &[Vec2], degree: u8) -> bspline::SplineResult<NurbsCurve> {
+    let n = pts.len();
+    let p = usize::from(degree).clamp(1, MAX_BEZIER_DEGREE).min(n.saturating_sub(1)).max(1);
+    let ctrl: Vec<HPoint> = pts.iter().map(|q| HPoint::weighted(Vec3::new(q.x, q.y, 0.0), 1.0)).collect();
+    NurbsCurve::from_homogeneous(p, sketch_knots(p, n, 0.0, 1.0), &ctrl)
+}
+
+/// `curve` as one sketch spline when it is the sketch's own: degree at most 9, at most 500
+/// points, its weights all alike (which is no weighting), its knots clamped and evenly spaced up
+/// to the rounding of a number (4ε of the domain). Knots written to fewer digits than that are a
+/// different curve, which comes in as its exact pieces.
+fn sketch_own(curve: &NurbsCurve) -> Option<Geom2> {
+    let p = curve.degree();
+    let degree = u8::try_from(p).ok().filter(|_| p <= MAX_BEZIER_DEGREE)?;
+    let ctrl: Vec<HPoint> = curve.ctrl().collect();
+    let n = ctrl.len();
+    if n > MAX_SPLINE_POINTS || ctrl.windows(2).any(|w| w[0].w != w[1].w) {
+        return None;
+    }
+    let k = curve.knots();
+    let (lo, hi) = (*k.get(p)?, *k.get(n)?);
+    if !sketch_knots(p, n, lo, hi).iter().zip(k).all(|(a, b)| (a - b).abs() <= 4.0 * f64::EPSILON * (hi - lo)) {
+        return None;
+    }
+    let pts = ctrl.iter().map(|h| h.project().map(|q| Vec2::new(q.x, q.y))).collect::<Option<Vec<_>>>()?;
+    Some(Geom2::Spline { pts, control: true, degree })
+}
+
+/// A curve a sketch holds for a fit (z dropped: the file's curves have z = 0).
+fn sketch_curve(fit: Fit) -> Geom2 {
+    let flat = |q: Vec3| Vec2::new(q.x, q.y);
+    match fit {
+        Fit::Bezier(p) => match &p[..] {
+            [a, b] => Geom2::Line(flat(*a), flat(*b)),
+            _ => Geom2::Spline {
+                degree: u8::try_from(p.len().saturating_sub(1)).unwrap_or(u8::MAX),
+                control: true,
+                pts: p.into_iter().map(flat).collect(),
+            },
+        },
+        Fit::Conic { a, apex, b, rho } => Geom2::Conic { a: flat(a), apex: flat(apex), b: flat(b), rho },
+    }
 }
 
 /// How big a drawing is in its own file, to size it before it is inserted.
@@ -220,6 +370,8 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         None => sized("height", |n| n.1)?,
     };
     let k = from_size.or_else(|| num(p, "scale")).filter(|k| *k > 1e-9 && *k < 1e6).unwrap_or(1.0);
+    // The sketch's curves are the drawing's scaled by `k`: half of FIT_TOLERANCE there.
+    let (geom, mut warnings, from_bsplines) = split_nurbs(geom, FIT_TOLERANCE / 2.0 / k, k).map_err(|e| drawing_error(p, svg, e))?;
     let angle = match p.get("angle") {
         Some(v) => v.as_f64().filter(|a| a.is_finite()).ok_or_else(|| bad(cmd, "`angle` must be a number (degrees)"))?.to_radians(),
         None => 0.0,
@@ -245,10 +397,15 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         let v = (q - pivot) * k;
         Vec2::new(v.x * cos - v.y * sin, v.x * sin + v.y * cos) + off
     };
-    let ((curves, texts), info) = edit(s, p, cmd, false, |sk, _| {
-        let (cs, texts) = add_geometry(sk, &geom, &f, k, tol)?;
-        Ok((ids_of(sk, &cs), texts))
+    let ((curves, texts, moved), info) = edit(s, p, cmd, false, |sk, _| {
+        let (cs, texts, moved) = add_geometry(sk, &geom, &f, k, tol)?;
+        Ok((ids_of(sk, &cs), texts, moved))
     })?;
+    if from_bsplines > 0 && moved > FIT_TOLERANCE / 2.0 {
+        warnings.push(format!(
+            "curve ends moved up to {moved:.1e} mm to join others (the join tolerance is {tol} mm), so a spline from the file can be that far from it at an end"
+        ));
+    }
     // Text becomes sketch text.
     let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch"))?;
     let mut n_text = 0;
@@ -273,7 +430,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
             }
         }
     }
-    Ok(json!({"sketch": id, "created_sketch": created, "curves": curves.len(), "texts": n_text, "info": info}))
+    Ok(json!({"sketch": id, "created_sketch": created, "curves": curves.len(), "texts": n_text, "warnings": warnings, "info": info}))
 }
 
 fn insert_dxf(s: &mut Session, p: &Value) -> Result<Value> {
@@ -317,6 +474,8 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+    use solidcraft_geom::Vec2;
+    use solidcraft_sketch::{CurveKind, Sketch};
 
     use crate::Session;
 
@@ -422,6 +581,327 @@ mod tests {
         // Every point the sketch draws it with lies on the ellipse.
         let worst = sk.polyline(0).iter().map(|p| ((p.x / 10.0).powi(2) + (p.y / 5.0).powi(2) - 1.0).abs()).fold(0.0, f64::max);
         assert!(worst < 1e-9, "{worst}");
+    }
+
+    /// A degree-`p` SPLINE over `ctrl` with `knots` and, when given, `weights`.
+    fn spline_dxf(p: usize, ctrl: &[[f64; 2]], knots: &[f64], weights: &[f64]) -> String {
+        let mut body = format!("0\nSECTION\n2\nENTITIES\n0\nSPLINE\n71\n{p}\n");
+        body.extend(knots.iter().map(|k| format!("40\n{k}\n")));
+        body.extend(weights.iter().map(|w| format!("41\n{w}\n")));
+        body.extend(ctrl.iter().map(|[x, y]| format!("10\n{x}\n20\n{y}\n")));
+        body + "0\nENDSEC\n0\nEOF\n"
+    }
+
+    /// De Boor's evaluation, in homogeneous coordinates when there are weights, both factors of
+    /// each step from knot differences: the B-spline at `u`, independent of the importer.
+    fn de_boor(ctrl: &[[f64; 2]], weights: &[f64], knots: &[f64], p: usize, u: f64) -> Vec2 {
+        let k = (p..ctrl.len()).rev().find(|&k| knots[k] <= u && knots[k] < knots[k + 1]).unwrap();
+        let w = |i: usize| if weights.is_empty() { 1.0 } else { weights[i] };
+        let mut d: Vec<[f64; 3]> = (0..=p).map(|j| j + k - p).map(|i| [ctrl[i][0] * w(i), ctrl[i][1] * w(i), w(i)]).collect();
+        for r in 1..=p {
+            for j in (r..=p).rev() {
+                let i = j + k - p;
+                let (lo, hi) = (knots[i], knots[i + p + 1 - r]);
+                let (f, g) = ((hi - u) / (hi - lo), (u - lo) / (hi - lo));
+                d[j] = [0, 1, 2].map(|c| d[j - 1][c] * f + d[j][c] * g);
+            }
+        }
+        Vec2::new(d[p][0] / d[p][2], d[p][1] / d[p][2])
+    }
+
+    fn insert_scaled(dxf: &str, scale: f64) -> Result<(serde_json::Value, Sketch, usize), String> {
+        insert_with(json!({"text": dxf, "scale": scale}))
+    }
+
+    fn insert_with(params: serde_json::Value) -> Result<(serde_json::Value, Sketch, usize), String> {
+        let mut s = Session::default();
+        let r = s.execute("sketch.insert_dxf", &params).map_err(|e| e.to_string())?;
+        let ss = s.model.state().sketch(r["sketch"].as_u64().unwrap()).unwrap().clone();
+        Ok((r, ss.sketch, ss.profiles.len()))
+    }
+
+    fn insert_one(dxf: &str) -> (serde_json::Value, Sketch, usize) {
+        insert_scaled(dxf, 1.0).unwrap()
+    }
+
+    /// Sketch curve `i` at `t ∈ [0, 1]`.
+    fn curve_point(sk: &Sketch, i: usize, t: f64) -> Vec2 {
+        let at = |j: usize| sk.point(j).unwrap();
+        match &sk.curves[i].kind {
+            CurveKind::Line { a, b } => at(*a) + (at(*b) - at(*a)) * t,
+            CurveKind::Spline { pts, control, degree, .. } => {
+                solidcraft_sketch::spline_point(&pts.iter().map(|j| at(*j)).collect::<Vec<_>>(), *control, *degree, t)
+            }
+            CurveKind::Conic { a, b, apex, rho } => solidcraft_sketch::conic_point(at(*a), at(*apex), at(*b), *rho, t),
+            k => panic!("{k:?}"),
+        }
+    }
+
+    /// The distance from `x` to the curve `f` over `[lo, hi]`: samples spread along the curve, not
+    /// its parameter (a rational curve can run much of its length in a sliver of it), and closer
+    /// together the nearer they come to `x` (a curve can loop tighter than the spacing), each one
+    /// closer than its neighbours refined by golden-section search. Never less than the true
+    /// distance (each is to a point on the curve), so a check against it can't pass wrongly.
+    fn closest(f: &dyn Fn(f64) -> Vec2, lo: f64, hi: f64, x: Vec2) -> f64 {
+        let mut s: Vec<f64> = (0..=64).map(|i| lo + (hi - lo) * f64::from(i) / 64.0).collect();
+        let mut p: Vec<Vec2> = s.iter().map(|&t| f(t)).collect();
+        let length: f64 = p.windows(2).map(|w| w[0].dist(w[1])).sum();
+        for _ in 0..60 {
+            let (mut ns, mut np) = (vec![s[0]], vec![p[0]]);
+            for i in 1..s.len() {
+                let near = 0.5 * p[i - 1].dist(x).min(p[i].dist(x));
+                if p[i - 1].dist(p[i]) > near.min(length / 512.0) && s[i] - s[i - 1] > 1e-13 * (hi - lo) && ns.len() < 20_000 {
+                    let mid = 0.5 * (s[i - 1] + s[i]);
+                    ns.push(mid);
+                    np.push(f(mid));
+                }
+                ns.push(s[i]);
+                np.push(p[i]);
+            }
+            if ns.len() == s.len() {
+                break;
+            }
+            (s, p) = (ns, np);
+        }
+        let d: Vec<f64> = p.iter().map(|q| q.dist(x)).collect();
+        let last = d.len() - 1;
+        let mut found = d.iter().copied().fold(f64::INFINITY, f64::min);
+        for i in (0..=last).filter(|&i| d[i] <= d[i.saturating_sub(1)] && d[i] <= d[(i + 1).min(last)]) {
+            let (mut a, mut b) = (s[i.saturating_sub(1)], s[(i + 1).min(last)]);
+            for _ in 0..80 {
+                let (m1, m2) = (a + (b - a) * 0.381_966, b - (b - a) * 0.381_966);
+                let (d1, d2) = (f(m1).dist(x), f(m2).dist(x));
+                found = found.min(d1).min(d2);
+                if d1 < d2 { b = m2 } else { a = m1 }
+            }
+        }
+        found
+    }
+
+    /// Every point of the file's curve (scaled by `k`) within `allowed` of the sketch's curves from
+    /// `from` on, and the points of the first, middle and last of those within it of the file's
+    /// curve.
+    fn assert_within(sk: &Sketch, from: usize, ctrl: &[[f64; 2]], weights: &[f64], knots: &[f64], p: usize, k: f64, allowed: f64) {
+        let (lo, hi) = (knots[p], knots[ctrl.len()]);
+        let file = |u: f64| de_boor(ctrl, weights, knots, p, u) * k;
+        for j in 0..=40 {
+            let x = file(lo + (hi - lo) * f64::from(j) / 40.0);
+            let off = (from..sk.curves.len()).map(|i| closest(&|t| curve_point(sk, i, t), 0.0, 1.0, x)).fold(f64::INFINITY, f64::min);
+            assert!(off <= allowed, "file point {j}/40 is {off:e} from the sketch's curves");
+        }
+        let last = sk.curves.len() - 1;
+        for i in [from, (from + last) / 2, last] {
+            for j in 0..=4 {
+                let y = curve_point(sk, i, f64::from(j) / 4.0);
+                let off = closest(&file, lo, hi, y);
+                assert!(off <= allowed, "curve {i} at {j}/4 is {off:e} from the file's curve");
+            }
+        }
+    }
+
+    /// #9355: a SPLINE with uneven knots, a double knot or unclamped closed knots comes in as the
+    /// curve its own knots describe: one control-point spline per span of its domain, each on the
+    /// file's curve (by de Boor) all along, not one spline over the points with even knots. A
+    /// repeated control point stays repeated, in a plain Bézier and in an exact piece alike.
+    #[test]
+    fn a_spline_comes_in_as_its_own_knots_describe() {
+        let open = [[0.0, 0.0], [10.0, 25.0], [30.0, 30.0], [45.0, 5.0], [60.0, 20.0], [80.0, 0.0]];
+        let (a, b, c) = ([0.0, 0.0], [20.0, 0.0], [10.0, 20.0]);
+        let closed = [a, b, c, a, b, c];
+        let bezier = [a, a, b, c];
+        let repeated = [a, a, b, c, [30.0, 5.0]];
+        for (ctrl, knots, closes) in [
+            (&open[..], vec![0.0, 0.0, 0.0, 0.0, 0.1, 0.15, 1.0, 1.0, 1.0, 1.0], false),
+            (&open, vec![0.0, 0.0, 0.0, 0.0, 0.4, 0.4, 1.0, 1.0, 1.0, 1.0], false),
+            (&closed, (0..10).map(f64::from).collect(), true),
+            (&bezier, vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0], false),
+            (&repeated, vec![0.0, 0.0, 0.0, 0.0, 0.3, 1.0, 1.0, 1.0, 1.0], false),
+        ] {
+            let (r, sk, profiles) = insert_one(&spline_dxf(3, ctrl, &knots, &[]));
+            assert_eq!(r["warnings"], json!([]), "{r}");
+            let spans: Vec<(f64, f64)> = knots[3..=ctrl.len()].windows(2).map(|w| (w[0], w[1])).filter(|(a, b)| a < b).collect();
+            assert_eq!(sk.curves.len(), spans.len(), "{knots:?}");
+            for (i, (lo, hi)) in spans.into_iter().enumerate() {
+                let CurveKind::Spline { pts, control: true, degree: 3, .. } = &sk.curves[i].kind else { panic!("{:?}", sk.curves[i].kind) };
+                // A cubic's piece: four control points, repeated ones included.
+                assert_eq!(pts.len(), 4, "{knots:?}: {pts:?}");
+                for j in 0..=16 {
+                    let t = f64::from(j) / 16.0;
+                    let (got, want) = (curve_point(&sk, i, t), de_boor(ctrl, &[], &knots, 3, lo + (hi - lo) * t));
+                    assert!(got.dist(want) < 1e-9, "{knots:?} at {t} of [{lo}, {hi}]: {got:?} vs {want:?}");
+                }
+            }
+            assert_eq!(profiles, usize::from(closes), "{knots:?}");
+        }
+    }
+
+    /// A SPLINE that is the sketch's own (clamped, evenly spaced knots, no weights or all alike)
+    /// comes in as one editable spline over its points, as it did before; knots written to six
+    /// digits are a different curve and come in as its exact pieces.
+    #[test]
+    fn the_sketchs_own_spline_comes_in_as_one_spline() {
+        let five = [[0.0, 0.0], [10.0, 20.0], [30.0, 20.0], [40.0, 0.0], [60.0, 10.0]];
+        let even = [0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
+        for weights in [&[][..], &[2.0; 5]] {
+            let (r, sk, _) = insert_one(&spline_dxf(3, &five, &even, weights));
+            let [curve] = &sk.curves[..] else { panic!("{r}") };
+            let CurveKind::Spline { pts, control: true, degree: 3, .. } = &curve.kind else { panic!("{:?}", curve.kind) };
+            let pts: Vec<Vec2> = pts.iter().map(|i| sk.point(*i).unwrap()).collect();
+            assert!(pts.iter().zip(&five).all(|(p, q)| p.dist(Vec2::new(q[0], q[1])) < 1e-12), "{pts:?}");
+        }
+        let six = [[0.0, 0.0], [10.0, 20.0], [30.0, 20.0], [40.0, 0.0], [60.0, 10.0], [70.0, 5.0]];
+        let thirds = [0.0, 0.0, 0.0, 0.0, 0.333333, 0.666667, 1.0, 1.0, 1.0, 1.0];
+        let (_, sk, _) = insert_one(&spline_dxf(3, &six, &thirds, &[]));
+        assert_eq!(sk.curves.len(), 3);
+        assert_within(&sk, 0, &six, &[], &thirds, 3, 1.0, 1e-3);
+    }
+
+    /// #9355: a SPLINE with more control points than a sketch spline holds (500) comes in whole,
+    /// as exact pieces on the file's curve from its first point to its last: with uneven knots,
+    /// with even ones, and with none given (the sketch's even knots).
+    #[test]
+    fn a_spline_past_five_hundred_control_points_comes_in_whole() {
+        let n = 520;
+        let ctrl: Vec<[f64; 2]> = (0..n).map(|i| [i as f64, 10.0 * (i as f64 / 7.0).sin()]).collect();
+        let even: Vec<f64> = (0..n + 4).map(|i| (i.clamp(3, n) - 3) as f64 / (n - 3) as f64).collect();
+        let uneven: Vec<f64> = (0..n + 4).map(|i| ((i.clamp(3, n) - 3) as f64 / (n - 3) as f64).powi(2)).collect();
+        for (given, knots) in [(&uneven[..], &uneven), (&even, &even), (&[][..], &even)] {
+            let (r, sk, _) = insert_one(&spline_dxf(3, &ctrl, given, &[]));
+            assert_eq!((r["curves"].as_u64(), &r["warnings"]), (Some(n as u64 - 3), &json!([])), "{} knots given", given.len());
+            for i in 0..sk.curves.len() {
+                assert!(matches!(sk.curves[i].kind, CurveKind::Spline { control: true, degree: 3, .. }), "{:?}", sk.curves[i].kind);
+                let (lo, hi) = (knots[i + 3], knots[i + 4]);
+                for j in 0..=4 {
+                    let t = f64::from(j) / 4.0;
+                    let (got, want) = (curve_point(&sk, i, t), de_boor(&ctrl, &[], knots, 3, lo + (hi - lo) * t));
+                    assert!(got.dist(want) < 1e-9, "{} knots given, piece {i} at {t}: {got:?} vs {want:?}", given.len());
+                }
+            }
+        }
+    }
+
+    /// #9355: weighted quadratics (how CAD programs write arcs and circles) come in as conics on
+    /// the circle all along: a quarter, and a whole circle of four, closed.
+    #[test]
+    fn a_weighted_quadratic_spline_comes_in_as_conics_on_its_circle() {
+        let h = std::f64::consts::FRAC_1_SQRT_2;
+        let quarter = spline_dxf(2, &[[20.0, 0.0], [20.0, 20.0], [0.0, 20.0]], &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0], &[1.0, h, 1.0]);
+        let ctrl = [[20.0, 0.0], [20.0, 20.0], [0.0, 20.0], [-20.0, 20.0], [-20.0, 0.0], [-20.0, -20.0], [0.0, -20.0], [20.0, -20.0], [20.0, 0.0]];
+        let knots = [0.0, 0.0, 0.0, 0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1.0, 1.0, 1.0];
+        let circle = spline_dxf(2, &ctrl, &knots, &[1.0, h, 1.0, h, 1.0, h, 1.0, h, 1.0]);
+        for (dxf, conics, profiles) in [(quarter, 1, 0), (circle, 4, 1)] {
+            let (r, sk, found) = insert_one(&dxf);
+            assert_eq!((r["curves"].as_u64(), found, &r["warnings"]), (Some(conics), profiles, &json!([])), "{r}");
+            for i in 0..sk.curves.len() {
+                assert!(matches!(sk.curves[i].kind, CurveKind::Conic { .. }), "{:?}", sk.curves[i].kind);
+                let worst = (0..=64).map(|j| (curve_point(&sk, i, f64::from(j) / 64.0).len() - 20.0).abs()).fold(0.0, f64::max);
+                assert!(worst < 1e-9, "{worst}");
+            }
+        }
+    }
+
+    /// #9355: a weighted cubic has no exact sketch curve: it comes in as cubic splines within
+    /// 0.001 mm of it in the sketch, scaled up or not, and the import says how close.
+    #[test]
+    fn a_weighted_cubic_spline_comes_in_within_its_tolerance_and_the_import_says_so() {
+        let (ctrl, weights, knots) =
+            ([[0.0, 0.0], [5.0, 30.0], [40.0, 30.0], [50.0, 0.0]], [1.0, 3.0, 0.5, 1.0], [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
+        for scale in [1.0, 40.0] {
+            let (r, sk, _) = insert_scaled(&spline_dxf(3, &ctrl, &knots, &weights), scale).unwrap();
+            assert!(sk.curves.iter().all(|c| matches!(c.kind, CurveKind::Spline { control: true, degree: 3, .. })), "{r}");
+            let warnings = r["warnings"].as_array().unwrap();
+            assert!(warnings.len() == 1 && warnings[0].as_str().unwrap().starts_with("1 spline piece(s) have no exact sketch curve"), "{r}");
+            assert_within(&sk, 0, &ctrl, &weights, &knots, 3, scale, 1e-3);
+        }
+    }
+
+    /// A weighted quadratic so sharp (middle weight 2·10⁹, so 1 − rho below 10⁻⁹) that the sketch
+    /// would hold its conic at another weight comes in as cubics within 0.001 mm, not as that conic.
+    #[test]
+    fn a_quadratic_sharper_than_a_sketch_conic_comes_in_as_cubics() {
+        let (ctrl, weights, knots) = ([[0.0, 0.0], [1000.0, 0.0], [1000.0, 1000.0]], [1.0, 2e9, 1.0], [0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+        let (r, sk, _) = insert_one(&spline_dxf(2, &ctrl, &knots, &weights));
+        assert!(sk.curves.iter().all(|c| matches!(c.kind, CurveKind::Spline { control: true, degree: 3, .. })), "{r}");
+        assert_within(&sk, 0, &ctrl, &weights, &knots, 2, 1.0, 1e-3);
+    }
+
+    /// A spline's end joining a line's end 0.01 mm away, with a join tolerance of 0.05 mm, moves
+    /// that far: the import says so, for a weighted cubic split into pieces and for the sketch's
+    /// own spline alike. With the default tolerance it doesn't join, and the spline keeps within
+    /// 0.001 mm.
+    #[test]
+    fn a_spline_end_moved_further_than_the_tolerance_to_join_is_reported() {
+        let (ctrl, knots) = ([[0.0, 0.0], [5.0, 30.0], [40.0, 30.0], [50.0, 0.0]], [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0]);
+        let line = "0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n-20\n20\n0\n11\n0.01\n21\n0\n";
+        for weights in [&[1.0, 3.0, 0.5, 1.0][..], &[]] {
+            let dxf = line.to_string() + spline_dxf(3, &ctrl, &knots, weights).trim_start_matches("0\nSECTION\n2\nENTITIES\n");
+            let (r, sk, _) = insert_with(json!({"text": dxf, "tolerance": 0.05})).unwrap();
+            let warned = |r: &serde_json::Value, start: &str| {
+                r["warnings"].as_array().unwrap().iter().filter(|w| w.as_str().unwrap().starts_with(start)).count()
+            };
+            assert_eq!(warned(&r, "curve ends moved up to 1.0e-2 mm"), 1, "{weights:?}: {r}");
+            let (r, sk2, _) = insert_with(json!({"text": dxf})).unwrap();
+            assert_eq!(warned(&r, "curve ends moved"), 0, "{weights:?}: {r}");
+            assert_within(&sk2, 1, &ctrl, weights, &knots, 3, 1.0, 1e-3);
+            assert!(sk.curves.len() == sk2.curves.len());
+        }
+    }
+
+    /// An inner control point of a spline joins no other curve, even one ending right on it: it
+    /// shapes the curve, and moving it would move the curve. The ends still join.
+    #[test]
+    fn an_inner_spline_point_joins_no_other_curve() {
+        let dxf = "0\nSECTION\n2\nENTITIES\n0\nLINE\n10\n100\n20\n100\n11\n10\n21\n25\n0\nLINE\n10\n45\n20\n5\n11\n90\n21\n5\n\
+                   0\nSPLINE\n71\n3\n10\n0\n20\n0\n10\n10\n20\n25\n10\n30\n20\n30\n10\n45\n20\n5\n0\nENDSEC\n0\nEOF\n";
+        let (_, sk, _) = insert_one(dxf);
+        let (CurveKind::Line { b: inner_end, .. }, CurveKind::Line { a: end, .. }, CurveKind::Spline { pts, .. }) =
+            (&sk.curves[0].kind, &sk.curves[1].kind, &sk.curves[2].kind)
+        else {
+            panic!("{:?}", sk.curves)
+        };
+        assert!(pts[1] != *inner_end && pts[3] == *end, "{pts:?}");
+    }
+
+    /// Random SPLINEs of degree 1 to 9 (now and then 11), clamped or not, inner knots repeated up
+    /// to and past the degree, weights up to 100 apart, inserted at three scales: each comes in
+    /// within 0.001 mm of the file's curve in the sketch, both ways, or is refused with the reason.
+    #[test]
+    fn random_splines_come_in_within_the_tolerance_or_are_refused() {
+        let mut rng = 0x9355_u64;
+        let mut unit = move || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            (rng >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let (mut came, mut refused) = (0, 0);
+        for _ in 0..150 {
+            let p = if unit() < 0.1 { 11 } else { 1 + (unit() * 9.0) as usize };
+            let n = p + 1 + (unit() * 8.0) as usize;
+            let clamped = unit() < 0.6;
+            let mut knots = Vec::with_capacity(n + p + 1);
+            let mut u = 0.0;
+            for i in 0..n + p + 1 {
+                if i > 0 && !(clamped && (i <= p || i > n)) && !(i > p && i < n && unit() < 0.25) {
+                    u += 0.05 + unit();
+                }
+                knots.push(u);
+            }
+            let ctrl: Vec<[f64; 2]> = (0..n).map(|_| [100.0 * unit() - 50.0, 100.0 * unit() - 50.0]).collect();
+            let weights: Vec<f64> = if unit() < 0.5 { Vec::new() } else { (0..n).map(|_| 10f64.powf(2.0 * unit() - 1.0)).collect() };
+            let scale = [1.0, 7.5, 0.02][(unit() * 3.0) as usize];
+            match insert_scaled(&spline_dxf(p, &ctrl, &knots, &weights), scale) {
+                Ok((_, sk, _)) => {
+                    assert_within(&sk, 0, &ctrl, &weights, &knots, p, scale, 1e-3 * (1.0 + 1e-6) + 1e-12 * 100.0 * scale);
+                    came += 1;
+                }
+                Err(e) => {
+                    assert!(e.contains("spline") || e.contains("SPLINE"), "{e}");
+                    refused += 1;
+                }
+            }
+        }
+        assert!(came > 100 && refused > 5, "came in {came}, refused {refused}");
     }
 
     const PLATE: &str =

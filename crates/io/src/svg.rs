@@ -56,6 +56,8 @@ fn geom_is_finite(g: &Geom2) -> bool {
         Geom2::Arc { c, a, b } => c.is_finite() && a.is_finite() && b.is_finite(),
         Geom2::Ellipse { c, major, minor } => c.is_finite() && major.is_finite() && minor.is_finite(),
         Geom2::Spline { pts, .. } => pts.iter().all(|p| p.is_finite()),
+        // Finite by construction.
+        Geom2::Nurbs(_) => true,
         Geom2::Conic { a, apex, b, rho } => a.is_finite() && apex.is_finite() && b.is_finite() && rho.is_finite(),
         Geom2::Text { at, height, angle, .. } => at.is_finite() && height.is_finite() && angle.is_finite(),
     }

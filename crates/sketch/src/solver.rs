@@ -325,7 +325,12 @@ impl State<'_> {
                 }
             }
             Some(CurveKind::Conic { a, b, apex, rho }) => {
-                vec![Seg2::Conic { a: self.p(*a), b: self.p(*b), apex: self.p(*apex), w: rho / (1.0 - rho).max(1e-9) }]
+                vec![Seg2::Conic {
+                    a: self.p(*a),
+                    b: self.p(*b),
+                    apex: self.p(*apex),
+                    w: rho / (1.0 - rho).max(solidcraft_geom::bspline::MIN_CONIC_RHO_GAP),
+                }]
             }
             _ => Vec::new(),
         };
