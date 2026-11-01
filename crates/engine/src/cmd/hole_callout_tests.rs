@@ -1,8 +1,8 @@
 //! Hole callouts follow the model's Hole features (#7605). The parts are made with SolidCraft's
 //! own commands and checked against hand-worked values: a 100 x 60 x 40 bearing block with a
 //! 50 x 40 x 5 pocket, a Ø35 bore through from the pocket floor and Ø6.6 counterbored holes; a
-//! flange with 6 Ø9 holes at sketch points; an M8 tapped blind hole; plates moved, in sheet metal
-//! and in a part placed twice.
+//! flange with 6 Ø9 holes at sketch points; an M8 tapped blind hole; plates moved, edited, in
+//! sheet metal and in a part placed twice.
 
 use serde_json::{Value, json};
 use solidcraft_geom::Vec3;
@@ -356,6 +356,8 @@ fn hostile_callout_input_is_refused_without_a_panic() {
         (json!({"feature": holes, "point": ids[0], "units": "furlong"}), "unit"),
         (json!({"feature": holes, "point": ids[0], "units": "x".repeat(10_000)}), "unit"),
         (json!({"feature": holes, "point": ids[0], "language": "-"}), "language"),
+        // A misspelt key is refused, not ignored.
+        (json!({"feature": holes, "point": ids[0], "decimal": 3}), "decimal"),
     ] {
         let e = refused(&mut s, p.clone());
         assert!(e.contains(why), "{p}: {e}");
@@ -484,7 +486,7 @@ fn one_feature_can_drill_through_on_one_hole_and_blind_on_another() {
 }
 
 #[test]
-fn a_hole_in_sheet_metal_is_not_supported_yet_and_one_in_a_part_placed_twice_reads_once() {
+fn a_hole_in_sheet_metal_is_not_supported_yet() {
     let mut s = Session::default();
     run(&mut s, "sheet.manage_rules", json!({"name": "R1", "thickness": "1 mm", "bend_radius": "1 mm", "active": true}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
@@ -497,14 +499,86 @@ fn a_hole_in_sheet_metal_is_not_supported_yet_and_one_in_a_part_placed_twice_rea
     let c = callout(&mut s, "SheetHole");
     assert_eq!(c["status"], "failed", "{c}");
     assert!(c["reason"].as_str().is_some_and(|r| r.contains("not supported yet") && r.contains("sheet metal")), "{c}");
-    // A part placed twice: one callout of its one hole, in the part's own frame.
+}
+
+#[test]
+fn a_hole_in_a_part_placed_twice_reads_once_in_the_parts_own_frame() {
     let mut a = Session::default();
-    let part = run(&mut a, "component.create", json!({"name": "Bracket"}))["component"].as_u64().unwrap_or_default();
+    // `component.create` makes the new part the active one, so the plate and its hole are its.
+    let made = run(&mut a, "component.create", json!({"name": "Bracket"}));
+    let (part, first) = (made["component"].as_u64().unwrap_or_default(), made["occurrence"].as_u64().unwrap_or_default());
     run(&mut a, "solid.box", json!({"length": 60, "width": 30, "height": 8, "name": "Plate"}));
     run(&mut a, "solid.hole", json!({"position": [15, 15, 8], "diameter": 6.6, "name": "H"}));
+    for f in ["Plate", "H"] {
+        assert_eq!(a.doc.find_feature(f).map(|f| f.component), Some(part), "{f} is in Bracket");
+    }
+    // Placed a second time, and the first placement moved off the origin, so neither placement's
+    // frame is the part's own.
     run(&mut a, "occurrence.copy", json!({"component": part, "translate": [0, 100, 0]}));
+    run(&mut a, "occurrence.ground", json!({"occurrence": first, "grounded": false}));
+    run(&mut a, "occurrence.move", json!({"occurrence": first, "translate": [0, 0, 50]}));
     let h = callout(&mut a, "H");
     assert_eq!(h["status"], "resolved", "{h}");
     assert_eq!(lines(&h), ["Ø6.60 THRU"]);
-    assert!(near(&h["callout"]["start"][0], 15.0) && near(&h["callout"]["start"][1], 15.0), "{h}");
+    let at = |k: usize| h["callout"]["start"][k].as_f64().unwrap_or(f64::NAN);
+    let dir = |k: usize| h["callout"]["direction"][k].as_f64().unwrap_or(f64::NAN);
+    assert!((at(0) - 15.0).abs() < 1e-6 && (at(1) - 15.0).abs() < 1e-6 && (at(2) - 8.0).abs() < 1e-6, "{h}");
+    assert!((dir(2) + 1.0).abs() < 1e-6, "{h}");
+}
+
+#[test]
+fn a_later_edit_of_the_holes_own_faces_reads_failed() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 8, "body_name": "Plate"}));
+    run(&mut s, "solid.hole", json!({"position": [45, 15, 8], "diameter": 5, "depth": 4, "name": "Blind"}));
+    assert_eq!(lines(&callout(&mut s, "Blind")), ["Ø5.00 ↧ 4.00"]);
+    // The floor raised 1: the bore keeps its faces' names, but it is 3 deep now, not the
+    // feature's 4.
+    run(&mut s, "solid.offset_face", json!({"faces": [[45, 15, 4]], "distance": 1}));
+    let c = callout(&mut s, "Blind");
+    assert_eq!(c["status"], "failed", "{c}");
+    assert!(c["reason"].as_str().is_some_and(|r| r.contains("changed the hole")), "{c}");
+}
+
+#[test]
+fn one_hole_of_a_feature_filled_in_reads_removed_while_its_sibling_still_reads() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 8, "body_name": "Plate"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 8], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [15, 15], "id": "q1"}));
+    run(&mut s, "sketch.point", json!({"point": [45, 15], "id": "q2"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "points": ["q1", "q2"], "diameter": 6, "name": "Pair"}));
+    // A block joined over q1 fills that hole; q2's is still there.
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 8, "corner": [10, 10, 0], "operation": "join"}));
+    assert!(solid_at(&s, 15.0, 15.0, 4.0) && !solid_at(&s, 45.0, 15.0, 4.0));
+    let q1 = callout_with(&mut s, "Pair", Some("q1"), json!({}));
+    assert_eq!(q1["status"], "failed", "{q1}");
+    assert_eq!(q1["reason"], "a later feature removed the hole", "the sibling still in place is not this hole moved: {q1}");
+    assert_eq!(lines(&callout_with(&mut s, "Pair", Some("q2"), json!({}))), ["2× Ø6.00 THRU"]);
+}
+
+#[test]
+fn a_tapped_hole_under_a_recess_gives_its_thread_depth_from_the_start_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 30, "body_name": "Block"}));
+    // Counterbored 4 deep, threaded 10 below it: the thread ends 14 below the top, as the
+    // drill's 20 does.
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [15, 15, 30], "thread": "M8", "depth": 20, "thread_depth": 10, "type": "counterbore", "cb_diameter": 14, "cb_depth": 4, "name": "Cb"}),
+    );
+    let c = callout(&mut s, "Cb");
+    assert!(near(&c["callout"]["thread_depth"], 14.0), "{c}");
+    assert_eq!(lines(&c), ["Ø6.75 ↧ 20.00", "M8 ↧ 14.00", "⌴ Ø14.00 ↧ 4.00"]);
+    // Countersunk Ø12.75 × 90°: its cone reaches (12.75 - 6.75) / 2 = 3 below the top.
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [45, 15, 30], "thread": "M8", "depth": 20, "thread_depth": 10, "type": "countersink", "cs_diameter": 12.75, "cs_angle": "90 deg", "name": "Cs"}),
+    );
+    let c = callout(&mut s, "Cs");
+    assert!((c["callout"]["thread_depth"].as_f64().unwrap_or(f64::NAN) - 13.0).abs() < 1e-9, "{c}");
+    assert_eq!(lines(&c), ["Ø6.75 ↧ 20.00", "M8 ↧ 13.00", "⌵ Ø12.75 × 90.00°"]);
 }
