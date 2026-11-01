@@ -10,9 +10,10 @@
 //! - **Curves:** lines `L`, circular arcs `A` in the grid's pieces of at most a quarter turn (a half
 //!   turn's centre is ill-conditioned once its ends are rounded), cubics `C`, parabolas `Q`.
 //! - **Paint:** strokes `stroke-width`, with butt caps, miter joins and a miter limit of 4 on the
-//!   root; fills black, even-odd. One `<path>` per item, so each stays one object in an editor.
+//!   root; fills black, even-odd, or a coloured paper's ink. One `<path>` per item, so each stays one object in an editor.
 //! - **Groups** are `<g data-object="…" data-kind="…">`: object ids repeat and start with a digit,
-//!   so they can't be XML ids. No background: the page stays transparent, as cutters want.
+//!   so they can't be XML ids. No background: the page stays transparent, as cutters want. A
+//!   coloured paper is one `<rect>` under everything.
 //! - **Pictures** (#5624 S5) are `<image>`s holding a PNG as a data URI, on their own pixel grid
 //!   ([`Picture::grid`]) at the picture resolution the caller gives, cropped to the pixels on the
 //!   sheet. Their edges are the grid's, on the same nanometre grid as the lines, so they register.
@@ -22,6 +23,7 @@ use std::fmt::Write;
 use solidcraft_geom::paper::{Grid, GridItem, GridPath, GridPoint, GridReport, Picture, Pictures, Piece, Prepared};
 use solidcraft_geom::{Aabb2, Vec2};
 
+use super::PaperColour;
 use super::png::{PICTURE_DPI, picture_png};
 use crate::{IoError, MAX_DRAWING_BYTES, Result};
 
@@ -31,18 +33,27 @@ pub type SvgReport = GridReport;
 /// A scene's SVG document, its pictures' pixels from `pictures` at `picture_dpi`, and what
 /// writing it did.
 pub fn paper_svg(scene: &Prepared, pictures: &dyn Pictures, picture_dpi: f64) -> Result<(Vec<u8>, SvgReport)> {
+    paper_svg_on(scene, None, pictures, picture_dpi)
+}
+
+/// [`paper_svg`] on a coloured paper, or on none: a picture keeps its own colours on either.
+pub fn paper_svg_on(scene: &Prepared, paper: Option<PaperColour>, pictures: &dyn Pictures, picture_dpi: f64) -> Result<(Vec<u8>, SvgReport)> {
     if !PICTURE_DPI.contains(&picture_dpi) {
         return Err(IoError::Invalid(format!("an SVG's pictures are 25 to 1200 dpi, not {picture_dpi}")));
     }
     let on = scene.on_grid(Grid::NANOMETRE).map_err(|e| IoError::Invalid(e.to_string()))?;
     let mut w = Writer { out: String::new(), height: on.size.y };
     let (width, height) = (number(on.size.x), number(on.size.y));
+    let ink = paper.map_or_else(|| "#000".to_string(), |_| hex(PaperColour::INK));
     w.out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     let _ = writeln!(
         w.out,
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}mm\" height=\"{height}mm\" viewBox=\"0 0 {width} {height}\" \
-         fill=\"none\" stroke=\"#000\" stroke-linecap=\"butt\" stroke-linejoin=\"miter\" stroke-miterlimit=\"4\">"
+         fill=\"none\" stroke=\"{ink}\" stroke-linecap=\"butt\" stroke-linejoin=\"miter\" stroke-miterlimit=\"4\">"
     );
+    if let Some(paper) = paper {
+        let _ = writeln!(w.out, "<rect width=\"{width}\" height=\"{height}\" fill=\"{}\" stroke=\"none\"/>", hex(paper.rgb()));
+    }
     for group in &on.groups {
         let kind = serde_json::to_value(group.kind).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default();
         let _ = writeln!(w.out, "<g data-object=\"{}\" data-kind=\"{kind}\">", group.object);
@@ -55,7 +66,7 @@ pub fn paper_svg(scene: &Prepared, pictures: &dyn Pictures, picture_dpi: f64) ->
                     w.path(path);
                 }
                 GridItem::Fill { loops } => {
-                    w.out.push_str("<path fill=\"#000\" stroke=\"none\" fill-rule=\"evenodd\" d=\"");
+                    let _ = write!(w.out, "<path fill=\"{ink}\" stroke=\"none\" fill-rule=\"evenodd\" d=\"");
                     loops.iter().for_each(|l| w.path(l));
                 }
                 GridItem::Picture(picture) => {
@@ -74,6 +85,11 @@ pub fn paper_svg(scene: &Prepared, pictures: &dyn Pictures, picture_dpi: f64) ->
     }
     w.out.push_str("</svg>\n");
     Ok((w.out.into_bytes(), on.report))
+}
+
+/// An sRGB colour as SVG writes it.
+fn hex([r, g, b]: [u8; 3]) -> String {
+    format!("#{r:02X}{g:02X}{b:02X}")
 }
 
 /// Nanometres written as millimetres onto `out`: the integer part, then up to six decimals

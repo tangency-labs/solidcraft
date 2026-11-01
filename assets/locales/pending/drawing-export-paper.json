@@ -1,0 +1,34 @@
+{
+  "en": {
+    "export.paper.blueprint": "Blueprint",
+    "export.paper.prussian_blue": "Prussian Blue (Historical)"
+  },
+  "ar": {
+    "export.paper.blueprint": "مخطط أزرق",
+    "export.paper.prussian_blue": "أزرق بروسي (تاريخي)"
+  },
+  "de": {
+    "export.paper.blueprint": "Blaupause",
+    "export.paper.prussian_blue": "Preußischblau (historisch)"
+  },
+  "he": {
+    "export.paper.blueprint": "שרטוט כחול",
+    "export.paper.prussian_blue": "כחול פרוסי (היסטורי)"
+  },
+  "ja": {
+    "export.paper.blueprint": "青写真",
+    "export.paper.prussian_blue": "プルシアンブルー（歴史的）"
+  },
+  "ko": {
+    "export.paper.blueprint": "청사진",
+    "export.paper.prussian_blue": "프러시안 블루(역사적)"
+  },
+  "vi": {
+    "export.paper.blueprint": "Bản vẽ xanh",
+    "export.paper.prussian_blue": "Xanh Phổ (lịch sử)"
+  },
+  "zh": {
+    "export.paper.blueprint": "蓝图",
+    "export.paper.prussian_blue": "普鲁士蓝（历史）"
+  }
+}
