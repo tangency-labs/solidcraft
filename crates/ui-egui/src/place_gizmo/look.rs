@@ -55,8 +55,8 @@ pub(super) const DIM: f32 = 0.25;
 pub(super) const DIM_S: f32 = 0.16;
 
 /// The marker answering the pointer arriving or leaving, and switching into and out of a drag.
-pub(super) const MARKER_HOT: Transition = Transition::symmetric(0.22);
-pub(super) const MARKER_ACTIVE: Transition = Transition::symmetric(0.36);
+pub(super) const MARKER_HOT: Transition = Transition::symmetric(0.12);
+pub(super) const MARKER_ACTIVE: Transition = Transition::symmetric(0.22);
 /// The marker's line width (a dash's and the shaft's).
 const LINE: f32 = 2.0;
 /// The dot's radius.
@@ -77,13 +77,18 @@ const HEAD_BASE: f32 = ARM_FROM + DASH + GAP;
 /// (the dialog's drag arrow) can keep clear of it.
 pub(super) const MARKER_CLEAR: f32 = HEAD_BASE + HEAD_LEN + 6.0;
 
-/// The move marker: a dot with four arms to the screen cardinals. At rest each arm is two dashes,
-/// a place that can be grabbed and nothing more. Pointed at, the outer dash becomes an arrowhead,
-/// its far end narrowing to a point and its near end widening while it grows a little: the
-/// feature moves straight in any direction along the face. While it drags, the inner dash runs
-/// on into the head as a solid shaft. The dotted-to-solid switch is the one step that cannot
-/// tween, so it flips halfway into the drag.
-pub(super) fn crosshair(painter: &egui::Painter, c: Pos2, s: &CrossStyle, _t: &Tokens) {
+/// The four screen cardinals: the arms of a marker whose feature moves anywhere on its face.
+pub(super) const CARDINALS: [Vec2; 4] = [vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0)];
+
+/// The move marker: a dot with an arm for each way the feature can go, the four screen cardinals
+/// when it moves anywhere on its face, two along a line when a reference edge holds it to one,
+/// none when its references hold it still. At rest each arm is two dashes, a place that can be
+/// grabbed and nothing more. Pointed at, the outer dash becomes an arrowhead, its far end
+/// narrowing to a point and its near end widening while it grows a little: the feature moves
+/// straight that way along the face. While it drags, the inner dash runs on into the head as a
+/// solid shaft. The dotted-to-solid switch is the one step that cannot tween, so it flips halfway
+/// into the drag. `arms` are unit screen directions.
+pub(super) fn crosshair(painter: &egui::Painter, c: Pos2, s: &CrossStyle, arms: &[Vec2], _t: &Tokens) {
     let solid = s.active > 0.5;
     let (core, case) = (core(s.hot > 0.5).gamma_multiply(s.alpha), casing().gamma_multiply(s.alpha));
     // The outer dash on its way to being the head.
@@ -92,7 +97,7 @@ pub(super) fn crosshair(painter: &egui::Painter, c: Pos2, s: &CrossStyle, _t: &T
     let far = LINE / 2.0 * (1.0 - s.hot);
     let mut lines: Vec<Vec<Pos2>> = Vec::new();
     let mut heads: Vec<Vec<Pos2>> = Vec::new();
-    for d in [vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0)] {
+    for d in arms.iter().copied() {
         // The inner dash, or the shaft up to the head's base.
         lines.push(vec![c + d * ARM_FROM, c + d * if solid { HEAD_BASE } else { ARM_FROM + DASH }]);
         let n: Vec2 = vec2(-d.y, d.x);
