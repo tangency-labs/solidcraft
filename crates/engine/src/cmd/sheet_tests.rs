@@ -3094,6 +3094,89 @@ fn fold_at_a_tab_root_names_the_real_cause() {
     run(&mut ok, "sheet.fold", json!({"points": [[40, 51, 0.8], [60, 51, 0.8]], "fixed": [50, 25, 0.8]}));
 }
 
+/// The rule of #6957's reports: 2 mm thick, K 0.4.
+fn fold_rule(s: &mut Session) {
+    run(s, "sheet.manage_rules", json!({"name": "T2", "thickness": "2 mm", "bend_radius": "1 mm", "k_factor": "0.4", "active": true}));
+}
+
+/// The blank's outline sketched by `draw`, as a sheet.
+fn shaped_blank(s: &mut Session, draw: &dyn Fn(&mut Session)) {
+    fold_rule(s);
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Blank"}));
+    draw(s);
+    run(s, "sketch.finish", json!({}));
+    run(s, "sheet.flange", json!({"sketch": "Blank", "body_name": "Sheet"}));
+}
+
+/// The way round a refused fold (#6957): fold the rectangle that holds the outline, unfold, cut
+/// the outline out of the flat and refold.
+fn fold_cut_refold(s: &mut Session, holder: ([f64; 2], [f64; 2]), draw: &dyn Fn(&mut Session), fold: Value) {
+    fold_rule(s);
+    rectangle_tool(s, "Blank", holder.0, holder.1);
+    run(s, "sheet.flange", json!({"sketch": "Blank", "body_name": "Sheet"}));
+    run(s, "sheet.fold", fold);
+    run(s, "sheet.unfold", json!({"body": "Sheet"}));
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": [-200, -100], "p1": [200, 100]}));
+    draw(s);
+    run(s, "sketch.finish", json!({}));
+    run(
+        s,
+        "solid.extrude",
+        json!({"distance": 10, "direction": "symmetric", "operation": "cut", "profiles": [{"point": [-190, -90]}], "targets": ["Sheet"]}),
+    );
+    run(s, "sheet.refold", json!({"body": "Sheet"}));
+}
+
+/// A fold whose bend zone crosses the outline on a curved or slanted edge (an ellipse, a
+/// trapezoid) folds directly, to the body the fold, cut and refold route gives (#6957).
+#[test]
+fn a_blank_whose_outline_crosses_the_bend_zone_on_a_curved_or_slanted_edge_folds() {
+    let ellipse = |s: &mut Session| {
+        run(s, "sketch.ellipse", json!({"center": [0, 0], "major": [150, 0], "minor_radius": 60}));
+    };
+    let trapezoid = |s: &mut Session| {
+        run(s, "sketch.line", json!({"points": [[-150, -60], [150, -40], [150, 40], [-150, 60]], "closed": true}));
+    };
+    let cases: [(&str, &dyn Fn(&mut Session), Value); 2] = [
+        (
+            "ellipse",
+            &ellipse,
+            json!({"points": [[0, -100, 0], [0, 100, 0]], "angle": "120 deg", "radius": 60, "fixed": [-140, 0, 0], "body": "Sheet"}),
+        ),
+        ("trapezoid", &trapezoid, json!({"points": [[0, -100, 0], [0, 100, 0]], "angle": "90 deg", "fixed": [-140, 0, 0], "body": "Sheet"})),
+    ];
+    for (name, draw, fold) in cases {
+        let mut direct = Session::default();
+        shaped_blank(&mut direct, draw);
+        if let Err(e) = direct.execute("sheet.fold", &fold) {
+            panic!("{name}: {e}");
+        }
+        let mut route = Session::default();
+        fold_cut_refold(&mut route, ([-150.0, -60.0], [150.0, 60.0]), draw, fold.clone());
+        let (v, want) = (volume(&mut direct), volume(&mut route));
+        assert!(rel(v, want) < 1e-4, "{name}: volume {v} vs {want}");
+        let (f, g) = (flat(&mut direct), flat(&mut route));
+        assert_eq!(f["flat_size_mm"], g["flat_size_mm"], "{name}");
+        let bends = |f: &Value| f["bends"].as_array().map(|b| b.len());
+        assert_eq!(bends(&f), Some(1), "{name}: {f}");
+        for key in ["allowance", "angle_deg", "length", "radius"] {
+            let (a, b) = (f["bends"][0][key].as_f64().unwrap_or(f64::NAN), g["bends"][0][key].as_f64().unwrap_or(f64::NAN));
+            assert!((a - b).abs() < 1e-6, "{name}: bend {key} {a} vs {b}");
+        }
+    }
+}
+
+/// A real corner of the outline inside the bend zone still names the corner, and a curved edge
+/// is not taken for one.
+#[test]
+fn a_corner_in_the_bend_zone_is_still_named() {
+    let mut s = Session::default();
+    outline_blank(&mut s, json!([[0, 0], [100, 0], [100, 50], [60, 50], [60, 70], [40, 70], [40, 50], [0, 50]]));
+    let e = s.execute("sheet.fold", &json!({"points": [[40, 50, 0.8], [60, 50, 0.8]], "fixed": [50, 25, 0.8]})).unwrap_err().to_string();
+    assert!(e.contains("corner of the sheet's outline"), "{e}");
+}
+
 /// #296: two bends meeting at an open corner relief touch only along an edge, so the folded
 /// material the machining guard checks must not be sewn into one solid.
 #[test]
