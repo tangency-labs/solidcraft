@@ -2321,10 +2321,12 @@ fn a_plane_through_three_points_draws_as_a_plane() {
 #[test]
 fn procedural_and_placed_records_are_not_supported_yet() {
     let o = Options::default();
-    // A cylinder side stored as a placed revolution of its seam line.
+    // A cylinder side stored as a placed revolution of its seam line, under a placement that is
+    // not rigid. (The B-rep model now has this one record for main's drawn `Revolution` too, so a
+    // rigid placement is drawn: `a_placement_that_is_not_rigid_is_refused` and the tube fixtures.)
     let mut placed = cylinder(4., 10.);
-    let profile = Box::new(Curve::Line { start: [4., 0., 0.], end: [4., 0., 10.] });
-    let matrix = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+    let profile = Box::new(Curve::Line { start: [2., 0., 0.], end: [2., 0., 10.] });
+    let matrix = [[2., 0., 0., 0.], [0., 2., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
     placed.shells[0].faces[0].surface = Surface::PlacedRevolution { profile, origin: [0.; 3], axis: [0., 0., 1.], matrix, forward: true };
     assert!(matches!(prepare(&placed, &o), Err(HlrError::Unsupported("placed revolution surface"))));
     // A box edge stored as the meeting of the planes y = 0 and z = 0, traced from a leader.
