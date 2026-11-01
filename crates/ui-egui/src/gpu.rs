@@ -1124,12 +1124,12 @@ mod tests {
                     .shapes
                     .iter()
                     .find_map(|s| match &s.shape {
-                        egui::Shape::Text(t) if t.galley.job.text.starts_with(if target == "note" { "Long discovery" } else { "LONG PROVIDER" }) => {
+                        egui::Shape::Text(t) if t.galley.job.text.starts_with(if target == "note" { "Long discovery" } else { "Long provider" }) => {
                             Some(t.pos + t.galley.rect.center().to_vec2())
                         }
                         _ => None,
                     })
-                    .unwrap(),
+                    .expect("picker heading or note has visible text"),
             };
             for _ in 0..4 {
                 output = frame(vec![egui::Event::PointerMoved(at)]);
