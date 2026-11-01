@@ -2730,22 +2730,34 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     for (t, _, h) in bestp.into_iter().chain(profiles_all) {
         surf.push((t - slack, h));
     }
+    let front = bestf.as_ref().map(|(t, _)| *t);
     if all {
         surf.extend(faces.sorted());
     } else if let Some(f) = bestf {
         surf.push(f);
     }
-    // Planes give way to a face or profile at the same depth (a floor on the XZ plane).
+    let mut planes: Vec<(f64, Hit)> = Vec::new();
     for (name, _, q) in origin_planes(app) {
         if let Some(t) = ray_quad(o, d, &q) {
-            surf.push((t + slack, Hit::Plane { name: name.into(), point: o + d * t }));
+            planes.push((t, Hit::Plane { name: name.into(), point: o + d * t }));
         }
     }
     for (name, _, q) in construction_quads(app) {
         if let Some(t) = ray_quad(o, d, &q) {
-            surf.push((t + slack, Hit::Plane { name, point: o + d * t }));
+            planes.push((t, Hit::Plane { name, point: o + d * t }));
         }
     }
+    planes.sort_by(|a, b| a.0.total_cmp(&b.0));
+    // Planes give way to a face or profile at the same depth (a floor on the XZ plane). While a
+    // dialog waits for a plane they are drawn over the bodies, so when the nearest face hides the
+    // nearest plane, the planes are picked through it: just ahead of that face, in their own
+    // depth order, still behind a profile on it (#5431).
+    let through = match (front, planes.first()) {
+        (Some(f), Some((t, _))) if app.picking_plane() && *t > f + slack => Some(f - slack * 0.5),
+        _ => None,
+    };
+    // The sort is stable, so planes moved ahead of the face keep their order.
+    surf.extend(planes.into_iter().map(|(t, h)| (through.unwrap_or(t + slack), h)));
     surf.sort_by(|a, b| a.0.total_cmp(&b.0));
     hits.extend(surf.into_iter().map(|x| x.1));
     hits
