@@ -237,9 +237,10 @@ fn a_read_only_command_keeps_the_replay_after_body_names_are_pinned() {
 
 #[test]
 fn live_sketch_drag_frames_keep_the_replay() {
-    let directory = std::env::temp_dir().join(format!("solidcraft-crash-test-sketch-drag-{}", std::process::id()));
+    let directory = fresh_dir("sketch-drag");
     let (output, ok) = run_child(&directory, "sketch_drag");
     assert!(ok && output.contains("SKETCH_DRAG_JOURNAL_OK"), "{output}");
+    let _ = fs::remove_dir_all(directory);
 }
 
 fn only_report(dir: &Path) -> (Summary, Value) {
