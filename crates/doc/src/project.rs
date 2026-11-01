@@ -1334,6 +1334,24 @@ fn section_of_polyline(plane: &Plane, pts: &[Vec3]) -> Vec<LinkGeom> {
     out
 }
 
+/// Which way the surface faces at triangle `t`: its normals at the corners, added. A flat triangle
+/// close to the outline can tip the other way from the surface it approximates (one whose far
+/// corner lies inside the chord of its near edge), which would add spurs to the outline. The
+/// triangle's own normal `flat` when a corner has none, or when they aren't that surface's: unit,
+/// and close to `flat` (normals averaged across a crease, as an imported mesh may have, are not).
+fn surface_facing(m: &Mesh, t: &[u32; 3], flat: Vec3) -> Vec3 {
+    /// Least cosine between a corner's normal and the triangle's: about 26 degrees.
+    const AGREES: f64 = 0.9;
+    let mut sum = Vec3::ZERO;
+    for i in t {
+        match m.normals.get(*i as usize).and_then(|v| v.normalized()) {
+            Some(v) if v.dot(flat) >= AGREES => sum = sum + v,
+            _ => return flat,
+        }
+    }
+    sum.normalized().unwrap_or(flat)
+}
+
 /// The outline of a body seen along the sketch normal: mesh edges between triangles facing the
 /// sketch and triangles facing away (or edge-on), projected and fitted.
 fn silhouette(plane: &Plane, m: &Mesh) -> Vec<LinkGeom> {
@@ -1346,8 +1364,8 @@ fn silhouette(plane: &Plane, m: &Mesh) -> Vec<LinkGeom> {
     for t in &m.triangles {
         let Some([a, b, c]) = m.tri(t) else { continue };
         let fnrm = (b - a).cross(c - a);
-        let Some(un) = fnrm.normalized() else { continue };
-        let front = un.dot(n) > 1e-6;
+        let Some(flat) = fnrm.normalized() else { continue };
+        let front = surface_facing(m, t, flat).dot(n) > 1e-6;
         for (p, r) in [(a, b), (b, c), (c, a)] {
             let (kp, kr) = (key(p), key(r));
             let k = if kp <= kr { (kp, kr) } else { (kr, kp) };

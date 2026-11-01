@@ -177,6 +177,26 @@ fn boundary_edges(mesh: &Mesh, mut edges: Vec<usize>, faces: &BTreeSet<usize>, p
 mod tests {
     use super::*;
 
+    /// A cube's outline from above is its four sides whatever normals its mesh carries: none, too
+    /// few, zero or not numbers fall back to each triangle's own normal, and so do normals
+    /// averaged across its creases, as an imported mesh may have them.
+    #[test]
+    fn a_silhouette_takes_the_triangles_own_normal_where_the_mesh_has_no_surface_normal() {
+        let corner = |i: u32| Vec3::new(f64::from(i & 1), f64::from((i >> 1) & 1), f64::from((i >> 2) & 1)) * 10.0;
+        let positions: Vec<Vec3> = (0..8).map(corner).collect();
+        let quads = [[0, 2, 3, 1], [4, 5, 7, 6], [0, 1, 5, 4], [2, 6, 7, 3], [0, 4, 6, 2], [1, 3, 7, 5]];
+        let triangles: Vec<[u32; 3]> = quads.iter().flat_map(|[a, b, c, d]| [[*a, *b, *c], [*a, *c, *d]]).collect();
+        let averaged: Vec<Vec3> = positions.iter().map(|p| (*p - Vec3::new(5.0, 5.0, 5.0)).normalized().unwrap_or(Vec3::Z)).collect();
+        let nan = Vec3::new(f64::NAN, 0.0, 0.0);
+        for normals in [Vec::new(), vec![Vec3::Z; 3], vec![Vec3::ZERO; 8], vec![nan; 8], vec![Vec3::new(f64::INFINITY, 0.0, 0.0); 8], averaged] {
+            let tri_face = vec![0; triangles.len()];
+            let mesh = Mesh { positions: positions.clone(), normals: normals.clone(), triangles: triangles.clone(), tri_face, ..Mesh::default() };
+            let outline = super::super::silhouette(&Plane::XY, &mesh);
+            let sides = outline.iter().filter(|g| matches!(g, solidcraft_sketch::LinkGeom::Line(a, b) if (a.dist(*b) - 10.0).abs() < 1e-9)).count();
+            assert_eq!((outline.len(), sides), (4, 4), "{normals:?}: {outline:?}");
+        }
+    }
+
     #[test]
     fn face_family_omits_only_exact_shared_topological_edges() {
         let mut mesh = Mesh::default();

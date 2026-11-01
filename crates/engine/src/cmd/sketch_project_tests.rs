@@ -1296,3 +1296,21 @@ fn a_thicker_angle_moves_the_projected_face_of_the_sketch_on_it() {
     check(&s);
     check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
 }
+
+/// A sphere's outline from above is its equator: one circle and one profile. Flat triangles beside
+/// the equator can tip the other way from the sphere, and their edges must not join the outline.
+#[test]
+fn a_spheres_silhouette_is_one_circle() {
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"radius": 8, "body_name": "Ball"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": -10, "name": "Below"}));
+    let r = run(&mut s, "sketch.project", json!({"refs": [{"body": "Ball"}]}));
+    let curves = r["links"][0]["curves"].as_array().unwrap();
+    assert_eq!(curves.len(), 1, "{r}");
+    let inspected = run(&mut s, "sketch.inspect", json!({}));
+    let circle = inspected["curves"].as_array().unwrap().iter().find(|c| c["id"] == curves[0]).unwrap();
+    assert_eq!(circle["type"], "circle", "{circle}");
+    assert!((circle["radius"].as_f64().unwrap() - 8.0).abs() < 1e-6, "{circle}");
+    let done = run(&mut s, "sketch.finish", json!({}));
+    assert_eq!(done["profiles"], 1, "{done}");
+}
