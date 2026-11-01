@@ -1188,6 +1188,26 @@ impl Dialog {
         {
             inp.items = default_profiles(s);
         }
+        if matches!(d.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::Mirror)) && app.preferences.sketch_mirror_auto_line {
+            let state = s.model.state();
+            if let Some(sketch) = s.active_sketch.and_then(|id| state.sketch(id)) {
+                let mut lines = s.selection.iter().filter_map(|sel| {
+                    let Sel::SketchCurve { id, sketch: from } = sel else { return None };
+                    if from.is_some() && *from != s.active_sketch {
+                        return None;
+                    }
+                    let curve = sketch.sketch.curves.get(sketch.sketch.curve_index(id)?)?;
+                    (curve.construction && matches!(curve.kind, solidcraft_engine::sketch::CurveKind::Line { .. })).then_some(curve)
+                });
+                if let Some(line) = lines.next()
+                    && lines.next().is_none()
+                    && let Some(input) = d.inputs.get_mut(1)
+                    && input.items.is_empty()
+                {
+                    input.items.push(Sel::SketchCurve { id: line.id.clone(), sketch: None });
+                }
+            }
+        }
         d.sync_thread(s);
         d.sync_material(s);
         d.advance();

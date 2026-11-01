@@ -457,6 +457,12 @@ it to remove it. Each input has its own Clear button. Source inputs show a count
 references identify the chosen mirror line, direction, or centre. Box selection also works
 while the window is open. Sketch modify tools take geometry from the sketch being edited.
 
+If your preselection includes exactly one straight construction line of the active sketch,
+opening Mirror uses it as **Mirror line**, keeping your selected entities. Other construction
+lines in the sketch do not count unless selected. With none or multiple selected construction
+lines, choose the reference manually. You can clear or replace the line. To always choose it
+manually, turn off **Preferences > Sketch > Use the preselected construction line for Mirror**.
+
 Proposed sketch geometry appears **green** before confirmation. Change the inputs or values to
 update the preview, then press **OK**. **Cancel** discards the preview. A circular pattern centre
 can be an existing point or a position clicked in empty sketch space.

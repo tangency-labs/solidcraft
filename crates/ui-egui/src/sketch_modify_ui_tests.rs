@@ -204,6 +204,107 @@ fn the_toolbar_button_opens_a_window_with_both_picks_visible() {
 }
 
 #[test]
+fn mirror_uses_the_only_preselected_construction_line_among_multiple_lines() {
+    for second_axis in [false, true] {
+        let mut h = line_and_circle();
+        let ids = curve_ids(&h);
+        h.app.run("sketch.construction", json!({"curves": [ids[0]], "value": true})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[5, -20], [5, 20]], "construction": true, "ids": ["second_axis"]})).unwrap();
+        let line = if second_axis { "second_axis" } else { &ids[0] };
+        let mut picks = vec![Sel::SketchCurve { id: line.into(), sketch: None }, Sel::SketchCurve { id: ids[1].clone(), sketch: None }];
+        if second_axis {
+            picks.reverse();
+        }
+        h.app.session.selection = picks.clone();
+        let before = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"start": "sketch.mirror"})).unwrap();
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[0].items, picks);
+        assert_eq!(d.inputs[1].items, vec![Sel::SketchCurve { id: line.into(), sketch: None }]);
+        assert_eq!(h.app.session.doc.to_json(), before, "opening Mirror only previews the result");
+        assert_eq!(h.app.session.undo.len(), undo);
+        h.frames(2);
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
+        let state = h.app.session.model.state();
+        let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        assert_eq!(sketch.curves.len(), 4, "neither the reference nor the unselected construction line is copied");
+        let solidcraft_engine::sketch::CurveKind::Circle { c, r } = &sketch.curves.last().unwrap().kind else { panic!("expected mirrored circle") };
+        let at = sketch.point(*c).unwrap();
+        let expected_x = if second_axis { 0.0 } else { -10.0 };
+        assert!((at.x - expected_x).abs() < 1e-6 && at.y.abs() < 1e-6);
+        assert!((*r - 3.0).abs() < 1e-6);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.to_json(), before);
+    }
+}
+
+#[test]
+fn mirror_auto_line_requires_one_preselected_straight_construction_line_and_the_preference() {
+    for (count, selected, enabled) in [(0, 1, true), (1, 0, true), (2, 0, true), (1, 1, true), (2, 1, true), (2, 2, true), (1, 1, false)] {
+        let mut h = line_and_circle();
+        let ids = curve_ids(&h);
+        // A construction circle never qualifies, and ordinary lines do not count.
+        h.app.run("sketch.construction", json!({"curves": [ids[1]], "value": true})).unwrap();
+        if count > 0 {
+            h.app.run("sketch.construction", json!({"curves": [ids[0]], "value": true})).unwrap();
+        }
+        if count > 1 {
+            h.app.run("sketch.line", json!({"points": [[5, -20], [5, 20]], "construction": true, "ids": ["second_axis"]})).unwrap();
+        }
+        h.app.session.selection = vec![Sel::SketchCurve { id: ids[1].clone(), sketch: None }];
+        h.app
+            .session
+            .selection
+            .extend([ids[0].as_str(), "second_axis"].into_iter().take(selected).map(|id| Sel::SketchCurve { id: id.into(), sketch: None }));
+        h.app.preferences.sketch_mirror_auto_line = enabled;
+        h.step(&json!({"start": "sketch.mirror"})).unwrap();
+        let d = h.app.dialog.as_ref().unwrap();
+        let expected = if count > 0 && selected == 1 && enabled { vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }] } else { vec![] };
+        assert_eq!(d.inputs[1].items, expected, "count={count}, selected={selected}, enabled={enabled}");
+    }
+}
+
+#[test]
+fn mirror_auto_line_respects_manual_references_and_only_uses_the_active_sketch() {
+    let mut h = line_and_circle();
+    let ids = curve_ids(&h);
+    h.app.run("sketch.construction", json!({"curves": [ids[0]], "value": true})).unwrap();
+    h.app.session.selection.clear();
+    h.step(&json!({"start": "sketch.mirror"})).unwrap();
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(d.inputs[0].items.is_empty() && d.inputs[1].items.is_empty(), "nothing is inferred without preselection");
+    assert_eq!(d.active, 0);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    let line = Sel::SketchCurve { id: ids[0].clone(), sketch: None };
+    let axis = Sel::Axis { name: "X".into() };
+    h.app.session.selection = vec![axis.clone(), line.clone()];
+    h.step(&json!({"start": "sketch.mirror"})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items, vec![axis]);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.app.session.selection = vec![line];
+    h.step(&json!({"start": "sketch.mirror"})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items.len(), 1);
+    h.step(&json!({"click": {"handle": "dialog:clear:Mirror line"}})).unwrap();
+    h.frames(3);
+    assert!(h.app.dialog.as_ref().unwrap().inputs[1].items.is_empty(), "a cleared reference stays empty");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    let previous_sketch = h.app.session.active_sketch;
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XZ"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0, -20], [0, 20]], "construction": true, "ids": [ids[0]]})).unwrap();
+    h.app.session.selection = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: previous_sketch }];
+    h.step(&json!({"start": "sketch.mirror"})).unwrap();
+    assert!(h.app.dialog.as_ref().unwrap().inputs[1].items.is_empty(), "another sketch's construction line is not used");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.app.session.selection = vec![Sel::SketchCurve { id: ids[0].clone(), sketch: h.app.session.active_sketch }];
+    h.step(&json!({"start": "sketch.mirror"})).unwrap();
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items, vec![Sel::SketchCurve { id: ids[0].clone(), sketch: None }]);
+}
+
+#[test]
 fn the_two_picks_become_the_command() {
     let h = line_and_circle();
     let ids = curve_ids(&h);
