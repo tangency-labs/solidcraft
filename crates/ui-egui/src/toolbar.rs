@@ -1874,7 +1874,18 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 pos2(px + RIBBON_TAB_INSET, top + group_height - SECTION_HEIGHT - (RIBBON_TAB_INSET - 1.0)),
                 vec2((width - 2.0 * RIBBON_TAB_INSET).max(0.0), SECTION_HEIGHT),
             );
-            let lresp = ui.interact(lr, ui.id().with(("panel", panel)), Sense::click());
+            // The type filter has no command buttons: its name sits where a button's label
+            // sits (under the icon, level with the neighbouring button labels), and the whole
+            // panel opens the drop-down.
+            let label = if finish {
+                app.tr("ui.ribbon_exit").to_string()
+            } else if *panel == "SELECT" {
+                app.tr_label("Selection filter").to_string()
+            } else {
+                ribbon_label(app, panel)
+            };
+            let hit = if *panel == "SELECT" { Rect::from_min_max(pos2(lr.left(), top + 2.0), lr.max) } else { lr };
+            let lresp = ui.interact(hit, ui.id().with(("panel", panel)), Sense::click());
             crate::scenario::publish_handle(&format!("panel:{tab}:{panel}"), lr.center());
             crate::scenario::publish_target(&format!("ribbon:section:{tab}:{panel}"), lr);
             // Commands this panel has only in its drop-down (not drawn as a button or cell).
@@ -1892,27 +1903,43 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let hot = lresp.hovered() && enabled_panel;
             if hidden_running && !panel_open {
                 // Its command is running from the drop-down: the label shows it like a pressed button.
-                painter.rect(lr, t.radius_sm, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside);
-                crate::scenario::publish_rect(&format!("ribbon:running_section:{tab}:{panel}"), lr);
+                painter.rect(hit, t.radius_sm, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside);
+                crate::scenario::publish_rect(&format!("ribbon:running_section:{tab}:{panel}"), hit);
             } else if panel_open || hot {
-                painter.rect_filled(lr, t.radius_sm, if panel_open { accent.soft } else { t.hover });
+                painter.rect_filled(hit, t.radius_sm, if panel_open { accent.soft } else { t.hover });
             }
             if hidden_reveal.is_some_and(|r| !r.preview) {
-                paint_reveal(&painter, lr, &accent, pulse, true);
-                crate::scenario::publish_rect("ribbon:reveal", lr);
+                paint_reveal(&painter, hit, &accent, pulse, true);
+                crate::scenario::publish_rect("ribbon:reveal", hit);
             }
-            let label = if finish { app.tr("ui.ribbon_exit").to_string() } else { ribbon_label(app, panel) };
             let panel_open = panel_open || hidden_running;
             let font = if panel_open || hot {
                 crate::fonts::semibold(crate::theme::Tokens::get().font_caption)
             } else {
                 FontId::proportional(crate::theme::Tokens::get().font_caption)
             };
-            let label_width = painter.layout_no_wrap(label.clone(), font, t.text_dim).size().x;
-            let ink = if panel_open { accent.ink } else { t.text_dim };
-            ribbon_text(ui, lr.center() - vec2(if finish { 0.0 } else { 6.0 }, 0.0), &label, t.font_caption, ink, panel_open || hot);
+            let galley = painter.layout_no_wrap(label.clone(), font, t.text_dim);
+            let label_width = galley.size().x;
+            let label_center =
+                if *panel == "SELECT" { pos2(lr.center().x, top + 2.0 + BUTTON_LABEL_TOP + galley.size().y / 2.0) } else { lr.center() };
+            // The type filter's name stands where a command's label stands, so it takes that
+            // label's ink rather than the dimmer section-label ink.
+            let ink = if panel_open {
+                accent.ink
+            } else if *panel == "SELECT" {
+                t.text
+            } else {
+                t.text_dim
+            };
+            ribbon_text(ui, label_center - vec2(if finish { 0.0 } else { 6.0 }, 0.0), &label, t.font_caption, ink, panel_open || hot);
             if !finish {
-                dropdown_arrow(&painter, pos2(lr.center().x + label_width / 2.0 + 1.0, lr.center().y + 0.5), ink);
+                dropdown_arrow(&painter, pos2(label_center.x + label_width / 2.0 + 1.0, label_center.y + 0.5), ink);
+            }
+            // A panel with no commands of its own (the type filter) still shows what it is, at
+            // the size and height of a command button's icon.
+            if cmds.is_empty() && !finish {
+                let icon = Rect::from_center_size(pos2(px + width / 2.0, top + 2.0 + 16.0), vec2(26.0, 26.0));
+                crate::icons::paint_icon(&painter, icon, "filter", f32::from(t.icon.a()) / 255.0);
             }
             if lresp.clicked() && enabled_panel {
                 ui.ctx().data_mut(|d| {
@@ -3046,32 +3073,49 @@ fn drag_ghost(app: &SolveApp, ctx: &egui::Context, id: &str, at: egui::Pos2, rem
 pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     ui.label(egui::RichText::new(crate::i18n::tr_label("Selection filter")).color(t.text_dim).size(t.font_small));
-    for (mode, label) in [("body", app.tr_label("Select bodies (a face picks its body)")), ("component", app.tr("ui.select_components_by_face"))] {
-        let mut on = app.ui.pick_mode() == mode;
-        if ui_kit::checkbox(ui, label, &mut on).changed() {
-            // The Faces checkbox below is independent. The standalone command enables faces.
-            let filters = std::mem::take(&mut app.ui.pick_off);
-            let _ = app.run("select.filter", json!({"mode": if on { mode } else { "face" }}));
-            app.ui.pick_off = filters;
-        }
+    // NX's Type Filter, in its order: one kind of object, chosen from the list, nothing to
+    // tick. The kinds a design model has no objects of pick nothing, as they do in NX.
+    const FILTERS: &[crate::PickFilter] = &[
+        crate::PickFilter::Any,
+        crate::PickFilter::Machining,
+        crate::PickFilter::DatumCsys,
+        crate::PickFilter::Datum,
+        crate::PickFilter::Bodies,
+        crate::PickFilter::Curves,
+        crate::PickFilter::CurveFeature,
+        crate::PickFilter::Points,
+        crate::PickFilter::Sheets,
+        crate::PickFilter::Features,
+        crate::PickFilter::Sketch,
+        crate::PickFilter::View,
+        crate::PickFilter::Edges,
+        crate::PickFilter::Faces,
+    ];
+    const LABELS: &[&str] = &[
+        "No selection filter",
+        "Machining feature",
+        "Datum coordinate system",
+        "Datum",
+        "Solid body",
+        "Curve",
+        "Curve feature",
+        "Point",
+        "Sheet body",
+        "Feature",
+        "Sketch",
+        "View",
+        "Edge",
+        "Face",
+    ];
+    let mut mode = FILTERS.iter().position(|f| *f == app.ui.pick_filter).unwrap_or(0);
+    if crate::ui_kit::dropdown_picked(ui, "select.filter", &mut mode, &LABELS) {
+        app.set_pick_filter(FILTERS[mode.min(FILTERS.len() - 1)]);
     }
-    for (k, label) in [
-        ("faces", "Faces"),
-        ("edges", "Edges"),
-        ("vertices", "Vertices"),
-        ("sketch", "Sketch geometry and profiles"),
-        ("sketch_curves", "Sketch curves"),
-        ("sketch_points", "Sketch points"),
-        ("dimensions", "Sketch dimensions"),
-        ("constraints", "Sketch constraints"),
-    ] {
-        let mut on = !app.ui.pick_off.iter().any(|x| x == k);
-        if crate::ui_kit::checkbox(ui, crate::i18n::tr_label(label), &mut on).changed() {
-            app.ui.pick_off.retain(|x| x != k);
-            if !on {
-                app.ui.pick_off.push(k.to_string());
-            }
-        }
+    // Picking a component (not one of NX's types) is for assemblies: a face picks its own
+    // component occurrence instead of the model body.
+    let mut on = app.ui.pick_components;
+    if ui_kit::checkbox(ui, app.tr("ui.select_components_by_face"), &mut on).changed() {
+        app.ui.pick_components = on;
     }
     // The selection shape (#4376): a drag draws a freehand lasso instead of the rectangle.
     let label = app.tr("ui.lasso_select").to_string();

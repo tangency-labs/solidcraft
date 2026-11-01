@@ -1327,8 +1327,8 @@ fn select_filter(_s: &mut Session, p: &Value) -> Result<Value> {
         mode: String,
     }
     let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("select.filter", e.to_string()))?;
-    if !matches!(request.mode.as_str(), "body" | "face" | "component") {
-        return Err(bad("select.filter", "mode must be body, face or component"));
+    if !matches!(request.mode.as_str(), "any" | "body" | "face" | "edge" | "vertex" | "sketch" | "component") {
+        return Err(bad("select.filter", "mode must be any, body, face, edge, vertex, sketch or component"));
     }
     Ok(json!({"mode": request.mode}))
 }
