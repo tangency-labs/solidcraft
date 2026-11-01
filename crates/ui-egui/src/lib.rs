@@ -1159,7 +1159,16 @@ impl SolveApp {
         self.ui.pick_components = false;
         self.ui.pick_bodies = filter == PickFilter::Bodies;
         const KINDS: [&str; 11] = [
-            "faces", "edges", "vertices", "sketch", "sketch_curves", "sketch_points", "dimensions", "constraints", "planes", "axes",
+            "faces",
+            "edges",
+            "vertices",
+            "sketch",
+            "sketch_curves",
+            "sketch_points",
+            "dimensions",
+            "constraints",
+            "planes",
+            "axes",
             "construction_points",
         ];
         self.ui.pick_off.retain(|kind| !KINDS.contains(&kind.as_str()));

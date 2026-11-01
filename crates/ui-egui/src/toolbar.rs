@@ -1890,14 +1890,17 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             };
             let galley = painter.layout_no_wrap(label.clone(), font, t.text_dim);
             let label_width = galley.size().x;
-            let label_center = if *panel == "SELECT" {
-                pos2(lr.center().x, top + 2.0 + BUTTON_LABEL_TOP + galley.size().y / 2.0)
-            } else {
-                lr.center()
-            };
+            let label_center =
+                if *panel == "SELECT" { pos2(lr.center().x, top + 2.0 + BUTTON_LABEL_TOP + galley.size().y / 2.0) } else { lr.center() };
             // The type filter's name stands where a command's label stands, so it takes that
             // label's ink rather than the dimmer section-label ink.
-            let ink = if panel_open { accent.ink } else if *panel == "SELECT" { t.text } else { t.text_dim };
+            let ink = if panel_open {
+                accent.ink
+            } else if *panel == "SELECT" {
+                t.text
+            } else {
+                t.text_dim
+            };
             ribbon_text(ui, label_center - vec2(if finish { 0.0 } else { 6.0 }, 0.0), &label, t.font_caption, ink, panel_open || hot);
             if !finish {
                 dropdown_arrow(&painter, pos2(label_center.x + label_width / 2.0 + 1.0, label_center.y + 0.5), ink);
