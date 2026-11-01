@@ -167,8 +167,9 @@ fn set(s: &mut Session, p: &Value, a: SurfaceAnalysis) -> Result<Value> {
     if bool_(p, "clear").unwrap_or(false) {
         s.analysis = None;
     } else {
-        s.analyses_off(Some(a.command()));
+        // In this order: a replaced analysis keeps its status slot.
         s.analysis = Some(a);
+        s.analyses_off(Some(a.command()));
     }
     s.status_analysis_changed((!bool_(p, "clear").unwrap_or(false)).then_some(crate::status_items::StatusId::SurfaceAnalysis));
     s.revision += 1;

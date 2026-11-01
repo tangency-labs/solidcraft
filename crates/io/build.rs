@@ -13,7 +13,7 @@ use std::process::Command;
 
 /// The workspace crates a design's model is computed from: `doc` and every workspace crate it
 /// depends on (a test checks the list against their manifests).
-const EVALUATION_CRATES: [&str; 6] = ["geom", "sketch", "kernel", "render", "derive", "doc"];
+const EVALUATION_CRATES: [&str; 9] = ["geom", "profile", "smlib", "step", "sketch", "kernel", "render", "derive", "doc"];
 /// The other files the saved model depends on, relative to the workspace root.
 const EVALUATION_FILES: [&str; 3] = ["crates/io/build.rs", "crates/io/src/design/native_cache.rs", ".cargo/config.toml"];
 /// What under `vendor/` does not compute models: notes, and the interface's renderer.

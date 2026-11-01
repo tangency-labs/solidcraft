@@ -749,10 +749,13 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         let keys: Option<Vec<(String, usize)>> = members.iter().map(|i| bodies.get(*i).and_then(least).map(|k| (k, *i))).collect();
         let Some(mut keys) = keys else { continue };
         keys.sort();
-        let names: Vec<String> = members.iter().filter_map(|i| bodies.get(*i).map(|b| b.name.clone())).collect();
-        for (name, (_, i)) in names.into_iter().zip(keys) {
+        // A name goes with the feature that made it: the piece taking the first name is the body
+        // the feature was given, whichever piece the kernel lists first.
+        let names: Vec<(String, u64)> = members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature))).collect();
+        for ((name, feature), (_, i)) in names.into_iter().zip(keys) {
             if let Some(b) = bodies.get_mut(i) {
                 b.name = name;
+                b.feature = feature;
             }
         }
     }

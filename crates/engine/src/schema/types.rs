@@ -1180,9 +1180,6 @@ pub struct FeatureCommon {
     /// feature.
     #[serde(default)]
     pub participants: Option<StringList>,
-    /// What a join makes of pieces that share no face. Default: separate.
-    #[serde(default)]
-    pub touching: Option<TouchingParam>,
 }
 
 /// Deserializes a flattened [`FeatureCommon`] (or [`ConstructionCommon`], [`PlaneCommon`]) from

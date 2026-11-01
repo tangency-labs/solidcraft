@@ -425,7 +425,9 @@ impl Drop for Nested {
 /// `params` with world picks mapped into component frames (`None`: nothing to change). A model
 /// that cannot be placed is the error.
 pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<Value>> {
-    if !placed(s) {
+    // A command with no world picks has nothing to map, and may not need the bodies placed.
+    let picks = !table(id).is_empty() || matches!(id, "library.apply" | "timeline.redefine" | "sketch.redefine");
+    if !picks || !placed(s) {
         return Ok(None);
     }
     let world = s.world_state()?;
