@@ -1215,10 +1215,11 @@ pub(crate) fn imprint_union(a: &Body, b: &Body, accept: &dyn Fn(&Body) -> bool) 
                 out
             };
             let (pa, pb) = (corners(&a2, *n, *d), corners(&b2, -*n, -*d));
+            // A side with no edge to cut is left as it was: its history stays.
             let a3 = crate::splitface::split_edges_at(&a2, &pb)?;
-            ha = crate::boolean_record::through(&a3, 0, ha.as_ref());
+            ha = crate::boolean_record::stepped(&a2, &a3, ha);
             let b3 = crate::splitface::split_edges_at(&b2, &pa)?;
-            hb = crate::boolean_record::through(&b3, 0, hb.as_ref());
+            hb = crate::boolean_record::stepped(&b2, &b3, hb);
             (a2, b2) = (a3, b3);
         }
         let Some(r) = glue(&a2, &b2) else { return Ok(None) };

@@ -541,16 +541,17 @@ pub(crate) fn outline_union(a: &Body, b: &Body, accept: &dyn Fn(&Body) -> bool) 
             let in_a = |x: &Body| crate::coplanar::faces_in(x, *n, *d, tol);
             let in_b = |x: &Body| crate::coplanar::faces_in(x, -*n, -*d, tol);
             let (Some(ea), Some(eb)) = (plane_edges(&a2, &in_a(&a2), &fa, tol), plane_edges(&b2, &in_b(&b2), &fa, tol)) else { return Ok(None) };
+            // A side with no edge to cut or face to divide is left as it was: its history stays.
             let a3 = crate::splitface::split_edges_at(&a2, &cuts(&ea, &eb, &fa, tol))?;
-            ha = crate::boolean_record::through(&a3, 0, ha.as_ref());
+            ha = crate::boolean_record::stepped(&a2, &a3, ha);
             let b3 = crate::splitface::split_edges_at(&b2, &cuts(&eb, &ea, &fa, tol))?;
-            hb = crate::boolean_record::through(&b3, 0, hb.as_ref());
+            hb = crate::boolean_record::stepped(&b2, &b3, hb);
             // Each side's edges as the other side's frame sees them.
             let (Some(eb), Some(ea)) = (plane_edges(&b3, &in_b(&b3), &fa, tol), plane_edges(&a3, &in_a(&a3), &fb, tol)) else { return Ok(None) };
-            let a4 = divided(&a3, &in_a(&a3), &eb, &fa, tol)?.unwrap_or(a3);
-            let b4 = divided(&b3, &in_b(&b3), &ea, &fb, tol)?.unwrap_or(b3);
-            ha = crate::boolean_record::through(&a4, 0, ha.as_ref());
-            hb = crate::boolean_record::through(&b4, 0, hb.as_ref());
+            let a4 = divided(&a3, &in_a(&a3), &eb, &fa, tol)?.unwrap_or_else(|| a3.clone());
+            let b4 = divided(&b3, &in_b(&b3), &ea, &fb, tol)?.unwrap_or_else(|| b3.clone());
+            ha = crate::boolean_record::stepped(&a3, &a4, ha);
+            hb = crate::boolean_record::stepped(&b3, &b4, hb);
             (a2, b2) = (a4, b4);
         }
         let Some(r) = crate::coplanar::glue(&a2, &b2) else { return Ok(None) };
