@@ -762,7 +762,18 @@ fn export_to(
     } else {
         // Bodies carry the colour they are shown in (appearance, material or imported), and the
         // file the design's properties where the format has a place for them.
-        solidcraft_io::export_with_parts(&s.doc.painted(&s.world_state()), bodies, parts, format, &name, &s.doc.metadata, quality)?
+        // A picture of the part, drawn only for a format that has a place for it.
+        let thumbnail = matches!(format, Format::ThreeMf | Format::ThreeMfTagged).then(|| thumbnail::exported(s)).flatten();
+        solidcraft_io::export_with_parts(
+            &s.doc.painted(&s.world_state()),
+            bodies,
+            parts,
+            format,
+            &name,
+            &s.doc.metadata,
+            quality,
+            thumbnail.as_deref(),
+        )?
     };
     solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     Ok(json!({"path": path, "bytes": bytes.len(), "format": format!("{format:?}")}))
@@ -1062,6 +1073,28 @@ mod urdf_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #9449: a 3MF export carries a picture of the part as its package thumbnail.
+    #[test]
+    fn a_3mf_export_carries_the_design_thumbnail() {
+        crate::capture::install_test_renderer();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30})).unwrap();
+        for body in &s.world_state().bodies {
+            body.mesh();
+        }
+        assert!(thumbnail::exported(&s).is_some());
+        let dir = std::env::temp_dir();
+        let has_thumbnail = |s: &mut Session, name: &str| {
+            let path = dir.join(format!("solidcraft-3mf-thumbnail-{}-{name}", std::process::id()));
+            s.execute("file.export", &json!({"path": path})).unwrap();
+            let bytes = std::fs::read(&path).unwrap();
+            std::fs::remove_file(&path).unwrap();
+            bytes.windows(b"Metadata/thumbnail.png".len()).any(|entry| entry == b"Metadata/thumbnail.png")
+        };
+        assert!(has_thumbnail(&mut s, "part.3mf"));
+        assert!(!has_thumbnail(&mut s, "part.stl"), "STL has no place for a picture");
+    }
 
     /// #8139: with `objects: "component"` a 3MF has one object for each placement of a component
     /// with two or more bodies, its bodies the object's parts; the design's own bodies stay objects

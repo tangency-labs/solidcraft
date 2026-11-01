@@ -345,7 +345,14 @@ pub fn render_transparent(scene: &mut Scene, cam: &Camera, w: usize, h: usize) -
     scene.background = Some((Rgb(255, 255, 255), Rgb(255, 255, 255)));
     let mut out = render(scene, cam, w, h);
     scene.background = keep;
-    for (o, b) in out.rgba.as_chunks_mut::<4>().0.iter_mut().zip(black.rgba.as_chunks::<4>().0) {
+    unblend(&mut out.rgba, &black.rgba);
+    out
+}
+
+/// One picture drawn over white (`over_white`, made straight RGBA in place) and over black, with
+/// the alpha recovered from the difference (exact for the anti-aliased edges).
+pub fn unblend(over_white: &mut [u8], over_black: &[u8]) {
+    for (o, b) in over_white.as_chunks_mut::<4>().0.iter_mut().zip(over_black.as_chunks::<4>().0) {
         // white - black = 255 (1 - alpha) in every channel; average them.
         let d: u32 = (0..3).map(|k| u32::from(o[k].saturating_sub(b[k]))).sum();
         let a = 255.0 - d as f64 / 3.0;
@@ -354,7 +361,6 @@ pub fn render_transparent(scene: &mut Scene, cam: &Camera, w: usize, h: usize) -
         }
         o[3] = a.round().clamp(0.0, 255.0) as u8;
     }
-    out
 }
 
 #[cfg(test)]

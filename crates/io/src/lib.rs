@@ -694,12 +694,14 @@ pub fn export_with_quality(
     meta: &Metadata,
     quality: MeshQuality,
 ) -> Result<Vec<u8>> {
-    export_with_parts(state, bodies, &[], format, name, meta, quality)
+    export_with_parts(state, bodies, &[], format, name, meta, quality, None)
 }
 
 /// [`export_with_quality`], and in 3MF each of `parts` (a name and the names of its bodies)
 /// written as one object with those bodies as its parts ([`model_xml_parts`], #8139).
 /// Bodies of a part that are not exported are left out of it. Other formats have no parts.
+/// A 3MF carries `thumbnail` (a PNG) as its package thumbnail; other formats have no place for it.
+#[allow(clippy::too_many_arguments)]
 pub fn export_with_parts(
     state: &ModelState,
     bodies: &[String],
@@ -708,6 +710,7 @@ pub fn export_with_parts(
     name: &str,
     meta: &Metadata,
     quality: MeshQuality,
+    thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     let sel = selected(state, bodies)?;
     Ok(match format {
@@ -744,7 +747,7 @@ pub fn export_with_parts(
             let objs: Vec<MeshObject> = sel.iter().map(|b| mesh_object(b, format == Format::ThreeMfTagged, quality)).collect::<Result<_>>()?;
             let index = |n: &String| sel.iter().position(|b| &b.name == n);
             let parts: Vec<(String, Vec<usize>)> = parts.iter().map(|(p, names)| (p.clone(), names.iter().filter_map(index).collect())).collect();
-            write_3mf_parts(&objs, &parts, &threemf_metadata(meta))?
+            write_3mf_parts(&objs, &parts, &threemf_metadata(meta), thumbnail)?
         }
         Format::Design => return Err(IoError::Format("sc (save the document instead)".into())),
         Format::Urdf => return Err(IoError::Format("urdf (an assembly package; use file.export)".into())),
