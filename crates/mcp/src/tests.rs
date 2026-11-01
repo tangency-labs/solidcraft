@@ -1271,6 +1271,77 @@ fn tool_unknown_command_errors_explain_packed_params() {
     assert!(body["failed"]["error"].as_str().unwrap().contains("command ids have no parameters; pass them in `params`"), "{body}");
 }
 
+/// #10678: through direct `execute`, an unknown command id that is exactly a registered
+/// MCP tool name gets the namespace hint instead of unrelated closest-command suggestions.
+#[test]
+fn tool_name_command_ids_get_namespace_hint_via_execute() {
+    let mut s = server();
+    for id in ["execute", "list_commands", "describe_command", "screenshot"] {
+        let r = raw_tool(&mut s, "execute", json!({"command": id, "params": {}}));
+        assert_eq!(r["result"]["isError"], true, "{r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with(&format!("unknown command `{id}`")), "{text}");
+        assert!(text.contains(&format!("`{id}` is an MCP tool, not an engine command id")), "{text}");
+        assert!(text.contains("tools/list") && text.contains("list_commands"), "{text}");
+        assert!(!text.contains("closest:"), "{text}");
+    }
+}
+
+/// #10678: the direct `describe_command` hint inspects the requested `id`, not the outer
+/// `engine.describe` command `exec` sees.
+#[test]
+fn tool_name_command_ids_get_namespace_hint_via_describe_command() {
+    let mut s = server();
+    for id in ["execute", "list_commands"] {
+        let r = raw_tool(&mut s, "describe_command", json!({"id": id}));
+        assert_eq!(r["result"]["isError"], true, "{r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with(&format!("unknown command `{id}`")), "{text}");
+        assert!(text.contains(&format!("`{id}` is an MCP tool, not an engine command id")), "{text}");
+        assert!(!text.contains("engine.describe"), "{text}");
+    }
+    // Control: a valid engine command id still describes itself.
+    let r = raw_tool(&mut s, "describe_command", json!({"id": "solid.box"}));
+    assert_ne!(r["result"]["isError"], true, "{r}");
+}
+
+/// #10678: an engine-id typo keeps its closest-command suggestions; the tool-name hint is
+/// only for exact registered tool names.
+#[test]
+fn engine_command_id_typo_still_gets_closest_suggestions() {
+    let mut s = server();
+    let r = raw_tool(&mut s, "execute", json!({"command": "solid.bxo"}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let text = r["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("closest: `solid.box`"), "{text}");
+    assert!(!text.contains("MCP tool"), "{text}");
+}
+
+/// #10678: a genuinely unknown id keeps the ordinary unknown-command error on both paths.
+#[test]
+fn genuinely_unknown_command_id_keeps_the_ordinary_error() {
+    let mut s = server();
+    for (name, args) in [("execute", json!({"command": "madeup.thing"})), ("describe_command", json!({"id": "madeup.thing"}))] {
+        let r = raw_tool(&mut s, name, args);
+        assert_eq!(r["result"]["isError"], true, "{r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("unknown command `madeup.thing`"), "{text}");
+        assert!(!text.contains("MCP tool"), "{text}");
+    }
+}
+
+/// #10678: a valid engine command id that overlaps a tool name resolves as a command —
+/// the engine accepts it before any tool-name hint could apply.
+#[test]
+fn valid_engine_command_id_overlapping_a_tool_name_resolves_as_command() {
+    let mut b = Recorder { calls: Vec::new(), batch: Ok(json!({})) };
+    let r = crate::tools::call_tool(&mut b, "execute", &json!({"command": "measure"}));
+    assert_ne!(r["isError"], json!(true), "{r}");
+    assert!(r["content"][0]["text"].as_str().unwrap().contains("measure"), "{r}");
+    let r = crate::tools::call_tool(&mut b, "describe_command", &json!({"id": "measure"}));
+    assert_ne!(r["isError"], json!(true), "{r}");
+}
+
 fn hostile_values() -> Vec<Value> {
     vec![
         Value::Null,

@@ -729,6 +729,11 @@ fn command_error(command: &str, error: String) -> String {
         return error;
     }
     let id = command.split(['{', '(']).next().unwrap_or(command).trim();
+    // An id that is exactly a registered tool name confuses the two namespaces: name the
+    // distinction and its recovery instead of offering unrelated closest-command suggestions.
+    if id == command.trim() && is_tool_name(id) {
+        return tool_name_error(id);
+    }
     let packed = id != command.trim();
     let normalize = |s: &str| s.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_lowercase()).collect::<String>();
     let normalized = normalize(id);
@@ -760,6 +765,29 @@ fn command_error(command: &str, error: String) -> String {
         message.push_str("; command ids have no parameters; pass them in `params`");
     }
     message
+}
+
+/// Whether `name` is exactly a registered MCP tool name, read from the tool definitions
+/// themselves so the two namespaces can never drift apart.
+fn is_tool_name(name: &str) -> bool {
+    tool_definitions().iter().any(|t| t["name"].as_str() == Some(name))
+}
+
+/// The reply when a rejected command id is exactly a tool name: the recovery belongs to the
+/// tool namespace, not to a typo's closest-command suggestions.
+fn tool_name_error(id: &str) -> String {
+    format!(
+        "unknown command `{id}`: `{id}` is an MCP tool, not an engine command id. Use MCP tools/list for its tool schema, or list_commands for engine command ids."
+    )
+}
+
+/// A `describe_command` rejection of an id that is exactly a tool name gets the namespace
+/// hint; every other error is left exactly as the engine said it.
+fn describe_error(id: &str, error: String) -> String {
+    if error.starts_with(&format!("unknown command `{id}`")) && is_tool_name(id) {
+        return tool_name_error(id);
+    }
+    error
 }
 
 fn command_distance(a: &str, b: &str) -> usize {
@@ -808,7 +836,9 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         }
         "describe_command" => {
             let id = str_arg(a, "id").ok_or("`id` is required")?;
-            exec(b, "engine.describe", json!({"command": id}))
+            // The engine rejects the requested id inside its own error, so the tool-name
+            // hint must inspect the `id`, not the outer `engine.describe` command `exec` sees.
+            exec(b, "engine.describe", json!({"command": id})).map_err(|e| describe_error(id, e))
         }
         "execute" => {
             let id = str_arg(a, "command").ok_or("`command` is required")?;
