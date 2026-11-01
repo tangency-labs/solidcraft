@@ -1607,6 +1607,10 @@ pub struct PrefsWindow {
     reveal: Option<crate::prefs_search::Reveal>,
     /// Where the theme Import tile was drawn last frame: a file dropped there is a theme (#8226).
     import_tile: Option<egui::Rect>,
+    /// The GitHub link typed on the Plugins page.
+    pub(crate) plugin_url: String,
+    /// A GitHub install running in the background. The page polls it.
+    pub(crate) plugin_job: Option<std::sync::mpsc::Receiver<Result<crate::plugins::Installed, String>>>,
 }
 
 /// Following a theme file needs the file system: the desktop app only (#7573).

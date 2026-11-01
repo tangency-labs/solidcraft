@@ -1,10 +1,11 @@
 //! Preferences › Plugins: packages installed under the per-user data folder.
 //!
-//! A plugin is a directory of `{data}/plugins/<id>/plugin.json`. The page searches that list.
-//! It reads `plugin.json` and records which ids are turned off. It does not load or run anything
-//! from the folder. Running a plugin (the wasm host in docs/plugins.md) is a later step; it will
-//! honour `disabled_plugins`.
+//! A plugin is a directory of `{data}/plugins/<id>/plugin.json`. The page searches that list and
+//! can install one from a GitHub repository link. It reads `plugin.json` and records which ids
+//! are turned off. It does not load or run anything from the folder. Running a plugin (the wasm
+//! host in docs/plugins.md) is a later step; it will honour `disabled_plugins`.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use egui::RichText;
@@ -130,6 +131,137 @@ pub fn enabled(app: &SolveApp, id: &str) -> bool {
     !app.preferences.disabled_plugins.contains(id)
 }
 
+/// A repository SolidCraft can download. Only `github.com`, and only the repository itself.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct GitHubRepo {
+    pub owner: String,
+    pub repo: String,
+    pub git_ref: Option<String>,
+}
+
+/// What [`install_zip`] put in the plugins folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Installed {
+    pub id: String,
+    pub name: String,
+    pub updated: bool,
+}
+
+/// A downloaded repository larger than this is refused, and again once it is unpacked.
+const MAX_ZIP: u64 = 256 * 1024 * 1024;
+const MAX_ENTRIES: usize = 4_000;
+const MAX_FILE: u64 = 64 * 1024 * 1024;
+
+impl GitHubRepo {
+    /// The zip GitHub serves for this repository (the default branch, unless a tag or branch was named).
+    pub(crate) fn archive_url(&self) -> String {
+        match &self.git_ref {
+            Some(git_ref) => format!("https://api.github.com/repos/{}/{}/zipball/{}", self.owner, self.repo, encode_ref(git_ref)),
+            None => format!("https://api.github.com/repos/{}/{}/zipball", self.owner, self.repo),
+        }
+    }
+
+    fn caption(&self) -> String {
+        match &self.git_ref {
+            Some(git_ref) => format!("{}/{} ({git_ref})", self.owner, self.repo),
+            None => format!("{}/{}", self.owner, self.repo),
+        }
+    }
+}
+
+/// `https://github.com/owner/repo`, `git@github.com:owner/repo.git`, or `owner/repo`.
+/// A `/tree/<branch>`, `/commit/<sha>` or `/releases/tag/<tag>` link selects that revision.
+/// A link to a file or another host is refused.
+pub(crate) fn parse_github(input: &str) -> Result<GitHubRepo, String> {
+    let text = input.trim();
+    if text.is_empty() {
+        return Err("Paste a GitHub repository link.".into());
+    }
+    if text.starts_with("http://") {
+        return Err("The link has to start with https://github.com/.".into());
+    }
+    let (owner, repo, git_ref) = if let Some(rest) = text.strip_prefix("git@github.com:") { split_ssh(rest)? } else { split_web(text)? };
+    let repo = repo.strip_suffix(".git").unwrap_or(repo);
+    github_owner(owner)?;
+    github_repo(repo)?;
+    if let Some(git_ref) = &git_ref {
+        github_ref(git_ref)?;
+    }
+    Ok(GitHubRepo { owner: owner.to_string(), repo: repo.to_string(), git_ref })
+}
+
+fn split_ssh(rest: &str) -> Result<(&str, &str, Option<String>), String> {
+    let rest = rest.split(['?', '#']).next().unwrap_or(rest);
+    let mut parts = rest.split('/').filter(|part| !part.is_empty());
+    let owner = parts.next().ok_or_else(|| "Paste a link like https://github.com/owner/repository.".to_string())?;
+    let repo = parts.next().ok_or_else(|| "Paste a link like https://github.com/owner/repository.".to_string())?;
+    if parts.next().is_some() {
+        return Err("Paste the repository link, not a file inside it.".into());
+    }
+    Ok((owner, repo, None))
+}
+
+fn split_web(text: &str) -> Result<(&str, &str, Option<String>), String> {
+    let bare = text.strip_prefix("https://").unwrap_or(text);
+    if bare.contains("://") {
+        return Err("The link has to be a github.com repository.".into());
+    }
+    let bare = bare.split(['?', '#']).next().unwrap_or(bare);
+    if bare.split('/').next().unwrap_or("").contains('@') {
+        return Err("The link has to be a github.com repository.".into());
+    }
+    let mut parts: Vec<&str> = bare.split('/').filter(|part| !part.is_empty()).collect();
+    let had_host = matches!(parts.first().copied(), Some("github.com" | "www.github.com"));
+    if had_host {
+        parts.remove(0);
+    } else if text.contains("://") || parts.first().is_some_and(|part| part.contains('.')) {
+        return Err("The link has to be a github.com repository.".into());
+    }
+    if parts.len() < 2 {
+        return Err("Paste a link like https://github.com/owner/repository.".into());
+    }
+    let git_ref = match &parts[2..] {
+        [] => None,
+        ["tree", branch] | ["commit", branch] => Some((*branch).to_string()),
+        ["releases", "tag", tag] => Some((*tag).to_string()),
+        _ => return Err("Paste the repository link, not a file inside it.".into()),
+    };
+    Ok((parts[0], parts[1], git_ref))
+}
+
+fn github_owner(name: &str) -> Result<(), String> {
+    let ok = (1..=39).contains(&name.len())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        && !name.starts_with('-')
+        && !name.ends_with('-');
+    if ok { Ok(()) } else { Err("That link is not a GitHub repository.".into()) }
+}
+
+fn github_repo(name: &str) -> Result<(), String> {
+    let ok = (1..=100).contains(&name.len())
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        && !name.starts_with('.')
+        && !name.ends_with('.')
+        && !name.contains("..");
+    if ok { Ok(()) } else { Err("That link is not a GitHub repository.".into()) }
+}
+
+fn github_ref(name: &str) -> Result<(), String> {
+    let ok = (1..=255).contains(&name.len()) && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    if ok { Ok(()) } else { Err("That link's branch or tag is not one SolidCraft can request.".into()) }
+}
+
+fn encode_ref(git_ref: &str) -> String {
+    let mut out = String::new();
+    for byte in git_ref.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(byte as char),
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
 fn matches_query(plugin: &Plugin, query: &str) -> bool {
     let query = query.trim();
     if query.is_empty() {
@@ -139,6 +271,244 @@ fn matches_query(plugin: &Plugin, query: &str) -> bool {
     [plugin.name.as_str(), plugin.id.as_str(), plugin.description.as_str(), plugin.version.as_str()]
         .iter()
         .any(|text| text.to_lowercase().contains(&query))
+}
+
+/// Install the one plugin inside a GitHub zipball. The folder that contains `plugin.json` is
+/// copied to `plugins/<id>/`. Nothing in the archive is executed. A second install of the same
+/// id replaces the folder.
+pub(crate) fn install_zip(bytes: &[u8], plugins_dir: &Path) -> Result<Installed, String> {
+    if bytes.len() as u64 > MAX_ZIP {
+        return Err(format!("That repository is larger than {} MB.", MAX_ZIP / (1024 * 1024)));
+    }
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| format!("GitHub did not return a zip archive ({e})"))?;
+    if archive.len() > MAX_ENTRIES {
+        return Err("That repository has too many files.".into());
+    }
+    let mut manifests = Vec::new();
+    let mut unpacked = 0u64;
+    for index in 0..archive.len() {
+        let entry = archive.by_index(index).map_err(|e| format!("the archive could not be read ({e})"))?;
+        let Some(name) = entry.enclosed_name() else {
+            return Err("That archive contains a path that leaves its folder.".into());
+        };
+        if name.components().any(|component| matches!(component, std::path::Component::ParentDir)) {
+            return Err("That archive contains a path that leaves its folder.".into());
+        }
+        if entry.is_symlink() || !entry.is_file() {
+            continue;
+        }
+        let size = entry.size();
+        if size > MAX_FILE {
+            return Err("A file in that repository is too large.".into());
+        }
+        unpacked = unpacked.saturating_add(size);
+        if unpacked > MAX_ZIP {
+            return Err(format!("That repository unpacks to more than {} MB.", MAX_ZIP / (1024 * 1024)));
+        }
+        let is_manifest = name.file_name().and_then(|file| file.to_str()) == Some("plugin.json");
+        let hidden = name.components().any(|component| component.as_os_str().to_str().is_some_and(|text| text.starts_with('.')));
+        if is_manifest && !hidden {
+            manifests.push((index, name));
+        }
+    }
+    let (index, manifest_path) = match manifests.as_slice() {
+        [one] => one.clone(),
+        [] => return Err("That repository has no plugin.json.".into()),
+        many => {
+            let shown = many.iter().take(4).map(|(_, path)| path.display().to_string()).collect::<Vec<_>>().join(", ");
+            return Err(format!("That repository has {} plugin.json files ({shown}). Add the repository that is the one plugin.", many.len()));
+        }
+    };
+    let manifest_bytes = {
+        let mut entry = archive.by_index(index).map_err(|e| format!("plugin.json could not be read ({e})"))?;
+        if entry.size() > MAX_MANIFEST_BYTES {
+            return Err("plugin.json is missing or larger than 16 KiB".into());
+        }
+        read_limited(&mut entry, MAX_MANIFEST_BYTES)?
+    };
+    let text = String::from_utf8(manifest_bytes).map_err(|_| "plugin.json is not a plugin manifest (it is not text)".to_string())?;
+    let manifest: Manifest = serde_json::from_str(&text).map_err(|e| format!("plugin.json is not a plugin manifest ({e})"))?;
+    let id = manifest.id.clone();
+    let plugin = check(manifest, &id)?;
+    let root = manifest_path.parent().unwrap_or(Path::new("")).to_path_buf();
+
+    std::fs::create_dir_all(plugins_dir).map_err(|e| format!("Could not create the plugins folder: {e}"))?;
+    let staging = Staging { path: plugins_dir.join(format!(".{}.incoming", plugin.id)) };
+    let _ = std::fs::remove_dir_all(&staging.path);
+    std::fs::create_dir_all(&staging.path).map_err(|e| format!("Could not create the plugins folder: {e}"))?;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|e| format!("the archive could not be read ({e})"))?;
+        if entry.is_symlink() || !entry.is_file() {
+            continue;
+        }
+        let Some(name) = entry.enclosed_name() else { continue };
+        let Ok(relative) = name.strip_prefix(&root) else { continue };
+        if relative.as_os_str().is_empty() || relative.components().any(|component| matches!(component, std::path::Component::ParentDir)) {
+            continue;
+        }
+        let dest = staging.path.join(relative);
+        if !dest.starts_with(&staging.path) {
+            return Err("That archive contains a path that leaves its folder.".into());
+        }
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("could not create a folder ({e})"))?;
+        }
+        let mut file = std::fs::File::create(&dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+        let copied = std::io::copy(&mut (&mut entry).take(MAX_FILE + 1), &mut file).map_err(|e| format!("{}: {e}", dest.display()))?;
+        if copied > MAX_FILE {
+            return Err("A file in that repository is too large.".into());
+        }
+    }
+    let verified = read_plugin(&staging.path, &plugin.id)?;
+    let dest = plugins_dir.join(&verified.id);
+    if dest.parent() != Some(plugins_dir) {
+        return Err("the plugin id is not a folder name".into());
+    }
+    let updated = dest.exists();
+    place(&staging.path, &dest)?;
+    Ok(Installed { id: verified.id, name: verified.name, updated })
+}
+
+fn read_limited(entry: &mut impl Read, limit: u64) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    entry.take(limit + 1).read_to_end(&mut bytes).map_err(|e| format!("plugin.json could not be read ({e})"))?;
+    if bytes.len() as u64 > limit {
+        return Err("plugin.json is missing or larger than 16 KiB".into());
+    }
+    Ok(bytes)
+}
+
+/// Removes the staging folder unless it was moved into place.
+struct Staging {
+    path: PathBuf,
+}
+
+impl Drop for Staging {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+fn place(staging: &Path, dest: &Path) -> Result<(), String> {
+    let backup_name = format!(".{}.previous", dest.file_name().and_then(|name| name.to_str()).unwrap_or("plugin"));
+    let backup = dest.with_file_name(backup_name);
+    let _ = std::fs::remove_dir_all(&backup);
+    let had = dest.exists();
+    if had {
+        std::fs::rename(dest, &backup).map_err(|e| format!("could not replace the installed plugin ({e})"))?;
+    }
+    if let Err(e) = std::fs::rename(staging, dest) {
+        if had {
+            let _ = std::fs::rename(&backup, dest);
+        }
+        return Err(format!("could not put the plugin in place ({e})"));
+    }
+    if had {
+        let _ = std::fs::remove_dir_all(&backup);
+    }
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn explain_fetch(message: &str, repo: &GitHubRepo) -> String {
+    if message.contains("HTTP 404") { format!("GitHub has no repository {}/{}.", repo.owner, repo.repo) } else { message.to_string() }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn fetch_and_install(download: &crate::update::install::HttpDownload, repo: &GitHubRepo, dir: &Path) -> Result<Installed, String> {
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let tmp = std::env::temp_dir().join(format!("solidcraft-plugin-{}-{nanos}", std::process::id()));
+    let too_big = std::sync::atomic::AtomicBool::new(false);
+    let downloaded = download(&repo.archive_url(), &tmp, &|done, _| {
+        if done > MAX_ZIP {
+            too_big.store(true, std::sync::atomic::Ordering::Relaxed);
+            false
+        } else {
+            true
+        }
+    });
+    let result = match downloaded {
+        Err(_) if too_big.load(std::sync::atomic::Ordering::Relaxed) => {
+            Err(format!("That repository is larger than {} MB.", MAX_ZIP / (1024 * 1024)))
+        }
+        Err(error) => Err(explain_fetch(&error.to_string(), repo)),
+        Ok(()) => match std::fs::read(&tmp) {
+            Ok(bytes) => install_zip(&bytes, dir),
+            Err(error) => Err(format!("the download could not be read ({error})")),
+        },
+    };
+    let _ = std::fs::remove_file(&tmp);
+    result
+}
+
+fn poll_install(app: &mut SolveApp) {
+    let Some(rx) = &app.prefs_window.plugin_job else { return };
+    let result = match rx.try_recv() {
+        Ok(result) => result,
+        Err(std::sync::mpsc::TryRecvError::Empty) => return,
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => Err("Adding the repository stopped.".into()),
+    };
+    app.prefs_window.plugin_job = None;
+    match result {
+        Ok(installed) => {
+            let message = if installed.updated {
+                crate::i18n::format("ui.plugins_updated", &[("name", &installed.name)])
+            } else {
+                crate::i18n::format("ui.plugins_installed", &[("name", &installed.name)])
+            };
+            app.prefs_window.plugin_url.clear();
+            app.set_status(message, false);
+        }
+        Err(error) => app.set_status(error, true),
+    }
+}
+
+fn start_add(app: &mut SolveApp, ctx: &egui::Context) {
+    if app.prefs_window.plugin_job.is_some() {
+        return;
+    }
+    let repo = match parse_github(&app.prefs_window.plugin_url) {
+        Ok(repo) => repo,
+        Err(error) => {
+            app.set_status(error, true);
+            return;
+        }
+    };
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = (repo, ctx);
+        app.set_status(crate::i18n::tr("ui.plugins_desktop").to_string(), true);
+        return;
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let Some(download) = app.services.http_download.clone() else {
+            app.set_status(crate::i18n::tr("ui.plugins_desktop").to_string(), true);
+            return;
+        };
+        let Some(dir) = plugins_dir() else {
+            app.set_status(crate::i18n::tr("ui.plugins_desktop").to_string(), true);
+            return;
+        };
+        if let Err(error) = std::fs::create_dir_all(&dir) {
+            app.set_status(format!("Could not create the plugins folder: {error}"), true);
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = ctx.clone();
+        let spawned = std::thread::Builder::new().name("plugin-install".into()).spawn(move || {
+            let result = fetch_and_install(&download, &repo, &dir);
+            let _ = tx.send(result);
+            ctx.request_repaint();
+        });
+        match spawned {
+            Ok(_) => {
+                app.prefs_window.plugin_job = Some(rx);
+                app.set_status(crate::i18n::tr("ui.plugins_adding").to_string(), false);
+            }
+            Err(error) => app.set_status(format!("Could not add the repository: {error}"), true),
+        }
+    }
 }
 
 /// The Plugins page. Desktop only: the browser build has no per-user plugin folder.
@@ -154,9 +524,37 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     };
     let path = dir.display().to_string();
     let searching = crate::prefs_search::querying(ui);
+    poll_install(app);
+    let busy = app.prefs_window.plugin_job.is_some();
+    if busy {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+    }
     // The page's own box is for browsing Plugins. The dialog search is the filter while it is active.
     if !searching {
         crate::ui_kit::search_field(ui, ui.id().with("plugins_search"), &mut app.prefs_window.plugin_query, crate::i18n::tr("ui.plugins_search"));
+        ui.add_space(8.0);
+        let mut submit = false;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let field_width = (ui.available_width() - 168.0 - 8.0).max(40.0);
+            let (enter, _) = ui
+                .allocate_ui_with_layout(egui::vec2(field_width, crate::ui_kit::row_height()), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    crate::ui_kit::text_field(ui, &mut app.prefs_window.plugin_url, "https://github.com/owner/repository")
+                })
+                .inner;
+            let add = crate::ui_kit::button(ui, "Add repository", crate::ui_kit::Button::Enabled(!busy));
+            crate::scenario::publish_handle("prefs:plugins:add", add.rect.center());
+            submit = !busy && (enter || add.clicked());
+        });
+        if submit {
+            start_add(app, ui.ctx());
+        }
+        if busy {
+            ui.add(egui::Label::new(RichText::new(crate::i18n::tr("ui.plugins_adding")).size(t.font_small).color(t.text_dim)).wrap());
+        } else if let Ok(repo) = parse_github(&app.prefs_window.plugin_url) {
+            ui.add(egui::Label::new(RichText::new(repo.caption()).size(t.font_small).color(t.text_dim)).wrap());
+        }
+        ui.add(egui::Label::new(RichText::new(crate::i18n::tr("ui.plugins_add_note")).size(t.font_small).color(t.text_dim)).wrap());
         ui.add_space(8.0);
     }
     if searching {
@@ -298,6 +696,33 @@ mod tests {
         assert!(crate::prefs::control(&mut app, &json!({"open": "NoSuch"})).is_err());
     }
 
+    fn zip_with(files: &[(&str, &str)]) -> Vec<u8> {
+        use std::io::Write;
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default();
+        for (name, body) in files {
+            writer.start_file(*name, options).unwrap();
+            writer.write_all(body.as_bytes()).unwrap();
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
+    const MANIFEST: &str = r#"{"id":"demo","name":"Demo parts","version":"1.0.0","description":"A small plugin."}"#;
+
+    #[test]
+    fn a_github_link_is_the_repository_and_nothing_else() {
+        let repo = parse_github("https://github.com/Tangency-Labs/SolidCraft.git").unwrap();
+        assert_eq!(repo.archive_url(), "https://api.github.com/repos/Tangency-Labs/SolidCraft/zipball");
+        assert_eq!(parse_github("git@github.com:octocat/Hello-World.git").unwrap().caption(), "octocat/Hello-World");
+        assert_eq!(parse_github("  github.com/octocat/Hello-World/tree/main  ").unwrap().git_ref.as_deref(), Some("main"));
+        assert_eq!(parse_github("octocat/Hello-World/releases/tag/v1.0.0").unwrap().git_ref.as_deref(), Some("v1.0.0"));
+        assert!(parse_github("https://gitlab.com/octocat/Hello-World").is_err());
+        assert!(parse_github("http://github.com/octocat/Hello-World").is_err());
+        assert!(parse_github("https://user:token@github.com/octocat/Hello-World").is_err());
+        assert!(parse_github("https://github.com/octocat/Hello-World/blob/main/plugin.json").is_err());
+        assert!(parse_github("https://github.com.evil.example/octocat/Hello-World").is_err());
+    }
+
     #[test]
     fn search_matches_the_name_the_id_and_the_description() {
         let plugin = Plugin {
@@ -312,5 +737,45 @@ mod tests {
         assert!(matches_query(&plugin, "commercial"));
         assert!(matches_query(&plugin, "0.1"));
         assert!(!matches_query(&plugin, "bearing"));
+    }
+
+    #[test]
+    fn a_zip_with_one_plugin_json_is_installed_under_its_id() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-plugins-zip-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let bytes = zip_with(&[
+            ("owner-repo-abc/README.md", "not the plugin"),
+            ("owner-repo-abc/plugin/plugin.json", MANIFEST),
+            ("owner-repo-abc/plugin/note.txt", "hello"),
+        ]);
+        let installed = install_zip(&bytes, &dir).unwrap();
+        assert_eq!(installed.id, "demo");
+        assert!(!installed.updated);
+        assert_eq!(std::fs::read_to_string(dir.join("demo/plugin.json")).unwrap(), MANIFEST);
+        assert_eq!(std::fs::read_to_string(dir.join("demo/note.txt")).unwrap(), "hello");
+        assert!(!dir.join("demo/README.md").exists());
+        let again = zip_with(&[("wrap/plugin.json", r#"{"id":"demo","name":"Demo parts","version":"1.0.1","description":"A small plugin."}"#)]);
+        let updated = install_zip(&again, &dir).unwrap();
+        assert!(updated.updated);
+        assert!(std::fs::read_to_string(dir.join("demo/plugin.json")).unwrap().contains("1.0.1"));
+        assert!(!dir.join("demo/note.txt").exists(), "an update replaces the folder");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn two_plugin_json_files_and_a_path_that_leaves_the_archive_are_refused() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-plugins-zip-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let two = zip_with(&[("a/plugin.json", MANIFEST), ("b/plugin.json", r#"{"id":"other","name":"Other","version":"1","description":""}"#)]);
+        let err = install_zip(&two, &dir).unwrap_err();
+        assert!(err.contains("2 plugin.json"), "{err}");
+        assert!(!dir.join("demo").exists());
+        let escaped = zip_with(&[("../escaped.txt", "no"), ("wrap/plugin.json", MANIFEST)]);
+        let err = install_zip(&escaped, &dir).unwrap_err();
+        assert!(err.contains("leaves its folder"), "{err}");
+        assert!(!dir.join("escaped.txt").exists());
+        assert!(!dir.parent().unwrap().join("escaped.txt").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
