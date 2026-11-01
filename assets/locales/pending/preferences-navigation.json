@@ -1,0 +1,84 @@
+{
+  "ar": {
+    "prefs.navigation.axes_signed": "المحاور (بإشارات)",
+    "prefs.navigation.cube_compact": "المكعب (مضغوط)",
+    "prefs.navigation.device": "الجهاز",
+    "prefs.navigation.free": "حر",
+    "prefs.navigation.free_help": "يدور الوضع الحر عبر كلا القطبين، مع الالتفاف ودون التقاط المحور بمفتاح Shift.",
+    "prefs.navigation.orbit_style": "نمط الدوران",
+    "prefs.navigation.radial_help": "اضغط مطولاً أو انقر سريعاً بالزر الأيمن لعرض حلقة من الأدوات.",
+    "prefs.navigation.turntable": "طاولة دوارة"
+  },
+  "de": {
+    "prefs.navigation.axes_signed": "Achsen (mit Vorzeichen)",
+    "prefs.navigation.cube_compact": "Würfel (kompakt)",
+    "prefs.navigation.device": "Gerät",
+    "prefs.navigation.free": "Frei",
+    "prefs.navigation.free_help": "Frei dreht über beide Pole, mit Rollen und ohne Achsenfang per Umschalt.",
+    "prefs.navigation.orbit_style": "Drehstil",
+    "prefs.navigation.radial_help": "Die rechte Taste halten oder kurz bewegen, um einen Werkzeugring zu öffnen.",
+    "prefs.navigation.turntable": "Drehteller"
+  },
+  "en": {
+    "prefs.navigation.axes_signed": "Axes (signed)",
+    "prefs.navigation.cube_compact": "Cube (compact)",
+    "prefs.navigation.device": "Device",
+    "prefs.navigation.free": "Free",
+    "prefs.navigation.free_help": "Free turns through both poles, with roll and no Shift axis snap.",
+    "prefs.navigation.orbit_style": "Orbit style",
+    "prefs.navigation.radial_help": "Hold or flick the right button for a ring of tools.",
+    "prefs.navigation.turntable": "Turntable"
+  },
+  "he": {
+    "prefs.navigation.axes_signed": "צירים (עם סימן)",
+    "prefs.navigation.cube_compact": "קובייה (קומפקטית)",
+    "prefs.navigation.device": "התקן",
+    "prefs.navigation.free": "חופשי",
+    "prefs.navigation.free_help": "מצב חופשי עובר דרך שני הקטבים, עם גלגול וללא הצמדה לציר באמצעות Shift.",
+    "prefs.navigation.orbit_style": "סגנון סיבוב",
+    "prefs.navigation.radial_help": "יש להחזיק או להניע במהירות את הלחצן הימני להצגת טבעת כלים.",
+    "prefs.navigation.turntable": "שולחן מסתובב"
+  },
+  "ja": {
+    "prefs.navigation.axes_signed": "軸（符号付き）",
+    "prefs.navigation.cube_compact": "キューブ（コンパクト）",
+    "prefs.navigation.device": "デバイス",
+    "prefs.navigation.free": "自由",
+    "prefs.navigation.free_help": "自由回転では両極を越えてロールでき、Shiftによる軸スナップは行いません。",
+    "prefs.navigation.orbit_style": "回転方式",
+    "prefs.navigation.radial_help": "右ボタンを長押しするかフリックすると、ツールのリングを表示します。",
+    "prefs.navigation.turntable": "ターンテーブル"
+  },
+  "ko": {
+    "prefs.navigation.axes_signed": "축(부호 표시)",
+    "prefs.navigation.cube_compact": "큐브(간결)",
+    "prefs.navigation.device": "장치",
+    "prefs.navigation.free": "자유",
+    "prefs.navigation.free_help": "자유 회전은 양극을 통과하고 롤을 허용하며 Shift 축 스냅을 사용하지 않습니다.",
+    "prefs.navigation.orbit_style": "회전 방식",
+    "prefs.navigation.radial_help": "오른쪽 버튼을 길게 누르거나 튕겨 도구 링을 표시합니다.",
+    "prefs.navigation.turntable": "턴테이블",
+    "ui.3d_mouse_sketch_orbit": "스케치 편집 중 뷰 회전",
+    "ui.nav_bridge_tip": "장치의 내비게이션 브리지에 연결합니다. 요청하기 전에는 꺼져 있습니다. 3D 입력 장치 자체 프로그램(예: 직접 만든 3D 마우스 드라이버)이 뷰를 움직이며 마우스 포인터는 그대로 사용할 수 있습니다. 연결은 이 컴퓨터의 이 포트만 사용합니다."
+  },
+  "vi": {
+    "prefs.navigation.axes_signed": "Trục (có dấu)",
+    "prefs.navigation.cube_compact": "Khối lập phương (gọn)",
+    "prefs.navigation.device": "Thiết bị",
+    "prefs.navigation.free": "Tự do",
+    "prefs.navigation.free_help": "Xoay tự do qua cả hai cực, có lăn và không bắt trục bằng Shift.",
+    "prefs.navigation.orbit_style": "Kiểu xoay",
+    "prefs.navigation.radial_help": "Giữ hoặc hất nút phải để mở vòng công cụ.",
+    "prefs.navigation.turntable": "Bàn xoay"
+  },
+  "zh": {
+    "prefs.navigation.axes_signed": "坐标轴（带正负号）",
+    "prefs.navigation.cube_compact": "立方体（紧凑）",
+    "prefs.navigation.device": "设备",
+    "prefs.navigation.free": "自由",
+    "prefs.navigation.free_help": "自由旋转可越过两极，允许滚转，且不使用 Shift 轴捕捉。",
+    "prefs.navigation.orbit_style": "旋转方式",
+    "prefs.navigation.radial_help": "按住或轻甩右键以显示工具环。",
+    "prefs.navigation.turntable": "转台"
+  }
+}

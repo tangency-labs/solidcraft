@@ -404,17 +404,24 @@ fn start_test(app: &SolveApp, e: &agents::Entry, key: Option<String>) -> Test {
 
 /// An endpoint's request timeout field: seconds, 30 s to an hour.
 fn timeout_field(ui: &mut egui::Ui, secs: &mut u64, handle: &str) -> bool {
-    let r = ui_kit::number_field(ui, secs, agents::MIN_REQUEST_TIMEOUT_S..=agents::MAX_REQUEST_TIMEOUT_S, 5.0, " s")
+    let r = ui_kit::number_field(ui, secs, agents::MIN_REQUEST_TIMEOUT_S..=agents::MAX_REQUEST_TIMEOUT_S, 5.0, "")
         .on_hover_text(tr("ui.ai_request_timeout_hint"));
+    r.widget_info(|| {
+        let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), *secs as f64);
+        info.label = Some(tr("prefs.assistant_seconds_aria").to_owned());
+        info
+    });
+    ui.label(tr("prefs.assistant_seconds"));
     crate::scenario::publish_target(handle, r.rect);
     r.changed()
 }
 
 /// The free-text reasoning effort field with its hover hint; true when the text changed.
-fn effort_field(ui: &mut egui::Ui, effort: &mut String) -> bool {
-    ui_kit::cell_editor(ui, ui.id().with("ai_reasoning_effort"), effort, tr("ui.ai_reasoning_effort_field_hint"), false)
-        .on_hover_text(tr("ui.ai_reasoning_effort_hint"))
-        .changed()
+fn effort_field(ui: &mut egui::Ui, effort: &mut String, handle: &str) -> bool {
+    let response = ui_kit::cell_editor(ui, ui.id().with("ai_reasoning_effort"), effort, tr("ui.ai_reasoning_effort_field_hint"), false)
+        .on_hover_text(tr("ui.ai_reasoning_effort_hint"));
+    crate::scenario::publish_target(handle, response.rect);
+    response.changed()
 }
 
 fn test_line(ui: &mut egui::Ui, test: &Option<&Test>) {
@@ -435,55 +442,63 @@ fn test_line(ui: &mut egui::Ui, test: &Option<&Test>) {
 /// The Assistant page of Settings. Copy stays close to its control; full security details
 /// remain accessible on hover, and high-risk permissions always retain a visible warning.
 pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
-    ui_kit::settings_heading(ui, tr("prefs.assistant"), tr("ai.prefs.intro"));
-    ui_kit::settings_section(ui, "assistant_availability", tr("ai.prefs.availability"), |ui| {
-        let response =
-            ui_kit::checkbox(ui, tr("ui.ai_show_features"), &mut app.preferences.ai_features).on_hover_text(tr("ui.ai_show_features_note"));
-        crate::scenario::publish_handle("prefs:ai_features", response.rect.center());
-        if !cfg!(target_arch = "wasm32") {
-            if app.preferences.ai_features {
+    ui_kit::settings_page(ui, |ui| {
+        ui_kit::settings_heading(ui, tr("prefs.assistant"), tr("ai.prefs.intro"));
+        ui_kit::settings_section(ui, "assistant_availability", tr("ai.prefs.availability"), |ui| {
+            ui.horizontal(|ui| {
+                let response =
+                    ui_kit::checkbox(ui, tr("ui.ai_show_features"), &mut app.preferences.ai_features).on_hover_text(tr("ui.ai_show_features_note"));
+                crate::scenario::publish_handle("prefs:ai_features", response.rect.center());
+                ui_kit::help_icon(ui, tr("ui.ai_show_features_note"));
+            });
+            ui.add_enabled_ui(app.preferences.ai_features && !cfg!(target_arch = "wasm32"), |ui| {
                 let response = ui_kit::checkbox(ui, tr("ui.ai_toolbar_button"), &mut app.preferences.ai_toolbar_button)
                     .on_hover_text(tr("ui.ai_toolbar_button_note"));
                 crate::scenario::publish_handle("prefs:ai_toolbar_button", response.rect.center());
-                let response = ui_kit::checkbox(ui, tr("ai.prefs.connect_at_start"), &mut app.preferences.agent_connect_at_start)
-                    .on_hover_text(tr("ai.prefs.connect_at_start_note"));
-                crate::scenario::publish_handle("prefs:agent_connect_at_start", response.rect.center());
-                let response = ui_kit::checkbox(ui, tr("ai.prefs.open_at_start"), &mut app.preferences.agent_chat_open_at_start)
-                    .on_hover_text(tr("ai.prefs.open_at_start_note"));
-                crate::scenario::publish_handle("prefs:agent_chat_open_at_start", response.rect.center());
+            });
+            if cfg!(target_arch = "wasm32") {
+                ui_kit::text(ui, tr("ui.agent_chat_desktop_only"), ui_kit::Text::Hint("desktop"));
             }
-            let response = ui_kit::checkbox(ui, tr("ai.prefs.background_commands"), &mut app.preferences.agent_off_thread)
-                .on_hover_text(tr("ui.agent_off_thread_note"));
-            crate::scenario::publish_handle("prefs:agent_off_thread", response.rect.center());
-            let response = ui_kit::checkbox(ui, tr("ai.prefs.allow_control"), &mut app.preferences.agent_control)
-                .on_hover_text(tr("ai.prefs.allow_control_note"));
-            crate::scenario::publish_handle("prefs:agent_control", response.rect.center());
-            let response = ui_kit::checkbox(ui, tr("ai.prefs.connect_apps"), &mut app.preferences.connect_ai_apps)
-                .on_hover_text(tr("ai.prefs.connect_apps_note"));
-            crate::scenario::publish_handle("prefs:connect_ai_apps", response.rect.center());
-        }
-        if cfg!(target_arch = "wasm32") {
-            ui_kit::text(ui, tr("ui.agent_chat_desktop_only"), ui_kit::Text::Hint("desktop"));
+        });
+        ui.add_enabled_ui(app.preferences.ai_features && !cfg!(target_arch = "wasm32"), |ui| {
+            permissions_section(app, ui);
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let browsing = !crate::prefs_search::querying(ui) || app.prefs_window.section == crate::prefs::PAGE_ASSISTANT;
+                if app.preferences.ai_features && browsing && app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
+                    refresh(app, &ui.ctx().clone());
+                }
+                agents_section(app, ui);
+            }
+            panel_section(app, ui);
+            connecting_section(app, ui);
+        });
+        ui.add_enabled_ui(app.preferences.ai_features, |ui| pointer_section(app, ui));
+    });
+}
+
+fn connecting_section(app: &mut SolveApp, ui: &mut egui::Ui) {
+    ui_kit::settings_section(ui, "assistant_connecting", tr("prefs.assistant_connecting"), |ui| {
+        for (label, help, handle, value) in [
+            ("ai.prefs.allow_control", "ai.prefs.allow_control_note", "agent_control", &mut app.preferences.agent_control),
+            ("ai.prefs.connect_apps", "ai.prefs.connect_apps_note", "connect_ai_apps", &mut app.preferences.connect_ai_apps),
+            ("ai.prefs.background_commands", "ui.agent_off_thread_note", "agent_off_thread", &mut app.preferences.agent_off_thread),
+            ("ai.prefs.connect_at_start", "ai.prefs.connect_at_start_note", "agent_connect_at_start", &mut app.preferences.agent_connect_at_start),
+            ("ai.prefs.open_at_start", "ai.prefs.open_at_start_note", "agent_chat_open_at_start", &mut app.preferences.agent_chat_open_at_start),
+        ] {
+            ui.horizontal(|ui| {
+                let response = ui_kit::checkbox(ui, tr(label), value).on_hover_text(tr(help));
+                crate::scenario::publish_handle(&format!("prefs:{handle}"), response.rect.center());
+                ui_kit::help_icon(ui, tr(help));
+            });
         }
     });
-    if !cfg!(target_arch = "wasm32") && app.preferences.ai_features {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let browsing = !crate::prefs_search::querying(ui) || app.prefs_window.section == crate::prefs::PAGE_ASSISTANT;
-            if browsing && app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
-                refresh(app, &ui.ctx().clone());
-            }
-            agents_section(app, ui);
-        }
-        permissions_section(app, ui);
-        panel_section(app, ui);
-    }
-    pointer_section(app, ui);
 }
 
 fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "permissions", tr("ui.ai_permissions"), |ui| {
         let mut selected = Mode::ALL.iter().position(|mode| *mode == app.preferences.ai_permissions).unwrap_or(0);
+        let all_help = format!("{}\n\n{}", tr("prefs.assistant_use_care"), tr("ui.ai_mode_all_note"));
         let choices = [
             ui_kit::SettingsChoice {
                 key: "prefs:ai_mode:ask",
@@ -501,7 +516,7 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 key: "prefs:ai_mode:all",
                 title: tr("ai.prefs.permission_all"),
                 summary: tr("ai.prefs.permission_all_summary"),
-                detail: tr("ui.ai_mode_all_note"),
+                detail: &all_help,
             },
         ];
         if ui_kit::settings_choices(ui, &choices, &mut selected)
@@ -512,7 +527,7 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         if app.preferences.ai_permissions == Mode::All {
             ui_kit::text(ui, tr("ui.ai_mode_all_warning"), ui_kit::Text::Report("permissions_warning", true));
         }
-        ui_kit::text(ui, tr("ai.prefs.permission_scope"), ui_kit::Text::Hint("scope")).on_hover_text(tr("ui.ai_modes_scope"));
+        ui_kit::text(ui, tr("ui.ai_modes_scope"), ui_kit::Text::Hint("permissions_scope"));
         let remembered: Vec<_> = app
             .preferences
             .agent_always_allow
@@ -529,7 +544,9 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let t = crate::theme::Tokens::get();
                 ui_kit::settings_block(ui, names.get(&agent).unwrap_or(&agent), t.space_24 * 6.0 + t.space_6, |ui| {
                     ui.horizontal(|ui| {
-                        if ui_kit::button(ui, tr("ui.ai_reset"), ui_kit::Button::Small).clicked() {
+                        let reset = ui_kit::button(ui, tr("ui.ai_reset"), ui_kit::Button::Small);
+                        crate::scenario::publish_target(&format!("prefs:ai_approvals_reset:{agent}"), reset.rect);
+                        if reset.clicked() {
                             app.preferences.agent_always_allow.remove(&agent);
                         }
                         ui_kit::settings_short_note(ui, &tools.join(", "));
@@ -543,7 +560,11 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get();
     ui_kit::settings_section(ui, "panel", tr("ui.ai_panel"), |ui| {
-        ui_kit::settings_form(ui, t.space_24 * 6.0 + t.space_6, |ui| {
+        let label_width = [tr("ui.agent_chat_side"), tr("ui.agent_chat_turn_limit")]
+            .iter()
+            .map(|label| ui_kit::ContentWidth::label(ui, label) + t.space_4)
+            .fold(0.0, f32::max);
+        ui_kit::settings_form(ui, label_width, |ui| {
             ui_kit::row(ui, tr("ui.agent_chat_side"), |ui| {
                 let p = &mut app.preferences;
                 let mut selected = if p.agent_chat_popped { 2 } else { usize::from(p.agent_chat_side != "left") };
@@ -557,16 +578,41 @@ fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
             ui_kit::row(ui, tr("ui.agent_chat_turn_limit"), |ui| {
                 let p = &mut app.preferences;
-                let mut unlimited = p.agent_chat_turn_limit == 0;
-                if ui_kit::checkbox(ui, tr("ui.agent_chat_turn_unlimited"), &mut unlimited).changed() {
-                    p.agent_chat_turn_limit = if unlimited { 0 } else { gate::SEEDED_TURN_LIMIT };
+                let previous = usize::from(p.agent_chat_turn_limit != 0);
+                let mut limit = previous;
+                let options = [tr("ui.agent_chat_turn_unlimited"), tr("prefs.assistant_limited")];
+                crate::prefs_search::note_current(ui, &options.join(" "));
+                let dropdown_width = ui_kit::ContentWidth::dropdown(ui, &options);
+                let response =
+                    ui_kit::settings_control_width(ui, dropdown_width, |ui| ui_kit::dropdown(ui, "assistant_turn_limit", &mut limit, &options));
+                let query = crate::prefs_search::query(ui);
+                if let Some(option) = options
+                    .iter()
+                    .find(|option| option.to_lowercase() == query)
+                    .or_else(|| options.iter().find(|option| crate::prefs_search::texts_hit(ui, &[*option])))
+                {
+                    crate::prefs_search::remember(ui, option, response.rect);
                 }
-                if !unlimited {
-                    ui_kit::settings_number(ui, &mut p.agent_chat_turn_limit, 1..=200, 1.0).on_hover_text(tr("ai.prefs.turn_limit_hint"));
+                for option in options {
+                    crate::prefs_search::follow(ui, option, response.rect);
+                }
+                crate::scenario::publish_target("prefs:agent_chat_turn_limit:mode", response.rect);
+                if limit != previous {
+                    p.agent_chat_turn_limit = if limit == 0 { 0 } else { gate::SEEDED_TURN_LIMIT };
+                }
+                if limit != 0 {
+                    let response =
+                        ui_kit::settings_number(ui, &mut p.agent_chat_turn_limit, 1..=200, 1.0).on_hover_text(tr("ai.prefs.turn_limit_hint"));
+                    response.widget_info(|| {
+                        let mut info = egui::WidgetInfo::drag_value(ui.is_enabled(), f64::from(p.agent_chat_turn_limit));
+                        info.label = Some(tr("prefs.assistant_limit").to_owned());
+                        info
+                    });
+                    crate::scenario::publish_target("prefs:agent_chat_turn_limit:value", response.rect);
                 }
             });
         });
-        ui_kit::text(ui, tr("ai.prefs.privacy_note"), ui_kit::Text::Hint("privacy"));
+        ui_kit::text(ui, tr("ai.prefs.privacy_note"), ui_kit::Text::Hint("privacy_note"));
     });
 }
 
@@ -575,15 +621,39 @@ fn pointer_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_pair(
             ui,
             |ui| {
-                ui_kit::checkbox(ui, tr("ai.prefs.show_pointer"), &mut app.ui.agent_cursor.show)
+                let response = ui_kit::checkbox(ui, tr("ai.prefs.show_pointer"), &mut app.ui.agent_cursor.show)
                     .on_hover_text(crate::i18n::tr_label("Show the pointer an AI agent moves (#35)"));
+                crate::scenario::publish_target("prefs:agent_pointer_show", response.rect);
                 ui.add_enabled_ui(app.ui.agent_cursor.show, |ui| {
                     let speed_label_width = ui_kit::ContentWidth::label(ui, tr("ai.prefs.pointer_speed")) + crate::theme::Tokens::get().space_4;
-                    ui_kit::settings_block(ui, tr("ai.prefs.pointer_speed"), speed_label_width, |ui| {
-                        crate::agent_cursor::speed_slider(ui, &mut app.ui.agent_cursor.speed);
+                    ui_kit::settings_form(ui, speed_label_width, |ui| {
+                        ui_kit::row(ui, tr("ai.prefs.pointer_speed"), |ui| {
+                            let name = tr("prefs.assistant_pointer_speed");
+                            crate::prefs_search::note_current(ui, name);
+                            let response =
+                                ui_kit::named_control(ui, name, |ui| crate::agent_cursor::speed_slider(ui, &mut app.ui.agent_cursor.speed));
+                            crate::scenario::publish_target("prefs:agent_pointer_speed", response.rect);
+                            let value = match app.ui.agent_cursor.speed {
+                                crate::agent_cursor::Speed::Times(value) => value,
+                                crate::agent_cursor::Speed::Instant => 5.5,
+                            };
+                            response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), value, name));
+                            // The visible row owns Speed and its legacy Motion speed alias. The
+                            // native editor's name owns queries that only match Pointer speed.
+                            if !crate::prefs_search::texts_hit(ui, &[tr("ai.prefs.pointer_speed")]) {
+                                crate::prefs_search::remember(ui, name, response.rect);
+                            }
+                            for label in [tr("ai.prefs.pointer_speed"), name] {
+                                crate::prefs_search::follow(ui, label, response.rect);
+                            }
+                        });
                     });
-                    ui_kit::checkbox(ui, tr("ai.prefs.follow_camera"), &mut app.ui.agent_cursor.follow_camera)
-                        .on_hover_text(crate::i18n::tr_label("Follow the camera (Look At sketches)"));
+                    ui.horizontal(|ui| {
+                        let response = ui_kit::checkbox(ui, tr("ai.prefs.follow_camera"), &mut app.ui.agent_cursor.follow_camera)
+                            .on_hover_text(tr("prefs.assistant_follow_help"));
+                        crate::scenario::publish_target("prefs:agent_pointer_follow", response.rect);
+                        ui_kit::help_icon(ui, tr("prefs.assistant_follow_help"));
+                    });
                 });
                 (app.ui.agent_cursor.show, app.ui.agent_cursor.speed.label(), app.ui.agent_cursor.follow_camera)
             },
@@ -605,7 +675,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut reeffort: Option<(String, String)> = None;
     let mut picked_model: Option<(String, ui_kit::Picked)> = None;
     let t = crate::theme::Tokens::get();
-    ui_kit::settings_section(ui, "agents", tr("ui.ai_agents"), |ui| {
+    ui_kit::settings_section_count(ui, "agents", tr("ui.ai_agents"), Some(&all.len().to_string()), |ui| {
         if app.agent_chat.detecting.is_some() {
             ui_kit::text(ui, tr("ui.agent_chat_detecting"), ui_kit::Text::Hint("detecting"));
         } else if all.is_empty() {
@@ -615,84 +685,140 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::empty_box(ui, "assistant_agents", tr("ai.prefs.no_agents"));
             }
         }
-        for (index, entry) in all.iter().enumerate() {
+        for entry in &all {
             ui.push_id(&entry.id, |ui| {
-                if index > 0 {
-                    ui_kit::divider(ui, "agent_divider");
-                }
-                ui_kit::settings_block(ui, &entry.name, t.space_24 * 6.0 + t.space_6, |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        let is_default = default.as_deref() == Some(entry.id.as_str());
-                        let choice = ui_kit::button(
-                            ui,
-                            tr(if is_default { "ui.ai_default" } else { "ai.prefs.make_default" }),
-                            if is_default { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small },
-                        );
-                        crate::scenario::publish_target(&format!("dialog:list:{}", entry.id), choice.rect);
-                        if choice.clicked() {
-                            app.preferences.agent_default = entry.id.clone();
-                        }
-                        let test_button = ui_kit::button(ui, tr("ui.ai_test"), ui_kit::Button::Small);
-                        crate::scenario::publish_handle(&format!("prefs:ai_test:{}", entry.id), test_button.rect.center());
-                        let tip = match entry.kind {
-                            Kind::Acp => "ui.ai_test_acp_tip",
-                            Kind::Api => "ui.ai_test_api_tip",
-                            Kind::Anthropic => "ui.ai_test_anthropic_tip",
-                        };
-                        if test_button.on_hover_text(tr(tip)).clicked() {
-                            test = Some(entry.clone());
-                        }
-                        if !entry.found {
-                            let edit_button = ui_kit::button(ui, tr("ui.ai_edit"), ui_kit::Button::Small);
-                            crate::scenario::publish_handle(&format!("prefs:ai_edit:{}", entry.id), edit_button.rect.center());
-                            if edit_button.on_hover_text(tr("ui.ai_edit_tip")).clicked() {
-                                edit = Some(entry.id.clone());
-                            }
-                        }
-                        if !entry.found && ui_kit::button(ui, tr("ui.ai_remove"), ui_kit::Button::Ghost).clicked() {
-                            remove = Some(entry.id.clone());
-                        }
-                        match entry.login {
-                            "login_found" => ui_kit::settings_badge(ui, tr("ui.agent_chat_login_found"), false),
-                            "signed_in" => ui_kit::settings_badge(ui, tr("ui.agent_chat_signed_in"), false),
-                            "key" => ui_kit::settings_badge(ui, tr("ui.agent_chat_key_in_env"), false),
-                            "signed_out" => ui_kit::settings_badge(ui, tr("ui.agent_chat_not_signed_in"), true),
-                            _ => {}
-                        }
-                        if !entry.found {
-                            ui_kit::settings_badge(ui, tr("ui.ai_added"), false);
-                        }
-                    });
-                    ui_kit::settings_short_note(ui, &entry.detail());
-                    // Wide enough for an endpoint's "Request timeout" or "Reasoning effort" too,
-                    // so all rows line up.
-                    let label_w = (t.form_label_width + t.space_16)
-                        .max(ui_kit::ContentWidth::label(ui, tr("ui.ai_request_timeout")) + t.space_16)
-                        .max(ui_kit::ContentWidth::label(ui, tr("ui.ai_reasoning_effort")) + t.space_16);
-                    ui_kit::settings_form(ui, label_w, |ui| {
-                        ui_kit::row(ui, tr("ui.ai_permissions"), |ui| {
-                            let current = app.preferences.agent_permissions.get(&entry.id).copied();
-                            let shown = current.map_or_else(|| tr("ui.ai_mode_global").to_owned(), |mode| mode.label().to_owned());
-                            let mut pick: Option<Option<Mode>> = None;
-                            ui_kit::dropdown_menu(ui, ("sc_ai_mode", &entry.id), &shown, |ui| {
-                                if ui_kit::list_picker(ui, "global", tr("ui.ai_mode_global"), current.is_none()).clicked() {
-                                    pick = Some(None);
-                                }
-                                for mode in Mode::ALL {
-                                    if ui_kit::list_picker(ui, mode.id(), mode.label(), current == Some(mode)).clicked() {
-                                        pick = Some(Some(mode));
+                let detail = entry.detail();
+                let gate = crate::prefs_search::block_gate(ui, &entry.name, Some(&format!("{} {detail}", entry.id)));
+                let before = crate::prefs_search::hits(ui);
+                let mut paint = |ui: &mut egui::Ui| {
+                    let card = ui_kit::settings_card(ui, |ui| {
+                        ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                            crate::prefs_search::visible(ui, &[&entry.name, &entry.id, &detail]);
+                            ui.label(egui::RichText::new(&entry.name).strong().size(t.font_label).color(t.form_ink));
+                            ui.allocate_ui_with_layout(
+                                egui::vec2(ui.available_width(), t.control_height),
+                                egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),
+                                |ui| {
+                                    let is_default = default.as_deref() == Some(entry.id.as_str());
+                                    let choice = ui_kit::button(
+                                        ui,
+                                        tr(if is_default { "ui.ai_default" } else { "ai.prefs.make_default" }),
+                                        if is_default { ui_kit::Button::SmallSelected } else { ui_kit::Button::Small },
+                                    );
+                                    crate::scenario::publish_target(&format!("dialog:list:{}", entry.id), choice.rect);
+                                    if choice.clicked() {
+                                        app.preferences.agent_default = entry.id.clone();
                                     }
-                                }
+                                    let test_button = ui_kit::button(ui, tr("ui.ai_test"), ui_kit::Button::Small);
+                                    crate::scenario::publish_handle(&format!("prefs:ai_test:{}", entry.id), test_button.rect.center());
+                                    let tip = match entry.kind {
+                                        Kind::Acp => "ui.ai_test_acp_tip",
+                                        Kind::Api => "ui.ai_test_api_tip",
+                                        Kind::Anthropic => "ui.ai_test_anthropic_tip",
+                                    };
+                                    if test_button.on_hover_text(tr(tip)).clicked() {
+                                        test = Some(entry.clone());
+                                    }
+                                    if !entry.found {
+                                        let edit_button = ui_kit::button(ui, tr("ui.ai_edit"), ui_kit::Button::Small);
+                                        crate::scenario::publish_handle(&format!("prefs:ai_edit:{}", entry.id), edit_button.rect.center());
+                                        if edit_button.on_hover_text(tr("ui.ai_edit_tip")).clicked() {
+                                            edit = Some(entry.id.clone());
+                                        }
+                                    }
+                                    if !entry.found {
+                                        let button = ui_kit::button(ui, tr("ui.ai_remove"), ui_kit::Button::Ghost);
+                                        crate::scenario::publish_target(&format!("prefs:ai_remove:{}", entry.id), button.rect);
+                                        if button.clicked() {
+                                            remove = Some(entry.id.clone());
+                                        }
+                                    }
+                                    match entry.login {
+                                        "login_found" => ui_kit::settings_badge(ui, tr("ui.agent_chat_login_found"), false),
+                                        "signed_in" => ui_kit::settings_badge(ui, tr("ui.agent_chat_signed_in"), false),
+                                        "key" => ui_kit::settings_badge(ui, tr("ui.agent_chat_key_in_env"), false),
+                                        "signed_out" => ui_kit::settings_badge(ui, tr("ui.agent_chat_not_signed_in"), true),
+                                        _ => {}
+                                    }
+                                    if !entry.found {
+                                        ui_kit::settings_badge(ui, tr("ui.ai_added"), false);
+                                    }
+                                },
+                            );
+                            ui_kit::settings_short_note(ui, &detail).on_hover_text(&entry.id);
+                            // Wide enough for an endpoint's "Request timeout" or "Reasoning effort" too,
+                            // so all rows line up.
+                            let label_w = [tr("ui.ai_permissions"), tr("ui.ai_request_timeout"), tr("ui.ai_reasoning_effort")]
+                                .iter()
+                                .map(|label| ui_kit::ContentWidth::label(ui, label) + t.space_4)
+                                .fold(0.0, f32::max);
+                            ui_kit::settings_form(ui, label_w, |ui| {
+                                ui_kit::row(ui, tr("ui.ai_permissions"), |ui| {
+                                    let current = app.preferences.agent_permissions.get(&entry.id).copied();
+                                    let shown = current.map_or_else(|| tr("ui.ai_mode_global").to_owned(), |mode| mode.label().to_owned());
+                                    let mut pick: Option<Option<Mode>> = None;
+                                    let options: Vec<_> = std::iter::once(tr("ui.ai_mode_global")).chain(Mode::ALL.map(Mode::label)).collect();
+                                    crate::prefs_search::note_current(ui, &options.join(" "));
+                                    let response = ui_kit::settings_control_width(ui, t.space_24 * 9.0 + t.space_4, |ui| {
+                                        ui_kit::dropdown_menu(ui, ("sc_ai_mode", &entry.id), &shown, |ui| {
+                                            if ui_kit::list_picker(ui, "global", tr("ui.ai_mode_global"), current.is_none()).clicked() {
+                                                pick = Some(None);
+                                            }
+                                            for mode in Mode::ALL {
+                                                if ui_kit::list_picker(ui, mode.id(), mode.label(), current == Some(mode)).clicked() {
+                                                    pick = Some(Some(mode));
+                                                }
+                                            }
+                                        })
+                                    });
+                                    let query = crate::prefs_search::query(ui);
+                                    if let Some(option) = options
+                                        .iter()
+                                        .find(|option| option.to_lowercase() == query)
+                                        .or_else(|| options.iter().find(|option| crate::prefs_search::texts_hit(ui, &[*option])))
+                                    {
+                                        crate::prefs_search::remember(ui, option, response.rect);
+                                    }
+                                    for option in options {
+                                        crate::prefs_search::follow(ui, option, response.rect);
+                                    }
+                                    match pick {
+                                        Some(Some(mode)) => {
+                                            app.preferences.agent_permissions.insert(entry.id.clone(), mode);
+                                        }
+                                        Some(None) => {
+                                            app.preferences.agent_permissions.remove(&entry.id);
+                                        }
+                                        None => {}
+                                    }
+                                });
                             });
-                            match pick {
-                                Some(Some(mode)) => {
-                                    app.preferences.agent_permissions.insert(entry.id.clone(), mode);
-                                }
-                                Some(None) => {
-                                    app.preferences.agent_permissions.remove(&entry.id);
-                                }
-                                None => {}
+                            if entry.kind == Kind::Api
+                                && let Some(c) = app.preferences.agents.iter_mut().find(|c| c.id == entry.id)
+                            {
+                                ui_kit::settings_form(ui, label_w, |ui| {
+                                    ui_kit::row(ui, tr("ui.ai_request_timeout"), |ui| {
+                                        let mut secs = entry.request_timeout_s;
+                                        if timeout_field(ui, &mut secs, &format!("prefs:ai_timeout:{}", entry.id)) {
+                                            c.request_timeout_s = secs;
+                                            retimed = Some((entry.id.clone(), secs));
+                                        }
+                                    });
+                                    ui_kit::row(ui, tr("ui.ai_reasoning_effort"), |ui| {
+                                        let mut effort = c.reasoning_effort.clone();
+                                        if effort_field(ui, &mut effort, &format!("prefs:ai_reasoning:{}", entry.id)) {
+                                            let effort = agents::reasoning_effort(&effort);
+                                            c.reasoning_effort = effort.clone();
+                                            reeffort = Some((entry.id.clone(), effort));
+                                        }
+                                    });
+                                });
                             }
+                            if app.preferences.agent_permissions.get(&entry.id) == Some(&Mode::All) {
+                                ui_kit::text(ui, tr("ai.prefs.override_all_warning"), ui_kit::Text::Report("agent_permissions_warning", true))
+                                    .on_hover_text(tr("ui.ai_mode_all_warning"));
+                            }
+                            test_line(ui, &app.agent_chat.settings.tests.get(&entry.id));
                         });
                         if let Some(protocol) = entry.kind.protocol() {
                             ui_kit::row(ui, tr("ui.ai_model"), |ui| {
@@ -744,33 +870,26 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                             });
                         }
                     });
-                    if entry.kind == Kind::Api
-                        && let Some(c) = app.preferences.agents.iter_mut().find(|c| c.id == entry.id)
-                    {
-                        ui_kit::settings_form(ui, label_w, |ui| {
-                            ui_kit::row(ui, tr("ui.ai_request_timeout"), |ui| {
-                                let mut secs = entry.request_timeout_s;
-                                if timeout_field(ui, &mut secs, &format!("prefs:ai_timeout:{}", entry.id)) {
-                                    c.request_timeout_s = secs;
-                                    retimed = Some((entry.id.clone(), secs));
-                                }
-                            });
-                            ui_kit::row(ui, tr("ui.ai_reasoning_effort"), |ui| {
-                                let mut effort = c.reasoning_effort.clone();
-                                if effort_field(ui, &mut effort) {
-                                    let effort = agents::reasoning_effort(&effort);
-                                    c.reasoning_effort = effort.clone();
-                                    reeffort = Some((entry.id.clone(), effort));
-                                }
-                            });
-                        });
+                    crate::scenario::publish_rect(&format!("prefs:ai_card:{}", entry.id), card.response.rect);
+                    let metadata = [&entry.name, &entry.id, &detail];
+                    if let Some(text) = metadata.iter().find(|text| crate::prefs_search::texts_hit(ui, &[*text])) {
+                        crate::prefs_search::remember(ui, text, card.response.rect);
                     }
-                    if app.preferences.agent_permissions.get(&entry.id) == Some(&Mode::All) {
-                        ui_kit::text(ui, tr("ai.prefs.override_all_warning"), ui_kit::Text::Report("agent_permissions_warning", true))
-                            .on_hover_text(tr("ui.ai_mode_all_warning"));
+                    for text in metadata {
+                        crate::prefs_search::follow(ui, text, card.response.rect);
                     }
-                    test_line(ui, &app.agent_chat.settings.tests.get(&entry.id));
-                });
+                };
+                let show = gate.as_ref().is_none_or(|gate| gate.show);
+                if show {
+                    paint(ui);
+                } else {
+                    crate::prefs_search::run_hidden(ui, &entry.id, |ui| {
+                        paint(ui);
+                    });
+                }
+                if let Some(gate) = gate {
+                    crate::prefs_search::block_finish(ui, &gate, show, before);
+                }
             });
         }
         ui.horizontal_wrapped(|ui| {
@@ -998,7 +1117,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                         timeout_field(ui, &mut s.request_timeout_s, "ai_add:request_timeout");
                     });
                     ui_kit::row(ui, tr("ui.ai_reasoning_effort"), |ui| {
-                        effort_field(ui, &mut s.reasoning_effort);
+                        effort_field(ui, &mut s.reasoning_effort, "ai_add:reasoning_effort");
                     });
                     ui_kit::row(ui, tr("ui.ai_key"), |ui| {
                         ui.add_enabled_ui(has_keychain, |ui| {
@@ -1171,6 +1290,313 @@ mod card_tests {
     use super::*;
     use crate::scenario::{self, Harness};
     use serde_json::json;
+
+    #[test]
+    fn assistant_production_heading_and_sections_use_page_metrics() {
+        for theme in ["light", "dark"] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.ai_features = false;
+            h.app.agent_chat.detection = Some(Default::default());
+            h.call("ui.resize", json!({"width":1600,"height":4000}));
+            h.call("ui.prefs", json!({"open":"Assistant","theme":theme}));
+            h.frames(4);
+            let heading = scenario::rect_of("prefs:page_heading").unwrap();
+            let body = scenario::rect_of("prefs:page_body").unwrap();
+            assert!(body.contains_rect(heading));
+            let mut page_font = false;
+            let mut scope_visible = false;
+            let mut privacy_visible = false;
+            for shape in &h.shapes {
+                crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                    if let egui::Shape::Text(text) = shape {
+                        scope_visible |= text.galley.job.text == tr("ui.ai_modes_scope");
+                        privacy_visible |= text.galley.job.text == tr("ai.prefs.privacy_note");
+                        page_font |= text.galley.job.text == "Assistant"
+                            && text
+                                .galley
+                                .job
+                                .sections
+                                .iter()
+                                .all(|section| section.format.font_id.size == crate::theme::Tokens::get().font_page_heading);
+                    }
+                });
+            }
+            assert!(page_font, "the production heading uses the page font");
+            assert!(scope_visible, "the full localized permission scope remains visible without hovering, including with AI off");
+            assert!(privacy_visible, "the localized privacy note remains visible without hovering, including with AI off");
+            let mut previous: Option<f32> = None;
+            for key in ["assistant_availability", "permissions", "agents", "panel", "assistant_connecting", "agent_pointer"] {
+                let section = scenario::rect_of(&format!("prefs:section:{key}")).unwrap();
+                assert!((section.left() - body.left()).abs() <= 1.0 && (section.right() - body.right()).abs() <= 1.0);
+                assert!((section.height() - (crate::theme::Tokens::get().control_height + crate::theme::Tokens::get().space_2)).abs() <= 1.0);
+                if let Some(bottom) = previous {
+                    assert!((section.top() - bottom - 38.0).abs() <= 1.0, "{theme}: {key} retains the page section rhythm");
+                }
+                previous = Some(scenario::rect_of(&format!("prefs:section:{key}:body")).unwrap().bottom());
+            }
+        }
+    }
+
+    #[test]
+    fn pointer_speed_search_reveals_one_real_slider_in_all_enablement_states() {
+        use crate::prefs_search::{nav, set_cursor};
+        for theme in ["light", "dark"] {
+            for (ai, show) in [(true, true), (true, false), (false, true), (false, false)] {
+                let mut h = Harness::new();
+                h.app.home.open = false;
+                h.app.agent_chat.detection = Some(Default::default());
+                h.app.preferences.ai_features = ai;
+                h.app.ui.agent_cursor.show = show;
+                h.app.ui.agent_cursor.speed = crate::agent_cursor::Speed::Times(3.5);
+                h.call("ui.resize", json!({"width":1600,"height":1400}));
+                h.call("ui.prefs", json!({"open":"General","theme":theme}));
+                for query in ["Speed", "Pointer speed", "Motion speed"] {
+                    h.app.prefs_window.filter = query.into();
+                    h.frames(6);
+                    let (_, _, hits) = nav(&h.ctx);
+                    let matches: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_ASSISTANT).collect();
+                    assert_eq!(matches.len(), 1, "{theme} AI={ai} show={show}: {query} owns one editor");
+                    set_cursor(&h.ctx, matches[0].0);
+                    h.frames(2);
+                    h.step(&json!({"key":"Enter"})).unwrap();
+                    h.frames(4);
+                    assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_ASSISTANT);
+                    assert!(h.app.prefs_window.filter.is_empty());
+                    let slider = scenario::rect_of("prefs:agent_pointer_speed").unwrap();
+                    assert_eq!(slider, scenario::rect_of("dialog:slider:Pointer speed").unwrap());
+                    let body = scenario::rect_of("dialog:page_body").unwrap();
+                    assert!(body.contains_rect(slider), "{query} reveals the editor inside the page");
+                    assert!(scenario::handle_at("prefs:revealed").unwrap().distance(slider.center()) <= 1.0, "{query} reveals the slider itself");
+                    let tree = h.output.accesskit_update.as_ref().unwrap();
+                    let sliders: Vec<_> = tree
+                        .nodes
+                        .iter()
+                        .filter(|(_, node)| node.role() == egui::accesskit::Role::Slider && node.label() == Some("Pointer speed"))
+                        .collect();
+                    assert_eq!(sliders.len(), 1);
+                    assert_eq!(sliders[0].1.is_disabled(), !(ai && show));
+                    assert_eq!(h.app.ui.agent_cursor.speed, crate::agent_cursor::Speed::Times(3.5));
+                    assert_eq!((h.app.preferences.ai_features, h.app.ui.agent_cursor.show), (ai, show));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn overlapping_agent_metadata_has_one_card_target_and_keeps_fields_indexed() {
+        use crate::prefs_search::{nav, set_cursor};
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        for theme in ["light", "dark"] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.agent_chat.detection = Some(Default::default());
+            h.app.preferences.agent_connect_at_start = false;
+            h.app.preferences.agents = vec![
+                AgentConfig {
+                    id: "acp-current".into(),
+                    name: "Current fixture".into(),
+                    command: "solidcraft-fixture-agent --acp".into(),
+                    ..Default::default()
+                },
+                AgentConfig {
+                    id: "api-public".into(),
+                    name: "Public endpoint".into(),
+                    kind: Kind::Api,
+                    base_url: "https://example.com/v1".into(),
+                    model: "public-model".into(),
+                    reasoning_effort: "high".into(),
+                    ..Default::default()
+                },
+            ];
+            h.app.preferences.agent_default = "acp-current".into();
+            h.app.agent_chat.agent_id = Some("acp-current".into());
+            let calls = Arc::new(AtomicUsize::new(0));
+            let seen = calls.clone();
+            h.app.services.agent_http = Some(Arc::new(move |_| {
+                seen.fetch_add(1, Ordering::SeqCst);
+                Err("fixture must not be queried".into())
+            }));
+            h.call("ui.resize", json!({"width":1600,"height":1800}));
+            h.call("ui.prefs", json!({"open":"General","theme":theme}));
+            for query in ["public", "api-public", "public-model"] {
+                h.app.prefs_window.filter = query.into();
+                h.frames(6);
+                let (_, _, hits) = nav(&h.ctx);
+                let matches: Vec<_> = hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_ASSISTANT).collect();
+                assert_eq!(matches.len(), 1, "{query}: overlapping name/id/detail own one card stop");
+                set_cursor(&h.ctx, matches[0].0);
+                h.frames(2);
+                h.step(&json!({"key":"Enter"})).unwrap();
+                h.frames(4);
+                assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_ASSISTANT);
+                assert!(h.app.prefs_window.filter.is_empty());
+                let card = scenario::rect_of("prefs:ai_card:api-public").unwrap();
+                assert!(scenario::rect_of("dialog:page_body").unwrap().contains_rect(card));
+                assert!(scenario::handle_at("prefs:revealed").unwrap().distance(card.center()) <= 1.0, "{query} reveals the same complete card");
+            }
+            for (query, handle) in [("Request timeout", "prefs:ai_timeout:api-public"), ("Reasoning effort", "prefs:ai_reasoning:api-public")] {
+                h.app.prefs_window.filter = query.into();
+                h.frames(6);
+                let (_, _, hits) = nav(&h.ctx);
+                let matches: Vec<_> =
+                    hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_ASSISTANT && hit.label == query).collect();
+                assert_eq!(matches.len(), 1, "{query} keeps its independent setting target");
+                set_cursor(&h.ctx, matches[0].0);
+                h.frames(2);
+                h.step(&json!({"key":"Enter"})).unwrap();
+                h.frames(4);
+                assert!(h.app.prefs_window.filter.is_empty());
+                assert!(scenario::rect_of("dialog:page_body").unwrap().contains_rect(scenario::rect_of(handle).unwrap()));
+            }
+            h.app.prefs_window.filter = "Permissions".into();
+            h.frames(6);
+            let (_, _, hits) = nav(&h.ctx);
+            assert!(
+                hits.iter().filter(|hit| hit.page == crate::prefs::PAGE_ASSISTANT && hit.label == "Permissions").count() >= 2,
+                "real per-agent Permissions remain independently indexed"
+            );
+            assert_eq!(calls.load(Ordering::SeqCst), 0, "ACP-current/API-noncurrent search never probes or tests an endpoint");
+        }
+    }
+
+    #[test]
+    fn assistant_off_keeps_dependent_controls_disabled_and_cancel_restores_the_pointer() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.agent_chat.detection = Some(Default::default());
+        h.app.ui.agent_cursor.speed = crate::agent_cursor::Speed::Times(3.5);
+        h.call("ui.resize", json!({"width":1600,"height":1800}));
+        h.call("ui.prefs", json!({"open":"Assistant"}));
+        h.app.preferences.ai_features = false;
+        h.app.ui.agent_cursor.speed = crate::agent_cursor::Speed::Instant;
+        h.frames(4);
+        let tree = h.output.accesskit_update.as_ref().unwrap();
+        for label in [
+            tr("ui.ai_toolbar_button"),
+            tr("ai.prefs.allow_control"),
+            tr("ai.prefs.connect_apps"),
+            tr("ai.prefs.background_commands"),
+            tr("ai.prefs.connect_at_start"),
+            tr("ai.prefs.open_at_start"),
+            tr("ai.prefs.show_pointer"),
+            tr("ai.prefs.follow_camera"),
+        ] {
+            let nodes: Vec<_> =
+                tree.nodes.iter().filter(|(_, node)| node.role() == egui::accesskit::Role::CheckBox && node.label() == Some(label)).collect();
+            assert_eq!(nodes.len(), 1, "{label} is retained exactly once");
+            assert!(nodes[0].1.is_disabled(), "{label} dims when AI is off");
+        }
+        assert!(tree.nodes.iter().any(|(_, node)| node.label() == Some(tr("ui.ai_show_features")) && !node.is_disabled()));
+        assert!(h.app.agent_chat.detecting.is_none() && h.app.agent_chat.backend.is_none());
+        h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
+        assert!(h.app.preferences.ai_features);
+        assert_eq!(h.app.ui.agent_cursor.speed, crate::agent_cursor::Speed::Times(3.5));
+    }
+
+    #[test]
+    fn assistant_limit_dropdown_preserves_values_and_seeds_only_on_transition() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.agent_chat.detection = Some(Default::default());
+        h.app.preferences.agent_chat_turn_limit = 37;
+        h.call("ui.resize", json!({"width":1600,"height":1400}));
+        h.call("ui.prefs", json!({"open":"Assistant"}));
+        h.app.prefs_window.filter = tr("ui.agent_chat_turn_limit").into();
+        h.frames(4);
+        for limit in [1, 37, 199, 200] {
+            h.app.preferences.agent_chat_turn_limit = limit;
+            h.frames(3);
+            assert_eq!(h.app.preferences.agent_chat_turn_limit, limit, "rendering preserves every supported value");
+        }
+        h.step(&json!({"click":{"handle":"prefs:agent_chat_turn_limit:mode"}})).unwrap();
+        h.step(&json!({"click":{"handle":format!("dialog:{}:{}", tr("ui.agent_chat_turn_limit"), tr("ui.agent_chat_turn_unlimited"))}})).unwrap();
+        assert_eq!(h.app.preferences.agent_chat_turn_limit, 0);
+        h.step(&json!({"click":{"handle":"prefs:agent_chat_turn_limit:mode"}})).unwrap();
+        h.step(&json!({"click":{"handle":format!("dialog:{}:{}", tr("ui.agent_chat_turn_limit"), tr("prefs.assistant_limited"))}})).unwrap();
+        assert_eq!(h.app.preferences.agent_chat_turn_limit, gate::SEEDED_TURN_LIMIT);
+        h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
+        assert_eq!(h.app.preferences.agent_chat_turn_limit, 37);
+    }
+
+    #[test]
+    fn agent_card_reads_the_key_only_for_test_and_removal_clears_remembered_state() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        #[derive(Default)]
+        struct Keys {
+            values: MemoryKeys,
+            reads: AtomicUsize,
+        }
+        impl Secrets for Keys {
+            fn get(&self, id: &str) -> Result<Option<String>, String> {
+                self.reads.fetch_add(1, Ordering::SeqCst);
+                self.values.get(id)
+            }
+            fn set(&self, id: &str, secret: &str) -> Result<(), String> {
+                self.values.set(id, secret)
+            }
+            fn delete(&self, id: &str) -> Result<(), String> {
+                self.values.delete(id)
+            }
+        }
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.agent_chat.detection = Some(Default::default());
+        let keys = Arc::new(Keys::default());
+        keys.set("api-public", "render-fixture-key").unwrap();
+        h.app.services.secrets = Some(keys.clone());
+        let (tx, rx) = std::sync::mpsc::channel();
+        h.app.services.agent_http = Some(Arc::new(move |_| {
+            let _ = tx.send(());
+            Ok((200, br#"{"data":[{"id":"public-model"}]}"#.to_vec()))
+        }));
+        // An ACP default keeps the API fixture noncurrent; baseline capability polling is unchanged.
+        h.app.preferences.agents = vec![
+            AgentConfig {
+                id: "acp-public".into(),
+                name: "Public ACP".into(),
+                command: "solidcraft-fixture-agent --acp".into(),
+                ..Default::default()
+            },
+            AgentConfig {
+                id: "api-public".into(),
+                name: "Public endpoint".into(),
+                kind: Kind::Api,
+                base_url: "https://example.com/v1".into(),
+                model: "public-model".into(),
+                key: true,
+                ..Default::default()
+            },
+        ];
+        h.app.preferences.agent_default = "acp-public".into();
+        h.app.preferences.agent_last = "api-public".into();
+        h.app.preferences.agent_permissions.insert("api-public".into(), Mode::Ask);
+        h.app.preferences.agent_always_allow.insert("api-public".into(), vec!["view.fit".into()]);
+        h.call("ui.resize", json!({"width":1600,"height":1400}));
+        h.call("ui.prefs", json!({"open":"Assistant"}));
+        h.app.prefs_window.filter = "Public endpoint".into();
+        h.frames(4);
+        assert_eq!(keys.reads.load(Ordering::SeqCst), 0, "rendering never retrieves a stored key");
+        assert!(rx.try_recv().is_err(), "a noncurrent card does not probe or test its endpoint");
+        assert!(h.widget("render-fixture-key").is_none());
+        h.step(&json!({"click":{"handle":"prefs:ai_test:api-public"}})).unwrap();
+        rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
+        assert_eq!(keys.reads.load(Ordering::SeqCst), 1, "only the explicit Test action retrieves the key");
+        h.step(&json!({"click":{"handle":"prefs:ai_remove:api-public"}})).unwrap();
+        assert!(!h.app.preferences.agents.iter().any(|agent| agent.id == "api-public"));
+        assert!(!h.app.preferences.agent_permissions.contains_key("api-public"));
+        assert!(!h.app.preferences.agent_always_allow.contains_key("api-public"));
+        assert!(!h.app.agent_chat.settings.tests.contains_key("api-public"));
+        assert!(!h.app.agent_chat.login_results.contains_key("api-public"));
+        assert!(h.app.preferences.agent_last.is_empty());
+        assert_eq!(keys.values.get("api-public").unwrap(), None);
+    }
 
     #[test]
     fn cached_model_warning_follows_endpoint_model_and_agent_selection() {

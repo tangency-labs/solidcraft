@@ -521,6 +521,96 @@ fn preference_dropdown_keeps_disabled_choices_inert_and_closes_after_selection()
 }
 
 #[test]
+fn dropdown_popups_own_escape_and_return_focus_without_canceling_the_window() {
+    use std::cell::Cell;
+    let previous = crate::theme::is_dark();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        for kind in ["plain", "icons", "compact", "editable"] {
+            let ctx = crate::fonts::test_context();
+            let action = Cell::new(Action::None);
+            let trigger = Cell::new(None);
+            let selected = Cell::new(0);
+            let mut draw = |ui: &mut Ui| {
+                let ctx = ui.ctx().clone();
+                action.set(
+                    Window::new(egui::Id::new(("dropdown_escape", kind)), "settings", "Preferences")
+                        .cards(1.0)
+                        .fields()
+                        .actions("OK", "Cancel", None)
+                        .show(&ctx, true, |ui| {
+                            // An earlier, closed dropdown must not steal this popup's Escape or focus.
+                            row(ui, "Units", |ui| {
+                                dropdown(ui, "units", &mut 0, &["mm", "in"]);
+                            });
+                            row(ui, "Visual style", |ui| {
+                                let options = crate::navigation_bar::VISUAL_STYLES.map(|(_, label)| label);
+                                let icons = crate::navigation_bar::VISUAL_STYLES
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(index, (_, label))| (*label, crate::navigation_bar::visual_style_icon(index as u8)))
+                                    .collect::<Vec<_>>();
+                                let mut choice = selected.get();
+                                let mut choices = |ui: &mut Ui| {
+                                    for (index, option) in options.iter().enumerate() {
+                                        let response = ui.selectable_label(selected.get() == index, *option);
+                                        scenario::publish_target(&format!("dialog:Visual style:{option}"), response.rect);
+                                        if response.clicked() {
+                                            selected.set(index);
+                                        }
+                                    }
+                                };
+                                let response = match kind {
+                                    "plain" => dropdown(ui, "styles", &mut choice, &options),
+                                    "icons" => dropdown_icons(ui, "styles", &mut choice, &icons),
+                                    "compact" => compact_dropdown_menu(ui, "styles", options[selected.get()], &mut choices),
+                                    _ => dropdown_menu_with_close_behavior(
+                                        ui,
+                                        "styles",
+                                        options[selected.get()],
+                                        egui::PopupCloseBehavior::CloseOnClickOutside,
+                                        &mut choices,
+                                    ),
+                                };
+                                trigger.set(Some(response.id));
+                                if matches!(kind, "plain" | "icons") {
+                                    selected.set(choice);
+                                }
+                            });
+                        })
+                        .1,
+                );
+            };
+            for _ in 0..3 {
+                frame(&ctx, vec![], &mut draw);
+            }
+            let at = scenario::handle_at("dialog:Visual style").unwrap();
+            frame(&ctx, pointer(at, true), &mut draw);
+            frame(&ctx, pointer(at, false), &mut draw);
+            frame(&ctx, vec![], &mut draw);
+            assert!(scenario::handle_at("dialog:Visual style:Wireframe").is_some(), "{kind}: popup opens");
+            frame(&ctx, key(egui::Key::Escape), &mut draw);
+            assert_eq!(action.get(), Action::None, "{kind}: first Escape belongs to the popup");
+            assert!(ctx.memory(|m| m.has_focus(trigger.get().unwrap())), "{kind}: Escape refocuses its own trigger");
+            frame(&ctx, vec![], &mut draw);
+            assert!(scenario::handle_at("dialog:Visual style:Wireframe").is_none());
+            frame(&ctx, key(egui::Key::Enter), &mut draw);
+            assert_eq!(action.get(), Action::None, "{kind}: Enter reopens rather than submitting");
+            frame(&ctx, vec![], &mut draw);
+            assert!(scenario::handle_at("dialog:Visual style:Wireframe").is_some(), "{kind}: focused trigger reopens on Enter");
+            frame(&ctx, key(egui::Key::Escape), &mut draw);
+            assert_eq!(action.get(), Action::None);
+            frame(&ctx, vec![], &mut draw);
+            assert!(scenario::handle_at("dialog:Visual style:Wireframe").is_none());
+            frame(&ctx, key(egui::Key::Escape), &mut draw);
+            assert_eq!(action.get(), Action::Cancel, "{kind}: Escape without a popup cancels normally");
+            assert_eq!(selected.get(), 0, "dismissal does not select an option");
+        }
+    }
+    crate::theme::set_dark(previous);
+}
+
+#[test]
 fn secret_field_retains_focus_and_masks_paint_and_accessibility_events() {
     let ctx = crate::fonts::test_context();
     let id = egui::Id::new("secret_test");

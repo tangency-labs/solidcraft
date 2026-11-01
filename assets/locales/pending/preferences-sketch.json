@@ -1,0 +1,89 @@
+{
+  "ar": {
+    "prefs.sketch.click_selects": "النقر يحدد",
+    "prefs.sketch.drawing": "الرسم",
+    "prefs.sketch.faces_edges": "الأوجه والحواف",
+    "prefs.sketch.marks": "العلامات في الرسم",
+    "prefs.sketch.opening_closing": "الفتح والإغلاق",
+    "prefs.sketch.snapping_guides": "الالتقاط والأدلة",
+    "prefs.sketch.unless_turned_note": "العودة إذا لم يتم التدوير",
+    "prefs.sketch.whole_bodies": "الأجسام كاملة"
+  },
+  "de": {
+    "prefs.sketch.click_selects": "Klick wählt",
+    "prefs.sketch.drawing": "Zeichnen",
+    "prefs.sketch.faces_edges": "Flächen und Kanten",
+    "prefs.sketch.marks": "Markierungen in der Skizze",
+    "prefs.sketch.opening_closing": "Öffnen und Schließen",
+    "prefs.sketch.snapping_guides": "Fangen und Hilfslinien",
+    "prefs.sketch.unless_turned_note": "zurück, wenn nicht gedreht",
+    "prefs.sketch.whole_bodies": "Ganze Körper"
+  },
+  "en": {
+    "prefs.sketch.click_selects": "Click selects",
+    "prefs.sketch.drawing": "Drawing",
+    "prefs.sketch.faces_edges": "Faces and edges",
+    "prefs.sketch.marks": "Marks in the sketch",
+    "prefs.sketch.opening_closing": "Opening and closing",
+    "prefs.sketch.snapping_guides": "Snapping and guides",
+    "prefs.sketch.unless_turned_note": "return if not rotated",
+    "prefs.sketch.whole_bodies": "Whole bodies"
+  },
+  "he": {
+    "prefs.sketch.click_selects": "לחיצה בוחרת",
+    "prefs.sketch.drawing": "שרטוט",
+    "prefs.sketch.faces_edges": "פאות וקצוות",
+    "prefs.sketch.marks": "סימונים בסקיצה",
+    "prefs.sketch.opening_closing": "פתיחה וסגירה",
+    "prefs.sketch.snapping_guides": "הצמדה וקווי עזר",
+    "prefs.sketch.unless_turned_note": "חזרה אם לא סובבה",
+    "prefs.sketch.whole_bodies": "גופים שלמים"
+  },
+  "ja": {
+    "prefs.sketch.click_selects": "クリックで選択",
+    "prefs.sketch.drawing": "作図",
+    "prefs.sketch.faces_edges": "面とエッジ",
+    "prefs.sketch.marks": "スケッチ内のマーク",
+    "prefs.sketch.opening_closing": "開始と終了",
+    "prefs.sketch.snapping_guides": "スナップとガイド",
+    "prefs.sketch.unless_turned_note": "回転していなければ戻る",
+    "prefs.sketch.whole_bodies": "ボディ全体"
+  },
+  "ko": {
+    "prefs.prefer_free_sketch_points": "겹치는 곳에서는 이동 가능한 점 우선",
+    "prefs.sketch.click_selects": "클릭으로 선택",
+    "prefs.sketch.drawing": "그리기",
+    "prefs.sketch.faces_edges": "면과 모서리",
+    "prefs.sketch.marks": "스케치의 표시",
+    "prefs.sketch.opening_closing": "열기 및 닫기",
+    "prefs.sketch.snapping_guides": "스냅 및 안내선",
+    "prefs.sketch.unless_turned_note": "회전하지 않았으면 복귀",
+    "prefs.sketch.whole_bodies": "전체 바디",
+    "prefs.sketch_exit_view.keep": "유지",
+    "prefs.sketch_exit_view.previous": "이전 뷰로 돌아가기",
+    "prefs.sketch_exit_view.unless_rotated": "회전하지 않았다면",
+    "ui.center_arc_follows_cursor": "중심점 호가 커서를 따라감",
+    "ui.shortcut_cycles_modes": "단축키를 다시 누르면 모드 전환",
+    "ui.shortcut_cycles_modes_tip": "끄면 도구를 다시 시작합니다."
+  },
+  "vi": {
+    "prefs.sketch.click_selects": "Nhấp để chọn",
+    "prefs.sketch.drawing": "Vẽ",
+    "prefs.sketch.faces_edges": "Mặt và cạnh",
+    "prefs.sketch.marks": "Dấu trong phác thảo",
+    "prefs.sketch.opening_closing": "Mở và đóng",
+    "prefs.sketch.snapping_guides": "Bắt điểm và đường dẫn",
+    "prefs.sketch.unless_turned_note": "trở về nếu chưa xoay",
+    "prefs.sketch.whole_bodies": "Toàn bộ khối"
+  },
+  "zh": {
+    "prefs.sketch.click_selects": "单击选择",
+    "prefs.sketch.drawing": "绘制",
+    "prefs.sketch.faces_edges": "面和边",
+    "prefs.sketch.marks": "草图中的标记",
+    "prefs.sketch.opening_closing": "打开和关闭",
+    "prefs.sketch.snapping_guides": "捕捉和辅助线",
+    "prefs.sketch.unless_turned_note": "未旋转时返回",
+    "prefs.sketch.whole_bodies": "整个实体"
+  }
+}

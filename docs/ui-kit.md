@@ -267,7 +267,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `footer`, `Footer`, `Action`, `HeaderActions` | OK/Cancel with optional Apply, compute status or selected action; `HeaderActions` puts the same buttons in a header row | `form_footer/button_height`, `dialog_footer/rule`, `control_*`, `accent`, spacing |
 | `keyboard` | Esc cancels, unowned Enter submits when valid | none |
 | `action_menu`, `command_menu_button` | Nested dense action menu or ribbon overflow action retaining its icon, shortcut and enabled state | form control/font tokens, `space_16`, icon palette |
-| table: `table`, `table_custom`, `Column`, `Table::headers`, `Table::row`, `TableRow::cell`, `Table::add_prompt` | Left-aligned headers/cells, horizontal overflow, selected/hover rows and empty state. `table_custom` supplies header actions through `headers`. `Column::flex` shares remaining width by weight, freezing columns at their control minimums before redistributing the remaining space; `Column::icon_only` hides the heading while retaining its automation identity. `add_prompt` is the final slim dashed line and requests a regular draft row from its owner; `Column::new(label, width)` uses label-column multiples, `min_content_width(points)` reserves measured control content; `ContentWidth::name` measures strong configuration names | label-column tokens, `control_height`, `dialog_rule/footer`, `selected_bg`, spacing |
+| table: `table_custom`, `Column`, `Table::headers`, `Table::row`, `TableRow::cell`, `Table::add_prompt` | Left-aligned headers/cells, horizontal overflow, selected/hover rows and empty state. `table_custom` supplies header actions through `headers`. `Column::flex` shares remaining width by weight, freezing columns at their control minimums before redistributing the remaining space; `Column::icon_only` hides the heading while retaining its automation identity. `add_prompt` is the final slim dashed line and requests a regular draft row from its owner; `Column::new(label, width)` uses label-column multiples, `min_content_width(points)` reserves measured control content; `ContentWidth::name` measures strong configuration names | label-column tokens, `control_height`, `dialog_rule/footer`, `selected_bg`, spacing |
 | `name_list`, `NameList::row`, `NameRow::name`, `NameRow::cell` | A list of named rows on the table grid (the web app's stored files): the name column takes the width the other columns leave; the other columns are as wide as their widest cell, measured as drawn (a changed measurement discards the frame). A name is cut with an ellipsis, and given its full text on hover, only when it does not fit; `dialog:name:NAME:cut` reports it | `form_label_width`, `font_label`, `form_ink`, `space_8`, `table_row_height` |
 | `removable_header`, `plus_header`, `bin_button`, `active_pill` | Hover-only column removal, anchored Add Column menu with insertion brackets, icon-only immediate deletion and active-row status. Bins preserve `dialog:button:Actions:Delete` and `:×`; header removal preserves `dialog:button:LABEL:×`. | `control_*`, `form_*`, `selected_bg`, spacing |
 | `compact_button`, `summary_row` | Borderless stars and chevrons with enabled/selected states; named two-line rule summary beside an enable checkbox and compact actions. | `form_close_size`, `control_*`, `form_*`, typography and spacing |
@@ -858,3 +858,53 @@ and its shared gap above an inline result toolbar.
 
 `number_pair` extends the shared value-pair row to bounded numeric fields (such as
 image width and height), preserving label alignment, clipping and number-field behavior.
+
+## Preferences cards, figures and help (redesign)
+
+The redesigned Preferences pages (tracker #9863, reference in `docs/design/preferences/`) compose
+these shared pieces; the pages themselves arrive in later steps. Sizes follow
+`docs/design/preferences/measurements.md`.
+
+| Element | Use | Main tokens |
+| --- | --- | --- |
+| `picture_card(ui, &Card, width)` | A radio card: a figure, a label, an optional sub-label, an optional "has options" disc (its text is the hover) and an optional accent check. The figure keeps its aspect ratio and fills the card's inside width; the card sizes to the `width` its container gives it (`card_width(available, columns, gap)` divides a row). Selected: 2 pt `form_primary` border, `selected_bg` fill, `selected_ink` semibold label. Disabled: dimmed, no hover, no click, no focus ring. Keyboard focus draws a ring outside the border. Reports `RadioButton` to accessibility. | `form_primary`, `selected_bg`, `selected_ink`, `hover`, `control_fill`, `dialog_border`, `form_ink`, `form_dim`, `on_accent`, `radius_lg`, `space_*`, `font_label/small` |
+| `toggle_tile(ui, &Card, width)` | The same picture with a 15 pt checkbox in the top-right corner (`Card::selected` is "on"). Reports `Checkbox`. | as above, `control_border` |
+| `preset_card(ui, name, word, selected, enabled, &icon, width)` | A 70 pt card with a 38 pt icon box (`icon` paints into it in the ink it is given), a name, one word and an accent check. Used for Performance, Quality and Custom. | as above, `pref_well` |
+| `help_icon(ui, text)` | The (i) after a label. Shows `text` as a tooltip and exposes it as the widget's label. | `form_dim`, `form_ink` |
+| `shortcut_binding(ui, chord, editable)` | Complete mono keycaps using the command-search painter; one focusable recorder target per binding, or a read-only label. Empty chords show dim Not assigned. `shortcut_binding_width` measures the same font and padding, including literal plus keys. Gallery: `shortcut_binding`. | `font_small/label`, `control_height`, `form_dim`, `form_primary`, `space_4/8/10`, `radius_sm` |
+| `carousel(ui, id, count, item_width, item_height, item)` | A row of items between a previous and a next arrow (both labelled from the `prefs.carousel_*` messages). `carousel_window(count, offset, available, item_width, gap, arrow)` says which items show; the arrow at an end is dimmed (0.35) and inert. The first shown index is kept in the Ui's temporary memory under `id`. | `dialog_border`, `control_fill`, `hover`, `form_ink`, `radius_lg` |
+
+`card_look(selected, enabled, hovered, focused)` holds the state rules (border width, fill, ink, weight,
+dimming, focus ring) apart from the painting so they can be tested.
+
+### Figures
+
+`ui_kit/preferences_figures.rs` paints the illustrations of the Preferences boards. The geometry of
+each comes from its SVG in `docs/design/preferences/figures/`: `tools/preferences-figures/generate.py`
+compiles those files into `ui_kit/preferences_figure_data.rs`, one constant and one painter per
+figure (`paint_tess_normal`, `paint_orbit_origin`, ...; `FIGURES` lists them all), and
+`preferences_figure_ops.rs` paints the operations with egui shapes. A figure is a list of rectangles,
+circles, polygons, soft shadows and tiny captions in the figure's own coordinates. Nothing is
+rasterised and no image is loaded; a figure costs a few dozen shapes and scales to any rectangle,
+keeping its aspect ratio. A zero, tiny, huge or non-finite rectangle paints nothing or something
+clipped, never panics.
+
+To change a figure, edit its SVG (light and dark) and run
+`python3 tools/preferences-figures/generate.py`; never edit `preferences_figure_data.rs`. The colour
+of each element is a role read from `Tokens`: `figure_ground`, `figure_line`, `figure_face_top`,
+`figure_face_left`, `figure_face_right`, `figure_card`, `figure_accent`, `figure_reference`,
+`figure_axis_x/y/z`, `figure_ok`, `figure_warn`, plus `form_ink`, `form_dim`, `dialog_border`,
+`control_border` and `control_fill` (`docs/design/preferences/tokens.md`). The new tokens, with light
+and dark values, are in `assets/styles/ui/palettes.rs`; theme files cannot override them yet and keep
+the built-in values. The colour vision samples read `axis_z`, `sketch_projected`, `axis_x`, `bend_up`
+and `bend_down`, so they follow the colour vision mode.
+
+Theme thumbnails (`paint_theme_thumbnail`, `paint_theme_system`) take a `ThemeSample` (12 colours,
+`ThemeSample::from_tokens(&tokens)`), not the dialog's tokens, because a card shows its own theme.
+The Orientation figures and the visual-style icon are not repeated here: the app already has them.
+
+New pieces and figures each have an entry in `gallery::ELEMENTS` (`picture_card`, `toggle_tile`,
+`preset_card`, `help_icon`, `carousel`, `preference_theme_thumbnails`, `preference_figures`), checked
+in both themes. `SOLIDCRAFT_PREFERENCE_WIDGET_EVIDENCE=<dir>` keeps the CPU-rendered boards
+(`preferences-widgets-*.png`, `preferences-figures-*.png`) from
+`preference_widgets_and_figures_board_in_both_themes`.
