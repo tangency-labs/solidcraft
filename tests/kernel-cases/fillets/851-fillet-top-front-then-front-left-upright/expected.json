@@ -3,9 +3,9 @@
   "tangency-labs/solidcraft#851",
   "tangency-labs/solidcraft#854"
  ],
- "what": "on #851's knife-edge part (tessellation/1263): the top front edge R2, then the front-left upright R2 as a fillet of its own, ending in the first round",
- "source": "invariants",
- "method": "the rolling ball of R2 fits on every one of these edges and where they meet; the corner between rounds that end in each other has no closed form here: one closed valid solid whose display mesh closes. Each round meets the faces it rolls on G1: graded at its seams' middles (the top front round's at z = 8 on the front and y = -19 on the top; the arc's at rho 23 on the top and rho 21, z = 8 on the wall; the uprights' at their contacts, z = 5). Where a round ends on a face or on another round the seam is a crease by construction and is not graded.",
+ "what": "on #851's knife-edge part (tessellation/1263): the top front edge R2, then the front-left upright R2 with its tangent chain: up the first round's end arc and along the left top edge",
+ "source": "analytic",
+ "method": "plate x 0..41.1667, y -21..0 and the corner x 41.1667..62.1667 less the cylinder r 21 about (62.1667, -21), 10 high (tessellation/1263): V0 = 10 (62.1667 x 21 - pi 21^2/4) = 9591.394099. The top front edge rounded R2 first: no ball of R2 inside the part (centre y >= -19, z <= 8) reaches its spandrel (y in [-21,-19], z in [8,10], outside the circle about (-19, 8)), so it removes the spandrel's material, from x = 0 to the wall x_w(y) = 62.1667 - sqrt(441 - (y+21)^2): Int over the spandrel of x_w(y) = 35.344727 (Simpson in y = -19 - 2 sin t, 200000 steps). Then the front-left upright (x=0, y=-21, z 0..8) with its tangent chain: at z = 8 it runs on tangentially into the first round's end arc on x = 0 (a quarter circle about y = -19, z = 8, convex), which runs on at (0, -19, 10) into the left top edge (x=0, z=10, y -19..0), ending on the back face y = 0, square to it. The three are the corner's other two edges and the arc between: the result is the part with all three edges at (0, -21, 10) rolled by the R2 ball, its corner the ball's eighth about (2, -19, 8) (the arc's round is the torus of tube centre radius 0 about the first round's axis, the ball itself). With A = (4 - pi) the R2 spandrel: the upright removes 8 A and the left top edge 19 A; in the corner cube [0,2] x [-21,-19] x [8,10] the first round left the quarter cylinder 2 pi and the ball leaves its eighth 4 pi/3: 2 pi/3. V = 9591.394099 - 35.344727 - 27 A - 2 pi/3 = 9530.777979. Faces: the part's 6, the first round, and the chain's three (cylinder, sphere, cylinder): 10. Each round meets the faces it rolls on G1: graded at its seams' middles (the top front round's at z = 8 on the front and y = -19 on the top; the uprights' at their contacts, z = 5).",
  "body_count": 1,
  "watertight": true,
  "continuity": {
@@ -32,5 +32,7 @@
     5
    ]
   ]
- }
+ },
+ "volume_mm3": 9530.777979288185,
+ "faces": 10
 }
