@@ -2511,6 +2511,122 @@ fn a_round_face_off_its_frames_quarter_lines_is_formed_within_one_turn() {
     }
 }
 
+/// A ball (radius 10, axis z) between the planes y = -6 and y = 6, its two halves z > 0 and
+/// z < 0 meeting on the equator, neither with a seam: each gets one from the first vertex of its
+/// loop to the pole it covers. The upper loop starts at (8, -6, 0), the lower at (8, 6, 0)
+/// (`lower_first` 0) or (-8, -6, 0) (2): the seams are 73.7 degrees apart, so no one turn of
+/// the frames the equator joins puts both on a quarter line. The lower half was left past one
+/// turn of its form, its trim across the form's end crossed the face, and its mesh had 15.6
+/// times its area, folded over the ball (a torn ball in a rotor's STEP file). Each half is
+/// turned on its own: forms of four quarters, and each half's mesh has its area.
+#[test]
+fn a_balls_halves_with_seams_off_each_others_quarter_lines_each_form_within_one_turn() {
+    let (r, c) = (10.0f64, 6.0f64);
+    let rr = (r * r - c * c).sqrt();
+    let p = |x: f64, y: f64, z: f64| format!("({x:.17},{y:.17},{z:.17})");
+    for lower_first in [0usize, 2] {
+        let lower = [
+            "#60=ORIENTED_EDGE('',*,*,#40,.F.)",
+            "#61=ORIENTED_EDGE('',*,*,#45,.F.)",
+            "#62=ORIENTED_EDGE('',*,*,#41,.F.)",
+            "#63=ORIENTED_EDGE('',*,*,#43,.T.)",
+        ];
+        let order: Vec<&str> = (0..4).map(|k| lower[(lower_first + k) % 4].split('=').next().unwrap_or("")).collect();
+        let text = format!(
+            "{HEAD}#1=CARTESIAN_POINT('',(0.,0.,0.));
+#2=DIRECTION('',(0.,0.,1.));
+#3=DIRECTION('',(1.,0.,0.));
+#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);
+#5=SPHERICAL_SURFACE('',#4,{r:?});
+#10=CARTESIAN_POINT('',{});
+#11=CARTESIAN_POINT('',{});
+#12=CARTESIAN_POINT('',{});
+#13=CARTESIAN_POINT('',{});
+#14=VERTEX_POINT('',#10);
+#15=VERTEX_POINT('',#11);
+#16=VERTEX_POINT('',#12);
+#17=VERTEX_POINT('',#13);
+#20=DIRECTION('',(0.,-1.,0.));
+#21=CARTESIAN_POINT('',(0.,{c:?},0.));
+#22=AXIS2_PLACEMENT_3D('',#21,#20,#3);
+#23=CARTESIAN_POINT('',(0.,{:?},0.));
+#24=AXIS2_PLACEMENT_3D('',#23,#20,#3);
+#30=CIRCLE('',#4,{r:?});
+#31=CIRCLE('',#22,{rr:.17});
+#32=CIRCLE('',#24,{rr:.17});
+#40=EDGE_CURVE('',#14,#15,#30,.T.);
+#41=EDGE_CURVE('',#16,#17,#30,.T.);
+#42=EDGE_CURVE('',#15,#16,#31,.T.);
+#43=EDGE_CURVE('',#16,#15,#31,.T.);
+#44=EDGE_CURVE('',#14,#17,#32,.T.);
+#45=EDGE_CURVE('',#17,#14,#32,.T.);
+#50=ORIENTED_EDGE('',*,*,#40,.T.);
+#51=ORIENTED_EDGE('',*,*,#42,.T.);
+#52=ORIENTED_EDGE('',*,*,#41,.T.);
+#53=ORIENTED_EDGE('',*,*,#44,.F.);
+#54=EDGE_LOOP('',(#50,#51,#52,#53));
+#55=FACE_OUTER_BOUND('',#54,.T.);
+#56=ADVANCED_FACE('Upper',(#55),#5,.T.);
+{};
+{};
+{};
+{};
+#64=EDGE_LOOP('',({}));
+#65=FACE_OUTER_BOUND('',#64,.T.);
+#66=ADVANCED_FACE('Lower',(#65),#5,.T.);
+#70=DIRECTION('',(0.,1.,0.));
+#71=AXIS2_PLACEMENT_3D('',#21,#70,#3);
+#72=PLANE('',#71);
+#73=ORIENTED_EDGE('',*,*,#43,.F.);
+#74=ORIENTED_EDGE('',*,*,#42,.F.);
+#75=EDGE_LOOP('',(#73,#74));
+#76=FACE_OUTER_BOUND('',#75,.T.);
+#77=ADVANCED_FACE('Top',(#76),#72,.T.);
+#79=PLANE('',#24);
+#80=ORIENTED_EDGE('',*,*,#44,.T.);
+#81=ORIENTED_EDGE('',*,*,#45,.T.);
+#82=EDGE_LOOP('',(#80,#81));
+#83=FACE_OUTER_BOUND('',#82,.T.);
+#84=ADVANCED_FACE('Bottom',(#83),#79,.T.);
+#90=CLOSED_SHELL('',(#56,#66,#77,#84));
+#91=MANIFOLD_SOLID_BREP('Ball',#90);
+#92=SHAPE_REPRESENTATION('',(#91),$);
+{TAIL}",
+            p(rr, -c, 0.0),
+            p(rr, c, 0.0),
+            p(-rr, c, 0.0),
+            p(-rr, -c, 0.0),
+            -c,
+            lower[0],
+            lower[1],
+            lower[2],
+            lower[3],
+            order.join(","),
+        );
+        let imp = step_import(&text).unwrap();
+        assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+        let b = &imp.bodies[0];
+        assert!(b.closed && b.refused.is_none(), "{lower_first}: {:?} {:?}", b.refused, imp.warnings);
+        let pi = std::f64::consts::PI;
+        let m = measure(&b.body).unwrap();
+        let (volume, area) = (pi * (r * r * 2.0 * c - 2.0 * c.powi(3) / 3.0), 4.0 * pi * r * c + 2.0 * pi * rr * rr);
+        // Measured on the sphere to 1e-5.
+        assert!(rel(m.volume, volume) < 1e-4, "{lower_first}: volume {} vs {volume}", m.volume);
+        assert!(rel(m.area, area) < 1e-4, "{lower_first}: area {} vs {area}", m.area);
+        let meshed = b.body.faces(0.005).unwrap();
+        for half in [56, 66] {
+            let fi = b.face_origin.iter().position(|f| *f == half).unwrap();
+            let Some(solidcraft_geom::brep::Surface::RationalSpline { u_knots, .. }) = &b.body.record().faces[fi].nurbs else {
+                panic!("the half's form")
+            };
+            assert!(u_knots[u_knots.len() - 1] - u_knots[0] <= 4.0, "{lower_first}: face #{half}'s form spans {u_knots:?}");
+            // Each half is a zone of the sphere 2c high, halved: pi r 2c.
+            let want = pi * r * 2.0 * c;
+            assert!(rel(meshed[fi].area, want) < 1e-2, "{lower_first}: face #{half}'s mesh has area {} of {want}", meshed[fi].area);
+        }
+    }
+}
+
 /// A circle edge between two vertices its file's uncertainty does not tell apart is the short arc
 /// between them, not a full turn (the engine assembly's water pump housing has a 20.4 um arc
 /// between two vertices in a part whose uncertainty is 20.5 um). A can whose wall is
