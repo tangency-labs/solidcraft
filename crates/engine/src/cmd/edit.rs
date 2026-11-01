@@ -1737,6 +1737,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }
     trial.doc_mut().marker = Some(idx + 1);
     trial.refresh();
+    // The edited feature keeps its name. Its temporary replacement needs a fresh one while
+    // the original remains in the trial as a placeholder (including construction planes).
+    if let Some(parameters) = params.as_object_mut() {
+        parameters.remove("name");
+    }
     let r = spec.run_nested(&mut trial, &params)?;
     let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     let mut new = trial.doc.feature(made).cloned().ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;

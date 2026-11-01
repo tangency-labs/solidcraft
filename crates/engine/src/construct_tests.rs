@@ -44,6 +44,55 @@ fn plane(s: &Session, name: &str) -> Plane {
 }
 
 #[test]
+fn construction_plane_names_cannot_be_reused_by_new_features() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "body_name": "Block"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "Mid"}));
+    let before = s.doc.clone();
+    for (command, params) in [
+        ("construct.plane.offset", json!({"base": "XY", "offset": 20, "name": "Mid"})),
+        ("construct.plane.offset", json!({"base": "XY", "offset": 20, "name": " Mid "})),
+        ("sketch.create", json!({"plane": "XY", "name": "Mid"})),
+        ("solid.box", json!({"length": 1, "width": 1, "height": 1, "name": "Mid"})),
+        ("construct.plane.offset", json!({"base": "XY", "offset": 20, "name": "Box1"})),
+    ] {
+        let error = s.execute(command, &params).unwrap_err().to_string();
+        assert!(error.contains("another feature is called"), "{command}: {error}");
+        assert_eq!(s.doc, before, "{command}: a refused creation changes nothing");
+    }
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 20, "name": "Upper"}));
+    run(&mut s, "solid.mirror", json!({"bodies": ["Block"], "plane": "Upper"}));
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    let mirrored = measured["bodies"].as_array().unwrap().iter().find(|b| b["name"] == "Block (2)").unwrap();
+    assert_eq!(mirrored["bbox"]["min"][2], 35.0);
+    assert_eq!(mirrored["bbox"]["max"][2], 40.0);
+}
+
+#[test]
+fn redefining_a_construction_plane_keeps_its_existing_name() {
+    let mut s = Session::default();
+    let id = run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "Mid"}))["feature"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "Mid", "name": "Profile"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": id, "command": "construct.plane.offset", "params": {"base": "XY", "offset": 20, "name": "Mid"}}),
+    );
+    assert_eq!(s.doc.feature(id).unwrap().name, "Mid");
+    assert_eq!(s.doc.features.len(), 2);
+    assert!(near(plane(&s, "Mid").origin, Vec3::new(0.0, 0.0, 20.0)));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(near(plane(&s, "Mid").origin, Vec3::new(0.0, 0.0, 10.0)));
+    run(&mut s, "edit.redo", json!({}));
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    reopened.refresh();
+    assert_eq!(reopened.doc.feature(id).unwrap().name, "Mid");
+    assert!(near(plane(&reopened, "Mid").origin, Vec3::new(0.0, 0.0, 20.0)));
+    assert!(reopened.model.results.iter().all(|r| r.error.is_none()));
+}
+
+#[test]
 fn renamed_construction_references_survive_edits_and_reopening() {
     let mut s = Session::default();
     run(&mut s, "construct.axis.two_planes", json!({"a": "XZ", "b": "YZ", "name": "Spine"}));

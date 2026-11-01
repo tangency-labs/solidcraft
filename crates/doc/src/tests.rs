@@ -654,6 +654,28 @@ fn new_names_take_the_first_free_number() {
 }
 
 #[test]
+fn construction_plane_name_collisions_leave_the_document_unchanged() {
+    let plane = || FeatureKind::ConstructionPlane { plane: PlaneRef::Origin { name: "XY".into() } };
+    let sketch = || FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() };
+    for (first, second) in [(plane(), plane()), (plane(), sketch()), (sketch(), plane())] {
+        let mut doc = Document::new("names");
+        let id = doc.add_feature(first, Some("Mid")).unwrap();
+        // A suppressed feature beyond the marker still owns its name.
+        doc.feature_mut(id).unwrap().suppressed = true;
+        doc.marker = Some(0);
+        let before = doc.clone();
+        for name in ["Mid", " Mid "] {
+            let error = doc.add_feature(second.clone(), Some(name)).unwrap_err().to_string();
+            assert!(error.contains("another feature is called `Mid`"), "{error}");
+            assert_eq!(doc, before, "a refused name must not consume an id or change the timeline");
+        }
+        let other = doc.add_feature(second, Some("Upper")).unwrap();
+        assert_eq!(doc.feature(other).unwrap().name, "Upper");
+        assert_eq!(other, before.next_id);
+    }
+}
+
+#[test]
 fn empty_boolean_targets_name_overlapping_component() {
     for (operation, offset) in [(Operation::Cut, 0.0), (Operation::Intersect, 0.0), (Operation::Cut, 40.0)] {
         let (mut doc, sketch) = plate_doc();
