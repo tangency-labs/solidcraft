@@ -18,3 +18,4 @@ solidcraft-kernel::corner_g2::tests::a_long_setback_keeps_the_g2_patch_inside_th
 solidcraft-kernel::corner_g2::tests::curvature_rounds_meet_at_a_g2_corner the explicit G2 corner patch is not yet G2 to the new order-2 section's rounds across the whole seam (the corner step replaces it)
 solidcraft-kernel::corner_g2::tests::the_box_corner_g2_patch_is_a_closed_solid_curvature_continuous_to_its_neighbours the fitted G2 corner patch bulges 1.7e-5 past the box, which SMLib's exact tight box now sees (the explicit G2 corner builds it inside)
 solidcraft-kernel::tests::fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole the arc and tab rounds together remove 9.20067 against 9.20420 (3.8e-4 off, 1e-5 allowed)
+solidcraft-smlib::ops::tests::a_variable_round_with_a_corner_in_its_law_is_its_balls_union the two halves' rounds end on their own touch circles at the law's corner, not where they cross: 39.6456 removed against 39.5421
