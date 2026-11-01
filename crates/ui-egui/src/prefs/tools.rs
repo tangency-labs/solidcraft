@@ -36,6 +36,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     ui_kit::settings_section(ui, "joint_move", app.tr("joint_move.settings"), |ui| {
         setting::assembly_move_handles(app, ui);
+        setting::move_starts_fixed(app, ui);
         ui_kit::text(ui, app.tr("joint_move.legacy_hint"), ui_kit::Text::Hint("joint_move_legacy"));
         ui_kit::settings_form(ui, t.space_24 * 7.0 + t.space_2, |ui| {
             ui_kit::row(ui, app.tr("joint_move.coarse"), |ui| {

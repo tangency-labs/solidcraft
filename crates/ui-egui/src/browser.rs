@@ -222,18 +222,104 @@ pub struct OccMove {
     /// Effective local placement at dialog opening, including its pre-existing pending move.
     pub baseline: Option<solidcraft_engine::doc::Mat>,
     pub had_pending: bool,
-    /// Distances along X, Y, Z (mm) and turns about X, Y, Z (degrees) from where it was.
+    /// Distances along the triad (mm) and turns about X, Y, Z (degrees) from where it was.
     pub translate: [f64; 3],
     pub angles: [f64; 3],
-    /// The occurrence's origin when the move began: what it turns about.
+    /// The occurrence's centre when the move began: what it turns about.
     pub pivot: Option<solidcraft_engine::geom::Vec3>,
+    /// The triad's axes stay as they are, rather than turn with the occurrence.
+    pub fixed: bool,
+    /// The order the angles apply in (`gizmo::turn_of`), so each stays what was dragged.
+    order: [usize; 3],
+    /// The axes the angles start from, and those the distances lie along.
+    start: crate::gizmo::Axes,
+    along: crate::gizmo::Axes,
+    /// The placement the values start from, when not the baseline: a turn no sum of angles can
+    /// make starts the values over from where the occurrence stands.
+    base: Option<solidcraft_engine::doc::Mat>,
+    /// Whether the panel has laid the axes along the occurrence yet, and taken the frame to start
+    /// in from the preferences.
+    laid: bool,
+    opened: bool,
     /// The values when the current triad drag began.
     drag0: Option<([f64; 3], [f64; 3])>,
 }
 
 impl OccMove {
     pub fn new(occurrence: u64) -> Self {
-        OccMove { occurrence, path: Vec::new(), baseline: None, had_pending: false, translate: [0.0; 3], angles: [0.0; 3], pivot: None, drag0: None }
+        OccMove {
+            occurrence,
+            path: Vec::new(),
+            baseline: None,
+            had_pending: false,
+            translate: [0.0; 3],
+            angles: [0.0; 3],
+            pivot: None,
+            fixed: false,
+            order: crate::gizmo::ANGLE_ORDER,
+            start: crate::gizmo::WORLD,
+            along: crate::gizmo::WORLD,
+            base: None,
+            laid: false,
+            opened: false,
+            drag0: None,
+        }
+    }
+
+    /// The triad's axes now: they turn with the occurrence unless fixed.
+    fn triad_axes(&self) -> crate::gizmo::Axes {
+        use crate::gizmo;
+        if self.fixed { self.start } else { gizmo::mul(&self.start, &gizmo::turn_of(self.angles.map(f64::to_radians), self.order)) }
+    }
+
+    /// The distances as a move in the world.
+    fn distance(&self) -> solidcraft_engine::geom::Vec3 {
+        use solidcraft_engine::geom::Vec3;
+        crate::gizmo::apply(&self.along, Vec3::new(self.translate[0], self.translate[1], self.translate[2]))
+    }
+
+    /// Keep the distances along the triad's axes when they turn; the occurrence stays.
+    pub(crate) fn sync(&mut self) {
+        let now = self.triad_axes();
+        if now.iter().flatten().zip(self.along.iter().flatten()).all(|(a, b)| (a - b).abs() < 1e-9) {
+            return;
+        }
+        let v = crate::gizmo::apply(&crate::gizmo::inverse(&now), self.distance());
+        (self.translate, self.along) = ([v.x, v.y, v.z], now);
+    }
+
+    /// The values go back to zero where the occurrence stands, which keeps its pending move.
+    fn bake(&mut self, app: &SolveApp) {
+        let axes = self.triad_axes();
+        self.pivot = self.pivot.map(|p| p + self.distance());
+        self.base = app.session.pending_moves.get(&self.occurrence).copied().or(self.base);
+        (self.translate, self.angles, self.order, self.along) = ([0.0; 3], [0.0; 3], crate::gizmo::ANGLE_ORDER, axes);
+        if !self.fixed {
+            self.start = axes;
+        }
+    }
+
+    /// Local or Fixed, from where the occurrence stands.
+    pub(crate) fn set_fixed(&mut self, app: &SolveApp, on: bool) {
+        self.bake(app);
+        self.fixed = on;
+        self.laid = false;
+    }
+
+    /// Lay the axes along the occurrence, or the world's when fixed.
+    pub(crate) fn lay_axes(&mut self, app: &SolveApp) {
+        if self.laid {
+            return;
+        }
+        self.laid = true;
+        if !self.opened {
+            self.opened = true;
+            self.fixed = app.preferences.move_starts_fixed;
+        }
+        let placed =
+            if self.path.is_empty() { self.base.or(self.baseline) } else { app.session.occurrence_placement(&self.path).ok().map(|p| p.world) };
+        self.start = placed.filter(|_| !self.fixed).map_or(crate::gizmo::WORLD, |m| crate::dialogs_move::rows_of(&m));
+        self.along = self.start;
     }
 }
 
@@ -3189,30 +3275,42 @@ pub(crate) fn revert_occurrence_dialog(app: &mut SolveApp, m: &OccMove) {
     }
 }
 
-/// The pending move: turned about X, then Y, then Z through the starting origin, then moved.
+/// The middle of what a moved occurrence places, in the world, where its triad sits and it turns.
+/// Its component's origin can be anywhere, far from the part. `None` when it places nothing.
+pub(crate) fn occurrence_centre(app: &SolveApp, m: &OccMove) -> Option<solidcraft_engine::geom::Vec3> {
+    let bounds = if m.path.is_empty() {
+        crate::dialogs_assembly::occurrence_bounds(&app.session, &[m.occurrence])
+    } else {
+        let names = app.session.occurrence_bodies_shared(&m.path, true).ok()?;
+        let world = app.session.world_state();
+        names.iter().filter_map(|n| world.body(n)).fold(solidcraft_engine::geom::Aabb3::EMPTY, |bb, b| bb.union(&b.mesh().bounds()))
+    };
+    (!bounds.is_empty()).then(|| bounds.center())
+}
+
+/// The pending move: turned by the angles through the pivot, then moved.
 pub fn apply_occurrence_move(app: &mut SolveApp, m: &OccMove) {
     use crate::gizmo;
     use solidcraft_engine::geom::Vec3;
-    let a = m.angles.map(f64::to_radians);
-    let r = gizmo::mul(&gizmo::mul(&gizmo::rotation(Vec3::Z, a[2]), &gizmo::rotation(Vec3::Y, a[1])), &gizmo::rotation(Vec3::X, a[0]));
-    let (axis, angle) = gizmo::axis_angle(&r);
+    let (axis, angle) = gizmo::axis_angle(&gizmo::turn_in(&m.start, &gizmo::turn_of(m.angles.map(f64::to_radians), m.order)));
     let o = m.pivot.unwrap_or(Vec3::ZERO);
-    let baseline = m.baseline.or_else(|| app.session.doc.occurrences.iter().find(|o| o.id == m.occurrence).map(|o| o.transform));
+    let t = m.distance();
+    let translate = [t.x, t.y, t.z];
+    let baseline = m.base.or(m.baseline).or_else(|| app.session.doc.occurrences.iter().find(|o| o.id == m.occurrence).map(|o| o.transform));
     let _ = app.run(
         "occurrence.move",
         if m.path.is_empty() {
-            json!({ "occurrence": m.occurrence, "base_transform": baseline, "translate": m.translate, "axis": [axis.x, axis.y, axis.z], "angle": angle, "origin": [o.x, o.y, o.z], "capture": false })
+            json!({ "occurrence": m.occurrence, "base_transform": baseline, "translate": translate, "axis": [axis.x, axis.y, axis.z], "angle": angle, "origin": [o.x, o.y, o.z], "capture": false })
         } else {
-            json!({ "occurrence": m.occurrence, "path": m.path, "space": "world", "base_transform": baseline, "translate": m.translate, "axis": [axis.x, axis.y, axis.z], "angle": angle, "origin": [o.x, o.y, o.z], "capture": false })
+            json!({ "occurrence": m.occurrence, "path": m.path, "space": "world", "base_transform": baseline, "translate": translate, "axis": [axis.x, axis.y, axis.z], "angle": angle, "origin": [o.x, o.y, o.z], "capture": false })
         },
     );
 }
 
-/// The shared move triad at the occurrence's origin: arrows and squares move it, rings turn it.
+/// The shared move triad at the occurrence's pivot: arrows and squares move it, rings turn it.
 pub(crate) fn occurrence_triad_model(app: &SolveApp) -> Option<crate::gizmo::Triad> {
     let movement = app.tree.occurrence_move.as_ref()?;
-    let center = movement.pivot? + solidcraft_engine::geom::Vec3::new(movement.translate[0], movement.translate[1], movement.translate[2]);
-    Some(crate::gizmo::Triad { center, translate: true, rotate: true })
+    Some(crate::gizmo::Triad { center: movement.pivot? + movement.distance(), axes: movement.triad_axes(), translate: true, rotate: true })
 }
 
 /// Occurrence handles belong to the viewport, not the clipped Move panel's child UI.
@@ -3228,13 +3326,31 @@ pub(crate) fn occurrence_triad(app: &mut SolveApp, ui: &mut egui::Ui, painter: &
     }
     let (t0, a0) = m.drag0.unwrap_or((m.translate, m.angles));
     match g.change {
-        Change::Translate(v) => m.translate = [t0[0] + v.x, t0[1] + v.y, t0[2] + v.z],
-        Change::Rotate { axis, angle } => {
-            if let Some(slot) = m.angles.get_mut(axis) {
-                *slot = a0.get(axis).copied().unwrap_or(0.0) + angle.to_degrees();
+        Change::Translate(v) => {
+            let v = gizmo::apply(&gizmo::inverse(&m.along), v);
+            m.translate = [t0[0] + v.x, t0[1] + v.y, t0[2] + v.z];
+        }
+        Change::Rotate { axis, angle } if angle != 0.0 => {
+            let i = axis.min(2);
+            let mut from = a0[i];
+            // The turn's first move: let its angle add, or start over on the turns so far.
+            if a0 == m.angles {
+                match gizmo::ring_order(m.angles.map(f64::to_radians), m.order, i, !m.fixed) {
+                    Some(order) => m.order = order,
+                    None => {
+                        m.bake(app);
+                        m.drag0 = Some((m.translate, m.angles));
+                        from = 0.0;
+                    }
+                }
+            }
+            if let Some(a) = m.angles.get_mut(i) {
+                *a = gizmo::within_turn((from + angle.to_degrees()).to_radians()).to_degrees();
             }
         }
+        Change::Rotate { .. } => {}
     }
+    m.sync();
     if g.done {
         m.drag0 = None;
     }

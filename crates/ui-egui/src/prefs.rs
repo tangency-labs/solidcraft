@@ -1165,6 +1165,8 @@ preference_settings! {
     max_design_file_mb: u64 = DEFAULT_DESIGN_MB, PAGE_GENERAL;
     /// Explicit assembly Move uses joint handles; off keeps the previous Move panel.
     assembly_move_handles: bool = true, PAGE_TOOLS => check_id("joint_move.use_handles");
+    /// Move starts on fixed axes, as it did, rather than on the bodies' own.
+    move_starts_fixed: bool = false, PAGE_TOOLS => check_id("prefs.move_starts_fixed");
     /// Degrees per step near the assembly Move ring.
     joint_rotation_coarse: f64 = 10.0, PAGE_TOOLS;
     /// Degrees per step after pulling the cursor outside the precision guide.

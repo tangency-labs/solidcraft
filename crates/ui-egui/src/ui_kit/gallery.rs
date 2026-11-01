@@ -1512,6 +1512,9 @@ const ELEMENTS: &[Element] = &[
     element!("value_pair", "dialog:row:Position", Some("dialog:Y"), |ui, s| {
         value_pair(ui, "Position", [&mut s.value, &mut s.second], ["X", "Y"], None);
     }),
+    element!("check_button", "dialog:gallery:accept", Some("dialog:gallery:accept"), |ui, _| {
+        check_button(ui, "dialog:gallery:accept", "Accept");
+    }),
     element!("toggle_icon", "dialog:Alignment:Center", Some("dialog:Alignment:Center"), |ui, s| {
         toggle_icon(ui, "Alignment", "Center", &mut s.checked, "pattern_center");
     }),

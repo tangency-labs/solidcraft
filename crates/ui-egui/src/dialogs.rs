@@ -980,7 +980,13 @@ impl Dialog {
                     rail2,
                 ]
             }),
-            "solid.move" => Dialog::new(crate::dialogs_move::kind(0, &s.doc), crate::dialogs_move::inputs(0)),
+            "solid.move" => {
+                let mut d = Dialog::new(crate::dialogs_move::kind(0, &s.doc), crate::dialogs_move::inputs(0));
+                if app.preferences.move_starts_fixed {
+                    d.extra.insert("fixed".into(), json!(true));
+                }
+                d
+            }
             "solid.hole" => Dialog::new(hole_defaults(s), single_hole_inputs()),
             "solid.box" => Dialog::new(
                 Kind::Primitive {
@@ -3439,14 +3445,19 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             d.reset_scroll = false;
             d.collapsed = collapsed;
             cancel |= closed;
+            // Placing a pivot, the keys answer for the pivot (below), not for the dialog.
+            let placing = crate::dialogs_move::placing_pivot(&d);
+            let (enter_key, esc_key) = ctx.input(|i| (i.key_pressed(egui::Key::Enter), i.key_pressed(egui::Key::Escape)));
             if app.issue_report.draft.is_none() {
                 match action {
+                    crate::ui_kit::Action::Ok if placing && enter_key => {}
+                    crate::ui_kit::Action::Cancel if placing && esc_key => {}
                     crate::ui_kit::Action::Ok => {
                         ok = true;
                         apply_again = false;
                     }
                     crate::ui_kit::Action::Cancel => {
-                        if (!app.esc_handled && escape_routed_here) || !ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+                        if (!app.esc_handled && escape_routed_here) || !esc_key {
                             cancel = true;
                         }
                     }
@@ -3524,12 +3535,22 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         && !matches!(&d.kind, Kind::Motion(k) if k.wide())
         && !matches!(&d.kind, Kind::Material { editor, .. } if editor.editing());
     let report_active = app.issue_report.draft.is_some();
+    // Placing a pivot, Enter and Esc answer for the pivot: the move stays open.
+    let placing = crate::dialogs_move::placing_pivot(&d);
     if !preset_prompt && !report_active && enter_applies && app.applying.is_none() && (enter || canvas_enter || (enter_free && nothing_focused)) {
-        ok = true;
+        if placing {
+            crate::dialogs_move::accept_pivot(app, &mut d);
+        } else {
+            ok = true;
+        }
     }
     if !preset_prompt && !report_active && esc && !app.esc_handled && escape_routed_here {
         app.esc_handled = true;
-        cancel = true;
+        if placing {
+            crate::dialogs_move::end_pivot(app, &mut d);
+        } else {
+            cancel = true;
+        }
     }
     // A plane picked for a new sketch starts it right away.
     let mut then_start = None;
@@ -6667,7 +6688,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 &mut d,
                 &solidcraft_engine::doc::plain(bodies),
                 &world_translate,
-                rotate_axis.map(Vec3::from),
+                rotate_axis.map(|axis| solidcraft_engine::doc::apply_vector(&frame, Vec3::from(axis))),
                 angle.as_ref(),
                 *copy,
             );

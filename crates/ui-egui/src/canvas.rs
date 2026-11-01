@@ -325,6 +325,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
     // one sets it. The triad is the manipulator here, so the box comes without the drag arrow
     // every other dialog's value gets (`dir` is None below).
     if matches!(d.kind, Kind::Move { .. }) {
+        crate::dialogs_move::sync(app, &mut d);
         let mut dragging = false;
         if let Some(t) = crate::dialogs_move::triad(app, &d)
             && let Some(g) = crate::gizmo::show(ui, painter, proj, egui::Id::new("sc_move_triad"), &t, snap_step(app.cam.half_height()))
@@ -357,6 +358,16 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
             d.focus = true;
         }
         let focus = take_focus(ui.ctx(), &mut d);
+        // A pivot being placed: the way it has come, in the colour its values show in.
+        let trail = crate::dialogs_move::pivot_trail(app, &d);
+        let ink = Tokens::get().warning;
+        if let Some((from, to)) = trail
+            && let (Some(a), Some(b)) = (proj.to_screen(from), proj.to_screen(to))
+        {
+            painter.line_segment([a, b], Stroke::new(1.5, ink));
+            painter.circle_stroke(a, 4.0, Stroke::new(1.5, ink));
+            painter.circle_stroke(b, 9.0, Stroke::new(2.0, ink));
+        }
         if let Some(bs) = at.and_then(|base| proj.to_screen(base))
             && let Some((label, _, value)) = d.primary()
         {
@@ -364,7 +375,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
             // beside the centre would cover the handles the user is reaching for.
             let off = if triad.is_some() { vec2(crate::gizmo::LEN_PX as f32 + 16.0, -12.0) } else { vec2(16.0, -30.0) };
             let box_at = rotation.map_or(bs + off, |(end, _)| end + vec2(16.0, -12.0));
-            value_box_with(ui, label, value, box_at, focus || dragging, true, place);
+            let ids = (egui::Id::new("sc_canvas_area"), egui::Id::new("sc_canvas_value"));
+            let field = value_box_in(ui, ids, label, value, (box_at, egui::Align2::LEFT_TOP), focus || dragging, true, place);
+            if let (Some(field), true) = (field, trail.is_some()) {
+                let over = egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("sc_pivot_value"));
+                ui.ctx().layer_painter(over).rect_stroke(field.expand(2.0), 2.0, Stroke::new(1.5, ink), egui::StrokeKind::Outside);
+            }
         }
         app.dialog = Some(d);
         return;

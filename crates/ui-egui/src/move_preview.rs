@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use serde_json::Value;
-use solidcraft_engine::doc::{Document, Mat, apply_point, apply_vector, expr::Kind, rigid};
+use solidcraft_engine::doc::{Document, IDENTITY, Mat, apply_point, apply_vector, expr::Kind, mat_inverse, mat_mul, rigid};
 use solidcraft_engine::geom::{Aabb3, Mesh, Vec3};
 
 use crate::{
@@ -23,12 +23,23 @@ pub(crate) struct MovePreview {
     cached: Option<Cached>,
 }
 
-/// The listed bodies' world meshes, for the design and revision they were taken from.
+/// The listed bodies' world meshes and the frames their components place them in, for the design
+/// and revision they were taken from.
 struct Cached {
     document: Arc<Document>,
     revision: u64,
     bodies: Vec<String>,
     meshes: Vec<Arc<Mesh>>,
+    frames: Vec<Mat>,
+}
+
+/// Where the components of `bodies` place them, the world for a body outside one.
+fn placed_frames(app: &SolveApp, bodies: &[String]) -> Vec<Mat> {
+    if app.session.doc.occurrences.is_empty() {
+        return vec![IDENTITY; bodies.len()];
+    }
+    let frames = app.session.placed_document().body_frames(&app.session.model.state());
+    bodies.iter().map(|name| frames.iter().find(|f| f.0 == *name).map_or(IDENTITY, |f| f.3)).collect()
 }
 
 impl MovePreview {
@@ -84,16 +95,20 @@ impl MovePreview {
             if meshes.iter().map(|m| m.triangles.len()).sum::<usize>() > MAX_TRIANGLES {
                 return None;
             }
-            self.cached = Some(Cached { document: app.session.doc.clone(), revision: app.session.revision, bodies: bodies.clone(), meshes });
+            let frames = placed_frames(app, &bodies);
+            self.cached = Some(Cached { document: app.session.doc.clone(), revision: app.session.revision, bodies: bodies.clone(), meshes, frames });
         }
         let cache = self.cached.as_ref()?;
-        // About the world origin, as the Move feature turns bodies (`kernel::transform`).
-        let m = rigid(translate, Vec3::ZERO, axis, angle);
+        // As the Move feature does (`kernel::transform`): about the origin of each body's frame,
+        // with the values taken into the first body's.
+        let back = mat_inverse(cache.frames.first()?)?;
+        let turned = rigid(apply_vector(&back, translate), Vec3::ZERO, apply_vector(&back, axis), angle);
         let copy = params.get("copy").and_then(Value::as_bool) == Some(true);
         let mut scene = GpuScene::default();
         let removed = scene.color(colors.removed);
         let mut bounds = Aabb3::EMPTY;
-        for mesh in &cache.meshes {
+        for (mesh, frame) in cache.meshes.iter().zip(&cache.frames) {
+            let m = mat_mul(&mat_mul(frame, &turned), &mat_inverse(frame)?);
             draw(&mut scene, mesh, &m, colors, &mut bounds);
             if !copy {
                 // Where the body was, as the scratch-design preview shows a body moved away.
@@ -185,6 +200,25 @@ mod tests {
         // A copy keeps the original shown.
         let copy = [("solid.move".to_string(), json!({"bodies": ["Plate"], "translate": [0, 0, 10], "copy": true}))];
         assert!(pv.compute(&app, &copy, c).unwrap().unwrap().replaced.is_empty());
+    }
+
+    /// A body in a turned, placed component turns about its component's origin, not the world's:
+    /// previewed about the world's, it was drawn far from where the feature puts it.
+    #[test]
+    fn a_placed_body_is_previewed_where_the_feature_puts_it() {
+        let mut s = Session::default();
+        s.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+        s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": "Part:1", "axis": [0, 0, 1], "angle": "30 deg", "translate": [130, 20, 20]})).unwrap();
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        let app = SolveApp::new(s, Services::default());
+        let cmds =
+            [("solid.move".to_string(), json!({"bodies": ["Body1"], "translate": ["10 mm", "-5 mm", "0 mm"], "axis": [1, 0, 0], "angle": "25 deg"}))];
+        let built = MovePreview::default().compute(&app, &cmds, colors(&app)).expect("taken here").expect("built");
+        let mut s = app.session.scratch();
+        s.execute("solid.move", &cmds[0].1).unwrap();
+        let moved = s.world_state().body("Body1").unwrap().mesh().bounds();
+        assert!(built.bounds.min.dist(moved.min) < 1e-6 && built.bounds.max.dist(moved.max) < 1e-6, "{:?} vs {moved:?}", built.bounds);
     }
 
     /// Anything it can't take is left to the scratch-design preview.

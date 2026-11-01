@@ -5,7 +5,7 @@
 use serde_json::json;
 
 use crate::SolveApp;
-use crate::browser::{answer_capture, apply_occurrence_move, occurrence_origin, panel_pos, revert_occurrence_dialog};
+use crate::browser::{answer_capture, apply_occurrence_move, occurrence_centre, occurrence_origin, panel_pos, revert_occurrence_dialog};
 use crate::ui_kit;
 
 /// Move/Copy of an occurrence: offsets and a rotation about Z, pending until Capture Position.
@@ -29,14 +29,21 @@ pub(crate) fn occurrence_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let ctx = ui.ctx().clone();
     if m.pivot.is_none() {
-        m.pivot = if m.path.is_empty() {
-            occurrence_origin(app, m.occurrence)
-        } else {
-            app.session.occurrence_placement(&m.path).ok().map(|p| solidcraft_engine::doc::apply_point(&p.world, solidcraft_engine::geom::Vec3::ZERO))
-        };
+        m.pivot = occurrence_centre(app, &m).or_else(|| {
+            if m.path.is_empty() {
+                occurrence_origin(app, m.occurrence)
+            } else {
+                app.session
+                    .occurrence_placement(&m.path)
+                    .ok()
+                    .map(|p| solidcraft_engine::doc::apply_point(&p.world, solidcraft_engine::geom::Vec3::ZERO))
+            }
+        });
     }
+    m.lay_axes(app);
     let name = app.session.doc.occurrences.iter().find(|o| o.id == m.occurrence).map(|o| o.name.clone()).unwrap_or_default();
     let before = (m.translate, m.angles);
+    let mut frame = usize::from(m.fixed);
     let shared = !m.path.is_empty() && app.session.occurrence_scope_count(&m.path).is_ok_and(|n| n > 1);
     let title = crate::i18n::format("browser.move_title", &[("name", &name)]);
     let at = panel_pos(app);
@@ -54,6 +61,11 @@ pub(crate) fn occurrence_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui_kit::Text::Note("shared"),
                 );
             }
+            let options = [crate::i18n::tr("dialog.move_frame_local"), crate::i18n::tr("dialog.move_frame_fixed")];
+            ui_kit::row(ui, crate::i18n::tr("ui.axes"), |ui| {
+                let segments = ui_kit::Segments { compact: true, targets: &["occurrence-move:local", "occurrence-move:fixed"], ..Default::default() };
+                ui_kit::segmented(ui, &mut frame, &options, segments)
+            });
             for (k, axis) in ["X distance", "Y distance", "Z distance"].into_iter().enumerate() {
                 if let Some(v) = m.translate.get_mut(k) {
                     let response = ui_kit::row(ui, crate::i18n::tr_label(axis), |ui| ui_kit::length_field(ui, v, &units, decimals));
@@ -67,6 +79,11 @@ pub(crate) fn occurrence_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         });
+    if frame != usize::from(m.fixed) {
+        m.set_fixed(app, frame == 1);
+        m.lay_axes(app);
+    }
+    m.sync();
     if (m.translate, m.angles) != before {
         apply_occurrence_move(app, &m);
     }

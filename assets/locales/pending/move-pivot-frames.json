@@ -1,0 +1,93 @@
+{
+  "en": {
+    "dialog.move_frame_fixed": "Fixed",
+    "dialog.move_frame_fixed_tip": "The axes stay as they are while the bodies turn",
+    "dialog.move_frame_local": "Local",
+    "dialog.move_frame_local_tip": "The axes turn with the bodies",
+    "dialog.move_pivot_accept": "Accept the pivot",
+    "dialog.move_pivot_clear": "Back to the bodies' center and their own axes",
+    "dialog.move_pivot_discard": "Discard the new pivot",
+    "dialog.move_pivot_set": "Place the pivot: click a point, an edge or a face, or drag the handles",
+    "prefs.move_starts_fixed": "Start Move on fixed axes"
+  },
+  "en-GB": {
+    "dialog.move_pivot_clear": "Back to the bodies' centre and their own axes"
+  },
+  "de": {
+    "dialog.move_frame_fixed": "Fest",
+    "dialog.move_frame_fixed_tip": "Die Achsen bleiben stehen, während sich die Körper drehen",
+    "dialog.move_frame_local": "Lokal",
+    "dialog.move_frame_local_tip": "Die Achsen drehen sich mit den Körpern",
+    "dialog.move_pivot_accept": "Drehpunkt übernehmen",
+    "dialog.move_pivot_clear": "Zurück zur Mitte der Körper und ihren eigenen Achsen",
+    "dialog.move_pivot_discard": "Neuen Drehpunkt verwerfen",
+    "dialog.move_pivot_set": "Drehpunkt setzen: Punkt, Kante oder Fläche anklicken oder die Griffe ziehen",
+    "prefs.move_starts_fixed": "Bewegen mit festen Achsen beginnen"
+  },
+  "ja": {
+    "dialog.move_frame_fixed": "固定",
+    "dialog.move_frame_fixed_tip": "ボディが回転しても軸はそのままです",
+    "dialog.move_frame_local": "ローカル",
+    "dialog.move_frame_local_tip": "軸はボディと一緒に回転します",
+    "dialog.move_pivot_accept": "ピボットを確定",
+    "dialog.move_pivot_clear": "ボディの中心と固有の軸に戻す",
+    "dialog.move_pivot_discard": "新しいピボットを破棄",
+    "dialog.move_pivot_set": "ピボットを配置: 点、エッジ、面をクリックするか、ハンドルをドラッグします",
+    "prefs.move_starts_fixed": "移動を固定の軸で開始"
+  },
+  "ko": {
+    "dialog.move_frame_fixed": "고정",
+    "dialog.move_frame_fixed_tip": "바디가 회전해도 축은 그대로 유지됩니다",
+    "dialog.move_frame_local": "로컬",
+    "dialog.move_frame_local_tip": "축이 바디와 함께 회전합니다",
+    "dialog.move_pivot_accept": "피벗 확정",
+    "dialog.move_pivot_clear": "바디의 중심과 고유 축으로 되돌리기",
+    "dialog.move_pivot_discard": "새 피벗 취소",
+    "dialog.move_pivot_set": "피벗 배치: 점, 모서리 또는 면을 클릭하거나 핸들을 드래그합니다",
+    "prefs.move_starts_fixed": "고정 축으로 이동 시작"
+  },
+  "zh": {
+    "dialog.move_frame_fixed": "固定",
+    "dialog.move_frame_fixed_tip": "实体旋转时坐标轴保持不变",
+    "dialog.move_frame_local": "局部",
+    "dialog.move_frame_local_tip": "坐标轴随实体一起旋转",
+    "dialog.move_pivot_accept": "确认枢轴",
+    "dialog.move_pivot_clear": "恢复为实体中心及其自身坐标轴",
+    "dialog.move_pivot_discard": "放弃新枢轴",
+    "dialog.move_pivot_set": "放置枢轴：单击点、边或面，或拖动手柄",
+    "prefs.move_starts_fixed": "以固定坐标轴开始移动"
+  },
+  "ar": {
+    "dialog.move_frame_fixed": "ثابت",
+    "dialog.move_frame_fixed_tip": "تبقى المحاور كما هي أثناء دوران الأجسام",
+    "dialog.move_frame_local": "محلي",
+    "dialog.move_frame_local_tip": "تدور المحاور مع الأجسام",
+    "dialog.move_pivot_accept": "اعتماد نقطة الارتكاز",
+    "dialog.move_pivot_clear": "العودة إلى مركز الأجسام ومحاورها الخاصة",
+    "dialog.move_pivot_discard": "تجاهل نقطة الارتكاز الجديدة",
+    "dialog.move_pivot_set": "وضع نقطة الارتكاز: انقر نقطة أو حافة أو وجهًا، أو اسحب المقابض",
+    "prefs.move_starts_fixed": "بدء النقل على محاور ثابتة"
+  },
+  "he": {
+    "dialog.move_frame_fixed": "קבוע",
+    "dialog.move_frame_fixed_tip": "הצירים נשארים במקומם בזמן שהגופים מסתובבים",
+    "dialog.move_frame_local": "מקומי",
+    "dialog.move_frame_local_tip": "הצירים מסתובבים עם הגופים",
+    "dialog.move_pivot_accept": "אישור נקודת הציר",
+    "dialog.move_pivot_clear": "חזרה למרכז הגופים ולצירים שלהם",
+    "dialog.move_pivot_discard": "ביטול נקודת הציר החדשה",
+    "dialog.move_pivot_set": "מיקום נקודת הציר: לחצו על נקודה, קצה או פאה, או גררו את הידיות",
+    "prefs.move_starts_fixed": "התחלת הזזה על צירים קבועים"
+  },
+  "vi": {
+    "dialog.move_frame_fixed": "Cố định",
+    "dialog.move_frame_fixed_tip": "Các trục giữ nguyên khi các khối xoay",
+    "dialog.move_frame_local": "Cục bộ",
+    "dialog.move_frame_local_tip": "Các trục xoay cùng các khối",
+    "dialog.move_pivot_accept": "Chấp nhận điểm xoay",
+    "dialog.move_pivot_clear": "Trở về tâm của các khối và các trục riêng của chúng",
+    "dialog.move_pivot_discard": "Bỏ điểm xoay mới",
+    "dialog.move_pivot_set": "Đặt điểm xoay: nhấp vào một điểm, cạnh hoặc mặt, hoặc kéo các tay nắm",
+    "prefs.move_starts_fixed": "Bắt đầu Di chuyển trên các trục cố định"
+  }
+}

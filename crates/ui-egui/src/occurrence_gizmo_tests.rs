@@ -65,3 +65,53 @@ fn occurrence_gizmo_drag_matches_numeric_input_and_preserves_joints_capture_and_
     assert_eq!(serde_json::to_value(&h.app.session.doc.assembly.joints).unwrap(), joints);
     assert!(!h.app.session.selection.contains(&Sel::Occurrence { path: vec![second] }));
 }
+
+/// The triad sits on the part, wherever its component's origin is: a part modelled away from
+/// that origin must not be turned and moved from over there. A second ring reads what was
+/// dragged and turns about the axis it shows: one the first turn leaves it on (Local), or the
+/// world's (Fixed).
+#[test]
+fn occurrence_triad_sits_on_the_part_and_its_rings_turn_about_their_axes() {
+    for fixed in [false, true] {
+        let mut h = Harness::new();
+        let part = h.app.run("component.create", json!({"name":"Block","grounded":false})).unwrap();
+        let first = part["occurrence"].as_u64().unwrap();
+        h.app.run("solid.box", json!({"length":10,"width":20,"height":30,"corner":[100,40,0]})).unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        let centre = Vec3::new(105., 50., 15.);
+        h.app.cam = h.app.cam.looking_from(Vec3::new(1.0, 0.8, 0.6));
+        h.app.cam.target = centre;
+        h.app.cam.distance = 200.;
+        h.frames(3);
+        let target = Target::Occurrence { path: vec![first] };
+        let item = context_menu::items(&h.app, &target).into_iter().find(|item| item.id == "ui.moveOccurrence").unwrap();
+        context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+        h.frames(3);
+        let at = crate::browser::occurrence_triad_model(&h.app).unwrap().center;
+        assert!((at - centre).len() < 1e-6, "triad at {at:?}, part at {centre:?}");
+
+        let mut m = h.app.tree.occurrence_move.clone().unwrap();
+        m.fixed = fixed;
+        m.angles = [0., 40., 0.];
+        crate::browser::apply_occurrence_move(&mut h.app, &m);
+        h.app.tree.occurrence_move = Some(m);
+        h.frames(3);
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        let t = crate::browser::occurrence_triad_model(&h.app).unwrap();
+        let grip = crate::gizmo::ring_grip(&proj, &t, 0).unwrap();
+        let [start, end] = [grip, grip + 35.].map(|a| crate::gizmo::handle_point("rx", Vec3::ZERO, a).unwrap());
+        h.step(&json!({"drag":[{"world":[start.x,start.y,start.z]},{"world":[end.x,end.y,end.z]}],"steps":12})).unwrap();
+        h.frames(3);
+        let m = h.app.tree.occurrence_move.as_ref().unwrap();
+        assert_eq!(m.angles.map(|a| a.round()), [35., 40., 0.], "fixed {fixed}");
+        let rotation = crate::gizmo::rotation;
+        let (x, y) = (rotation(Vec3::X, 35_f64.to_radians()), rotation(Vec3::Y, 40_f64.to_radians()));
+        let want = if fixed { crate::gizmo::mul(&x, &y) } else { crate::gizmo::mul(&y, &x) };
+        let world = h.app.session.occurrence_placement(&[first]).unwrap().world;
+        for (got, want) in crate::dialogs_move::rows_of(&world).iter().flatten().zip(want.iter().flatten()) {
+            assert!((got - want).abs() < 1e-6, "fixed {fixed}: {world:?}");
+        }
+        let bounds = h.app.session.world_state().bodies.first().unwrap().mesh().bounds();
+        assert!((bounds.center() - centre).len() < 1.0, "the part stays where it is: {bounds:?}");
+    }
+}
