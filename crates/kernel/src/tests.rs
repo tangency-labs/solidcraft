@@ -2487,6 +2487,11 @@ fn shell_with_spherical_and_conical_faces() {
     let s = shell(&fr, &[Vec3::new(0.0, 0.0, 0.0)], 1.0).unwrap();
     let v = measure(&s).unwrap().volume;
     assert!(v > 0.1 * v0 && v < 0.6 * v0, "{v} of {v0}");
+    // #6210: the same frustum opened on the conical wall (one seam half's pick) must hollow.
+    // Mid-height on the slant: sketch (7.5, −5) maps to world (7.5, 0, 5) on this revolve frame.
+    let side = shell(&fr, &[Vec3::new(7.5, 0.0, 5.0)], 1.0).unwrap();
+    let vs = measure(&side).unwrap().volume;
+    assert!(vs > 0.1 * v0 && vs < 0.6 * v0, "side-open shell {vs} of {v0}");
 }
 
 #[test]
