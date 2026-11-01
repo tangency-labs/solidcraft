@@ -1,13 +1,13 @@
 {
   "source": "analytic",
-  "method": "box 40x30x20 with its top front edge (y=0, z=20) rounded at a radius running straight from 2 (x=0) to 5 (x=40): sections are quarter rounds, V = abc - (1 - pi/4) L (a^2 + ab + b^2) / 3; moments and the round's area integrated along the edge (tools/oracle-analytic/cases_fillets.py)",
+  "method": "box 40x30x20 with its top front edge (y=0, z=20) rounded at a radius running straight from 2 (x=0) to 5 (x=40). The round is the union of the balls rolled along the edge, ball s touching both faces at r(s), the law continued past the edge's ends along its end slopes: each section loses the corner points no ball reaches, up to rho(x, t), the nearest entry into a ball along the ray from the edge at the angle t. V, moments and areas integrated by Gauss-Legendre panels in x and t (tools/oracle-analytic/cases_fillets.py)",
   "body_count": 1,
-  "volume_mm3": 23888.407044966672,
-  "area_mm2": 5133.743774393379,
+  "volume_mm3": 23888.613525715446,
+  "area_mm2": 5133.8107297256165,
   "center_of_mass": [
-    19.974846161095797,
-    15.065997951540359,
-    9.957359184584975
+    19.974892920326873,
+    15.065878619972304,
+    9.957435096867028
   ],
   "bbox": {
     "min": [
