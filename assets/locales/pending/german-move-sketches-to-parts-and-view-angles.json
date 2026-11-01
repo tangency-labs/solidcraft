@@ -1,0 +1,24 @@
+{
+  "de": {
+    "browser.sketches_to_parts_already_in_part": "bereits in ihrem Teil",
+    "browser.sketches_to_parts_design_body": "auf einem Körper des Designs selbst",
+    "browser.sketches_to_parts_moved": "{moved} Skizzen in das Teil verschoben, auf dem sie liegen",
+    "browser.sketches_to_parts_no_exact_attachment": "auf einer Fläche ohne exakte Anbindung",
+    "browser.sketches_to_parts_not_on_face": "nicht auf der Fläche eines Teils",
+    "browser.sketches_to_parts_part_missing": "ihr Teil gibt es nicht mehr",
+    "browser.sketches_to_parts_result": "{moved} Skizzen in das Teil verschoben, auf dem sie liegen; {stayed} geblieben: {why}",
+    "cmd.component_move_sketches_to_parts": "Skizzen in ihre Teile verschieben",
+    "nav.nx.help": "Mittlere Maustaste dreht, Umschalt+Mitte verschiebt (in NX Mitte + rechts), Strg+Mitte zoomt (in NX Mitte + links); rechtes Ziehen lässt die Kamera unverändert",
+    "prefs.invert_navigator_arrows": "Drehpfeile des Ansichtswürfels umkehren",
+    "prefs.invert_navigator_arrows_note": "Die Pfeile um den Würfel drehen die Kamera in die Richtung, in die sie zeigen, wie in Fusion und Inventor: Der linke Pfeil zeigt nach rechts und schwenkt die Kamera nach rechts. Aus: Ein Pfeil dreht den Würfel zu der Seite hin, an der er sitzt, sodass der linke Pfeil die Kamera nach links schwenkt. Die gebogenen Rollpfeile sind davon nicht betroffen.",
+    "prefs.sketch_face_activates_part": "Skizzieren auf der Fläche eines Teils aktiviert dieses Teil",
+    "prefs.sketch_face_activates_part_note": "Eine Skizze, die auf einer Fläche am Körper einer anderen Komponente begonnen wird, aktiviert zuerst diese Komponente, sodass die Skizze zu ihr gehört und im Browser bei diesem Teil bleibt. Das Teil bleibt danach aktiv. Aus: Die Skizze gehört zur aktiven Komponente.",
+    "sketch_text.no_bold": "Die integrierte Schrift hat keinen fetten Schnitt: Wählen Sie eine installierte Schriftart",
+    "ui.ai_reasoning_effort": "Denkaufwand",
+    "ui.ai_reasoning_effort_field_hint": "leer = Standard des Anbieters",
+    "ui.ai_reasoning_effort_hint": "Optional. Wird als `reasoning_effort` an den Endpunkt gesendet; die zulässigen Werte unterscheiden sich je nach Anbieter (zum Beispiel `low`, `high` oder `max`). Einen hier gesetzten Wert ersetzt SolidCraft nie. Leer lassen, um nichts zu senden und den Standard des Anbieters zu behalten.",
+    "ui.view_angles_lock": "{axis} sperren",
+    "ui.view_angles_unlock": "{axis} entsperren",
+    "ui.view_angles_zero": "{axis} auf 0° setzen"
+  }
+}
