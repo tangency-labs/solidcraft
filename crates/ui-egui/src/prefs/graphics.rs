@@ -190,6 +190,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             if let Some(right) = columns.get_mut(1) {
                 ui_kit::checkbox(right, crate::i18n::tr_label("Ground shadow"), &mut app.ui.ground_shadow);
+                right.add_enabled_ui(app.ui.ground_shadow, |ui| {
+                    let response = setting::ground_shadow_follows_model(app, ui).on_hover_text(app.tr("prefs.ground_shadow_follows_model_help"));
+                    crate::scenario::publish_handle("prefs:ground_shadow_follows_model", response.rect.center());
+                });
                 right.add_enabled_ui(app.ui.show_grid, |ui| {
                     setting::grid_follows_view(app, ui);
                 });

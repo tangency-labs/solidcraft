@@ -1,0 +1,34 @@
+{
+  "ar": {
+    "prefs.ground_shadow_follows_model": "ظل الأرض يتبع النموذج",
+    "prefs.ground_shadow_follows_model_help": "ضع الظل أسفل أدنى جسم مرئي. عند التعطيل، يبقى ظل النماذج المرفوعة على مستوى الأرض عند نقطة الأصل."
+  },
+  "de": {
+    "prefs.ground_shadow_follows_model": "Bodenschatten folgt dem Modell",
+    "prefs.ground_shadow_follows_model_help": "Den Schatten unter dem niedrigsten sichtbaren Körper platzieren. Wenn deaktiviert, bleibt der Schatten angehobener Modelle auf der Bodenebene durch den Ursprung."
+  },
+  "en": {
+    "prefs.ground_shadow_follows_model": "Ground shadow follows the model",
+    "prefs.ground_shadow_follows_model_help": "Place the shadow below the lowest visible body. When off, raised models keep their shadow on the origin ground plane."
+  },
+  "he": {
+    "prefs.ground_shadow_follows_model": "צל הקרקע עוקב אחר המודל",
+    "prefs.ground_shadow_follows_model_help": "מקם את הצל מתחת לגוף הגלוי הנמוך ביותר. כשהאפשרות כבויה, הצל של מודלים מוגבהים נשאר במישור הקרקע העובר בראשית הצירים."
+  },
+  "ja": {
+    "prefs.ground_shadow_follows_model": "地面の影をモデルに追従させる",
+    "prefs.ground_shadow_follows_model_help": "表示中のボディの最下部に影を配置します。オフの場合、持ち上げたモデルの影は原点を通る地面上に残ります。"
+  },
+  "ko": {
+    "prefs.ground_shadow_follows_model": "지면 그림자가 모델을 따라 이동",
+    "prefs.ground_shadow_follows_model_help": "표시된 바디의 가장 낮은 지점 아래에 그림자를 배치합니다. 끄면 위로 이동한 모델의 그림자가 원점을 지나는 지면에 유지됩니다."
+  },
+  "vi": {
+    "prefs.ground_shadow_follows_model": "Bóng trên mặt đất di chuyển theo mô hình",
+    "prefs.ground_shadow_follows_model_help": "Đặt bóng bên dưới khối hiển thị thấp nhất. Khi tắt, bóng của mô hình được nâng lên vẫn nằm trên mặt phẳng đất đi qua gốc tọa độ."
+  },
+  "zh": {
+    "prefs.ground_shadow_follows_model": "地面阴影跟随模型",
+    "prefs.ground_shadow_follows_model_help": "将阴影放在可见实体的最低点下方。关闭时，抬高模型的阴影仍位于经过原点的地面上。"
+  }
+}
