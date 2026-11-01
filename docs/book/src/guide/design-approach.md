@@ -4,7 +4,7 @@ SolidCraft is a parametric, history-based modeller. You don't shape geometry dir
 describe the steps that make it, and SolidCraft computes the result from those steps. Change a
 step or a value and everything after it is computed again. This page explains that idea and the
 usual ways of working with it. The pages after it cover each tool in detail; the
-[glossary](../reference/glossary.md) defines every term used here.
+[glossary](../reference/glossary.md) defines most of the terms used here.
 
 ## The idea in one paragraph
 
@@ -45,15 +45,16 @@ sketch (plane + constraints + dimensions)
 ## The timeline is the design
 
 The [timeline](ui-tour.md), the **History** strip along the bottom of the window, lists every
-feature in the order it is computed. Each feature can be edited (double-click), suppressed, renamed, reordered when nothing it
-depends on moves after it, and deleted; deleting asks first when other features depend on it.
+feature in the order it is computed. Each feature can be edited (double-click), suppressed,
+renamed, reordered when nothing it depends on moves after it, and deleted; deleting asks first
+when other features depend on it.
 
 Drag the **rollback marker** back to see the design as it was at an earlier step. Features after
 the marker are kept, not deleted, and a new feature is added at the marker. This is how you add
 something early in the design (a sketch the later features should use) without rebuilding the rest.
 
-The timeline is not the undo history: Undo and Redo step back through what you did; the timeline is
-what the design is made of.
+The timeline is not the undo history: Undo and Redo move back and forth through what you did; the
+timeline is what the design is made of.
 
 ## Bodies and components
 
@@ -102,7 +103,7 @@ Other programs use other words for the same ideas. SolidCraft uses one term for 
 
 | SolidCraft | You may know it as |
 |---|---|
-| timeline | history, feature tree |
+| timeline (shown as the History strip) | history, feature tree |
 | rollback marker | rollback bar, end-of-part marker |
 | browser | model tree, feature tree, design tree |
 | body | solid body, surface body |
@@ -116,8 +117,10 @@ The full list, with what each term must not be confused with, is in the
 ## Finding help
 
 - **Help (?) › Documentation** in the title bar opens this manual.
-- **Help (?) › Keyboard Shortcuts** lists the shortcuts; see also [Keyboard shortcuts](shortcuts.md).
+- **Help (?) › Keyboard Shortcuts** lists the shortcuts; see also
+  [Keyboard shortcuts](shortcuts.md).
 - The [command reference](../reference/commands.md) describes every command and its parameters.
-- **Report a bug**, in the title bar, writes an issue report with the details the maintainers need.
+- **Report a bug**, in the title bar, drafts an issue report with the details the maintainers
+  need, for you to review and file on GitHub; the app doesn't send anything itself.
 - Questions and ideas: the [Discord](https://discord.gg/FtU4NQNVDH) and the
   [issue tracker](https://github.com/tangency-labs/solidcraft/issues).
