@@ -718,6 +718,15 @@ fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Optio
 /// About the size of a value box, for keeping it in view.
 pub(crate) const BOX: egui::Vec2 = egui::vec2(76.0, 24.0);
 
+/// Whether `p` is over the active tool's own floating boxes: a value box or the construction
+/// line's construction/normal switch. #10600: these must not swallow a click that lands on a
+/// sketch point, so the viewport asks before letting one take the click.
+pub(crate) fn over_tool_boxes(app: &SolveApp, ctx: &egui::Context, p: egui::Pos2) -> bool {
+    let Some(t) = app.tool.as_ref() else { return false };
+    (0..t.dims.len()).any(|i| ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", i)))).is_some_and(|r| r.contains(p)))
+        || ctx.memory(|m| m.area_rect(egui::Id::new("sc_construction_switch"))).is_some_and(|r| r.contains(p))
+}
+
 /// Where a value box whose top left would be `pos` goes so it stays in the drawing area `view`:
 /// as it is when it fits; else mirrored through the pointer (a box set off the cursor, past the
 /// view's edge, goes to the cursor's other side, still clear of it, #2201); else pushed inside.
