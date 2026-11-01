@@ -640,7 +640,7 @@ impl SurfOfRevolution {
         let gen = tmp.as_ref().unwrap_or(gen_own);
 
         // construct and init global solver
-        let mut gs: GlobalSolver<'_, O> = GlobalSolver::new();
+        let mut gs: GlobalSolver<'_, O> = GlobalSolver::new_with_kernel(k);
         gs.set_3d_tolerance(distance_tolerance);
         gs.set_solver_operation(operation);
         gs.set_solution_requested(SolutionRequested::All);

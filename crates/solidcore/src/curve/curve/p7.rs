@@ -1226,6 +1226,7 @@ impl Curve {
                 vecs.to_vec(),
             )
             .with_curve(self);
+            gs.base.fixes = k.fixes;
 
             // assign solver op based on eCurveProperty
             let op = match property {

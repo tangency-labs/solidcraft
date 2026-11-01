@@ -475,7 +475,7 @@ impl<'t, 'a, O: SolutionObject + 't> TopologySolver<'t, 'a, O> {
         best_answer_so_far_sq: f64,
         opt_vectors: &[Vec3],
     ) -> Self {
-        let mut base = GlobalSolver::new();
+        let mut base = GlobalSolver::new_with_kernel(kernel);
         base.operation = operation;
         base.solution_requested = requested;
         base.tolerance_3d = tolerance_3d;

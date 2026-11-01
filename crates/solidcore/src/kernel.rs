@@ -400,6 +400,15 @@ pub struct UpstreamFixes {
     pub oscillating_skips_failed_guesses: bool,
     /// `sm_RefineCCSolutions` judges a range end's shift by its distance from 1 (WR-383, #527).
     pub refine_cc_range_ends: bool,
+    /// `SmGlobalSolver::IdenticalSolutions` prefers the solution with the larger
+    /// `m_vStart.m_dSolutionValue` when the solver operation is a plain maximisation
+    /// (`SM_SO_MAXIMIZE`, `SM_SO_DIRECTED_MAXIMIZE`, `SM_SO_PROJECTED_MAXIMIZE`), so an
+    /// interior maximum is not replaced by a nearby span-boundary candidate within
+    /// `SM_EFF_ZERO_SQRT` in value and `dScaledZero` in parameter; pinned v1.0.1 always
+    /// prefers `<` (WR-21, #2155;
+    /// `plan/upstream-issues/WR-21--addendum-2026-10-31-identical-maximize-preferred.md`).
+    /// Off by default for pinned C++ parity.
+    pub global_solver_identical_prefers_larger_when_maximizing: bool,
     /// `SmSurface::GetFlatCorners` tests each corner bit instead of clearing the others (WR-384, #525).
     pub flat_corners_test_bits: bool,
     /// `SmSurfaceCache::GetSurfaceContinuity` checks the last internal V knot (`iv + 1 < rVConts.GetSize()`) rather than skipping it (`iv + 1 < rVConts.GetSize() - 1`) (WR-42).

@@ -1837,6 +1837,7 @@ impl Curve {
 
         // Construct and init global solver
         let mut gs = CpGlobalSolver::new(k, &point_tree, curve_tree, *interval).with_curve(self);
+        gs.base.fixes = k.fixes;
         gs.zone_tol_3d = opts.zone_tol_3d;
 
         // set atDistance value - when appropriate

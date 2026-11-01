@@ -4106,7 +4106,7 @@ impl<'t, 's, O: SolutionObject> CsiGlobalSolver<'t, 's, O> {
     ) -> Self {
         Self {
             kernel: k,
-            base: GlobalSolver::with_trees(curve_tree, surface_tree, 3),
+            base: GlobalSolver::with_trees_and_kernel(k, curve_tree, surface_tree, 3),
             curve: None,
             surface_cache: None,
             face_queries: None,
@@ -4198,7 +4198,7 @@ impl<'t, 's, O: SolutionObject> CsGlobalSolver<'t, 's, O> {
         uv_domain: Extent2d,
     ) -> Self {
         Self {
-            base: GlobalSolver::with_trees(curve_tree, surface_tree, 3),
+            base: GlobalSolver::with_trees_and_kernel(k, curve_tree, surface_tree, 3),
             surface,
             interval,
             uv_domain,
@@ -4263,7 +4263,7 @@ impl<'t, 's, O: SolutionObject> LsiGlobalSolver<'t, 's, O> {
     ) -> Self {
         Self {
             kernel: k,
-            base: GlobalSolver::with_tree(surface_tree, 2),
+            base: GlobalSolver::with_tree_and_kernel(k, surface_tree, 2),
             surface,
             uv_domain,
             line_point,
@@ -4291,7 +4291,7 @@ impl<'t, 's, O: SolutionObject> SpGlobalSolver<'t, 's, O> {
     ) -> Self {
         Self {
             kernel: k,
-            base: GlobalSolver::with_trees(point_tree, surface_tree, 2),
+            base: GlobalSolver::with_trees_and_kernel(k, point_tree, surface_tree, 2),
             surface,
             uv_domain,
             surface_cache: None,
@@ -4312,7 +4312,7 @@ impl<'t, 's, O: SolutionObject> SsGlobalSolver<'t, 's, O> {
         kernel: &'s Kernel,
     ) -> Self {
         Self {
-            base: GlobalSolver::with_trees(surface_tree1, surface_tree2, 4),
+            base: GlobalSolver::with_trees_and_kernel(kernel, surface_tree1, surface_tree2, 4),
             surface1: surfaces[0],
             surface2: surfaces[1],
             uv_domain1,
