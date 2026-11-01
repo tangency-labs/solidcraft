@@ -3099,13 +3099,60 @@ fn auto_operation(app: &SolveApp, d: &mut Dialog) {
         nothing_shown = shown.is_empty();
         params["participants"] = json!(shown);
     }
-    let fresh = if nothing_shown { Some("new") } else { solidcraft_engine::auto_operation(&app.session, &params) };
+    let fresh = if nothing_shown {
+        Some("new")
+    } else {
+        // Asked again only when the parameters or the design change: it casts rays through
+        // every triangle of the bodies, milliseconds a frame on a large part.
+        let key = auto_operation_key(app, &params);
+        let cached = match &d.kind {
+            Kind::Extrude { smart, .. } => smart.auto.filter(|(k, _)| *k == key).map(|(_, op)| op),
+            _ => None,
+        };
+        match cached {
+            Some(op) => op,
+            None => {
+                #[cfg(test)]
+                AUTO_OPERATION_ASKED.with(|n| n.set(n.get() + 1));
+                let op = solidcraft_engine::auto_operation(&app.session, &params);
+                if let Kind::Extrude { smart, .. } = &mut d.kind {
+                    smart.auto = Some((key, op));
+                }
+                op
+            }
+        }
+    };
     let Some(fresh) = fresh.and_then(|op| OPS.iter().position(|o| *o == op)) else {
         return;
     };
     if let Kind::Extrude { operation, smart, .. } = &mut d.kind {
         *operation = crate::smart_extrude::operation(fresh, *operation, side, &mut smart.latch);
     }
+}
+
+/// What [`solidcraft_engine::auto_operation`] depends on besides its parameters: the design
+/// (its revision counts every change, shown bodies too), which design it is, and the active
+/// component the extrude goes into.
+fn auto_operation_key(app: &SolveApp, params: &Value) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    params.to_string().hash(&mut h);
+    app.session.revision.hash(&mut h);
+    app.session.document_id.hash(&mut h);
+    app.session.active_component.hash(&mut h);
+    app.session.active_occurrence_path.hash(&mut h);
+    h.finish()
+}
+
+#[cfg(test)]
+thread_local! {
+    static AUTO_OPERATION_ASKED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How often the extrude window asked the engine for its automatic operation on this thread.
+#[cfg(test)]
+pub(crate) fn auto_operation_asked() -> usize {
+    AUTO_OPERATION_ASKED.with(std::cell::Cell::get)
 }
 
 /// The one-side direction a new extrude takes for its first pick: toward the side of a sketch

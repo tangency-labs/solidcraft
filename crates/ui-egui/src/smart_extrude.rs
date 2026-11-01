@@ -37,6 +37,9 @@ pub struct Smart {
     pub shown: Option<Vec<String>>,
     /// Picks off the profile plane become the To Object target (Preferences › Design).
     pub auto_to_object: bool,
+    /// The engine's automatic operation for the last parameters and design: a key over all it
+    /// depends on, and its answer. It probes the bodies' triangles, too slow to ask every frame.
+    pub auto: Option<(u64, Option<&'static str>)>,
 }
 
 /// One-side direction for a new pick: 0 (along the normal) or 1 (reversed). `ray` is the view
