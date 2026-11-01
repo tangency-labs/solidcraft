@@ -411,9 +411,9 @@ pub(super) fn project_operands(s: &mut Session, p: &Value, cmd: &str, keys: &[&s
 }
 
 /// A model's reference among a command's operands (#6348): an `{edge: [x,y,z], body?}` or a
-/// `{vertex: [x,y,z], body?}`.
+/// `{vertex: [x,y,z], body?}`, or an origin axis `{axis: X|Y|Z}`.
 fn model_ref(v: &Value) -> bool {
-    v.get("edge").is_some() || v.get("vertex").is_some()
+    v.get("edge").is_some() || v.get("vertex").is_some() || v.get("axis").and_then(Value::as_str).is_some_and(|a| matches!(a, "X" | "Y" | "Z"))
 }
 
 /// Project one model reference into the sketch and report the entity it stands for: an edge's
@@ -422,8 +422,12 @@ fn project_ref(s: &mut Session, doc: &Document, id: u64, sk: &mut Sketch, v: &Va
     let src = source(s, v, cmd)?;
     let what = src.describe();
     let link = add_link(s, doc, id, sk, LinkKind::Project, src).map_err(|e| bad(cmd, format!("{what}: {e}")))?;
-    // An edge stands for its curve (a point when it is seen end on), a vertex for its point.
-    let curve = if v.get("edge").is_some() { sk.link_curves(&link).first().and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone()) } else { None };
+    // An edge or axis stands for its curve (a point when it is seen end on), a vertex for its point.
+    let curve = if v.get("edge").is_some() || v.get("axis").is_some() {
+        sk.link_curves(&link).first().and_then(|c| sk.curves.get(*c)).map(|c| c.id.clone())
+    } else {
+        None
+    };
     curve
         .or_else(|| sk.link_points(&link).first().and_then(|q| sk.points.get(*q)).map(|q| q.id.clone()))
         .ok_or_else(|| bad(cmd, format!("{what} projects to nothing on this sketch")))
