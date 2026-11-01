@@ -144,22 +144,28 @@ fn sketch_plane(doc: &Document, id: u64, st: &solidcraft_doc::ModelState) -> Res
 }
 
 /// The model before sketch `id` in the frame its links and its plane are resolved in: the
-/// attached face's frame for a sketch on a face, else its component's.
+/// attached face's frame for a sketch on a face, else its component's. The further placements
+/// `named` names (`Block (Part:2)`) are in it too, where they are (#9957).
 fn state_for_sketch<'a>(
     s: &Session,
     doc: &Document,
     id: u64,
     st: &'a solidcraft_doc::ModelState,
+    named: &[&str],
 ) -> std::result::Result<std::borrow::Cow<'a, solidcraft_doc::ModelState>, solidcraft_doc::DocError> {
     let comp = doc.feature(id).map(|f| f.component).unwrap_or(0);
     let attachment = doc.feature(id).and_then(|feature| match &feature.kind {
         solidcraft_doc::FeatureKind::Sketch { plane, .. } => super::sketch::face::anchor(plane),
         _ => None,
     });
-    match attachment {
-        Some(anchor) => solidcraft_doc::state_in_face_anchor_frame(doc, st, anchor, comp),
-        None => Ok(solidcraft_doc::state_in_frame_at(doc, st, comp, owner_frame(s, doc, comp))),
-    }
+    let (framed, frame) = match attachment {
+        Some(anchor) => (solidcraft_doc::state_in_face_anchor_frame(doc, st, anchor, comp)?, anchor.author_frame(doc, comp)?),
+        None => {
+            let frame = owner_frame(s, doc, comp);
+            (solidcraft_doc::state_in_frame_at(doc, st, comp, frame), frame)
+        }
+    };
+    Ok(solidcraft_doc::with_placed_copies(doc, st, framed, &frame, named))
 }
 
 /// Keep candidate feature edits while overlaying uncommitted occurrence placements.
@@ -204,7 +210,8 @@ pub(super) fn refresh(s: &Session, doc: &Document, id: u64, sk: &mut Sketch) -> 
         solidcraft_doc::FeatureKind::Sketch { plane, .. } => super::sketch::face::anchor(plane),
         _ => None,
     });
-    let Ok(st) = state_for_sketch(s, &doc, id, &st) else {
+    let named: Vec<&str> = sk.links.iter().flat_map(|l| l.source.bodies()).collect();
+    let Ok(st) = state_for_sketch(s, &doc, id, &st, &named) else {
         return vec!["lost face attachment; reattach explicitly".into()];
     };
     let Ok(plane) = sketch_plane(&doc, id, &st) else { return Vec::new() };
@@ -249,7 +256,7 @@ pub(super) fn origin_axis_line(s: &Session, p: &Value, line: &Value, cmd: &str) 
     let id = sketch_store::target(s, p, cmd)?;
     let doc = placed_candidate(s, &s.doc);
     let st = s.model.state_before(id);
-    let st = state_for_sketch(s, &doc, id, &st)?;
+    let st = state_for_sketch(s, &doc, id, &st, &[])?;
     let plane = sketch_plane(&doc, id, &st)?;
     let src = source(s, line, cmd)?;
     let LinkSource::Axis { name } = &src else { return Err(bad(cmd, "the mirror line must be a straight sketch curve or an origin axis")) };
@@ -287,7 +294,7 @@ fn add_link_unless_present(
     let (vals, _) = doc.param_values();
     let st = s.model.state_before(id);
     // The model as the sketch's component sees it.
-    let st = state_for_sketch(s, &doc, id, &st)?;
+    let st = state_for_sketch(s, &doc, id, &st, &src.bodies())?;
     let plane = sketch_plane(&doc, id, &st)?;
     let r = resolve(&doc, &vals, &st, &plane, kind, &src)?;
     if skip_present && r.wires.is_empty() && sk.link_geometry_present(&r.geom) {
@@ -706,7 +713,7 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
         } else if let Some(at) = edge {
             let l = add_link(s, d, id, sk, LinkKind::Project, LinkSource::Edge { body, at }).map_err(|e| bad(cmd, format!("edge: {e}")))?;
             let before = s.model.state_before(id);
-            let plane = sketch_plane(d, id, &*state_for_sketch(s, d, id, &before)?)?;
+            let plane = sketch_plane(d, id, &*state_for_sketch(s, d, id, &before, &[])?)?;
             let q = plane.to_local(at);
             let ci = sk.link_curves(&l).first().copied().ok_or_else(|| bad(cmd, "the edge projects to a point"))?;
             let pi = sk.add_point(q, None)?;
