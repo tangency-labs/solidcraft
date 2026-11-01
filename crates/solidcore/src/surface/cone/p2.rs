@@ -369,7 +369,7 @@ impl Cone {
 
     /// Rebuilds the polar converter with the cone's iso curves
     /// (`RebuildPolarConverter`, which calls the virtual `CreateIsoParametricCurve`).
-    fn rebuild_cone_polar_converter(&mut self, k: &Kernel) -> Result<()> {
+    pub(crate) fn rebuild_cone_polar_converter(&mut self, k: &Kernel) -> Result<()> {
         let inside_out = self.inside_out;
         self.rev.rebuild_polar_converter(k, &|s, k, p, t| {
             Ok(super::p1::cone_iso_curve(s, inside_out, k, p, t, None, false)?.curve)

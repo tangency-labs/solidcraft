@@ -27,6 +27,11 @@
 //! | [`FixSeamPlanType`]                          | `SmFixSeamPlanType` (`SmTypes.h`)            |
 //!
 //! Deviations:
+//! - **Opt-in shrink fixes (the fork's, not upstream).** `shrink_geometry` keeps the
+//!   face's trim curves where its surface's trim keeps the surface's parameterization
+//!   (WR-700, `Kernel::fixes.face_trim_curves_kept_where_exact`), and takes a bound
+//!   within 64 ulp of a B-spline knot as that knot (WR-702,
+//!   `Kernel::fixes.face_shrink_bound_on_knot`).
 //! - **Object model.** A face is a record in the [`Brep`]'s arenas; the methods are free
 //!   functions taking the B-rep and the face's id. Out-parameters are return values,
 //!   with an additional UV-domain `_into` entry point for partial outputs on error.
@@ -1678,9 +1683,46 @@ fn shrink_geometry_notifying(
         max.y = surf_domain.max().y;
     }
 
+    // Not upstream (WR-702, the fork's tangency-labs/smlib@d80ea93): a bound within
+    // rounding of one of the surface's knots (64 ulp of the knot's magnitude) is that
+    // knot. A computed end parameter lands a rounding step either side of the knot it
+    // stands for, and TrimWithDomain would space a bound just past a knot off it by its
+    // snapping tolerance and keep a sliver span past the knot.
+    if k.fixes.face_shrink_bound_on_knot {
+        let surface = fp2::surface(b, f)?.ok_or_else(|| null("face without surface"))?;
+        if surface.is_kind_of(B_SPLINE_SURFACE_TYPE)? {
+            for dir in [SurfParamType::U, SurfParamType::V] {
+                let (knots, _) = surface.knots_with_nurb(k, dir, None)?;
+                let (lo, hi) = if dir == SurfParamType::U {
+                    (&mut min.x, &mut max.x)
+                } else {
+                    (&mut min.y, &mut max.y)
+                };
+                for &knot in &knots {
+                    let round = 64.0 * f64::EPSILON * knot.abs();
+                    if (*lo - knot).abs() <= round {
+                        *lo = knot;
+                    }
+                    if (*hi - knot).abs() <= round {
+                        *hi = knot;
+                    }
+                }
+            }
+        }
+    }
+
     // set the (revised) face domain
     let mut new_domain = Extent2d::from_points(min, max);
     fp2::set_uv_domain(b, f, &new_domain)?;
+
+    // Not upstream (WR-700, the fork's tangency-labs/smlib@6f811b8): whether the trim
+    // keeps the surface's parameterization, by its kind's construction
+    // (`TrimKeepsParameterization`), asked before it is trimmed
+    let same_map = k.fixes.face_trim_curves_kept_where_exact
+        && match fp2::surface(b, f)? {
+            Some(s) => s.trim_keeps_parameterization(k, &new_domain)?,
+            None => false,
+        };
 
     // Trim the surface (status ignored)
     if let Some(s) = b.face_mut(f)?.surface.as_mut() {
@@ -1688,8 +1730,12 @@ fn shrink_geometry_notifying(
     }
 
     // remove all associated UVTrimCurves (status ignored; passed on with the opt-in fix,
-    // tangency-labs/smlib 6997962, which keeps the curve trims below ignored)
-    ignore_status(pass(k, remove_uv_trim_curves_notifying(b, f, notify))?)?;
+    // tangency-labs/smlib 6997962, which keeps the curve trims below ignored); with
+    // WR-700, not where the trim kept the surface's parameterization: they lie on it as
+    // they did and are kept
+    if !same_map {
+        ignore_status(pass(k, remove_uv_trim_curves_notifying(b, f, notify))?)?;
+    }
 
     // Now Trim all Curves to the face edges
     for e in face_edges(b, f)? {

@@ -442,7 +442,7 @@ impl Sphere {
     }
 
     /// `RebuildPolarConverter` with the sphere's iso circles.
-    fn rebuild_polar_converter(&mut self, k: &Kernel) -> Result<()> {
+    pub(crate) fn rebuild_polar_converter(&mut self, k: &Kernel) -> Result<()> {
         let shape = self.shape();
         self.base.rebuild_polar_converter(k, &|s, k, p, t| {
             Ok(iso_curve(s, shape, k, p, t, None, false)?.curve)

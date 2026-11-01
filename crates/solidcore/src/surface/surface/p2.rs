@@ -32,6 +32,7 @@
 //! | [`Surface::reverse`], [`Surface::reparameterize`] | `Reverse`, `Reparameterize`                      |
 //! | [`Surface::split_at`], [`Surface::step_inversion`] | `SplitAt`, `STEPInversion`                      |
 //! | [`Surface::swap_uv`], [`Surface::transform`], [`Surface::trim_with_domain`], [`Surface::trim_with_domain_with`] | `SwapUV`, `Transform`, `TrimWithDomain` |
+//! | [`Surface::trim_keeps_parameterization`]          | `TrimKeepsParameterization` (fork, WR-700)       |
 //! | [`Surface::knots`]                                | `GetKnots`                                       |
 //! | [`Surface::convert_uv_from_step_to_nurbs`], [`Surface::convert_uv_from_nurbs_to_step`] | `ConvertUVFromSTEPToNURBS`, `ConvertUVFromNURBSToSTEP` |
 //! | [`Surface::curve_on_classify`]                    | `CurveOnClassify`                                |
@@ -64,6 +65,13 @@
 //! | [`IsoCurveLengthIntegrand`]                       | `SmIsoCurveLengthIFEO` (constructor)             |
 //!
 //! Deviations:
+//! - **`SwapUV` keeps an analytic's definition (WR-701, opt-in).** With
+//!   `Kernel::fixes.swap_uv_keeps_analytic_definition` (the fork's
+//!   tangency-labs/smlib@0c00de7, `SwapUVDefinition`), a cone, sphere, torus or surface
+//!   of revolution swapped by [`Surface::swap_uv`] keeps its frame, generator and
+//!   domains, and only rebuilds its polar converter on the transposed net (its status
+//!   passed on). A plane keeps the definition its `ToggleSwapUVBit` swapped. By default
+//!   each is re-derived from the net, status ignored, as upstream does.
 //! - **Output arrays.** `GlobalSurfaceIntersect`'s output arrays are a
 //!   `&mut SurfaceIntersection` threaded through the kind dispatchers and the special
 //!   cases that can fail after appending (the `*_into` functions), so a failure leaves in
@@ -2929,7 +2937,9 @@ impl Surface {
                     NotifyOperation::PostEdit,
                 )
             }
-            SurfaceKind::Plane(s) => s.swap_uv_notifying(&mut own),
+            SurfaceKind::Plane(s) => {
+                s.swap_uv_notifying_keeping(&mut own, k.fixes.swap_uv_keeps_analytic_definition)
+            }
             SurfaceKind::Cone(s) => {
                 // SmBSplineSurface::SwapUV: the inherited
                 // SmSurfOfRevolution::ToggleSwapUVBit before SetCanonical's notifications
@@ -2939,6 +2949,11 @@ impl Surface {
                 if let Err(e) = s.base_mut().swap_uv_notifying(&mut own) {
                     s.rev.toggle_swap_uv_bit();
                     return Err(e);
+                }
+                if k.fixes.swap_uv_keeps_analytic_definition {
+                    // WR-701 (fork 0c00de7): SmSurfOfRevolution::SwapUVDefinition, the
+                    // polar converter made again on the transposed net (SER)
+                    return s.rebuild_cone_polar_converter(k);
                 }
                 ignore_status(s.rebuild_step_from_nurb_parameters(k))
             }
@@ -2952,6 +2967,10 @@ impl Surface {
                     s.base.toggle_swap_uv_bit();
                     return Err(e);
                 }
+                if k.fixes.swap_uv_keeps_analytic_definition {
+                    // WR-701 (fork 0c00de7): SmSurfOfRevolution::SwapUVDefinition
+                    return s.rebuild_polar_converter(k);
+                }
                 ignore_status(s.rebuild_step_from_nurb_parameters(k))
             }
             SurfaceKind::Torus(s) => {
@@ -2964,6 +2983,10 @@ impl Surface {
                     s.base.toggle_swap_uv_bit();
                     return Err(e);
                 }
+                if k.fixes.swap_uv_keeps_analytic_definition {
+                    // WR-701 (fork 0c00de7): SmSurfOfRevolution::SwapUVDefinition
+                    return s.rebuild_polar_converter(k);
+                }
                 ignore_status(s.rebuild_step_from_nurb_parameters(k))
             }
             SurfaceKind::SurfOfRevolution(s) => {
@@ -2973,6 +2996,10 @@ impl Surface {
                 if let Err(e) = s.base_mut().swap_uv_notifying(&mut own) {
                     s.toggle_swap_uv_bit();
                     return Err(e);
+                }
+                if k.fixes.swap_uv_keeps_analytic_definition {
+                    // WR-701 (fork 0c00de7): SmSurfOfRevolution::SwapUVDefinition
+                    return s.rebuild_polar_converter(k, &SurfOfRevolution::own_sweep_iso);
                 }
                 ignore_status(s.rebuild_step_from_nurb_parameters(k))
             }
@@ -3075,6 +3102,36 @@ impl Surface {
             SurfaceKind::SurfOfRevolution(s) => s.trim_with_domain(k, trim_domain),
             SurfaceKind::SurfOfExtrusion(s) => s.trim_with_domain(k, trim_domain),
         }
+    }
+
+    /// Not upstream (WR-700, the fork's tangency-labs/smlib@6f811b8,
+    /// `SmSurface::TrimKeepsParameterization`): whether [`Surface::trim_with_domain`] to
+    /// `trim_domain` keeps this surface's parameterization by its kind's construction:
+    /// every `(u, v)` of the trimmed domain evaluates to the point it did, so a face's
+    /// trim curves still lie on it. A B-spline surface's trim extracts the patch by knot
+    /// insertion (true); a cone, sphere, torus or surface of revolution answers
+    /// [`SurfOfRevolution::trim_keeps_parameterization`] on its `GetNaturalUVDomain`; a
+    /// plane, a surface of extrusion and every other kind answer false.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::natural_uv_domain_with_nurb`].
+    pub fn trim_keeps_parameterization(&self, k: &Kernel, trim_domain: &Extent2d) -> Result<bool> {
+        let rev = match self.kind() {
+            SurfaceKind::BSpline(_) => return Ok(true),
+            SurfaceKind::Cone(s) => s.rev(),
+            SurfaceKind::Sphere(s) => s.base(),
+            SurfaceKind::Torus(s) => s.base(),
+            SurfaceKind::SurfOfRevolution(s) => s,
+            SurfaceKind::Plane(_)
+            | SurfaceKind::SurfOfExtrusion(_)
+            | SurfaceKind::CurveBounded(_)
+            | SurfaceKind::Step(_)
+            | SurfaceKind::OffsetSurface(_)
+            | SurfaceKind::SrfInVolume(_) => return Ok(false),
+        };
+        let natural = self.natural_uv_domain_with_nurb(k)?;
+        Ok(rev.trim_keeps_parameterization(&natural, trim_domain))
     }
 
     // ---- new surfaces ---------------------------------------------------------------

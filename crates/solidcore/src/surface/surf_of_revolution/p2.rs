@@ -15,8 +15,11 @@
 //! | [`SurfOfRevolution::global_surface_intersect`]              | `GlobalSurfaceIntersect`                  |
 //! | [`SurfOfRevolution::is_nurb_surface_surf_of_revolution`]    | `IsNurbSurfaceSurfOfRevolution`           |
 //! | [`SurfOfRevolution::trim_with_domain`]                      | `TrimWithDomain`                          |
+//! | [`SurfOfRevolution::trim_keeps_parameterization`]           | `TrimKeepsParameterization` (fork, WR-700) |
 //!
 //! Deviations:
+//! - **`TrimKeepsParameterization`** (WR-700) is the fork's
+//!   (tangency-labs/smlib@6f811b8), for `Kernel::fixes.face_trim_curves_kept_where_exact`.
 //! - **Rejected generator intervals (#428).** With
 //!   `Kernel::fixes.ellipse_step_interval_checks`, the surface analytic domain is
 //!   stored only after its generator accepts the STEP interval. Default order is C++.
@@ -231,6 +234,52 @@ impl SurfOfRevolution {
             new_nurb_uv_domain,
             &|s, k, uv| s.convert_uv_from_nurbs_to_step_or_written(k, uv),
             &Self::own_sweep_iso,
+        )
+    }
+
+    /// Not upstream (WR-700, the fork's tangency-labs/smlib@6f811b8,
+    /// `SmSurfOfRevolution::TrimKeepsParameterization`): whether
+    /// [`Self::trim_with_domain`] to `trim_domain` keeps the surface's
+    /// parameterization, so curves made on its parameters (a face's trim curves) still
+    /// lie on it. `natural` is the surface's `GetNaturalUVDomain` now. It is true where
+    /// the rotation's range stays as it is (within `SM_EFF_ZERO_PARAM` both ways) and the
+    /// generator is untrimmed or a line: the trim rebuilds a circle's arcs over a smaller
+    /// angle with another rational parameterization, and a line over the image of the
+    /// trim interval under its affine map.
+    #[must_use]
+    pub fn trim_keeps_parameterization(&self, natural: &Extent2d, trim_domain: &Extent2d) -> bool {
+        let (rot_now, rot_new, gen_now, gen_new) = if self.swap_uv {
+            (
+                natural.v_interval(),
+                trim_domain.v_interval(),
+                natural.u_interval(),
+                trim_domain.u_interval(),
+            )
+        } else {
+            (
+                natural.u_interval(),
+                trim_domain.u_interval(),
+                natural.v_interval(),
+                trim_domain.v_interval(),
+            )
+        };
+
+        // the same rotation range (as TrimWithDomain tells an untrimmed domain)
+        if !rot_now.is_contained_by(&rot_new, EFF_ZERO_PARAM)
+            || !rot_new.is_contained_by(&rot_now, EFF_ZERO_PARAM)
+        {
+            return false;
+        }
+
+        // the generator untrimmed, or a line
+        if gen_now.is_contained_by(&gen_new, EFF_ZERO_PARAM)
+            && gen_new.is_contained_by(&gen_now, EFF_ZERO_PARAM)
+        {
+            return true;
+        }
+        matches!(
+            self.gen_curve.as_ref().map(Curve::kind),
+            Some(CurveKind::Line(_))
         )
     }
 
