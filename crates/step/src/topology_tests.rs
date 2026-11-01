@@ -78,11 +78,15 @@ impl W {
     }
     /// The file: millimetres, radians, an uncertainty of 1e-7 mm, every item in one
     /// representation.
-    fn file(mut self, items: &[u64]) -> p21::Exchange {
+    fn file(self, items: &[u64]) -> p21::Exchange {
+        self.file_within(items, 1e-7)
+    }
+    /// [`W::file`] stating `uncertainty` mm.
+    fn file_within(mut self, items: &[u64], uncertainty: f64) -> p21::Exchange {
         let l = self.add("(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
         let a = self.add("(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.))");
         let s = self.add("(NAMED_UNIT(*)SI_UNIT($,.STERADIAN.)SOLID_ANGLE_UNIT())");
-        let u = self.add(format!("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-07),#{l},'distance_accuracy_value','')"));
+        let u = self.add(format!("UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE({uncertainty:e}),#{l},'distance_accuracy_value','')"));
         let c = self.add(format!(
             "(GEOMETRIC_REPRESENTATION_CONTEXT(3)GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#{u}))GLOBAL_UNIT_ASSIGNED_CONTEXT((#{l},#{a},#{s}))REPRESENTATION_CONTEXT('',''))"
         ));
@@ -1233,4 +1237,33 @@ fn parabola_and_hyperbola_edges_bound_faces() {
             assert!(on.abs() < 1e-12, "{kind}: {p:?}");
         }
     }
+}
+
+/// A quarter of a cylinder's side whose frame is turned 1.4e-5 rad off the face's start, in a file
+/// stating 8e-5 mm: the face's far end lies 5.7e-5 mm past the frame's quarter line. The form must
+/// cover it, not snap to the line and leave the edges off it by more than the uncertainty allows.
+#[test]
+fn a_round_face_off_its_frames_quarter_line_is_covered_by_its_form() {
+    let (c, r, turn) = ([6.0, 6.0], 4.0, 1.414e-5_f64);
+    let mut w = W::default();
+    let at = |a: f64, h: f64| [c[0] + r * a.cos(), c[1] + r * a.sin(), h];
+    let x = [-turn.cos(), turn.sin(), 0.0];
+    let arc = |w: &mut W, h: f64| {
+        let (a, b) = (w.vertex(at(PI, h)), w.vertex(at(1.5 * PI, h)));
+        let k = w.circle([c[0], c[1], h], [0.0, 0.0, 1.0], x, r);
+        (w.add(format!("EDGE_CURVE('',#{a},#{b},#{k},.T.)")), a, b)
+    };
+    let (bottom, a0, b0) = arc(&mut w, 0.0);
+    let (top, a1, b1) = arc(&mut w, 5.0);
+    let up = w.line_edge((b0, at(1.5 * PI, 0.0)), (b1, at(1.5 * PI, 5.0)), true, 1.0);
+    let down = w.line_edge((a0, at(PI, 0.0)), (a1, at(PI, 5.0)), true, 1.0);
+    let ring = [w.oe(bottom, true), w.oe(up, true), w.oe(top, false), w.oe(down, false)];
+    let bound = w.bound(&ring, true, true);
+    let frame = w.axis([c[0], c[1], 0.0], [0.0, 0.0, 1.0], x);
+    let surface = w.add(format!("CYLINDRICAL_SURFACE('',#{frame},{})", real(r)));
+    let face = w.face(&[bound], surface, true);
+    let shell = w.add(format!("OPEN_SHELL('',(#{face}))"));
+    let model = w.add(format!("SHELL_BASED_SURFACE_MODEL('',(#{shell}))"));
+    let s = one_solid(&w.file_within(&[model], 8e-5));
+    assert!(s.notes.is_empty(), "{:?}", s.notes);
 }

@@ -96,7 +96,7 @@ impl Builder<'_, '_> {
         for fi in 0..self.faces.len() {
             let Some(face) = self.faces.get(fi) else { continue };
             let Some(e) = face.extent else { continue };
-            if brep::form::tube_quarters(&face.surface, e, tol).is_none_or(|q| q <= 4) {
+            if brep::form::tube_quarters(&face.surface, e, self.snap()).is_none_or(|q| q <= 4) {
                 continue;
             }
             // Its tube circles about another round face's axis, with that face's frame.
@@ -144,7 +144,7 @@ impl Builder<'_, '_> {
         }
         // Each face's quarters about its axis as the file frames it: a spill is five.
         let spills: Vec<bool> =
-            self.faces.iter().map(|f| f.extent.and_then(|e| quarters_turned(&f.surface, e, 0.0, self.tol)).is_some_and(|q| q > 4)).collect();
+            self.faces.iter().map(|f| f.extent.and_then(|e| quarters_turned(&f.surface, e, 0.0, self.snap())).is_some_and(|q| q > 4)).collect();
         if !spills.iter().any(|s| *s) {
             return Ok(0);
         }
@@ -226,7 +226,7 @@ impl Builder<'_, '_> {
             }
             let fits = |phi: f64| {
                 members.iter().all(|(fi, sign, e)| match (self.faces.get(*fi), e) {
-                    (Some(f), Some(e)) => quarters_turned(&f.surface, *e, sign * phi, self.tol).is_some_and(|q| q <= 4),
+                    (Some(f), Some(e)) => quarters_turned(&f.surface, *e, sign * phi, self.snap()).is_some_and(|q| q <= 4),
                     _ => false,
                 })
             };

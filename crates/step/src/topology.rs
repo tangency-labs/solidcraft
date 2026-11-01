@@ -632,6 +632,16 @@ impl<'b, 'a> Builder<'b, 'a> {
         Ok(())
     }
 
+    /// How far a round face's form may stop short of its boundary: a face that starts or ends
+    /// within this of a quarter line of its frame is given the form up to the line, and its edges
+    /// then lie that far off the form. The edge tolerance (`cover_edge` with [`EDGE_GAP_MARGIN`])
+    /// covers a gap only up to the file's uncertainty over that margin; snapping within the whole
+    /// uncertainty left gaps the uncertainty cannot cover (a cylinder 1.4e-5 rad off its face's
+    /// start, in a file stating 8e-5 mm, left 5.7e-5 mm and raised the edges past it).
+    fn snap(&self) -> f64 {
+        self.tol / EDGE_GAP_MARGIN
+    }
+
     /// Edge `e`'s tolerance covers `gap` with `margin`: refused if far off.
     fn cover_edge(&mut self, e: u32, gap: f64, margin: f64) -> R<()> {
         let Some(x) = self.edges.get_mut(e as usize) else { return Err("edge reference".into()) };
@@ -1336,7 +1346,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                     None => self.face_extent(fi)?,
                 };
                 let extent = extent.ok_or_else(|| unsupported("a face whose boundary does not lie on its surface"))?;
-                Some(brep::form::surface_within(&label, extent, tol).ok_or_else(|| unsupported("a face of more than one turn"))?)
+                Some(brep::form::surface_within(&label, extent, self.snap()).ok_or_else(|| unsupported("a face of more than one turn"))?)
             }
             None => None,
         };
