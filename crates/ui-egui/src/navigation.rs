@@ -892,23 +892,29 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     // Off by default: the cap and bridge can pass through the model, as before. The wheel and
     // pinch keep their separate "Zoom to the cursor" preference.
     let anchor = model_zoom_anchor(app, rect, Some(rect.center()), caps.orbit);
-    // The view turns around the model in the middle of the view, else the middle of the bodies in
-    // view, so what the user is looking at stays put. Off: around the view's centre, as before.
-    // The cap keeps the point it started turning around until it is back at rest (and the view
-    // shows it there); a device app sends no rest, so its turns pick it each frame.
-    let pivot = (turn && app.preferences.space_mouse_model_pivot).then(|| {
-        let cap = app.viewport.device_motion.is_some_and(|m| m.motion.rotation != [0.0; 3]);
-        match app.viewport.device_pivot.filter(|_| cap) {
-            Some(p) => p,
-            None => {
-                let p = crate::prefs::pivot_under(app, &projection(app, rect), rect.center());
-                if cap {
-                    app.viewport.device_pivot = Some(p);
-                }
-                p
+    // The point the view turns around and keeps still on screen, and marks with the faint ball
+    // (`viewport::paint_device_pivot`). Traced (`space_mouse_model_pivot`) turns around the model
+    // in the middle of the view, else the middle of the bodies in view, so what the user is
+    // looking at stays put (#7435). Otherwise Preferences' Orbit around decides, as it does for a
+    // drag: the world origin, the model point under the pointer, or the view's centre — none,
+    // unmarked, as before (#10452). The cap keeps the point it started turning around until it is
+    // back at rest (and the view shows it there); a device app sends no rest, so its turns pick it
+    // each frame.
+    let cap = app.viewport.device_motion.is_some_and(|m| m.motion.rotation != [0.0; 3]);
+    let pivot = if !turn {
+        None
+    } else if app.preferences.space_mouse_model_pivot {
+        device_turn_pivot(app, cap, |app| crate::prefs::pivot_under(app, &projection(app, rect), rect.center()))
+    } else {
+        match app.preferences.orbit_around {
+            OrbitAround::ViewCentre => None,
+            OrbitAround::Origin => device_turn_pivot(app, cap, |_| Vec3::ZERO),
+            OrbitAround::Cursor => {
+                let at = app.viewport.mouse.filter(|p| rect.contains(*p)).unwrap_or(rect.center());
+                device_turn_pivot(app, cap, |app| crate::prefs::pivot_under(app, &projection(app, rect), at))
             }
         }
-    });
+    };
     if let Some(queued) = app.viewport.device_motion.take() {
         let before = app.cam;
         device_camera(&mut app.cam, queued.motion, queued.seconds, height, turn, app.preferences.free_orbit, anchor, pivot);
@@ -920,6 +926,20 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
         bridge_camera(&mut app.cam, queued, height, turn, app.preferences.zoom_reverse, app.preferences.free_orbit, anchor, pivot);
         app.cam = crate::view_angles::keep_locked(app, before, app.cam);
     }
+}
+
+/// The point a device turn holds still on screen: `pick`ed afresh, or the point the cap's turn
+/// began with while it is still the cap turning (`ViewportState.device_pivot`, dropped at rest by
+/// `space_mouse::navigate_frame`). A device app sends no rest, so its turns pick each frame.
+fn device_turn_pivot(app: &mut SolveApp, cap: bool, pick: impl FnOnce(&SolveApp) -> Vec3) -> Option<Vec3> {
+    if let Some(p) = app.viewport.device_pivot.filter(|_| cap) {
+        return Some(p);
+    }
+    let p = pick(app);
+    if cap {
+        app.viewport.device_pivot = Some(p);
+    }
+    Some(p)
 }
 
 /// How far one zoom step of a device app (a click of its ring or wheel) moves the camera: this
@@ -2449,6 +2469,63 @@ mod tests {
                 assert_eq!(h.app.viewport.device_pivot, model_pivot.then_some(held), "free={free}: the turn kept its point");
             }
         }
+    }
+
+    /// With Orbit Classic, the cap turns the view around what Preferences' Orbit around names, as a
+    /// drag does: the world origin, or the model point under the pointer when the turn began. That
+    /// point stays on screen and is marked; the view's centre, the default, stays unmarked (#10452).
+    #[test]
+    fn the_3d_mouse_turns_around_the_orbit_around_point() {
+        use super::*;
+        use crate::prefs::OrbitAround;
+        use crate::space_mouse::{DeviceMotion, Motion};
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        for free in [false, true] {
+            for around in [OrbitAround::Origin, OrbitAround::Cursor] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.session.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "corner": [-20, -20, -20]})).unwrap();
+                h.app.preferences.orbit_around = around;
+                h.app.preferences.free_orbit = free;
+                h.settle();
+                // The view's centre is off the origin and off the pointer, so a turn around either
+                // would swing the other away.
+                h.app.cam = Camera { target: Vec3::new(5.0, -7.0, 3.0), distance: 400.0, yaw: 0.4, pitch: 0.3, ..Camera::default() };
+                let corner = Vec3::new(-20.0, -20.0, 20.0);
+                let at = projection(&h.app, rect).to_screen(corner).expect("the corner on screen");
+                h.app.viewport.mouse = Some(at);
+                let held = if around == OrbitAround::Origin { Vec3::ZERO } else { crate::prefs::pivot_under(&h.app, &projection(&h.app, rect), at) };
+                assert_ne!(held, h.app.cam.target, "the point is off the view's centre");
+                let was = projection(&h.app, rect).to_screen(held).expect("the held point on screen");
+                for _ in 0..10 {
+                    h.app.viewport.device_motion =
+                        Some(DeviceMotion { motion: Motion { translation: [0.0; 3], rotation: [0.5, 0.5, 0.0] }, seconds: 0.05 });
+                    device(&mut h.app, rect, NavCaps::MODEL);
+                }
+                let now = projection(&h.app, rect).to_screen(held).expect("the held point on screen");
+                assert!((now - was).length() < 0.5, "{around:?} free={free}: the held point moved from {was:?} to {now:?}");
+                assert_eq!(h.app.viewport.device_pivot, Some(held), "{around:?} free={free}: the held point is marked");
+                // Panning while it turns brings other parts of the view under it; the turn keeps
+                // the point it began with.
+                for _ in 0..10 {
+                    h.app.viewport.device_motion =
+                        Some(DeviceMotion { motion: Motion { translation: [0.5, 0.0, 0.0], rotation: [0.5, 0.5, 0.0] }, seconds: 0.05 });
+                    device(&mut h.app, rect, NavCaps::MODEL);
+                }
+                assert_eq!(h.app.viewport.device_pivot, Some(held), "{around:?} free={free}: the turn kept its point");
+            }
+        }
+        // The view's centre is what Classic turned around before: unmarked, and the view turns.
+        let mut h = crate::scenario::Harness::new();
+        h.app.session.execute("solid.box", &json!({"length": 40, "width": 40, "height": 40, "corner": [-20, -20, -20]})).unwrap();
+        h.settle();
+        h.app.cam = Camera { target: Vec3::new(5.0, -7.0, 3.0), distance: 400.0, yaw: 0.4, pitch: 0.3, ..Camera::default() };
+        let before = h.app.cam;
+        for _ in 0..10 {
+            h.app.viewport.device_motion = Some(DeviceMotion { motion: Motion { translation: [0.0; 3], rotation: [0.5, 0.5, 0.0] }, seconds: 0.05 });
+            device(&mut h.app, rect, NavCaps::MODEL);
+        }
+        assert_ne!(h.app.cam, before, "the cap still turns the view");
+        assert_eq!(h.app.viewport.device_pivot, None, "the view's centre is unmarked");
     }
 
     /// While a sketch is edited the cap pans and zooms without turning a square-on view; after the
