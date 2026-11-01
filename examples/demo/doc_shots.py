@@ -48,12 +48,13 @@ CALLOUT_RIM = (255, 255, 255)
 SHOTS = {}
 
 
-def shot(name, kind, start="empty"):
+def shot(name, kind, start="empty", setup=None):
     """Register a shot: `kind` is "still" or "clip"; `start` is "empty" (a new design) or
-    "sample" (the built-in sample plate)."""
+    "sample" (the built-in sample plate); `setup(d)`, when given, runs first and is not
+    recorded."""
 
     def register(f):
-        SHOTS[name] = (kind, start, f)
+        SHOTS[name] = (kind, start, f, setup)
         return f
 
     return register
@@ -126,12 +127,40 @@ class Shot(Demo):
         super().__init__(port, None, log, speed=1.0, minimum_caption=0)
         self.crop = None  # (x, y, w, h) in window points; None: the whole window
         self.callouts = []  # [(x, y)] in window points, numbered from 1 in order
+        self.keep_pauses = False  # a clip whose pauses matter (hovering) keeps them
 
     def execute(self, command, params=None):
         self.settle_camera()
         r = self.ui("engine.execute", {"command": command, "params": params or {}})
         self.settle_camera()
         return r
+
+    def enter(self):
+        """Enter as two input frames: pressed and released in one frame, a sketch value box
+        misses it."""
+        self.ui("ui.key", {"key": "Enter", "pressed": True})
+        time.sleep(0.1)
+        self.ui("ui.key", {"key": "Enter", "pressed": False})
+        self.wait(0.4)
+        self.settle_camera()
+
+    def type(self, text, enter=True):
+        self.ui("ui.text", {"text": text})
+        self.wait(0.4)
+        if enter:
+            self.enter()
+
+    def sketch_scale(self):
+        """Points per millimetre in the open sketch."""
+        a, b = self.at(sketch=[0, 0]), self.at(sketch=[10, 0])
+        return abs(b[0] - a[0]) / 10
+
+    def frame_sketch(self, centre, scale):
+        """Look at `centre` (mm on a sketch on XY) at `scale` points per mm, keeping the view's
+        direction."""
+        cam = self.ui("ui.inspect")["camera"]
+        self.ui("ui.camera", {"target": [centre[0], centre[1], 0], "distance": cam["distance"] * self.sketch_scale() / scale})
+        self.settle_camera()
 
     def handle(self, name):
         """The handle's screen point, or None when it isn't drawn."""
@@ -155,7 +184,7 @@ class Shot(Demo):
 
 
 def run_shot(name, exe, display, keep):
-    kind, start, f = SHOTS[name]
+    kind, start, f, setup = SHOTS[name]
     work = Path(tempfile.mkdtemp(prefix="doc-shot-"))
     out = MEDIA / f"{name}.{'png' if kind == 'still' else 'mp4'}"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -164,6 +193,11 @@ def run_shot(name, exe, display, keep):
         log = open(work / "steps.log", "w")
         d = Shot(app.port, log)
         d.prepare()
+        if setup:
+            setup(d)
+            d.settle_camera()
+            log.seek(0)
+            log.truncate()
         if kind == "still":
             f(d)
             d.settle_camera()
@@ -228,10 +262,10 @@ def clip(d, f, display, work, out):
         ff.wait(30)
     log = (work / "ffmpeg.log").read_text()
     start = float(log.split("start: ", 1)[1].split(",", 1)[0])
-    composite(work, raw, start, d.crop, out)
+    composite(work, raw, start, d.crop, out, d.keep_pauses)
 
 
-def composite(work, raw, start, crop, out):
+def composite(work, raw, start, crop, out, keep_pauses=False):
     """The drawn pointer and click ripples over the recording, cropped, idle cut, H.264."""
     marks = [json.loads(line) for line in open(work / "steps.log") if line.strip()]
     cursor_sprite(str(work / "cursor.png"))
@@ -266,8 +300,11 @@ def composite(work, raw, start, crop, out):
         ["ffmpeg", "-loglevel", "error", "-y", "-i", str(raw), "-loop", "1", "-i", str(work / "cursor.png"), "-loop", "1", "-i", str(work / "ripple.png"), "-filter_complex", graph, "-map", "[v]", "-c:v", "libx264", "-crf", "14", "-pix_fmt", "yuv420p", str(full)],
         check=True,
     )
-    # Idle stretches shortened, not removed: a reader needs a moment on each result.
-    subprocess.run([sys.executable, str(HERE / "trim_idle.py"), str(full), str(out), "--crf", "26", "--hold", "0.8"], check=True)
+    if keep_pauses:
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(full), "-c:v", "libx264", "-crf", "26", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out)], check=True)
+    else:
+        # Idle stretches shortened, not removed: a reader needs a moment on each result.
+        subprocess.run([sys.executable, str(HERE / "trim_idle.py"), str(full), str(out), "--crf", "26", "--hold", "0.8"], check=True)
 
 
 def labels(work, marks, start, w, h):
@@ -365,6 +402,142 @@ def ui_tour_navigate(d):
     d.wait(1.0)
 
 
+# sketching.md: one sketch on the Top (XY) plane, a 60 x 40 rectangle from the origin and a
+# 12 mm hole placed 20 mm from two sides, step by step. Each clip starts where the last ends.
+RECT = (60, 40)
+HOLE = (20, 20, 12)
+
+
+def top_sketch(d):
+    """A sketch open on the Top plane, framed on where the rectangle will go."""
+    d.execute("sketch.create", {"plane": "XY"})
+    d.ui("ui.view", {"view": "top"})
+    d.settle_camera()
+    d.frame_sketch((RECT[0] / 2, RECT[1] / 2 - 4), 7.5)
+
+
+def draw_rectangle(d):
+    d.tool("sketch.rectangle.two_point")
+    d.click(d.at(sketch=[0, 0]), dur=0.6, settle=0.3)
+    d.glide(d.at(sketch=[RECT[0] * 0.7, RECT[1] * 0.7]), 0.8)
+    d.wait(0.3)
+    d.type(str(RECT[0]), enter=False)
+    d.key("Tab")
+    d.type(str(RECT[1]), enter=False)
+    # A click places the shape at the typed size, wherever the pointer is.
+    d.click(d.pos, dur=0.1, settle=0.4)
+    d.key("Escape")
+
+
+def draw_circle(d):
+    # Off its final place, so the dimensions visibly move it there.
+    d.tool("sketch.circle.center")
+    d.click(d.at(sketch=[HOLE[0] - 4, HOLE[1] + 5]), dur=0.6, settle=0.3)
+    # Down and right: the diameter box opens above the pointer, and over it the tool can't see
+    # the pointer move.
+    d.glide(d.at(sketch=[HOLE[0] + 4, HOLE[1] - 1]), 0.5)
+    d.type(str(HOLE[2]), enter=False)
+    d.click(d.pos, dur=0.1, settle=0.4)
+    d.key("Escape")
+
+
+def drawn(d):
+    top_sketch(d)
+    draw_rectangle(d)
+    draw_circle(d)
+    if len(d.execute("sketch.inspect")["curves"]) != 5:
+        raise RuntimeError("the rectangle and the circle were not drawn")
+
+
+def dimension_hole(d):
+    """Dimension the hole's centre from the left side, then from the bottom."""
+    d.tool("sketch.dimension")
+    centre = lambda: d.at(sketch=d.hole_centre())  # noqa: E731
+    d.click(centre(), dur=0.6, settle=0.2)
+    d.click(d.at(sketch=[0, RECT[1] * 0.85]), dur=0.5, settle=0.2)
+    d.click(d.at(sketch=[HOLE[0] / 2, RECT[1] + 7]), dur=0.5, settle=0.3)
+    d.type(str(HOLE[0]))
+    d.click(centre(), dur=0.6, settle=0.2)
+    d.click(d.at(sketch=[RECT[0] * 0.8, 0]), dur=0.5, settle=0.2)
+    d.click(d.at(sketch=[RECT[0] * 0.75, HOLE[1] / 2]), dur=0.5, settle=0.3)
+    d.type(str(HOLE[1]))
+    d.key("Escape")
+
+
+def hole_centre(d):
+    sk = d.execute("sketch.inspect")
+    c = next(c for c in sk["curves"] if c["type"] == "circle")
+    return list(c["center_at"])
+
+
+Shot.hole_centre = hole_centre
+
+
+@shot("sketching/create", "clip")
+def sketching_create(d):
+    """New Sketch, hover the planes (each lights up), click Top: the view turns to face it."""
+    d.keep_pauses = True
+    d.caption("New Sketch")
+    d.tool("sketch.create")
+    o = d.at(world=[0, 0, 0])
+    d.caption("Hover a plane: it lights up")
+    d.glide((o[0] + 20, o[1] - 45), 0.8)
+    d.wait(1.0)
+    d.glide((o[0] + 62, o[1] + 1), 0.6)
+    d.wait(1.0)
+    d.caption("Click it: the sketch opens facing you")
+    d.click((o[0] + 62, o[1] + 1), dur=0.2, settle=1.5)
+    plane = d.execute("sketch.inspect")["plane"]
+    if plane["x_dir"] != [1.0, 0.0, 0.0] or plane["y_dir"] != [0.0, 1.0, 0.0]:
+        raise RuntimeError(f"the sketch went on the wrong plane: {plane}")
+    d.wait(1.0)
+
+
+@shot("sketching/draw", "clip", setup=top_sketch)
+def sketching_draw(d):
+    """A rectangle from the origin with its sides typed (60 Tab 40, click), then a circle with
+    its diameter typed: each typed value becomes a dimension."""
+    d.caption("Rectangle: click the origin, type 60, Tab, 40, click")
+    draw_rectangle(d)
+    d.wait(0.8)
+    d.caption("Circle: click its centre, type 12, click")
+    draw_circle(d)
+    d.wait(1.2)
+
+
+@shot("sketching/dimension", "clip", setup=drawn)
+def sketching_dimension(d):
+    """Dimension the hole's centre from two sides: the sketch turns fully constrained."""
+    d.caption("Dimension: click the centre, then a side, place it, type 20")
+    dimension_hole(d)
+    if d.execute("sketch.inspect").get("dof") != 0:
+        raise RuntimeError("the sketch is not fully constrained")
+    d.caption("Fully constrained: nothing left to move")
+    d.wait(2.0)
+
+
+@shot("sketching/parts", "still", setup=drawn)
+def sketching_parts(d):
+    """The finished sketch, numbered: 1 the Sketch tab's tools, 2 a constraint, 3 a dimension,
+    4 the sketch's state, 5 Finish Sketch."""
+    dimension_hole(d)
+    d.ui("ui.move", {"x": 5, "y": 600})
+    time.sleep(6)  # the "Dimension applied" notice fades
+    sel = d.ui("ui.selection")
+    dims = sel.get("dimensions") or []
+    if not dims:
+        raise RuntimeError("no dimensions drawn")
+    names = {h["name"]: (h["x"], h["y"]) for h in d.ui("ui.handles")}
+    left = d.at(sketch=[0, RECT[1] / 2])
+    d.callouts += [
+        (names["toolbar:sketch.line"][0] - 2, names["toolbar:sketch.line"][1] + 56),
+        (left[0] - 34, left[1] + 26),
+        (dims[0]["x"], dims[0]["y"] - 30),
+        (names["sketch_palette:status_header"][0] - 128, names["sketch_palette:status_header"][1] + 8),
+        (names["sketch_palette:finish"][0] - 130, names["sketch_palette:finish"][1]),
+    ]
+
+
 # -- main ---------------------------------------------------------------------------------------
 
 
@@ -378,7 +551,7 @@ def main():
     ap.add_argument("--keep", action="store_true", help="keep each shot's work folder")
     a = ap.parse_args()
     if a.list:
-        for name, (kind, start, f) in SHOTS.items():
+        for name, (kind, start, f, _) in SHOTS.items():
             print(f"{name:32} {kind:5} {start:6} {(f.__doc__ or '').split(chr(10))[0]}")
         return
     names = [n for n in SHOTS if not a.shots or n in a.shots or n.split("/")[0] in a.shots]
