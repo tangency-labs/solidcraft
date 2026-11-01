@@ -8,12 +8,27 @@
     "ui.delete_face_heal_hint": "关闭后保留开口片体，可继续进行曲面编辑。"
   },
   "ja": {
-    "ui.delete_face_heal": "修復（隙間を閉じる）"
+    "ui.delete_face_heal": "修復（隙間を閉じる）",
+    "ui.delete_face_heal_hint": "オフにすると開口したサーフェスボディのまま残し、サーフェス編集を続けられます。"
   },
   "de": {
-    "ui.delete_face_heal": "Heilen (Lücke schließen)"
+    "ui.delete_face_heal": "Heilen (Lücke schließen)",
+    "ui.delete_face_heal_hint": "Ausschalten, um einen offenen Flächenkörper für weitere Flächenbearbeitung zu behalten."
   },
   "ko": {
-    "ui.delete_face_heal": "복구 (틈 닫기)"
+    "ui.delete_face_heal": "복구 (틈 닫기)",
+    "ui.delete_face_heal_hint": "끄면 열린 서피스 바디로 남겨 서피스 편집을 계속할 수 있습니다."
+  },
+  "ar": {
+    "ui.delete_face_heal": "إصلاح (إغلاق الفجوة)",
+    "ui.delete_face_heal_hint": "أطفئه لترك جسم سطحي مفتوح لمزيد من تحرير السطح."
+  },
+  "he": {
+    "ui.delete_face_heal": "תיקון (סגירת הפער)",
+    "ui.delete_face_heal_hint": "כבה כדי להשאיר גוף משטח פתוח להמשך עריכת משטח."
+  },
+  "vi": {
+    "ui.delete_face_heal": "Sửa (đóng khe hở)",
+    "ui.delete_face_heal_hint": "Tắt để giữ lại khối bề mặt hở cho việc chỉnh sửa bề mặt tiếp theo."
   }
 }
