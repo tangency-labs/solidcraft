@@ -7870,12 +7870,35 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let (mut found, mut notes, mut fitted, mut tapered_all) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
             let mut reduced = false;
             let mut blended = Vec::new();
+            // A constant round or an equal chamfer on edges through a sheet's thickness, at the
+            // outside corners of its outline, is a cut-out of the sheet: it stays through later
+            // sheet metal features and is in the flat pattern (#9340).
+            let corner_cut = match &f.kind {
+                FeatureKind::Fillet {
+                    style: crate::FilletStyle::Constant,
+                    fit: crate::FilletFit::Exact,
+                    corner: crate::FilletCorner::Rolling,
+                    ..
+                } => Some(crate::sheet::CornerCut::Round(r)),
+                FeatureKind::Chamfer { distance2: None, angle: None, .. } => Some(crate::sheet::CornerCut::Chamfer(r)),
+                _ => None,
+            };
+            let mut corners = Vec::new();
             for (ti, idx) in &groups {
                 let Some(mb) = st.bodies.get(*ti) else { return Err(DocError::Invalid("body".into())) };
                 let mut w = None;
                 let edges = blend_edges_on(mb, f, edges, idx, &mut w)?;
                 if let Some(w) = w {
                     notes.push(w);
+                }
+                if let Some(cut) = corner_cut
+                    && let Some(sh) = st.sheets.iter().find(|s| s.body == mb.name)
+                    && let Some(cuts) = sh.corner_cuts(&edges, cut)?
+                {
+                    fitted.extend(std::iter::repeat_n(r, edges.len()));
+                    found.extend(edges);
+                    corners.push((mb.name.clone(), cuts));
+                    continue;
                 }
                 let mut note = None;
                 let (nb, used, tapered) = blend_body(vals, f, mb, &edges, r, &mut note)?;
@@ -7903,6 +7926,9 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     let (name, feat) = (slot.name.clone(), slot.feature);
                     *slot = ModelBody::traced_new(name, nb, feat);
                 }
+            }
+            for (body, cuts) in corners {
+                more::sheet_corner_cuts(st, &body, cuts)?;
             }
             Ok(())
         }

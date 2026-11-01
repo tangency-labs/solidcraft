@@ -443,6 +443,28 @@ fn replace_sheet_body(mb: &mut ModelBody, body: Body) {
     *mb = next;
 }
 
+/// Rounded or chamfered outline corners of the sheet `body`, from a fillet or chamfer on edges
+/// through its thickness ([`sheet::SheetBody::corner_cuts`]): cut-outs of its flat pattern, so
+/// the folded part, the flat pattern and its DXF all have them, and a later sheet metal feature
+/// that rebuilds the body keeps them (#9340).
+pub(super) fn sheet_corner_cuts(st: &mut ModelState, body: &str, cuts: Vec<Region2>) -> Result<()> {
+    let Some(original) = st.sheets.iter().find(|s| s.body == body) else { return Ok(()) };
+    let mut sh = original.clone();
+    for cut in cuts {
+        if !sh.holes.contains(&cut) {
+            sh.holes.push(cut);
+        }
+    }
+    let solid = sh.solid()?;
+    if let Some(mb) = st.bodies.iter_mut().find(|b| b.name == body) {
+        replace_sheet_body(mb, solid);
+    }
+    if let Some(target) = st.sheets.iter_mut().find(|s| s.body == body) {
+        *target = sh;
+    }
+    Ok(())
+}
+
 /// Put a converted sheet in the place of the body it was made from.
 fn put_sheet(st: &mut ModelState, sh: sheet::SheetBody) -> Result<()> {
     let solid = sh.solid()?;
