@@ -23,7 +23,7 @@ use solidcraft_geom::{Plane, Vec2};
 use solidcraft_render::VisualStyle;
 
 use super::{Drawing, add_by_id, in_id_order, require};
-use crate::drawing_view::{MAX_REFERENCE_MARGIN_MM, TangentEdges, ViewDirection, ViewOverrides, ViewSettings};
+use crate::drawing_view::{MAX_REFERENCE_SHOWN_PERCENT, TangentEdges, ViewDirection, ViewOverrides, ViewSettings};
 use crate::{DocError, Result, ids};
 
 /// The most views a drawing may have.
@@ -46,10 +46,10 @@ pub struct View {
     /// What it sets itself; each setting left out follows its parent, then the default.
     #[serde(default, skip_serializing_if = "ViewOverrides::is_empty")]
     pub settings: ViewOverrides,
-    /// Model millimetres added on every side of its extents, so reference parts around the model
-    /// show inside its boundary: 0 to [`MAX_REFERENCE_MARGIN_MM`], each view its own.
+    /// How far its boundary grows from the model's box towards the box that also holds its reference
+    /// parts, each side on its own: 0 to [`MAX_REFERENCE_SHOWN_PERCENT`], each view its own.
     #[serde(default, skip_serializing_if = "is_zero")]
-    pub reference_margin_mm: f64,
+    pub reference_shown_percent: f64,
 }
 
 /// What a view draws, and from where.
@@ -109,7 +109,7 @@ pub struct ResolvedView {
     pub reference_style: Setting<VisualStyle>,
     pub reference_hides_model: Setting<bool>,
     pub tangent_edges: Setting<TangentEdges>,
-    pub reference_margin_mm: f64,
+    pub reference_shown_percent: f64,
 }
 
 fn is_zero(v: &f64) -> bool {
@@ -187,9 +187,9 @@ impl Drawing {
     fn check_view(&self, view: &View) -> Result<()> {
         let on = |sheet: u64| format!("it is on sheet {}, which the drawing doesn't have", ids::encode(sheet));
         require(self.sheets.iter().any(|s| s.id == view.sheet), || on(view.sheet))?;
-        let margin = view.reference_margin_mm;
-        require(margin.is_finite() && (0.0..=MAX_REFERENCE_MARGIN_MM).contains(&margin), || {
-            format!("its reference margin is 0 to {MAX_REFERENCE_MARGIN_MM} model millimetres")
+        let percent = view.reference_shown_percent;
+        require(percent.is_finite() && (0.0..=MAX_REFERENCE_SHOWN_PERCENT).contains(&percent), || {
+            format!("its reference_shown_percent is 0 to {MAX_REFERENCE_SHOWN_PERCENT}")
         })?;
         let place = match view.place {
             ViewPlace::At([x, y]) => is_paper_coordinate(x) && is_paper_coordinate(y),
@@ -237,7 +237,7 @@ impl Drawing {
             reference_style: or_default(&chain, |s| s.reference_style, defaults.reference_style),
             reference_hides_model: or_default(&chain, |s| s.reference_hides_model, defaults.reference_hides_model),
             tangent_edges: or_default(&chain, |s| s.tangent_edges, defaults.tangent_edges),
-            reference_margin_mm: chain.first().map_or(0.0, |view| view.reference_margin_mm),
+            reference_shown_percent: chain.first().map_or(0.0, |view| view.reference_shown_percent),
         })
     }
 

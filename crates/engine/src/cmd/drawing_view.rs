@@ -76,7 +76,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
     .noundo()
     .contract(&CONTRACT)
     .output(output_schema_for::<SnapshotResult>)
-    .params("view?: front (default), back, top, bottom, left, right, iso (= iso_front_right), iso_front_left, iso_back_right, iso_back_left, or {direction, up, origin?}; scale?: \"paper:model\" such as \"1:2\" (default: the largest ISO 5455 scale that fits the sheet's drawing area); position_mm?: [x, y] for the view's centre on the sheet (default the sheet's centre); sheet?: {size: {standard: a3} or {custom: {sides_mm: [w, h]}}, orientation?: landscape|portrait, dpi?: 25..2400} (default A3 landscape, 300 dpi); display_style?, reference_style?: visible (default), visible_hidden or shaded (drawn as a picture, without its own lines, and not with scene; shaded_visible and shaded_visible_hidden aren't supported yet); reference_hides_model?: false; reference_margin_mm?: 0..100000 model mm on every side; tangent_edges?: hide (default) or show; chord_mm?: 0.001..1 paper mm the lines are sampled at (default 0.01); max_error_mm?: the accuracy the lines must certify on paper (refused while they come from the mesh); scene?: true adds the lines as a paper scene of the sheet (visible lines only for now); source?: {occurrences: [[ids…]]}, the occurrence subtrees drawn ([] the design's own bodies; default every body); hide?: [[ids…]], subtrees left out; at most 1000 paths in each and 4096 ids in all. Every body the design places, whatever the browser shows. Returns {view, scale: {text, factor, fitted}, position_mm, sheet, extents (model mm on the view's plane), boundary_mm (on the sheet), lines: [{occurrence, body, reference, source: {kind: edge, edge, tangent} or {kind: silhouette, face}, pieces: [{visibility, path: [paper mm lines, and arcs for circles facing the view], accuracy}]}], status: {lines: approximate, provenance: mesh_projection, chord_mm, model_chord_mm, uncertain_pieces, covered_pieces}, stats, scene (with scene: true: {size_mm, groups: [{object: 0, kind: view, items: [{kind: stroke, path, closed, width_mm}]}]}), picture? ({pixels: [w, h], dpi, rect_mm} when something is shaded: the boundary's pixel grid at sheet.dpi or 1200, the lower, which dpi gives), source}. Read-only: saves nothing."),
+    .params("view?: front (default), back, top, bottom, left, right, iso (= iso_front_right), iso_front_left, iso_back_right, iso_back_left, or {direction, up, origin?}; scale?: \"paper:model\" such as \"1:2\" (default: the largest ISO 5455 scale that fits the sheet's drawing area); position_mm?: [x, y] for the view's centre on the sheet (default the sheet's centre); sheet?: {size: {standard: a3} or {custom: {sides_mm: [w, h]}}, orientation?: landscape|portrait, dpi?: 25..2400} (default A3 landscape, 300 dpi); display_style?, reference_style?: visible (default), visible_hidden or shaded (drawn as a picture, without its own lines, and not with scene; shaded_visible and shaded_visible_hidden aren't supported yet); reference_hides_model?: false; reference_shown_percent?: 0..100, how far the box grows from the model's towards holding its reference parts, each side on its own (0, the default: the model's box; 100: holds them all); tangent_edges?: hide (default) or show; chord_mm?: 0.001..1 paper mm the lines are sampled at (default 0.01); max_error_mm?: the accuracy the lines must certify on paper (refused while they come from the mesh); scene?: true adds the lines as a paper scene of the sheet (visible lines only for now); source?: {occurrences: [[ids…]]}, the occurrence subtrees drawn ([] the design's own bodies; default every body); hide?: [[ids…]], subtrees left out; at most 1000 paths in each and 4096 ids in all. Every body the design places, whatever the browser shows. Returns {view, scale: {text, factor, fitted}, position_mm, sheet, extents (model mm on the view's plane), boundary_mm (on the sheet), lines: [{occurrence, body, reference, source: {kind: edge, edge, tangent} or {kind: silhouette, face}, pieces: [{visibility, path: [paper mm lines, and arcs for circles facing the view], accuracy}]}], status: {lines: approximate, provenance: mesh_projection, chord_mm, model_chord_mm, uncertain_pieces, covered_pieces}, stats, scene (with scene: true: {size_mm, groups: [{object: 0, kind: view, items: [{kind: stroke, path, closed, width_mm}]}]}), picture? ({pixels: [w, h], dpi, rect_mm} when something is shaded: the boundary's pixel grid at sheet.dpi or 1200, the lower, which dpi gives), source}. Read-only: saves nothing."),
     CommandSpec::new(INSPECT, "Inspect Drawing View", crate::checked!("drawing.view.inspect", inspect))
         .icon("inspect")
         .in_drawing()
@@ -84,14 +84,14 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&INSPECT_CONTRACT)
         .output(output_schema_for::<InspectResult>)
-        .params("view: a saved view's id → {view, sheet, kind: base|projected, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, display_style, reference_style, reference_hides_model, tangent_edges: {value, from: this|parent|default, parent?, set}}, reference_margin_mm, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|placeholder, provenance} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], choices: {display_style, scale}}. Read-only; no model is evaluated."),
+        .params("view: a saved view's id → {view, sheet, kind: base|projected, source, parent?, side?, direction, place: {at: [x, y]} or {aligned: n}, settings: {scale, display_style, reference_style, reference_hides_model, tangent_edges: {value, from: this|parent|default, parent?, set}}, reference_shown_percent, boundary_mm: {min, max} on the sheet (a 20 x 20 mm placeholder round the view's centre when there's nothing to measure), extents: {min, max, error_mm, status: approximate|placeholder, provenance} in model mm on the view's plane, linked? (a projected view's display settings: true, false or \"partly\"), dimensions: [its dimensions' ids, in id order], balloons: [its balloons' ids, in id order], choices: {display_style, scale}}. Read-only; no model is evaluated."),
     CommandSpec::new(EDIT, "Edit Drawing View", crate::checked!("drawing.view.edit", edit))
         .icon("edit")
         .in_drawing()
         .doc_only()
         .contract(&EDIT_CONTRACT)
         .output(output_schema_for::<EditResult>)
-        .params("view: a saved view's id; set: {scale?, display_style?, reference_style?, reference_hides_model?, tangent_edges?: each a value, or null to follow the parent (a base view keeps a scale); reference_margin_mm?; view?: a base view's direction; place?: {at: [x, y]} or {aligned: n}; linked?: a projected view's display settings all following its parent (true) or all its own, as they are now (false)} → {view, changed: [fields], followers: [the views projected from it whose settings changed with it]}. One undo step; no model is evaluated."),
+        .params("view: a saved view's id; set: {scale?, display_style?, reference_style?, reference_hides_model?, tangent_edges?: each a value, or null to follow the parent (a base view keeps a scale); reference_shown_percent?; view?: a base view's direction; place?: {at: [x, y]} or {aligned: n}; linked?: a projected view's display settings all following its parent (true) or all its own, as they are now (false)} → {view, changed: [fields], followers: [the views projected from it whose settings changed with it]}. One undo step; no model is evaluated."),
     CommandSpec::new(MOVE, "Move View to Sheet", crate::checked!("drawing.view.move_to_sheet", move_to_sheet))
         .icon("move")
         .in_drawing()
@@ -112,7 +112,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
         .doc_only()
         .contract(&BASE_CONTRACT)
         .output(output_schema_for::<CreateResult>)
-        .params("sheet: id or name; view?: as drawing.view.snapshot's (front by default); scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space, centred where it goes, or 1:1 with nothing to measure; saved either way); position_mm?: [x, y] for its centre (default the sheet's centre); display_style?, reference_style?, reference_hides_model?, reference_margin_mm?, tangent_edges?: settings it sets itself (each left out follows the default) → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?: [it, when its boundary leaves the sheet's drawing space]}. A view of the drawing's design. One undo step; no model is evaluated."),
+        .params("sheet: id or name; view?: as drawing.view.snapshot's (front by default); scale?: \"paper:model\" (default: the largest ISO 5455 preset at which it lies inside the sheet's drawing space, centred where it goes, or 1:1 with nothing to measure; saved either way); position_mm?: [x, y] for its centre (default the sheet's centre); display_style?, reference_style?, reference_hides_model?, reference_shown_percent?, tangent_edges?: settings it sets itself (each left out follows the default) → {view, sheet, scale: {text, factor, fitted}, boundary_mm, outside?: [it, when its boundary leaves the sheet's drawing space]}. A view of the drawing's design. One undo step; no model is evaluated."),
     CommandSpec::new(PROJECTED, "Projected View", crate::checked!("drawing.view.projected", projected))
         .icon("new")
         .in_drawing()
@@ -150,13 +150,13 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(CMD, "the source and hide leave no bodies to draw"));
     }
     let extents = crate::drawing_view::measure(&set, &basis).map_err(|why| bad(CMD, why.to_string()))?;
-    let shown = extents.model.inflated(settings.reference_margin_mm);
+    let shown = crate::drawing_view::shows(&set, &basis, &extents, settings.reference_shown_percent);
     let position = request.position_mm.map_or(paper * 0.5, |p| p.0);
     let (scale, fitted) = match settings.scale {
         Some(scale) => (scale, false),
-        None => (fit(shown.size(), position, border, CMD)?, true),
+        None => (fit(&extents, shown, position, border, CMD)?, true),
     };
-    let frame = crate::drawing_view::frame(basis, scale, &shown, position, CMD)?;
+    let frame = crate::drawing_view::frame(basis, scale, &extents.model, position, CMD)?;
     let boundary = frame.boundary(&shown).map_err(|e| bad(CMD, e.to_string()))?;
     let on_paper = [boundary.min, boundary.max].iter().all(|c| c.is_finite() && c.x.abs() <= MAX_COORDINATE_MM && c.y.abs() <= MAX_COORDINATE_MM);
     if !on_paper {
@@ -326,7 +326,7 @@ fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             reference_hides_model: setting(resolved.reference_hides_model, own.reference_hides_model, |b| b),
             tangent_edges: setting(resolved.tangent_edges, own.tangent_edges, snake_name),
         },
-        reference_margin_mm: view.reference_margin_mm,
+        reference_shown_percent: view.reference_shown_percent,
         boundary_mm: BoxResult { min: placed.boundary.min.into(), max: placed.boundary.max.into() },
         extents: extents_result(&placed.extents, placed.unmeasured),
         linked: matches!(view.kind, ViewKind::Projected { .. }).then(|| match display_set(&own) {
@@ -432,8 +432,8 @@ fn change(d: &mut Drawing, id: u64, set: &ViewSet) -> Result<Vec<String>> {
     if let Some(edges) = set.tangent_edges {
         own.tangent_edges = edges.map(|e| e.0);
     }
-    if let Some(margin) = set.reference_margin_mm {
-        view.reference_margin_mm = margin;
+    if let Some(percent) = set.reference_shown_percent {
+        view.reference_shown_percent = percent;
     }
     if let Some(direction) = set.view {
         let ViewKind::Base { view: looking, .. } = &mut view.kind else {
@@ -459,7 +459,7 @@ fn changed_fields(a: &View, b: &View) -> Vec<String> {
         ("reference_style", x.reference_style != y.reference_style),
         ("reference_hides_model", x.reference_hides_model != y.reference_hides_model),
         ("tangent_edges", x.tangent_edges != y.tangent_edges),
-        ("reference_margin_mm", a.reference_margin_mm != b.reference_margin_mm),
+        ("reference_shown_percent", a.reference_shown_percent != b.reference_shown_percent),
         ("view", a.kind != b.kind),
         ("place", a.place != b.place),
     ];
@@ -648,10 +648,10 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let place = ViewPlace::At([position.x, position.y]);
     let kind = ViewKind::Base { source, view: direction };
-    let mut view = View { id, sheet, kind, place, settings, reference_margin_mm: request.reference_margin_mm.unwrap_or(0.0) };
+    let mut view = View { id, sheet, kind, place, settings, reference_shown_percent: request.reference_shown_percent.unwrap_or(0.0) };
     let mut fitted = false;
     if view.settings.scale.is_none() {
-        // The record's rules first, at 1:1, so a bad direction, margin or place is refused as the
+        // The record's rules first, at 1:1, so a bad direction, percent or place is refused as the
         // record says; then the fitted scale, which is saved. With nothing to measure, 1:1.
         let one = Scale::new(1.0, 1.0).map_err(|e| bad(BASE, e.to_string()))?;
         let mut staged = Drawing::clone(&record);
@@ -659,11 +659,14 @@ fn base(s: &mut Session, p: &Value) -> Result<Value> {
         staged.validate().map_err(|e| bad(BASE, e.to_string()))?;
         let space = crate::drawing_view::sheet(&staged, sheet, BASE)?.drawing_space().map_err(|e| bad(BASE, e.to_string()))?;
         let basis = staged.resolve_view(id).map_err(|e| bad(BASE, e.to_string()))?.basis;
-        let measured = crate::drawing_view::shown(s).and_then(|set| crate::drawing_view::measure(&set, &basis)).ok();
-        fitted = measured.is_some();
+        let measured = crate::drawing_view::shown(s).and_then(|set| {
+            let extents = crate::drawing_view::measure(&set, &basis)?;
+            Ok((extents, crate::drawing_view::shows(&set, &basis, &extents, view.reference_shown_percent)))
+        });
+        fitted = measured.is_ok();
         view.settings.scale = Some(match measured {
-            Some(extents) => fit(extents.model.inflated(view.reference_margin_mm).size(), position, space, BASE)?,
-            None => one,
+            Ok((extents, shown)) => fit(&extents, shown, position, space, BASE)?,
+            Err(_) => one,
         });
     }
     s.edit_drawing(BASE, |d| {
@@ -686,7 +689,7 @@ fn projected(s: &mut Session, p: &Value) -> Result<Value> {
         None => ViewPlace::Aligned(side.along(parent_centre)),
     };
     let kind = ViewKind::Projected { parent, side };
-    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_margin_mm: 0.0 };
+    let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0 };
     if request.place.is_none() {
         // Staged on its parent's centre to measure it, then moved along the free axis until its
         // boundary is the gap past its parent's.
@@ -765,10 +768,12 @@ fn direction(basis: &Plane) -> ViewResult {
     }
 }
 
-/// The largest preset scale at which a view `size` (model mm), centred at `position`, lies inside
-/// the drawing border: the room is twice the distance from the position to the nearer side,
-/// each way.
-fn fit(size: Vec2, position: Vec2, border: Aabb2, cmd: &str) -> Result<Scale> {
+/// The largest preset scale at which what a view shows (model mm), placed by the middle of its model at
+/// `position`, lies inside the drawing border: the room is twice the distance from the position to
+/// the nearer side, each way, for the box round the model's middle that holds what shows.
+fn fit(extents: &Extents, shown: Aabb2, position: Vec2, border: Aabb2, cmd: &str) -> Result<Scale> {
+    let off = shown.center() - extents.model.center();
+    let size = shown.size() + Vec2::new(off.x.abs(), off.y.abs()) * 2.0;
     let room =
         Vec2::new(2.0 * (position.x - border.min.x).min(border.max.x - position.x), 2.0 * (position.y - border.min.y).min(border.max.y - position.y));
     Scale::fit(size, room).ok_or_else(|| {

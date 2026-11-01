@@ -140,13 +140,13 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
         Ok(measured) => measured,
         Err(why) => return none(Status::Placeholder(why)),
     };
-    let around = extents.model.inflated(view.reference_margin_mm);
+    let around = crate::drawing_view::shows(set, &view.basis, &extents, view.reference_shown_percent);
     let tangent_edges = view.tangent_edges.value == TangentEdges::Show;
     // The margin keeps the mesh's chord at or above its floor once divided back by the factor.
     let chord_mm = CHORD_MM.max(MIN_MODEL_CHORD_MM * view.scale.value.factor() * (1.0 + 1e-9));
     let reference_hides_model = view.reference_hides_model.value;
     let request = LineRequest { shows: around, hidden: false, reference_hidden: false, reference_hides_model, tangent_edges, chord_mm };
-    let lines = crate::drawing_view::frame(view.basis, view.scale.value, &around, Vec2::ZERO, CMD)
+    let lines = crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, Vec2::ZERO, CMD)
         .and_then(|frame| crate::drawing_view::lines(s, set, &frame, &request, CMD));
     match lines {
         Ok(lines) => {

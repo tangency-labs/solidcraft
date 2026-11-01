@@ -27,11 +27,11 @@ fn front() -> (Drawing, IdSource, u64) {
     (d, id_source, id)
 }
 
-/// A view on the drawing's first sheet, with no reference margin.
+/// A view on the drawing's first sheet, showing no more for its reference parts.
 fn add(d: &mut Drawing, id_source: &mut IdSource, kind: ViewKind, place: ViewPlace, settings: ViewOverrides) -> u64 {
     let id = d.allocate_id(id_source).unwrap();
     let sheet = d.sheets[0].id;
-    d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_margin_mm: 0.0 })]);
+    d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0 })]);
     id
 }
 
@@ -192,15 +192,15 @@ fn the_views_rules_are_kept_on_reading() {
         rule(&right_id, "a view lined up with its parent is on its parent's sheet")
     );
     assert_eq!(refused(&d, |v| v["views"][1]["sheet"] = json!(other_id)), "read");
-    // Its place and its reference margin.
+    // Its place and its reference_shown_percent.
     let off_paper = "its place is at most 5000 mm from the sheet's origin";
     assert_eq!(refused(&d, |v| v["views"][1]["place"] = json!({"at": [5000.0, -5000.0]})), "read");
     assert_eq!(refused(&d, |v| v["views"][1]["place"] = json!({"at": [5000.001, 0.0]})), rule(&top_id, off_paper));
     assert_eq!(refused(&d, |v| v["views"][2]["place"] = json!({"aligned": -5000.001})), rule(&right_id, off_paper));
-    for (margin, read) in [(0.0, true), (100_000.0, true), (-0.001, false), (100_000.001, false)] {
-        let why = refused(&d, |v| v["views"][1]["reference_margin_mm"] = json!(margin));
-        let expected = if read { "read".to_string() } else { rule(&top_id, "its reference margin is 0 to 100000 model millimetres") };
-        assert_eq!(why, expected, "{margin}");
+    for (percent, read) in [(0.0, true), (100.0, true), (-0.001, false), (100.001, false)] {
+        let why = refused(&d, |v| v["views"][1]["reference_shown_percent"] = json!(percent));
+        let expected = if read { "read".to_string() } else { rule(&top_id, "its reference_shown_percent is 0 to 100") };
+        assert_eq!(why, expected, "{percent}");
     }
     // Its settings and its fields, only those it knows; a resolution is the sheet's, not a view's.
     let unknown: [fn(&mut Value); 5] = [
@@ -254,13 +254,13 @@ fn a_chain_of_views_is_at_most_its_depth() {
 
 /// A view resolves through its chain of parents: its basis turned down the chain in the drawing's
 /// projection, each setting from the nearest view that sets it, then the default, saying who gave
-/// it, and its own reference margin.
+/// it, and its own reference_shown_percent.
 #[test]
 fn a_view_resolves_through_its_chain() {
     let (mut d, _, [front, right, top]) = three();
     let view = view_mut(&mut d, top);
     view.settings.tangent_edges = Some(TangentEdges::Show);
-    view.reference_margin_mm = 2.0;
+    view.reference_shown_percent = 2.0;
     let resolved = d.resolve_view(top).unwrap();
     assert_eq!(resolved.source, d.sources[0].id);
     let right_basis = projected_basis(&NamedView::Front.basis(), ProjectedSide::Right, Projection::Third).unwrap();
@@ -270,7 +270,7 @@ fn a_view_resolves_through_its_chain() {
     assert_eq!(resolved.tangent_edges, Setting { value: TangentEdges::Show, set_by: SetBy::This });
     assert_eq!(resolved.reference_style, Setting { value: VisualStyle::Visible, set_by: SetBy::Default });
     assert_eq!(resolved.reference_hides_model, Setting { value: false, set_by: SetBy::Default });
-    assert_eq!(resolved.reference_margin_mm, 2.0);
+    assert_eq!(resolved.reference_shown_percent, 2.0);
     // The base view gives its own; its projected views follow the drawing's projection.
     let base = d.resolve_view(front).unwrap();
     assert_eq!((base.basis, base.scale.set_by, base.display_style.set_by), (NamedView::Front.basis(), SetBy::This, SetBy::Default));

@@ -34,7 +34,7 @@ fn front_and_top_of(mut s: Session) -> (Session, u64, [u64; 2]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let mut add = |d: &mut Drawing, kind: ViewKind, place: ViewPlace, settings: ViewOverrides| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_margin_mm: 0.0 })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0 })]);
         id
     };
     let half = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
@@ -499,4 +499,46 @@ fn text_moves_with_its_group() {
     let group = Group { object: 1, kind: ObjectKind::View, items: vec![Item::Text(run.clone())] };
     let Item::Text(placed) = &moved(&group, Vec2::new(10.0, 20.0)).items[0] else { panic!("a run") };
     assert_eq!(placed, &TextRun { origin: Vec2::new(11.0, 22.0), ..run });
+}
+
+/// A saved view's reference_shown_percent redraws that view alone, grows its boundary on the reference
+/// part's side, leaves the model's strokes where they were, and goes back with an undo.
+#[test]
+fn a_saved_views_reference_shown_percent_grows_only_what_it_should() {
+    let mut design = Session::default();
+    let mut part = |name: &str, body: &str| {
+        let occurrence = run(&mut design, "component.create", json!({"name": name}))["occurrence"].as_u64().unwrap();
+        run(&mut design, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": body, "operation": "new"}));
+        run(&mut design, "component.activate", json!({"component": 0}));
+        occurrence
+    };
+    part("Under", "BodyUnder");
+    let over = part("Over", "BodyOver");
+    run(&mut design, "occurrence.move", json!({"occurrence": over, "translate": [10, 0, 10]}));
+    run(&mut design, "occurrence.bom_type", json!({"occurrence": over, "bom_type": "reference"}));
+    let (mut s, sheet, [_, top]) = front_and_top_of(design);
+    let strokes = |scene: &Scene, reference: bool| {
+        let items = scene.groups.iter().filter(|g| g.kind == ObjectKind::View).flat_map(|g| &g.items);
+        let thin = |i: &&Item| matches!(i, Item::Stroke { width_mm, .. } if *width_mm == crate::drawing_view::REFERENCE_MM);
+        let mut drawn: Vec<String> = items.filter(|i| matches!(i, Item::Stroke { .. }) && thin(i) == reference).map(|i| format!("{i:?}")).collect();
+        drawn.sort();
+        drawn
+    };
+    let before = settled(&mut s, sheet);
+    let boundary = |s: &mut Session| run(s, "drawing.view.inspect", json!({"view": ids::encode(top)}))["boundary_mm"].clone();
+    let (min, max) = {
+        let b = boundary(&mut s);
+        (b["min"].clone(), b["max"].clone())
+    };
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"reference_shown_percent": 100}}));
+    assert_eq!(extract(&mut s, sheet).unwrap().stale, [top]);
+    let after = settled(&mut s, sheet);
+    assert_eq!(strokes(&before.scene, false), strokes(&after.scene, false), "the model stays where it is");
+    assert_ne!(strokes(&before.scene, true), strokes(&after.scene, true));
+    let grown = boundary(&mut s);
+    assert_eq!(grown["min"], min, "the side it doesn't pass stays");
+    assert_ne!(grown["max"], max);
+    assert_eq!(bytes(&built(&s, sheet).scene), bytes(&after.scene), "the provider and a build draw one thing");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&before.scene));
 }

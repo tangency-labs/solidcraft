@@ -15,7 +15,7 @@ fn view_settings_default_to_a_front_view_that_fits_its_page() {
     let full = json!({
         "view": {"direction": [0.0, 1.0, 0.0], "up": [0.0, 0.0, 1.0], "origin": [1.0, 2.0, 3.0]},
         "scale": "1:2", "display_style": "visible_hidden", "reference_style": "shaded",
-        "reference_hides_model": true, "reference_margin_mm": 5.0, "tangent_edges": "show",
+        "reference_hides_model": true, "reference_shown_percent": 5.0, "tangent_edges": "show",
     });
     let read: ViewSettings = serde_json::from_value(full.clone()).unwrap();
     assert_eq!(serde_json::to_value(read).unwrap(), full);
@@ -43,13 +43,13 @@ fn view_settings_refuse_what_they_cant_draw() {
     let refused = [
         json!({"view": {"direction": [0, 0, 0], "up": [0, 0, 1]}}),
         json!({"view": {"direction": [0, 0, 1], "up": [0, 0, -1]}}),
-        json!({"reference_margin_mm": -0.001}),
-        json!({"reference_margin_mm": 100000.001}),
+        json!({"reference_shown_percent": -0.001}),
+        json!({"reference_shown_percent": 100.001}),
     ];
     for settings in refused {
         let read: ViewSettings = serde_json::from_value(settings.clone()).unwrap();
         assert!(read.validate().is_err(), "{settings}");
     }
-    let edge: ViewSettings = serde_json::from_value(json!({"reference_margin_mm": 100000.0})).unwrap();
+    let edge: ViewSettings = serde_json::from_value(json!({"reference_shown_percent": 100.0})).unwrap();
     assert!(edge.validate().is_ok());
 }

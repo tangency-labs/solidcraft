@@ -37,7 +37,7 @@ fn measured() -> (Drawing, [u64; 3]) {
     let (view, sheet) = (d.allocate_id(&mut id_source).unwrap(), d.sheets[0].id);
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let settings = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
-    d.add_views([Arc::new(View { id: view, sheet, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_margin_mm: 0.0 })]);
+    d.add_views([Arc::new(View { id: view, sheet, kind, place: ViewPlace::At([150.0, 150.0]), settings, reference_shown_percent: 0.0 })]);
     let kinds = [
         DimensionKind::Linear {
             a: corner(&["F1:front|F1:bottom", "F1:front|F1:left"]),

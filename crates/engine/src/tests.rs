@@ -873,7 +873,7 @@ fn hostile_params_never_panic() {
         "display_style",
         "reference_style",
         "reference_hides_model",
-        "reference_margin_mm",
+        "reference_shown_percent",
         "tangent_edges",
         "sheet",
         "position_mm",
