@@ -200,7 +200,7 @@ fn a_view_that_cant_be_drawn_leaves_out_only_itself() {
     let (mut s, sheet, [front, top]) = front_and_top();
     let status = |s: &Session, id: u64| built(s, sheet).views.into_iter().find(|v| v.view == id).map(|v| v.status);
     for (style, why) in [
-        ("shaded", "not supported yet: shaded views need the drawing renderer (#5624)"),
+        ("shaded_visible", "not supported yet: shaded views with lines need the view's exact lines (W06)"),
         ("visible_hidden", "not supported yet: hidden lines in the paper scene need dashed lines (#4890 A5)"),
     ] {
         run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": style}}));
@@ -715,12 +715,12 @@ fn status_says_which_views_are_out_of_date() {
 #[test]
 fn status_says_why_a_view_has_no_lines() {
     let (mut s, sheet, [front, top]) = front_and_top();
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": "shaded"}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": "shaded_visible"}}));
     settled(&mut s, sheet);
     let (reply, words) = status_of(&mut s);
     assert_eq!((words[&front].as_str(), words[&top].as_str()), ("current", "failed"), "{reply}");
     let failed = reply["views"].as_array().unwrap().iter().find(|v| v["status"] == "failed").unwrap();
-    assert!(failed["reason"].as_str().unwrap().contains("drawing renderer"), "{reply}");
+    assert!(failed["reason"].as_str().unwrap().contains("exact lines"), "{reply}");
     assert_eq!(failed["sheet"], json!(ids::encode(sheet)), "{reply}");
 
     run(&mut s, "drawing.sheet.add", json!({"name": "Other"}));

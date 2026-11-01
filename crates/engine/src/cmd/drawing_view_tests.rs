@@ -728,7 +728,6 @@ fn hostile_snapshots_are_refused() {
         (json!({"view": {"direction": [0, 0, 1], "up": [0, 0, 2]}}), "along the view direction"),
         (json!({"display_style": "shaded_visible_hidden"}), "not supported yet"),
         (json!({"reference_style": "shaded_visible"}), "not supported yet: shaded views with lines need the view's exact lines (W06)"),
-        (json!({"display_style": "shaded", "scene": true}), "not supported yet: shaded views need the drawing renderer (#5624)"),
         (json!({"display_style": "Shaded"}), "unknown variant"),
         (json!({"tangent_edges": "thin"}), "thin"),
         (json!({"sheet": {"dpi": 24.9}}), "dpi"),

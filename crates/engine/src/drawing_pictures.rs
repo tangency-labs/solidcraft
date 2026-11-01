@@ -1,5 +1,6 @@
 //! A drawing's images on paper (W38e, #5425): each placement on a sheet as a group of the sheet's
-//! scene ([`groups`]), and the pixels a writer asks for ([`Provider`]).
+//! scene ([`groups`]), and the pixels a writer asks for ([`Provider`]). [`SheetPictures`] answers for
+//! a whole sheet, its images and its shaded views' pictures.
 //!
 //! One export makes one provider, which holds only what its sheet uses. It decodes a file the first
 //! time a writer asks for it, and once however many placements show it: a writer asks in bands, and
@@ -18,6 +19,9 @@ use solidcraft_geom::paper::{Group, Item, MAX_IMAGE_PIXELS, ObjectKind, Picture,
 use solidcraft_geom::pixel_grid::{GridWindow, PixelGrid};
 use solidcraft_geom::{Aabb2, Vec2};
 use solidcraft_render::sheet_image;
+
+use crate::Session;
+use crate::drawing_picture::ViewPictures;
 
 /// The placements on sheet `sheet` of `d`, by id.
 fn on_sheet(d: &Drawing, sheet: u64) -> impl Iterator<Item = &SheetImage> {
@@ -81,6 +85,30 @@ impl Pictures for Provider<'_> {
         let (file, pixels) = self.files.get(&place.0).ok_or_else(|| named("the drawing doesn't have its file".into()))?;
         let image = pixels.get_or_init(|| decode(file)).as_ref().map_err(|why| named(why.clone()))?;
         image.rows(place.1, grid, window).map_err(named)
+    }
+}
+
+/// All the pixels one sheet's scene asks for.
+pub struct SheetPictures<'a> {
+    images: Provider<'a>,
+    views: ViewPictures<'a>,
+}
+
+impl<'a> SheetPictures<'a> {
+    /// The pictures of sheet `sheet` of `d`, or why they can't be held or told apart.
+    pub fn new(s: &'a Session, d: &'a Drawing, sheet: u64) -> Result<SheetPictures<'a>, String> {
+        let images = Provider::new(d, sheet)?;
+        let views = ViewPictures::new(s, d, sheet).map_err(|e| e.to_string())?;
+        if let Some(id) = images.places.keys().find(|id| views.has(**id)) {
+            return Err(format!("image {}: its number is a view's picture's", ids::encode(*id)));
+        }
+        Ok(SheetPictures { images, views })
+    }
+}
+
+impl Pictures for SheetPictures<'_> {
+    fn rows(&self, source: u64, grid: &PixelGrid, window: GridWindow) -> Result<Vec<u8>, String> {
+        if self.views.has(source) { self.views.rows(source, grid, window) } else { self.images.rows(source, grid, window) }
     }
 }
 
