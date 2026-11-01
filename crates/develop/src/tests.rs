@@ -72,6 +72,7 @@ fn bracket(b: Bend) -> Sheet {
             kind: JointKind::Bend(b),
         }],
         corners: Vec::new(),
+        cuts: Vec::new(),
     }
 }
 
@@ -204,6 +205,7 @@ fn a_ring_of_bends_is_reported_not_forced() {
         panels: (0..4).map(wall).collect(),
         joints: vec![joint(0, 1), joint(1, 2), joint(2, 3), joint(3, 0)],
         corners: Vec::new(),
+        cuts: Vec::new(),
     };
     let dev = develop(&sheet, 0).unwrap_or_default();
     assert!(dev.placements.iter().all(Option::is_some));
@@ -280,6 +282,7 @@ fn a_roll_flattens_through_its_neutral_surface() {
             ],
             joints: vec![seam(0, 40.0, 1, 0.0), seam(1, FRAC_PI_2, 2, 0.0)],
             corners: Vec::new(),
+            cuts: Vec::new(),
         };
         let dev = develop(&sheet, 0).unwrap_or_default();
         assert!(dev.loops.is_empty() && dev.zones.is_empty() && dev.trims.is_empty() && dev.pieces.len() == 1);
@@ -309,6 +312,7 @@ fn a_cone_flattens_to_a_sector_at_its_neutral_radii() {
         }],
         joints: Vec::new(),
         corners: Vec::new(),
+        cuts: Vec::new(),
     };
     let dev = develop(&sheet, 0).unwrap_or_default();
     let Some(Some(flat)) = dev.panels.first() else { panic!("laid out: {dev:?}") };
@@ -332,6 +336,7 @@ fn a_tube_of_rolls_opens_with_a_rip() {
         panels: vec![roll(r, true, 100.0, PI), roll(r, true, 100.0, PI)],
         joints: vec![seam(0, PI, 1, 0.0), seam(1, PI, 0, 0.0)],
         corners: Vec::new(),
+        cuts: Vec::new(),
     };
     assert_eq!(develop(&sheet, 0).unwrap_or_default().loops.len(), 1);
     if let Some(j) = sheet.joints.get_mut(1) {
@@ -360,7 +365,7 @@ fn a_hole_in_a_roll_flattens_to_an_exact_ellipse() {
         .collect();
     let mut panel = roll(r, false, 100.0, 60.0 / r);
     panel.region.holes.push(Loop2 { segs: quarters }.reversed());
-    let sheet = Sheet { thickness: T, k_factor: K, panels: vec![panel], joints: Vec::new(), corners: Vec::new() };
+    let sheet = Sheet { thickness: T, k_factor: K, panels: vec![panel], joints: Vec::new(), corners: Vec::new(), cuts: Vec::new() };
     let dev = develop(&sheet, 0).unwrap_or_default();
     let Some(Some(flat)) = dev.panels.first() else { panic!("laid out: {dev:?}") };
     let (Some(ellipse), Some(from)) = (flat.region.holes.first(), flat.origins.get(1)) else { panic!("{flat:?}") };
@@ -400,6 +405,7 @@ fn free(surface: Surface) -> Sheet {
         panels: vec![Panel { name: "free".into(), surface, region: rect(0.0, 0.0, 1.0, 1.0) }],
         joints: Vec::new(),
         corners: Vec::new(),
+        cuts: Vec::new(),
     }
 }
 
@@ -587,6 +593,7 @@ fn a_roll_folds_onto_its_cylinder_between_its_neighbours() {
             ],
             joints: vec![seam(0, 40.0, 1, 0.0), seam(1, FRAC_PI_2, 2, 0.0)],
             corners: Vec::new(),
+            cuts: Vec::new(),
         };
         let dev = develop(&sheet, 0).unwrap_or_default();
         let folded = fold(&sheet, &dev, &[Rigid3::IDENTITY]).unwrap_or_else(|e| panic!("{e}"));
@@ -618,6 +625,7 @@ fn a_cones_flat_maps_back_to_its_parameters() {
             panels: vec![Panel { name: "hopper".into(), surface: surface.clone(), region: rect(40.0, 0.5, 90.0, 5.5) }],
             joints: Vec::new(),
             corners: Vec::new(),
+            cuts: Vec::new(),
         };
         let dev = develop(&sheet, 0).unwrap_or_default();
         let folded = fold(&sheet, &dev, &[Rigid3::IDENTITY]).unwrap_or_else(|e| panic!("{e}"));
@@ -649,6 +657,7 @@ fn a_ring_of_bends_closes_in_space() {
         panels: (0..4).map(wall).collect(),
         joints: vec![joint(0, 1), joint(1, 2), joint(2, 3), joint(3, 0)],
         corners: Vec::new(),
+        cuts: Vec::new(),
     };
     let dev = develop(&sheet, 0).unwrap_or_default();
     let folded = fold(&sheet, &dev, &[Rigid3::IDENTITY]).unwrap_or_else(|e| panic!("{e}"));
@@ -703,6 +712,7 @@ fn corner(round: bool, flip: bool) -> Sheet {
             second,
         ],
         corners: vec![Corner { joints: [0, 1], relief: if round { CornerRelief::Round } else { CornerRelief::Square }, size: 8.0 }],
+        cuts: Vec::new(),
     }
 }
 
@@ -840,6 +850,7 @@ fn half_round_cut(exact: bool) -> Vec<(Seg2, EdgeFrom)> {
             kind: JointKind::Rip(Rip { edges: (along, round), curves, turns: vec![-FRAC_PI_2; n], lap: Lap::Cut(3.0, 0.0) }),
         }],
         corners: Vec::new(),
+        cuts: Vec::new(),
     };
     let dev = develop(&sheet, 0).unwrap_or_default();
     assert!(dev.trims.is_empty(), "{:?}", dev.trims);
@@ -896,6 +907,7 @@ fn a_rip_on_a_roll_is_cut_back_on_the_roll() {
         panels: vec![roll(r, true, 100.0, FRAC_PI_2), Panel { name: "wall".into(), region: rect(0.0, 0.0, 100.0, 30.0), ..Panel::default() }],
         joints: vec![seam(0, FRAC_PI_2, 1, 0.0)],
         corners: Vec::new(),
+        cuts: Vec::new(),
     };
     if let Some(j) = sheet.joints.get_mut(0) {
         j.kind = rip_along(j, 100.0, 0.0, Lap::Cut(2.0, 0.0));

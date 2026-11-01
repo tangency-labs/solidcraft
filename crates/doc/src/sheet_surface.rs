@@ -4,8 +4,8 @@
 //! `SOLIDCRAFT_SURFACE_REPORT` to a file makes every sheet body that is built append one line to it,
 //! naming the thread (a test's name under `cargo test`) and how far the two flats differ.
 
-use solidcraft_develop::{Anchor, Bend, Datum, Development, Joint, JointKind, Panel, Relief, Rigid2, Sheet, Tail, ZoneEnds, develop};
-use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
+use solidcraft_develop::{Anchor, Bend, Datum, Development, Joint, JointKind, Panel, Relief, Rigid2, Sheet, Tail, ZoneEnds, crossings, develop};
+use solidcraft_geom::{Aabb2, Loop2, Region2, Ring, Seg2, Vec2};
 use solidcraft_kernel::BoolOp;
 
 use crate::sheet::{FlatWork, SheetBody, SheetFlange, material_boolean, material_union};
@@ -74,7 +74,7 @@ pub(crate) fn surfaces_of(sh: &SheetBody) -> Result<Sheet> {
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    Ok(Sheet { thickness: sh.t, k_factor: sh.k, panels, joints, corners: Vec::new() })
+    Ok(Sheet { thickness: sh.t, k_factor: sh.k, panels, joints, corners: Vec::new(), cuts: Vec::new() })
 }
 
 /// One flange's bend, in the sheet's flat frame: the anchors run `along` the bend with the
@@ -180,17 +180,28 @@ fn surface_flat(model: &Sheet, work: &mut FlatWork) -> Result<(Vec<Region2>, Dev
     Ok((join(&dev, work)?, dev))
 }
 
-/// A piece of a development's flat: a panel's material less its trims, or a bend's zone (by its
-/// place in the development's zones).
+/// A piece of a development's flat: a panel's material less its trims, a bend's zone (by its
+/// place in the development's zones), or a tab: a piece of a zone that the cuts leave joined to
+/// one of its panels only, which rides with that panel, flat, where the rest of the zone bends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Piece {
     Panel(usize),
     Zone(usize),
+    /// A piece of zone `.0`, riding with panel `.1`.
+    Tab(usize, usize),
 }
 
+/// How near (mm) a cut may come to a piece's loops and still be a hole of it as it is: as near
+/// as the sew joins points.
+const CLEAR: f64 = 1e-6;
+
+/// How far (mm) a piece's edge may lie off a zone's tangent line and still run along it.
+const ON_LINE: f64 = 1e-7;
+
 /// A development's pieces before they are joined: each placed panel less its trims, and the
-/// zones, all less the corners' reliefs. The flat pattern and the folded solid are both made of
-/// them.
+/// zones, all less what the development cuts from the flat (the corners' reliefs and the sheet's
+/// cuts), with each piece of a zone sorted by what still holds it (see [`sort_zones`]). The flat
+/// pattern and the folded solid are both made of them.
 pub(crate) fn pieces(dev: &Development, work: &mut FlatWork) -> Result<Vec<(Piece, Region2)>> {
     let mut pieces = Vec::new();
     for (i, flat) in dev.panels.iter().enumerate() {
@@ -212,13 +223,107 @@ pub(crate) fn pieces(dev: &Development, work: &mut FlatWork) -> Result<Vec<(Piec
     if dev.cuts.is_empty() {
         return Ok(pieces);
     }
-    // The corners' reliefs, from every piece they reach.
-    let cuts = stage("joining the corners' reliefs", material_union(dev.cuts.iter().map(on_grid).collect(), work))?;
+    // A cut clear inside one piece is a hole of it as it is, its curves kept; the rest are cut
+    // from every piece they reach. A cut that came clear of the pieces but meets what the others
+    // cut from them is cut the same way, after them.
+    let cuts: Vec<Region2> = dev.cuts.iter().map(on_grid).collect();
+    let (inside, across): (Vec<&Region2>, Vec<&Region2>) = cuts.iter().partition(|c| pieces.iter().any(|(_, r)| holds_clear(r, c)));
+    let mut out = cut_from(pieces, &across, work)?;
+    let mut late = Vec::new();
+    for c in inside {
+        match out.iter_mut().find(|(_, r)| holds_clear(r, c)) {
+            Some((_, r)) => r.holes.push(c.outer.ccw().reversed()),
+            None => late.push(c),
+        }
+    }
+    sort_zones(dev, cut_from(out, &late, work)?)
+}
+
+/// `pieces` less `cuts`, joined first: what each piece leaves, each a piece of the same kind.
+fn cut_from(pieces: Vec<(Piece, Region2)>, cuts: &[&Region2], work: &mut FlatWork) -> Result<Vec<(Piece, Region2)>> {
+    if cuts.is_empty() {
+        return Ok(pieces);
+    }
+    let cuts = stage("joining what is cut from the flat", material_union(cuts.iter().map(|c| (*c).clone()).collect(), work))?;
     let mut out = Vec::with_capacity(pieces.len());
     for (piece, region) in pieces {
-        out.extend(stage("cutting the corners' reliefs", material_boolean(&[region], &cuts, BoolOp::Cut, work))?.into_iter().map(|r| (piece, r)));
+        out.extend(stage("cutting the flat", material_boolean(&[region], &cuts, BoolOp::Cut, work))?.into_iter().map(|r| (piece, r)));
     }
     Ok(out)
+}
+
+/// Whether `cut` lies clear inside `region`, so that it is a hole of it as it is: within its
+/// outline, outside its holes, crossing none of its loops and nowhere nearer them than
+/// [`CLEAR`].
+pub(crate) fn holds_clear(region: &Region2, cut: &Region2) -> bool {
+    let Some(start) = cut.outer.segs.first().map(Seg2::start) else { return false };
+    if !cut.holes.is_empty() || !region.contains(start) {
+        return false;
+    }
+    // Chords this far inside the curves: two loops whose chords stay farther apart than twice
+    // that and `CLEAR` are clear of each other.
+    let sag = 1e-4;
+    let ring = cut.outer.polyline(sag);
+    let reach = ring.bounds().inflated(2.0 * sag + CLEAR);
+    let near = |b: &Aabb2| b.min.x <= reach.max.x && reach.min.x <= b.max.x && b.min.y <= reach.max.y && reach.min.y <= b.max.y;
+    let gap = |a: &Ring<Vec2>, b: &Ring<Vec2>| {
+        a.iter().map(|p| b.edges().map(|(q0, q1)| segment_distance(*p, *q0, *q1)).fold(f64::INFINITY, f64::min)).fold(f64::INFINITY, f64::min)
+    };
+    std::iter::once(&region.outer).chain(&region.holes).all(|l| {
+        let other = l.polyline(sag);
+        !near(&other.bounds())
+            || (l.segs.first().is_none_or(|s| !cut.outer.contains(s.start()))
+                && crossings(&cut.outer.segs, &l.segs).is_empty()
+                && gap(&ring, &other).min(gap(&other, &ring)) > 2.0 * sag + CLEAR)
+    })
+}
+
+/// How far `p` lies from the segment from `a` to `b`.
+fn segment_distance(p: Vec2, a: Vec2, b: Vec2) -> f64 {
+    let d = b - a;
+    let t = if d.len2() > 0.0 { ((p - a).dot(d) / d.len2()).clamp(0.0, 1.0) } else { 0.0 };
+    p.dist(a + d * t)
+}
+
+/// The pieces with each piece of a zone sorted by what still holds it: one that runs along both
+/// its panels' tangent lines bends with the zone; one that runs along only one is a tab of that
+/// panel. A piece that runs along neither is refused, and so is a zone left with nothing that
+/// bends: the cuts part the sheet there.
+fn sort_zones(dev: &Development, pieces: Vec<(Piece, Region2)>) -> Result<Vec<(Piece, Region2)>> {
+    let mut bends = vec![false; dev.zones.len()];
+    let mut out = Vec::with_capacity(pieces.len());
+    for (piece, region) in pieces {
+        let Piece::Zone(z) = piece else {
+            out.push((piece, region));
+            continue;
+        };
+        let zone = dev.zones.get(z).ok_or_else(|| DocError::Invalid(format!("the flat has no bend {}", z + 1)))?;
+        let sorted = match (along(&region, zone.near), along(&region, zone.far)) {
+            (true, true) => Piece::Zone(z),
+            (true, false) => Piece::Tab(z, zone.panels[0]),
+            (false, true) => Piece::Tab(z, zone.panels[1]),
+            (false, false) => {
+                return Err(DocError::Invalid(format!("a cut leaves a piece of bend {} joined to neither of its panels: not supported yet", z + 1)));
+            }
+        };
+        if let Some(b) = bends.get_mut(z) {
+            *b |= sorted == Piece::Zone(z);
+        }
+        out.push((sorted, region));
+    }
+    if let Some(z) = bends.iter().position(|b| !b) {
+        return Err(DocError::Invalid(format!("a cut takes bend {} apart, cutting the sheet in two there: not supported yet", z + 1)));
+    }
+    Ok(out)
+}
+
+/// Whether an edge of `region`'s outline runs along the line from `a` to `b` for more than a
+/// rounding.
+fn along(region: &Region2, [a, b]: [Vec2; 2]) -> bool {
+    let l = a.dist(b);
+    let Some(u) = (b - a).normalized() else { return false };
+    let on = |p: Vec2| (p - a).cross(u).abs() <= ON_LINE && (-ON_LINE..=l + ON_LINE).contains(&(p - a).dot(u));
+    region.outer.segs.iter().any(|s| matches!(s, Seg2::Line { .. }) && s.length() > ON_LINE && on(s.start()) && on(s.end()))
 }
 
 /// A development's flat: each placed panel less its trims, and the zones, joined.

@@ -20,6 +20,20 @@ pub struct Sheet {
     pub joints: Vec<Joint>,
     /// The reliefs cut where bends meet.
     pub corners: Vec<Corner>,
+    /// The cuts that cross a joint (see [`Cut`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cuts: Vec<Cut>,
+}
+
+/// A cut through the sheet that crosses a joint, so that no one panel's region can hold it: a
+/// hole across a bend's tangent line, or across a seam. Its region is drawn in the flat chart of
+/// a panel it reaches (the chart the development places: a roll's neutral one), and it is cut
+/// from every piece of the flat it reaches, bends' zones included. What it leaves of a zone bends
+/// where it still joins both panels, and is a tab of the one panel it joins otherwise.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Cut {
+    pub panel: usize,
+    pub region: Region2,
 }
 
 /// What is cut where two bends meet at a corner. A round or a square relief is cut from the flat

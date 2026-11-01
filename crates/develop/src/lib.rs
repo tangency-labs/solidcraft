@@ -33,7 +33,7 @@ mod sheet;
 pub use develop::{DevelopError, Development, EdgeFrom, FlatPanel, Mismatch, Trim, Zone, crossings, curve_through, develop};
 pub use fold::{Bent, Fold, fold};
 pub use rigid::{Rigid2, Rigid3};
-pub use sheet::{Anchor, Bend, Corner, CornerRelief, Datum, Joint, JointKind, Lap, Panel, Relief, Rip, Sheet, Surface, Tail, ZoneEnds};
+pub use sheet::{Anchor, Bend, Corner, CornerRelief, Cut, Datum, Joint, JointKind, Lap, Panel, Relief, Rip, Sheet, Surface, Tail, ZoneEnds};
 
 #[cfg(test)]
 mod tests;

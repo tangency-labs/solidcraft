@@ -1258,7 +1258,7 @@ pub fn convert_surfaces(
         edges.push(mid);
     }
 
-    let mut model = Sheet { thickness: t, k_factor: rule.k_factor, panels, joints, corners: Vec::new() };
+    let mut model = Sheet { thickness: t, k_factor: rule.k_factor, panels, joints, corners: Vec::new(), cuts: Vec::new() };
     let reliefs = Reliefs::of(rule);
     let notes = settle(&mut model, &places, &reliefs, &|_| None, tol, &at)?;
     // A hole reaching into the band a bend takes from its panel has no one place in the flat.
@@ -1692,6 +1692,10 @@ pub struct SurfaceBendLine {
     pub radius: f64,
     pub up: bool,
     pub allowance: f64,
+    /// The tabs the cuts leave of its zone: they ride flat with a panel, and the bend's line
+    /// stops at them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tabs: Vec<Region2>,
 }
 
 impl SurfaceSheet {
@@ -1716,7 +1720,7 @@ impl SurfaceSheet {
             recesses: Vec::new(),
             pockets: Vec::new(),
         };
-        sheet.laid_out(&c.development, c.flat()?);
+        sheet.laid_out(&c.development, c.pieces()?, c.flat()?);
         Ok((sheet, c.solid()?))
     }
 
@@ -1734,7 +1738,7 @@ impl SurfaceSheet {
         let mut work = FlatWork::new();
         let pieces = crate::sheet_surface::pieces(&dev, &mut work)?;
         let regions = crate::sheet_surface::join_pieces(&pieces, &mut work)?;
-        self.laid_out(&dev, regions);
+        self.laid_out(&dev, &pieces, regions);
         if self.unfolded {
             let base = self.places.first().copied().flatten().ok_or_else(|| DocError::Invalid("the sheet's first panel has no place".into()))?;
             let frames: Vec<Option<Rigid3>> = dev.placements.iter().map(|p| p.map(|r| crate::sheet_surface_cuts::lift(&base, &r))).collect();
@@ -1786,14 +1790,15 @@ impl SurfaceSheet {
     }
 
     /// The bends of the flat as the sheet tools list them, numbered from 1. A bend is listed
-    /// where its center line has material: one entry for each stretch the reliefs and cut-outs
-    /// leave of it, all with the bend's number, and none for a bend they take whole.
+    /// where its center line has material that bends: one entry for each stretch the reliefs,
+    /// cut-outs and tabs leave of it, all with the bend's number, and none for a bend they take
+    /// whole.
     pub fn bend_infos(&self) -> Vec<crate::sheet::BendInfo> {
         let mut out = Vec::new();
         for (i, b) in self.bends.iter().enumerate() {
             let line = [Seg2::Line { a: b.start, b: b.end }];
             let mut cuts: Vec<f64> = vec![0.0, 1.0];
-            for r in &self.regions {
+            for r in self.regions.iter().chain(&b.tabs) {
                 for l in std::iter::once(&r.outer).chain(&r.holes) {
                     cuts.extend(solidcraft_develop::crossings(&line, &l.segs).iter().map(|c| c.1));
                 }
@@ -1803,7 +1808,8 @@ impl SurfaceSheet {
             for w in cuts.windows(2) {
                 let (u0, u1) = (w[0], w[1]);
                 let (start, end) = (b.start.lerp(b.end, u0), b.start.lerp(b.end, u1));
-                if start.dist(end) <= 1e-9 || !self.regions.iter().any(|r| r.contains(start.lerp(end, 0.5))) {
+                let mid = start.lerp(end, 0.5);
+                if start.dist(end) <= 1e-9 || !self.regions.iter().any(|r| r.contains(mid)) || b.tabs.iter().any(|t| t.contains(mid)) {
                     continue;
                 }
                 out.push(crate::sheet::BendInfo {
@@ -1821,12 +1827,14 @@ impl SurfaceSheet {
         out
     }
 
-    /// Keeps the flat `regions` of the development `dev`, with its bends, stretch and rolls.
-    fn laid_out(&mut self, dev: &Development, regions: Vec<Region2>) {
+    /// Keeps the flat `regions` of the development `dev` (joined from its `pieces`), with its
+    /// bends and their tabs, stretch and rolls.
+    fn laid_out(&mut self, dev: &Development, pieces: &[(Piece, Region2)], regions: Vec<Region2>) {
         self.bends = dev
             .zones
             .iter()
-            .filter_map(|z| {
+            .enumerate()
+            .filter_map(|(k, z)| {
                 let JointKind::Bend(b) = &self.sheet.joints.get(z.joint)?.kind else { return None };
                 Some(SurfaceBendLine {
                     zone: z.region.clone(),
@@ -1836,6 +1844,7 @@ impl SurfaceSheet {
                     radius: b.radius,
                     up: b.toward_material,
                     allowance: b.allowance(self.sheet.thickness, self.sheet.k_factor),
+                    tabs: pieces.iter().filter(|(p, _)| matches!(p, Piece::Tab(t, _) if *t == k)).map(|(_, r)| r.clone()).collect(),
                 })
             })
             .collect();

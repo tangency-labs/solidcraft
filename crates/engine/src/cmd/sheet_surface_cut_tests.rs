@@ -6,6 +6,8 @@
 
 use std::f64::consts::PI;
 
+use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
+
 use super::*;
 
 const T: f64 = 2.0;
@@ -296,4 +298,146 @@ fn shadows_a_sheet_cannot_keep_are_refused_with_the_reason() {
         .unwrap_or_default();
     assert!(e.contains("reaches a bend"), "{e}");
     assert!((exact_volume(&s) - v).abs() < 1e-9 * v, "the sheet changed");
+}
+
+/// A plate with a 20 high flange on its edge y = 0, as its sheet keeps it, and its bend's zone in
+/// the flat (the plate's chart): where the plate's tangent line starts, the unit vectors along the
+/// bend and across it toward the flange, and the zone's width and length.
+struct Flanged {
+    sheet: solidcraft_doc::SurfaceSheet,
+    start: Vec2,
+    along: Vec2,
+    across: Vec2,
+    width: f64,
+    length: f64,
+}
+
+impl Flanged {
+    fn new() -> Flanged {
+        let mut s = plate();
+        run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
+        let Some(sheet) = s.model.state().surface_sheets.first().cloned() else { panic!("the plate is a sheet") };
+        let Ok(dev) = solidcraft_develop::develop(&sheet.sheet, 0) else { panic!("the sheet lies flat") };
+        let Some(z) = dev.zones.first() else { panic!("the sheet has a bend") };
+        let (start, along) = (z.near[0], (z.near[1] - z.near[0]).normalized().unwrap_or_default());
+        let left = Vec2::new(-along.y, along.x);
+        let across = if (z.far[0] - start).dot(left) < 0.0 { -left } else { left };
+        Flanged { width: (z.far[0] - start).dot(across), length: z.near[0].dist(z.near[1]), sheet, start, along, across }
+    }
+
+    /// The point `a` along the bend from its start and `b` across it from the plate's tangent
+    /// line.
+    fn at(&self, a: f64, b: f64) -> Vec2 {
+        self.start + self.along * a + self.across * b
+    }
+
+    fn polygon(&self, pts: &[(f64, f64)]) -> Region2 {
+        let pts: Vec<Vec2> = pts.iter().map(|(a, b)| self.at(*a, *b)).collect();
+        Region2 { outer: Loop2::polygon(&pts).ccw(), holes: Vec::new() }
+    }
+
+    fn rect(&self, a: [f64; 2], b: [f64; 2]) -> Region2 {
+        self.polygon(&[(a[0], b[0]), (a[1], b[0]), (a[1], b[1]), (a[0], b[1])])
+    }
+
+    /// The sheet with `cuts` drawn on `panel` built: its volume, and the sheet.
+    fn cut_on(&self, panel: usize, cuts: Vec<Region2>) -> solidcraft_doc::Result<(f64, solidcraft_doc::SurfaceSheet)> {
+        let mut sheet = self.sheet.clone();
+        sheet.sheet.cuts.extend(cuts.into_iter().map(|region| solidcraft_develop::Cut { panel, region }));
+        let body = sheet.build()?;
+        Ok((solidcraft_kernel::measure_mass(&body).map_or(f64::NAN, |m| m.volume), sheet))
+    }
+
+    /// The sheet with `cuts` drawn on the plate, whose chart is the flat's frame.
+    fn cut(&self, cuts: Vec<Region2>) -> (f64, solidcraft_doc::SurfaceSheet) {
+        match self.cut_on(0, cuts) {
+            Ok(out) => out,
+            Err(e) => panic!("{e}"),
+        }
+    }
+}
+
+/// A circle of radius `r` round `c`.
+fn disc(c: Vec2, r: f64) -> Loop2 {
+    Loop2 { segs: vec![Seg2::Arc { center: c, radius: r, start: 0.0, sweep: PI }, Seg2::Arc { center: c, radius: r, start: PI, sweep: PI }] }.ccw()
+}
+
+/// What a bend of the test rule (T 2, R 2, K 0.44) keeps per area of its zone in the flat: the
+/// zone's neutral width wraps round the bend, its thickness from R to R + T.
+fn bent_per_area() -> f64 {
+    T * (2.0 + T / 2.0) / (2.0 + 0.44 * T)
+}
+
+/// A slot cut across a bend from the plate into the flange leaves two stretches of the bend, each
+/// still joining both panels: both bend, and the bend's line stops at the slot. Drawn on the
+/// flange in its own chart instead, the slot is the same cut.
+#[test]
+fn a_slot_across_a_bend_leaves_two_stretches_that_bend() {
+    let f = Flanged::new();
+    let w = f.width;
+    let (v0, _) = f.cut(Vec::new());
+    let slot = f.rect([40.0, 60.0], [-3.0, w + 3.0]);
+    let (v, sheet) = f.cut(vec![slot.clone()]);
+    let want = v0 - 2.0 * 20.0 * 3.0 * T - 20.0 * w * bent_per_area();
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+    let lines: Vec<f64> = sheet.bend_infos().iter().map(|b| b.length).collect();
+    assert!(lines.len() == 2 && (lines.iter().sum::<f64>() - (f.length - 20.0)).abs() < 1e-6, "{lines:?} of {}", f.length);
+    assert!(sheet.bends.iter().all(|b| b.tabs.is_empty()), "no tabs");
+    let Ok(dev) = solidcraft_develop::develop(&f.sheet.sheet, 0) else { panic!("the sheet lies flat") };
+    let Some(place) = dev.placements.get(1).copied().flatten() else { panic!("the flange has a place in the flat") };
+    match f.cut_on(1, vec![place.inverse().region(&slot)]) {
+        Ok((on_flange, _)) => assert!((on_flange - v).abs() < 1e-9 * v, "{on_flange} vs {v}"),
+        Err(e) => panic!("{e}"),
+    }
+}
+
+/// A U cut into a bend from the plate's side frees the strip of the bend inside it from the
+/// flange: the strip is a tab, and stays flat with the plate, its volume its flat area through
+/// the thickness, while the rest of the bend bends round it. The bend's line stops at the tab.
+#[test]
+fn a_strip_of_a_bend_held_by_one_panel_stays_flat_with_it_as_a_tab() {
+    let f = Flanged::new();
+    let (w, (v0, _)) = (f.width, f.cut(Vec::new()));
+    let b = 0.6 * w;
+    // Its sides 0.3 wide from 1 inside the plate, its bottom 0.3 wide across the bend at b.
+    let u = f.polygon(&[(40.0, -1.0), (40.3, -1.0), (40.3, b), (60.0, b), (60.0, -1.0), (60.3, -1.0), (60.3, b + 0.3), (40.0, b + 0.3)]);
+    let (v, sheet) = f.cut(vec![u]);
+    let whole = 20.3 * (b + 1.3) - 19.7 * (b + 1.0);
+    let in_plate = 20.3 - 19.7;
+    let tab = 19.7 * b;
+    let want = v0 - in_plate * T - (whole - in_plate) * bent_per_area() - tab * bent_per_area() + tab * T;
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want} (bent, it would be {})", want - tab * (T - bent_per_area()));
+    assert!(sheet.bends.first().is_some_and(|l| l.tabs.len() == 1), "one tab");
+    let lines: Vec<f64> = sheet.bend_infos().iter().map(|b| b.length).collect();
+    assert!(lines.len() == 2 && (lines.iter().sum::<f64>() - (f.length - 20.3)).abs() < 1e-6, "{lines:?} of {}", f.length);
+}
+
+/// A hole across the plate's tangent line is cut from the plate and from the bend, each its
+/// share of the circle; a hole inside the bend bends with it.
+#[test]
+fn a_hole_across_a_tangent_line_is_cut_from_the_plate_and_the_bend() {
+    let f = Flanged::new();
+    let (w, (v0, _)) = (f.width, f.cut(Vec::new()));
+    // Its center 1 into the plate: the cap past the tangent line lies in the bend.
+    let (r, d): (f64, f64) = (2.5, 1.0);
+    let cap = r * r * (d / r).acos() - d * (r * r - d * d).sqrt();
+    let across = Region2 { outer: disc(f.at(70.0, -d), r), holes: Vec::new() };
+    let inside = Region2 { outer: disc(f.at(20.0, w / 2.0), 1.0), holes: Vec::new() };
+    let (v, _) = f.cut(vec![across, inside]);
+    let want = v0 - (PI * r * r - cap) * T - cap * bent_per_area() - PI * bent_per_area();
+    assert!((v - want).abs() < 1e-6 * want, "{v} vs {want}");
+}
+
+/// Cuts that part a bend from its panels are refused: one that takes the whole bend, cutting the
+/// sheet in two, and a ring that leaves an island of the bend joined to neither panel.
+#[test]
+fn cuts_that_part_a_bend_from_its_panels_are_refused() {
+    let f = Flanged::new();
+    let w = f.width;
+    let refused = |cuts: Vec<Region2>| f.cut_on(0, cuts).err().map(|e| e.to_string()).unwrap_or_default();
+    let e = refused(vec![f.rect([-5.0, f.length + 5.0], [-1.0, w + 1.0])]);
+    assert!(e.contains("takes bend 1 apart"), "{e}");
+    let c = f.at(50.0, w / 2.0);
+    let e = refused(vec![Region2 { outer: disc(c, 2.0), holes: vec![disc(c, 1.0).reversed()] }]);
+    assert!(e.contains("joined to neither"), "{e}");
 }

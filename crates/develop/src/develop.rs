@@ -51,7 +51,8 @@ pub struct Development {
     pub trims: Vec<Trim>,
     /// Bends and seams that close a loop, where the layout reached both panels another way.
     pub loops: Vec<Mismatch>,
-    /// What the corners' reliefs cut from the flat, from every piece they reach.
+    /// What is cut from the flat, from every piece it reaches: the corners' reliefs, then the
+    /// sheet's cuts.
     pub cuts: Vec<Region2>,
 }
 
@@ -77,14 +78,15 @@ pub enum EdgeFrom {
 }
 
 /// A bend's zone in the flat frame: its region, its edge on the `a` panel's side (`near`) and on
-/// the `b` panel's side (`far`), each from the end at the anchors' origin to the other. Its
-/// ends join `near[k]` to `far[k]`.
+/// the `b` panel's side (`far`), each from the end at the anchors' origin to the other, and the
+/// panels on those sides. Its ends join `near[k]` to `far[k]`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Zone {
     pub joint: usize,
     pub region: Region2,
     pub near: [Vec2; 2],
     pub far: [Vec2; 2],
+    pub panels: [usize; 2],
 }
 
 /// What a joint takes from a panel: the region to cut, and the line along which the panel's
@@ -203,6 +205,7 @@ pub fn develop(sheet: &Sheet, root: usize) -> Result<Development, DevelopError> 
         panels: Vec::with_capacity(sheet.panels.len()),
         joints: Vec::with_capacity(sheet.joints.len()),
         corners: sheet.corners.clone(),
+        cuts: sheet.cuts.clone(),
     };
     let mut origins = Vec::with_capacity(sheet.panels.len());
     for (i, (panel, map)) in sheet.panels.iter().zip(&maps).enumerate() {
@@ -326,6 +329,15 @@ pub fn develop(sheet: &Sheet, root: usize) -> Result<Development, DevelopError> 
         }
     }
     out.cuts = sheet.corners.iter().filter_map(|c| corner_cut(&out, c)).collect();
+    for cut in &sheet.cuts {
+        let place = out
+            .placements
+            .get(cut.panel)
+            .copied()
+            .flatten()
+            .ok_or(DevelopError::Panel(cut.panel, "a cut lies on a panel the flat has no place for"))?;
+        out.cuts.push(place.region(&cut.region));
+    }
     Ok(out)
 }
 
@@ -857,7 +869,13 @@ fn add_zone(
         segs.extend(end(&bend.relief.1, (near.1, far.1)));
         segs.push(Seg2::Line { a: f1, b: f0 });
         segs.extend(end(&bend.relief.0, (near.0, far.0)).iter().rev().map(Seg2::reversed));
-        out.zones.push(Zone { joint: j, region: Region2 { outer: Loop2 { segs }.ccw(), holes: Vec::new() }, near: [n0, n1], far: [f0, f1] });
+        out.zones.push(Zone {
+            joint: j,
+            region: Region2 { outer: Loop2 { segs }.ccw(), holes: Vec::new() },
+            near: [n0, n1],
+            far: [f0, f1],
+            panels: [joint.a.panel, joint.b.panel],
+        });
     }
     // A panel's band runs from its tangent line across its anchor, and a thickness past it so
     // that an edge lying on the anchor leaves no sliver.

@@ -227,10 +227,11 @@ impl Folded<'_> {
         self.dev.zones.get(zone).and_then(|z| self.fold.bends.get(z.joint)).and_then(Option::as_ref)
     }
 
-    /// Where a point of a piece goes, `depth` into the material.
+    /// Where a point of a piece goes, `depth` into the material: a tab's where its panel puts it,
+    /// carried on flat past the panel's edge (along the roll's surface, on a roll).
     fn at(&self, piece: Piece, p: Vec2, depth: f64) -> Result<Vec3> {
         let got = match piece {
-            Piece::Panel(i) => self.fold.panel_point(i, p, depth),
+            Piece::Panel(i) | Piece::Tab(_, i) => self.fold.panel_point(i, p, depth),
             Piece::Zone(z) => self.bent(z).map(|b| b.point(p, depth)),
         };
         got.filter(|q| q.is_finite()).ok_or_else(|| DocError::Invalid("a piece of the flat pattern has no place on the folded sheet".into()))
@@ -303,7 +304,7 @@ impl Folded<'_> {
                 let (axis_origin, axis) = b.axis();
                 Ok(SurfSpec::Revolved { a: b.at(l0, p0, depth), b: b.at(l1, p0, depth), axis_origin, axis, angle: p1 - p0 })
             }
-            Piece::Panel(i) => {
+            Piece::Panel(i) | Piece::Tab(_, i) => {
                 let Some((axis_origin, axis)) = self.fold.axis(i) else { return Ok(SurfSpec::Plane) };
                 let q: Vec<Vec2> = samples.iter().map(|p| self.fold.param(i, *p)).collect::<Option<_>>().ok_or_else(lost)?;
                 let ((u0, u1), (v0, v1)) = (range(&mut q.iter().map(|q| q.x)), range(&mut q.iter().map(|q| q.y)));

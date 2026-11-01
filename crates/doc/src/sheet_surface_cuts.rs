@@ -20,11 +20,12 @@
 
 use std::collections::BTreeSet;
 
-use solidcraft_develop::{Development, Rigid2, Rigid3, Surface, crossings, develop};
+use solidcraft_develop::{Development, Rigid2, Rigid3, Surface, develop};
 use solidcraft_geom::brep::query::Query;
-use solidcraft_geom::{Plane, Region2, Seg2};
+use solidcraft_geom::{Plane, Region2};
 use solidcraft_kernel::{Body, BoolOp, FaceSurface, face_surface, planar_regions_boolean};
 
+use crate::sheet_surface::holds_clear;
 use crate::sheet_surface_shadow::{Slab, around, shadow, walls as made, within};
 use crate::{DocError, Feature, FeatureKind, ModelState, Result, SurfaceSheet};
 
@@ -212,15 +213,7 @@ struct Read {
 /// What is left of a panel's `region` named `name` without `through`: one piece. What goes
 /// through clear of the region's outline and holes is a hole of it as it is, its curves kept.
 fn left(region: &Region2, through: &[Region2], name: &str, tol: f64) -> std::result::Result<Region2, String> {
-    let loops = || std::iter::once(&region.outer).chain(&region.holes);
-    let clear = |t: &Region2| {
-        let p = t.outer.segs.first().map(Seg2::start);
-        t.holes.is_empty()
-            && p.is_some_and(|p| region.contains(p))
-            && region.holes.iter().all(|h| h.segs.first().is_none_or(|s| !t.outer.contains(s.start())))
-            && loops().all(|l| crossings(&t.outer.segs, &l.segs).is_empty())
-    };
-    if !through.is_empty() && through.iter().all(clear) {
+    if !through.is_empty() && through.iter().all(|t| holds_clear(region, t)) {
         let mut out = region.clone();
         out.holes.extend(through.iter().map(|t| t.outer.ccw().reversed()));
         return Ok(out);
