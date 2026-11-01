@@ -108,12 +108,40 @@ permission to write, the disk is full, the file is larger than 1 GB, or the shar
 within 30 seconds. A missing folder is never created, so nothing lands on this computer by mistake
 when a share is not mounted, and the file stays in your slicer folder either way.
 
+#### On an SFTP server
+
+When the share is not mounted here, the file can go over SFTP instead, to any computer that runs an
+SSH server. In the Network folder window choose **SFTP** as the type, and give the server as
+`user@host` (`user@host:2222` for another port), the folder there (a whole path, or one from the
+login folder such as `~/prints`) and, if you like, a private key file. You log in with your own SSH
+key: the keys of your ssh-agent when the key file is empty, or that file (Ed25519 or ECDSA, without
+a passphrase; add a key with a passphrase to ssh-agent with `ssh-add` instead). SolidCraft never
+asks for a password or keeps one.
+
+The server must be one you trust. A server listed in `~/.ssh/known_hosts` is trusted as it is.
+For any other, **Test** shows the fingerprint of its key (`SHA256:…`) and writes nothing: compare
+it with what the server shows (`ssh-keygen -lf` on its host key file, such as
+`/etc/ssh/ssh_host_ed25519_key.pub`), then press **Trust this key**. The fingerprint is kept with
+the network folder in your preferences. If the server later shows another key, nothing is sent and
+the status line says so: the server was set up again, or someone is in between. A server that
+`~/.ssh/known_hosts` lists with another key is never sent to; remove its line there first
+(`ssh-keygen -R host`).
+
+Sending works as for a folder: a readable name, a number rather than replacing a file, a hidden
+name until the file is complete, and `sftp://user@host/folder/name` in the status line. Each step
+gives up after 30 seconds without an answer, and the status line says what went wrong: the server
+can't be found or nothing answers, the key was refused, the folder is not there, there is no
+permission to write, or the server's disk is full.
+
 Hover a network folder in the list and press Delete to remove it, or change and remove them in
 **Preferences → General → Slicer**; the files already sent stay. The browser build has no network
-folders. Scripts and the control channel use `file.slicers.add_remote` (`name`, `folder`),
-`file.slicers.remove_remote` and `file.slicers.test` (`name` or `folder`); `file.slicers` lists the
-network folders first, with `remote: true`, and `file.send_to_slicer` or `file.save_mesh` take a
-network folder's name or id (`remote:<name>`) as their `slicer`. None of them opens a window.
+folders. Scripts and the control channel use `file.slicers.add_remote` (`name`, `folder`, and for
+SFTP `sftp`, `key` and `host_key`), `file.slicers.remove_remote` and `file.slicers.test` (`name`, or
+`folder` with the same SFTP keys; `confirm` trusts a fingerprint for that test only, and the answer's
+`host_key` says the server's key); `file.slicers` lists the network folders first, with
+`remote: true`, and `file.send_to_slicer` or `file.save_mesh` take a network folder's name or id
+(`remote:<name>`) as their `slicer`. None of them opens a window. An AI agent limited to some folders
+can send to an SFTP server you added but can't add one or test another.
 
 Files sent to a slicer go to a folder only you can
 read: `~/.cache/solidcraft/slicer` on Linux, `~/Library/Caches/SolidCraft/slicer` on macOS and
