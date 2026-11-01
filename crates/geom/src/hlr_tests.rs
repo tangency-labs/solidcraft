@@ -2191,11 +2191,11 @@ fn chords_only_near_each_other_still_meet_their_crossings() {
     let sag = 1000. * (1. - 0.1f64.cos());
     let out = Vec3::new(0.1f64.cos(), 0.1f64.sin(), 0.);
     let line = C3::Line { a: a + out, b: b + out };
-    let track = |curve: &C3, range: [f64; 2], sag: f64| {
+    fn track<'a>(view: &View, curve: &'a C3, range: [f64; 2], sag: f64) -> Track<'a> {
         let screen = |t: f64| view.screen(curve.at(t));
         Track {
             placement: 0,
-            curve: TrackCurve::Owned(curve.clone()),
+            curve,
             range,
             source: Source::Edge { edge: 0, tangent: false },
             acc: CurveAccuracy::Analytic,
@@ -2205,9 +2205,441 @@ fn chords_only_near_each_other_still_meet_their_crossings() {
             sags: vec![sag],
             splits: Vec::new(),
         }
-    };
-    let mut tracks = vec![track(&arc, [0., 0.2], sag), track(&line, [0., 1.], 0.)];
+    }
+    let mut tracks = vec![track(&view, &arc, [0., 0.2], sag), track(&view, &line, [0., 1.], 0.)];
     assert!(sag > 4.9 && ((a + out).dist(a) - 1.).abs() < 1e-12);
     assert_eq!(crossings(&mut tracks, &ctx).unwrap(), 2);
     assert!(tracks.iter().all(|t| t.splits.len() == 2), "{:?}", tracks.iter().map(|t| &t.splits).collect::<Vec<_>>());
+}
+
+/// Turned `a` radians about Z, standing at `t`.
+fn turned_about_z(body: usize, a: f64, t: [f64; 3]) -> Placement {
+    let (c, s) = (a.cos(), a.sin());
+    Placement { body, rotation: [Vec3::new(c, s, 0.), Vec3::new(-s, c, 0.), Vec3::new(0., 0., 1.)], translation: Vec3::new(t[0], t[1], t[2]) }
+}
+
+/// A mixed scene: boxes (two touching), cylinders, a sphere, a torus seen obliquely (body 3,
+/// a traced and sampled silhouette) and a left-out freeform patch over them, some placements
+/// sharing a body and a turn.
+fn mixed_scene(o: &Options) -> (Vec<Prepared>, Vec<Placement>) {
+    let defs = vec![
+        prepare(&cuboid([0.; 3], [8.; 3]), o).unwrap(),
+        prepare(&cylinder(4., 10.), o).unwrap(),
+        prepare(&sphere(4.), o).unwrap(),
+        prepare(&torus(5., 1.5), o).unwrap(),
+        prepare(&twisted_patch(), o).unwrap(),
+    ];
+    let mut scene = vec![identity(0, [0.; 3]), identity(0, [8., 0., 0.]), identity(3, [4., 4., 12.]), identity(4, [6., 2., 20.])];
+    for k in 0..12 {
+        let body = [1, 2, 0][k % 3];
+        // Every other placement repeats an earlier turn: those share their silhouettes.
+        scene.push(turned_about_z(body, 0.4 * (k / 2) as f64, [3. + 5. * (k % 4) as f64, -6. - 5. * (k / 4) as f64, (k % 3) as f64]));
+    }
+    (defs, scene)
+}
+
+/// Timing (`cargo test --release -p solidcraft-geom --lib hlr_timing -- --ignored --nocapture`).
+/// Each scene is drawn on one thread, two workers and one worker per core, in a rotated order
+/// over three rounds; the first round's drawings must not depend on the thread count (compared
+/// outside the timed part). Scenes: 100 placements (`SOLIDCRAFT_BENCH_HLR=N` for N) of four
+/// bodies each turned differently; the same grid at one turn sharing four definitions, against
+/// one definition prepared per placement; and sixteen thin bars seen from above, crossing 8x8.
+/// The first of the four phases is grouping, silhouette tracing, tracks and screen sampling.
+#[test]
+#[ignore]
+fn hlr_timing() {
+    let n = std::env::var("SOLIDCRAFT_BENCH_HLR").ok().and_then(|s| s.parse().ok()).unwrap_or(100);
+    let o = Options::default();
+    let bodies = [cuboid([0.; 3], [8.; 3]), cylinder(4., 10.), sphere(4.), torus(5., 1.5)];
+    let started = std::time::Instant::now();
+    let shared: Vec<Prepared> = bodies.iter().map(|b| prepare(b, &o).unwrap()).collect();
+    eprintln!("prepare {} bodies: {:.3} s", shared.len(), started.elapsed().as_secs_f64());
+    let started = std::time::Instant::now();
+    let own: Vec<Prepared> = (0..n).map(|k| prepare(&bodies[k % 4], &o).unwrap()).collect();
+    eprintln!("prepare {n} definitions: {:.3} s", started.elapsed().as_secs_f64());
+    let at = |k: usize| [14. * (k % 10) as f64, 14. * (k / 10) as f64, 0.];
+    let turned: Vec<Placement> = (0..n).map(|k| turned_about_z(k % 4, 0.07 * k as f64, at(k))).collect();
+    let alike: Vec<Placement> = (0..n).map(|k| turned_about_z(k % 4, 0.3, at(k))).collect();
+    let unshared: Vec<Placement> = (0..n).map(|k| turned_about_z(k, 0.3, at(k))).collect();
+    let bar = vec![prepare(&cuboid([-18., -0.5, 0.], [18., 0.5, 1.]), &o).unwrap()];
+    let half = std::f64::consts::FRAC_PI_2;
+    let bars: Vec<Placement> = (0..8)
+        .map(|k| identity(0, [0., -14. + 4. * k as f64, 0.]))
+        .chain((0..8).map(|k| turned_about_z(0, half, [-14. + 4. * k as f64, 0., 2.])))
+        .collect();
+    let iso = View::new(Vec3::new(-1., -1., -1.), Vec3::new(0., 0., 1.)).unwrap();
+    let top = View::new(Vec3::new(0., 0., -1.), Vec3::new(0., 1., 0.)).unwrap();
+    let scenes: [(&str, &[Prepared], &[Placement], &View); 4] = [
+        ("turned", &shared, &turned, &iso),
+        ("alike, shared", &shared, &alike, &iso),
+        ("alike, unshared", &own, &unshared, &iso),
+        ("bars", &bar, &bars, &top),
+    ];
+    for (name, defs, scene, view) in scenes {
+        let mut drawn = Vec::new();
+        for round in 0..3 {
+            for i in 0..3 {
+                let threads = [1, 2, 0][(round + i) % 3];
+                let started = std::time::Instant::now();
+                let d = hidden_lines(defs, scene, view, &Options { threads, ..o }, &never).unwrap();
+                let seconds = started.elapsed().as_secs_f64();
+                let s = &d.stats;
+                eprintln!("{name}, {} placements, threads {threads}: {seconds:.3} s, phases {:.0?} ms, {} rays", scene.len(), s.phase_ms, s.rays);
+                if round == 0 {
+                    drawn.push(fingerprint(d));
+                }
+            }
+        }
+        assert!(drawn.windows(2).all(|w| w[0] == w[1]), "{name}: the thread count changed the drawing");
+    }
+}
+
+#[test]
+fn permuting_or_removing_placements_moves_only_their_lines() {
+    // One prepared box at three positions far apart on screen, so none hides another: every
+    // line names its placement by its current index, whatever the order or count.
+    let def = prepare(&cuboid([0.; 3], [1.; 3]), &Options::default()).unwrap();
+    let view = View::new(Vec3::new(-1., -1., -1.), Vec3::new(0., 0., 1.)).unwrap();
+    let at = [[0., 0., 0.], [6., -6., 0.], [-6., 6., 0.]];
+    let draw = |order: &[usize]| {
+        let scene: Vec<Placement> = order.iter().map(|&i| identity(0, at[i])).collect();
+        hidden_lines(std::slice::from_ref(&def), &scene, &view, &Options::default(), &never).unwrap()
+    };
+    // Each line keyed by the position it was placed at: bit for bit, or with its pieces' ends
+    // rounded to 1e-9 mm (the view-local frame follows the scene, so a smaller scene rounds
+    // its coordinates differently in the last bits).
+    let lines = |order: &[usize], exact: bool| {
+        let r = |v: f64| (v * 1e9).round() / 1e9 + 0.;
+        let mut keyed: Vec<(usize, String)> = draw(order)
+            .lines
+            .iter()
+            .map(|l| {
+                let pieces = if exact {
+                    format!("{:?}", l.pieces)
+                } else {
+                    let rounded: Vec<_> = l
+                        .pieces
+                        .iter()
+                        .map(|p| {
+                            let ends: Vec<_> = p
+                                .geometry
+                                .iter()
+                                .map(|g| match g {
+                                    Seg2::Line { a, b } => [r(a.x), r(a.y), r(b.x), r(b.y)],
+                                    _ => [f64::NAN; 4],
+                                })
+                                .collect();
+                            format!("{:?} {:?} {} {:?} {ends:?}", p.t.map(r), p.visibility, p.covered, p.accuracy)
+                        })
+                        .collect();
+                    format!("{rounded:?}")
+                };
+                (order[l.placement], format!("{:?} {pieces}", l.source))
+            })
+            .collect();
+        keyed.sort();
+        keyed
+    };
+    let base = lines(&[0, 1, 2], true);
+    assert_eq!(base.iter().filter(|(p, _)| *p == 1).count(), 12, "{base:?}");
+    for order in [[2, 0, 1], [1, 2, 0]] {
+        assert_eq!(lines(&order, true), base, "{order:?}");
+    }
+    let without: Vec<_> = lines(&[0, 1, 2], false).into_iter().filter(|(p, _)| *p != 1).collect();
+    assert_eq!(lines(&[0, 2], false), without);
+    // Analytic and exact: each box draws the first one's lines moved by its own screen offset.
+    let d = draw(&[0, 1, 2]);
+    for (p, offset) in at.iter().enumerate().skip(1) {
+        let [dx, dy] = view.screen(Vec3::new(offset[0], offset[1], offset[2]));
+        for l in d.lines.iter().filter(|l| l.placement == p) {
+            let first = d.lines.iter().find(|f| f.placement == 0 && f.source == l.source).unwrap();
+            assert_eq!(l.pieces.len(), first.pieces.len(), "{:?}", l.source);
+            for (a, b) in l.pieces.iter().zip(&first.pieces) {
+                assert_eq!((a.visibility, a.accuracy), (b.visibility, b.accuracy));
+                assert!(matches!(a.accuracy, crate::section::CurveAccuracy::Analytic), "{:?}", a.accuracy);
+                for (g, h) in a.geometry.iter().zip(&b.geometry) {
+                    let (Seg2::Line { a: ga, b: gb }, Seg2::Line { a: ha, b: hb }) = (g, h) else { panic!("a box edge is a line: {g:?}") };
+                    for (u, v) in [(ga, ha), (gb, hb)] {
+                        assert!((u.x - v.x - dx).abs() < 1e-9 && (u.y - v.y - dy).abs() < 1e-9, "{u:?} vs {v:?} + ({dx}, {dy})");
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Everything a drawing holds, phase timings left out.
+fn fingerprint(mut d: Drawing) -> String {
+    d.stats.phase_ms = [0.; 4];
+    format!("{d:?}")
+}
+
+#[test]
+fn serial_and_parallel_work_draw_the_same_bits() {
+    let view = View::new(Vec3::new(-1., -0.8, -0.6), Vec3::new(0., 0., 1.)).unwrap();
+    // Freeform faces handled and tangent edges left out change every phase's work; once more
+    // than one thread is enough to compare there.
+    let freeform = Options { freeform: true, tangent_edges: false, ..Options::default() };
+    for (base, counts) in [(Options::default(), &[2, 3, 8, 0][..]), (freeform, &[4][..])] {
+        let (defs, scene) = mixed_scene(&base);
+        let run = |threads: usize| hidden_lines(&defs, &scene, &view, &Options { threads, ..base }, &never).unwrap();
+        let serial = run(1);
+        assert!(serial.stats.crossings > 0 && serial.stats.pieces > serial.stats.tracks, "{:?}", serial.stats);
+        assert!(base.freeform || serial.stats.uncertain_pieces > 0, "the patch casts its shadow: {:?}", serial.stats);
+        let serial = fingerprint(serial);
+        for &threads in counts {
+            assert!(fingerprint(run(threads)) == serial, "{threads} threads differ from one");
+        }
+    }
+}
+
+#[test]
+fn placements_sharing_a_body_and_turn_draw_as_unshared_ones() {
+    // The second placement shares the first one's silhouettes; with its own copy of the body
+    // it traces them again. The drawings are the same.
+    let o = Options::default();
+    let view = View::new(Vec3::new(-1., -0.8, -0.6), Vec3::new(0., 0., 1.)).unwrap();
+    let scene = [turned_about_z(0, 0.3, [0.; 3]), turned_about_z(0, 0.3, [9., 3., 1.])];
+    let shared = hidden_lines(&[prepare(&torus(5., 1.5), &o).unwrap()], &scene, &view, &o, &never).unwrap();
+    let defs = [prepare(&torus(5., 1.5), &o).unwrap(), prepare(&torus(5., 1.5), &o).unwrap()];
+    let own = hidden_lines(&defs, &[scene[0], Placement { body: 1, ..scene[1] }], &view, &o, &never).unwrap();
+    assert!(shared.stats.silhouettes > 0);
+    assert!(fingerprint(shared) == fingerprint(own));
+}
+
+#[test]
+fn budgets_hold_for_the_whole_call_on_any_number_of_threads() {
+    let view = View::new(Vec3::new(-1., -0.8, -0.6), Vec3::new(0., 0., 1.)).unwrap();
+    let (defs, mut scene) = mixed_scene(&Options::default());
+    // The torus's tracing is slow and adds nothing here.
+    scene.retain(|p| p.body != 3);
+    let all = hidden_lines(&defs, &scene, &view, &Options { threads: 1, ..Options::default() }, &never).unwrap();
+    let (rays, tracks) = (all.stats.rays, all.stats.tracks);
+    for threads in [1, 4] {
+        let o = Options { threads, ..Options::default() };
+        let run = |o: Options| hidden_lines(&defs, &scene, &view, &o, &never);
+        assert_eq!(run(Options { max_rays: rays, ..o }).map(|d| d.stats.rays).ok(), Some(rays), "{threads} threads");
+        assert!(matches!(run(Options { max_rays: rays - 1, ..o }), Err(HlrError::Budget("ray"))), "{threads} threads");
+        assert!(run(Options { max_tracks: tracks, ..o }).is_ok(), "{threads} threads");
+        assert!(matches!(run(Options { max_tracks: tracks - 1, ..o }), Err(HlrError::Budget("curve"))), "{threads} threads");
+    }
+}
+
+#[test]
+fn workers_poll_cancellation() {
+    // Cancelled only when asked from another thread than the caller's: every parallel item
+    // runs on a worker, which asks before it starts.
+    let caller = std::thread::current().id();
+    let elsewhere = move || std::thread::current().id() != caller;
+    let view = View::new(Vec3::new(-1., -0.8, -0.6), Vec3::new(0., 0., 1.)).unwrap();
+    let (defs, mut scene) = mixed_scene(&Options::default());
+    scene.retain(|p| p.body != 3);
+    let run =
+        |threads: usize, cancel: &(dyn Fn() -> bool + Sync)| hidden_lines(&defs, &scene, &view, &Options { threads, ..Options::default() }, cancel);
+    assert!(run(1, &elsewhere).is_ok());
+    assert!(matches!(run(4, &elsewhere), Err(HlrError::Cancelled)));
+    // Cancelled part way through, wherever it is noticed, the call ends cancelled.
+    for after in [1, 10, 40] {
+        let polls = AtomicUsize::new(0);
+        let late = || polls.fetch_add(1, Ordering::Relaxed) >= after;
+        assert!(matches!(run(4, &late), Err(HlrError::Cancelled)), "after {after} polls");
+    }
+}
+
+#[test]
+fn a_failing_or_panicking_worker_stops_the_work_without_escaping() {
+    let view = View::new(Vec3::new(0., 0., -1.), Vec3::new(0., 1., 0.)).unwrap();
+    let ctx = || context(&[], &[], &view, &Options { threads: 4, ..Options::default() }, &never).unwrap();
+    let items: Vec<usize> = (0..200).collect();
+    assert_eq!(ctx().map(&items, 1, |i| Ok(i * 3)).unwrap(), items.iter().map(|i| i * 3).collect::<Vec<_>>());
+    assert!(matches!(ctx().map(&items, 1, |i| if *i == 50 { Err(HlrError::Budget("test")) } else { Ok(*i) }), Err(HlrError::Budget("test"))));
+    let out = ctx().map(&items, 1, |i| {
+        assert_ne!(*i, 37, "a panicking item is the call's error");
+        Ok(*i)
+    });
+    assert!(matches!(out, Err(HlrError::Internal(_))), "{out:?}");
+}
+
+#[test]
+fn a_panicking_worker_stops_the_other_workers() {
+    // The worker that takes item 1 waits until the one that panicked on item 0 has exited
+    // (its thread-local is dropped last), so by then the panic is known: no further item runs.
+    struct OnExit(Option<std::sync::mpsc::Sender<()>>);
+    impl Drop for OnExit {
+        fn drop(&mut self) {
+            if let Some(tx) = self.0.take() {
+                let _ = tx.send(());
+            }
+        }
+    }
+    thread_local!(static EXIT: std::cell::RefCell<OnExit> = const { std::cell::RefCell::new(OnExit(None)) });
+    let (tx, rx) = std::sync::mpsc::channel();
+    let rx = std::sync::Mutex::new(rx);
+    let view = View::new(Vec3::new(0., 0., -1.), Vec3::new(0., 1., 0.)).unwrap();
+    let ctx = context(&[], &[], &view, &Options { threads: 2, ..Options::default() }, &never).unwrap();
+    let ran = AtomicUsize::new(0);
+    let items: Vec<usize> = (0..200).collect();
+    let out = ctx.map(&items, 1, |i| {
+        ran.fetch_add(1, Ordering::Relaxed);
+        if *i == 0 {
+            EXIT.with(|exit| exit.borrow_mut().0 = Some(tx.clone()));
+            panic!("item 0 panics");
+        }
+        if *i == 1 {
+            let _ = rx.lock().map(|rx| rx.recv());
+        }
+        Ok(*i)
+    });
+    assert!(matches!(out, Err(HlrError::Internal(_))), "{out:?}");
+    // Item 1 runs only if the other worker took it before the panic; without the stop, all 200 would.
+    let ran = ran.load(Ordering::Relaxed);
+    assert!(ran <= 2, "{ran} items ran");
+}
+
+#[test]
+fn scenes_and_trims_beyond_the_shared_limits_are_refused() {
+    let def = prepare(&cuboid([0.; 3], [1.; 3]), &Options::default()).unwrap();
+    let view = View::new(Vec3::new(-1., -1., -1.), Vec3::new(0., 0., 1.)).unwrap();
+    let crowd = vec![identity(0, [0.; 3]); MAX_ITEMS + 1];
+    assert!(matches!(hidden_lines(&[def], &crowd, &view, &Options::default(), &never), Err(HlrError::Budget("placement"))));
+    for trim_samples in [0, MAX_TRIM_SAMPLES + 1] {
+        assert!(matches!(prepare(&cuboid([0.; 3], [1.; 3]), &Options { trim_samples, ..Options::default() }), Err(HlrError::Invalid(_))));
+    }
+    assert_eq!((MAX_ITEMS, Options::default().max_tracks), (crate::section::MAX_ITEMS, crate::section::MAX_ITEMS));
+}
+
+/// A disc bounded by one closed cubic spline through `n` control points on a wavy circle of
+/// radius `r`: `n - 3` knot spans, never taken for a circle.
+fn wavy_disc(r: f64, n: usize) -> Brep {
+    let tau = std::f64::consts::TAU;
+    let points: Vec<[f64; 3]> = (0..n)
+        .map(|i| {
+            let a = tau * (i % (n - 1)) as f64 / (n - 1) as f64;
+            let rho = r * (1. + 0.01 * (7. * a).sin());
+            [rho * a.cos(), rho * a.sin(), 0.]
+        })
+        .collect();
+    let spans = n - 3;
+    let knots: Vec<f64> = (0..n + 4).map(|i| (i.saturating_sub(3).min(spans)) as f64 / spans as f64).collect();
+    Brep {
+        version: crate::brep::VERSION,
+        shells: vec![Shell {
+            vertices: vec![points[0]],
+            edges: vec![Edge { vertices: [0, 0], curve: Curve::Spline { knots, points } }],
+            faces: vec![Face {
+                loops: vec![vec![uses(0, true)]],
+                surface: Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] },
+                forward: true,
+            }],
+        }],
+    }
+}
+
+/// The track of a placement's first edge, unsampled.
+fn first_edge_track(def: &Prepared) -> Track<'_> {
+    let e = &def.edges[0];
+    Track {
+        placement: 0,
+        curve: &e.curve,
+        range: e.curve.domain(),
+        source: Source::Edge { edge: 0, tangent: false },
+        acc: e.acc,
+        own: e.faces.clone(),
+        own_eps: 1e-6,
+        samples: Vec::new(),
+        sags: Vec::new(),
+        splits: Vec::new(),
+    }
+}
+
+#[test]
+fn long_items_poll_cancellation_inside_them() {
+    let o = Options::default();
+    let view = View::new(Vec3::new(-1., -0.8, -0.6), Vec3::new(0., 0., 1.)).unwrap();
+    // Sampling one long spline is one item: it asks again at every refinement pass.
+    let defs = [prepare(&wavy_disc(50., 1000), &o).unwrap()];
+    let scene = [identity(0, [0.; 3])];
+    let track = first_edge_track(&defs[0]);
+    let polls = AtomicUsize::new(0);
+    let counting = || {
+        polls.fetch_add(1, Ordering::Relaxed);
+        false
+    };
+    let ctx = context(&defs, &scene, &view, &o, &counting).unwrap();
+    let (samples, _) = screen_samples(&track, &ctx).unwrap();
+    assert!(samples.len() > 1000 && polls.load(Ordering::Relaxed) >= 2, "{} samples, {polls:?} polls", samples.len());
+    let ctx = context(&defs, &scene, &view, &o, &|| true).unwrap();
+    assert!(matches!(screen_samples(&track, &ctx), Err(HlrError::Cancelled)));
+    // Tracing a body's silhouettes is one item: it asks again before each surface.
+    let (a, b) = (torus(5., 1.5), torus(9., 1.));
+    let two = prepare(&Brep { version: crate::brep::VERSION, shells: vec![a.shells[0].clone(), b.shells[0].clone()] }, &o).unwrap();
+    let ctx = context(&[], &[], &view, &o, &never).unwrap();
+    assert_eq!(body_silhouettes(&two, view.d, &o, &ctx).unwrap().len(), 2);
+    let polls = AtomicUsize::new(0);
+    let second = || polls.fetch_add(1, Ordering::Relaxed) >= 1;
+    let ctx = context(&[], &[], &view, &o, &second).unwrap();
+    assert!(matches!(body_silhouettes(&two, view.d, &o, &ctx), Err(HlrError::Cancelled)));
+    // One surface in two faces: it asks again before each face its curves are trimmed to, and
+    // a cancellation seen there drops the partial curves even if the callback changes its mind.
+    let halves = prepare(&torus(5., 1.5), &o).unwrap();
+    let polls = AtomicUsize::new(0);
+    let counting = || {
+        polls.fetch_add(1, Ordering::Relaxed);
+        false
+    };
+    let ctx = context(&[], &[], &view, &o, &counting).unwrap();
+    assert_eq!(body_silhouettes(&halves, view.d, &o, &ctx).unwrap().len(), 1);
+    assert!(polls.load(Ordering::Relaxed) >= 3, "{polls:?} polls");
+    let polls = AtomicUsize::new(0);
+    let once = || polls.fetch_add(1, Ordering::Relaxed) == 1;
+    let ctx = context(&[], &[], &view, &o, &once).unwrap();
+    assert!(matches!(body_silhouettes(&halves, view.d, &o, &ctx), Err(HlrError::Cancelled)));
+    // Many faces: forming the sets asks too, before any surface is traced.
+    let shells = (0..50).map(|k| cuboid([2. * k as f64, 0., 0.], [2. * k as f64 + 1., 1., 1.]).shells.remove(0)).collect();
+    let boxes = prepare(&Brep { version: crate::brep::VERSION, shells }, &o).unwrap();
+    let ctx = context(&[], &[], &view, &o, &|| true).unwrap();
+    assert!(matches!(body_silhouettes(&boxes, view.d, &o, &ctx), Err(HlrError::Cancelled)));
+    // One chord across the boxes of many left-out faces: it asks every 1024 boxes.
+    let defs = [prepare(&cuboid([0.; 3], [1.; 3]), &o).unwrap()];
+    let top = View::new(Vec3::new(0., 0., -1.), Vec3::new(0., 1., 0.)).unwrap();
+    let mut track = first_edge_track(&defs[0]);
+    let ctx = context(&defs, &scene, &top, &o, &never).unwrap();
+    (track.samples, track.sags) = screen_samples(&track, &ctx).unwrap();
+    // The prepared box stands at its centre: edge 0 runs from (-0.5, -0.5) to (0.5, -0.5).
+    assert_eq!(track.samples.len(), 2, "one chord");
+    let across =
+        (1..2000).map(|k| Shadow { lo: [k as f64 / 2000. - 0.5 - 1e-4, -1.], hi: [k as f64 / 2000. - 0.5 + 1e-4, 1.], near: -10. }).collect();
+    let shadows = ShadowIndex::new(across).unwrap();
+    assert_eq!(shadow_cuts(&track, &ctx, &shadows, &AtomicUsize::new(0)).unwrap().len(), 2 * 1999);
+    let ctx = context(&defs, &scene, &top, &o, &|| true).unwrap();
+    assert!(matches!(shadow_cuts(&track, &ctx, &shadows, &AtomicUsize::new(0)), Err(HlrError::Cancelled)));
+}
+
+#[test]
+fn spline_points_and_hulls_come_from_their_own_knot_spans() {
+    // Uniform knots, and repeated inner knots with an end span of their own.
+    let wavy = wavy_disc(50., 300);
+    let Curve::Spline { knots, points } = &wavy.shells[0].edges[0].curve else { panic!("a spline edge") };
+    let repeated = Curve::Spline {
+        knots: vec![0., 0., 0., 0., 0.2, 0.2, 0.5, 0.5, 0.5, 0.8, 1., 1., 1., 1.],
+        points: (0..10).map(|i| [i as f64, ((i * 7) % 5) as f64, (i % 3) as f64]).collect(),
+    };
+    for curve in [Curve::Spline { knots: knots.clone(), points: points.clone() }, repeated] {
+        let (c, _) = C3::new(&curve).unwrap();
+        let C3::Spline { degree, knots, pieces, .. } = &c else { panic!("a spline") };
+        let [t0, t1] = c.domain();
+        let ts = knots.iter().copied().chain((0..=997).map(|i| t0 + (t1 - t0) * i as f64 / 997.)).filter(|t| *t >= t0 && *t <= t1);
+        for t in ts {
+            // The point from the Bézier piece holding t, against de Boor's.
+            let (span, ctrl) = pieces.iter().find(|(s, _)| s[0] <= t && t <= s[1]).unwrap();
+            let h: Vec<crate::bspline::HPoint> = ctrl.iter().map(|q| crate::bspline::HPoint { x: q[0], y: q[1], z: q[2], w: q[3] }).collect();
+            let q = crate::bspline::bezier_point(&h, (t - span[0]) / (span[1] - span[0])).project().unwrap();
+            assert!(q.dist(c.at(t)) < 1e-9, "t = {t}: {q:?} against {:?}", c.at(t));
+        }
+        // A part's hull holds the control points of exactly the pieces it overlaps.
+        for (a, b) in [(t0, t1), (t0 + 0.3 * (t1 - t0), t0 + 0.31 * (t1 - t0)), (t0 + 0.5 * (t1 - t0), t1)] {
+            let overlapping = pieces.iter().filter(|(s, _)| s[0] < b && s[1] > a).count();
+            assert_eq!(c.hull([a, b]).map_or(0, |h| h.len()), overlapping * (degree + 1), "part {a}..{b}");
+        }
+    }
 }
