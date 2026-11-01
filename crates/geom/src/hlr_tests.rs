@@ -1,5 +1,357 @@
 use super::*;
-use crate::brep::{Brep, Curve, Edge, EdgeUse, Face, Shell, Surface};
+use crate::brep;
+
+// The fixtures below write a body as data: shells each with their own vertices, edges and faces,
+// curves and surfaces carrying their bounds, edges numbered as the fixture likes. `Brep::record`
+// makes the portable record of it, which `prepare` here hands to the real one.
+
+#[derive(Clone)]
+struct Brep {
+    version: u32,
+    shells: Vec<Shell>,
+}
+
+#[derive(Clone)]
+struct Shell {
+    vertices: Vec<[f64; 3]>,
+    edges: Vec<Edge>,
+    faces: Vec<Face>,
+}
+
+#[derive(Clone)]
+struct Edge {
+    vertices: [u32; 2],
+    curve: Curve,
+}
+
+#[derive(Clone)]
+struct Face {
+    loops: Vec<Vec<EdgeUse>>,
+    surface: Surface,
+    forward: bool,
+}
+
+#[derive(Clone, Copy)]
+struct EdgeUse {
+    edge: u32,
+    forward: bool,
+}
+
+#[derive(Clone)]
+enum Curve {
+    Line { start: [f64; 3], end: [f64; 3] },
+    CircleArc { frame: brep::Frame, radius: f64, angle: [f64; 2] },
+    Polyline { points: Vec<[f64; 3]> },
+    Spline { knots: Vec<f64>, points: Vec<[f64; 3]> },
+    RationalSpline { knots: Vec<f64>, homogeneous: Vec<[f64; 4]> },
+    SurfaceIntersection { surfaces: [Box<Surface>; 2], leader: Box<Curve>, tolerance: f64 },
+}
+
+#[derive(Clone)]
+enum Surface {
+    Plane {
+        origin: [f64; 3],
+        u_axis: [f64; 3],
+        v_axis: [f64; 3],
+    },
+    PlaneThrough {
+        origin: [f64; 3],
+        u_point: [f64; 3],
+        v_point: [f64; 3],
+    },
+    Cylinder {
+        frame: brep::Frame,
+        radius: f64,
+        angle: [f64; 2],
+        height: [f64; 2],
+    },
+    Cone {
+        frame: brep::Frame,
+        radius_at_origin: f64,
+        half_angle: f64,
+        angle: [f64; 2],
+        height: [f64; 2],
+    },
+    Sphere {
+        frame: brep::Frame,
+        radius: f64,
+        longitude: [f64; 2],
+        latitude: [f64; 2],
+    },
+    Torus {
+        frame: brep::Frame,
+        major_radius: f64,
+        minor_radius: f64,
+        longitude: [f64; 2],
+        meridian: [f64; 2],
+    },
+    Spline {
+        u_knots: Vec<f64>,
+        v_knots: Vec<f64>,
+        points: Vec<Vec<[f64; 3]>>,
+    },
+    RationalSpline {
+        u_knots: Vec<f64>,
+        v_knots: Vec<f64>,
+        homogeneous: Vec<Vec<[f64; 4]>>,
+    },
+    /// A revolution as far as `angle`, its profile where it stands.
+    Revolution {
+        profile: Box<Curve>,
+        origin: [f64; 3],
+        axis: [f64; 3],
+        angle: [f64; 2],
+    },
+    /// A whole revolution.
+    PlacedRevolution {
+        profile: Box<Curve>,
+        origin: [f64; 3],
+        axis: [f64; 3],
+        matrix: [[f64; 4]; 4],
+        forward: bool,
+    },
+}
+
+const IDENTITY: [[f64; 4]; 4] = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+
+fn range(natural: brep::Natural) -> [f64; 2] {
+    match natural {
+        brep::Natural::Range(a, b) => [a, b],
+        brep::Natural::Periodic => [0., std::f64::consts::TAU],
+    }
+}
+
+impl Curve {
+    /// What the curve is, unbounded.
+    fn label(&self) -> brep::Curve {
+        match self {
+            Curve::Line { start, end } => brep::Curve::Line { start: *start, end: *end },
+            Curve::CircleArc { frame, radius, .. } => brep::Curve::Circle { frame: frame.clone(), radius: *radius },
+            Curve::Polyline { points } => brep::Curve::Polyline { points: points.clone() },
+            Curve::Spline { knots, points } => brep::Curve::Spline { knots: knots.clone(), points: points.clone() },
+            Curve::RationalSpline { knots, homogeneous } => brep::Curve::RationalSpline { knots: knots.clone(), homogeneous: homogeneous.clone() },
+            Curve::SurfaceIntersection { surfaces, leader, tolerance } => brep::Curve::SurfaceIntersection {
+                surfaces: [Box::new(surfaces[0].label()), Box::new(surfaces[1].label())],
+                leader: Box::new(leader.label()),
+                tolerance: *tolerance,
+            },
+        }
+    }
+
+    /// The curve's parameter range, the whole of it for a profile (a line from `start` to `end`).
+    fn extent(&self) -> [f64; 2] {
+        match self {
+            Curve::Line { .. } => [0., 1.],
+            Curve::CircleArc { angle, .. } => *angle,
+            _ => range(self.label().natural()),
+        }
+    }
+
+    /// The label, its NURBS form and the interval the edge's parameter runs over.
+    fn parts(&self) -> (brep::Curve, Option<brep::Curve>, [f64; 2]) {
+        let label = self.label();
+        match self {
+            Curve::CircleArc { angle, .. } => {
+                let (form, interval) = brep::form::curve(&label, *angle).expect("a circle's form");
+                (label, Some(form), interval)
+            }
+            _ => (label, None, self.extent()),
+        }
+    }
+}
+
+impl Surface {
+    /// What the surface is, unbounded.
+    fn label(&self) -> brep::Surface {
+        match self {
+            Surface::Plane { origin, u_axis, v_axis } => brep::Surface::Plane { origin: *origin, u_axis: *u_axis, v_axis: *v_axis },
+            Surface::PlaneThrough { origin, u_point, v_point } => {
+                brep::Surface::PlaneThrough { origin: *origin, u_point: *u_point, v_point: *v_point }
+            }
+            Surface::Cylinder { frame, radius, .. } => brep::Surface::Cylinder { frame: frame.clone(), radius: *radius },
+            Surface::Cone { frame, radius_at_origin, half_angle, .. } => {
+                brep::Surface::Cone { frame: frame.clone(), radius_at_origin: *radius_at_origin, half_angle: *half_angle }
+            }
+            Surface::Sphere { frame, radius, .. } => brep::Surface::Sphere { frame: frame.clone(), radius: *radius },
+            Surface::Torus { frame, major_radius, minor_radius, .. } => {
+                brep::Surface::Torus { frame: frame.clone(), major_radius: *major_radius, minor_radius: *minor_radius, tube_start: 0. }
+            }
+            Surface::Spline { u_knots, v_knots, points } => {
+                brep::Surface::Spline { u_knots: u_knots.clone(), v_knots: v_knots.clone(), points: points.clone() }
+            }
+            Surface::RationalSpline { u_knots, v_knots, homogeneous } => {
+                brep::Surface::RationalSpline { u_knots: u_knots.clone(), v_knots: v_knots.clone(), homogeneous: homogeneous.clone() }
+            }
+            // A revolution from its profile, u the angle and v along the profile.
+            Surface::Revolution { profile, origin, axis, .. } => {
+                brep::Surface::PlacedRevolution { profile: Box::new(profile.label()), origin: *origin, axis: *axis, matrix: IDENTITY, forward: false }
+            }
+            Surface::PlacedRevolution { profile, origin, axis, matrix, forward } => brep::Surface::PlacedRevolution {
+                profile: Box::new(profile.label()),
+                origin: *origin,
+                axis: *axis,
+                matrix: *matrix,
+                forward: *forward,
+            },
+        }
+    }
+
+    /// The bounds it carries, on its label.
+    fn bounds(&self) -> [[f64; 2]; 2] {
+        let turn = [0., std::f64::consts::TAU];
+        match self {
+            Surface::Cylinder { angle, height, .. } | Surface::Cone { angle, height, .. } => [*angle, *height],
+            Surface::Sphere { longitude, latitude, .. } => [*longitude, *latitude],
+            Surface::Torus { longitude, meridian, .. } => [*longitude, *meridian],
+            Surface::Revolution { profile, angle, .. } => [*angle, profile.extent()],
+            Surface::PlacedRevolution { profile, forward: true, .. } => [profile.extent(), turn],
+            Surface::PlacedRevolution { profile, forward: false, .. } => [turn, profile.extent()],
+            Surface::Spline { .. } | Surface::RationalSpline { .. } => self.label().natural().map(range),
+            // Nothing reads a plane's domain; this is around anything a fixture draws on one.
+            Surface::Plane { .. } | Surface::PlaneThrough { .. } => [[-1e12, 1e12]; 2],
+        }
+    }
+
+    /// The label, its NURBS form and the face's domain.
+    fn parts(&self) -> (brep::Surface, Option<brep::Surface>, [[f64; 2]; 2]) {
+        let (label, bounds) = (self.label(), self.bounds());
+        match self {
+            Surface::Plane { .. } | Surface::PlaneThrough { .. } | Surface::Spline { .. } | Surface::RationalSpline { .. } => (label, None, bounds),
+            _ => {
+                let (form, domain) = brep::form::surface(&label, bounds).expect("a surface's form");
+                (label, Some(form), domain)
+            }
+        }
+    }
+}
+
+impl Brep {
+    /// The portable record of the fixture, and the fixture's number of each of its edges. Shells,
+    /// and faces within them, keep their order, so a face keeps its number; edges and vertices come
+    /// in canonical order, first appearance walking faces, loops and uses. Pcurves carry the edge's
+    /// interval, which `Brep::validate` checks; neither it nor hidden lines read their points, as
+    /// hidden lines trace trims from the edges in 3D, so these are not on the surface.
+    fn record(&self) -> (brep::Brep, Vec<usize>) {
+        let (mut points, mut edges, mut faces, mut spans) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        for s in &self.shells {
+            let (base_edge, base_vertex) = (edges.len() as u32, points.len() as u32);
+            spans.push((faces.len()..faces.len() + s.faces.len(), edges.len()..edges.len() + s.edges.len()));
+            points.extend_from_slice(&s.vertices);
+            edges.extend(s.edges.iter().map(|e| Edge { vertices: e.vertices.map(|v| v + base_vertex), curve: e.curve.clone() }));
+            faces.extend(s.faces.iter().cloned().map(|mut f| {
+                f.loops.iter_mut().flatten().for_each(|u| u.edge += base_edge);
+                f
+            }));
+        }
+        let mut order: Vec<Option<u32>> = vec![None; edges.len()];
+        let mut numbers: Vec<usize> = Vec::new();
+        let mut walked: Vec<Vec<brep::EdgeUseRef>> = vec![Vec::new(); edges.len()];
+        let mut visit = |e: usize, order: &mut Vec<Option<u32>>| {
+            if order[e].is_none() {
+                order[e] = Some(numbers.len() as u32);
+                numbers.push(e);
+            }
+        };
+        for (fi, f) in faces.iter().enumerate() {
+            for (li, l) in f.loops.iter().enumerate() {
+                for k in 0..l.len() {
+                    let position = if f.forward { k } else { l.len() - 1 - k };
+                    let u = l[position];
+                    visit(u.edge as usize, &mut order);
+                    let at = brep::EdgeUseRef { face: fi as u32, r#loop: li as u32, position: position as u32, upper: !u.forward };
+                    walked[u.edge as usize].push(at);
+                }
+            }
+        }
+        // Edges no face uses, shell by shell: its wires.
+        let wires: Vec<Vec<u32>> = spans
+            .iter()
+            .map(|(_, shell_edges)| {
+                shell_edges
+                    .clone()
+                    .filter(|e| walked[*e].is_empty())
+                    .map(|e| {
+                        visit(e, &mut order);
+                        order[e].expect("just numbered")
+                    })
+                    .collect()
+            })
+            .collect();
+        let number = |e: u32| order[e as usize].expect("every edge is numbered");
+        let mut vertex_order: Vec<Option<u32>> = vec![None; points.len()];
+        let mut vertices = Vec::new();
+        let mut edge_records = Vec::new();
+        for &e in &numbers {
+            let (label, nurbs, interval) = edges[e].curve.parts();
+            let ends = edges[e].vertices.map(|v| {
+                *vertex_order[v as usize].get_or_insert_with(|| {
+                    vertices.push(brep::Vertex { point: points[v as usize], tolerance: 1e-6 });
+                    vertices.len() as u32 - 1
+                })
+            });
+            edge_records.push(brep::Edge { curve: label, nurbs, interval, vertices: ends, tolerance: 1e-6, uses: walked[e].clone() });
+        }
+        let pcurve = |edge: u32| {
+            let [t0, t1] = edge_records[number(edge) as usize].interval;
+            brep::Curve2::Spline { knots: vec![t0, t0, t1, t1], points: vec![[0., 0.], [1., 0.]] }
+        };
+        let face_records = faces
+            .iter()
+            .map(|f| {
+                let (surface, nurbs, domain) = f.surface.parts();
+                let loops = f
+                    .loops
+                    .iter()
+                    .map(|l| brep::Loop::Edges {
+                        edges: l.iter().map(|u| brep::OrientedEdge { edge: number(u.edge), forward: u.forward, pcurve: pcurve(u.edge) }).collect(),
+                    })
+                    .collect();
+                brep::Face { surface, nurbs, domain, loops }
+            })
+            .collect();
+        let mut regions = vec![brep::Region { shells: (0..self.shells.len() as u32).collect(), void: false }];
+        let mut shells = Vec::new();
+        for (s, (shell_faces, _)) in spans.iter().enumerate() {
+            // A closed shell (each edge on its faces used twice among them) also bounds a region.
+            let used = |e: u32| faces[shell_faces.clone()].iter().flat_map(|f| f.loops.iter().flatten()).filter(|u| u.edge == e).count();
+            if faces[shell_faces.clone()].iter().flat_map(|f| f.loops.iter().flatten()).all(|u| used(u.edge) >= 2) {
+                regions.push(brep::Region { shells: vec![s as u32], void: false });
+            }
+            let oriented = shell_faces.clone().map(|f| brep::OrientedFace { face: f as u32, forward: faces[f].forward }).collect();
+            shells.push(brep::Shell::Faces { faces: oriented, wires: wires[s].clone() });
+        }
+        let record = brep::Brep { version: self.version, tolerance: 1e-6, regions, shells, faces: face_records, edges: edge_records, vertices };
+        (record, numbers)
+    }
+}
+
+/// The real `prepare_cancellable` on the fixture's record, its edges then back in the fixture's
+/// numbering and its arcs on the angles the fixture counted them from (the record's are within a
+/// turn of zero: `Edge::curve_interval`), which is what the assertions below speak of.
+fn prepare_cancellable(b: &Brep, opts: &Options, cancel: &dyn Fn() -> bool) -> Result<Prepared, HlrError> {
+    let (record, numbers) = b.record();
+    let mut def = super::prepare_cancellable(&record, opts, cancel)?;
+    let curves: Vec<&Curve> = b.shells.iter().flat_map(|s| s.edges.iter().map(|e| &e.curve)).collect();
+    let mut ordered: Vec<(usize, EdgeData)> = numbers.into_iter().zip(std::mem::take(&mut def.edges)).collect();
+    ordered.sort_by_key(|(n, _)| *n);
+    for (n, e) in &mut ordered {
+        if let (Curve::CircleArc { angle, .. }, C3::Arc { range, .. }) = (curves[*n], &mut e.curve) {
+            let turns = ((angle[0] - range[0]) / std::f64::consts::TAU).round() * std::f64::consts::TAU;
+            *range = [range[0] + turns, range[1] + turns];
+        }
+    }
+    def.edges = ordered.into_iter().map(|(_, e)| e).collect();
+    Ok(def)
+}
+
+fn prepare(b: &Brep, opts: &Options) -> Result<Prepared, HlrError> {
+    prepare_cancellable(b, opts, &|| false)
+}
+
+/// A surface's chart over the bounds it carries.
+fn chart(s: &Surface) -> S3 {
+    S3::bounded(&s.label(), s.bounds()).unwrap()
+}
 
 /// An axis-aligned box with line edges and plane faces.
 fn cuboid(lo: [f64; 3], hi: [f64; 3]) -> Brep {
@@ -95,7 +447,7 @@ fn a_torus_seen_along_its_axis_has_both_equator_silhouettes() {
     // A whole-meridian torus record: the outer equator sits where the closed profile's ends meet.
     let frame = crate::brep::Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] };
     let tau = std::f64::consts::TAU;
-    let s = surface::S3::new(&Surface::Torus { frame, major_radius: 20., minor_radius: 5., longitude: [0., tau], meridian: [0., tau] }).unwrap();
+    let s = chart(&Surface::Torus { frame, major_radius: 20., minor_radius: 5., longitude: [0., tau], meridian: [0., tau] });
     let mut radii: Vec<f64> = s
         .rev_silhouette(Vec3::new(0., 0., -1.))
         .iter()
@@ -167,9 +519,7 @@ fn a_torus_seen_nearly_along_its_axis_keeps_its_silhouettes() {
     let frame = crate::brep::Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] };
     let tau = std::f64::consts::TAU;
     let shift = std::f64::consts::PI / 720.;
-    let s =
-        surface::S3::new(&Surface::Torus { frame, major_radius: 1000., minor_radius: 500., longitude: [0., tau], meridian: [shift, shift + tau] })
-            .unwrap();
+    let s = chart(&Surface::Torus { frame, major_radius: 1000., minor_radius: 500., longitude: [0., tau], meridian: [shift, shift + tau] });
     let d = Vec3::new(1e-4, 0., -1.).normalized().unwrap();
     let curves = s.rev_silhouette(d);
     // Both the outer (radius about 1500) and the inner (about 500) silhouettes are there.
