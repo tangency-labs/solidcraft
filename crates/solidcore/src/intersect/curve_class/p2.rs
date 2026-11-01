@@ -306,10 +306,9 @@ impl<O: ClassObject> CurveClassification<O> {
                 || obj_class == PointClassType::Edge
                 || obj_class == PointClassType::Face
             {
-                let (b, e) = geometry.topology_entity(obj).ok_or(SolidError::unported(
-                    "SmBrep::IsLiveTopologyMember",
-                    "topology.brep_p1",
-                ))?;
+                let (b, e) = geometry.topology_entity(obj).ok_or_else(|| {
+                    SolidError::unported("SmBrep::IsLiveTopologyMember", "topology.brep_p1")
+                })?;
                 if !(std::ptr::eq(b, brep) && is_live_topology_member(brep, Some(e))) {
                     return Ok(true);
                 }

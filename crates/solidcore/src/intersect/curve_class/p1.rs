@@ -2069,17 +2069,19 @@ pub fn get_cci_geometry_in<'g, O: ClassObject, G: ClassGeometry<O>>(
     // When curve classification is being done as part of a boolean operation
     if let Some(ti) = classification.topology_intersector() {
         // look for edge->BooleanMate (GetOtherMate, else GetBrepMate)
-        out.emate = geometry.topology_intersector_mate(ti, edge).ok_or(
-            // UNPORTED(boolean.topology_intersector_p1): SmTopologyIntersector::GetOtherMate
-            // (an adapter that cannot reach the intersector behind its handle)
-            // Proof (unreachable): only if topology_intersector() is Some and the adapter
-            // returns no mate; the library ClassGeometry impls resolve it; 0 hits in the
-            // green difftest sweep.
-            SolidError::unported(
-                "SmTopologyIntersector::GetOtherMate",
-                "boolean.topology_intersector_p1",
-            ),
-        )?;
+        out.emate = geometry
+            .topology_intersector_mate(ti, edge)
+            .ok_or_else(|| {
+                // UNPORTED(boolean.topology_intersector_p1): SmTopologyIntersector::GetOtherMate
+                // (an adapter that cannot reach the intersector behind its handle)
+                // Proof (unreachable): only if topology_intersector() is Some and the adapter
+                // returns no mate; the library ClassGeometry impls resolve it; 0 hits in the
+                // green difftest sweep.
+                SolidError::unported(
+                    "SmTopologyIntersector::GetOtherMate",
+                    "boolean.topology_intersector_p1",
+                )
+            })?;
 
         // when pEdge has a boolean operation temporary mate
         if let Some(emate) = out.emate {

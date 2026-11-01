@@ -1163,17 +1163,19 @@ impl<O: ClassObject> CurveClassification<O> {
             // see if the edge has a boolean operation temporary mate
             if let Some(ti) = self.topology_intersector() {
                 let edge = handle(b, EntityRef::Edge(e))?;
-                let mate = geometry.topology_intersector_mate(ti, edge).ok_or(
-                    // UNPORTED(boolean.topology_intersector_p1): SmTopologyIntersector::GetOtherMate
-                    // (an adapter that cannot reach the intersector behind its handle)
-                    // Proof (unreachable): only if topology_intersector() is Some and the
-                    // adapter returns no mate; the library ClassGeometry impls resolve it;
-                    // 0 hits in the green difftest sweep.
-                    SolidError::unported(
-                        "SmTopologyIntersector::GetOtherMate",
-                        "boolean.topology_intersector_p1",
-                    ),
-                )?;
+                let mate = geometry
+                    .topology_intersector_mate(ti, edge)
+                    .ok_or_else(|| {
+                        // UNPORTED(boolean.topology_intersector_p1): SmTopologyIntersector::GetOtherMate
+                        // (an adapter that cannot reach the intersector behind its handle)
+                        // Proof (unreachable): only if topology_intersector() is Some and the
+                        // adapter returns no mate; the library ClassGeometry impls resolve it;
+                        // 0 hits in the green difftest sweep.
+                        SolidError::unported(
+                            "SmTopologyIntersector::GetOtherMate",
+                            "boolean.topology_intersector_p1",
+                        )
+                    })?;
                 if let Some(mate) = mate {
                     let (mb, me) = super::p7::edge_of(geometry, mate, "SmEdge::GetEdgeuses")?;
                     for eu in crate::topology::edge::edgeuses(mb, me, None, None)? {

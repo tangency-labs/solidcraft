@@ -2074,26 +2074,26 @@ pub fn classify_curve_surface_xsect_point_with(
     let mut surface_tol = EFF_ZERO_SQRT;
     if curve.owner().is_some_and(|o| o.type_code == EDGE_TYPE) {
         // pCurveOwner->GetTolerance(), as the caller resolves it
-        curve_tol = edge_tolerance.ok_or(
+        curve_tol = edge_tolerance.ok_or_else(|| {
             // UNPORTED(topology.edge): SmEdge::GetTolerance (a caller without the edge)
             // Proof (unreachable): the plain wrapper passes None, the library callers
             // (surface p9, p10) use classify_curve_surface_xsect_point_with with the
             // caller's edge tolerance; 0 hits in the green difftest sweep.
-            SolidError::unported("SmEdge::GetTolerance", "topology.edge"),
-        )?;
+            SolidError::unported("SmEdge::GetTolerance", "topology.edge")
+        })?;
     } else if !curve_line {
         curve_tol = curve_radius / 1000.0;
     }
     if surface.owner().is_some_and(|o| o.type_code == FACE_TYPE) {
         // pSurfaceOwner->GetTolerance(): the direct owner is the face, so the face the
         // surface reaches; its tolerance as cached by the B-rep
-        surface_tol = surface.owner_zone_tol_3d().ok_or(
+        surface_tol = surface.owner_zone_tol_3d().ok_or_else(|| {
             // UNPORTED(topology.face_p2): SmFace::GetTolerance (a bare face handle)
             // Proof (unreachable): a B-rep face's surface carries the face tolerance
             // (Brep::sync_face_surface_tolerance invariant, see Surface::face_zone_tol_3d);
             // 0 hits in the green difftest sweep.
-            SolidError::unported("SmFace::GetTolerance", "topology.face_p2"),
-        )?;
+            SolidError::unported("SmFace::GetTolerance", "topology.face_p2")
+        })?;
     } else if !surface_line {
         surface_tol = surface_radius / 1000.0;
     }

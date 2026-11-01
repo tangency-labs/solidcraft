@@ -1887,7 +1887,7 @@ fn connect_target<O: ClassObject>(
 ) -> Result<Option<EntityRef>> {
     let (tb, e) = geometry
         .topology_entity(target)
-        .ok_or(SolidError::unported(upstream, unit))?;
+        .ok_or_else(|| SolidError::unported(upstream, unit))?;
     Ok(std::ptr::eq(b, tb).then_some(e))
 }
 
