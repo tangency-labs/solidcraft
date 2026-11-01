@@ -57,6 +57,18 @@ impl Aabb2 {
     pub fn contains(&self, p: Vec2) -> bool {
         p.x >= self.min.x && p.y >= self.min.y && p.x <= self.max.x && p.y <= self.max.y
     }
+    /// Whether `p` lies clearly outside the box: past every side by a margin that covers
+    /// rounding, so no closed polyline with its corners in the box contains `p` by the even-odd
+    /// rule ([`crate::Ring::contains`]). False when unsure (an empty box, values too large for
+    /// the margin); true for a point that is not a number, which no polyline contains either.
+    pub fn clearly_excludes(&self, p: Vec2) -> bool {
+        let big = self.min.x.abs().max(self.min.y.abs()).max(self.max.x.abs()).max(self.max.y.abs());
+        if self.is_empty() || !(big < 1e150) {
+            return false;
+        }
+        let m = 1e-9 * (1.0 + big);
+        !(p.x >= self.min.x - m && p.x <= self.max.x + m && p.y >= self.min.y - m && p.y <= self.max.y + m)
+    }
     /// The box both hold: empty when they do not meet.
     pub fn intersection(&self, o: &Aabb2) -> Aabb2 {
         Aabb2 { min: Vec2::new(self.min.x.max(o.min.x), self.min.y.max(o.min.y)), max: Vec2::new(self.max.x.min(o.max.x), self.max.y.min(o.max.y)) }

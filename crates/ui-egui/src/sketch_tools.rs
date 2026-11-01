@@ -1359,12 +1359,51 @@ pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
     }
 }
 
-/// The cursor's Trim piece, keyed by design revision, sketch, curve and cursor: the viewport's
-/// hover and the preview both ask for it each frame, and it intersects the curve with every other.
-type TrimPieceKey = (u64, u64, String, [u64; 2]);
+type SolvedSketchRef = std::sync::Arc<solidcraft_engine::doc::SolvedSketch>;
+
+/// The shown state's solve of `sketch`, shared.
+fn solved_sketch(app: &SolveApp, sketch: u64) -> Option<SolvedSketchRef> {
+    app.session.world_state().sketches.iter().find(|s| s.feature == sketch).cloned()
+}
+
+/// Which sketch state a hover cache was made from: the design revision and the solve itself,
+/// held weakly so its place is not reused while the cache remembers it (a live drag swaps in a
+/// new solve without a new revision).
+struct SketchStateKey {
+    revision: u64,
+    solve: std::sync::Weak<solidcraft_engine::doc::SolvedSketch>,
+    curve: String,
+}
+
+impl SketchStateKey {
+    fn new(app: &SolveApp, solve: &SolvedSketchRef, curve: &str) -> SketchStateKey {
+        SketchStateKey { revision: app.session.revision, solve: std::sync::Arc::downgrade(solve), curve: curve.to_string() }
+    }
+    fn matches(&self, app: &SolveApp, solve: &SolvedSketchRef, curve: &str) -> bool {
+        self.revision == app.session.revision && std::ptr::eq(self.solve.as_ptr(), std::sync::Arc::as_ptr(solve)) && self.curve == curve
+    }
+}
+
+/// Trim's hover over one curve: the cuts on it, made once per sketch state (they intersect the
+/// curve with every other one), and the last piece the cursor chose (the viewport's hover and the
+/// preview both ask for it each frame).
+struct TrimHoverCache {
+    key: SketchStateKey,
+    hover: Option<solidcraft_engine::cmd::TrimHover>,
+    piece: Option<([u64; 2], Option<Vec<Vec2>>)>,
+}
+
+/// Extend's preview of one curve, per sketch state and growing end (it depends on the cursor
+/// only through the end, [`solidcraft_engine::cmd::extend_end_at`]).
+struct ExtendPreviewCache {
+    key: SketchStateKey,
+    at_b: bool,
+    piece: Option<Vec<Vec2>>,
+}
 
 thread_local! {
-    static TRIM_PIECE: std::cell::RefCell<Option<(TrimPieceKey, Option<Vec<Vec2>>)>> = const { std::cell::RefCell::new(None) };
+    static TRIM_HOVER: RefCell<Option<TrimHoverCache>> = const { RefCell::new(None) };
+    static EXTEND_PREVIEW: RefCell<Option<ExtendPreviewCache>> = const { RefCell::new(None) };
 }
 
 /// With Trim active and the cursor over curve `id` of `sketch` (the active sketch): the piece a
@@ -1376,14 +1415,27 @@ pub(crate) fn trim_hover_piece(app: &SolveApp, sketch: u64, id: &str) -> Option<
     if active_sketch(app) != Some(sketch) {
         return None;
     }
-    let key = (app.session.revision, sketch, id.to_string(), [at.x.to_bits(), at.y.to_bits()]);
-    if let Some(piece) = TRIM_PIECE.with(|c| c.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, p)| p.clone())) {
-        return piece;
-    }
-    let st = app.session.world_state();
-    let piece = solidcraft_engine::cmd::trim_piece(&st.sketch(sketch)?.sketch, id, *at);
-    TRIM_PIECE.with(|c| *c.borrow_mut() = Some((key, piece.clone())));
-    piece
+    let solve = solved_sketch(app, sketch)?;
+    let cursor = [at.x.to_bits(), at.y.to_bits()];
+    TRIM_HOVER.with(|c| {
+        let mut c = c.borrow_mut();
+        let cache = match c.take() {
+            Some(cache) if cache.key.matches(app, &solve, id) => c.insert(cache),
+            _ => c.insert(TrimHoverCache {
+                key: SketchStateKey::new(app, &solve, id),
+                hover: solidcraft_engine::cmd::trim_hover(&solve.sketch, id),
+                piece: None,
+            }),
+        };
+        if let Some((k, piece)) = &cache.piece
+            && *k == cursor
+        {
+            return piece.clone();
+        }
+        let piece = cache.hover.as_ref().and_then(|h| h.piece(*at));
+        cache.piece = Some((cursor, piece.clone()));
+        piece
+    })
 }
 
 /// Extend preview: the geometry that would be added, based on the hover position over curve `id`
@@ -1396,19 +1448,37 @@ fn extend_preview_piece(app: &SolveApp, sketch: u64, id: &str) -> Option<Vec<Vec
     if active_sketch(app) != Some(sketch) {
         return None;
     }
-    let st = app.session.world_state();
-    let sk = st.sketch(sketch)?;
-    let hover_pos = hover.0;
-    let ci = sk.sketch.curve_index(id)?;
-    let kind = sk.sketch.curves.get(ci)?.kind.clone();
+    let solve = solved_sketch(app, sketch)?;
+    let sk = &solve.sketch;
+    let ci = sk.curve_index(id)?;
+    // An infinite line in the way is cut short about the cursor, so the preview then follows it.
+    let at_b = solidcraft_engine::cmd::extend_end_at(sk, ci, hover.0).filter(|_| !sk.curves.iter().any(|c| c.infinite));
+    let Some(at_b) = at_b else { return extend_preview_uncached(sk, ci, hover.0) };
+    EXTEND_PREVIEW.with(|c| {
+        let mut c = c.borrow_mut();
+        if let Some(cache) = c.as_ref()
+            && cache.at_b == at_b
+            && cache.key.matches(app, &solve, id)
+        {
+            return cache.piece.clone();
+        }
+        let piece = extend_preview_uncached(sk, ci, hover.0);
+        *c = Some(ExtendPreviewCache { key: SketchStateKey::new(app, &solve, id), at_b, piece: piece.clone() });
+        piece
+    })
+}
+
+/// [`extend_preview_piece`] worked out afresh.
+fn extend_preview_uncached(sk: &solidcraft_engine::sketch::Sketch, ci: usize, hover_pos: Vec2) -> Option<Vec<Vec2>> {
+    let kind = sk.curves.get(ci)?.kind.clone();
     // Arcs extend along their circle either way round, up to the first geometry in the way.
     if let solidcraft_engine::sketch::CurveKind::Arc { .. } = kind {
-        return solidcraft_engine::cmd::extend_arc_preview(&sk.sketch, ci, hover_pos);
+        return solidcraft_engine::cmd::extend_arc_preview(sk, ci, hover_pos);
     }
     let solidcraft_engine::sketch::CurveKind::Line { a, b } = kind else { return None };
-    let at_b = hover_pos.dist(sk.sketch.point(b)?) <= hover_pos.dist(sk.sketch.point(a)?);
-    let end = sk.sketch.point(if at_b { b } else { a })?;
-    let hit = solidcraft_engine::cmd::extend_preview(&sk.sketch, ci, hover_pos)?;
+    let at_b = hover_pos.dist(sk.point(b)?) <= hover_pos.dist(sk.point(a)?);
+    let end = sk.point(if at_b { b } else { a })?;
+    let hit = solidcraft_engine::cmd::extend_preview(sk, ci, hover_pos)?;
     Some(vec![end, hit])
 }
 

@@ -8,10 +8,10 @@
 //! rectangle with a hole, and the disc.
 
 use std::f64::consts::TAU;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
-use solidcraft_geom::{Loop2, Region2, Ring, Seg2, Vec2};
+use solidcraft_geom::{Aabb2, Loop2, Region2, RegionOutline, Ring, Seg2, Vec2};
 
 use crate::model::{CurveKind, Sketch};
 use crate::shape::{Shape, intersections_within};
@@ -36,6 +36,12 @@ pub struct Profile {
     complete_outer: Option<Vec<String>>,
     #[serde(skip)]
     complete_holes: Option<Vec<Vec<String>>>,
+    // [`Profile::contains`]'s outer box and sampled loops, made on first use from `region` (a
+    // profile is made once and not edited): hovering asks every profile on each mouse move.
+    #[serde(skip)]
+    hull: OnceLock<Option<Aabb2>>,
+    #[serde(skip)]
+    outline: OnceLock<RegionOutline>,
 }
 
 impl Profile {
@@ -43,6 +49,16 @@ impl Profile {
     /// missing spans and unknown sampled geometry cannot acquire this persistent identity.
     pub fn whole_curve_boundaries(&self) -> Option<(Vec<String>, Vec<Vec<String>>)> {
         Some((self.complete_outer.clone()?, self.complete_holes.clone()?))
+    }
+
+    /// Whether `p` is in the profile: what `region.contains(p)` answers, from the loops sampled
+    /// once. A point clearly outside the outer loop's box ([`Loop2::hull_box`]) is answered
+    /// without sampling anything, so the profiles away from the cursor cost a box test.
+    pub fn contains(&self, p: Vec2) -> bool {
+        if self.hull.get_or_init(|| self.region.outer.hull_box()).is_some_and(|b| b.clearly_excludes(p)) {
+            return false;
+        }
+        self.outline.get_or_init(|| self.region.outline()).contains(p)
     }
 
     /// All curve ids bounding the profile.
@@ -1646,7 +1662,17 @@ fn assemble(sk: &Sketch, islands: &[Arc<Island>]) -> Vec<Profile> {
             if let Some(holes) = &mut complete_holes {
                 holes.sort();
             }
-            Profile { region, outer_curves: (*ids).clone(), hole_curves, area, centroid, complete_outer: (*complete_outer).clone(), complete_holes }
+            Profile {
+                region,
+                outer_curves: (*ids).clone(),
+                hole_curves,
+                area,
+                centroid,
+                complete_outer: (*complete_outer).clone(),
+                complete_holes,
+                hull: OnceLock::new(),
+                outline: OnceLock::new(),
+            }
         })
         .collect();
     let index: std::collections::HashMap<&str, usize> = sk.curves.iter().enumerate().map(|(i, c)| (c.id.as_str(), i)).collect();
@@ -1706,7 +1732,7 @@ pub fn profile_by_curves(profiles: &[Profile], ids: &[String]) -> Result<usize, 
 
 /// The innermost profile containing a sketch point, by index into `profiles`.
 pub fn profile_at_point(profiles: &[Profile], p: Vec2) -> Option<usize> {
-    profiles.iter().enumerate().filter(|(_, q)| q.region.contains(p)).min_by(|a, b| a.1.area.total_cmp(&b.1.area)).map(|(i, _)| i)
+    profiles.iter().enumerate().filter(|(_, q)| q.contains(p)).min_by(|a, b| a.1.area.total_cmp(&b.1.area)).map(|(i, _)| i)
 }
 
 /// The distinct curve ids of a loop, in loop order (a curve cut into pieces is listed once).
@@ -2117,5 +2143,45 @@ mod tests {
         assert_eq!(before.len(), after.len());
         assert_eq!(before.iter().zip(&after).filter(|(a, b)| a != b).count(), 1);
         assert_same(&find_profiles(&sk), &search(&sk, MAX_EDGES, false, false).profiles);
+    }
+
+    /// The profile under a point, from each profile's box and loops sampled once, is the one
+    /// testing every region afresh found (the code before), over a sketch of text, circles in a
+    /// plate, lines through them and arcs; asked twice, so the second answers from the samples.
+    #[test]
+    fn profile_at_point_from_the_sampled_loops_matches_the_regions() {
+        let mut sk = Sketch::new();
+        rectangle(&mut sk, -5.0, -5.0, 105.0, 85.0);
+        text_into(&mut sk, "B8", Vec2::new(10.0, 62.0), 12.0);
+        for i in 0..8 {
+            for j in 0..5 {
+                sk.add_circle(Vec2::new(8.0 + 12.0 * f64::from(i), 6.0 + 11.0 * f64::from(j)), 4.0, None, None).unwrap();
+            }
+        }
+        for j in 0..3 {
+            let y = 6.0 + 22.0 * f64::from(j);
+            sk.add_line(Vec2::new(-5.0, y), Vec2::new(105.0, y), None, None, None).unwrap();
+        }
+        sk.add_arc(Vec2::new(80.0, 70.0), Vec2::new(90.0, 70.0), Vec2::new(70.0, 70.0), [None; 3], None).unwrap();
+        sk.add_line(Vec2::new(70.0, 70.0), Vec2::new(90.0, 70.0), None, None, None).unwrap();
+        let profiles = find_profiles(&sk);
+        assert!(profiles.len() > 60, "{}", profiles.len());
+        let old =
+            |p: Vec2| profiles.iter().enumerate().filter(|(_, q)| q.region.contains(p)).min_by(|a, b| a.1.area.total_cmp(&b.1.area)).map(|(i, _)| i);
+        let mut found = 0;
+        for round in 0..2 {
+            for j in 0..=91 {
+                for i in 0..=127 {
+                    let p = Vec2::new(-10.0 + 120.0 * f64::from(i) / 127.0, -10.0 + 100.0 * f64::from(j) / 91.0);
+                    let want = old(p);
+                    assert_eq!(profile_at_point(&profiles, p), want, "round {round} at {p:?}");
+                    for q in &profiles {
+                        assert_eq!(q.contains(p), q.region.contains(p));
+                    }
+                    found += usize::from(want.is_some());
+                }
+            }
+        }
+        assert!(found > 15_000, "{found}");
     }
 }

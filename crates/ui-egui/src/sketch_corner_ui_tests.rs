@@ -781,6 +781,59 @@ fn trim_hover_shows_the_piece_a_click_takes_away() {
     assert!(trim_hover_piece(&h.app, sid, &line).is_none(), "only Trim shows a piece");
 }
 
+/// Trim's hover keeps the cuts of the curve under the cursor while the sketch is unchanged and
+/// Extend's preview while the cursor stays nearer one end: the piece follows the cursor along the
+/// line, and a curve added in the way moves the piece's end and the extension's stop with it.
+#[test]
+fn trim_and_extend_hovers_follow_the_cursor_and_a_changed_sketch() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let line = h.app.run("sketch.line", json!({"points": [[0,0],[30,0]], "connect": false})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    h.app.run("sketch.line", json!({"points": [[10,-5],[10,5]], "connect": false})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[20,-5],[20,5]], "connect": false})).unwrap();
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    let ends = |p: &[Vec2]| {
+        let mut x = [p[0].x, p[p.len() - 1].x];
+        x.sort_by(f64::total_cmp);
+        x
+    };
+    let near = |a: [f64; 2], b: [f64; 2]| (a[0] - b[0]).abs() < 1e-6 && (a[1] - b[1]).abs() < 1e-6;
+    h.step(&json!({"start":"sketch.trim"})).unwrap();
+    for (at, want) in [(15.0, [10.0, 20.0]), (16.0, [10.0, 20.0]), (25.0, [20.0, 30.0]), (4.0, [0.0, 10.0])] {
+        h.step(&json!({"move":{"world":[at,0,0]}})).unwrap();
+        let piece = trim_hover_piece(&h.app, sid, &line).unwrap();
+        assert!(near(ends(&piece), want), "at {at}: {piece:?}");
+    }
+    h.app.run("sketch.line", json!({"points": [[24,-5],[24,5]], "connect": false})).unwrap();
+    h.settle();
+    h.step(&json!({"move":{"world":[27,0,0]}})).unwrap();
+    let piece = trim_hover_piece(&h.app, sid, &line).unwrap();
+    assert!(near(ends(&piece), [24.0, 30.0]), "the new line cuts: {piece:?}");
+    let at = h.app.tool.as_ref().and_then(|t| t.hover.as_ref()).map(|h| h.0).unwrap();
+    let fresh = solidcraft_engine::cmd::trim_piece(&h.app.session.world_state().sketch(sid).unwrap().sketch, &line, at);
+    assert_eq!(Some(piece), fresh, "the kept cuts are those of the sketch as it is");
+    h.step(&json!({"key":"Escape"})).unwrap();
+
+    let short = h.app.run("sketch.line", json!({"points": [[0,20],[8,20]], "connect": false})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    h.app.run("sketch.line", json!({"points": [[18,15],[18,25]], "connect": false})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.extend"})).unwrap();
+    for at in [7.0, 6.0, 5.0] {
+        h.step(&json!({"move":{"world":[at,20,0]}})).unwrap();
+        let piece = extend_preview_piece(&h.app, sid, &short).unwrap();
+        assert!(near([piece[0].x, piece[1].x], [8.0, 18.0]), "at {at}: {piece:?}");
+    }
+    h.step(&json!({"move":{"world":[2,20,0]}})).unwrap();
+    let piece = extend_preview_piece(&h.app, sid, &short).unwrap();
+    assert!((piece[0].x).abs() < 1e-6 && piece[1].x < 0.0, "the other end grows: {piece:?}");
+    h.app.run("sketch.line", json!({"points": [[13,15],[13,25]], "connect": false})).unwrap();
+    h.settle();
+    h.step(&json!({"move":{"world":[7,20,0]}})).unwrap();
+    let piece = extend_preview_piece(&h.app, sid, &short).unwrap();
+    assert!(near([piece[0].x, piece[1].x], [8.0, 13.0]), "the new line stops it: {piece:?}");
+}
+
 /// #3141: the 2-tangent circle tool, clicked on two sides of a rectangle drawn away from the
 /// origin, offers its default radius before it puts the circle in the corner between the clicks.
 /// A typed radius reaches the command, neither path moves the rectangle, and fixed sides work.
