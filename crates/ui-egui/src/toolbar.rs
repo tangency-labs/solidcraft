@@ -301,15 +301,32 @@ const REPORT_TEXT_X: f32 = 29.0;
 /// The application bar's height: the window's title bar on desktop builds.
 pub const APP_BAR_HEIGHT: f32 = 34.0;
 
+/// Top padding absorbed into the application bar (macOS fullscreen safe-area inset, #8245).
+fn app_bar_top_pad(ctx: &egui::Context, max_top: f32) -> f32 {
+    let pad = (ctx.content_rect().top() - max_top).max(0.0);
+    if pad.is_finite() { pad } else { 0.0 }
+}
+
+/// Bottom edge of the application bar in screen space (controls sit above this).
+pub fn app_bar_bottom(ctx: &egui::Context) -> f32 {
+    ctx.data(|d| d.get_temp::<f32>(egui::Id::new("sc_app_bar_bottom")).unwrap_or(APP_BAR_HEIGHT))
+}
+
 pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
+    let top_pad = app_bar_top_pad(ui.ctx(), ui.max_rect().top());
+    let height = APP_BAR_HEIGHT + top_pad;
     let app_bar = Container::new(ui.ctx(), Surface::ApplicationBar).edge("sc_appbar", Edge::Top);
     let frame = Container::new(ui.ctx(), Surface::ApplicationBar).edge_frame(t.app_bar);
-    app_bar.exact_size(APP_BAR_HEIGHT).show_separator_line(false).frame(frame).show(ui, |ui| {
-        let r = ui.max_rect();
+    app_bar.exact_size(height).show_separator_line(false).frame(frame).show(ui, |ui| {
+        let outer = ui.max_rect();
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_app_bar_bottom"), outer.bottom()));
+        // Controls stay in the lower APP_BAR_HEIGHT so they clear the macOS fullscreen
+        // click-steal zone; the padded top is still bar chrome (drag + fill), not an empty band.
+        let r = egui::Rect::from_min_size(egui::pos2(outer.left(), outer.top() + top_pad), egui::vec2(outer.width(), APP_BAR_HEIGHT));
         // The bar is the window's title bar: its empty space moves the window.
         if app.custom_titlebar || app.integrated_titlebar {
-            crate::titlebar::drag_area(ui, r);
+            crate::titlebar::drag_area(ui, outer);
         }
         let left = r.left() + if app.integrated_titlebar { crate::titlebar::TRAFFIC_LIGHTS } else { 0.0 };
         // Keep the current header controls and product name when merging the new mark.
@@ -513,7 +530,7 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     file_menu(app, ui.ctx());
     let help_x = ui.ctx().data(|d| d.get_temp::<f32>(egui::Id::new("sc_help_anchor")).unwrap_or(300.0));
-    crate::help::show(app, &ui.ctx().clone(), pos2(help_x - 14.0, APP_BAR_HEIGHT));
+    crate::help::show(app, &ui.ctx().clone(), pos2(help_x - 14.0, app_bar_bottom(ui.ctx())));
 }
 
 /// File, edit and application actions shared by the in-window and native menus.
@@ -622,7 +639,7 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
     let mut close = false;
     let resp = Container::new(ctx, Surface::Popup)
         .area(egui::Id::new("sc_file_area"))
-        .fixed_pos(pos2(ctx.data(|d| d.get_temp::<f32>(egui::Id::new("sc_file_menu_x"))).unwrap_or(100.0), APP_BAR_HEIGHT))
+        .fixed_pos(pos2(ctx.data(|d| d.get_temp::<f32>(egui::Id::new("sc_file_menu_x"))).unwrap_or(100.0), app_bar_bottom(ctx)))
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             crate::ui_kit::Menu::show_frame(ui, crate::ui_kit::Menu::frame(), |ui| {
