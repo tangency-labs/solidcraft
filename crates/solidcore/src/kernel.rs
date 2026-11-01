@@ -520,6 +520,16 @@ pub struct UpstreamFixes {
     /// `plan/upstream-issues/WR-15--addendum-2026-10-31-centroid-multiples-of-50.md`).
     /// Off by default for pinned C++ parity.
     pub point_set_centroid_all_blocks: bool,
+    /// `SmLocalSolve1d::SolveIt` clamps the Newton step `delta_t` to
+    /// `0.08 * m_vInterval.GetLength() + SM_EFF_ZERO` (scaled by `0.99`) only when
+    /// `m_bUseInterval` is `true`, instead of evaluating `m_vInterval.GetLength()` on the
+    /// uninitialised `[1e20, -1e20]` interval (`length = -2e20`, `step_limit = -1.6e19`)
+    /// when solving without an interval — which made `|delta_t| > step_limit` always true
+    /// and replaced every step with `±1.584e19` in the opposite direction of Newton
+    /// (WR-19, #2150; see
+    /// `plan/upstream-issues/WR-19--addendum-2026-10-31-unbounded-newton-step.md`). Off by
+    /// default for pinned C++ parity.
+    pub local_solve1d_unbounded_newton_step: bool,
     /// `SmBrep::LocalOperation` sizes the offset executive's distance (by which it extends the neighbouring surfaces to meet the moved ones) from a box that also holds the replacement surfaces, not from the original body alone, so a face moved further than about the body's size away is still reached (WR-534; the fork's tangency-labs/smlib@a1ee273).
     pub local_operation_box_holds_new_surfaces: bool,
     /// With `offset_resolve_crossing_loops` (it has no effect without it), loops of an offset face that touch without crossing (run along one another, meet tangentially, or come up to one another and go back on the same side) are refused, before any crossing is resolved, with `SM_ERR_OFFSET_WALLS_TOUCH` (1042) instead of `SM_ERR_BAD_INTERSECTIONS` (1027): the offset walls meet along a line (WR-345 addendum, #1442; tangency-labs/smlib a759622).
