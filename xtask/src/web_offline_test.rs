@@ -43,8 +43,10 @@
 //!
 //! The site is a small stand-in app (default) or a real web build (`--site dist/web`, after
 //! `trunk build --release`); a real build must hold the `sw.js` and `build.json` the generator
-//! writes for its files. Each build then gets its own `sw.js` and `build.json` from
-//! `cargo xtask web-offline`'s generator and a `data-build` marker on `<html>`. Chrome comes from
+//! generator writes for its files. Each build then gets its own `sw.js` and `build.json` from
+//! `cargo xtask web-offline`'s generator and a `data-build` marker on `<html>`, plus a file only
+//! that build has (a real build's names all follow their contents, so the copies would otherwise
+//! be identical and no download could be held back). Chrome comes from
 //! `CHROME` or the usual install locations; `cargo xtask ci` skips this test when there is none.
 //!
 //! The stand-in app has a content-named script, a `shared.js` whose name is the same in every
@@ -243,6 +245,11 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
                 let index = to.join("index.html");
                 let html = std::fs::read_to_string(&index).map_err(|e| format!("{}: {e}", index.display()))?;
                 std::fs::write(&index, mark(&html, build)?).map_err(|e| format!("{}: {e}", index.display()))?;
+                // A real build names every file after its contents, so the copies are otherwise
+                // identical: without a file only this build has, Mode::SlowFiles holds nothing,
+                // an update finishes before the next one is deployed, and its sweep deletes it.
+                let unique = to.join(format!("only-{build}.txt"));
+                std::fs::write(&unique, format!("{build}\n")).map_err(|e| format!("{}: {e}", unique.display()))?;
             }
             // The wasm ran: the loading message is gone (started) or says why it couldn't start.
             "(() => { const el = document.getElementById('solidcraft_loading'); return !el || !el.innerText.startsWith('Loading'); })()"
