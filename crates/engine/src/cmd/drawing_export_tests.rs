@@ -1,5 +1,6 @@
 use serde_json::{Value, json};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
+use solidcraft_geom::paper::NoPictures;
 
 use super::*;
 use crate::drawing_scene::tests::{front_and_top, nest};
