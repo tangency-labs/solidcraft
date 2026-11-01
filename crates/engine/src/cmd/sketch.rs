@@ -128,7 +128,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!("p0, p1: overall ends, width", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.point", "Point", draw_point).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", dimension).at("SKETCH", "CREATE").icon("dimension").key("D").enabled(in_sketch).params(
-        "entities: [refs] (a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points, two midpoints or a line off the axes: with auto, text_at inside the box they span (as opposite corners) or in its outer corners is the distance between them, above or below the box horizontal, beside it vertical. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends true): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales about its origin to the value instead of distorting. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
+        "entities: [refs] (a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points, two midpoints or a line off the axes: with auto, text_at inside the box they span (as opposite corners) or in its outer corners is the distance between them, above or below the box horizontal, beside it vertical. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. Three points: the angle at the middle one (the vertex) between the lines running from it to the outer two (the arms); the arms must be drawn lines. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends true): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales about its origin to the value instead of distorting. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
     ),
     CommandSpec::new("sketch.constraint.horizontal_vertical", "Horizontal/Vertical", c_horizontal_vertical)
         .at("SKETCH", "CONSTRAINTS")
@@ -2781,8 +2781,8 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
     // `sketch.project` does, and stands for the projected curve (or point) there.
     let p = &super::sketch_project::project_entities(s, p, cmd)?;
     let ents = string_list(cmd, p, "entities")?;
-    if ents.is_empty() || ents.len() > 2 {
-        return Err(bad(cmd, "`entities` must list one or two sketch entities"));
+    if ents.is_empty() || ents.len() > 3 {
+        return Err(bad(cmd, "`entities` must list one, two, or three sketch entities"));
     }
     let ty = str_(p, "type").unwrap_or("auto").to_ascii_lowercase();
     let ty = match (ty.as_str(), str_(p, "orientation").map(str::to_ascii_lowercase).as_deref()) {
@@ -2836,6 +2836,44 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
         let e1 = match ents.get(1) {
             Some(r) => Some(ent(r)?),
             None => None,
+        };
+        // Three points give the angle at the middle one (the vertex) between the lines running
+        // from it to the outer two (the arms) (#10137): the same angle dimension two lines give,
+        // placed on the two lines the points name.
+        let (e0, e1) = match ents.get(2) {
+            None => (e0, e1),
+            Some(r) => {
+                let e2 = ent(r)?;
+                let point = |e: (Option<usize>, Option<usize>)| -> Result<usize> {
+                    e.0.ok_or_else(|| bad(cmd, "three points give an angle: every entity must be a point (the middle one is the vertex)"))
+                };
+                let (pa, pv, pb) = (point(e0)?, point(e1.unwrap_or((None, None)))?, point(e2)?);
+                if ty != "auto" && ty != "angle" {
+                    return Err(bad(cmd, "three points give an angle: drop `type` or use `angle`"));
+                }
+                let (va, vv, vb) = (sk.point(pa).unwrap_or_default(), sk.point(pv).unwrap_or_default(), sk.point(pb).unwrap_or_default());
+                let ang = (va - vv).cross(vb - vv).atan2((va - vv).dot(vb - vv)).abs();
+                if !(ang > 1e-9 && ang < std::f64::consts::PI - 1e-9) {
+                    return Err(bad(cmd, "the three points are collinear: there is no angle at the middle point"));
+                }
+                // The line running from `from` to `to`, matched by its ends' positions so a
+                // vertex that is a coincident copy of the line's own end still finds it.
+                let arm = |from: usize, to: usize| -> Result<usize> {
+                    let (p, q) = (sk.point(from).unwrap_or_default(), sk.point(to).unwrap_or_default());
+                    let tol = 1e-9 * p.dist(q).max(1.0);
+                    sk.curves
+                        .iter()
+                        .position(|c| match &c.kind {
+                            CurveKind::Line { a, b } => {
+                                let (pa, pb) = (sk.point(*a).unwrap_or_default(), sk.point(*b).unwrap_or_default());
+                                (pa.dist(p) <= tol && pb.dist(q) <= tol) || (pa.dist(q) <= tol && pb.dist(p) <= tol)
+                            }
+                            _ => false,
+                        })
+                        .ok_or_else(|| bad(cmd, "three points give an angle where a line runs from the middle point to each of the others"))
+                };
+                ((None, Some(arm(pv, pa)?)), Some((None, Some(arm(pv, pb)?))))
+            }
         };
         let is_line = |c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Line { .. }));
         let is_circle = |c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Circle { .. }));

@@ -176,7 +176,7 @@ pub fn hint(id: &str) -> String {
         "sketch.point3d" => "3D Point: click where a 3D point goes".into(),
         "sketch.arc.center_point" => "Arc: click centre and start, go round either way and click the end, or type a signed sweep".into(),
         "sketch.dimension" => {
-            "Dimension: pick one or two entities and type the value (or click to place it first); click a dimension to edit it; Enter applies".into()
+            "Dimension: pick one or two entities (or three points for the angle at the middle one) and type the value (or click to place it first); click a dimension to edit it; Enter applies".into()
         }
         "sketch.constraint.horizontal_vertical" => {
             "Horizontal/Vertical: pick a line, two points, or a point and a line; hold Shift to pick a line midpoint".into()
@@ -423,7 +423,16 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                         _ => None,
                     })
                 });
-            let fresh = |tool: &Tool, id: &String| !tool.picks.contains(id) && tool.picks.len() < 2;
+            // A third pick joins the dimension only as a point after two points: the
+            // three-point angle, the middle point the vertex (#10137).
+            let picks_are_points = {
+                let state = app.session.world_state();
+                app.session
+                    .active_sketch
+                    .and_then(|sid| state.sketch(sid))
+                    .is_some_and(|ss| tool.picks.len() == 2 && tool.picks.iter().all(|p| ss.sketch.curve_index(p).is_none()))
+            };
+            let fresh = |tool: &Tool, id: &String, point: bool| !tool.picks.contains(id) && (tool.picks.len() < 2 || (point && picks_are_points));
             // Before a new dimension is under way, a click on an existing one edits its value;
             // the tool stays on for the next dimension.
             if crate::dim_view::live().is_none()
@@ -438,7 +447,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                 match hit {
                     // Before anything is typed, another entity joins the dimension, as in the
                     // place-first flow (a distance, an angle between lines).
-                    Some((id, _, midpoint_target)) if !typed && fresh(&tool, &id) => {
+                    Some((id, curve, midpoint_target)) if !typed && fresh(&tool, &id, !curve || midpoint_target) => {
                         let picks = dimension_picks(&tool, id, midpoint.as_deref(), midpoint_target);
                         match crate::dim_view::begin_live(app, picks.clone(), Some(pos)) {
                             Ok(live) => {
@@ -461,7 +470,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                     }
                 }
             } else if let Some((id, curve, midpoint_target)) = hit {
-                if fresh(&tool, &id) {
+                if fresh(&tool, &id, !curve || midpoint_target) {
                     tool.picks = dimension_picks(&tool, id, midpoint.as_deref(), midpoint_target);
                     if let Some(midpoint) = midpoint {
                         tool.point_picks.push(json!(midpoint));
@@ -469,7 +478,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                     // As soon as the picks determine a dimension (one line, circle or arc, or a
                     // second entity), its value takes the keyboard: D, click, type. A pick that
                     // doesn't keeps the place-first flow; placing reports why.
-                    if curve || tool.picks.len() == 2 {
+                    if curve || tool.picks.len() >= 2 {
                         let _ = crate::dim_view::begin_live(app, tool.picks.clone(), Some(pos));
                     }
                 }

@@ -1819,3 +1819,89 @@ fn conflict_lists_the_constraints_instead_of_claiming_the_entities_are_fixed() {
         assert!(e.contains("conflicts with"), "{cmd} {params}: {e}");
     }
 }
+
+/// Three points give the angle at the middle one (the vertex) between the lines running from
+/// it to the outer two (the arms) (#10137): the same angle dimension two lines give, on the
+/// two lines the points name. The outer order does not matter; the middle one is the vertex.
+#[test]
+fn three_points_dimension_the_angle_at_the_middle_point() {
+    for arms in [["a.end", "a.start", "b.end"], ["b.end", "a.start", "a.end"]] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]], "ids": ["a"], "infer": false}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 30]], "ids": ["b"], "infer": false}));
+        let d = run(&mut s, "sketch.dimension", json!({"entities": arms}));
+        assert_eq!((d["type"].as_str(), d["unit"].as_str()), (Some("AngularDimension"), Some("deg")), "{arms:?}: {d}");
+        assert!((d["measured"].as_f64().unwrap() - 90.0).abs() < 1e-6, "{arms:?}: {d}");
+        // The constraint is the angle between the two arm lines themselves.
+        let sk = sketch(&s);
+        let (ia, ib) = (sk.curve_index("a").unwrap(), sk.curve_index("b").unwrap());
+        assert!(
+            sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Angle { a, b, .. } if (a, b) == (ia, ib) || (a, b) == (ib, ia))),
+            "{arms:?}: {:?}",
+            sk.constraints
+        );
+    }
+    // The middle point is the vertex: in a triangle, the angle at the middle corner.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "ids": ["a"], "infer": false}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 0], [10, 10]], "ids": ["b"], "infer": false}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["a.start", "a.end", "b.end"]}));
+    assert!((d["measured"].as_f64().unwrap() - 90.0).abs() < 1e-6, "{d}");
+}
+
+/// The three-point angle drives: the value swings the arm about the vertex, and a value nearer
+/// the supplement takes that reading, as between two lines.
+#[test]
+fn three_points_angle_dimension_drives_and_takes_the_reading_nearest_its_value() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]], "ids": ["a"], "infer": false}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 30]], "ids": ["b"], "infer": false}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["a.end", "a.start", "b.end"], "value": "60 deg"}));
+    assert!((d["measured"].as_f64().unwrap() - 60.0).abs() < 1e-6, "{d}");
+    assert!((line_angle(&s, "a", "b") - 60.0).abs() < 1e-6);
+    // The parameter drives it from now on.
+    let param = d["param"].as_str().unwrap();
+    run(&mut s, "parameters.change", json!({"name": param, "expression": "45 deg"}));
+    assert!((line_angle(&s, "a", "b") - 45.0).abs() < 1e-6);
+    // A 45° corner asked for at 135° takes the supplement, as two lines do.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "ids": ["a"], "infer": false}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 10]], "ids": ["b"], "infer": false}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["a.end", "a.start", "b.end"], "value": "135 deg"}));
+    assert!((d["measured"].as_f64().unwrap() - 135.0).abs() < 1e-6, "{d}");
+    // A driven (reference) three-point angle measures without a parameter.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [30, 0]], "ids": ["a"], "infer": false}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 30]], "ids": ["b"], "infer": false}));
+    let d = run(&mut s, "sketch.dimension", json!({"entities": ["a.end", "a.start", "b.end"], "driven": true}));
+    assert_eq!((d["driven"].as_bool(), d["unit"].as_str()), (Some(true), Some("deg")), "{d}");
+    assert!((d["measured"].as_f64().unwrap() - 90.0).abs() < 1e-6, "{d}");
+}
+
+/// A three-point angle is refused where it cannot be one: an entity that is not a point, no
+/// line running from the vertex to an arm, collinear points, a `type` that is not an angle,
+/// and more than three entities.
+#[test]
+fn three_points_angle_dimension_refusals() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "ids": ["a"], "infer": false}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 10]], "ids": ["b"], "infer": false}));
+    run(&mut s, "sketch.line", json!({"points": [[10, 0], [20, 0]], "ids": ["c"], "infer": false}));
+    run(&mut s, "sketch.point", json!({"point": [20, 5], "id": "free"}));
+    run(&mut s, "sketch.constraint.fix", json!({"entity": "free"}));
+    // An entity that is not a point.
+    let e = s.execute("sketch.dimension", &json!({"entities": ["a", "a.start", "b.end"]})).unwrap_err().to_string();
+    assert!(e.contains("every entity must be a point"), "{e}");
+    // No line runs from the vertex to the free point.
+    let e = s.execute("sketch.dimension", &json!({"entities": ["a.end", "a.start", "free"]})).unwrap_err().to_string();
+    assert!(e.contains("a line runs from the middle point"), "{e}");
+    // Collinear points (lines a and c run straight on) have no angle at the middle one.
+    let e = s.execute("sketch.dimension", &json!({"entities": ["a.start", "a.end", "c.end"]})).unwrap_err().to_string();
+    assert!(e.contains("collinear"), "{e}");
+    // A `type` that is not an angle cannot be measured from three points.
+    let e = s.execute("sketch.dimension", &json!({"entities": ["a.end", "a.start", "b.end"], "type": "distance"})).unwrap_err().to_string();
+    assert!(e.contains("drop `type`"), "{e}");
+    // More than three entities is refused outright.
+    let e = s.execute("sketch.dimension", &json!({"entities": ["a.start", "a.end", "b.end", "free"]})).unwrap_err().to_string();
+    assert!(e.contains("one, two, or three"), "{e}");
+}

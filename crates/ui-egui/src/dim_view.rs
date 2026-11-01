@@ -277,8 +277,8 @@ fn entities_value(entities: &[String]) -> serde_json::Value {
 
 fn dimension_draft(app: &SolveApp, entities: Vec<String>, at: Option<Vec2>) -> Result<(String, String, DimensionDraft), String> {
     let sketch = app.session.active_sketch.ok_or("Edit a sketch to add a dimension")?;
-    if entities.is_empty() || entities.len() > 2 || at.is_some_and(|at| !at.x.is_finite() || !at.y.is_finite()) {
-        return Err("Pick one edge or two endpoints, then place the dimension".into());
+    if entities.is_empty() || entities.len() > 3 || at.is_some_and(|at| !at.x.is_finite() || !at.y.is_finite()) {
+        return Err("Pick one or two entities, or three points for the angle at the middle one, then place the dimension".into());
     }
     // A dimension the sketch can't take (it would over-constrain it) becomes a driven one,
     // which only measures; when that fails too, the first refusal is the one to report.
