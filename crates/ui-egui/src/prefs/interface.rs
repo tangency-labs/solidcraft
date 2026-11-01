@@ -315,6 +315,12 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                         });
                     });
+                    // Whether the Browser's placements and folders start closed and open only on
+                    // request (#8768).
+                    ui_kit::row(ui, "", |ui| {
+                        let check = setting::browser_rows_start_closed(app, ui).on_hover_text(app.tr("prefs.browser_rows_start_closed_note"));
+                        crate::scenario::publish_target("prefs:browser_rows_start_closed", check.rect);
+                    });
                     // Where command dialogs open (#6707).
                     ui_kit::row(ui, app.tr("prefs.dialogs"), |ui| {
                         use crate::dialog_column::DialogPlace;
