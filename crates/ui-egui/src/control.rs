@@ -558,8 +558,8 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
         "ui.blur" => {
             // Internal rendering harness; deliberately no saved preference or product UI.
             let radius = if let Some(radius) = p.get("radius_px") {
-                let Some(radius) = radius.as_f64().filter(|v| v.is_finite() && (0.0..=40.0).contains(v)) else {
-                    return err("radius_px must be finite and between 0 and 40");
+                let Some(radius) = radius.as_f64().filter(|v| v.is_finite() && (0.0..=60.0).contains(v)) else {
+                    return err("radius_px must be finite and between 0 and 60");
                 };
                 Some(radius as f32)
             } else {
@@ -637,7 +637,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 crate::theme_options::Availability::Available => None,
             };
             ok(
-                json!({"radius_px":app.blur.radius(), "max_radius_px":40, "capability":app.blur.capability_for(ctx.viewport_id()), "counters":app.blur.counters(),
+                json!({"radius_px":app.blur.radius(), "max_radius_px":60, "capability":app.blur.capability_for(ctx.viewport_id()), "counters":app.blur.counters(),
                     "available": availability == crate::theme_options::Availability::Available, "reason": reason,
                     "evidence_fixture": app.blur_session.evidence_fixture,
                     "guard": {"tier_cap": app.blur_session.guard.cap, "streak": app.blur_session.guard.streak,
@@ -1462,7 +1462,7 @@ mod tests {
     #[test]
     fn blur_control_validates_before_mutation_and_reports_no_gpu() {
         let mut h = crate::scenario::Harness::new();
-        for invalid in [json!(-1), json!(41), json!("18"), json!(null)] {
+        for invalid in [json!(-1), json!(61), json!("18"), json!(null)] {
             let reply = h.call("ui.blur", json!({"radius_px":invalid}));
             assert_eq!(reply["ok"], false, "{reply}");
             assert_eq!(h.app.blur.radius(), 0.0);

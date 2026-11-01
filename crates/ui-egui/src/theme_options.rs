@@ -85,7 +85,7 @@ pub(crate) fn blur_radius(file: &ThemeFile, values: &BTreeMap<String, OptionValu
         parent = definitions.iter().find(|o| o.id == id).and_then(|o| o.parent.as_deref());
     }
     match values.get("blur") {
-        Some(OptionValue::Num(n)) if n.is_finite() && (0.0..=40.0).contains(n) => *n,
+        Some(OptionValue::Num(n)) if n.is_finite() && (0.0..=60.0).contains(n) => *n,
         _ => 0.0,
     }
 }

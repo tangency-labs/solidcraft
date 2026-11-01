@@ -40,10 +40,10 @@ impl Counters {
 }
 
 pub fn validate_radius(radius: f32) -> Result<f32, &'static str> {
-    if radius.is_finite() && (0.0..=40.0).contains(&radius) {
+    if radius.is_finite() && (0.0..=60.0).contains(&radius) {
         Ok(radius)
     } else {
-        Err("blur radius must be finite and between 0 and 40 physical pixels")
+        Err("blur radius must be finite and between 0 and 60 physical pixels")
     }
 }
 

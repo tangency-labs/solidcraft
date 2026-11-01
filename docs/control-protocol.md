@@ -29,7 +29,7 @@ so agents can drive the app without a launch flag. Every connection still needs 
 token (below); nothing else on the machine, and nothing off it, can send a command.
 
 Internal rendering harness: `ui.blur {radius_px?, surface_alpha?, fixture?}` queries or sets
-session-only panel blur. Radius is finite physical pixels in 0..40; the optional
+session-only panel blur. Radius is finite physical pixels in 0..60; the optional
 capture tint is 0..1 (`null` restores ordinary fills). This is not a saved
 preference. Theme-authored blur is edited with `ui.prefs {theme_options:{theme_id:{blur:18}}}`;
 the theme must declare the option. Finite fractional values remain valid, although

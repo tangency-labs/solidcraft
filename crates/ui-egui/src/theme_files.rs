@@ -738,7 +738,7 @@ fn parse_option(v: &Value) -> Result<OptionDef, String> {
         }
         let (floor, ceiling, standard_unit) = match id {
             "opacity" => (40.0, 100.0, Some("%")),
-            "blur" => (0.0, 40.0, Some("px")),
+            "blur" => (0.0, 60.0, Some("px")),
             "tab_fade_ms" => (0.0, 600.0, Some("ms")),
             _ => (0.0, 0.0, None),
         };
@@ -1600,7 +1600,7 @@ mod tests {
             (json!([{"id":"a","type":"bool","default":true,"parent":"missing"}]), "parent"),
             (json!([{"id":"a","type":"bool","default":true,"advanced":"yes"}]), "advanced"),
             (json!([{"id":"opacity","type":"range","default":80,"min":39}]), "min"),
-            (json!([{"id":"blur","type":"range","default":10,"max":41}]), "max"),
+            (json!([{"id":"blur","type":"range","default":10,"max":61}]), "max"),
         ];
         let mut too_many = Vec::new();
         for i in 0..17 {

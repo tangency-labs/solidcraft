@@ -4,7 +4,7 @@ use egui::{Rect, Ui, pos2, vec2};
 
 #[test]
 fn blur_meter_boundaries_and_off_thumb() {
-    for (radius, bars) in [(0.0, 0), (1.0, 1), (8.0, 1), (9.0, 2), (18.0, 3), (33.0, 5), (40.0, 5)] {
+    for (radius, bars) in [(0.0, 0), (1.0, 1), (8.0, 1), (9.0, 2), (18.0, 3), (33.0, 5), (40.0, 5), (60.0, 5)] {
         assert_eq!(blur_cost_bars(radius), bars, "{radius}");
     }
     for dark in [false, true] {
