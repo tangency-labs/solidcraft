@@ -564,6 +564,24 @@ pub fn to_script(recipe: &Value) -> Result<Value, String> {
             Some("chamfer") => {
                 out.push(json!({"command": "solid.chamfer", "params": {"edges": edge_points(f), "distance": f.get("distance"), "name": name}}))
             }
+            // Frame members along a sketch's lines (all of them unless `lines` names some), and
+            // trims of members against other members or planes (#4003).
+            Some("frame_member") => {
+                let mut p = json!({"sketch": f.get("sketch"), "profile": f.get("profile"), "body_name": f.get("body_name"), "name": name});
+                if let Some(lines) = f.get("lines") {
+                    p["lines"] = lines.clone();
+                }
+                out.push(json!({"command": "frame.member", "params": p}));
+            }
+            Some("frame_trim") => {
+                let mut p = json!({"members": f.get("members"), "to": f.get("to"), "name": name});
+                for key in ["end", "gap"] {
+                    if let Some(v) = f.get(key) {
+                        p[key] = v.clone();
+                    }
+                }
+                out.push(json!({"command": "frame.trim", "params": p}));
+            }
             Some(other) => return Err(format!("recipe: feature op `{other}` is not supported yet")),
             None => return Err("recipe: feature without `op`".into()),
         }

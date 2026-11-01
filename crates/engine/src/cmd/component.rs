@@ -798,6 +798,20 @@ pub fn to_active_frame(s: &Session, kind: &mut FeatureKind) {
     }
 }
 
+/// [`to_active_frame`] for one plane, of a feature whose other planes are already in the frame.
+pub fn plane_to_active_frame(s: &Session, plane: &mut solidcraft_doc::PlaneRef) {
+    if s.active_component == 0 || crate::frames::mapped() {
+        return;
+    }
+    let m = s.active_component_frame();
+    if solidcraft_doc::is_identity(&m) {
+        return;
+    }
+    if let Some(inv) = solidcraft_doc::mat_inverse(&m) {
+        solidcraft_doc::map_plane_ref(&inv, plane);
+    }
+}
+
 fn cycle_color(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.cycle_color";
     let id = component(s, p, "component", cmd)?;

@@ -195,3 +195,151 @@ fn picked_lines_stay_in_the_sketch_they_were_picked_in() {
     d.inputs[0].items.push(Sel::ExternalSketchCurve { sketch: rails, id: ids[0].clone() });
     assert!(apply_commands(&app, &d).unwrap_err().contains("one sketch"));
 }
+
+fn trim(d: &mut Dialog) -> &mut Trim {
+    match &mut d.kind {
+        Kind::FrameTrim(t) => t,
+        k => panic!("{k:?}"),
+    }
+}
+
+/// A post along Y at x = 0 and a rail along X from x = 100, 45 × 45 bar, each its own member
+/// feature: `Post` and `Rail`.
+fn post_and_rail() -> SolveApp {
+    let bar = json!({"kind": "bar", "width": 45, "height": 45});
+    app_with(&[
+        ("sketch.create", json!({"plane": "XY", "name": "Posts"})),
+        ("sketch.line", json!({"points": [[0, -100], [0, 100]]})),
+        ("sketch.finish", json!({})),
+        ("sketch.create", json!({"plane": "XY", "name": "Rails"})),
+        ("sketch.line", json!({"points": [[100, 0], [300, 0]]})),
+        ("sketch.finish", json!({})),
+        ("frame.member", json!({"sketch": "Posts", "profile": bar, "body_name": "Post"})),
+        ("frame.member", json!({"sketch": "Rails", "profile": bar, "body_name": "Rail"})),
+    ])
+}
+
+/// Members and a target picked in the view make `frame.trim`; End and Gap follow the rows; a face
+/// of a member is that member, a plane its name. Edit Feature refills the picks and rows, and a
+/// target a pick can't show (a member's chosen side) is kept unless unticked.
+#[test]
+fn trim_from_picked_members_and_targets() {
+    let mut app = post_and_rail();
+    app.session.selection = vec![Sel::Body { name: "Rail".into() }];
+    app.start("frame.trim");
+    let mut d = app.dialog.clone().unwrap();
+    assert_eq!(d.inputs[0].items, [Sel::Body { name: "Rail".into() }], "the selected member is picked");
+    assert!(apply_commands(&app, &d).is_err(), "nothing to trim to yet");
+    d.inputs[1].items = vec![
+        Sel::Face { body: "Post".into(), index: 0, point: solidcraft_engine::geom::Vec3::new(22.5, 0.0, 0.0) },
+        Sel::Plane { name: "YZ".into() },
+    ];
+    let t = trim(&mut d);
+    t.end = 1;
+    t.gap = "2 mm".into();
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].0, "frame.trim");
+    assert_eq!(c[0].1, json!({"members": ["Rail"], "to": ["Post", {"plane": "YZ"}], "end": "start", "gap": "2 mm"}));
+    // Only the post: the rail's start butts its side, 2 short of it.
+    d.inputs[1].items.truncate(1);
+    let c = apply_commands(&app, &d).unwrap();
+    run_all(&mut app, c);
+    let b = app.session.world_state().bodies.iter().find(|b| b.name == "Rail").map(|b| b.outline_bounds()).unwrap();
+    assert!((b.min.x - 24.5).abs() < 1e-6, "{b:?}");
+
+    let f = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    assert_eq!(e.inputs[0].items, [Sel::Body { name: "Rail".into() }]);
+    assert_eq!(e.inputs[1].items, [Sel::Body { name: "Post".into() }]);
+    let t = trim(&mut e);
+    assert_eq!((t.end, t.gap.as_str(), t.kept.len()), (1, "2 mm", 0));
+    t.gap.clear();
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    run_all(&mut app, c);
+    let b = app.session.world_state().bodies.iter().find(|b| b.name == "Rail").map(|b| b.outline_bounds()).unwrap();
+    assert!((b.min.x - 22.5).abs() < 1e-6, "no gap now: {b:?}");
+
+    // A side chosen through the command is kept by Edit Feature as it is.
+    app.run(
+        "timeline.redefine",
+        json!({"feature": f, "command": "frame.trim", "params": {"members": ["Rail"], "to": [{"member": "Post", "side": "left"}]}}),
+    )
+    .unwrap();
+    let mut e = edit_dialog(&app, f, None).unwrap();
+    assert!(e.inputs[1].items.is_empty());
+    let t = trim(&mut e);
+    assert!(t.keep && t.kept.len() == 1, "{:?}", t.kept);
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["to"][0]["side"], json!("left"), "{}", c[0].1);
+    // Unticked, it goes, and with nothing else picked there is nothing to trim to.
+    trim(&mut e).keep = false;
+    assert!(apply_commands(&app, &e).unwrap_err().contains("trim them to"));
+    run_all(&mut app, c);
+}
+
+/// A face of a body that isn't a member is a plane target, sent as the exact face picked (its
+/// body, index and path), as Start Sketch sends one.
+#[test]
+fn a_face_target_is_the_exact_face_picked() {
+    let mut app = post_and_rail();
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [400, 0, 0], "body_name": "Block"})).unwrap();
+    app.session.selection = vec![Sel::Body { name: "Rail".into() }];
+    app.start("frame.trim");
+    let mut d = app.dialog.clone().unwrap();
+    d.inputs[1].items = vec![Sel::Face { body: "Block".into(), index: 2, point: solidcraft_engine::geom::Vec3::new(400.0, 5.0, 5.0) }];
+    let c = apply_commands(&app, &d).unwrap();
+    let plane = &c[0].1["to"][0]["plane"];
+    assert_eq!((&plane["face"], &plane["body"], &plane["index"]), (&json!([400.0, 5.0, 5.0]), &json!("Block"), &json!(2)), "{}", c[0].1);
+    assert!(plane["path"].is_array(), "{}", c[0].1);
+}
+
+#[test]
+fn a_changed_member_face_target_follows_its_actual_face() {
+    let mut app = post_and_rail();
+    app.run("solid.move", json!({"bodies": ["Post"], "translate": [10, 0, 0]})).unwrap();
+    app.session.selection = vec![Sel::Body { name: "Rail".into() }];
+    app.start("frame.trim");
+    let mut d = app.dialog.clone().unwrap();
+    let st = app.session.world_state();
+    let b = st.body("Post").unwrap();
+    let face = b.body.faces(0.01).unwrap().into_iter().find(|f| f.plane_normal.is_some_and(|n| n.x > 0.99)).unwrap();
+    d.inputs[1].items = vec![Sel::Face { body: "Post".into(), index: face.index, point: face.centroid }];
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["to"][0]["plane"]["body"], "Post");
+    run_all(&mut app, c);
+    let st = app.session.world_state();
+    assert!((st.body("Rail").unwrap().outline_bounds().min.x - 32.5).abs() < 1e-6);
+}
+
+#[test]
+fn editing_a_trim_resolves_a_renamed_construction_plane_by_id() {
+    let mut app = post_and_rail();
+    app.run("construct.plane.offset", json!({"base": "YZ", "offset": 150, "name": "Cut"})).unwrap();
+    let trim = app.run("frame.trim", json!({"members": ["Rail"], "to": {"plane": "Cut"}})).unwrap()["feature"].clone();
+    app.run("timeline.rename", json!({"feature": "Cut", "name": "Renamed cut"})).unwrap();
+    let d = edit_dialog(&app, trim.as_u64().unwrap(), None).unwrap();
+    assert_eq!(d.inputs[1].items, [Sel::Plane { name: "Renamed cut".into() }]);
+    let c = apply_commands(&app, &d).unwrap();
+    run_all(&mut app, c);
+    let st = app.session.world_state();
+    assert!((st.body("Rail").unwrap().outline_bounds().min.x - 150.0).abs() < 1e-6);
+}
+
+#[test]
+fn a_transferred_member_face_is_an_exact_plane_target() {
+    let mut app = post_and_rail();
+    let c = app.run("component.create", json!({"name": "Child"})).unwrap()["component"].clone();
+    app.run("component.move_bodies", json!({"component": c, "bodies": ["Post"]})).unwrap();
+    app.run("component.activate", json!({"component": "root"})).unwrap();
+    app.session.selection = vec![Sel::Body { name: "Rail".into() }];
+    app.start("frame.trim");
+    let mut d = app.dialog.clone().unwrap();
+    let st = app.session.world_state();
+    let face = st.body("Post").unwrap().body.faces(0.01).unwrap().into_iter().find(|f| f.plane_normal.is_some_and(|n| n.x > 0.99)).unwrap();
+    d.inputs[1].items = vec![Sel::Face { body: "Post".into(), index: face.index, point: face.centroid }];
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["to"][0]["plane"]["body"], "Post");
+    run_all(&mut app, c);
+    assert!((app.session.world_state().body("Rail").unwrap().outline_bounds().min.x - 22.5).abs() < 1e-6);
+}
