@@ -91,6 +91,7 @@ use crate::window::{
 };
 use runner::{EventLoopRunner, EventLoopRunnerShared};
 
+use super::dark_mode::WIN10_BUILD_VERSION;
 use super::window::set_skip_taskbar;
 use super::SelectedCursor;
 
@@ -2306,7 +2307,9 @@ unsafe fn public_window_callback_inner(
             }
 
             let new_outer_rect: RECT;
-            {
+            if takes_suggested_rect(*WIN10_BUILD_VERSION, allow_resize) {
+                new_outer_rect = suggested_rect;
+            } else {
                 let suggested_ul =
                     (suggested_rect.left + margin_left, suggested_rect.top + margin_top);
 
@@ -2672,5 +2675,44 @@ fn get_pointer_move_kind(
         PointerMoveKind::Leave
     } else {
         PointerMoveKind::None
+    }
+}
+
+/// `WM_DPICHANGED` applies the rect Windows suggests, as is, from Windows 11 on (the first build
+/// is 22000; `None` is any Windows whose version isn't 10.0, so not Windows 10).
+///
+/// The adjustments below it are for earlier Windows 10 builds. On Windows 11 they break the move:
+/// when the shell moves a window (Win+Shift+Arrow, snap) the window is still on the old monitor
+/// while this message runs, so `MonitorFromWindow` names the old monitor as the new DPI's, and
+/// the nudge loop pushes the correct rect back until most of it is on the old monitor. That
+/// sends `WM_DPICHANGED` straight back, leaving the window on the boundary, and a size that was
+/// already scaled gets scaled again.
+///
+/// A maximized or fullscreen window (`allow_resize` false) keeps its existing path.
+fn takes_suggested_rect(win10_build: Option<u32>, allow_resize: bool) -> bool {
+    allow_resize && win10_build.map_or(true, |build| build >= 22000)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::takes_suggested_rect;
+
+    #[test]
+    fn windows_11_takes_the_suggested_rect() {
+        assert!(takes_suggested_rect(Some(22000), true));
+        assert!(takes_suggested_rect(Some(26300), true));
+        assert!(takes_suggested_rect(None, true));
+    }
+
+    #[test]
+    fn windows_10_keeps_its_adjustments() {
+        assert!(!takes_suggested_rect(Some(19045), true));
+        assert!(!takes_suggested_rect(Some(21999), true));
+    }
+
+    #[test]
+    fn a_maximized_or_fullscreen_window_keeps_its_path() {
+        assert!(!takes_suggested_rect(Some(26300), false));
+        assert!(!takes_suggested_rect(None, false));
     }
 }

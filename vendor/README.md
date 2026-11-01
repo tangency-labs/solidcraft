@@ -392,3 +392,10 @@ SolidCraft changes:
   (the `wp::pointer_gestures` module); drop the example and test targets.
 - `src/event.rs`, `src/changelog/unreleased.md`: the platform notes of both events and the
   changelog entry.
+- `src/platform_impl/windows/event_loop.rs`, `dark_mode.rs`: on Windows 11, `WM_DPICHANGED`
+  applies the rect Windows suggests (`takes_suggested_rect`), for a window that isn't maximized
+  or fullscreen. The nudge loop took the monitor the window was still on for the new one and
+  pushed the rect back, so a window moved to a monitor with another scale stayed on the
+  boundary and its size drifted (#9336). Same behaviour as rust-windowing/winit#4341 (winit 0.31
+  only; the 0.30 backport rust-windowing/winit#4637 was closed), except that the maximized path
+  stays as it was. eframe 0.36 requires winit 0.30, so this cannot come from a newer winit.
