@@ -21,6 +21,7 @@ mod component_removal;
 pub use component_removal::RemovedTree;
 pub mod config;
 pub mod construct;
+pub mod design_diff;
 pub mod display_quality;
 pub mod display_units;
 mod document;
@@ -28,6 +29,8 @@ pub mod drawing;
 mod eval;
 pub mod expr;
 pub mod face_anchor;
+mod feature_definition;
+pub use feature_definition::{Definition, FieldRole};
 mod feature_geometry;
 mod feature_refs;
 pub use face_anchor::{FaceAnchor, FaceAttachmentStatus};
@@ -80,8 +83,8 @@ pub mod sketch_equation;
 pub mod text_params;
 
 pub use assembly::{
-    BomType, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence, WorldNames, apply_point, apply_vector, is_identity, map_point_expr,
-    map_vector_expr, mat_inverse, mat_mul, rigid,
+    BomType, ComponentTree, IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence, WorldNames, apply_point, apply_vector, is_identity,
+    map_point_expr, map_vector_expr, mat_inverse, mat_mul, rigid,
 };
 pub use document::*;
 pub use eval::{

@@ -901,3 +901,32 @@ fn feature_kind_key_and_type_name_mappings() {
     assert_eq!(FeatureKind::type_name_to_kind_key("MeshFeature"), Some("mesh_import"));
     assert_eq!(FeatureKind::type_name_to_kind_key("NonExistent"), None);
 }
+
+/// #5184 (CE8): a feature's saved fields by what they are. Who it is and the names kept for its
+/// inputs and picks are not its definition; the sketch geometry is left out by name; the body
+/// names evaluation pins are in it, but say they are written back.
+#[test]
+fn a_feature_says_which_fields_are_its_definition() {
+    let (doc, sketch) = plate_doc();
+    let mut f = doc.feature(sketch).unwrap().clone();
+    f.param_names = vec!["d9".into()];
+    f.body_names = vec!["Plate".into()];
+    f.edge_names = vec!["F1:top|F1:side".into()];
+    let def = f.definition().unwrap();
+    assert_eq!(def.fields.keys().collect::<Vec<_>>(), ["body_names", "plane"]);
+    assert_eq!(def.omitted.iter().map(|(k, _)| *k).collect::<Vec<_>>(), ["sketch"]);
+    assert_eq!(f.field_role("name"), FieldRole::Identity);
+    assert_eq!(f.field_role("type"), FieldRole::Identity);
+    assert_eq!(f.field_role("edge_names"), FieldRole::Bookkeeping);
+    assert_eq!(f.field_role("param_names"), FieldRole::Bookkeeping);
+    assert_eq!(f.field_role("body_names"), FieldRole::Derived);
+    assert_eq!(f.field_role("link_faces"), FieldRole::Derived);
+    assert!(matches!(f.field_role("sketch"), FieldRole::Heavy(_)));
+    assert_eq!(f.field_role("plane"), FieldRole::Input);
+    // `sketch` is heavy only on a sketch: an extrude's `sketch` is its input.
+    let pad = doc.features.iter().find(|x| matches!(x.kind, FeatureKind::Extrude { .. })).unwrap();
+    assert_eq!(pad.field_role("sketch"), FieldRole::Input);
+    // The definition is the input and derived fields.
+    let roles = [FieldRole::Identity, FieldRole::Bookkeeping, FieldRole::Heavy(""), FieldRole::Derived, FieldRole::Input];
+    assert_eq!(roles.map(FieldRole::in_definition), [false, false, false, true, true]);
+}

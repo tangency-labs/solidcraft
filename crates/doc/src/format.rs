@@ -790,14 +790,9 @@ pub fn read(s: &str) -> Result<Document> {
     crate::format_offsets::validate_typed(&d)?;
     normalise(&mut d)?;
     // `next_id` is trusted by nothing: a hand-edited or generated file may omit it or leave it stale,
-    // and the next feature, component or occurrence would then reuse an id that is already taken.
-    let largest =
-        d.features.iter().map(|f| f.id).chain(d.components.iter().map(|c| c.id)).chain(d.occurrences.iter().map(|o| o.id)).max().unwrap_or(0);
-    let floor = largest.checked_add(1).ok_or_else(|| DocError::Invalid("damaged design: the id space is exhausted".into()))?;
-    d.next_id = d.next_id.max(floor).max(1);
-    // These lists used to allocate independently. Keep their existing identities, but never
-    // let a later deletion make them available again after loading an older design.
-    d.next_id = d.next_item_id()?;
+    // and the next item would then reuse an id that is already taken. Lists that used to allocate
+    // independently keep their identities, and a later deletion never makes them available again.
+    d.next_id = d.next_item_id().map_err(|_| DocError::Invalid("damaged design: the id space is exhausted".into()))?;
     d.format = format_string(FORMAT);
     d.format_pending = pending_names();
     Ok(d)
