@@ -1,8 +1,8 @@
 //! The sheet scene (#4890 W10, #3890 W15): everything drawn on one sheet of a drawing as one paper
 //! scene ([`Scene`]), for the sheet page and every export, so the screen and the files draw the
 //! same thing. In paint order: the sheet's drawing border ([`SheetLayout::paper`]), then each view
-//! on the sheet by id, its visible lines as [`paper_group`] makes them, then its title block's lines
-//! and projection symbol, in the drawing's projection ([`TitleBlockLayout::paper`]). Images placed on
+//! on the sheet by id, its visible lines as [`paper_group`] makes them, then its title block's logos,
+//! lines and projection symbol, in the drawing's projection ([`TitleBlockLayout::paper`]). Images placed on
 //! the sheet sit between the border and the views ([`groups`]), so a view's lines draw over a photo.
 //! Text, tables, hidden lines and shaded views each join as one more kind of group.
 //!
@@ -115,7 +115,8 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // placed as they are drawn, so at most one view's are held beside the scene.
     let shown = crate::drawing_view::shown(s);
     let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(s, &shown, *id, view)));
-    let (scene, views) = assemble(record, drawing.projection, &crate::drawing_pictures::groups(drawing, sheet), drawn)?;
+    let (images, logos) = (crate::drawing_pictures::groups(drawing, sheet), crate::drawing_pictures::logo_items(drawing, sheet));
+    let (scene, views) = assemble(record, drawing.projection, &images, &logos, drawn)?;
     Ok(SheetScene { scene, views })
 }
 
@@ -162,13 +163,14 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
 }
 
 /// The scene of sheet `record`: its border, then `images`, then each of `views` (its id, centre and
-/// lines, in id order) moved to its centre, then its title block, its symbol in `projection`. A view
-/// that would take the scene past a paper scene's limits is left out and says why, and the views after
-/// it are still drawn when they fit.
+/// lines, in id order) moved to its centre, then its title block, with `logos` under its lines and its
+/// symbol in `projection`. A view that would take the scene past a paper scene's limits is left out and
+/// says why, and the views after it are still drawn when they fit.
 fn assemble<D: Borrow<Drawn>>(
     record: &Sheet,
     projection: Projection,
     images: &[Group],
+    logos: &[Item],
     views: impl Iterator<Item = (u64, Vec2, D)>,
 ) -> Result<(Scene, Vec<ViewState>)> {
     let size_mm = record.sheet.size_mm().map_err(|e| bad(CMD, e.to_string()))?;
@@ -178,7 +180,11 @@ fn assemble<D: Borrow<Drawn>>(
     // The block sits on the border. It's painted over the views, but counted with the border, so no
     // view takes its records.
     let block = match (&record.title_block, &layout) {
-        (Some(block), Some(layout)) => Some(block.layout(layout).map_err(|e| bad(CMD, e.to_string()))?.paper(record.id, projection)),
+        (Some(block), Some(layout)) => {
+            let mut group = block.layout(layout).map_err(|e| bad(CMD, e.to_string()))?.paper(record.id, projection);
+            group.items.splice(0..0, logos.iter().cloned());
+            Some(group)
+        }
         _ => None,
     };
     let mut records = border.iter().chain(&block).map(Group::records).fold(0usize, usize::saturating_add);
@@ -290,13 +296,14 @@ struct Entry {
 }
 
 /// What a scene is assembled from: the sheet's record, the drawing's projection (its title block's
-/// symbol), the images on it, and each view on it with its entry's serial (0: not drawn yet) and its
-/// centre.
+/// symbol), the images and logos on it, and each view on it with its entry's serial (0: not drawn
+/// yet) and its centre.
 #[derive(PartialEq)]
 struct Inputs {
     sheet: Sheet,
     projection: Projection,
     images: Vec<Group>,
+    logos: Vec<Item>,
     views: Vec<(u64, u64, Vec2)>,
 }
 
@@ -344,6 +351,7 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
         sheet: record.clone(),
         projection: d.projection,
         images,
+        logos: crate::drawing_pictures::logo_items(&d, sheet),
         views: on.iter().map(|(id, _, centre)| (*id, serial(id), *centre)).collect(),
     };
     let (scene, views, generation) = match cache.last.take() {
@@ -353,7 +361,7 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
             let kept: BTreeSet<u64> = d.views.iter().map(|v| v.id).collect();
             cache.views.retain(|id, _| kept.contains(id));
             let drawn = on.iter().filter_map(|(id, _, centre)| cache.views.get(id).map(|e| (*id, *centre, &e.drawn)));
-            let (scene, views) = assemble(record, d.projection, &inputs.images, drawn)?;
+            let (scene, views) = assemble(record, d.projection, &inputs.images, &inputs.logos, drawn)?;
             (Arc::new(scene), views, GENERATION.fetch_add(1, Ordering::Relaxed).wrapping_add(1))
         }
     };
