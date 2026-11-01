@@ -1832,18 +1832,24 @@ pub fn drawn_joints(app: &SolveApp) -> Vec<(u64, bool)> {
         .collect()
 }
 
-/// Joint glyphs in the viewport: a ring where the joint sits, its motion axis, and its limits
-/// (ticks on the ring for a turn, along the axis for a slide). Glyphs are only drawn; they are
-/// never picked in the viewport.
+/// Joint glyphs in the viewport: a round badge with the pictogram of the joint's type
+/// (`joint_symbols`), the same size wherever it sits, in the style Preferences picks. Joints that
+/// don't let their parts move draw quiet, and a joint with a limit has a mark on its rim. A picked
+/// joint's badge is larger and filled, drawn over the others, with its motion in the model around
+/// it ([`joint_guide`]). The [`RING_AND_AXIS`] style draws [`joint_ring`] instead. Glyphs are only
+/// drawn; they are never picked in the viewport.
 pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
-    let drawn = drawn_joints(app);
+    let mut drawn = drawn_joints(app);
     if drawn.is_empty() {
         return;
     }
+    drawn.sort_by_key(|(_, picked)| *picked);
     let t = Tokens::get();
+    let rings = app.preferences.joint_symbols == RING_AND_AXIS;
+    let bright = (app.preferences.highlight_moving_joints && !rings).then(|| crate::joint_symbols::bright(&app.session));
     let frames = joint_frames_world(&app.session);
     let len = app.cam.half_height() * 2.0 * 0.05;
-    let at = |m: &solidcraft_engine::doc::Mat, x: f64, y: f64, z: f64| solidcraft_engine::doc::apply_point(m, Vec3::new(x, y, z));
+    let at = |m: &solidcraft_engine::doc::Mat, p: [f64; 3]| solidcraft_engine::doc::apply_point(m, Vec3::new(p[0], p[1], p[2]));
     for (id, picked) in drawn {
         let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == id) else { continue };
         let Some((_, m)) = frames.iter().find(|(f, _)| *f == id) else { continue };
@@ -1854,44 +1860,164 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         } else {
             t.accent
         };
-        let width = if picked { 2.5 } else { 1.5 };
-        let stroke = Stroke::new(width, col);
-        let Some(c) = proj.to_screen(at(m, 0.0, 0.0, 0.0)) else { continue };
-        // The motion axis (z), both ways.
-        if let (Some(a), Some(b)) = (proj.to_screen(at(m, 0.0, 0.0, -len)), proj.to_screen(at(m, 0.0, 0.0, len))) {
-            painter.line_segment([a, b], stroke);
+        if rings {
+            joint_ring(painter, proj, j, m, len, col, picked);
+            continue;
         }
-        // A ring about the axis.
-        let r = len * 0.5;
-        let ring: Vec<Pos2> = (0..=32)
-            .filter_map(|k| {
-                let a = k as f64 / 32.0 * std::f64::consts::TAU;
-                proj.to_screen(at(m, r * a.cos(), r * a.sin(), 0.0))
-            })
-            .collect();
-        if ring.len() > 1 {
-            painter.add(egui::Shape::line(ring, stroke));
+        let Some(c) = proj.to_screen(at(m, [0.0; 3])) else { continue };
+        if picked {
+            joint_guide(painter, proj, j, m, len, col);
         }
-        // Limits: ticks across the ring for a turn, across the axis (or slot) for a slide.
-        for (i, lim) in j.limits.iter().enumerate() {
-            let Some((lo, hi)) = lim else { continue };
-            let name = j.kind.dofs().get(i).copied().unwrap_or("");
-            for v in [*lo, *hi] {
-                if !v.is_finite() {
-                    continue;
-                }
-                let (p, q) = match name {
-                    "angle" => ((v.cos() * r * 0.7, v.sin() * r * 0.7, 0.0), (v.cos() * r * 1.3, v.sin() * r * 1.3, 0.0)),
-                    "distance" if v.abs() < 1e6 => ((-r * 0.3, 0.0, v), (r * 0.3, 0.0, v)),
-                    "slide" if v.abs() < 1e6 => ((v, -r * 0.3, 0.0), (v, r * 0.3, 0.0)),
-                    _ => continue,
-                };
-                if let (Some(p), Some(q)) = (proj.to_screen(at(m, p.0, p.1, p.2)), proj.to_screen(at(m, q.0, q.1, q.2))) {
-                    painter.line_segment([p, q], Stroke::new(width, t.warning));
-                }
+        let quiet = !bright.as_ref().is_none_or(|joints| joints.contains(&id));
+        let look = if picked {
+            Badge { radius: 17.0, half: 11.0, fill: col, ring: (1.0, col), ink: (2.0, t.panel) }
+        } else if j.suppressed {
+            let dim = t.text_dim.gamma_multiply(0.5);
+            Badge { radius: 13.0, half: 8.5, fill: t.panel.gamma_multiply(0.85), ring: (1.0, dim), ink: (1.5, dim) }
+        } else if quiet {
+            Badge { radius: 13.0, half: 8.5, fill: t.panel.gamma_multiply(0.85), ring: (1.0, t.text_dim.gamma_multiply(0.6)), ink: (1.5, t.text_dim) }
+        } else {
+            let (fill, ring, ink) = match app.preferences.joint_symbols {
+                1 => (t.accent, (1.0, t.on_accent), t.on_accent),
+                2 => (t.warning, (1.0, t.panel), t.panel),
+                _ => (t.panel, (2.0, t.accent), t.text),
+            };
+            Badge { radius: 13.0, half: 8.5, fill, ring, ink: (2.0, ink) }
+        };
+        let (radius, half, ink) = (look.radius, look.half, look.ink.1);
+        if picked {
+            painter.circle_stroke(c, radius + 3.5, Stroke::new(2.0, t.text));
+        }
+        painter.circle(c, radius, look.fill, Stroke::new(look.ring.0, look.ring.1));
+        // x runs along the joint's travel as it looks from here, y to its upper side.
+        let travel = crate::joint_symbols::along(j.kind).and_then(|d| proj.to_screen(at(m, d.map(|v| v * len)))).map(|tip| tip - c);
+        let x = travel.filter(|d| d.length() > 4.0).map_or(vec2(1.0, 0.0), |d| if d.x < 0.0 { -d.normalized() } else { d.normalized() });
+        let y = vec2(x.y, -x.x);
+        let place = |p: [f32; 2]| c + (x * p[0] + y * p[1]) * half;
+        let symbol = crate::joint_symbols::symbol(j.kind);
+        for line in symbol.lines {
+            painter.add(egui::Shape::line(line.into_iter().map(place).collect(), Stroke::new(look.ink.0, ink)));
+        }
+        for (centre, r) in symbol.dots {
+            painter.circle_filled(place(centre), r * half, ink);
+        }
+        // A limit marks the rim, on bright and quiet badges alike.
+        if crate::joint_symbols::has_limit(j) {
+            let mark = if app.preferences.joint_symbols == 2 { t.text } else { t.warning };
+            painter.circle(c + vec2(0.7, -0.7) * radius, 4.0, mark, Stroke::new(1.5, t.panel));
+        }
+    }
+}
+
+/// The `joint_symbols` style that draws a ring and axis in the model in place of a badge.
+pub const RING_AND_AXIS: u8 = 3;
+
+/// How a joint's badge looks: its size, fill, and the width and colour of its ring and symbol.
+struct Badge {
+    radius: f32,
+    half: f32,
+    fill: Color32,
+    ring: (f32, Color32),
+    ink: (f32, Color32),
+}
+
+/// A picked joint's motion in the model: its axis, a ring where it turns, its slot, and its limits
+/// (ticks on the ring for a turn, along the axis or slot for a slide).
+fn joint_guide(
+    painter: &egui::Painter,
+    proj: &Proj,
+    j: &solidcraft_engine::doc::joints::Joint,
+    m: &solidcraft_engine::doc::Mat,
+    len: f64,
+    col: Color32,
+) {
+    if j.kind == JointKind::Rigid {
+        return;
+    }
+    let screen = |x: f64, y: f64, z: f64| proj.to_screen(solidcraft_engine::doc::apply_point(m, Vec3::new(x, y, z)));
+    let stroke = Stroke::new(1.5, col);
+    let r = len * 1.2;
+    let mut lines = vec![[(0.0, 0.0, -len * 2.0), (0.0, 0.0, len * 2.0)]];
+    if j.kind == JointKind::PinSlot {
+        lines.push([(-len * 2.0, 0.0, 0.0), (len * 2.0, 0.0, 0.0)]);
+    }
+    for [p, q] in lines {
+        if let (Some(p), Some(q)) = (screen(p.0, p.1, p.2), screen(q.0, q.1, q.2)) {
+            painter.line_segment([p, q], stroke);
+        }
+    }
+    if j.kind.dofs().contains(&"angle") {
+        motion_ring(painter, &screen, r, stroke);
+    }
+    limit_ticks(painter, &screen, j, r, 0.15, 2.5);
+}
+
+/// The `joint_symbols` style with no badge: a ring where the joint sits, its motion axis, and its
+/// limits, at a set share of the view whatever the joint's type.
+fn joint_ring(
+    painter: &egui::Painter,
+    proj: &Proj,
+    j: &solidcraft_engine::doc::joints::Joint,
+    m: &solidcraft_engine::doc::Mat,
+    len: f64,
+    col: Color32,
+    picked: bool,
+) {
+    let screen = |x: f64, y: f64, z: f64| proj.to_screen(solidcraft_engine::doc::apply_point(m, Vec3::new(x, y, z)));
+    let width = if picked { 2.5 } else { 1.5 };
+    let stroke = Stroke::new(width, col);
+    let Some(c) = screen(0.0, 0.0, 0.0) else { return };
+    if let (Some(a), Some(b)) = (screen(0.0, 0.0, -len), screen(0.0, 0.0, len)) {
+        painter.line_segment([a, b], stroke);
+    }
+    let r = len * 0.5;
+    motion_ring(painter, &screen, r, stroke);
+    limit_ticks(painter, &screen, j, r, 0.3, width);
+    painter.circle(c, if picked { 4.5 } else { 3.5 }, Tokens::get().panel, stroke);
+}
+
+/// A ring of radius `r` about a joint's axis.
+fn motion_ring(painter: &egui::Painter, screen: &impl Fn(f64, f64, f64) -> Option<Pos2>, r: f64, stroke: Stroke) {
+    let ring: Vec<Pos2> = (0..=48)
+        .filter_map(|k| {
+            let a = k as f64 / 48.0 * std::f64::consts::TAU;
+            screen(r * a.cos(), r * a.sin(), 0.0)
+        })
+        .collect();
+    if ring.len() > 1 {
+        painter.add(egui::Shape::line(ring, stroke));
+    }
+}
+
+/// A joint's limits: ticks across a ring of radius `r` for a turn, across the axis or slot for a
+/// slide, each reaching `reach` of `r` to either side.
+fn limit_ticks(
+    painter: &egui::Painter,
+    screen: &impl Fn(f64, f64, f64) -> Option<Pos2>,
+    j: &solidcraft_engine::doc::joints::Joint,
+    r: f64,
+    reach: f64,
+    width: f32,
+) {
+    let t = Tokens::get();
+    let (near, far, side) = (r * (1.0 - reach), r * (1.0 + reach), r * reach);
+    for (i, lim) in j.limits.iter().enumerate() {
+        let Some((lo, hi)) = lim else { continue };
+        let name = j.kind.dofs().get(i).copied().unwrap_or("");
+        for v in [*lo, *hi] {
+            if !v.is_finite() {
+                continue;
+            }
+            let (p, q) = match name {
+                "angle" => ((v.cos() * near, v.sin() * near, 0.0), (v.cos() * far, v.sin() * far, 0.0)),
+                "distance" | "slide" if j.kind != JointKind::PinSlot && v.abs() < 1e6 => ((-side, 0.0, v), (side, 0.0, v)),
+                "slide" if v.abs() < 1e6 => ((v, -side, 0.0), (v, side, 0.0)),
+                _ => continue,
+            };
+            if let (Some(p), Some(q)) = (screen(p.0, p.1, p.2), screen(q.0, q.1, q.2)) {
+                painter.line_segment([p, q], Stroke::new(width, t.warning));
             }
         }
-        painter.circle(c, if picked { 4.5 } else { 3.5 }, t.panel, stroke);
     }
 }
 

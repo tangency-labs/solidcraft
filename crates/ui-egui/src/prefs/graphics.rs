@@ -217,7 +217,14 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::dropdown(ui, "pref_style", &mut selected, &["Shaded with edges", "Shaded", "Wireframe", "Shaded with hidden edges"]);
                 app.ui.visual_style = selected as u8;
             });
+            ui_kit::row(ui, app.tr_label("Joint symbols"), |ui| {
+                let mut selected = usize::from(app.preferences.joint_symbols.min(crate::dialogs_assembly::RING_AND_AXIS));
+                ui_kit::dropdown(ui, "pref_joint_symbols", &mut selected, &["White on dark", "Solid accent", "Solid amber", "Ring and axis"]);
+                app.preferences.joint_symbols = selected as u8;
+            });
         });
+        let response = setting::highlight_moving_joints(app, ui).on_hover_text(app.tr("prefs.highlight_moving_joints_help"));
+        crate::scenario::publish_handle("prefs:highlight_moving_joints", response.rect.center());
     });
     #[cfg(target_os = "linux")]
     ui_kit::settings_section(ui, "window_system", app.tr("ui.window_system"), |ui| window_system_row(app, ui));

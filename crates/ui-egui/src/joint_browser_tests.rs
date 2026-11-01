@@ -10,6 +10,135 @@ use crate::context_menu::{self, Target};
 use crate::scenario::Harness;
 use crate::test_support::click;
 
+/// What `joint_glyphs` paints for the design as it stands.
+fn joint_shapes(h: &Harness) -> Vec<egui::Shape> {
+    let ctx = crate::fonts::test_context();
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let cam = h.app.cam;
+    let proj = crate::viewport::Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect };
+    let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
+        let painter = ui.painter().clone();
+        crate::dialogs_assembly::joint_glyphs(&h.app, &painter, &proj);
+    });
+    out.textures_delta.clear();
+    out.shapes.into_iter().map(|clipped| clipped.shape).collect()
+}
+
+/// How many circles of this radius and rim width are painted.
+fn circles(shapes: &[egui::Shape], radius: f32, width: f32) -> usize {
+    shapes.iter().filter(|s| matches!(s, egui::Shape::Circle(c) if c.radius == radius && c.stroke.width == width)).count()
+}
+
+/// A moving joint's badge has the wide rim and a rigid one the thin rim, until Highlight moving
+/// joints is off. The ring and axis style is the look from before badges: no badges, and no
+/// difference between a joint that moves and one that doesn't.
+#[test]
+fn joint_styles_draw_badges_or_the_old_ring_and_axis() {
+    let mut h = harness();
+    let shapes = joint_shapes(&h);
+    assert_eq!((circles(&shapes, 13.0, 2.0), circles(&shapes, 13.0, 1.0)), (1, 1), "the hinge glows and the rigid joint is quiet");
+
+    h.app.preferences.highlight_moving_joints = false;
+    assert_eq!(circles(&joint_shapes(&h), 13.0, 2.0), 2, "off, both draw alike");
+
+    h.app.preferences.joint_symbols = crate::dialogs_assembly::RING_AND_AXIS;
+    for highlight in [false, true] {
+        h.app.preferences.highlight_moving_joints = highlight;
+        let shapes = joint_shapes(&h);
+        assert_eq!(circles(&shapes, 3.5, 1.5), 2, "a dot on each joint's ring");
+        assert!(shapes.iter().all(|s| !matches!(s, egui::Shape::Circle(c) if c.radius >= 13.0)), "and no badge");
+    }
+}
+
+#[test]
+fn every_joint_type_has_its_own_symbol() {
+    use solidcraft_engine::doc::joints::JointKind;
+    let types = crate::dialogs_assembly::TYPES;
+    let symbols: Vec<_> = types.iter().map(|t| crate::joint_symbols::symbol(JointKind::parse(t).unwrap())).collect();
+    for (i, (name, symbol)) in types.iter().zip(&symbols).enumerate() {
+        assert!(symbol.lines.iter().all(|line| line.len() > 1) && !symbol.lines.is_empty(), "{name} draws nothing");
+        assert!(symbols.iter().skip(i + 1).all(|other| other != symbol), "{name} shares its symbol");
+    }
+}
+
+/// Which joints draw bright: those that let their parts move, and once limits stop all a pair's
+/// freedom, only the joints with the limits.
+#[test]
+fn bright_joints_are_the_ones_that_let_their_parts_move() {
+    use solidcraft_engine::doc::joints::{Joint, JointKind};
+    use std::collections::BTreeMap;
+    let h = harness();
+    let template = h.app.session.doc.assembly.joints[0].clone();
+    let (ground, part, other) = (template.a.occurrence, template.b.occurrence, u64::MAX);
+    let joint = |id: u64, kind: JointKind, limits: usize| {
+        let mut j: Joint = template.clone();
+        (j.id, j.kind, j.suppressed) = (id, kind, false);
+        j.limits = vec![Some((-1.0, 1.0)); limits];
+        j
+    };
+    let dof = |n: usize| BTreeMap::from([(ground, 0), (part, n), (other, n + 1)]);
+    let bright = |joints: &[Joint], n: usize| crate::joint_symbols::bright_joints(joints, &dof(n), &BTreeMap::new()).into_iter().collect::<Vec<_>>();
+    let (one, two) = (joint(1, JointKind::Parallel, 0), joint(2, JointKind::PointOnPlane, 0));
+
+    assert_eq!(bright(&[one.clone(), two.clone()], 1), [1, 2], "a free axis is left: both still glow");
+    assert_eq!(bright(&[one.clone(), two.clone(), joint(3, JointKind::PointOnLine, 0)], 0), Vec::<u64>::new(), "fully held: all go quiet");
+    assert_eq!(bright(&[one.clone(), two.clone(), joint(3, JointKind::PointOnLine, 1)], 1), [3], "the limit takes the free axis");
+    assert_eq!(bright(&[one.clone(), two.clone(), joint(3, JointKind::PointOnLine, 1)], 2), [1, 2, 3], "an axis is left unstopped");
+    assert_eq!(bright(&[one.clone(), joint(3, JointKind::PointOnLine, 1)], 0), Vec::<u64>::new(), "a limit doesn't glow on a held part");
+    assert_eq!(bright(&[joint(1, JointKind::Rigid, 0)], 1), Vec::<u64>::new(), "a rigid joint moves with its parts, it doesn't move them");
+
+    // A limit on the joint to a third part says nothing about this pair.
+    let mut beyond = joint(3, JointKind::Revolute, 1);
+    (beyond.a.occurrence, beyond.b.occurrence) = (part, other);
+    assert_eq!(bright(&[joint(1, JointKind::Slider, 0), beyond], 1), [1, 3]);
+
+    let mut off = joint(1, JointKind::Slider, 0);
+    off.suppressed = true;
+    assert_eq!(bright(&[off], 1), Vec::<u64>::new());
+
+    // Parts locked together are quiet however much they move as one in the world.
+    let pair = (ground.min(part), ground.max(part));
+    let locked = crate::joint_symbols::bright_joints(&[joint(1, JointKind::Slider, 0)], &dof(2), &BTreeMap::from([(pair, 0)]));
+    assert!(locked.is_empty(), "the pair's own freedom decides, not the world's");
+}
+
+/// A slider that another joint locks goes quiet though both of its parts still ride on a moving
+/// axis, as a spindle plate locked to a carriage does: they have freedom in the world, but none
+/// against each other.
+#[test]
+fn parts_locked_together_on_a_moving_axis_go_quiet() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    crate::test_support::grounded_boxes(&[("A", 0), ("B", 30), ("C", 60)], |id, p| h.app.run(id, p).unwrap());
+    h.app.run("joint.as_built", json!({"type": "slider", "name": "Axis", "a": "A:1", "b": "B:1", "at": {"point": [30, 10, 5]}})).unwrap();
+    h.app.run("joint.as_built", json!({"type": "slider", "name": "Second", "a": "B:1", "b": "C:1", "at": {"point": [60, 10, 5]}})).unwrap();
+    h.frames(2);
+    let [axis, second] = ["Axis", "Second"].map(|name| id(&h, name));
+    let bright = |h: &Harness| crate::joint_symbols::bright(&h.app.session).iter().copied().collect::<Vec<_>>();
+    assert_eq!(bright(&h), [axis, second], "each slider moves its part against the other");
+
+    h.app.run("joint.as_built", json!({"type": "rigid", "name": "Lock", "a": "B:1", "b": "C:1", "at": {"point": [60, 10, 2]}})).unwrap();
+    h.frames(2);
+    let solved = solidcraft_engine::doc::joints::solve(&h.app.session.doc, &h.app.session.model.state());
+    let c = occurrence(&h, "C:1");
+    assert_eq!(solved.dof.get(&c), Some(&1), "C still rides on the first axis");
+    assert_eq!(bright(&h), [axis], "and it is locked to B, so their slider has nothing left to do");
+}
+
+/// The answer comes from the solver, and stays until the construction changes.
+#[test]
+fn the_bright_joints_follow_the_design() {
+    let mut h = harness();
+    let (hinge, glue) = (id(&h, "Hinge"), id(&h, "Glue"));
+    let bright = |h: &Harness| crate::joint_symbols::bright(&h.app.session).iter().copied().collect::<Vec<_>>();
+    assert_eq!(bright(&h), [hinge], "the hinge turns B, and the rigid Glue draws quiet");
+    h.app.run("joint.drive", json!({"joint": "Hinge", "value": 30})).unwrap();
+    assert_eq!(bright(&h), [hinge], "driving it changes no construction");
+    h.app.run("joint.edit", json!({"joint": "Hinge", "suppressed": true})).unwrap();
+    assert!(bright(&h).is_empty());
+    assert!(crate::joint_symbols::bright(&h.app.session).get(&glue).is_none());
+}
+
 /// Components A (grounded) and B joined by a revolute "Hinge", and C held by a rigid "Glue".
 fn harness() -> Harness {
     let mut h = Harness::new();
@@ -28,6 +157,10 @@ fn harness() -> Harness {
 
 fn id(h: &Harness, name: &str) -> u64 {
     h.app.session.doc.assembly.joints.iter().find(|j| j.name == name).unwrap().id
+}
+
+fn occurrence(h: &Harness, name: &str) -> u64 {
+    h.app.session.doc.occurrences.iter().find(|o| o.name == name).unwrap().id
 }
 
 fn drawn(h: &Harness) -> Vec<(u64, bool)> {

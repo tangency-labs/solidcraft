@@ -920,6 +920,8 @@ pub enum Analysis {
     Placement,
     /// Also count each occurrence's remaining motion, including nearby singular poses.
     DegreesOfFreedom,
+    /// Also count how each pair of parts a moving joint joins moves against each other.
+    PairFreedom,
 }
 
 /// The result of placing occurrences by their joints.
@@ -940,6 +942,11 @@ pub struct Solution {
     /// motion link sets moving with the values its link chain starts from (a driven gear has its
     /// driving gear's one, a screw's travel its turn's). Empty for [`Analysis::Placement`].
     pub dof: BTreeMap<u64, usize>,
+    /// Remaining degrees of freedom of each pair of occurrences a moving joint joins, lowest id
+    /// first, against each other: a part locked to one that moves has 0 here and its partner's
+    /// count in `dof`. Only for [`Analysis::PairFreedom`], and without a pair over the caps.
+    #[serde(skip)]
+    pub pair_dof: BTreeMap<(u64, u64), usize>,
     /// Occurrences fixed in place (grounded, or the root's).
     pub fixed: Vec<u64>,
 }
@@ -1525,110 +1532,187 @@ fn loop_dof(tree: &Tree, closing: &[u64], asm: &Assembly, vals: &Values, dof: &m
     let near = (!candidates.is_empty()).then(|| nearby_pose(tree, &groups, asm, &linked, vals)).filter(|n| n != vals);
     for occ in tree.order.iter().filter(|o| candidates.contains(o)) {
         let path: Vec<u64> = tree.path(*occ).1.iter().map(|(k, _)| *k).collect();
-        let (mut values, mut have): (Vec<(u64, usize)>, BTreeSet<(u64, usize)>) = (Vec::new(), BTreeSet::new());
-        let mut add = |values: &mut Vec<(u64, usize)>, v: (u64, usize)| {
-            if have.insert(v) {
-                values.push(v);
-            }
-        };
-        for j in path.iter().filter_map(|k| tree.joints.get(k)) {
-            for v in (0..j.kind.dofs().len()).map(|i| (j.id, i)).filter(|v| !linked.contains(v)) {
-                add(&mut values, v);
-            }
-            if values.len() > MAX_LOOP_VALUES {
-                break;
-            }
-        }
-        if values.len() > MAX_LOOP_VALUES {
-            continue;
-        }
-        // A value on the path a motion link sets moves with the values its link chain starts from.
-        let on_path: BTreeSet<u64> = path.iter().copied().collect();
-        for v in link_chains(asm, tree, &on_path, &linked).1 {
-            add(&mut values, v);
-        }
-        // The loops on the path, and every loop whose values those reach (a linked source may be
-        // held by a loop of its own), each once.
-        let (mut closers, mut around) = (Vec::new(), BTreeSet::new());
-        let mut taken: BTreeSet<usize> = BTreeSet::new();
-        loop {
-            let more: Vec<usize> = groups
-                .iter()
-                .enumerate()
-                .filter(|(g, _)| !taken.contains(g))
-                .filter(|(_, (_, a, t))| path.iter().any(|k| a.contains(k)) || t.iter().any(|v| values.contains(v)))
-                .map(|(g, _)| g)
-                .collect();
-            if more.is_empty() {
-                break;
-            }
-            for (c, a, _) in more.iter().filter_map(|g| groups.get(*g)) {
-                closers.extend(c.iter().copied());
-                around.extend(a.iter().copied());
-                for v in unknowns(tree, a, asm, &linked, &Held::new()) {
-                    add(&mut values, v);
-                }
-            }
-            taken.extend(more);
-        }
+        let Some(reach) = loop_reach(tree, asm, &groups, &linked, &path) else { continue };
         // No loop reaches this occurrence's values (not even through a motion link it drives):
         // the tree's count stands.
-        if taken.is_empty() {
+        if reach.closers.is_empty() {
             continue;
         }
         counted += 1;
         if counted > MAX_DOF_OCCURRENCES || spent > MAX_LOOP_WORK {
             return;
         }
-        if values.len() > MAX_LOOP_VALUES {
+        if reach.values.len() > MAX_LOOP_VALUES {
             continue;
         }
-        let scale = loop_scale(tree, &around, vals);
-        let (n, gaps) = (values.len(), closers.len() * 9);
-        // How many ways the occurrence moves at a pose, with the loops kept closed.
-        let mut free_at = |at: &Values| -> Option<usize> {
-            let mut workspace = PlacementWorkspace::new(tree);
-            let mut work = at.clone();
-            // The loops' gaps, then three points of the occurrence `scale` apart.
-            let mut f = |x: &[f64]| -> Option<Vec<f64>> {
-                spent += 1;
-                for ((id, i), v) in values.iter().zip(x) {
-                    if let Some(slot) = work.get_mut(id).and_then(|q| q.get_mut(*i)) {
-                        *slot = *v;
-                    }
-                }
-                apply_links(asm, &mut work);
-                let mut out = Vec::with_capacity(closers.len() * 9 + 9);
-                let mut placed = workspace.at(&work);
-                placed.closure_gaps(&closers, scale, &mut out)?;
-                let t = placed.world(*occ)?;
-                for p in [Vec3::ZERO, Vec3::X * scale, Vec3::Y * scale] {
-                    let q = apply_point(&t, p);
-                    out.extend([q.x, q.y, q.z]);
-                }
-                out.iter().all(|v| v.is_finite()).then_some(out)
-            };
-            let x0: Vec<f64> = values.iter().map(|(id, i)| at.get(id).and_then(|q| q.get(*i)).copied().unwrap_or(0.0)).collect();
-            let jac = jacobian(&mut f, &x0, gaps + 9)?;
-            let rank = |rows: usize| {
-                let mut a = linalg::Mat::zeros(rows, n);
-                let mut big = 0.0f64;
-                for r in 0..rows {
-                    for c in 0..n {
-                        let v = jac.get(r * n + c).copied().unwrap_or(0.0);
-                        big = big.max(v.abs());
-                        a.set(r, c, v);
-                    }
-                }
-                linalg::rref(&mut a, 1e-6 * big.max(1.0)).len()
-            };
-            Some(rank(gaps + 9).saturating_sub(rank(gaps)))
-        };
-        let here = free_at(vals);
-        let there = near.as_ref().and_then(&mut free_at);
-        let Some(free) = here.max(there) else { continue };
+        let scale = loop_scale(tree, &reach.around, vals);
+        let Some(free) = free_motion(tree, asm, vals, near.as_ref(), &mut spent, &reach, scale, Watched::Occurrence(*occ)) else { continue };
         dof.insert(*occ, free.min(6));
     }
+}
+
+/// The values that move what a tree path leads to, and the loops those values are held by.
+struct LoopReach {
+    values: Vec<(u64, usize)>,
+    closers: Vec<u64>,
+    around: BTreeSet<u64>,
+}
+
+/// What [`free_motion`] counts the motion of.
+#[derive(Clone, Copy)]
+enum Watched {
+    Occurrence(u64),
+    /// The second occurrence against the first.
+    Pair(u64, u64),
+}
+
+/// What moves the joints on `path`: their values and the unknowns of the loops on it. `None` when
+/// the path alone has more values than a count takes on.
+fn loop_reach(tree: &Tree, asm: &Assembly, groups: &[Group], linked: &BTreeSet<(u64, usize)>, path: &[u64]) -> Option<LoopReach> {
+    let (mut values, mut have): (Vec<(u64, usize)>, BTreeSet<(u64, usize)>) = (Vec::new(), BTreeSet::new());
+    let mut add = |values: &mut Vec<(u64, usize)>, v: (u64, usize)| {
+        if have.insert(v) {
+            values.push(v);
+        }
+    };
+    for j in path.iter().filter_map(|k| tree.joints.get(k)) {
+        for v in (0..j.kind.dofs().len()).map(|i| (j.id, i)).filter(|v| !linked.contains(v)) {
+            add(&mut values, v);
+        }
+        if values.len() > MAX_LOOP_VALUES {
+            break;
+        }
+    }
+    if values.len() > MAX_LOOP_VALUES {
+        return None;
+    }
+    // A value on the path a motion link sets moves with the values its link chain starts from.
+    let on_path: BTreeSet<u64> = path.iter().copied().collect();
+    for v in link_chains(asm, tree, &on_path, linked).1 {
+        add(&mut values, v);
+    }
+    // The loops on the path, and every loop whose values those reach (a linked source may be
+    // held by a loop of its own), each once.
+    let (mut closers, mut around) = (Vec::new(), BTreeSet::new());
+    let mut taken: BTreeSet<usize> = BTreeSet::new();
+    loop {
+        let more: Vec<usize> = groups
+            .iter()
+            .enumerate()
+            .filter(|(g, _)| !taken.contains(g))
+            .filter(|(_, (_, a, t))| path.iter().any(|k| a.contains(k)) || t.iter().any(|v| values.contains(v)))
+            .map(|(g, _)| g)
+            .collect();
+        if more.is_empty() {
+            break;
+        }
+        for (c, a, _) in more.iter().filter_map(|g| groups.get(*g)) {
+            closers.extend(c.iter().copied());
+            around.extend(a.iter().copied());
+            for v in unknowns(tree, a, asm, linked, &Held::new()) {
+                add(&mut values, v);
+            }
+        }
+        taken.extend(more);
+    }
+    Some(LoopReach { values, closers, around })
+}
+
+/// How many ways `watched` can still move with every loop kept closed, the rank of its placement
+/// over the values once the loops' closure is taken out, at the pose and at the pose `near`; the
+/// larger count stands. `scale` is the size of the mechanism, in mm.
+fn free_motion(
+    tree: &Tree,
+    asm: &Assembly,
+    vals: &Values,
+    near: Option<&Values>,
+    spent: &mut usize,
+    reach: &LoopReach,
+    scale: f64,
+    watched: Watched,
+) -> Option<usize> {
+    let LoopReach { values, closers, .. } = reach;
+    let (n, gaps) = (values.len(), closers.len() * 9);
+    // How many ways it moves at a pose, with the loops kept closed.
+    let mut free_at = |at: &Values| -> Option<usize> {
+        let mut workspace = PlacementWorkspace::new(tree);
+        let mut work = at.clone();
+        // The loops' gaps, then three points of what is watched `scale` apart.
+        let mut f = |x: &[f64]| -> Option<Vec<f64>> {
+            *spent += 1;
+            for ((id, i), v) in values.iter().zip(x) {
+                if let Some(slot) = work.get_mut(id).and_then(|q| q.get_mut(*i)) {
+                    *slot = *v;
+                }
+            }
+            apply_links(asm, &mut work);
+            let mut out = Vec::with_capacity(closers.len() * 9 + 9);
+            let mut placed = workspace.at(&work);
+            placed.closure_gaps(closers, scale, &mut out)?;
+            let t = match watched {
+                Watched::Occurrence(occ) => placed.world(occ)?,
+                Watched::Pair(a, b) => {
+                    let against = placed.world(a)?;
+                    mat_mul(&crate::mat_inverse(&against)?, &placed.world(b)?)
+                }
+            };
+            for p in [Vec3::ZERO, Vec3::X * scale, Vec3::Y * scale] {
+                let q = apply_point(&t, p);
+                out.extend([q.x, q.y, q.z]);
+            }
+            out.iter().all(|v| v.is_finite()).then_some(out)
+        };
+        let x0: Vec<f64> = values.iter().map(|(id, i)| at.get(id).and_then(|q| q.get(*i)).copied().unwrap_or(0.0)).collect();
+        let jac = jacobian(&mut f, &x0, gaps + 9)?;
+        let rank = |rows: usize| {
+            let mut a = linalg::Mat::zeros(rows, n);
+            let mut big = 0.0f64;
+            for r in 0..rows {
+                for c in 0..n {
+                    let v = jac.get(r * n + c).copied().unwrap_or(0.0);
+                    big = big.max(v.abs());
+                    a.set(r, c, v);
+                }
+            }
+            linalg::rref(&mut a, 1e-6 * big.max(1.0)).len()
+        };
+        Some(rank(gaps + 9).saturating_sub(rank(gaps)))
+    };
+    let here = free_at(vals);
+    let there = near.and_then(&mut free_at);
+    here.max(there)
+}
+
+/// How many ways each pair of occurrences can still move against each other, with every loop kept
+/// closed: 0 when the joints have locked them together, however they move as one against the
+/// fixed parts. A pair over the solver's caps is left out.
+fn pair_dof(tree: &Tree, closing: &[u64], asm: &Assembly, vals: &Values, pairs: &BTreeSet<(u64, u64)>) -> BTreeMap<(u64, u64), usize> {
+    let mut out = BTreeMap::new();
+    if closing.len() > MAX_CLOSING {
+        return out;
+    }
+    let linked = set_values(asm);
+    let mut groups = loop_groups(tree, closing, asm, &linked);
+    groups.retain(|(c, _, _)| c.len() <= MAX_LOOPS);
+    let near = (!groups.is_empty()).then(|| nearby_pose(tree, &groups, asm, &linked, vals)).filter(|n| n != vals);
+    let mut spent = 0usize;
+    for (a, b) in pairs.iter().copied().take(MAX_DOF_OCCURRENCES) {
+        if spent > MAX_LOOP_WORK {
+            break;
+        }
+        let mut path: Vec<u64> = tree.path(a).1.iter().map(|(k, _)| *k).collect();
+        for (k, _) in tree.path(b).1 {
+            if !path.contains(&k) {
+                path.push(k);
+            }
+        }
+        let Some(reach) = loop_reach(tree, asm, &groups, &linked, &path).filter(|r| r.values.len() <= MAX_LOOP_VALUES) else { continue };
+        let scale = loop_scale(tree, &reach.around.iter().copied().chain(path.iter().copied()).collect(), vals);
+        if let Some(free) = free_motion(tree, asm, vals, near.as_ref(), &mut spent, &reach, scale, Watched::Pair(a, b)) {
+            out.insert((a, b), free.min(6));
+        }
+    }
+    out
 }
 
 /// Close one group of loops: move the values of the joints `around` them (all but the `held`
@@ -1897,7 +1981,12 @@ pub fn solve_holding_with_analysis(doc: &Document, st: &ModelState, held: &Held,
             sol.conflicts.push((j.id, j.name.clone(), "the loop can't stay closed on the way to these values".into()));
         }
     }
-    if analysis == Analysis::DegreesOfFreedom {
+    if analysis == Analysis::PairFreedom {
+        let moving = asm.joints.iter().filter(|j| j.kind != JointKind::Rigid && !j.suppressed);
+        let pairs = moving.map(|j| (j.a.occurrence.min(j.b.occurrence), j.a.occurrence.max(j.b.occurrence))).filter(|(a, b)| a != b).collect();
+        sol.pair_dof = pair_dof(&tree, &closing, asm, &vals, &pairs);
+    }
+    if analysis != Analysis::Placement {
         if !closing.is_empty() {
             loop_dof(&tree, &closing, asm, &vals, &mut dof);
         }

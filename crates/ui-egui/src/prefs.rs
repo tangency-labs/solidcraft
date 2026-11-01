@@ -1118,6 +1118,12 @@ preference_settings! {
     frame_rate_details: bool = false, PAGE_GRAPHICS;
     /// Draw a wider rim under finished sketch curves to improve contrast on shaded faces.
     sketch_halo: bool = false, PAGE_GRAPHICS => check("Halo under sketch curves");
+    /// How joints look in the viewport: 0 a white badge on dark, 1 solid accent, 2 solid amber,
+    /// 3 the ring and axis drawn before badges.
+    joint_symbols: u8 = 0, PAGE_GRAPHICS, accept(0..=3);
+    /// Joint badges draw quiet unless the joint lets its parts move, which shows what a
+    /// construction has fully constrained. Off: every joint draws alike.
+    highlight_moving_joints: bool = true, PAGE_GRAPHICS => check_id("prefs.highlight_moving_joints");
     /// Show the view's pitch, yaw and roll and its projection under the orientation gizmo (#6032).
     /// Off by default; View ▸ View angles and `view.angle_readout` turn it on.
     show_view_angles: bool = false, PAGE_GRAPHICS;
@@ -4150,6 +4156,9 @@ fn prepare_preferences(
     }
     if !accepted::print_face_highlight(&new) {
         return Err("`print_face_highlight` must be 0…1".into());
+    }
+    if !accepted::joint_symbols(&new) {
+        return Err("`joint_symbols` must be 0 (white on dark), 1 (solid accent), 2 (solid amber) or 3 (ring and axis)".into());
     }
     if !accepted::home_fit_size(&new) {
         return Err("`home_fit_size` must be 0.1…1".into());
@@ -7417,6 +7426,19 @@ mod tests {
         assert_eq!(super::lenient(&json!({"display_quality": "ultra"})).display_quality, "ultra");
         super::defaults(&mut app, super::PAGE_GRAPHICS);
         assert_eq!(app.preferences.display_quality, "normal");
+    }
+
+    #[test]
+    fn joint_symbols_default_to_white_on_dark_with_moving_joints_highlighted() {
+        use serde_json::json;
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        assert_eq!((app.preferences.joint_symbols, app.preferences.highlight_moving_joints), (0, true));
+        let saved = super::set(&mut app, &json!({"joint_symbols": 2, "highlight_moving_joints": false})).unwrap();
+        assert_eq!((saved["joint_symbols"].as_u64(), saved["highlight_moving_joints"].as_bool()), (Some(2), Some(false)));
+        assert!(super::set(&mut app, &json!({"joint_symbols": 4})).unwrap_err().contains("joint_symbols"));
+        assert_eq!(app.preferences.joint_symbols, 2);
+        super::defaults(&mut app, super::PAGE_GRAPHICS);
+        assert_eq!((app.preferences.joint_symbols, app.preferences.highlight_moving_joints), (0, true));
     }
 
     #[test]
