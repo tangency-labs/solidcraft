@@ -184,6 +184,11 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let check = setting::ribbon_reveal(app, ui).on_hover_text(app.tr("prefs.ribbon_reveal_note"));
                         crate::scenario::publish_target("prefs:ribbon_reveal", check.rect);
                     });
+                    // Pinned constraints as small cells in the Constrain grid.
+                    ui_kit::row(ui, "", |ui| {
+                        let check = setting::pinned_constraints_in_grid(app, ui).on_hover_text(app.tr("prefs.pinned_constraints_in_grid_note"));
+                        crate::scenario::publish_target("prefs:pinned_constraints_in_grid", check.rect);
+                    });
                     // Where every feature dialog puts its OK and Cancel (#6708).
                     ui_kit::row(ui, app.tr("prefs.dialog_buttons"), |ui| {
                         let placements = [crate::ui_kit::DialogButtons::Bottom, crate::ui_kit::DialogButtons::Top];

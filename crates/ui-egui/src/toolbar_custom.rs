@@ -32,11 +32,12 @@ pub struct ToolbarCustom {
 }
 
 impl ToolbarCustom {
-    /// Whether a command still uses a compact gallery cell in this panel.
-    pub fn in_gallery(&self, tab: &str, panel: &str, id: &str) -> bool {
+    /// Whether a command still uses a compact gallery cell in this panel. `pinned`: constraints
+    /// the user pinned join the default six (the `pinned_constraints_in_grid` preference).
+    pub fn in_gallery(&self, tab: &str, panel: &str, id: &str, pinned: bool) -> bool {
         tab == "SKETCH"
             && panel == "CONSTRAIN"
-            && crate::workspace::CONSTRAINT_GALLERY.contains(&id)
+            && (crate::workspace::CONSTRAINT_GALLERY.contains(&id) || (pinned && crate::workspace::constraint_cell(id)))
             && !self.gallery_buttons.get(&format!("{WORKSPACE}/{tab}")).is_some_and(|ids| ids.iter().any(|c| c == id))
     }
 
@@ -271,6 +272,11 @@ pub fn remove(app: &mut SolveApp, tab: &str, id: &str) {
     app.toolbar_custom.panels.insert(key(tab, panel), ids);
 }
 
+/// [`ToolbarCustom::in_gallery`] with the user's preference.
+pub fn in_gallery(app: &SolveApp, tab: &str, panel: &str, id: &str) -> bool {
+    app.toolbar_custom.in_gallery(tab, panel, id, app.preferences.pinned_constraints_in_grid)
+}
+
 /// Move a button before another one (`before`: None puts it at the end of `panel`).
 pub fn reorder(app: &mut SolveApp, tab: &str, id: &str, panel: &str, before: Option<&str>) {
     if fixed(tab, panel, id) {
@@ -278,8 +284,11 @@ pub fn reorder(app: &mut SolveApp, tab: &str, id: &str, panel: &str, before: Opt
     }
     // A gallery command dropped on a gallery cell goes (back) into the gallery; dropped anywhere
     // else it becomes a full-size button.
-    if tab == "SKETCH" && crate::workspace::CONSTRAINT_GALLERY.contains(&id) {
-        let into_gallery = before.is_some_and(|b| app.toolbar_custom.in_gallery(tab, panel, b));
+    if tab == "SKETCH"
+        && (crate::workspace::CONSTRAINT_GALLERY.contains(&id)
+            || (app.preferences.pinned_constraints_in_grid && crate::workspace::constraint_cell(id)))
+    {
+        let into_gallery = before.is_some_and(|b| in_gallery(app, tab, panel, b));
         let ids = app.toolbar_custom.gallery_buttons.entry(format!("{WORKSPACE}/{tab}")).or_default();
         ids.retain(|c| c != id);
         if !into_gallery {
