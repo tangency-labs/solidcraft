@@ -739,6 +739,20 @@ pub struct UpstreamFixes {
     /// stays unclamped, and both bodies clamp in the analytic domain, as upstream does
     /// (neither reads `SwapUV`).
     pub extrusion_step_uses_clamped_uv: bool,
+    /// `SmBSplineVolume::CalculateContinuitiesSimple` with `bCalcGeometric == FALSE`
+    /// sets both end knots (`0` and `knot_cnt - 1`) to `SM_CT_DISCONTINUOUS` (matching
+    /// its `SmBSplineVolume.h` contract, the `bCalcGeometric == TRUE` branch, and
+    /// `SmSurface::CalculateContinuities`) and evaluates representational knot
+    /// continuity (`degree - mult`) and `reMinContinuity` over interior knots
+    /// `1..knot_cnt - 1` only (leaving `reMinContinuity = SM_CT_CINFINITY` on a
+    /// single-span volume), instead of filling `0..knot_cnt - 1` into a zero-cleared
+    /// (`SM_CT_UNDEFINED`) array — which left the last knot `SM_CT_UNDEFINED`, set
+    /// knot `0` to `SM_CT_C0` on every clamped volume, lowered `reMinContinuity` to
+    /// `SM_CT_C0`, and made `HasDiscontinuitiesSimple(..., FALSE)` report
+    /// discontinuities on smooth single-span and `C1`/`C2` volumes (WR-49, #2151; see
+    /// `plan/upstream-issues/WR-49--addendum-2026-10-31-representational-end-continuities.md`).
+    /// Off by default for pinned C++ parity.
+    pub volume_representational_end_continuities: bool,
     /// A sheet sweep's open-profile wires are glued where the curves meet (WR-409, #1113).
     pub sheet_sweep_joins_profile_wires: bool,
     /// `FindPolygonGuess` keeps a suspicious control-net triangle guess as a candidate against the nearest control point's, and returns the nearer one on the surface, so a rational surface whose control points are farther apart than its neighbouring parts does not lose a good guess (WR-444, #1164).

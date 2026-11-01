@@ -18,10 +18,14 @@
 //!   `HasDiscontinuitiesSimple` writes the `U`, `V` and `W` members of
 //!   [`Discontinuities3d`] only (as upstream it sets neither `has_discontinuities` nor
 //!   `min_continuity` beyond `Init`).
-//! - **Representational continuities** (`bCalcGeometric == FALSE`): upstream sizes the
-//!   continuity array to the knot count but fills only the first `count - 1` entries;
-//!   the zero-filled last entry is [`ContinuityType::Undefined`] (`SmTArray::SetSize`
-//!   clears new elements), and so it is here.
+//! - **Representational continuities** (`bCalcGeometric == FALSE`): by default
+//!   (pinned C++ parity) upstream sizes the continuity array to the knot count but
+//!   fills only the first `count - 1` entries; the zero-filled last entry is
+//!   [`ContinuityType::Undefined`] (`SmTArray::SetSize` clears new elements), and
+//!   knot `0` is included in `min_cont`. With
+//!   [`crate::kernel::UpstreamFixes::volume_representational_end_continuities`] (`WR-49`),
+//!   both end knots (`0` and `count - 1`) are [`ContinuityType::Discontinuous`] and
+//!   only interior knots `1..count - 1` are evaluated and contribute to `min_cont`.
 //! - **Geometric continuities** (`bCalcGeometric == TRUE`) build iso-parametric
 //!   curves with `EvaluateIsoParametricCurveSimple`, which returns `SM_ERR` in
 //!   upstream's build (no `USE_VOLUMES`, see [`BSplineVolume`]), so this path always
@@ -111,7 +115,10 @@ impl BSplineVolume {
     /// else `W`) into `out` (`CalculateContinuitiesSimple`): `params` the distinct
     /// knots, `conts` the continuity at each, `min_cont` the lowest. With
     /// `calc_geometric == false` the continuities are representational (degree minus
-    /// multiplicity); with `true` (upstream's default) they are sampled from
+    /// multiplicity; with
+    /// [`crate::kernel::UpstreamFixes::volume_representational_end_continuities`], both
+    /// end knots are [`ContinuityType::Discontinuous`] and `min_cont` covers interior
+    /// knots only); with `true` (upstream's default) they are sampled from
     /// iso-parametric curves, which fails in upstream's build (module docs).
     ///
     /// `out` is written before any failure, as upstream; `out.unaligned` is left
@@ -150,6 +157,23 @@ impl BSplineVolume {
 
         // low work - no geometric tests
         if !calc_geometric {
+            if k.fixes.volume_representational_end_continuities {
+                out.conts = vec![ContinuityType::Discontinuous; knot_cnt];
+                let interior_cnt = knot_cnt.saturating_sub(2);
+                for (c, &mult) in out
+                    .conts
+                    .iter_mut()
+                    .skip(1)
+                    .zip(mults.iter().skip(1))
+                    .take(interior_cnt)
+                {
+                    *c = knot_continuity(degree, mult);
+                    if lower(*c, out.min_cont) {
+                        out.min_cont = *c;
+                    }
+                }
+                return Ok(());
+            }
             // size rConts array (new elements are zero: SM_CT_UNDEFINED)
             out.conts = vec![ContinuityType::Undefined; knot_cnt];
             // compute conts at each internal knot
@@ -368,9 +392,11 @@ impl BSplineVolume {
 mod tests {
     use super::*;
     use crate::curve::line::Line;
+    use crate::error::SM_ERR;
     use crate::geom::vector3d::Vec3;
     use crate::nurbs::math::CPoint;
     use crate::nurbs::spiral::allocate_nurb_volume;
+    use crate::surface::volume::{Volume, VolumeKind};
 
     /// A volume with the given degrees and knot vectors (control points on a grid).
     fn volume(deg: [usize; 3], knots: [&[f64]; 3]) -> BSplineVolume {
@@ -504,5 +530,219 @@ mod tests {
         assert!(!v
             .is_curve_in_param_domain_simple(&k, &seg([0.5, 0.5, 0.5], [1.5, 0.5, 0.5]))
             .unwrap());
+    }
+
+    #[test]
+    fn wr49_single_span_clamped_volume_ends_and_has_discontinuities() {
+        let k_def = Kernel::default();
+        let mut k_on = Kernel::default();
+        k_on.fixes.volume_representational_end_continuities = true;
+
+        let kc: &[f64] = &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let tricubic = volume([3, 3, 3], [kc, kc, kc]);
+
+        for v in [unit_cube(), tricubic] {
+            for dir in [VolumeParam::U, VolumeParam::V, VolumeParam::W] {
+                let mut out_def = DirectionDiscontinuities {
+                    unaligned: true,
+                    min_cont: ContinuityType::G1,
+                    params: vec![9.0],
+                    conts: vec![],
+                };
+                v.calculate_continuities_simple(&k_def, dir, &mut out_def, false)
+                    .unwrap();
+                assert!(out_def.unaligned);
+                assert_eq!(out_def.params, vec![0.0, 1.0]);
+                assert_eq!(
+                    out_def.conts,
+                    vec![ContinuityType::C0, ContinuityType::Undefined]
+                );
+                assert_eq!(out_def.min_cont, ContinuityType::C0);
+
+                let mut out_on = DirectionDiscontinuities {
+                    unaligned: true,
+                    min_cont: ContinuityType::G1,
+                    params: vec![9.0],
+                    conts: vec![],
+                };
+                v.calculate_continuities_simple(&k_on, dir, &mut out_on, false)
+                    .unwrap();
+                assert!(out_on.unaligned);
+                assert_eq!(out_on.params, vec![0.0, 1.0]);
+                assert_eq!(
+                    out_on.conts,
+                    vec![ContinuityType::Discontinuous, ContinuityType::Discontinuous]
+                );
+                assert_eq!(out_on.min_cont, ContinuityType::CInfinity);
+            }
+
+            let mut disc_def = Discontinuities3d::new();
+            assert!(v
+                .has_discontinuities_simple(&k_def, Some(&mut disc_def), false)
+                .unwrap());
+
+            let mut disc_on = Discontinuities3d::new();
+            assert!(!v
+                .has_discontinuities_simple(&k_on, Some(&mut disc_on), false)
+                .unwrap());
+            for dir_disc in [&disc_on.u, &disc_on.v, &disc_on.w] {
+                assert_eq!(dir_disc.params, vec![0.0, 1.0]);
+                assert_eq!(
+                    dir_disc.conts,
+                    vec![ContinuityType::Discontinuous, ContinuityType::Discontinuous]
+                );
+                assert_eq!(dir_disc.min_cont, ContinuityType::CInfinity);
+            }
+        }
+    }
+
+    #[test]
+    fn wr49_multi_span_cubic_interior_continuities() {
+        let k_def = Kernel::default();
+        let mut k_on = Kernel::default();
+        k_on.fixes.volume_representational_end_continuities = true;
+
+        let klin: &[f64] = &[0.0, 0.0, 1.0, 1.0];
+        let ku_smooth: &[f64] = &[0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 3.0];
+        let v_smooth = volume([3, 1, 1], [ku_smooth, klin, klin]);
+
+        let mut out = DirectionDiscontinuities {
+            unaligned: false,
+            min_cont: ContinuityType::C0,
+            params: vec![],
+            conts: vec![],
+        };
+        v_smooth
+            .calculate_continuities_simple(&k_def, VolumeParam::U, &mut out, false)
+            .unwrap();
+        assert_eq!(out.params, vec![0.0, 1.0, 2.0, 3.0]);
+        assert_eq!(
+            out.conts,
+            vec![
+                ContinuityType::C0,
+                ContinuityType::C1C2,
+                ContinuityType::C1,
+                ContinuityType::Undefined,
+            ]
+        );
+        assert_eq!(out.min_cont, ContinuityType::C0);
+        assert!(v_smooth
+            .has_discontinuities_simple(&k_def, None, false)
+            .unwrap());
+
+        v_smooth
+            .calculate_continuities_simple(&k_on, VolumeParam::U, &mut out, false)
+            .unwrap();
+        assert_eq!(out.params, vec![0.0, 1.0, 2.0, 3.0]);
+        assert_eq!(
+            out.conts,
+            vec![
+                ContinuityType::Discontinuous,
+                ContinuityType::C1C2,
+                ContinuityType::C1,
+                ContinuityType::Discontinuous,
+            ]
+        );
+        assert_eq!(out.min_cont, ContinuityType::C1);
+        assert!(!v_smooth
+            .has_discontinuities_simple(&k_on, None, false)
+            .unwrap());
+
+        // Triple interior knot at u = 3.0 in degree 3 -> true C0 interior crease
+        let ku_c0: &[f64] = &[
+            0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 4.0, 4.0, 4.0, 4.0,
+        ];
+        let v_c0 = volume([3, 1, 1], [ku_c0, klin, klin]);
+        let mut disc = Discontinuities3d::new();
+        assert!(v_c0
+            .has_discontinuities_simple(&k_on, Some(&mut disc), false)
+            .unwrap());
+        assert_eq!(disc.u.params, vec![0.0, 1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(
+            disc.u.conts,
+            vec![
+                ContinuityType::Discontinuous,
+                ContinuityType::C1C2,
+                ContinuityType::C1,
+                ContinuityType::C0,
+                ContinuityType::Discontinuous,
+            ]
+        );
+        assert_eq!(disc.u.min_cont, ContinuityType::C0);
+    }
+
+    #[test]
+    fn wr49_volume_wrapper_and_flag_lookup() {
+        let k_def = Kernel::default();
+        assert!(!k_def.fixes.volume_representational_end_continuities);
+
+        let mut k_on = Kernel::default();
+        *k_on
+            .fixes
+            .flag_mut("volume_representational_end_continuities")
+            .unwrap() = true;
+        assert!(k_on.fixes.volume_representational_end_continuities);
+        assert!(k_on
+            .fixes
+            .flags()
+            .any(|f| f == ("volume_representational_end_continuities", true)));
+
+        let klin: &[f64] = &[0.0, 0.0, 1.0, 1.0];
+        let ku_smooth: &[f64] = &[0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 2.0, 3.0, 3.0, 3.0, 3.0];
+        let vol = Volume::new(VolumeKind::BSpline(volume(
+            [3, 1, 1],
+            [ku_smooth, klin, klin],
+        )));
+
+        let mut out = DirectionDiscontinuities {
+            unaligned: false,
+            min_cont: ContinuityType::C0,
+            params: vec![],
+            conts: vec![],
+        };
+        vol.calculate_continuities_simple(&k_on, VolumeParam::U, &mut out, false)
+            .unwrap();
+        assert_eq!(
+            out.conts,
+            vec![
+                ContinuityType::Discontinuous,
+                ContinuityType::C1C2,
+                ContinuityType::C1,
+                ContinuityType::Discontinuous,
+            ]
+        );
+        assert_eq!(out.min_cont, ContinuityType::C1);
+
+        let mut disc = Discontinuities3d::new();
+        assert!(vol
+            .has_discontinuities_simple(&k_def, Some(&mut disc), false)
+            .unwrap());
+        assert!(!vol
+            .has_discontinuities_simple(&k_on, Some(&mut disc), false)
+            .unwrap());
+        assert!(vol
+            .has_discontinuities(&k_def, Some(&mut disc), false)
+            .unwrap());
+        assert!(!vol
+            .has_discontinuities(&k_on, Some(&mut disc), false)
+            .unwrap());
+
+        // Single unique knot in W still fails with SM_ERR under opt-in after writing params
+        let kz: &[f64] = &[2.0, 2.0, 2.0, 2.0];
+        let v_deg = volume([1, 1, 1], [klin, klin, kz]);
+        let mut out_deg = DirectionDiscontinuities {
+            unaligned: true,
+            min_cont: ContinuityType::C0,
+            params: vec![],
+            conts: vec![ContinuityType::C0],
+        };
+        let err = v_deg
+            .calculate_continuities_simple(&k_on, VolumeParam::W, &mut out_deg, false)
+            .unwrap_err();
+        assert_eq!(err.sm_status(), Some(SM_ERR));
+        assert!(out_deg.unaligned);
+        assert_eq!(out_deg.params, vec![2.0]);
+        assert!(out_deg.conts.is_empty());
+        assert_eq!(out_deg.min_cont, ContinuityType::CInfinity);
     }
 }
