@@ -194,8 +194,10 @@ fn construction_key_outside_a_sketch_opens_nothing_and_keys_in_a_sketch_keep_it(
     assert_eq!(tool(&h), Some("sketch.circle.center"));
 }
 
+/// #2031: `M` opens Sketch Move inside a sketch (the shortcut table already promised it); the
+/// body Move key belongs to the model scope and must not leak into the sketch editor.
 #[test]
-fn move_key_keeps_sketch_mode_behavior_and_honors_a_sketch_move_binding() {
+fn move_key_opens_sketch_move_in_a_sketch() {
     let mut h = Harness::new();
     h.app.run("component.create", json!({"name":"Carriage"})).unwrap();
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -205,17 +207,10 @@ fn move_key_keeps_sketch_mode_behavior_and_honors_a_sketch_move_binding() {
     h.app.session.selection = selection.clone();
 
     press(&mut h, "M");
-    assert!(h.app.dialog.is_none(), "the default body Move shortcut is disabled in a sketch");
-    assert!(h.app.tree.occurrence_move.is_none());
-    assert_eq!(h.app.session.active_sketch, sketch);
-    assert_eq!(h.app.session.selection, selection);
-
-    crate::keymap::bind(&mut h.app, "sketch.move", "M", true).unwrap();
-    press(&mut h, "M");
-    let dialog = h.app.dialog.as_ref().expect("a rebound M opens Sketch Move in an active sketch");
+    let dialog = h.app.dialog.as_ref().expect("M opens Sketch Move in an active sketch");
     assert!(matches!(dialog.kind, crate::dialogs::Kind::SketchModify(crate::sketch_modify_ui::Mod::Move { .. })));
-    assert_eq!(dialog.inputs[0].items, selection);
-    assert_eq!(h.app.session.active_sketch, sketch);
+    assert_eq!(dialog.inputs[0].items, selection, "the window moves what was picked");
+    assert_eq!(h.app.session.active_sketch, sketch, "the sketch stays open");
     assert!(h.app.tree.occurrence_move.is_none(), "M must not open component Move while editing its sketch");
 }
 
