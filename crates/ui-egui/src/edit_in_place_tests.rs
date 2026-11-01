@@ -353,6 +353,17 @@ fn double_clicking_a_body_of_this_design_or_with_the_preference_off_does_nothing
     assert!(f.app.edit_in_place.active.is_none() && f.app.edit_in_place.pending.is_none());
 }
 
+/// A linked component's menu starts with what a double-click on its row does.
+#[test]
+fn a_linked_components_menu_starts_with_what_a_double_click_does() {
+    use crate::context_menu::{self, Target};
+    let mut f = assembly("menu-order");
+    let ids = |app: &SolveApp| context_menu::items(app, &Target::Component { id: f.plate }).into_iter().take(3).map(|i| i.id).collect::<Vec<_>>();
+    assert_eq!(ids(&f.app), ["ui.editInPlace", "ui.openLinkedDesign", "ui.activate"]);
+    f.app.preferences.double_click_components = false;
+    assert_eq!(ids(&f.app), ["ui.activate", "ui.editInPlace", "ui.openLinkedDesign"]);
+}
+
 #[test]
 fn activate_only_activates_and_edit_in_place_opens_the_placement_right_clicked() {
     use crate::context_menu::{self, Target};

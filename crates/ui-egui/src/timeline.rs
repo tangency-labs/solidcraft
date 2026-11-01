@@ -1251,7 +1251,7 @@ mod tests {
         assert!(handle_at("timeline:CopyBox").is_some() && handle_at("timeline:PartBox").is_some(), "both parts' features start in the bar");
         // The Browser menu offers to hide the copy's History, and running it leaves its entries out.
         let copy = h.app.session.doc.components.iter().find(|c| c.name == "Copy").unwrap().id;
-        let menu = context_menu::items(&h.app, &Target::Component { id: copy });
+        let menu = context_menu::entries(&h.app, &Target::Component { id: copy });
         let hide = menu.iter().find(|i| i.id == "component.hide_history").expect("the component menu offers Hide its History");
         context_menu::run_item(&mut h.app, hide, egui::Pos2::ZERO);
         h.frames(4);
@@ -1271,7 +1271,7 @@ mod tests {
         h.frames(4);
         assert!(handle_at("timeline:CopyBox").is_none(), "and hides them again");
         // The component menu now offers to show its History back.
-        let menu = context_menu::items(&h.app, &Target::Component { id: copy });
+        let menu = context_menu::entries(&h.app, &Target::Component { id: copy });
         assert!(menu.iter().any(|i| i.id == "component.show_history"), "the menu flips to Show its History");
     }
 

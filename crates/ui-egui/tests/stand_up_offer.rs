@@ -156,7 +156,8 @@ fn turn_up_axis_in_the_component_menu_turns_and_undo_restores() {
     let occurrence = h.app.session.doc.occurrences.iter().map(|o| o.id).max().expect("the import's occurrence");
     h.app.run("occurrence.ground", json!({"occurrence": occurrence, "grounded": false})).unwrap();
     let items = solidcraft_ui_egui::context_menu::items(&h.app, &solidcraft_ui_egui::context_menu::Target::Occurrence { path: vec![occurrence] });
-    let turn = items.iter().find(|i| i.id == "ui.turnUpAxis").expect("Turn Up Axis is in the menu");
+    let placement = items.iter().find(|i| i.label == "Placement").expect("the Placement flyout is in the menu");
+    let turn = placement.children.iter().find(|i| i.id == "ui.turnUpAxis").expect("Turn Up Axis is in the Placement flyout");
     let labels: Vec<_> = turn.children.iter().map(|c| c.label.as_str()).collect();
     assert_eq!(labels, ["Y up \u{2192} Z up", "Z up \u{2192} Y up"]);
     let at = egui::pos2(10.0, 10.0);

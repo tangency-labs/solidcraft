@@ -22,7 +22,7 @@ Every imported file (STEP, IGES, 3MF, STL, OBJ or glTF) comes in as a new compon
 file, so its bodies never mix with yours. A STEP assembly keeps its structure: its parts and
 sub-assemblies become nested components, and a part used several times is one component with an
 occurrence for each place. The imported assembly is rigid: moving its component moves everything,
-and its parts don't move on their own. Right-click the component and choose **Unlock Contents** to
+and its parts don't move on their own. Right-click the component and choose **Placement → Unlock Contents** to
 joint the parts one by one. Undo removes a whole import in one step.
 
 A glTF file (`.glb`, or `.gltf` with the `.bin` files it names in the same folder) comes in the
@@ -209,7 +209,7 @@ The control channel sets the same preference with `ui.prefs {"max_step_file_mb":
 ## Design properties
 
 **File → Design Properties…** (also under **Document Settings** in the Browser, and on the
-top component's right-click menu) records who made a design and what it is: project, part
+top component's right-click menu, under **Design**) records who made a design and what it is: project, part
 number, revision, author, organization, description and licence. **OK** applies the changes as
 one undo step. Scripts and agents use the same commands: `document.metadata` reads them,
 `document.metadata.set` (`key` and `value`, or `values: {key: value, …}`) and

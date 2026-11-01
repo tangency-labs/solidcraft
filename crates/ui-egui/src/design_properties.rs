@@ -671,7 +671,7 @@ mod tests {
             h.app.run("occurrence.copy", json!({"component": block, "translate": [20 * i, 0, 0]})).unwrap();
         }
         h.app.apply_off_thread = Some(std::time::Duration::ZERO);
-        let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Component { id: 0 });
+        let items = crate::context_menu::entries(&h.app, &crate::context_menu::Target::Component { id: 0 });
         let item = items.iter().find(|i| i.label == "Properties").expect("Properties item");
         crate::context_menu::run_item(&mut h.app, item, egui::pos2(0.0, 0.0));
         assert!(h.app.menu.props_measuring.is_some(), "the menu returns at once, the card measuring");
@@ -705,7 +705,7 @@ mod tests {
     #[test]
     fn the_file_menu_browser_and_root_component_open_the_window() {
         let mut h = Harness::new();
-        let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Component { id: 0 });
+        let items = crate::context_menu::entries(&h.app, &crate::context_menu::Target::Component { id: 0 });
         let item = items.iter().find(|i| i.id == "ui.designProperties").expect("root component menu item");
         assert_eq!(item.label, "Design Properties");
         crate::context_menu::run_item(&mut h.app, item, egui::pos2(0.0, 0.0));

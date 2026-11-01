@@ -77,7 +77,7 @@ impl EditInPlace {
 
 /// A linked component the window edits in place when it is double-clicked: in a saved design
 /// (its links are found from its file) with `double_click_components` on.
-fn edits_on_double_click(app: &SolveApp, component: u64) -> bool {
+pub(crate) fn edits_on_double_click(app: &SolveApp, component: u64) -> bool {
     app.preferences.double_click_components && app.session.path.is_some() && app.session.doc.links.contains_key(&component)
 }
 
