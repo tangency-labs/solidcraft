@@ -941,22 +941,77 @@ fn a_box_from_points_holds_them_and_grows() {
     assert!(b.intersection(&far).is_empty());
 }
 
-/// A similarity moves every kind of segment exactly: the moved segment's points are the original's
-/// points moved, its length scales, and an arc stays an arc turning the same way.
-#[test]
-fn a_similarity_moves_each_kind_of_segment_exactly() {
-    let m = Similarity2::new(2.5, 0.7, Vec2::new(-3.0, 11.0)).unwrap();
+/// One segment of each kind: a line, an arc, a cubic, a conic and a quintic Bézier.
+fn every_kind_of_segment() -> [Seg2; 5] {
     let mut p = [Vec2::ZERO; MAX_BEZIER_CTRL];
     for (i, q) in p.iter_mut().take(6).enumerate() {
         *q = Vec2::new(i as f64, (i * i) as f64 * 0.3);
     }
-    let segments = [
+    [
         Seg2::Line { a: Vec2::new(1.0, 2.0), b: Vec2::new(4.0, -1.0) },
         Seg2::Arc { center: Vec2::new(2.0, 1.0), radius: 3.0, start: 0.4, sweep: -2.1 },
         Seg2::Cubic { p0: Vec2::ZERO, p1: Vec2::new(1.0, 2.0), p2: Vec2::new(3.0, 2.0), p3: Vec2::new(4.0, 0.0) },
         Seg2::Conic { a: Vec2::new(10.0, 0.0), apex: Vec2::new(10.0, 10.0), b: Vec2::new(0.0, 10.0), w: std::f64::consts::FRAC_1_SQRT_2 },
         Seg2::Bezier { n: 5, p },
-    ];
+    ]
+}
+
+/// A mirrored map moves every kind of segment exactly too: after a mirror in the x axis, a turn of
+/// 0.7, a scale of 2.5 and a shift, each segment's points are the original's mapped, its length
+/// scales and an arc's sweep reverses. And the arc numbers the sheet-metal flat and the sketch
+/// mirror wrote out by hand come out bit for bit.
+#[test]
+fn a_mirrored_map_moves_each_kind_of_segment_exactly() {
+    let (angle, scale, shift) = (0.7, 2.5, Vec2::new(-3.0, 11.0));
+    let (sin, cos) = f64::sin_cos(angle);
+    let f = |p: Vec2| Vec2::new(cos * p.x + sin * p.y, sin * p.x - cos * p.y) * scale + shift;
+    for seg in every_kind_of_segment() {
+        let moved = seg.mapped(f, ArcMap { angle, mirrored: true, scale });
+        for i in 0..=8 {
+            let t = f64::from(i) / 8.0;
+            assert!((moved.point_at(t) - f(seg.point_at(t))).len() < 1e-9, "{seg:?} at {t}");
+        }
+        assert!((moved.length() - seg.length() * scale).abs() < 1e-9 * seg.length().max(1.0), "{seg:?}");
+        if let (Seg2::Arc { sweep: s, .. }, Seg2::Arc { sweep: m, .. }) = (seg, moved) {
+            assert_eq!(m, -s);
+        }
+    }
+    // The sketch mirror's -start (a +0.0 start to -0.0), the mirrored flat's π - start, and the
+    // flat's rot - start mirrored or rot + start not.
+    let start_of = |s: Seg2| if let Seg2::Arc { start, .. } = s { start } else { f64::NAN };
+    let arc = |start: f64| Seg2::Arc { center: Vec2::ZERO, radius: 1.0, start, sweep: 1.0 };
+    let same = |p: Vec2| p;
+    for (start, angle, mirrored, want) in [
+        (0.4, -0.0, true, -0.4),
+        (0.0, -0.0, true, -0.0),
+        (0.4, std::f64::consts::PI, true, std::f64::consts::PI - 0.4),
+        (0.4, 1.1, true, 1.1 - 0.4),
+        (0.4, 1.1, false, 1.1 + 0.4),
+    ] {
+        assert_eq!(start_of(arc(start).mapped(same, ArcMap::turn(angle, mirrored))).to_bits(), f64::to_bits(want), "{start} {angle} {mirrored}");
+    }
+}
+
+/// A rigid map's arc map comes from where it puts the origin and the unit axes: the x axis's turn,
+/// whether the axes come out reversed, and a scale of exactly 1, whatever the shift.
+#[test]
+fn a_rigid_maps_arc_map_is_its_turn_and_its_mirror() {
+    let (sin, cos) = f64::sin_cos(0.7);
+    let shift = Vec2::new(-3.0, 11.0);
+    let mirrored = |p: Vec2| Vec2::new(cos * p.x + sin * p.y, sin * p.x - cos * p.y) + shift;
+    let turned = |p: Vec2| Vec2::new(cos * p.x - sin * p.y, sin * p.x + cos * p.y) + shift;
+    for (arc, mirror) in [(ArcMap::rigid(mirrored), true), (ArcMap::rigid(turned), false)] {
+        assert!((arc.angle - 0.7).abs() < 1e-12 && arc.mirrored == mirror && arc.scale == 1.0, "{arc:?}");
+    }
+    assert_eq!(ArcMap::rigid(|p| p), ArcMap::turn(0.0, false));
+}
+
+/// A similarity moves every kind of segment exactly: the moved segment's points are the original's
+/// points moved, its length scales, and an arc stays an arc turning the same way.
+#[test]
+fn a_similarity_moves_each_kind_of_segment_exactly() {
+    let m = Similarity2::new(2.5, 0.7, Vec2::new(-3.0, 11.0)).unwrap();
+    let segments = every_kind_of_segment();
     for seg in segments {
         let moved = seg.similar(&m);
         for i in 0..=8 {
