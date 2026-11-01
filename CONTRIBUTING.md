@@ -203,6 +203,13 @@ explicit caller overrides always win. Cargo's build-job setting remains an indep
 override; this limit does not change test filters, timeouts or baselines.
 Tests run beside each other on a busy machine, so a test must not depend on wall-clock timing.
 
+The default local libtest runner gives each test executable 60 minutes from launch. A timeout
+terminates and reaps that direct child, prints its binary name and captured output as a failure,
+and lets the remaining jobs finish. Set `SOLIDCRAFT_TEST_TIMEOUT_SECONDS` to a nonnegative integer
+to change the per-binary limit in seconds; `0` restores unlimited waiting. This is not a per-test
+deadline or a driver fix, and it does not terminate descendants spawned by a test. The test build,
+doc/wasm side commands and optional nextest runner keep their existing timeout policies.
+
 **Ready pull requests test what they touch.** CI maps changed files to workspace packages and
 runs Clippy, the test build and tests for those and their dependents. The
 [package selector](scripts/ci/affected.py) and [CI workflow](.github/workflows/ci.yml) define

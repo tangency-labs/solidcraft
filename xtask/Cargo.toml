@@ -11,5 +11,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 syn = { workspace = true, features = ["visit"] }
+tempfile = "3.27"
 toml = { workspace = true }
 zip = { workspace = true }
