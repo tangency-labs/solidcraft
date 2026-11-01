@@ -503,8 +503,11 @@ pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
     if let Some(body) = app.session.model.state().sheets.last().map(|sheet| sheet.body.clone()) {
         export_flat(app, &body, extension);
     } else {
-        // Let the command report its ordinary "no sheet body" error without opening a picker.
-        let _ = app.run(id, json!({}));
+        // Let the command report its ordinary "no sheet body" error without opening a picker;
+        // nothing starts, so the ribbon goes back to the tab it was started from (#10540).
+        if app.run(id, json!({})).is_err() {
+            app.restore_command_tab();
+        }
     }
     true
 }

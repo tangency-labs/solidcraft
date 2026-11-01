@@ -605,6 +605,9 @@ pub struct SolveApp {
     /// A feature started from a sketch while the marker rolls back, and that sketch: it starts
     /// once the marker is back.
     pub start_after_roll: Option<(String, u64)>,
+    /// The ribbon tab before the current `start` moved it to the command's home tab. A command
+    /// that starts nothing (refused with a parameter or status error) puts it back (#10540).
+    pub(crate) command_tab_before_start: Option<String>,
     pub(crate) timeline_playback: Option<timeline::Playback>,
     /// A delete's check of what it takes with it or breaks, computing off the window thread
     /// ([`deferred::DeleteCheck`], #2678).
@@ -835,6 +838,7 @@ impl SolveApp {
             deferred: None,
             deferred_queue: Vec::new(),
             start_after_roll: None,
+            command_tab_before_start: None,
             timeline_playback: None,
             delete_check: None,
             apply_off_thread: None,
@@ -1500,6 +1504,15 @@ impl SolveApp {
         self.start_at(id, None);
     }
 
+    /// A command that started nothing puts the ribbon back on the tab `start` was called from,
+    /// the way a disabled command never leaves it (#10540). Only a `start` that moved the tab
+    /// has anything to put back.
+    pub(crate) fn restore_command_tab(&mut self) {
+        if let Some(tab) = self.command_tab_before_start.take() {
+            self.ui.tab = tab;
+        }
+    }
+
     /// Insert Design's file picker: another design becomes a linked component; a STEP or mesh
     /// file picked here is inserted the way Insert STEP or Insert Mesh would (#1240).
     pub(crate) fn pick_design_to_insert(&mut self) {
@@ -1631,6 +1644,39 @@ impl SolveApp {
         if render_workspace::start_interactive(self, id) {
             return;
         }
+        // A display toggle leaves the current modelling tool and camera in place, and the ribbon
+        // where it is: F6, the navigation bar and the view cube never went through `start`, so
+        // command search and the VIEW tab's menus must not move the tab either (#10540).
+        if matches!(
+            id,
+            "view.fit"
+                | "view.home"
+                | "view.spin"
+                | "view.grid"
+                | "view.ground_shadow"
+                | "view.navigation_bar"
+                | "view.next_tab"
+                | "view.previous_tab"
+        ) {
+            let _ = self.run(id, json!({}));
+            return;
+        }
+        // A display choice opens its choices, as the navigation bar's menus do: run with no
+        // parameters it could only fail (#8868). The choices menu is not the command's ribbon
+        // place, so the ribbon keeps its tab however the menu was opened (#10540).
+        let choice = match id {
+            "view.visual_style" => Some(context_menu::Target::VisualStyle),
+            "view.tool" => Some(context_menu::Target::ViewTool),
+            _ => None,
+        };
+        if let Some(target) = choice {
+            self.open_choice_menu(opener, target);
+            return;
+        }
+        // The ribbon moves to the command's tab; a command that starts nothing puts it back, so
+        // a refusal is answered on the tab the user started from, as a disabled command above
+        // already is (#10540).
+        self.command_tab_before_start = Some(self.ui.tab.clone());
         workspace::select_command_tab(self, id);
         if id == "occurrence.move" {
             joint_handles::start(self);
@@ -1661,35 +1707,9 @@ impl SolveApp {
             dialogs_library::start_export(self);
             return;
         }
-        // A display toggle leaves the current modelling tool and camera in place.
-        if matches!(
-            id,
-            "view.fit"
-                | "view.home"
-                | "view.spin"
-                | "view.grid"
-                | "view.ground_shadow"
-                | "view.navigation_bar"
-                | "view.next_tab"
-                | "view.previous_tab"
-        ) {
-            let _ = self.run(id, json!({}));
-            return;
-        }
         if id == "view.layout" {
             let mode = if self.ui.layout == shell::LayoutMode::Floating { "compact" } else { "floating" };
             let _ = self.run(id, json!({"mode":mode}));
-            return;
-        }
-        // A display choice opens its choices, as the navigation bar's menus do: run with no
-        // parameters it could only fail (#8868).
-        let choice = match id {
-            "view.visual_style" => Some(context_menu::Target::VisualStyle),
-            "view.tool" => Some(context_menu::Target::ViewTool),
-            _ => None,
-        };
-        if let Some(target) = choice {
-            self.open_choice_menu(opener, target);
             return;
         }
         if id == "view.render_focus" {
@@ -1720,6 +1740,7 @@ impl SolveApp {
         // Send to Slicer always asks which slicer (the dialog pre-selects the last one).
         if matches!(id, "file.send_to_slicer" | "file.open_in_easyprint") && !dialogs_save_mesh::available(self) {
             self.set_status(self.tr("ui.send_to_slicer_unavailable").to_string(), true);
+            self.restore_command_tab();
             return;
         }
         if id == "view.perspective" {
@@ -1906,6 +1927,9 @@ impl SolveApp {
             // A feature committed before the marker is back would go in where the sketch was.
             if self.deferred.is_some() {
                 self.start_after_roll = finished_sketch.map(|sketch| (id.to_string(), sketch));
+                // The sketch already took the ribbon back through `sketch_return_tab`; the
+                // deferred start must not undo that when it eventually runs (#10540).
+                self.command_tab_before_start = None;
                 return;
             }
         }
@@ -2013,9 +2037,15 @@ impl SolveApp {
         // Change Part Size with no standard part selected (its dialog had nothing to open on).
         if id == "parts.resize" {
             dialogs_part_size::needs_a_part(self);
+            self.restore_command_tab();
             return;
         }
-        let _ = self.run(id, json!({}));
+        // The command either runs or starts nothing: a refusal (a missing parameter, nothing to
+        // work on) leaves the ribbon on the tab it was started from, as a disabled command does
+        // (#10540).
+        if self.run(id, json!({})).is_err() {
+            self.restore_command_tab();
+        }
     }
 
     /// Does starting `id` open a tool or a dialog?

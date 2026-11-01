@@ -5420,6 +5420,96 @@ mod sketch_return_tab_tests {
 }
 
 #[cfg(test)]
+mod command_start_tab_tests {
+    use super::*;
+    use crate::scenario::Harness;
+
+    /// The issue's starting point: a design with a box, nothing selected, the ribbon on MODEL.
+    fn on_model_with_a_box() -> Harness {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.ui.tab = "MODEL".into();
+        h.app.status = None;
+        h
+    }
+
+    /// #10540: a command that only reports a missing parameter or that there is nothing to work
+    /// on starts nothing, so the ribbon stays on the tab it was started from, as a disabled
+    /// command already does. The commands are the issue's table, started from MODEL.
+    #[test]
+    fn a_refused_command_leaves_the_ribbon_on_the_tab_it_was_started_from() {
+        for id in [
+            "occurrence.ground",
+            "joint.limits",
+            "component.break_link",
+            "timeline.dependents",
+            "view.rename",
+            "view.delete",
+            "view.navigate",
+            "edit.restore_checkpoint",
+            "parameters.move",
+            "library.inspect",
+            "surface.fair",
+            "surface.match",
+            "sheet.export_bend_table",
+        ] {
+            let mut h = on_model_with_a_box();
+            h.app.start(id);
+            assert_eq!(h.app.ui.tab, "MODEL", "{id}: a refused command leaves the tab where it was");
+            assert!(h.app.dialog.is_none() && h.app.tool.is_none(), "{id}: nothing started");
+        }
+    }
+
+    /// The issue's exact repro through the control channel: Ground from MODEL says `occurrence`
+    /// must be an id or name; the status line keeps the refusal, the ribbon does not move to
+    /// ASSEMBLE.
+    #[test]
+    fn ground_from_command_search_names_the_missing_occurrence_and_stays_on_model() {
+        let mut h = on_model_with_a_box();
+        h.call("ui.start", json!({"command": "occurrence.ground"}));
+        assert_eq!(h.app.ui.tab, "MODEL", "Ground started nothing: the ribbon stays on MODEL");
+        let (status, _, error) = h.app.status.clone().expect("the refusal reaches the status line");
+        assert!(error, "{status}");
+        assert!(status.contains("occurrence"), "{status}");
+    }
+
+    /// #10540: View Fit, Home and the other view display commands act on the view the same way
+    /// however they are started. F6, the navigation bar and the view cube never move the ribbon,
+    /// so command search and the VIEW tab's menus must not either.
+    #[test]
+    fn view_display_commands_keep_the_ribbon_on_the_tab_they_were_started_from() {
+        for id in ["view.fit", "view.home", "view.spin", "view.grid", "view.ground_shadow", "view.navigation_bar", "view.visual_style", "view.tool"] {
+            let mut h = on_model_with_a_box();
+            h.app.ui.tab = "INSPECT".into();
+            h.app.start(id);
+            assert_eq!(h.app.ui.tab, "INSPECT", "{id}: started from INSPECT, the ribbon stays there");
+        }
+    }
+
+    /// The other half of #10540: a command that does start still moves the ribbon to its tab —
+    /// Extrude's dialog opens and the ribbon follows it to MODEL from INSPECT.
+    #[test]
+    fn a_command_that_opens_still_moves_the_ribbon_to_its_tab() {
+        let mut h = on_model_with_a_box();
+        h.app.ui.tab = "INSPECT".into();
+        h.app.start("solid.extrude");
+        assert!(h.app.dialog.is_some(), "Extrude's dialog opens");
+        assert_eq!(h.app.ui.tab, "MODEL", "the ribbon follows the command that started");
+    }
+
+    /// A command that runs without a dialog or tool has run: the ribbon keeps the tab it moved
+    /// to (#10540's "or it runs"). List Contact Sets answers with the sets, no parameters.
+    #[test]
+    fn a_command_that_runs_still_moves_the_ribbon() {
+        let mut h = on_model_with_a_box();
+        h.app.start("contact.list");
+        assert_eq!(h.app.ui.tab, "ASSEMBLE", "the command ran: the ribbon stays on its tab");
+        assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
+    }
+}
+
+#[cfg(test)]
 mod persistent_ribbon_tests {
     use super::*;
     use crate::scenario::{self, Harness};
