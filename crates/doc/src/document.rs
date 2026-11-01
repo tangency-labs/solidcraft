@@ -1193,6 +1193,15 @@ pub enum FeatureKind {
         /// virtual sharp (`sheet::HeightFrom`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         height_from: Option<String>,
+        /// How far the flanges stop short of the start and of the end of each edge they stand on
+        /// (the edge runs the way its panel's outline does, counter-clockwise seen from the top
+        /// face). Walked after the corner relief, so the inputs before keep their names.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Start set-back")]
+        start_setback: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "End set-back")]
+        end_setback: Option<Expr>,
     },
     /// Flat hems on sheet edges.
     SheetHem {

@@ -105,6 +105,10 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// Edge flanges: further bends (angle, height, turns the other way), each a flange on
                 /// the far edge of the one before it (the command's `then`).
                 then: Vec<(String, String, bool)>,
+                /// Edge flanges: how far they stop short of the start and of the end of each edge
+                /// (empty: not at all), the command's `start_setback` and `end_setback`.
+                start: String,
+                end: String,
             },
             Unfold {
                 refold: bool,
@@ -182,6 +186,8 @@ fn new_flange(app: &SolveApp, ty: usize) -> Sm {
         relief: 0,
         relief_size: String::new(),
         then: Vec::new(),
+        start: String::new(),
+        end: String::new(),
     }
 }
 
@@ -246,7 +252,24 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
     let t = Tokens::get();
     let mut enter = false;
     match k {
-        Sm::Flange { ty, height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then } => {
+        Sm::Flange {
+            ty,
+            height,
+            angle,
+            radius,
+            position,
+            height_from,
+            flip,
+            distance,
+            reverse,
+            rule,
+            own,
+            relief,
+            relief_size,
+            then,
+            start,
+            end,
+        } => {
             *ty = flange_type(inputs);
             form_row(ui, "Type", |ui| {
                 ui.label(FLANGE_TYPES.get(*ty).copied().map(crate::i18n::tr).unwrap_or(""));
@@ -257,6 +280,13 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                     enter |= expr_row(ui, "Angle", angle);
                     choice_row(ui, "Bend Position", "sm_pos", position, &POSITION_LABELS);
                     choice_row(ui, "Height From", "sm_height_from", height_from, &HEIGHT_FROM_LABELS);
+                    // A flange shorter than its edge: how far it stops short of each end.
+                    let none = crate::i18n::tr_label("none");
+                    enter |= hint_row(ui, "Start Set-back", start, none);
+                    enter |= hint_row(ui, "End Set-back", end, none);
+                    if edge_point_list(inputs).len() > 1 {
+                        crate::ui_kit::caption(ui, "End Set-back", crate::i18n::tr_label("the same on every edge"));
+                    }
                     // Further bends: each a flange on the far edge of the one before it.
                     form_row(ui, "Further Bends", |ui| {
                         let add = crate::ui_kit::button(ui, "Add bend", crate::ui_kit::Button::Normal)
@@ -638,7 +668,24 @@ fn flange_edges(inputs: &[SelInput], own: &[(Vec3, String, String)]) -> Vec<Valu
 pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let s = &app.session;
     let (cmd, mut p): (&str, Value) = match k {
-        Sm::Flange { height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then, .. } => {
+        Sm::Flange {
+            height,
+            angle,
+            radius,
+            position,
+            height_from,
+            flip,
+            distance,
+            reverse,
+            rule,
+            own,
+            relief,
+            relief_size,
+            then,
+            start,
+            end,
+            ..
+        } => {
             let mut p = match flange_type(inputs) {
                 1 => {
                     let mut p = json!({"type": "edge", "edges": flange_edges(inputs, own), "height": height, "angle": angle,
@@ -651,6 +698,7 @@ pub fn commands(app: &SolveApp, k: &Sm, inputs: &[SelInput], extra: &Map<String,
                         p["corner_relief_shape"] = json!(shape);
                     }
                     put(&mut p, &[("corner_relief", relief_size)]);
+                    put(&mut p, &[("start_setback", start), ("end_setback", end)]);
                     if !then.is_empty() {
                         let mut bends = Vec::with_capacity(then.len());
                         for (n, (a, h, other)) in then.iter().enumerate() {
@@ -810,7 +858,20 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             (f, curves.iter().map(|id| crate::selection::curve_pick(id, sketch.0, app.session.active_sketch)).collect())
         }
-        FeatureKind::SheetFlange { edges, height, angle, radius, position, flip, body, corner_relief_shape, corner_relief, height_from } => {
+        FeatureKind::SheetFlange {
+            edges,
+            height,
+            angle,
+            radius,
+            position,
+            flip,
+            body,
+            corner_relief_shape,
+            corner_relief,
+            height_from,
+            start_setback,
+            end_setback,
+        } => {
             if let Some(b) = body {
                 extra.insert("body".into(), json!(b));
             }
@@ -849,6 +910,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                     .map_or(0, |i| i + 1),
                 relief_size: corner_relief.as_deref().map(str::to_string).unwrap_or_default(),
                 then: Vec::new(),
+                start: start_setback.as_deref().map(str::to_string).unwrap_or_default(),
+                end: end_setback.as_deref().map(str::to_string).unwrap_or_default(),
             };
             (f, picked)
         }
