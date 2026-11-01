@@ -1,10 +1,10 @@
 //! The Point Clouds folder of the Browser (#5151): an eye per cloud and for the folder, a menu,
-//! and the Edit Point Cloud card: the file's units, the size of the dots, how the cloud is
-//! coloured (its colours, one colour, a ramp over a property, its range on a track, or the
-//! palette of a label, with its legend), and its filters (a range on a track, played with ▶ or
-//! Space, or the values of a label picked in its legend). Each track shows how much of the cloud
-//! lies at each value, over what the other filters keep. The live edits of one opening are one
-//! undo step.
+//! and the Edit Point Cloud card: the file's units, the size of the dots (when some points are
+//! dots), how the cloud is coloured (its colours, one colour, a ramp over a property, its range
+//! on a track, or the palette of a label, with its legend), and its filters (a range on a track,
+//! played with ▶ or Space, or the values of a label picked in its legend). Each track shows how
+//! much of the cloud lies at each value, over what the other filters keep. The live edits of
+//! one opening are one undo step.
 
 use serde_json::{Value, json};
 use solidcraft_engine::doc::point_cloud::{COORDINATES, ColorBy, Filter, Keep, MAX_FILTERS, Names, PLAIN, PointCloud, UNITS, byte, label_color};
@@ -26,12 +26,14 @@ use range_track::{Part, Track, range_track};
 pub const DRAWN_FILTERS: usize = solidcraft_gpu::view::FILTERS;
 
 /// The Edit Point Cloud card: the cloud, the undo depth when it opened, what it worked out once
-/// for the cloud's data (the automatic height range), its tracks' bars, and a filter playing.
+/// for the cloud's data (the automatic height range, the number of dots), its tracks' bars, and
+/// a filter playing.
 #[derive(Clone, Debug)]
 pub struct CloudPanel {
     pub cloud: u64,
     pub(crate) depth: usize,
     auto: Option<(usize, [u64; 16], Option<[f64; 2]>)>,
+    dots: Option<([usize; 3], usize)>,
     tracks: Tracks,
     pub play: Option<Play>,
 }
@@ -94,7 +96,7 @@ impl Play {
 
 impl CloudPanel {
     pub fn new(app: &SolveApp, cloud: u64) -> Self {
-        CloudPanel { cloud, depth: app.session.undo.len(), auto: None, tracks: Tracks::default(), play: None }
+        CloudPanel { cloud, depth: app.session.undo.len(), auto: None, dots: None, tracks: Tracks::default(), play: None }
     }
     /// The cloud's automatic height range, worked out again only when its points or placement
     /// change.
@@ -106,6 +108,22 @@ impl CloudPanel {
                 let r = c.auto_height_range();
                 self.auto = Some((key.0, key.1, r));
                 r
+            }
+        }
+    }
+    /// How many points are drawn as dots, worked out again only when the cloud's data change.
+    fn dots(&mut self, c: &PointCloud) -> usize {
+        let key = [
+            std::sync::Arc::as_ptr(c.points.values()).cast::<f32>() as usize,
+            std::sync::Arc::as_ptr(&c.complex.segments.0).cast::<u32>() as usize,
+            std::sync::Arc::as_ptr(&c.complex.triangles.0).cast::<u32>() as usize,
+        ];
+        match self.dots {
+            Some((k, n)) if k == key => n,
+            _ => {
+                let n = c.isolated_points();
+                self.dots = Some((key, n));
+                n
             }
         }
     }
@@ -243,8 +261,10 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     };
     let mut edit: Option<Value> = None;
+    let mut reload = false;
     let title = crate::i18n::format("browser.edit_point_cloud_title", &[("name", &c.name)]);
     let auto = if c.color_by == ColorBy::Height { m.auto_range(&c) } else { None };
+    let dots = m.dots(&c);
     let now = ctx.input(|i| i.time);
     // A playing filter moves on; at the end of its span it stops, and is written once.
     let mut stop_play = false;
@@ -274,9 +294,17 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         .actions("", crate::i18n::tr("ui.close"), None)
         .show(ctx, true, |ui| {
             ui_kit::row(ui, crate::i18n::tr_label("Points"), |ui| ui.label(c.len().to_string()));
-            let mut size = c.point_size;
-            if ui_kit::row(ui, crate::i18n::tr("ui.point_cloud_size"), |ui| ui_kit::slider(ui, &mut size, 0.5..=16.0, Default::default())).changed() {
-                edit = Some(json!({ "cloud": c.id, "point_size": size }));
+            // The dots' size, where some points are dots: those no segment or triangle ends on.
+            if dots > 0 {
+                if dots < c.len() {
+                    ui_kit::row(ui, crate::i18n::tr_label("Dots"), |ui| ui.label(dots.to_string()));
+                }
+                let mut size = c.point_size;
+                if ui_kit::row(ui, crate::i18n::tr("ui.point_cloud_size"), |ui| ui_kit::slider(ui, &mut size, 0.5..=16.0, Default::default()))
+                    .changed()
+                {
+                    edit = Some(json!({ "cloud": c.id, "point_size": size }));
+                }
             }
             let units: Vec<&str> = UNITS.iter().map(|(u, _)| *u).collect();
             let was = units.iter().position(|u| *u == c.units).unwrap_or(0);
@@ -504,6 +532,9 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
             if changed {
                 edit = Some(json!({ "cloud": c.id, "filters": filters_json(&filters) }));
             }
+            if !c.source.is_empty() && ui_kit::button(ui, crate::i18n::tr_label("Reload from file"), ui_kit::Button::Normal).clicked() {
+                reload = true;
+            }
         });
     // A filter that stops playing is written where it stopped.
     if stop_play && let Some(p) = m.play.take() {
@@ -512,6 +543,9 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
             f.keep = Keep::Range { range: p.now };
             edit = Some(json!({ "cloud": c.id, "filters": filters_json(&filters) }));
         }
+    }
+    if reload {
+        let _ = app.run("pointcloud.reload", json!({ "cloud": c.id }));
     }
     if let Some(p) = edit
         && app.run("pointcloud.edit", p).is_ok()
@@ -565,15 +599,18 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// A PLY file of points along x, `t` running 0 to 10 by halves, a layer every 2: the layer
-    /// changes at t = 2, 4, 6 and 8.
-    fn layered_points(dir: &std::path::Path) -> std::path::PathBuf {
+    /// A PLY file of ten segments along x, `t` running 0 to 10 along them and two segments to a
+    /// layer: the layer changes at t = 2, 4, 6 and 8.
+    fn layered_segments(dir: &std::path::Path) -> std::path::PathBuf {
         let mut ply = String::from(
-            "ply\nformat ascii 1.0\nelement vertex 21\nproperty float x\nproperty float y\nproperty float z\nproperty float t\nproperty int layer\nend_header\n",
+            "ply\nformat ascii 1.0\nelement vertex 11\nproperty float x\nproperty float y\nproperty float z\nproperty float t\n\
+             element edge 10\nproperty int vertex1\nproperty int vertex2\nproperty int layer\nend_header\n",
         );
-        for i in 0..=20 {
-            let t = f64::from(i) / 2.0;
-            ply += &format!("{t} 0 0 {t} {}\n", (i / 4).min(4));
+        for i in 0..=10 {
+            ply += &format!("{i} 0 0 {i}\n");
+        }
+        for i in 0..10 {
+            ply += &format!("{i} {} {}\n", i + 1, i / 2);
         }
         let path = dir.join("layers.ply");
         std::fs::write(&path, ply).unwrap();
@@ -586,7 +623,7 @@ mod tests {
         h.app.home.open = false;
         let dir = std::env::temp_dir().join(format!("solidcraft-browser-track-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let path = layered_points(&dir);
+        let path = layered_segments(&dir);
         let id = h.app.run("pointcloud.insert", json!({"path": path.to_string_lossy()})).unwrap()["cloud"].as_u64().unwrap();
         h.app.run("pointcloud.edit", json!({"cloud": id, "color_by": "layer", "filters": [{"property": "t", "range": [2.0, 5.0]}]})).unwrap();
         h.app.tree.cloud_panel = Some(super::CloudPanel::new(&h.app, id));
