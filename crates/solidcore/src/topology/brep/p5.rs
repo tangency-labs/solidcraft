@@ -2680,6 +2680,17 @@ pub(crate) fn squeeze_face_in(
             keep_region = Some(if keep_first { r1 } else { r2 });
         }
         delete_face(k, b, Some(&mut *env), face, false, true, keep_region)?;
+        // The stitch's glues, squeezes and splits edit `b` within this edit, through its
+        // environment. Its plain helpers would each start an edit of their own, which the
+        // lent kernel context refuses as nested: with `ignore_problems` the refusal was
+        // silent, and a sliver's two edges stayed apart where upstream glues them.
+        let mut edits = crate::heal::stitch::p1::BorrowedStitchEdits {
+            env: &mut *env,
+            curve_identity: crate::topology::brep::p9::CurveIdentity::Actual(
+                &crate::topology::brep::p9::issue_curve_identity,
+            ),
+        };
+        stitch.edits = Some(&mut edits);
         // After face deletion, ordinary stitch failures record SM_ERR but do
         // not suppress the remaining cleanup calls or their partially filled outputs.
         let mut failed = false;
