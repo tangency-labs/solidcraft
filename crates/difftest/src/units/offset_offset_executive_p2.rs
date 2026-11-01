@@ -2203,6 +2203,17 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
     Ok(output)
 }
 
+/// The calls the C++ crash trap runs in a fresh child: an API shell of a file sheet
+/// with merged results, where `SmOffsetExecutive::PiecewiseMerge` reaches UB-241
+/// (`SmProtoTopologyManager::GlueCoincidentBrepVertices` keeps gluing a vertex it has
+/// deleted; `AddressSanitizer`: SEGV in `sm_RmFromSpatialTree` via `SmBrep::GlueVertices`). Only a
+/// call that actually crashes there is rejected; the others compare as usual.
+fn crash_trapped(input: &Inputs) -> bool {
+    input.operation == Operation::ApiShell
+        && input.config.merge_results
+        && matches!(input.source, Some(Fixture::File { .. }))
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "offset.offset_executive_p2"
@@ -2211,8 +2222,21 @@ impl UnitDiff for Runner {
         let input: Inputs = case.parse()?;
         // FFI argument errors are NEVER constructor rejections or native statuses.
         let Some(query) = input.volume_query else {
-            let outcome = ffi::eval(&input.native())
-                .map_err(|error| bad(format!("native p2 adapter: {error}")))?;
+            let outcome = if crash_trapped(&input) {
+                match ffi::eval_in_child(&input.native()) {
+                    Err(solidcore_ffi::FfiError::Status(solidcore_ffi::SC_ERR_CHILD_CRASHED)) => {
+                        return Ok(Output::rejected(
+                            "UB-241: SmApiShellBrepFull crashed in the crash trap's fresh \
+                             child process (GlueCoincidentBrepVertices glues a vertex it \
+                             has deleted; SIGSEGV in sm_RmFromSpatialTree)",
+                        ));
+                    }
+                    other => other,
+                }
+            } else {
+                ffi::eval(&input.native())
+            }
+            .map_err(|error| bad(format!("native p2 adapter: {error}")))?;
             return native_outcome(&input, outcome);
         };
         let (outcome, volumes) = ffi::eval_measured(&input.native(), query.native())

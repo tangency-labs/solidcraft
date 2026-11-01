@@ -1,5 +1,5 @@
 {
- "coverage": "tangency-labs/solidcore#2174: SmApiShellBrepFull thickening (create_offset_solid, extended convex edges, merged results) the r 10 sphere's face above z = 5 alone, by -1 (inward). Outward (+1) the pinned C++ crashes (SIGSEGV in SmApiShellBrepFull), so that direction has no case here; the Rust side returns a non-manifold body there. Its rim is two half circles meeting at (8.66, 0, 5) and (-8.66, 0, 5), its seam ending at (8.66, 0, 5). data/issue2174_cap_two_rim_edges.smb is a Rust-written ASCII .smb (data flows Rust to C++ only; each side reads it with its own reader): the ball intersected with a box over z >= 5 turned 90 degrees about z, its flat face removed. At the pin both sides take each rim half's second trim point as the first one's twin across the lifted offset circle's seam (WR-673; Kernel::fixes.offset_open_edge_second_trim_point is off here).",
+ "coverage": "tangency-labs/solidcore#2174: SmApiShellBrepFull thickening (create_offset_solid, extended convex edges, merged results) the r 10 sphere's face above z = 5 alone, by -1 (inward) and +1 (outward). Outward the pinned C++ crashes in the result merge (UB-241: GlueCoincidentBrepVertices glues a vertex it has deleted; SIGSEGV in sm_RmFromSpatialTree), which the runner's crash trap reports as rejected; the Rust side returns a body that is no manifold solid there. Its rim is two half circles meeting at (8.66, 0, 5) and (-8.66, 0, 5), its seam ending at (8.66, 0, 5). data/issue2174_cap_two_rim_edges.smb is a Rust-written ASCII .smb (data flows Rust to C++ only; each side reads it with its own reader): the ball intersected with a box over z >= 5 turned 90 degrees about z, its flat face removed. At the pin both sides take each rim half's second trim point as the first one's twin across the lifted offset circle's seam (WR-673; Kernel::fixes.offset_open_edge_second_trim_point is off here).",
  "cases": [
   {
    "name": "issue2174_cap_two_rim_edges_api_shell_in",
@@ -16,6 +16,27 @@
     "tolerance": 1e-06,
     "config": {
      "offset_distance": -1.0,
+     "extend_convex": true,
+     "merge_results": true,
+     "create_offset_solid": true
+    }
+   }
+  },
+  {
+   "name": "issue2174_cap_two_rim_edges_api_shell_out",
+   "upstream_ref": "tangency-labs/solidcore#2174 (operand: crates/solidcore/tests/issue_2174_cap_rim_two_edges.rs, ignored write_issue_2174_operand); outward crash: plan/upstream-issues UB-241 addendum 2026-11-01",
+   "inputs": {
+    "operation": "api_shell",
+    "source": {
+     "kind": "file",
+     "path": {
+      "$repo_file": "fixtures/offset.offset_executive_p2/data/issue2174_cap_two_rim_edges.smb"
+     }
+    },
+    "faces": [],
+    "tolerance": 1e-06,
+    "config": {
+     "offset_distance": 1.0,
      "extend_convex": true,
      "merge_results": true,
      "create_offset_solid": true

@@ -894,6 +894,38 @@ pub fn eval(request: &Request) -> Result<Outcome, FfiError> {
     decode(&raw, request.operation, request.attributed.is_some())
 }
 
+/// [`eval`] in a fresh forked child ([`crate::isolate::fresh_process`]): the crash trap
+/// for calls that can reach UB-241 (`SmProtoTopologyManager::GlueCoincidentBrepVertices`
+/// glues a vertex it has already deleted; SIGSEGV in `sm_RmFromSpatialTree`). The
+/// child's upstream state changes are not seen by later calls.
+///
+/// # Errors
+///
+/// As [`eval`], plus [`FfiError::Status`]`(`[`SC_ERR_CHILD_CRASHED`](crate::SC_ERR_CHILD_CRASHED)`)`
+/// when the child crashed.
+pub fn eval_in_child(request: &Request) -> Result<Outcome, FfiError> {
+    let input = pack(request)?;
+    let raw = crate::isolate::fresh_process(move || {
+        call_with_buffer(4096, |out, len| {
+            if out.len() > MAX_OUTPUT_VALUES {
+                return crate::SC_ERR_ARG;
+            }
+            // SAFETY: as for [`eval`]: input is validated, finite and bounded, and it
+            // and both outputs stay live throughout this synchronous call.
+            unsafe {
+                sys::sc_offset_offset_executive_p2_eval(
+                    input.as_ptr(),
+                    input.len() as i64,
+                    out.as_mut_ptr(),
+                    out.len() as i64,
+                    &raw mut *len,
+                )
+            }
+        })
+    })?;
+    decode(&raw, request.operation, request.attributed.is_some())
+}
+
 /// Which volumes [`eval_measured`] queries with `SmApiBrepComputeVolume` (accuracy `1e-6`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VolumeQuery {

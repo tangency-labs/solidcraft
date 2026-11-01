@@ -28,7 +28,8 @@
 //!
 //! The pinned C++ on the repro's sheet (the `issue2174` fixture of
 //! `offset.offset_executive_p2`): inward it agrees with the port's default; outward it
-//! crashes (SIGSEGV), so that direction has no difftest case.
+//! crashes (SIGSEGV; UB-241, see `issue_2174_cap_outward_ub_241.rs`), which the
+//! runner's crash trap reports as rejected.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
