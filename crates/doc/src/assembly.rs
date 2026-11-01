@@ -308,6 +308,29 @@ impl Document {
         transform_through(component, |c| self.occurrence_of(c))
     }
 
+    /// Every path from the root to an occurrence: one for each placement of the components above
+    /// it, as [`Self::path_placement`] takes them. Empty for an occurrence that isn't there.
+    pub fn occurrence_paths(&self, occurrence: u64) -> Vec<Vec<u64>> {
+        fn walk(doc: &Document, occurrence: u64, depth: usize) -> Vec<Vec<u64>> {
+            let Some(o) = doc.occurrences.iter().find(|o| o.id == occurrence) else { return Vec::new() };
+            if o.parent == 0 {
+                return vec![vec![occurrence]];
+            }
+            if depth >= MAX_PLACEMENT_DEPTH {
+                return Vec::new();
+            }
+            let above = doc.occurrences.iter().filter(|p| p.component == o.parent);
+            above
+                .flat_map(|p| walk(doc, p.id, depth + 1))
+                .map(|mut path| {
+                    path.push(occurrence);
+                    path
+                })
+                .collect()
+        }
+        walk(self, occurrence, 0)
+    }
+
     /// One placement: the component the occurrence `path` from the root leads to (the root for
     /// an empty path) and its world transform. `None` when the path no longer exists.
     pub fn path_placement(&self, path: &[u64]) -> Option<(u64, Mat)> {

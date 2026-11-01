@@ -54,6 +54,39 @@ fn leaf(s: &mut Session, name: &str) {
     run(s, "solid.cylinder", json!({"base": [0, 33, 4], "axis": [1, 0, 0], "radius": 4, "height": 40, "operation": "new"}));
 }
 
+/// A joint on a part inside a subassembly placed twice crosses the border of both placements: a
+/// joint names an occurrence, and both placements hold it. A joint between two parts inside
+/// crosses neither.
+#[test]
+fn a_shared_subassembly_lists_the_joints_crossing_it_on_each_placement() {
+    let mut s = Session::default();
+    leaf(&mut s, "Frame");
+    leaf(&mut s, "Nut");
+    leaf(&mut s, "Bolt");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.ground", json!({"occurrence": "Frame:1", "grounded": true}));
+    run(&mut s, "component.create", json!({"name": "Axis", "grounded": false}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.reparent", json!({"occurrence": "Nut:1", "parent": "Axis"}));
+    run(&mut s, "occurrence.reparent", json!({"occurrence": "Bolt:1", "parent": "Axis"}));
+    run(&mut s, "joint.as_built", json!({"type": "rigid", "name": "Inside", "a": "Nut:1", "b": "Bolt:1"}));
+    run(&mut s, "joint.as_built", json!({"type": "rigid", "name": "Across", "a": "Frame:1", "b": "Nut:1"}));
+    run(&mut s, "occurrence.copy", json!({"occurrence": "Axis:1", "translate": [0, 200, 0]}));
+
+    let id = |s: &Session, name: &str| s.doc.occurrences.iter().find(|o| o.name == name).map(|o| o.id).unwrap_or_else(|| panic!("no {name}"));
+    let joint = |s: &Session, name: &str| s.doc.assembly.joints.iter().find(|j| j.name == name).map(|j| j.id).unwrap_or_else(|| panic!("no {name}"));
+    let (across, inside) = (joint(&s, "Across"), joint(&s, "Inside"));
+    let (frame, nut, bolt) = (id(&s, "Frame:1"), id(&s, "Nut:1"), id(&s, "Bolt:1"));
+    let attached = s.doc.attached_joints();
+    let joints = |o: u64| attached.get(&o).map(|list| list.iter().map(|l| (l.joint, l.other)).collect::<Vec<_>>()).unwrap_or_default();
+    for placement in ["Axis:1", "Axis:2"] {
+        assert_eq!(joints(id(&s, placement)), [(across, frame)], "{placement}");
+    }
+    assert_eq!(joints(nut), [(inside, bolt), (across, frame)]);
+    assert_eq!(joints(bolt), [(inside, nut)]);
+    assert_eq!(joints(frame), [(across, nut)]);
+}
+
 #[test]
 fn circle_given_by_its_centre_takes_that_round_end() {
     // #393: `circle` at the centre of a round end, as the parameters document, was refused with

@@ -691,6 +691,40 @@ impl Session {
         self.visibility.hidden_occurrences.iter().any(|hidden| hidden == path)
     }
 
+    /// The placement Show Joints is on, while it is still in the design (deleting it, or undoing
+    /// its creation, leaves the view).
+    pub fn joint_focus(&self) -> Option<&[u64]> {
+        self.joint_focus.as_deref().filter(|path| self.doc.path_placement(path).is_some())
+    }
+
+    pub(crate) fn set_joint_focus(&mut self, path: Option<Vec<u64>>) {
+        self.joint_focus = path;
+    }
+
+    /// The joints Show Joints shows, in the design's joint order.
+    pub fn focused_joints(&self) -> Option<Vec<u64>> {
+        let occurrence = self.joint_focus()?.last()?;
+        Some(self.doc.attached_joints().get(occurrence).map(|list| list.iter().map(|l| l.joint).collect()).unwrap_or_default())
+    }
+
+    /// The bodies of the parts these joints join, sorted, in every placement of those parts (a
+    /// joint names an occurrence, not a path). An end on the root design is the root's own
+    /// bodies, not the whole design below it.
+    pub fn joint_bodies(&self, joints: &[u64]) -> Vec<String> {
+        let chosen = self.doc.assembly.joints.iter().filter(|j| joints.contains(&j.id));
+        let ends: std::collections::BTreeSet<u64> = chosen.flat_map(|j| [j.a.occurrence, j.b.occurrence]).collect();
+        let mut bodies = Vec::new();
+        for end in ends {
+            let paths = if end == 0 { vec![Vec::new()] } else { self.doc.occurrence_paths(end) };
+            for path in paths {
+                bodies.extend(self.occurrence_bodies(&path, end != 0).unwrap_or_default());
+            }
+        }
+        bodies.sort();
+        bodies.dedup();
+        bodies
+    }
+
     /// Number of placements affected by editing this shared occurrence definition.
     pub fn occurrence_scope_count(&self, path: &[u64]) -> Result<usize> {
         let id = self.occurrence_placement(path)?.occurrence;

@@ -580,6 +580,8 @@ fn scene_key(app: &SolveApp) -> u64 {
     app.session.visibility.hidden_profiles.hash(&mut h);
     app.session.active_component.hash(&mut h);
     app.session.active_occurrence_path.hash(&mut h);
+    crate::dialogs_assembly::joint_focus(app).hash(&mut h);
+    crate::joint_spotlight::bodies(app).hash(&mut h);
     app.preview.effective_replaced().hash(&mut h);
     app.preview.rolled_back.hash(&mut h);
     app.preferences.cosmetic_threads.hash(&mut h);
@@ -645,6 +647,16 @@ fn sketch_color(t: &Tokens, c: Rgb) -> [u8; 4] {
     } else {
         rgba(c)
     }
+}
+
+/// The bodies that stay solid while the others fade: the parts of a picked joint, or those of Show
+/// Joints' placement, or else of the active placement.
+pub(crate) fn solid_bodies(app: &SolveApp) -> Option<Vec<String>> {
+    if let Some(bodies) = crate::joint_spotlight::bodies(app) {
+        return Some(bodies.to_vec());
+    }
+    let s = &app.session;
+    crate::dialogs_assembly::joint_focus(app).or(s.active_occurrence_path.as_deref()).and_then(|p| s.occurrence_bodies(p, true).ok())
 }
 
 /// With a component active, bodies outside it are drawn faded.
@@ -1429,7 +1441,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     let s = &app.session;
     // Bodies where their occurrences place them.
     let st = crate::open_meshing::shown_world(app);
-    let active_bodies = s.active_occurrence_path.as_ref().and_then(|p| s.occurrence_bodies(p, true).ok());
+    let active_bodies = solid_bodies(app);
     let (shaded, edges) = match app.ui.visual_style {
         1 => (true, false),
         2 => (false, true),
@@ -3731,7 +3743,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     let mut sc = GpuScene::with_palette(crate::gpu::Palette::with_stable(body_slots.entries()));
     let st = crate::open_meshing::shown_world(app);
     let s = &app.session;
-    let active_bodies = s.active_occurrence_path.as_ref().and_then(|p| s.occurrence_bodies(p, true).ok());
+    let active_bodies = solid_bodies(app);
     // Faces lit over the model use the triangles the model shows them with.
     let product = crate::render_workspace::active(app);
     // Bodies a Move dialog moves are lit where they stand (as they are picked). While its triad
@@ -5806,6 +5818,7 @@ pub(crate) fn select(app: &mut SolveApp, sel: Option<Sel>, add: bool, toggle: bo
         }
         None if !add => {
             let _ = app.run("select.clear", json!({}));
+            crate::dialogs_assembly::leave_joint_focus(app);
         }
         None => {}
     }

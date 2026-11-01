@@ -10,6 +10,126 @@ use crate::context_menu::{self, Target};
 use crate::scenario::Harness;
 use crate::test_support::click;
 
+/// A picked joint lights the parts it joins and draws alone, until it is unpicked.
+#[test]
+fn a_picked_joint_lights_its_parts_and_fades_the_rest() {
+    let mut h = harness();
+    let [a, b, c] = ["A:1", "B:1", "C:1"].map(|name| occurrence(&h, name));
+    let (hinge, glue) = (id(&h, "Hinge"), id(&h, "Glue"));
+    assert_eq!(crate::viewport::solid_bodies(&h.app), None);
+
+    crate::dialogs_assembly::pick_joint(&mut h.app, hinge, false);
+    h.frames(2);
+    let mut parts: Vec<_> = [a, b].iter().flat_map(|o| h.app.session.occurrence_bodies(&[*o], true).unwrap()).collect();
+    parts.sort();
+    assert_eq!(crate::viewport::solid_bodies(&h.app).as_ref(), Some(&parts));
+    assert!(!parts.iter().any(|p| h.app.session.occurrence_bodies(&[c], true).unwrap().contains(p)));
+    assert_eq!(drawn(&h), [(hinge, true)], "the other joints step back");
+
+    // Ctrl adds a joint, and its part.
+    crate::dialogs_assembly::pick_joint(&mut h.app, glue, true);
+    h.frames(2);
+    assert_eq!(crate::viewport::solid_bodies(&h.app).unwrap().len(), parts.len() + h.app.session.occurrence_bodies(&[c], true).unwrap().len());
+
+    // The way a pick always ended: a click on nothing.
+    crate::viewport::select(&mut h.app, None, false, false);
+    h.frames(2);
+    assert_eq!(crate::viewport::solid_bodies(&h.app), None);
+    assert_eq!(drawn(&h), [(hinge, false), (glue, false)]);
+}
+
+/// The light is a glance: anything that shows the user has moved on ends it, though the joint
+/// stays picked, and it doesn't come back by itself.
+#[test]
+fn anything_else_puts_out_a_picked_joints_light() {
+    let mut h = harness();
+    let (hinge, glue) = (id(&h, "Hinge"), id(&h, "Glue"));
+    let solid = |h: &Harness| crate::viewport::solid_bodies(&h.app);
+    let pick = |h: &mut Harness| {
+        h.app.tree.picked_joints.clear();
+        h.frames(2);
+        crate::dialogs_assembly::pick_joint(&mut h.app, hinge, false);
+        h.frames(2);
+        assert!(solid(h).is_some());
+    };
+
+    // Moving the camera is looking.
+    pick(&mut h);
+    h.app.cam.pitch += 0.2;
+    h.frames(2);
+    assert!(solid(&h).is_some());
+
+    // Showing or hiding something.
+    h.app.run("browser.visibility", json!({"joints": [glue], "visible": false})).unwrap();
+    h.frames(2);
+    assert_eq!(solid(&h), None);
+    assert_eq!(h.app.tree.picked_joints, [hinge]);
+    h.app.run("browser.visibility", json!({"joints": [glue], "visible": true})).unwrap();
+    h.frames(2);
+    assert_eq!(solid(&h), None, "it doesn't come back with the state it left");
+
+    // Selecting something beside the joint.
+    pick(&mut h);
+    let body = h.app.session.world_state().bodies.first().unwrap().name.clone();
+    crate::viewport::select(&mut h.app, Some(solidcraft_engine::Sel::Body { name: body }), true, false);
+    h.frames(2);
+    assert_eq!(solid(&h), None);
+    h.app.run("select.clear", json!({})).unwrap();
+
+    // Editing the design.
+    pick(&mut h);
+    h.app.run("joint.drive", json!({"joint": "Hinge", "value": 45})).unwrap();
+    h.frames(2);
+    assert_eq!(solid(&h), None);
+
+    // A dialog, and it stays out after the dialog closes.
+    pick(&mut h);
+    h.step(&json!({"click": {"handle": "row:Hinge"}, "double": true})).unwrap();
+    h.frames(2);
+    assert!(h.app.dialog.is_some());
+    assert_eq!(solid(&h), None);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    assert_eq!(solid(&h), None);
+}
+
+/// With its preference off a pick lights nothing and every joint keeps drawing, and turning it off
+/// puts out a light that is on.
+#[test]
+fn highlight_joint_parts_off_keeps_the_view_as_it_was() {
+    let mut h = harness();
+    let (hinge, glue) = (id(&h, "Hinge"), id(&h, "Glue"));
+    h.app.preferences.highlight_joint_parts = false;
+    crate::dialogs_assembly::pick_joint(&mut h.app, hinge, false);
+    h.frames(2);
+    assert_eq!(crate::viewport::solid_bodies(&h.app), None);
+    assert_eq!(drawn(&h), [(hinge, true), (glue, false)]);
+
+    h.app.preferences.highlight_joint_parts = true;
+    h.app.tree.picked_joints.clear();
+    h.frames(2);
+    crate::dialogs_assembly::pick_joint(&mut h.app, hinge, false);
+    h.frames(2);
+    assert!(crate::viewport::solid_bodies(&h.app).is_some());
+    h.app.preferences.highlight_joint_parts = false;
+    h.frames(2);
+    assert_eq!(crate::viewport::solid_bodies(&h.app), None);
+}
+
+/// Every placement of a part in a shared subassembly lights up, as a joint names no path.
+#[test]
+fn a_joint_finds_every_placement_of_its_parts() {
+    let (mut h, [_, axis, spindle, ..]) = subassembly();
+    let again = h.app.run("occurrence.copy", json!({"occurrence": axis, "translate": [0, 200, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    let mut paths = h.app.session.doc.occurrence_paths(spindle);
+    paths.sort();
+    let mut expected = vec![vec![axis, spindle], vec![again, spindle]];
+    expected.sort();
+    assert_eq!(paths, expected);
+    assert_eq!(h.app.session.doc.occurrence_paths(axis), [vec![axis]]);
+    assert!(h.app.session.doc.occurrence_paths(u64::MAX).is_empty());
+}
+
 /// Components A (grounded) and B joined by a revolute "Hinge", and C held by a rigid "Glue".
 fn harness() -> Harness {
     let mut h = Harness::new();
@@ -28,6 +148,10 @@ fn harness() -> Harness {
 
 fn id(h: &Harness, name: &str) -> u64 {
     h.app.session.doc.assembly.joints.iter().find(|j| j.name == name).unwrap().id
+}
+
+fn occurrence(h: &Harness, name: &str) -> u64 {
+    h.app.session.doc.occurrences.iter().find(|o| o.name == name).unwrap().id
 }
 
 fn drawn(h: &Harness) -> Vec<(u64, bool)> {
@@ -109,6 +233,149 @@ fn the_menu_and_the_v_key_hide_and_show_picked_joints() {
     assert!(h.app.session.joint_visible(hinge) && h.app.session.joint_visible(glue));
 }
 
+/// What an occurrence's Joints folder lists: (joint, the placement it joins this one to).
+fn listed(h: &Harness, occurrence: u64) -> Vec<(String, String)> {
+    let doc = &h.app.session.doc;
+    let attached = doc.attached_joints().remove(&occurrence).unwrap_or_default();
+    crate::dialogs_assembly::placement_joints(doc, &attached).into_iter().map(|j| (j.name, j.other)).collect()
+}
+
+/// Frame (grounded) and Axis, a subassembly holding Spindle, Nut and Carriage. Bearing and Rail
+/// tie Axis to Frame from inside it; Screw and Mount stay inside. Returns the occurrences
+/// Frame, Axis, Spindle, Nut and Carriage.
+fn subassembly() -> (Harness, [u64; 5]) {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_browser = true;
+    for (name, x) in [("Frame", 0), ("Spindle", 30), ("Nut", 60), ("Carriage", 90)] {
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.create", json!({"name": name})).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [x, 0, 0]})).unwrap();
+    }
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.run("occurrence.ground", json!({"occurrence": "Frame:1", "grounded": true})).unwrap();
+    h.app.run("component.create", json!({"name": "Axis"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    for part in ["Spindle:1", "Nut:1", "Carriage:1"] {
+        h.app.run("occurrence.reparent", json!({"occurrence": part, "parent": "Axis"})).unwrap();
+    }
+    let [frame, axis, spindle, nut, carriage] = ["Frame:1", "Axis:1", "Spindle:1", "Nut:1", "Carriage:1"].map(|name| occurrence(&h, name));
+    for (name, a, b, at) in
+        [("Bearing", frame, spindle, 30), ("Screw", spindle, nut, 60), ("Mount", nut, carriage, 90), ("Rail", frame, carriage, 100)]
+    {
+        h.app.run("joint.as_built", json!({"type": "rigid", "name": name, "a": a, "b": b, "at": {"point": [at, 5, 5]}})).unwrap();
+    }
+    h.frames(3);
+    (h, [frame, axis, spindle, nut, carriage])
+}
+
+/// A subassembly lists the joints that cross its border; a part lists all of its own.
+#[test]
+fn a_subassembly_lists_only_the_joints_that_cross_its_border() {
+    let (h, [frame, axis, spindle, nut, carriage]) = subassembly();
+    let pair = |n: &str, o: &str| (n.to_string(), o.to_string());
+    assert_eq!(listed(&h, axis), [pair("Bearing", "Frame:1"), pair("Rail", "Frame:1")]);
+    assert_eq!(listed(&h, spindle), [pair("Bearing", "Frame:1"), pair("Screw", "Nut:1")]);
+    assert_eq!(listed(&h, nut), [pair("Screw", "Spindle:1"), pair("Mount", "Carriage:1")]);
+    assert_eq!(listed(&h, carriage), [pair("Mount", "Nut:1"), pair("Rail", "Frame:1")]);
+    assert_eq!(listed(&h, frame), [pair("Bearing", "Spindle:1"), pair("Rail", "Carriage:1")]);
+}
+
+/// Only a joint's own ends are direct, and with detailed folders off a subassembly joined from
+/// inside has no folder, as before they existed.
+#[test]
+fn plain_joint_folders_list_only_a_placements_own_joints() {
+    let (mut h, [_, axis, spindle, ..]) = subassembly();
+    let attached = h.app.session.doc.attached_joints();
+    assert!(attached[&axis].iter().all(|link| !link.direct), "both cross from inside");
+    assert!(attached[&spindle].iter().all(|link| link.direct));
+
+    h.app.tree.expanded.insert(format!("o:{axis}"));
+    h.app.tree.expanded.insert(format!("o:{axis}/joints"));
+    h.frames(3);
+    let rows = |label: &str| crate::browser::drawn_rows().into_iter().filter(|r| r.0 == label).count();
+    assert_eq!(rows("Bearing"), 2, "the root's folder and Axis's");
+    h.app.preferences.detailed_joint_folders = false;
+    h.frames(3);
+    assert_eq!(rows("Bearing"), 1, "the root's folder alone");
+}
+
+/// Show Joints draws one placement's joints, hidden ones too, and fades the bodies outside it. It
+/// is a view, no undo step; Escape, a click on nothing or the menu leaves it.
+#[test]
+fn show_joints_draws_only_that_placements_joints() {
+    let (mut h, [_, axis, spindle, nut, _]) = subassembly();
+    let [bearing, screw, mount, rail] = ["Bearing", "Screw", "Mount", "Rail"].map(|name| id(&h, name));
+    let drawn_ids = |h: &Harness| drawn(h).into_iter().map(|d| d.0).collect::<Vec<_>>();
+    assert_eq!(drawn_ids(&h), [bearing, screw, mount, rail]);
+    h.app.run("browser.visibility", json!({"joints": [mount], "visible": false})).unwrap();
+
+    let path = vec![axis, nut];
+    let item = |h: &Harness| {
+        let items = context_menu::items(&h.app, &Target::Occurrence { path: path.clone() });
+        items.iter().find(|i| i.id == "ui.showJoints").unwrap_or_else(|| panic!("no Show Joints in {items:?}")).clone()
+    };
+    let undo = h.app.session.undo.len();
+    assert_eq!(item(&h).label, "Show Joints");
+    let show = item(&h);
+    context_menu::run_item(&mut h.app, &show, pos2(0.0, 0.0));
+    h.frames(3);
+    assert_eq!(drawn_ids(&h), [screw, mount], "the nut's joints only, the hidden one too");
+    assert_eq!(h.app.session.undo.len(), undo, "a view is no undo step");
+    assert!(!h.app.session.joint_visible(mount), "showing it here doesn't unhide it");
+
+    let solid = h.app.session.occurrence_bodies(&path, true).unwrap();
+    assert!(!solid.is_empty());
+    let world = h.app.session.world_state();
+    let kept = crate::viewport::solid_bodies(&h.app);
+    assert_eq!(kept.as_ref(), Some(&solid));
+    for b in &world.bodies {
+        assert_eq!(crate::viewport::body_faded(&h.app, b, &kept), !solid.contains(&b.name), "{}", b.name);
+    }
+
+    // Picking a joint meanwhile keeps the view, and draws the joint with the others.
+    h.app.tree.picked_joints.push(rail);
+    assert_eq!(drawn_ids(&h), [screw, mount, rail]);
+    h.app.tree.picked_joints.clear();
+
+    // The menu's way back.
+    assert_eq!(item(&h).label, "Stop Showing Joints");
+    let show = item(&h);
+    context_menu::run_item(&mut h.app, &show, pos2(0.0, 0.0));
+    assert!(h.app.session.joint_focus().is_none());
+    assert_eq!(item(&h).label, "Show Joints");
+
+    // Escape, on another placement.
+    h.app.run("joint.focus", json!({"path": [axis, spindle]})).unwrap();
+    h.frames(3);
+    assert_eq!(drawn_ids(&h), [bearing, screw]);
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(3);
+    assert!(h.app.session.joint_focus().is_none(), "Escape leaves it");
+
+    // A click on nothing, as it lets go of a selection.
+    h.app.run("joint.focus", json!({"path": path})).unwrap();
+    crate::viewport::select(&mut h.app, None, false, false);
+    assert!(h.app.session.joint_focus().is_none());
+    assert_eq!(drawn_ids(&h), [bearing, screw, rail], "the normal view is back, Mount still hidden");
+}
+
+/// A placement no joint attaches has nothing to show, and a placement that goes ends the view.
+#[test]
+fn show_joints_needs_a_placement_with_joints() {
+    let mut h = harness();
+    let [b, c] = ["B:1", "C:1"].map(|name| occurrence(&h, name));
+    h.app.run("joint.focus", json!({"path": [b]})).unwrap();
+    assert_eq!(h.app.session.joint_focus(), Some([b].as_slice()));
+    h.app.run("joint.delete", json!({"joint": "Glue"})).unwrap();
+    let items = context_menu::items(&h.app, &Target::Occurrence { path: vec![c] });
+    assert!(!items.iter().find(|i| i.id == "ui.showJoints").unwrap().enabled);
+
+    h.app.run("component.delete", json!({"component": "B"})).unwrap();
+    assert!(h.app.session.joint_focus().is_none());
+    assert!(h.app.run("joint.focus", json!({"path": [b]})).is_err(), "a placement that isn't there is refused");
+}
+
 /// Each placement has a Joints folder listing the joints that attach it, beside the placement
 /// each joins it to (#9130). Its rows are the root folder's joints: a click picks, the eye
 /// hides, a double-click edits and the menu acts on the same joint.
@@ -118,9 +385,6 @@ fn each_placement_lists_the_joints_that_attach_it() {
     let hinge = id(&h, "Hinge");
     let occ = |h: &Harness, name: &str| h.app.session.doc.occurrences.iter().find(|o| o.name == name).unwrap().id;
     let (a, b, c) = (occ(&h, "A:1"), occ(&h, "B:1"), occ(&h, "C:1"));
-    let listed = |h: &Harness, o: u64| -> Vec<(String, String)> {
-        crate::dialogs_assembly::placement_joints(&h.app.session.doc, &[o]).into_iter().map(|j| (j.name, j.other)).collect()
-    };
     let pair = |n: &str, o: &str| (n.to_string(), o.to_string());
     assert_eq!(listed(&h, a), [pair("Hinge", "B:1"), pair("Glue", "C:1")]);
     assert_eq!(listed(&h, b), [pair("Hinge", "A:1")]);

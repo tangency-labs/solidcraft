@@ -341,6 +341,10 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                             app.preferences.browser_bodies_folders = *mode;
                         }
                     });
+                    ui_kit::row(ui, "", |ui| {
+                        let check = setting::detailed_joint_folders(app, ui).on_hover_text(app.tr("prefs.detailed_joint_folders_help"));
+                        crate::scenario::publish_target("prefs:detailed_joint_folders", check.rect);
+                    });
                     // The eye beside the fold arrow, where it was before #8718.
                     ui_kit::row(ui, "", |ui| {
                         let check = setting::browser_eye_left(app, ui).on_hover_text(app.tr("prefs.browser_eye_left_note"));

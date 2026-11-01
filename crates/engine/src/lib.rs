@@ -489,6 +489,8 @@ pub struct Session {
     pub active_component: u64,
     /// The placement used when authoring shared component geometry.
     pub active_occurrence_path: Option<Vec<u64>>,
+    /// The placement Show Joints is on (`joint.focus`): a view, never saved or undone.
+    joint_focus: Option<Vec<u64>>,
     /// Occurrence moves not captured yet (Capture Position keeps them, a recompute drops them).
     pub pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
     world_cache: std::sync::Mutex<Option<WorldCache>>,
@@ -721,6 +723,7 @@ impl Session {
             live_links: None,
             active_component: 0,
             active_occurrence_path: None,
+            joint_focus: None,
             pending_moves: Default::default(),
             world_cache: Default::default(),
             joints_settled: None,
@@ -1690,6 +1693,7 @@ impl Session {
     /// commands on without touching this one.
     pub fn scratch(&self) -> Session {
         Session {
+            joint_focus: None,
             doc: self.doc.clone(),
             model: self.model.clone(),
             undo: Vec::new(),

@@ -2044,7 +2044,63 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, sol: &mut Soluti
     Built { tree, placed, closing, dof }
 }
 
+/// A joint an occurrence lists, and the occurrence it joins that one to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AttachedJoint {
+    pub joint: u64,
+    pub other: u64,
+    /// The occurrence is an end of the joint, not a subassembly around that end.
+    pub direct: bool,
+}
+
+/// `occurrence` and every occurrence holding it. An occurrence inside a component placed twice is
+/// held by both placements, so this walks upwards through each of them.
+fn held_by(occurrence: u64, parents: &BTreeMap<u64, u64>, placed: &BTreeMap<u64, Vec<u64>>) -> BTreeSet<u64> {
+    let mut seen = BTreeSet::from([occurrence]);
+    let mut stack = vec![occurrence];
+    while let Some(o) = stack.pop() {
+        let Some(parent) = parents.get(&o) else { continue };
+        for holder in placed.get(parent).into_iter().flatten() {
+            if seen.insert(*holder) {
+                stack.push(*holder);
+            }
+        }
+    }
+    seen
+}
+
 impl Document {
+    /// The joints that attach each occurrence, in the design's joint order: those it is an end
+    /// of, and those that cross its border, with one end inside it and the other outside. A joint
+    /// with both ends inside is the concern of the occurrences it joins, not of the one around
+    /// them, so a subassembly lists only what ties it to the rest of the design.
+    pub fn attached_joints(&self) -> BTreeMap<u64, Vec<AttachedJoint>> {
+        let mut parents = BTreeMap::new();
+        let mut placed: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+        for o in &self.occurrences {
+            parents.entry(o.id).or_insert(o.parent);
+            placed.entry(o.component).or_default().push(o.id);
+        }
+        let mut holders: BTreeMap<u64, BTreeSet<u64>> = BTreeMap::new();
+        let mut out: BTreeMap<u64, Vec<AttachedJoint>> = BTreeMap::new();
+        for j in &self.assembly.joints {
+            let (a, b) = (j.a.occurrence, j.b.occurrence);
+            for end in [a, b] {
+                holders.entry(end).or_insert_with(|| held_by(end, &parents, &placed));
+            }
+            let (Some(around_a), Some(around_b)) = (holders.get(&a), holders.get(&b)) else { continue };
+            for (end, other, around, across) in [(a, b, around_a, around_b), (b, a, around_b, around_a)] {
+                for o in around.iter().filter(|o| **o == end || !across.contains(o)) {
+                    let list = out.entry(*o).or_default();
+                    if list.last().is_none_or(|l| l.joint != j.id) {
+                        list.push(AttachedJoint { joint: j.id, other, direct: *o == end });
+                    }
+                }
+            }
+        }
+        out
+    }
+
     /// Apply a solution: occurrence transforms (in their parents) for the occurrences it places,
     /// and the values of the joints that moved to close loops. Returns true when something moved.
     pub fn apply_joint_solution(&mut self, sol: &Solution) -> bool {

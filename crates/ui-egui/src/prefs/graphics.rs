@@ -222,6 +222,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.ui.visual_style = selected as u8;
             });
         });
+        let response = setting::highlight_joint_parts(app, ui).on_hover_text(app.tr("prefs.highlight_joint_parts_help"));
+        crate::scenario::publish_handle("prefs:highlight_joint_parts", response.rect.center());
     });
     #[cfg(target_os = "linux")]
     ui_kit::settings_section(ui, "window_system", app.tr("ui.window_system"), |ui| window_system_row(app, ui));

@@ -3292,6 +3292,15 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     app.last_escape = None;
                     continue;
                 }
+                // Show Joints gives way to a tool, dialog or sketch, which take this press.
+                if app.tool.is_none()
+                    && app.dialog.is_none()
+                    && app.session.active_sketch.is_none()
+                    && crate::dialogs_assembly::leave_joint_focus(app)
+                {
+                    app.last_escape = None;
+                    continue;
+                }
                 // Two quick presses in a sketch finish it (keeping it, like Finish Sketch);
                 // the first one has already cancelled whatever was active.
                 let now = ctx.input(|i| i.time);

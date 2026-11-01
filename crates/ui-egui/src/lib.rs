@@ -100,6 +100,7 @@ pub mod install;
 pub mod issue_report;
 pub mod joint_drag;
 pub(crate) mod joint_handles;
+pub mod joint_spotlight;
 pub mod keymap;
 mod length_input;
 mod linked_source;
@@ -3108,6 +3109,9 @@ impl SolveApp {
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
+        if joint_spotlight::follow(self) {
+            ui.ctx().request_repaint();
+        }
         if render_workspace::active(self) {
             render_workspace::show(self, ui);
         } else {

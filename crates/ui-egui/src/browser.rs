@@ -136,6 +136,8 @@ pub struct TreeState {
     pub picked_canvases: Vec<u64>,
     /// Joints picked in the tree (a hidden one shows highlighted while it is picked).
     pub picked_joints: Vec<u64>,
+    /// The parts of the picked joints, lit in the viewport while the pick is all that's going on.
+    pub joint_spotlight: crate::joint_spotlight::Spotlight,
     /// Folders picked in the feature history (features use the engine selection).
     pub picked_timeline_groups: Vec<u64>,
     /// Last feature-history item clicked, for Shift ranges (`f:<id>` or `g:<id>`).
@@ -1203,6 +1205,7 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, c
         ui.add_space(t.space_3);
     }
     crate::edit_in_place::browser_strip(app, ui);
+    crate::dialogs_assembly::joint_focus_strip(app, ui);
     if collapsible && !stacked {
         browser_rows_hugging(app, ui, acts);
     } else {
@@ -1262,6 +1265,12 @@ fn prepare_model(app: &mut SolveApp) {
     if app.tree.model.as_ref().is_none_or(|model| !model.matches(&app.session)) {
         app.tree.model = Some(model::Model::new(&app.session));
     }
+}
+
+/// The joints an occurrence's Joints folder lists.
+pub(crate) fn attached_joints(app: &mut SolveApp, occurrence: u64) -> Vec<solidcraft_engine::doc::joints::AttachedJoint> {
+    prepare_model(app);
+    app.tree.model.as_mut().map(|model| model.attached_joints(occurrence).to_vec()).unwrap_or_default()
 }
 
 fn model_placement(app: &mut SolveApp, path: &[u64]) -> Option<std::sync::Arc<solidcraft_engine::occurrences::OccurrencePlacement>> {

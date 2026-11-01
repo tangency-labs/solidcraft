@@ -13,11 +13,12 @@ use solidcraft_geom::{Aabb3, Vec3};
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec3};
-use crate::schema::joints::EditJointResult;
+use crate::schema::joints::{EditJointResult, FocusJointsParams, FocusJointsResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const EDIT_CONTRACT: TypedContract<crate::schema::joints::EditJointParams> = TypedContract::new();
+const FOCUS_CONTRACT: TypedContract<FocusJointsParams> = TypedContract::new();
 
 #[path = "joints_inspect.rs"]
 mod inspect;
@@ -82,6 +83,15 @@ pub static COMMANDS: &[CommandSpec] = &[
         "a: the cam's joint (revolute); b: the follower's joint, a slider (a translating follower) or a revolute (an oscillating one),          b driven by a; profile: {sketch: id|name, index?: the profile (default: the largest)} | {edges: [[x,y,z]…] (points on edges of          the cam's bodies forming one closed loop, world), occurrence?}: the cam's outline, in a plane square to its axis, read again          whenever the design changes; follower?: knife|roller|flat (default knife; flat: a face square to a slider's line); radius?: the          roller's radius (mm, an expression or {circle: [x,y,z], occurrence?}: the roller's round face, which is its tip too); tip?: a          joint origin where the follower touches: its knife's point or its roller's centre, such as {circle: [x,y,z]} on the roller          (needed for an oscillating follower; a translating one's line runs through it, by default along its slider's axis); flip?: bool (ride the cam from the other side          than the one the follower is on now); link?: index (replace that motion link) → link, lift: {min, max, rise, unit} (b's travel          over a turn of the cam), reverse (the side it rides from), follower_offset (mm: how far a translating follower's line passes          from the cam's axis); b keeps where it is, also when the link replaces another (at the current pose)",
     ),
     CommandSpec::new("joint.limits", "Joint Limits", limits).icon("joint").params("joint; index?: value index (default 0); min?, max? (omit both to clear)"),
+    CommandSpec::new("joint.focus", "Show Joints", crate::checked!("joint.focus", focus))
+        .icon("joint")
+        .noundo()
+        .contract(&FOCUS_CONTRACT)
+        .output(output_schema_for::<FocusJointsResult>)
+        .params(
+            "path?: [occurrence ids from the top]: show only the glyphs of the joints that attach this placement (hidden ones too), with \
+             every body outside it faded; a view, not saved or undone. Without path: back to the normal view. → joints: [ids], bodies: [names]",
+        ),
     CommandSpec::new("joint.edit", "Edit Joint", crate::checked!("joint.edit", edit))
         .icon("edit")
         .contract(&EDIT_CONTRACT)
@@ -1437,6 +1447,25 @@ fn limits(s: &mut Session, p: &Value) -> Result<Value> {
     j.values = q;
     let sol = resolve(s);
     Ok(sol_json(&sol, p))
+}
+
+/// Show Joints on a placement, or (without `path`) back to the normal view.
+fn focus(s: &mut Session, p: &Value) -> Result<Value> {
+    let path: Vec<u64> = match p.get("path") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(value) => value
+            .as_array()
+            .filter(|a| a.len() <= 64)
+            .and_then(|a| a.iter().map(Value::as_u64).collect())
+            .ok_or_else(|| bad("joint.focus", "`path` must list at most 64 occurrence ids"))?,
+    };
+    if path.is_empty() {
+        s.set_joint_focus(None);
+        return Ok(json!({"joints": [], "bodies": []}));
+    }
+    let bodies = s.occurrence_bodies(&path, true)?;
+    s.set_joint_focus(Some(path));
+    Ok(json!({"joints": s.focused_joints().unwrap_or_default(), "bodies": bodies}))
 }
 
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
