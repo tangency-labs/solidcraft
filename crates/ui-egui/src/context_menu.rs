@@ -1488,13 +1488,10 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             let _ = app.run("browser.visibility", json!({ "folder": "all", "visible": true }));
         }
         "ui.isolate" => {
-            // The picked bodies stay (shown first if they were hidden), everything else goes.
-            let others: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).filter(|b| !bodies.contains(b)).collect();
+            // The picked bodies stay (shown if they were hidden) and everything else goes, other
+            // components as components (#7896), in one step.
             if !bodies.is_empty() {
-                let _ = app.run("browser.visibility", json!({ "items": bodies, "visible": true }));
-            }
-            if !others.is_empty() {
-                let _ = app.run("browser.visibility", json!({ "items": others, "visible": false }));
+                let _ = app.run("browser.visibility", json!({ "items": bodies, "visible": true, "isolate": true }));
             }
         }
         "ui.lock" => {
