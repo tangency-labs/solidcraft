@@ -242,9 +242,11 @@ impl Locale {
     }
 
     /// A name someone gave (a body, sketch, component, …): shown as typed, even when it matches
-    /// a UI label ("Fillet", "Boss"); only the default names are translated.
+    /// a UI label ("Fillet", "Boss"); only the default names are translated. A right-to-left name
+    /// is given in display order like a catalog message (see [`crate::bidi`]), so a multi-word
+    /// Hebrew or Arabic name reads from the right like the interface's own labels (#10471).
     pub fn given_name(self, text: &str) -> String {
-        self.default_name(text).unwrap_or_else(|| text.to_string())
+        self.default_name(text).unwrap_or_else(|| crate::bidi::visual(text).into_owned())
     }
 
     /// Evaluation errors stay English for scripts; the empty Cut/Intersect hint that names
@@ -459,6 +461,19 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// A name someone gave is shown in display order, like a catalog message: a multi-word
+    /// Hebrew name must read from the right, not with its words backwards (#10471).
+    #[test]
+    fn given_names_are_shown_in_display_order() {
+        let _language = scope("he");
+        assert_eq!(tr_name("לוח עליון קטן"), "קטן עליון לוח");
+        assert_eq!(tr_name("לוח"), "לוח", "one word is shown as it is");
+        assert_eq!(tr_name("Top plate"), "Top plate", "Latin is shown as it is");
+        assert_eq!(tr_name("Body2"), tr("browser.body_name").replace("{number}", "2"), "default names stay translated");
+        let _arabic = scope("ar");
+        assert_eq!(tr_name("لوحة علوية صغيرة"), "صغيرة علوية لوحة");
     }
 
     #[test]
