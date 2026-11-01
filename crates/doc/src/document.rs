@@ -97,6 +97,8 @@ pub enum PlaneRef {
     Midplane { a: Box<GeoRef>, b: Box<GeoRef> },
     /// Through two straight edges (lines) that lie in one plane.
     TwoEdges { a: Box<GeoRef>, b: Box<GeoRef> },
+    /// Through a line (axis) and a point not on that line.
+    AxisPoint { axis: Box<GeoRef>, point: Box<GeoRef> },
     /// Through three points.
     ThreePoints { a: Box<GeoRef>, b: Box<GeoRef>, c: Box<GeoRef> },
     /// Tangent to a face (cylinder, cone, sphere, torus) where the point `at` lies over it.
@@ -3976,6 +3978,7 @@ impl Document {
             }
             PlaneRef::Midplane { .. }
             | PlaneRef::TwoEdges { .. }
+            | PlaneRef::AxisPoint { .. }
             | PlaneRef::ThreePoints { .. }
             | PlaneRef::Tangent { .. }
             | PlaneRef::AlongPath { .. }

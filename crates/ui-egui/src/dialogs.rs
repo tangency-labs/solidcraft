@@ -1656,7 +1656,7 @@ impl Dialog {
         if self.take_extrude_target(s, &sel) {
             return;
         }
-        if let Some(key) = feature_pattern_reference_key(self, self.active) {
+        if let Some(key) = stored_input_reference_key(self, self.active) {
             self.extra.remove(key);
         }
         if let Kind::PathPlane { sketch, .. } = &mut self.kind {
@@ -1729,6 +1729,9 @@ impl Dialog {
 
     /// Box selection result: replace (or add to) the active input.
     pub fn take_box(&mut self, s: &Session, sels: Vec<Sel>, add: bool) {
+        if let Some(key) = stored_input_reference_key(self, self.active) {
+            self.extra.remove(key);
+        }
         if let Kind::PathPlane { sketch, .. } = &mut self.kind {
             *sketch = None;
             self.extra.remove("path");
@@ -2649,7 +2652,10 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::pref
 }
 
 /// Saved vectors/axes are real inputs even when they have no origin-axis selection chip.
-fn feature_pattern_reference_key(d: &Dialog, index: usize) -> Option<&'static str> {
+fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> {
+    if let Kind::Construct { command: "construct.plane.axis_point", keys, .. } = &d.kind {
+        return keys.get(index).copied();
+    }
     if matches!(d.kind, Kind::Section { .. }) && index == 0 {
         return Some("plane");
     }
@@ -2693,7 +2699,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     let text_focus = crate::ui_kit::editor_has_focus(ui.ctx());
     let shell_count = d.shell_faces(s).map(|faces| faces.len());
     for (i, inp) in d.inputs.iter().enumerate().skip(range.start).take(range.end.saturating_sub(range.start)) {
-        let stored_reference = feature_pattern_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
+        let stored_reference = stored_input_reference_key(d, i).and_then(|key| d.extra.get(key)).filter(|_| inp.items.is_empty());
         form_row(ui, inp.label, |ui| {
             ui.horizontal(|ui| {
                 let active = i == d.active && !text_focus;
@@ -2781,7 +2787,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
         d.active = i;
     }
     if let Some(i) = clear {
-        if let Some(key) = feature_pattern_reference_key(d, i) {
+        if let Some(key) = stored_input_reference_key(d, i) {
             d.extra.remove(key);
         }
         let Some(inp) = d.inputs.get_mut(i) else { return };
@@ -4650,7 +4656,13 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             for (i, key) in keys.iter().enumerate() {
                 let input = d.inputs.get(i).map_or("", |inp| inp.label);
                 let sel = sels(d, i).first().ok_or_else(|| format!("pick the {}", input.to_lowercase()))?;
-                p.insert((*key).to_string(), construct_ref(app, sel)?);
+                p.insert(
+                    (*key).to_string(),
+                    match d.extra.get(*key) {
+                        Some(saved) => saved.clone(),
+                        None => construct_ref(app, sel)?,
+                    },
+                );
             }
             if let Some(t) = t {
                 p.insert("t".into(), json!(t));
@@ -5532,6 +5544,9 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
             ("construct.point.edge_plane", "POINT AT EDGE AND PLANE", &[("Edge", CURVE, "edge"), ("Plane", PLANE, "plane")])
         }
         "construct.point.along_path" => ("construct.point.along_path", "POINT ALONG PATH", &[("Path", CURVE, "path")]),
+        "construct.plane.axis_point" => {
+            ("construct.plane.axis_point", "cmd.construct.plane.axis_point", &[("Axis", LINE | CURVES, "axis"), ("Point", POINT, "point")])
+        }
         "construct.plane.two_edges" => {
             ("construct.plane.two_edges", "PLANE THROUGH TWO EDGES", &[("First edge", LINE, "a"), ("Second edge", LINE, "b")])
         }
@@ -6371,6 +6386,32 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
+        FeatureKind::ConstructionPlane { plane: PlaneRef::AxisPoint { .. } } => {
+            let mut world = f.kind.clone();
+            world.transform_geometry(&feature_frame(s, f.component));
+            let FeatureKind::ConstructionPlane { plane: PlaneRef::AxisPoint { axis, point } } = world else { return None };
+            let mut d = start("construct.plane.axis_point")?;
+            for (input, reference) in d.inputs.iter_mut().zip([&axis, &point]) {
+                // Keep the exact saved references when no new pick has replaced them.
+                // Fixed points also need a visible pick to keep the shared form complete.
+                input.items = vec![match reference.as_ref() {
+                    solidcraft_engine::doc::construct::GeoRef::World { axis } => Sel::Axis { name: axis.clone() },
+                    solidcraft_engine::doc::construct::GeoRef::Axis { name } => Sel::Axis { name: name.to_string() },
+                    solidcraft_engine::doc::construct::GeoRef::ConstructPoint { name } => Sel::ConstructionPoint { name: name.to_string() },
+                    solidcraft_engine::doc::construct::GeoRef::SketchPoint { sketch, point } => Sel::SketchPoint { id: format!("{sketch}:{point}") },
+                    solidcraft_engine::doc::construct::GeoRef::SketchCurve { sketch, curve } => {
+                        Sel::SketchCurve { id: curve.clone(), sketch: Some(*sketch) }
+                    }
+                    solidcraft_engine::doc::construct::GeoRef::Vertex { at, .. } => Sel::Vertex { body: String::new(), point: *at },
+                    solidcraft_engine::doc::construct::GeoRef::Point { p } => Sel::Vertex { body: String::new(), point: *p },
+                    solidcraft_engine::doc::construct::GeoRef::Origin => Sel::Vertex { body: String::new(), point: Vec3::ZERO },
+                    other => model_axis_sel(s, other)?,
+                }];
+            }
+            d.extra.insert("axis".into(), serde_json::to_value(axis).ok()?);
+            d.extra.insert("point".into(), serde_json::to_value(point).ok()?);
+            d
+        }
         FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a, b } } => {
             let mut d = start("construct.plane.midplane")?;
             if let Some(inp) = d.inputs.first_mut() {
@@ -7127,6 +7168,7 @@ mod construct_ask_tests {
         "construct.point.center",
         "construct.point.edge_plane",
         "construct.point.along_path",
+        "construct.plane.axis_point",
         "construct.plane.two_edges",
         "construct.plane.three_points",
         "construct.plane.tangent",

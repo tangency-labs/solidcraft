@@ -8198,6 +8198,7 @@ fn plane_reads_geometry(plane: &PlaneRef) -> bool {
         PlaneRef::ThroughPoint { .. }
         | PlaneRef::Midplane { .. }
         | PlaneRef::TwoEdges { .. }
+        | PlaneRef::AxisPoint { .. }
         | PlaneRef::ThreePoints { .. }
         | PlaneRef::Tangent { .. }
         | PlaneRef::AlongPath { .. }

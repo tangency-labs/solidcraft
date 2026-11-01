@@ -32,6 +32,17 @@ for the origin plane, the construction feature's numeric ID to select it, or an 
 `{origin: [x,y,z], normal: [x,y,z]}` plane. Existing saved references retain their meaning;
 opening a design does not reinterpret old sketches.
 
+**Plane Through Axis And Point** (Model > Construct) creates a plane containing an
+origin or construction axis, straight model edge or sketch line, and a point off that
+line. Pick the axis first, then a vertex, sketch point or construction point. A point
+on the axis leaves infinitely many possible planes, so choose an off-axis point.
+The plane follows its references when they change and can support a new sketch.
+Scripts use `construct.plane.axis_point`, for example:
+
+```json
+{"axis":{"axis":"Z"},"point":{"point":[10,20,30]},"name":"Fence"}
+```
+
 Curves adapt to the current zoom and display scale. Picking and highlighting use the same
 visible boundary, including small circles at Fit and sketches in rotated components.
 Profile shading follows those curves while preserving holes. Zooming changes the display

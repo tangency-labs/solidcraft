@@ -16,8 +16,8 @@ use super::features::{add_feature, check_expr, plane_param, sketch_id};
 use crate::params::{bad, req_expr, str_, vec3};
 use crate::schema::construct::{
     AxisEdgeParams, AxisNormalToFaceParams, AxisThroughCylinderParams, AxisTwoPlanesParams, AxisTwoPointsParams, MidplaneParams,
-    PlaneAlongPathParams, PlanePerpendicularParams, PlaneTangentParams, PlaneThreePointsParams, PlaneTwoEdgesParams, PointAlongPathParams,
-    PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams, PointTwoEdgesParams, PointVertexParams,
+    PlaneAlongPathParams, PlaneAxisPointParams, PlanePerpendicularParams, PlaneTangentParams, PlaneThreePointsParams, PlaneTwoEdgesParams,
+    PointAlongPathParams, PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams, PointTwoEdgesParams, PointVertexParams,
 };
 use crate::schema::features::FeatureResult;
 use crate::schema::{TypedContract, output_schema_for};
@@ -39,6 +39,7 @@ const POINT_EDGE_PLANE_CONTRACT: TypedContract<PointEdgePlaneParams> = TypedCont
 const POINT_ALONG_PATH_CONTRACT: TypedContract<PointAlongPathParams> = TypedContract::new();
 const PLANE_MIDPLANE_CONTRACT: TypedContract<MidplaneParams> = TypedContract::new();
 const PLANE_TWO_EDGES_CONTRACT: TypedContract<PlaneTwoEdgesParams> = TypedContract::new();
+const PLANE_AXIS_POINT_CONTRACT: TypedContract<PlaneAxisPointParams> = TypedContract::new();
 const PLANE_THREE_POINTS_CONTRACT: TypedContract<PlaneThreePointsParams> = TypedContract::new();
 const PLANE_TANGENT_CONTRACT: TypedContract<PlaneTangentParams> = TypedContract::new();
 const PLANE_ALONG_PATH_CONTRACT: TypedContract<PlaneAlongPathParams> = TypedContract::new();
@@ -123,6 +124,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PLANE_TWO_EDGES_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("a, b: straight edge or line refs in one plane; name?"),
+    CommandSpec::new("construct.plane.axis_point", "Plane Through Axis And Point", crate::checked!("construct.plane.axis_point", plane_axis_point))
+        .at("SOLID", "CONSTRUCT")
+        .icon("plane_axis_point")
+        .contract(&PLANE_AXIS_POINT_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("axis: origin axis, construction axis, straight edge or sketch line ref; point: off-axis point ref; name?"),
     CommandSpec::new("construct.plane.three_points", "Plane Through Three Points", crate::checked!("construct.plane.three_points", plane_points))
         .at("SOLID", "CONSTRUCT")
         .icon("plane_three_points")
@@ -372,6 +379,19 @@ fn plane_edges(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "construct.plane.two_edges";
     let (a, b) = (geo(s, p.get("a"), cmd, "a")?, geo(s, p.get("b"), cmd, "b")?);
     plane(s, p, PlaneRef::TwoEdges { a: Box::new(a), b: Box::new(b) })
+}
+
+fn plane_axis_point(s: &mut Session, p: &Value) -> Result<Value> {
+    let kind = plane_axis_point_kind(s, p)?;
+    add_feature(s, p, kind)
+}
+
+/// Shared parser for the constructor and its world-to-authoring-frame boundary.
+pub(crate) fn plane_axis_point_kind(s: &Session, p: &Value) -> Result<FeatureKind> {
+    let cmd = "construct.plane.axis_point";
+    let axis = geo(s, p.get("axis"), cmd, "axis")?;
+    let point = geo(s, p.get("point"), cmd, "point")?;
+    Ok(FeatureKind::ConstructionPlane { plane: PlaneRef::AxisPoint { axis: Box::new(axis), point: Box::new(point) } })
 }
 
 fn plane_points(s: &mut Session, p: &Value) -> Result<Value> {

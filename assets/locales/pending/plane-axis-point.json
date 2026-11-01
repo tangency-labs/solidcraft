@@ -1,0 +1,34 @@
+{
+  "en": {
+    "cmd.construct.plane.axis_point": "Plane Through Axis And Point",
+    "help.construct.plane.axis_point": "Creates a construction plane containing an axis and a point off that axis. Pick an origin or construction axis, a straight edge or sketch line, then a vertex, sketch point or construction point. A point on the axis cannot define a unique plane."
+  },
+  "ar": {
+    "cmd.construct.plane.axis_point": "مستوى عبر محور ونقطة",
+    "help.construct.plane.axis_point": "ينشئ مستوى إنشاء يحتوي على محور ونقطة خارجه. اختر محور الأصل أو محور إنشاء أو حافة مستقيمة أو خط رسم، ثم رأسًا أو نقطة رسم أو نقطة إنشاء. لا تحدد نقطة على المحور مستوى فريدًا."
+  },
+  "he": {
+    "cmd.construct.plane.axis_point": "מישור דרך ציר ונקודה",
+    "help.construct.plane.axis_point": "יוצר מישור עזר המכיל ציר ונקודה שאינה עליו. יש לבחור ציר ראשי או ציר עזר, קצה ישר או קו סקיצה, ואז קודקוד, נקודת סקיצה או נקודת עזר. נקודה על הציר אינה מגדירה מישור יחיד."
+  },
+  "ja": {
+    "cmd.construct.plane.axis_point": "軸と点を通る平面",
+    "help.construct.plane.axis_point": "軸と、その軸上にない点を含む構築平面を作成します。原点軸、構築軸、直線エッジまたはスケッチの直線を選択し、次に頂点、スケッチ点または構築点を選択します。軸上の点では平面が一意に定まりません。"
+  },
+  "vi": {
+    "cmd.construct.plane.axis_point": "Mặt phẳng qua trục và điểm",
+    "help.construct.plane.axis_point": "Tạo mặt phẳng dựng chứa một trục và một điểm nằm ngoài trục đó. Chọn trục gốc, trục dựng, cạnh thẳng hoặc đường thẳng phác thảo, rồi chọn đỉnh, điểm phác thảo hoặc điểm dựng. Điểm nằm trên trục không xác định được một mặt phẳng duy nhất."
+  },
+  "zh": {
+    "cmd.construct.plane.axis_point": "通过轴和点的平面",
+    "help.construct.plane.axis_point": "创建包含一条轴和一个轴外点的构造平面。先选择原点轴、构造轴、直边或草图直线，再选择顶点、草图点或构造点。轴上的点无法确定唯一的平面。"
+  },
+  "de": {
+    "cmd.construct.plane.axis_point": "Ebene durch Achse und Punkt",
+    "help.construct.plane.axis_point": "Erstellt eine Konstruktionsebene durch eine Achse und einen Punkt außerhalb der Achse. Zuerst eine Ursprungs- oder Konstruktionsachse, gerade Kante oder Skizzenlinie wählen, dann einen Eckpunkt, Skizzenpunkt oder Konstruktionspunkt. Ein Punkt auf der Achse legt keine eindeutige Ebene fest."
+  },
+  "ko": {
+    "cmd.construct.plane.axis_point": "축과 점을 지나는 평면",
+    "help.construct.plane.axis_point": "축과 축 위에 있지 않은 점을 포함하는 구성 평면을 만듭니다. 원점 축, 구성 축, 직선 모서리 또는 스케치 직선을 선택한 다음 꼭짓점, 스케치 점 또는 구성점을 선택합니다. 축 위의 점으로는 평면을 하나로 결정할 수 없습니다."
+  }
+}

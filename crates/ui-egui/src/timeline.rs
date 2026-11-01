@@ -200,6 +200,7 @@ fn construction_plane_icon(plane: &PlaneRef) -> &'static str {
         PlaneRef::AtAngle { .. } => "plane_angle",
         PlaneRef::Midplane { .. } => "plane_midplane",
         PlaneRef::TwoEdges { .. } => "plane_two_edges",
+        PlaneRef::AxisPoint { .. } => "plane_axis_point",
         PlaneRef::ThreePoints { .. } => "plane_three_points",
         PlaneRef::Tangent { .. } => "plane_tangent",
         PlaneRef::AlongPath { .. } => "plane_along_path",
@@ -1325,6 +1326,7 @@ mod tests {
         }
         for (id, plane) in [
             ("midplane", PlaneRef::Midplane { a: reference(), b: reference() }),
+            ("axis_point", PlaneRef::AxisPoint { axis: reference(), point: reference() }),
             ("two_edges", PlaneRef::TwoEdges { a: reference(), b: reference() }),
             ("three_points", PlaneRef::ThreePoints { a: reference(), b: reference(), c: reference() }),
             ("tangent", PlaneRef::Tangent { face: reference(), at: Vec3::ZERO }),
