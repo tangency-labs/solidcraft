@@ -52,6 +52,17 @@ impl Deferred {
     }
 }
 
+#[cfg(test)]
+impl Deferred {
+    /// A command that never finishes computing, with the sender that keeps it so, for the tests
+    /// of what waits for one (the real worker would finish in a moment).
+    pub(crate) fn never_done(id: &str, params: Value, revision: u64) -> (Self, std::sync::mpsc::Sender<Option<solidcraft_engine::Evaluated>>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let job = Deferred { done: rx, evaluated: None, started: crate::now_ms(), command: (id.to_string(), params), revision, kept: None };
+        (job, tx)
+    }
+}
+
 /// How a command asked to run off the window thread goes.
 enum Start {
     /// It computes off the window thread.
@@ -174,6 +185,25 @@ impl SolveApp {
             self.pending_feature_edit.as_ref().map(|edit| edit.started),
         ];
         started.into_iter().flatten().reduce(f64::min)
+    }
+
+    /// Whether the "Computing" toast can stop what it waits for (#8266): a history command or a
+    /// delete's check computing off the window thread. A feature edit applying has its own
+    /// dialog, with its own Cancel.
+    pub fn can_cancel_computing(&self) -> bool {
+        self.deferred.is_some() || self.delete_check.is_some()
+    }
+
+    /// Stop waiting for the history command, and the delete check, computing off the window thread
+    /// (#8266), and drop the commands waiting behind them. The design is as it was before they
+    /// started: a command only runs for real once its evaluation is in. The worker threads run
+    /// to the end of what they evaluate and their results are dropped (the same as Cancel while a
+    /// feature is applying).
+    pub fn cancel_computing(&mut self) {
+        self.deferred = None;
+        self.deferred_queue.clear();
+        self.delete_check = None;
+        self.start_after_roll = None;
     }
 
     /// Run a delete's check `commands` and carry on with `then` once their replies are in: off

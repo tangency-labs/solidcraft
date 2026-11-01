@@ -209,6 +209,43 @@ fn a_marker_moved_again_replaces_the_move_still_waiting() {
     assert_eq!(marker(&h), None, "where the drag ended: the end of the history");
 }
 
+/// The "Computing" toast has a Cancel (#8266): it gives up on a marker move that takes too long, and
+/// on the moves waiting behind it, and the design stays as it was.
+#[test]
+fn cancel_on_the_computing_toast_gives_up_on_the_move() {
+    let mut h = block_boss_hole();
+    // A move that does not finish, with another waiting behind it.
+    let (job, _keep) = crate::deferred::Deferred::never_done("timeline.roll_to", json!({"position": 1}), h.app.session.revision);
+    h.app.deferred = Some(job);
+    h.app.deferred_queue.push(("timeline.roll_to".into(), json!({"position": 2})));
+    h.frames(2);
+    let toast = crate::scenario::rect_of("toast:computing").expect("the computing toast");
+    let cancel = crate::scenario::handle_at("toast:computing:cancel").expect("its Cancel");
+    assert!(toast.contains(cancel), "{cancel:?} in {toast:?}");
+    assert!(h.widget("Cancel").is_some(), "Cancel has an accessible name");
+    h.step(&json!({"click": {"handle": "toast:computing:cancel"}})).unwrap();
+    h.frames(2);
+    assert!(h.app.deferred.is_none() && h.app.deferred_queue.is_empty(), "nothing computes or waits");
+    assert!(h.app.computing_since().is_none());
+    assert!(crate::scenario::rect_of("toast:computing").is_none(), "the toast is gone");
+    assert_eq!(marker(&h), None, "the marker stays where it was");
+    // And the history moves again afterwards.
+    h.app.run_heavy("timeline.roll_to", json!({"position": 1})).unwrap();
+    until_settled(&mut h);
+    assert_eq!(marker(&h), Some(1));
+}
+
+/// A feature edit applying has the dialog's own Cancel, so its toast has none.
+#[test]
+fn the_computing_toast_has_no_cancel_for_what_cannot_be_given_up() {
+    let mut h = block_boss_hole();
+    assert!(!h.app.can_cancel_computing(), "nothing computes");
+    h.app.run_heavy("timeline.roll_to", json!({"position": 1})).unwrap();
+    assert!(h.app.can_cancel_computing(), "a move can be given up");
+    until_settled(&mut h);
+    assert!(!h.app.can_cancel_computing());
+}
+
 #[test]
 fn undo_computes_off_the_window_thread() {
     let mut h = block_boss_hole();
