@@ -3,6 +3,7 @@
 //! show while open (a study's pose, an explosion) is display only: pending occurrence moves,
 //! computed on a scratch copy of the design and put back when the dialog closes.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{choice_row, expr_row, text_row};
 use std::collections::BTreeMap;
 
@@ -205,7 +206,7 @@ fn transport(ui: &mut egui::Ui, what: Transport, tip: &str) -> egui::Response {
             p.add(bar(c.x + 6.0));
         }
     }
-    resp.on_hover_text(crate::i18n::tr_label(tip))
+    resp.backing_on_hover_text(crate::i18n::tr_label(tip))
 }
 
 /// Study `key` as the Motion Study dialog edits it: (id, name, steps, keys as tracks with values
@@ -473,7 +474,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                             let _ = app.run("contact.edit", json!({"set": n, "suppressed": !off}));
                         }
                         if crate::ui_kit::button(ui, crate::i18n::tr_label("×"), crate::ui_kit::Button::Small)
-                            .on_hover_text(crate::i18n::tr_label("Delete the set"))
+                            .backing_on_hover_text(crate::i18n::tr_label("Delete the set"))
                             .clicked()
                         {
                             let _ = app.run("contact.edit", json!({"set": n, "delete": true}));
@@ -641,7 +642,7 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
                 let width = (ui.available_width() - t.control_height - t.space_8).max(0.0);
                 ui.allocate_ui(vec2(width, t.control_height), |ui| combo(ui, &format!("ms_joint{ti}"), &refs, &mut pos));
                 if crate::ui_kit::button(ui, crate::i18n::tr_label("×"), crate::ui_kit::Button::Small)
-                    .on_hover_text(crate::i18n::tr_label("Remove the track"))
+                    .backing_on_hover_text(crate::i18n::tr_label("Remove the track"))
                     .clicked()
                 {
                     remove = Some(ti);
@@ -671,7 +672,7 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
                 if crate::ui_kit::button(ui, crate::i18n::tr_label("Key here"), crate::ui_kit::Button::Small)
-                    .on_hover_text(crate::i18n::tr_label("Add a key at this step with the joint's value now"))
+                    .backing_on_hover_text(crate::i18n::tr_label("Add a key at this step with the joint's value now"))
                     .clicked()
                     && !tr.points.iter().any(|(s, _)| *s == now)
                 {
@@ -699,7 +700,7 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
     ui.vertical(|ui| {
         ui.horizontal(|ui| {
             if crate::ui_kit::button(ui, crate::i18n::tr_label("Add Key"), crate::ui_kit::Button::Normal)
-                .on_hover_text(crate::i18n::tr_label("Key a joint's value at this step"))
+                .backing_on_hover_text(crate::i18n::tr_label("Key a joint's value at this step"))
                 .clicked()
                 && let Some((ji, _, kind)) = moving.first()
             {
@@ -707,7 +708,7 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
                 tracks.push(Track { joint: *ji, index: 0, points: vec![(now, format!("0 {unit}"))] });
             }
             export = crate::ui_kit::button(ui, crate::i18n::tr_label("Export Animation…"), crate::ui_kit::Button::Normal)
-                .on_hover_text(crate::i18n::tr_label("Save the study as an animated GIF, seen as the viewport shows it"))
+                .backing_on_hover_text(crate::i18n::tr_label("Save the study as an animated GIF, seen as the viewport shows it"))
                 .clicked();
         });
     });

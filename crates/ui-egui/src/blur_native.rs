@@ -11,8 +11,8 @@ const BUDGET: u64 = 256 * 1024 * 1024;
 const MAX_MARKERS: usize = 256;
 type Params = [f32; 24];
 
-fn capability(adapter: &wgpu::Adapter, format: wgpu::TextureFormat, split: bool, msaa: u32) -> Capability {
-    if solidcraft_gpu::select::tier_of(adapter.get_info().device_type) == solidcraft_gpu::select::Tier::Software {
+fn capability(adapter: &wgpu::Adapter, device_type: wgpu::DeviceType, format: wgpu::TextureFormat, split: bool, msaa: u32) -> Capability {
+    if device_type == wgpu::DeviceType::Cpu {
         return Capability::Unavailable("software adapter (gpu-software)");
     }
     rendering_capability(adapter, format, split, msaa)
@@ -38,6 +38,7 @@ fn rendering_capability(adapter: &wgpu::Adapter, format: wgpu::TextureFormat, sp
 #[derive(Clone)]
 struct Host {
     adapter: wgpu::Adapter,
+    device_type: wgpu::DeviceType,
     device: wgpu::Device,
     queue: wgpu::Queue,
     renderer: std::sync::Weak<egui::epaint::mutex::RwLock<egui_wgpu::Renderer>>,
@@ -49,12 +50,14 @@ struct Host {
 }
 impl Host {
     fn capability(&self) -> Capability {
-        *self.capability.get_or_init(|| capability(&self.adapter, self.format, self.split, self.msaa))
+        *self.capability.get_or_init(|| capability(&self.adapter, self.device_type, self.format, self.split, self.msaa))
     }
 }
 
 pub struct State {
     radius: f32,
+    available: bool,
+    tier_cap: usize,
     host: Option<Host>,
     active: Option<Arc<Shared>>,
     retired: Counters,
@@ -69,6 +72,8 @@ impl Default for State {
     fn default() -> Self {
         Self {
             radius: 0.0,
+            available: true,
+            tier_cap: 5,
             host: None,
             active: None,
             retired: Counters::default(),
@@ -87,6 +92,7 @@ impl State {
         self.failure = None;
         self.host = Some(Host {
             adapter: rs.adapter.clone(),
+            device_type: rs.adapter.get_info().device_type,
             device: rs.device.clone(),
             queue: rs.queue.clone(),
             renderer: Arc::downgrade(&rs.renderer),
@@ -123,6 +129,25 @@ impl State {
     }
     pub fn radius(&self) -> f32 {
         self.radius
+    }
+    pub fn software_adapter(&self) -> bool {
+        self.host.as_ref().is_some_and(|h| h.device_type == wgpu::DeviceType::Cpu)
+    }
+    pub fn set_available(&mut self, available: bool) {
+        self.available = available;
+        if !available {
+            self.retire();
+        }
+    }
+    pub fn set_tier_cap(&mut self, cap: usize) {
+        let cap = cap.clamp(2, 5);
+        if self.tier_cap != cap {
+            self.retire();
+            self.tier_cap = cap;
+        }
+    }
+    pub fn painted_frame(&self) -> Option<PaintedFrame> {
+        self.active.as_ref()?.inner.lock().ok()?.painted
     }
     pub fn capability(&self) -> Capability {
         let base = self.base_capability();
@@ -207,7 +232,7 @@ impl State {
                 self.last_size = Some(size_key);
             }
         }
-        if self.base_capability() != Capability::Available || !size.is_finite() || size.x <= 0.0 || size.y <= 0.0 {
+        if !self.available || self.base_capability() != Capability::Available || !size.is_finite() || size.x <= 0.0 || size.y <= 0.0 {
             self.retire();
             return Scope { previous, alpha };
         }
@@ -216,6 +241,7 @@ impl State {
             Arc::new(Shared {
                 host: host.clone(),
                 radius: self.radius,
+                tier_cap: self.tier_cap,
                 painting_owner: std::sync::atomic::AtomicBool::new(true),
                 inner: Mutex::new(Inner { counts: self.retired, ..Inner::default() }),
             })
@@ -225,6 +251,12 @@ impl State {
             inner.serial = inner.serial.wrapping_add(1);
             inner.source_seen = false;
             inner.source_count = 0;
+            if inner.frame != ctx.cumulative_frame_nr() {
+                inner.frame = ctx.cumulative_frame_nr();
+                inner.continuous = ctx.requested_repaint_last_pass();
+            }
+            inner.rendered = false;
+            inner.drawn_before = inner.counts.markers_drawn;
         }
         if let Some(renderer) = host.renderer.upgrade() {
             renderer.write().frame_compositor = Some(shared.clone());
@@ -253,8 +285,11 @@ pub(crate) fn fixture_state(
 ) -> State {
     State {
         radius: 0.0,
+        available: true,
+        tier_cap: 5,
         host: Some(Host {
             adapter: adapter.clone(),
+            device_type: adapter.get_info().device_type,
             device: device.clone(),
             queue: queue.clone(),
             renderer: Arc::downgrade(renderer),
@@ -317,11 +352,18 @@ pub fn panel_fill(fill: Color32) -> Color32 {
 struct Shared {
     host: Host,
     radius: f32,
+    tier_cap: usize,
     inner: Mutex<Inner>,
     painting_owner: std::sync::atomic::AtomicBool,
 }
 #[derive(Default)]
 struct Inner {
+    frame: u64,
+    continuous: bool,
+    rendered: bool,
+    drawn_before: u64,
+    painted: Option<PaintedFrame>,
+    submitted_at: Option<std::time::Instant>,
     gpu: Option<Gpu>,
     markers: Vec<Marker>,
     counts: Counters,
@@ -340,10 +382,14 @@ struct Marker {
     corners: egui::CornerRadius,
     opacity: f32,
     snap: bool,
+    // Identity only: the paint job owns this callback for the entire frame. Keeping
+    // its Arc here would create a Shared -> callback -> Shared ownership cycle.
+    callback_id: usize,
 }
 
 pub fn decorate(painter: &Painter, frame: Frame, content: Rect, ordinary: Shape) -> Shape {
-    if frame.fill.a() == 255 || frame.fill.a() == 0 || !painter.is_visible() {
+    let opacity = painter.opacity();
+    if frame.fill.a() == 0 || (frame.fill.a() == 255 && opacity >= 1.0) || !opacity.is_finite() || opacity <= 0.0 || !painter.is_visible() {
         return ordinary;
     }
     CURRENT.with(|c| {
@@ -356,7 +402,7 @@ pub fn decorate(painter: &Painter, frame: Frame, content: Rect, ordinary: Shape)
         if !rect.is_finite() || !rect.is_positive() {
             return ordinary;
         }
-        let index = if let Ok(mut inner) = shared.inner.lock() {
+        let callback = if let Ok(mut inner) = shared.inner.lock() {
             if inner.markers.len() >= MAX_MARKERS {
                 inner.failure = Some("blur panel limit exceeded");
                 inner.gpu = None;
@@ -364,18 +410,19 @@ pub fn decorate(painter: &Painter, frame: Frame, content: Rect, ordinary: Shape)
                 return ordinary;
             }
             let index = inner.markers.len();
+            let callback = egui_wgpu::Callback::new_paint_callback(rect, PanelMarker { shared: shared.clone(), index });
             inner.markers.push(Marker {
                 rect,
                 corners: frame.corner_radius,
-                opacity: painter.opacity(),
+                opacity,
                 snap: painter.ctx().tessellation_options(|o| o.round_rects_to_pixels),
+                callback_id: Arc::as_ptr(&callback.callback) as *const () as usize,
             });
             inner.counts.markers_emitted += 1;
-            index
+            callback
         } else {
             return ordinary;
         };
-        let callback = egui_wgpu::Callback::new_paint_callback(rect, PanelMarker { shared: shared.clone(), index });
         Shape::Vec(vec![Shape::Callback(callback), ordinary])
     })
 }
@@ -477,7 +524,7 @@ impl CallbackTrait for Source {
             return Vec::new();
         }
         inner.source_seen = true;
-        let Some((steps, offset)) = schedule(self.shared.radius) else { return Vec::new() };
+        let Some((steps, offset)) = schedule_capped(self.shared.radius, self.shared.tier_cap) else { return Vec::new() };
         let Some(bytes) = target_bytes(screen.size_in_pixels, steps, self.shared.host.device.limits().max_texture_dimension_2d) else {
             inner.failure = Some("blur target is empty, exceeds device limits or memory budget");
             inner.gpu = None;
@@ -539,13 +586,9 @@ impl CallbackTrait for Source {
             }
         }
         counts.source_passes += 1;
-        for step in &gpu.chain {
-            let mut pass = pass(encoder, "blur_kawase", &step.target.view, wgpu::Color::TRANSPARENT);
-            pass.set_pipeline(if step.down { &gpu.down } else { &gpu.up });
-            pass.set_bind_group(0, &step.binding.group, &[]);
-            pass.draw(0..3, 0..1);
-            counts.blur_passes += 1;
-        }
+        // The backdrop pyramid is built at paint-order boundaries in render(),
+        // after the underlying UI has actually been drawn, rather than from this
+        // scene-only texture during preparation.
         gpu.pending = Some(key);
         Vec::new()
     }
@@ -575,6 +618,7 @@ impl Source {
         screen.size_in_pixels.hash(&mut h);
         screen.pixels_per_point.to_bits().hash(&mut h);
         self.shared.radius.to_bits().hash(&mut h);
+        self.shared.tier_cap.hash(&mut h);
         self.shared.host.format.hash(&mut h);
         h.finish()
     }
@@ -672,7 +716,7 @@ impl FrameCompositor for Shared {
         if !self.painting_owner.load(std::sync::atomic::Ordering::Relaxed) {
             return false;
         }
-        let (composition, pipeline, binding) = {
+        let (composition, pipeline, binding, marker_ids) = {
             let Ok(mut inner) = self.inner.lock() else { return false };
             if !inner.source_seen {
                 inner.missing_source = true;
@@ -688,14 +732,51 @@ impl FrameCompositor for Shared {
             if gpu.ready_serial != inner.serial || gpu.size != screen.size_in_pixels {
                 return false;
             }
-            let data = (gpu.composition.view.clone(), gpu.present.clone(), gpu.presentation.group.clone());
+            let mut marker_ids: Vec<_> = inner.markers.iter().map(|marker| marker.callback_id).collect();
+            marker_ids.sort_unstable();
+            let data = (gpu.composition.view.clone(), gpu.present.clone(), gpu.presentation.group.clone(), marker_ids);
             inner.counts.composition_passes += 1;
             data
         };
         {
             let color = wgpu::Color { r: clear[0] as f64, g: clear[1] as f64, b: clear[2] as f64, a: clear[3] as f64 };
-            let mut ui = pass(encoder, "blur_ui_composition", &composition, color);
-            renderer.render(&mut ui, jobs, screen);
+            let _clear = pass(encoder, "blur_ui_composition", &composition, color);
+        }
+        let mut start = 0;
+        let mut mesh_offset = 0;
+        let mut segment_passes = 0;
+        for end in 0..=jobs.len() {
+            let callback_id = jobs.get(end).and_then(|job| {
+                let egui::epaint::Primitive::Callback(callback) = &job.primitive else { return None };
+                Some(Arc::as_ptr(&callback.callback) as *const () as usize)
+            });
+            let marker = callback_id.is_some_and(|identity| marker_ids.binary_search(&identity).is_ok());
+            if !marker && end != jobs.len() {
+                continue;
+            }
+            if start < end {
+                let mut ui = load_pass(encoder, "blur_ui_segment", &composition);
+                renderer.render_with_mesh_offset(&mut ui, &jobs[start..end], screen, mesh_offset);
+                mesh_offset += jobs[start..end].iter().filter(|job| matches!(&job.primitive, egui::epaint::Primitive::Mesh(_))).count();
+                segment_passes += 1;
+            }
+            if marker {
+                // The preceding segment is complete before sampling its color target.
+                // Reuse the pyramid, but include previously painted UI in the backdrop.
+                if let Ok(mut inner) = self.inner.lock() {
+                    let Inner { gpu, counts, .. } = &mut *inner;
+                    if let Some(gpu) = gpu {
+                        for step in &gpu.chain {
+                            let mut blur = pass(encoder, "blur_backdrop", &step.target.view, wgpu::Color::TRANSPARENT);
+                            blur.set_pipeline(if step.down { &gpu.down } else { &gpu.up });
+                            blur.set_bind_group(0, &step.binding.group, &[]);
+                            blur.draw(0..3, 0..1);
+                            counts.blur_passes += 1;
+                        }
+                    }
+                }
+            }
+            start = end;
         }
         {
             let mut present = pass(encoder, "blur_present", target, wgpu::Color::TRANSPARENT);
@@ -704,7 +785,9 @@ impl FrameCompositor for Shared {
             present.draw(0..3, 0..1);
         }
         if let Ok(mut inner) = self.inner.lock() {
+            inner.counts.composition_passes += segment_passes;
             inner.counts.present_passes += 1;
+            inner.rendered = true;
         }
         true
     }
@@ -713,6 +796,19 @@ impl FrameCompositor for Shared {
             return;
         }
         if let Ok(mut inner) = self.inner.lock() {
+            if inner.rendered && inner.counts.markers_drawn > inner.drawn_before && !self.host.lost.is_lost() {
+                let now = std::time::Instant::now();
+                inner.painted = Some(PaintedFrame {
+                    frame: inner.frame,
+                    interval_ms: inner.submitted_at.map(|at| now.duration_since(at).as_secs_f64() * 1000.0),
+                    continuous: inner.continuous,
+                });
+                inner.submitted_at = Some(now);
+                inner.rendered = false;
+            } else {
+                inner.painted = None;
+                inner.submitted_at = None;
+            }
             if self.host.lost.is_lost() {
                 inner.gpu = None;
                 inner.counts.clear_live();
@@ -811,6 +907,19 @@ fn background_params(rect: Rect, clip: Rect, colors: [Color32; 2], outside: Colo
 }
 
 fn pass(encoder: &mut wgpu::CommandEncoder, label: &'static str, view: &wgpu::TextureView, clear: wgpu::Color) -> wgpu::RenderPass<'static> {
+    attachment_pass(encoder, label, view, wgpu::LoadOp::Clear(clear))
+}
+
+fn load_pass(encoder: &mut wgpu::CommandEncoder, label: &'static str, view: &wgpu::TextureView) -> wgpu::RenderPass<'static> {
+    attachment_pass(encoder, label, view, wgpu::LoadOp::Load)
+}
+
+fn attachment_pass(
+    encoder: &mut wgpu::CommandEncoder,
+    label: &'static str,
+    view: &wgpu::TextureView,
+    load: wgpu::LoadOp<wgpu::Color>,
+) -> wgpu::RenderPass<'static> {
     encoder
         .begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some(label),
@@ -818,7 +927,7 @@ fn pass(encoder: &mut wgpu::CommandEncoder, label: &'static str, view: &wgpu::Te
                 view,
                 resolve_target: None,
                 depth_slice: None,
-                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(clear), store: wgpu::StoreOp::Store },
+                ops: wgpu::Operations { load, store: wgpu::StoreOp::Store },
             })],
             depth_stencil_attachment: None,
             timestamp_writes: None,
@@ -931,7 +1040,7 @@ impl Gpu {
             dimensions.push(last.map(|d| d.div_ceil(2)));
         }
         for (index, dims) in dimensions.iter().skip(1).enumerate() {
-            let input = chain.last().map_or(&source.view, |s| &s.target.view);
+            let input = chain.last().map_or(&composition.view, |s| &s.target.view);
             let mut p = [0.0; 24];
             p[0] = offset;
             p[1] = u8::from(index == 0 && !format.is_srgb()) as f32;
@@ -940,7 +1049,7 @@ impl Gpu {
             chain.push(Step { target, binding, down: true });
         }
         for dims in dimensions.iter().take(steps).rev() {
-            let input = chain.last().map_or(&source.view, |s| &s.target.view);
+            let input = chain.last().map_or(&composition.view, |s| &s.target.view);
             let mut p = [0.0; 24];
             p[0] = offset;
             let binding = Binding::new(device, &layout, &sampler, input, p, counts);

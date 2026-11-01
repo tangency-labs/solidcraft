@@ -174,14 +174,14 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             };
             tr(key).to_owned()
         };
-        ui_kit::text(ui, &prompt, ui_kit::Text::Hint("tool")).on_hover_text(&prompt);
+        ui_kit::text(ui, &prompt, ui_kit::Text::Hint("tool")).backing_on_hover_text(&prompt);
         if matches!(&d.kind, Kind::SketchModify(k) if k.previews()) {
             let label = d.active_input().map(|input| tr(input.label)).unwrap_or_else(|| tr("Objects"));
             let step = crate::i18n::format(
                 "dialog.selection_step",
                 &[("step", &(d.active + 1).to_string()), ("total", &d.inputs.len().to_string()), ("input", label)],
             );
-            ui_kit::text(ui, &step, ui_kit::Text::Hint("step")).on_hover_text(tr("dialog.selection_guidance"));
+            ui_kit::text(ui, &step, ui_kit::Text::Hint("step")).backing_on_hover_text(tr("dialog.selection_guidance"));
         }
     }
     let manage_hint = match &d.kind {
@@ -436,12 +436,12 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                                 form_row(ui, "Mid Radius", |ui| {
                                     ui.horizontal(|ui| {
                                         ui_kit::fraction_field(ui, position)
-                                            .on_hover_text(tr("Position along the edge, 0 at the start end, 1 at the other"));
+                                            .backing_on_hover_text(tr("Position along the edge, 0 at the start end, 1 at the other"));
                                         let width = (ui.available_width() - t.space_24 - t.space_4).max(0.0);
                                         ui.allocate_ui_with_layout(vec2(width, t.space_24), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                             enter |= field(ui, r);
                                         });
-                                        if ui_kit::button(ui, "×", ui_kit::Button::Small).on_hover_text(tr("Remove this point")).clicked() {
+                                        if ui_kit::button(ui, "×", ui_kit::Button::Small).backing_on_hover_text(tr("Remove this point")).clicked() {
                                             remove = Some(k);
                                         }
                                     });
@@ -477,7 +477,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     });
                 })
                 .response
-                .on_disabled_hover_text(tr("Choose Variable radius or Spline in Type."));
+                .backing_on_disabled_hover_text(tr("Choose Variable radius or Spline in Type."));
                 ui_kit::section(ui, "fillet_advanced", "Advanced", false, |ui| {
                     let constant = rtype == 0;
                     ui.add_enabled_ui(constant, |ui| {
@@ -510,7 +510,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                         });
                     })
                     .response
-                    .on_hover_text(tr("G2 corners require a constant radius and Exact fit. G2 corner construction is not supported yet."));
+                    .backing_on_hover_text(tr("G2 corners require a constant radius and Exact fit. G2 corner construction is not supported yet."));
                     if !constant {
                         ui.label(RichText::new(tr("Fit and G2 corners require Constant radius.")).color(t.text_dim).size(t.font_small));
                     }
@@ -889,7 +889,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                         ui.label(format!("{:.2}, {:.2}, {:.2}", p.x, p.y, p.z));
                         // A cylinder's place is its Face pick, cleared there.
                         if *cmd != "solid.cylinder"
-                            && ui_kit::button(ui, "×", ui_kit::Button::Small).on_hover_text(tr("Place at the origin instead")).clicked()
+                            && ui_kit::button(ui, "×", ui_kit::Button::Small).backing_on_hover_text(tr("Place at the origin instead")).clicked()
                         {
                             *at = None;
                         }

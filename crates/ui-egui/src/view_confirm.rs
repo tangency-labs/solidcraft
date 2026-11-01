@@ -6,6 +6,7 @@
 //! below the pair while it is shown (`viewport_layout::Layout::with_content`), and the pair is
 //! one of the shell's covered rects, so a click on it never picks or navigates.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Rect, Sense, vec2};
 
 use crate::SolveApp;
@@ -110,7 +111,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
             let label = crate::i18n::tr_label(choice.label);
             response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, choice.enabled, label));
             crate::scenario::publish_target(choice.key, at);
-            if response.on_hover_text(label).clicked() && choice.enabled {
+            if response.backing_on_hover_text(label).clicked() && choice.enabled {
                 clicked = Some(choice.action);
             }
         }

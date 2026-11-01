@@ -12,6 +12,7 @@
 //! centre that drags it across the model (snapping as a pick would) and takes it out when
 //! clicked, and a pick elsewhere on a face that already has a hole moves the hole there.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use std::cell::RefCell;
 use std::sync::Arc;
 
@@ -303,7 +304,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         crate::icons::markers::hole_handle(painter, c, if hot { t.accent } else { t.manipulator }, hot);
         crate::scenario::publish_handle(&format!("hole:{n}"), c);
         if !r.dragged() {
-            r.on_hover_text(crate::i18n::tr_label("Drag to move the hole; click to remove it"));
+            r.backing_on_hover_text(crate::i18n::tr_label("Drag to move the hole; click to remove it"));
         }
     }
     if let Some((i, to)) = moved

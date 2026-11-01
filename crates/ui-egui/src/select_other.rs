@@ -21,6 +21,7 @@
 //!
 //! The control channel's `ui.selectOther` opens, describes and picks from the list.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use egui::{Align2, FontId, Pos2, Rect, Sense, pos2, vec2};
 use serde_json::{Value, json};
@@ -683,7 +684,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         let elided = galley.elided;
                         let at = pos2(text_rect.left(), r.center().y - galley.size().y / 2.0);
                         ui.painter().with_clip_rect(ui.clip_rect().intersect(text_rect)).galley(at, galley, t.text);
-                        let resp = if elided { resp.on_hover_text(&row.label) } else { resp };
+                        let resp = if elided { resp.backing_on_hover_text(&row.label) } else { resp };
                         if resp.clicked() {
                             picked = Some(i);
                         }

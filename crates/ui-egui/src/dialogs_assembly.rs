@@ -6,6 +6,7 @@
 //! component shows where it goes, and with Animate the joint plays its motion.
 
 use crate::fonts::RichTextExt as _;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{choice_row, expr_row, text_row};
 use egui::{Color32, Pos2, RichText, Stroke, vec2};
 use serde_json::{Value, json};
@@ -673,7 +674,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                     crate::ui_kit::status_line(ui, &why, crate::ui_kit::StatusTone::Warning);
                     if !bodies.is_empty()
                         && crate::ui_kit::button(ui, crate::i18n::tr("cmd.component_from_bodies"), crate::ui_kit::Button::Normal)
-                            .on_hover_text(crate::i18n::tr("joint.from_bodies_hint"))
+                            .backing_on_hover_text(crate::i18n::tr("joint.from_bodies_hint"))
                             .clicked()
                     {
                         // A refusal shows on the status line; the picks stay either way.
@@ -703,7 +704,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                 form_row(ui, "Animate", |ui| {
                     let label = crate::i18n::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
                     if crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
-                        .on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"))
+                        .backing_on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"))
                         .clicked()
                     {
                         f.animate = !f.animate;
@@ -994,7 +995,7 @@ fn interference_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
     for u in unchecked {
         form_row(ui, &format!("{} · {}", u["a"].as_str().unwrap_or(""), u["b"].as_str().unwrap_or("")), |ui| {
             ui.label(RichText::new(crate::i18n::tr("dialog.could_not_be_checked")).color(t.warning))
-                .on_hover_text(u["reason"].as_str().unwrap_or(""));
+                .backing_on_hover_text(u["reason"].as_str().unwrap_or(""));
         });
     }
 }
@@ -1453,7 +1454,7 @@ pub(crate) fn timeline_joint_tiles(app: &mut SolveApp, ui: &mut egui::Ui, p: &eg
         if suppressed {
             p.line_segment([br.left_bottom() + vec2(4.0, -4.0), br.right_top() + vec2(-4.0, 4.0)], Stroke::new(1.5, t.text_dim));
         }
-        let resp = resp.on_hover_text(format!("{name}  ({kind:?} joint)\nDouble-click to edit · right-click for more"));
+        let resp = resp.backing_on_hover_text(format!("{name}  ({kind:?} joint)\nDouble-click to edit · right-click for more"));
         if resp.double_clicked() {
             open = edit_joint(app, id);
         } else if resp.clicked() {
@@ -1516,7 +1517,7 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
             egui::FontId::proportional(crate::theme::Tokens::get().font_body),
             if suppressed { t.text_dim } else { t.text },
         );
-        let response = response.on_hover_text(format!("{name}  ({kind:?} joint)\nDouble-click to edit · right-click for more"));
+        let response = response.backing_on_hover_text(format!("{name}  ({kind:?} joint)\nDouble-click to edit · right-click for more"));
         if response.double_clicked() {
             open = edit_joint(app, id);
         } else if response.clicked() {
@@ -1588,7 +1589,7 @@ pub fn browser_joints(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
             },
         );
         if let Some(resp) = &r.resp {
-            resp.clone().on_hover_text(format!("{kind:?} joint"));
+            resp.clone().backing_on_hover_text(format!("{kind:?} joint"));
         }
         if r.eye {
             let _ = app.run("browser.visibility", json!({ "joints": [id], "visible": !visible }));
@@ -1677,7 +1678,7 @@ pub fn component_joints(app: &mut SolveApp, ui: &mut egui::Ui, path: &[u64], key
             },
         );
         if let Some(resp) = &r.resp {
-            resp.clone().on_hover_text(format!("{:?} joint", j.kind));
+            resp.clone().backing_on_hover_text(format!("{:?} joint", j.kind));
         }
         if r.eye {
             let _ = app.run("browser.visibility", json!({ "joints": [id], "visible": !visible }));

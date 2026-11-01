@@ -7,6 +7,217 @@ use egui::{Color32, Context, Frame, Id, Stroke, WidgetText};
 
 pub(super) type Background = fn(&egui::Painter, Frame, egui::Rect, egui::Shape) -> egui::Shape;
 
+/// A reserved background slot for native hosts whose Frame is painted by egui.
+pub(super) struct BackingSlot {
+    painter: egui::Painter,
+    slot: egui::layers::ShapeIdx,
+}
+
+impl BackingSlot {
+    pub(super) fn reserve(ctx: &Context, layer: egui::LayerId) -> Option<Self> {
+        if !crate::blur::enabled() || ctx.viewport_id() != egui::ViewportId::ROOT {
+            return None;
+        }
+        let painter = ctx.layer_painter(layer);
+        let slot = painter.add(egui::Shape::Noop);
+        Some(Self { painter, slot })
+    }
+
+    pub(super) fn body<R>(&self, ui: &mut egui::Ui, body: impl FnOnce(&mut egui::Ui) -> R) -> R {
+        let frame = *ui.stack().frame();
+        let painter = ui.painter().clone();
+        let result = body(ui);
+        self.painter.set(self.slot, crate::blur::decorate(&painter, frame, ui.min_rect(), egui::Shape::Noop));
+        result
+    }
+}
+
+/// Keep the stock combo's placement, focus and scroll behavior. Its popup frame is
+/// reserved before `show_ui` paints it, just as for the other native popup hosts.
+pub(super) fn show_combo<R>(
+    ui: &mut egui::Ui,
+    widget: Id,
+    combo: egui::ComboBox,
+    body: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    if !crate::blur::enabled() || ui.ctx().viewport_id() != egui::ViewportId::ROOT {
+        return combo.show_ui(ui, body);
+    }
+    let popup = widget.with("popup");
+    let slot = egui::ComboBox::is_open(ui.ctx(), widget)
+        .then(|| BackingSlot::reserve(ui.ctx(), egui::LayerId::new(egui::Order::Foreground, popup)))
+        .flatten();
+    let mut host = None;
+    let shown = combo.show_ui(ui, |ui| {
+        // ComboBox calls us inside its ScrollArea, whose content Frame has no
+        // fill and whose clip omits popup padding and any scrollbar. Its parent
+        // owns the actual native popup Frame; finish using the final Area rect.
+        if slot.is_some()
+            && let Some(frame) = ui.stack().iter().find(|node| node.kind() == Some(egui::UiKind::ScrollArea)).and_then(|node| node.parent.as_ref())
+        {
+            let mut painter = ui.painter().clone();
+            painter.set_clip_rect(ui.ctx().content_rect());
+            host = Some((painter, *frame.frame()));
+        }
+        body(ui)
+    });
+    if let (Some(slot), Some((painter, frame)), Some(response)) = (slot, host, ui.ctx().read_response(popup)) {
+        slot.painter.set(slot.slot, crate::blur::decorate(&painter, frame, response.rect - frame.total_margin(), egui::Shape::Noop));
+    }
+    shown
+}
+
+/// Native popup interaction and placement, with its backing surface reserved before contents.
+pub struct BackingPopup<'a>(egui::Popup<'a>);
+
+impl<'a> BackingPopup<'a> {
+    pub fn frame(mut self, frame: Frame) -> Self {
+        self.0 = self.0.frame(frame);
+        self
+    }
+    pub fn close_behavior(mut self, value: egui::PopupCloseBehavior) -> Self {
+        self.0 = self.0.close_behavior(value);
+        self
+    }
+    pub fn width(mut self, value: f32) -> Self {
+        self.0 = self.0.width(value);
+        self
+    }
+    pub fn open(mut self, value: bool) -> Self {
+        self.0 = self.0.open(value);
+        self
+    }
+    pub fn anchor(mut self, value: impl Into<egui::PopupAnchor>) -> Self {
+        self.0 = self.0.anchor(value);
+        self
+    }
+    pub fn align(mut self, value: egui::RectAlign) -> Self {
+        self.0 = self.0.align(value);
+        self
+    }
+    pub fn align_alternatives(mut self, value: &'a [egui::RectAlign]) -> Self {
+        self.0 = self.0.align_alternatives(value);
+        self
+    }
+    pub fn gap(mut self, value: f32) -> Self {
+        self.0 = self.0.gap(value);
+        self
+    }
+    pub fn is_open(&self) -> bool {
+        self.0.is_open()
+    }
+    pub fn get_expected_size(&self) -> Option<egui::Vec2> {
+        self.0.get_expected_size()
+    }
+    pub fn show<R>(self, body: impl FnOnce(&mut egui::Ui) -> R) -> Option<egui::InnerResponse<R>> {
+        let slot =
+            self.0.is_open().then(|| BackingSlot::reserve(self.0.ctx(), egui::LayerId::new(egui::Order::Foreground, self.0.get_id()))).flatten();
+        self.0.show(|ui| match slot {
+            Some(slot) => slot.body(ui, body),
+            None => body(ui),
+        })
+    }
+}
+
+pub struct BackingModal {
+    modal: egui::Modal,
+    id: Id,
+}
+impl BackingModal {
+    pub fn backdrop_color(mut self, value: Color32) -> Self {
+        self.modal = self.modal.backdrop_color(value);
+        self
+    }
+    pub fn frame(mut self, value: Frame) -> Self {
+        self.modal = self.modal.frame(value);
+        self
+    }
+    pub fn show<R>(self, ctx: &Context, body: impl FnOnce(&mut egui::Ui) -> R) -> egui::ModalResponse<R> {
+        if !crate::blur::enabled() || ctx.viewport_id() != egui::ViewportId::ROOT {
+            return self.modal.show(ctx, body);
+        }
+        // Blur the preceding UI before native dimming, then blur the dialog's immediate
+        // backdrop after dimming. Native Modal retains focus, input shielding and closing.
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, self.id));
+        let backdrop = Frame::NONE.fill(self.modal.backdrop_color);
+        painter.add(crate::blur::decorate(&painter, backdrop, ctx.content_rect(), egui::Shape::Noop));
+        let frame = self.modal.frame.unwrap_or_else(|| Frame::popup(&ctx.global_style()));
+        self.modal.frame(Frame::NONE).show(ctx, |ui| Container::show_backing(ui, frame, body).inner)
+    }
+}
+
+/// Response tooltips retain native hover/disabled/stacking behavior and share backing blur.
+pub trait BackingTooltipExt: Sized {
+    fn backing_on_hover_ui(self, body: impl FnOnce(&mut egui::Ui)) -> Self;
+    fn backing_on_disabled_hover_ui(self, body: impl FnOnce(&mut egui::Ui)) -> Self;
+    fn backing_on_hover_ui_at_pointer(self, body: impl FnOnce(&mut egui::Ui)) -> Self;
+    fn backing_on_hover_text(self, text: impl Into<WidgetText>) -> Self;
+    fn backing_on_disabled_hover_text(self, text: impl Into<WidgetText>) -> Self;
+    fn backing_on_hover_text_at_pointer(self, text: impl Into<WidgetText>) -> Self;
+    fn backing_show_tooltip_ui(&self, body: impl FnOnce(&mut egui::Ui));
+    fn backing_show_tooltip_text(&self, text: impl Into<WidgetText>);
+}
+
+fn show_backing_tooltip(parent: Id, tip: egui::Tooltip<'_>, body: impl FnOnce(&mut egui::Ui)) {
+    let slot = tip
+        .popup
+        .is_open()
+        .then(|| {
+            BackingSlot::reserve(tip.popup.ctx(), egui::LayerId::new(egui::Order::Tooltip, egui::Tooltip::next_tooltip_id(tip.popup.ctx(), parent)))
+        })
+        .flatten();
+    tip.show(|ui| match slot {
+        Some(slot) => slot.body(ui, body),
+        None => body(ui),
+    });
+}
+
+impl BackingTooltipExt for egui::Response {
+    fn backing_on_hover_ui(self, body: impl FnOnce(&mut egui::Ui)) -> Self {
+        show_backing_tooltip(self.id, egui::Tooltip::for_enabled(&self), body);
+        self
+    }
+    fn backing_on_disabled_hover_ui(self, body: impl FnOnce(&mut egui::Ui)) -> Self {
+        show_backing_tooltip(self.id, egui::Tooltip::for_disabled(&self), body);
+        self
+    }
+    fn backing_on_hover_ui_at_pointer(self, body: impl FnOnce(&mut egui::Ui)) -> Self {
+        show_backing_tooltip(self.id, egui::Tooltip::for_enabled(&self).at_pointer().gap(12.0), body);
+        self
+    }
+    fn backing_on_hover_text(self, text: impl Into<WidgetText>) -> Self {
+        self.backing_on_hover_ui(|ui| {
+            ui.set_max_width(ui.spacing().tooltip_width);
+            ui.label(text);
+        })
+    }
+    fn backing_on_disabled_hover_text(self, text: impl Into<WidgetText>) -> Self {
+        self.backing_on_disabled_hover_ui(|ui| {
+            ui.set_max_width(ui.spacing().tooltip_width);
+            ui.label(text);
+        })
+    }
+    fn backing_on_hover_text_at_pointer(self, text: impl Into<WidgetText>) -> Self {
+        self.backing_on_hover_ui_at_pointer(|ui| {
+            ui.set_max_width(ui.spacing().tooltip_width);
+            ui.label(text);
+        })
+    }
+    fn backing_show_tooltip_ui(&self, body: impl FnOnce(&mut egui::Ui)) {
+        let popup = egui::Popup::from_response(self).kind(egui::PopupKind::Tooltip);
+        let slot = BackingSlot::reserve(&self.ctx, egui::LayerId::new(egui::Order::Tooltip, popup.get_id()));
+        popup.show(|ui| match slot {
+            Some(slot) => slot.body(ui, body),
+            None => body(ui),
+        });
+    }
+    fn backing_show_tooltip_text(&self, text: impl Into<WidgetText>) {
+        self.backing_show_tooltip_ui(|ui| {
+            ui.label(text);
+        });
+    }
+}
+
 /// The feature sheet's deliberately restricted stock Window (no title, scrolling or fades).
 /// Keep its builder private: the marker's layer and host clip are owned here.
 pub(crate) struct FeatureWindow<'a> {
@@ -211,13 +422,42 @@ impl Container {
     }
 
     /// Standard content tooltip, including the same host and padding as library samples.
+    pub(crate) fn show_tooltip<R>(parent: Id, tip: egui::Tooltip<'_>, body: impl FnOnce(&mut egui::Ui) -> R) -> Option<egui::InnerResponse<R>> {
+        let slot = tip
+            .popup
+            .is_open()
+            .then(|| {
+                BackingSlot::reserve(
+                    tip.popup.ctx(),
+                    egui::LayerId::new(egui::Order::Tooltip, egui::Tooltip::next_tooltip_id(tip.popup.ctx(), parent)),
+                )
+            })
+            .flatten();
+        tip.show(|ui| match slot {
+            Some(slot) => slot.body(ui, body),
+            None => body(ui),
+        })
+    }
+
     pub(crate) fn tooltip(response: &egui::Response, text: &str) {
         let ctx = &response.ctx;
+        let parent = response.id;
         let mut tip = egui::Tooltip::for_enabled(response).at_pointer();
         tip.popup = tip.popup.frame(Self::new(ctx, Surface::Toast).tooltip_frame(ctx));
+        let slot = tip
+            .popup
+            .is_open()
+            .then(|| BackingSlot::reserve(ctx, egui::LayerId::new(egui::Order::Tooltip, egui::Tooltip::next_tooltip_id(tip.popup.ctx(), parent))))
+            .flatten();
         tip.show(|ui| {
-            ui.label(text);
-            crate::scenario::publish_rect("kit:tooltip", ui.min_rect());
+            let body = |ui: &mut egui::Ui| {
+                ui.label(text);
+                crate::scenario::publish_rect("kit:tooltip", ui.min_rect());
+            };
+            match slot {
+                Some(slot) => slot.body(ui, body),
+                None => body(ui),
+            }
         });
     }
 
@@ -225,11 +465,23 @@ impl Container {
     /// at the pointer, so it does not cover the row's neighbours.
     pub(crate) fn tooltip_ui(response: &egui::Response, add: impl FnOnce(&mut egui::Ui)) {
         let ctx = &response.ctx;
+        let parent = response.id;
         let mut tip = egui::Tooltip::for_enabled(response);
         tip.popup = tip.popup.align(egui::RectAlign::RIGHT_START).frame(Self::new(ctx, Surface::Toast).tooltip_frame(ctx));
+        let slot = tip
+            .popup
+            .is_open()
+            .then(|| BackingSlot::reserve(ctx, egui::LayerId::new(egui::Order::Tooltip, egui::Tooltip::next_tooltip_id(tip.popup.ctx(), parent))))
+            .flatten();
         tip.show(|ui| {
-            add(ui);
-            crate::scenario::publish_rect("kit:tooltip", ui.min_rect());
+            let body = |ui: &mut egui::Ui| {
+                add(ui);
+                crate::scenario::publish_rect("kit:tooltip", ui.min_rect());
+            };
+            match slot {
+                Some(slot) => slot.body(ui, body),
+                None => body(ui),
+            }
         });
     }
 
@@ -331,13 +583,51 @@ impl Container {
         self.show_frame_background(ui, frame, bounds, background, body)
     }
 
+    /// Stock Frame path for backing cards; no additional inset chrome is introduced.
+    pub(crate) fn show_backing<R>(ui: &mut egui::Ui, frame: Frame, body: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
+        if !crate::blur::enabled()
+            || frame.fill.a() == 0
+            || (frame.fill.a() == 255 && ui.painter().opacity() >= 1.0)
+            || ui.ctx().viewport_id() != egui::ViewportId::ROOT
+        {
+            return frame.show(ui, body);
+        }
+        let slot = ui.painter().add(egui::Shape::Noop);
+        let mut prepared = frame.begin(ui);
+        let inner = body(&mut prepared.content_ui);
+        ui.painter().set(slot, crate::blur::decorate(ui.painter(), frame, prepared.content_ui.min_rect(), egui::Shape::Noop));
+        egui::InnerResponse { inner, response: prepared.end(ui) }
+    }
+
+    /// Fill an already-reserved backing slot, preserving its original paint ordering.
+    pub(crate) fn set_backing(painter: &egui::Painter, slot: egui::layers::ShapeIdx, frame: Frame, content: egui::Rect) {
+        let shape = frame.paint(content);
+        painter.set(slot, if crate::blur::enabled() { crate::blur::decorate(painter, frame, content, shape) } else { shape });
+    }
+
+    pub(crate) fn show_central<R>(
+        ui: &mut egui::Ui,
+        panel: egui::CentralPanel,
+        frame: Frame,
+        body: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> egui::InnerResponse<R> {
+        if !crate::blur::enabled()
+            || frame.fill.a() == 0
+            || (frame.fill.a() == 255 && ui.painter().opacity() >= 1.0)
+            || ui.ctx().viewport_id() != egui::ViewportId::ROOT
+        {
+            return panel.frame(frame).show(ui, body);
+        }
+        let slot = BackingSlot::reserve(ui.ctx(), ui.layer_id());
+        panel.frame(frame).show(ui, |ui| match slot {
+            Some(slot) => slot.body(ui, body),
+            None => body(ui),
+        })
+    }
+
     fn background(self, ctx: &Context, frame: Frame) -> Option<Background> {
         // Keep the off path to boundary checks only: no painter, shape slot or allocation.
-        if self.adaptive() && crate::blur::enabled() && ctx.viewport_id() == egui::ViewportId::ROOT && (1..255).contains(&frame.fill.a()) {
-            Some(crate::blur::decorate)
-        } else {
-            None
-        }
+        if crate::blur::enabled() && ctx.viewport_id() == egui::ViewportId::ROOT && frame.fill.a() > 0 { Some(crate::blur::decorate) } else { None }
     }
 
     pub(super) fn show_frame_background<R>(
@@ -405,14 +695,15 @@ impl Container {
 
     /// Manually painted chrome uses exactly the same outer and inset policy as hosts.
     pub(crate) fn paint_frame(painter: &egui::Painter, frame: Frame, content: egui::Rect) {
-        painter.add(frame.paint(content));
+        let shape = frame.paint(content);
+        painter.add(if crate::blur::enabled() { crate::blur::decorate(painter, frame, content, shape) } else { shape });
         Self::paint_inset(painter, frame.widget_rect(content), frame);
     }
 
     /// Semantic manually painted workspace surface; HUDs keep `paint_frame`.
     pub(crate) fn paint_background(self, painter: &egui::Painter, frame: Frame, content: egui::Rect) {
         let shape = frame.paint(content);
-        painter.add(if self.adaptive() && crate::blur::enabled() { crate::blur::decorate(painter, frame, content, shape) } else { shape });
+        painter.add(if crate::blur::enabled() { crate::blur::decorate(painter, frame, content, shape) } else { shape });
     }
 
     pub(crate) fn paint_panel_frame(painter: &egui::Painter, frame: Frame, content: egui::Rect) {
@@ -517,12 +808,12 @@ impl Container {
         egui::menu::SubMenu::new()
     }
 
-    pub fn menu<'a>(self, response: &egui::Response) -> egui::Popup<'a> {
-        egui::Popup::menu(response)
+    pub fn menu<'a>(self, response: &egui::Response) -> BackingPopup<'a> {
+        BackingPopup(egui::Popup::menu(response))
     }
 
-    pub fn context_menu<'a>(self, response: &egui::Response) -> egui::Popup<'a> {
-        egui::Popup::context_menu(response)
+    pub fn context_menu<'a>(self, response: &egui::Response) -> BackingPopup<'a> {
+        BackingPopup(egui::Popup::context_menu(response))
     }
 
     pub(crate) fn tooltip_frame(self, ctx: &Context) -> Frame {
@@ -532,8 +823,8 @@ impl Container {
             .inner_margin(egui::Margin::symmetric(t.space_8 as i8, t.space_4 as i8))
     }
 
-    pub fn modal(self, id: Id) -> egui::Modal {
-        egui::Modal::new(id).area(egui::Modal::default_area(id).fade_in(false))
+    pub fn modal(self, id: Id) -> BackingModal {
+        BackingModal { modal: egui::Modal::new(id).area(egui::Modal::default_area(id).fade_in(false)), id }
     }
 
     pub fn central(self) -> egui::CentralPanel {

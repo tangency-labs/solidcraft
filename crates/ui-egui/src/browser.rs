@@ -6,6 +6,7 @@
 //! viewport, a double-click on a sketch edits it, and a right-click opens the item's menu
 //! ([`crate::context_menu`]).
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 
 #[path = "browser_cache.rs"]
@@ -1158,7 +1159,7 @@ fn browser_collapsed_rail(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::scenario::publish_handle("left-browser-toggle", disclosure.center());
     crate::scenario::publish_target("browser:header", disclosure);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), crate::i18n::tr("ui.browser_title")));
-    if response.on_hover_text(crate::i18n::tr("ui.browser_expand")).clicked() {
+    if response.backing_on_hover_text(crate::i18n::tr("ui.browser_expand")).clicked() {
         app.preferences.timeline_left_browser_collapsed = false;
     }
     let galley = ui.painter().layout_no_wrap(crate::i18n::tr("ui.browser_title").to_owned(), crate::fonts::semibold(t.font_body), t.text);
@@ -1246,7 +1247,7 @@ fn browser_header(app: &mut SolveApp, ui: &mut egui::Ui, collapsible: bool) {
     ui.painter().galley(pos2(right - galley.size().x, rect.center().y - galley.size().y / 2.0), galley, t.text_dim);
     if collapsible {
         let tip = crate::i18n::tr(if collapsed { "ui.browser_expand" } else { "ui.browser_collapse" });
-        if response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(tip).clicked() {
+        if response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(tip).clicked() {
             if stacked {
                 app.preferences.timeline_left_browser_collapsed = !app.preferences.timeline_left_browser_collapsed;
             } else if vertical {
@@ -1673,7 +1674,7 @@ fn occurrence_rows_inner(
     }
     if let Some(resp) = &r.resp {
         let inherited = if own_visible && !visible { "\nHidden by a parent placement. Show the parent to reveal this instance." } else { "" };
-        resp.clone().on_hover_ui(|ui| {
+        resp.clone().backing_on_hover_ui(|ui| {
             ui.label(&placement.tooltip);
             if !inherited.is_empty() {
                 ui.label(inherited.trim_start());

@@ -1,6 +1,7 @@
 //! Shared preference compositions and explanatory figures. Figures are cheap painter content,
 //! never additional application viewports; every colour and control metric comes from tokens.
 use super::{metrics::dimension, text::paint_text};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{
     scenario,
     theme::{ColorVision, Tokens},
@@ -9,6 +10,63 @@ use egui::{Color32, FontId, Pos2, Rect, Response, Sense, Stroke, Ui, pos2, vec2}
 
 pub(super) const PAGE_SCROLL_GUTTER: &str = "sc_page_scroll_gutter";
 
+pub(crate) fn blur_cost_bars(radius: f32) -> usize {
+    if radius.is_finite() && radius > 0.0 { (radius / 8.0).ceil().clamp(1.0, 5.0) as usize } else { 0 }
+}
+
+fn blur_meter_width(t: &Tokens) -> f32 {
+    t.space_4 * 5.0 + t.space_2 * 4.0
+}
+
+fn blur_cost_meter(ui: &mut Ui, radius: f32) {
+    let t = Tokens::get();
+    let (rect, response) = ui.allocate_exact_size(vec2(blur_meter_width(&t), t.control_height), Sense::hover());
+    let filled = blur_cost_bars(radius);
+    if filled == 0 {
+        ui.painter().rect_filled(Rect::from_center_size(rect.center(), vec2(rect.width(), t.space_2)), t.radius_sm, t.form_dim);
+    } else {
+        let heights = [t.space_4, t.space_6, t.space_8, t.space_8 + t.space_3, t.space_14];
+        for (i, height) in heights.into_iter().enumerate() {
+            let bar = Rect::from_min_size(
+                pos2(rect.left() + i as f32 * (t.space_4 + t.space_2), rect.center().y + t.space_8 - height),
+                vec2(t.space_4, height),
+            );
+            ui.painter().rect_filled(bar, t.radius_sm, if i < filled { t.form_primary } else { t.dialog_rule });
+        }
+    }
+    scenario::publish_rect("prefs:blur_cost", rect);
+    response.backing_on_hover_text(crate::i18n::tr("prefs.blur_cost"));
+}
+
+/// All theme problems share the same compact, inline composition within the existing host.
+pub(crate) fn theme_option_notice(ui: &mut Ui, id: &str, text: &str, can_undo: bool) -> (bool, bool) {
+    let mut undo = false;
+    let mut dismiss = false;
+    let response = ui.push_id(("theme_notice", id, text), |ui| {
+        ui.horizontal_top(|ui| {
+            let t = Tokens::get();
+            let dismiss_label = crate::i18n::tr("prefs.theme_notice_dismiss");
+            let actions = super::ContentWidth::button(ui, dismiss_label)
+                + t.space_8
+                + if can_undo { super::ContentWidth::button(ui, crate::i18n::tr("ui.undo")) + t.space_8 } else { 0.0 };
+            let width = dimension(ui.available_width() - actions);
+            ui.allocate_ui_with_layout(vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                super::text(ui, text, super::Text::Hint(id));
+            });
+            if can_undo {
+                let response = super::text_button(ui, crate::i18n::tr("ui.undo"), true);
+                scenario::publish_target("prefs:theme_notice_undo:guard", response.rect);
+                undo = response.clicked();
+            }
+            let response = super::text_button(ui, dismiss_label, true);
+            scenario::publish_target(&format!("prefs:theme_notice_dismiss:{id}"), response.rect);
+            dismiss = response.clicked();
+        })
+    });
+    scenario::publish_rect(&format!("prefs:theme_notice:{id}"), response.response.rect);
+    (undo, dismiss)
+}
+
 /// Presentation data is resolved by the caller; controls never distinguish standard/custom ids.
 pub(crate) struct ThemeOptionRow<'a> {
     pub definition: &'a crate::theme_files::OptionDef,
@@ -16,6 +74,7 @@ pub(crate) struct ThemeOptionRow<'a> {
     pub help: String,
     pub choices: Vec<String>,
     pub reason: Option<String>,
+    pub blur: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -48,7 +107,10 @@ fn theme_option_metrics(ui: &Ui, option: &ThemeOptionRow<'_>, value: Option<&cra
                 .into_iter()
                 .map(|n| super::ContentWidth::label(ui, &format!("{n}{}", unit.as_deref().unwrap_or(""))))
                 .fold(0.0, f32::max);
-            theme_option_slider_minimum(&t) + t.space_8 + readout
+            if option.blur {
+                readout = readout.max(super::ContentWidth::label(ui, crate::i18n::tr("prefs.blur_off")));
+            }
+            theme_option_slider_minimum(&t) + t.space_8 + readout + if option.blur { blur_meter_width(&t) + t.space_8 } else { 0.0 }
         }
         OptionKind::Choice { values, .. } => {
             if values.len() > 5 {
@@ -124,6 +186,9 @@ pub(crate) fn theme_options_list(
             for &index in cell {
                 let Some(option) = options.get(index) else { continue };
                 advanced |= option.definition.advanced;
+                if option.blur && cell.len() == 1 {
+                    width = Width::Wide;
+                }
                 if let OptionKind::Choice { values, .. } = &option.definition.kind
                     && choice_width(values.len()) == Width::Wide
                 {
@@ -242,7 +307,8 @@ fn theme_option_control(
                                 theme_option_switch(ui, &option.label, on);
                             }
                             (OptionKind::Range { min, max, step, unit, .. }, OptionValue::Num(n)) => {
-                                let available = dimension(ui.available_width() - metrics.readout - t.space_8);
+                                let meter = if option.blur { blur_meter_width(&t) + t.space_8 } else { 0.0 };
+                                let available = dimension(ui.available_width() - metrics.readout - t.space_8 - meter);
                                 // Standalone ranges fill their cell; composites retain their compact control alignment.
                                 let width =
                                     if fill_range { available } else { available.min(t.form_label_width.max(theme_option_slider_minimum(&t))) };
@@ -251,7 +317,12 @@ fn theme_option_control(
                                         ui,
                                         n,
                                         *min..=*max,
-                                        super::Slider { step: Some(f64::from(*step)), show_value: false, ..Default::default() },
+                                        super::Slider {
+                                            step: Some(f64::from(*step)),
+                                            show_value: false,
+                                            off_endpoint: option.blur,
+                                            ..Default::default()
+                                        },
                                     );
                                 });
                                 // Keep fractional theme values visible, including sliders with fractional steps.
@@ -259,10 +330,18 @@ fn theme_option_control(
                                     vec2(metrics.readout, t.control_height),
                                     egui::Layout::left_to_right(egui::Align::Center),
                                     |ui| {
-                                        super::text(ui, &format!("{}{}", *n, unit.as_deref().unwrap_or("")), super::Text::Inline);
+                                        let label = if option.blur && *n == 0.0 {
+                                            crate::i18n::tr("prefs.blur_off").to_owned()
+                                        } else {
+                                            format!("{}{}", *n, unit.as_deref().unwrap_or(""))
+                                        };
+                                        super::text(ui, &label, super::Text::Inline);
                                     },
                                 );
                                 scenario::publish_rect(&format!("prefs:theme_option_readout:{}", def.id), readout.response.rect);
+                                if option.blur {
+                                    blur_cost_meter(ui, *n);
+                                }
                             }
                             (OptionKind::Choice { values, .. }, OptionValue::Choice(selected)) => {
                                 let labels: Vec<_> = option.choices.iter().map(String::as_str).collect();
@@ -285,7 +364,7 @@ fn theme_option_control(
         .inner
         .response
     });
-    let response = response.inner.on_hover_text(&option.help);
+    let response = response.inner.backing_on_hover_text(&option.help);
     scenario::publish_target(&format!("prefs:theme_option:{}", def.id), response.rect);
     if let Some(reason) = &option.reason {
         let note = ui.horizontal(|ui| super::settings_inline_note(ui, reason));
@@ -572,7 +651,7 @@ pub(super) fn theme_rail_arrow(ui: &mut Ui, rect: Rect, direction: f32, label: &
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), crate::i18n::tr_label(label)));
     scenario::publish_target(&format!("prefs:theme_rail:{label}"), rect);
-    response.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(crate::i18n::tr_label(label))
+    response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(crate::i18n::tr_label(label))
 }
 
 /// Dashed import tile matches the swatch tiles, while remaining permanently visible.
@@ -725,7 +804,7 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
     }
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, enabled, selected, label));
     scenario::publish_target(&format!("prefs:option:{label}"), rect);
-    let response = response.on_hover_text(label);
+    let response = response.backing_on_hover_text(label);
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
 

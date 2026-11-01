@@ -1,6 +1,7 @@
 //! Grouped preferences composed with the shared UI kit. Changes apply immediately; Cancel
 //! restores the opening snapshot, Apply keeps editing, and Defaults affects the current page.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use std::collections::BTreeMap;
 
 use egui::{Modifiers, Pos2};
@@ -966,7 +967,7 @@ macro_rules! preference_settings {
     (@page $page:expr) => { Some($page) };
     (@control $app:ident, $ui:ident, $field:ident, check($label:literal $(, $help:literal)?)) => {
         ui_kit::checkbox($ui, crate::i18n::tr_label($label), &mut $app.preferences.$field)
-            $(.on_hover_text(crate::i18n::tr_label($help)))?
+            $(.backing_on_hover_text(crate::i18n::tr_label($help)))?
     };
     (@control $app:ident, $ui:ident, $field:ident, check_tr($label:literal)) => {
         ui_kit::checkbox($ui, crate::i18n::tr($label), &mut $app.preferences.$field)
@@ -1960,7 +1961,7 @@ fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
         },
         |ui| {
             let tile = ui_kit::theme_import_tile(ui, app.tr_label("Import…"), app.tr("prefs.theme_file_or_paste"))
-                .on_hover_text(app.tr("prefs.theme_import_hint"));
+                .backing_on_hover_text(app.tr("prefs.theme_import_hint"));
             import_tile = Some(tile.rect);
             if tile.clicked() {
                 action = Some("import");
@@ -2050,7 +2051,7 @@ fn follow_row(app: &mut SolveApp, ui: &mut egui::Ui) {
             stop = stop_button.clicked();
             let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string());
             let shown = name.unwrap_or_else(|| app.tr("prefs.theme_follow_off").to_string());
-            ui_kit::text(ui, &shown, ui_kit::Text::Inline).on_hover_text(&path);
+            ui_kit::text(ui, &shown, ui_kit::Text::Inline).backing_on_hover_text(&path);
         });
     });
     if !path.is_empty() {
@@ -2602,7 +2603,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Some((Tokens::get().control_height * 3.0, crate::settings_profiles::sidebar)),
         |ui| {
             if ui_kit::button(ui, crate::i18n::tr("ui.restore_defaults"), ui_kit::Button::Normal)
-                .on_hover_text(crate::i18n::tr("ui.reset_the_settings_on_this_page"))
+                .backing_on_hover_text(crate::i18n::tr("ui.reset_the_settings_on_this_page"))
                 .clicked()
             {
                 button = Some("defaults");
@@ -2767,7 +2768,7 @@ fn nav_bridge(app: &mut SolveApp, ui: &mut egui::Ui) {
         (None, true) => Some((app.tr("ui.nav_bridge_waiting").to_owned(), true)),
     };
     ui.horizontal_wrapped(|ui| {
-        ui_kit::checkbox(ui, &label, &mut app.preferences.nav_bridge_enabled).on_hover_text(&tip);
+        ui_kit::checkbox(ui, &label, &mut app.preferences.nav_bridge_enabled).backing_on_hover_text(&tip);
         if let Some((status, waiting)) = &status {
             ui_kit::settings_badge(ui, status, *waiting);
         }
@@ -2802,9 +2803,9 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
         ui.allocate_ui_with_layout(egui::vec2(width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-            setting::space_mouse_in_view(app, ui).on_hover_text(crate::i18n::tr("ui.3d_mouse_show_in_view_tip"));
+            setting::space_mouse_in_view(app, ui).backing_on_hover_text(crate::i18n::tr("ui.3d_mouse_show_in_view_tip"));
             ui.add_enabled_ui(app.preferences.space_mouse_enabled, |ui| {
-                setting::space_mouse_sketch_orbit(app, ui).on_hover_text(crate::i18n::tr("ui.3d_mouse_sketch_orbit_tip"));
+                setting::space_mouse_sketch_orbit(app, ui).backing_on_hover_text(crate::i18n::tr("ui.3d_mouse_sketch_orbit_tip"));
             });
         });
     });
@@ -2828,7 +2829,7 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
             let rect = response.response.rect;
             crate::scenario::publish_handle("prefs:3d_mouse_orbit_traced", egui::pos2(rect.left() + rect.width() * 0.25, rect.center().y));
             crate::scenario::publish_handle("prefs:3d_mouse_orbit_classic", egui::pos2(rect.left() + rect.width() * 0.75, rect.center().y));
-            response.response.on_hover_text(crate::i18n::tr("ui.3d_mouse_orbit_tip"));
+            response.response.backing_on_hover_text(crate::i18n::tr("ui.3d_mouse_orbit_tip"));
         });
         ui_kit::row(ui, crate::i18n::tr("ui.3d_mouse_ghost_position"), |ui| {
             let (in_view, position) = (app.preferences.space_mouse_in_view, &mut app.preferences.space_mouse_ghost_position);
@@ -2860,8 +2861,8 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
             let saved = device.as_ref().is_some_and(|device| app.preferences.space_mouse_calibrations.contains_key(device));
             ui.add_enabled_ui(app.preferences.space_mouse_enabled && device.is_some(), |ui| {
                 if ui_kit::button(ui, app.tr("ui.3d_mouse_calibrate"), ui_kit::Button::Normal)
-                    .on_hover_text(app.tr("ui.3d_mouse_calibrate_tip"))
-                    .on_disabled_hover_text(app.tr(if app.space_mouse.device.is_none() {
+                    .backing_on_hover_text(app.tr("ui.3d_mouse_calibrate_tip"))
+                    .backing_on_disabled_hover_text(app.tr(if app.space_mouse.device.is_none() {
                         "ui.3d_mouse_calibrate_wait"
                     } else {
                         "ui.3d_mouse_calibrate_tip"
@@ -2893,7 +2894,7 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
             // Nothing confirmed yet (none found, or waiting for the first record): a hint to try, as a
             // tooltip here and, while a reader is waiting for the first record, as a line below.
             if device.is_none() && !not_allowed {
-                status_line.on_hover_text(app.tr("ui.3d_mouse_wiggle"));
+                status_line.backing_on_hover_text(app.tr("ui.3d_mouse_wiggle"));
             }
         });
         if app.space_mouse.device.is_none() {
@@ -2964,7 +2965,7 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
                             0.0..=solidcraft_space_mouse::MAX_DEAD_ZONE_SHARE,
                             ui_kit::Slider { step: Some(0.01), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
                         )
-                        .on_hover_text(tip);
+                        .backing_on_hover_text(tip);
                     });
                 });
             }
@@ -3035,7 +3036,7 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     }
                                 }
                             })
-                            .on_hover_text(if *off { &off_tip } else { &driven_by });
+                            .backing_on_hover_text(if *off { &off_tip } else { &driven_by });
                             if chosen != current {
                                 crate::space_mouse::reassign(source, axis, chosen);
                             }
@@ -3656,6 +3657,69 @@ fn active_theme_file(app: &SolveApp) -> Option<&crate::theme_files::ThemeFile> {
         .or_else(|| crate::theme_files::find(&app.preferences.theme, &app.preferences.custom_themes))
 }
 
+/// The single runtime decision used by controls, ui.prefs and renderer activation. It never
+/// changes saved intent or caches accessibility/hardware state in palette tokens.
+pub(crate) fn blur_availability(app: &SolveApp) -> crate::theme_options::Availability {
+    blur_availability_for(app, active_theme_file(app).is_some_and(crate::theme_options::declares_blur))
+}
+
+fn blur_availability_for(app: &SolveApp, offered: bool) -> crate::theme_options::Availability {
+    use crate::theme_options::Availability::{Available, Unavailable};
+    let reduced = app.services.reduce_transparency.as_ref().and_then(|read| read(offered));
+    if !offered && app.blur_session.harness_radius.is_none() {
+        return Available;
+    }
+    if let Some(reason) = app.blur_session.harness_unavailable {
+        return Unavailable(reason);
+    }
+    // State owns CPU policy, including the explicit cfg(test) rendering fixture. The
+    // adapter identity stays real; production CPU capability can never be Available.
+    let capability = app.blur.capability();
+    if app.blur.software_adapter() && capability != crate::blur::Capability::Available {
+        return Unavailable("prefs.blur_software");
+    }
+    if cfg!(target_arch = "wasm32") {
+        return Unavailable("prefs.blur_web");
+    }
+    if reduced == Some(true) {
+        return Unavailable("prefs.blur_reduce_transparency");
+    }
+    if app.home.open || crate::render_workspace::result_active(app) {
+        return Unavailable("prefs.blur_source");
+    }
+    match capability {
+        crate::blur::Capability::Available => Available,
+        crate::blur::Capability::Unavailable(_) => Unavailable("prefs.blur_device"),
+    }
+}
+
+pub(crate) fn prepare_blur(app: &mut SolveApp, ctx: &egui::Context) {
+    if ctx.viewport_id() != egui::ViewportId::ROOT {
+        return;
+    }
+    let intent = crate::theme::blur_intent(ctx);
+    let radius = app.blur_session.harness_radius.unwrap_or(intent.radius);
+    // Disabled frames need only cached intent and atomic OS observation. Explicit UI/API
+    // queries still report capabilities at radius zero; painting need not probe the GPU.
+    let availability = if radius > 0.0 {
+        blur_availability_for(app, intent.offered)
+    } else {
+        if let Some(read) = &app.services.reduce_transparency {
+            read(intent.offered);
+        }
+        crate::theme_options::Availability::Available
+    };
+    // Resolve raw/default intent separately so temporary unavailability never drives the
+    // renderer through radius=0 and clears a latched device/allocation failure.
+    let available = availability == crate::theme_options::Availability::Available;
+    app.blur_session.sample(ctx, intent.revision, radius, available, app.blur.painted_frame());
+    app.blur.set_available(available);
+    app.blur.set_tier_cap(app.blur_session.guard.cap);
+    if let Err(error) = app.blur.set_radius(radius) {
+        log::warn!("theme blur: {error}");
+    }
+}
+
 fn followed_theme<'a>(prefs: &Prefs, follow: &'a crate::theme_files::Follow) -> Option<&'a crate::theme_files::ThemeFile> {
     (!follow.path(&prefs.theme_follow).is_empty()).then(|| follow.theme()).flatten()
 }
@@ -3723,6 +3787,7 @@ fn theme_option_rows<'a>(
     file: &'a crate::theme_files::ThemeFile,
     language: &str,
     providers: &[crate::theme_options::Provider],
+    blur: crate::theme_options::Availability,
 ) -> Vec<ui_kit::ThemeOptionRow<'a>> {
     use crate::theme_options::{Availability, offered, provider};
     let locale = crate::i18n::Locale::for_language(language);
@@ -3732,6 +3797,7 @@ fn theme_option_rows<'a>(
             let provider = provider(&definition.id, providers);
             ui_kit::ThemeOptionRow {
                 definition,
+                blur: definition.id == "blur",
                 label: provider
                     .map(|p| locale.text(p.label).to_owned())
                     .unwrap_or_else(|| theme_option_text(&definition.label, language, &definition.id)),
@@ -3742,22 +3808,50 @@ fn theme_option_rows<'a>(
                     }
                     _ => Vec::new(),
                 },
-                reason: provider.and_then(|p| match (p.availability)() {
+                reason: match crate::theme_options::availability(file, &definition.id, providers, blur) {
                     Availability::Available => None,
                     Availability::Unavailable(reason) => Some(locale.text(reason).to_owned()),
-                }),
+                },
             }
         })
         .collect()
 }
 
 fn theme_options_row(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let Some(file) = active_theme_file(app) else { return };
-    let rows = theme_option_rows(file, crate::i18n::effective_language(&app.preferences.language), crate::theme_options::PROVIDERS);
+    let availability = blur_availability(app);
+    let Some(file) = active_theme_file(app).cloned() else { return };
+    let (mut values, notices) = effective_theme_options(&app.preferences, &file);
+    // Notices precede the empty-control return: newer requirements intentionally have no rows.
+    let mut problems: Vec<_> = notices
+        .iter()
+        .map(|notice| {
+            let raw = app.preferences.theme_options.get(&file.id).and_then(|v| v.get(&notice.id));
+            (notice.id.clone(), format!("{:?}:{raw:?}", notice.kind), crate::i18n::format("prefs.theme_option_invalid", &[("option", &notice.id)]))
+        })
+        .collect();
+    if file.needs_newer() {
+        problems.push(("newer".into(), file.requires.to_string(), app.tr("prefs.theme_options_newer").to_owned()));
+    }
+    for (id, identity, text) in problems {
+        let key = theme_notice_key(&file.id, &id, &identity);
+        if !app.blur_session.dismissed(key) && ui_kit::theme_option_notice(ui, &id, &text, false).1 {
+            app.blur_session.dismiss(key);
+        }
+    }
+    if app.blur_session.guard.notice {
+        let (undo, dismiss) = ui_kit::theme_option_notice(ui, "guard", app.tr("prefs.blur_guard"), true);
+        if undo {
+            app.blur_session.guard.undo();
+            ui.ctx().request_repaint();
+        }
+        if dismiss {
+            app.blur_session.guard.notice = false;
+        }
+    }
+    let rows = theme_option_rows(&file, crate::i18n::effective_language(&app.preferences.language), crate::theme_options::PROVIDERS, availability);
     if rows.is_empty() {
         return;
     }
-    let (mut values, _) = effective_theme_options(&app.preferences, file);
     let before = values.clone();
     let reset = ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values);
     let changes: BTreeMap<_, _> = values.into_iter().filter(|(id, value)| before.get(id) != Some(value)).collect();
@@ -3770,6 +3864,13 @@ fn theme_options_row(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.set_status(error, true);
         }
     }
+}
+
+fn theme_notice_key(theme: &str, problem: &str, raw: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hash = std::collections::hash_map::DefaultHasher::new();
+    (theme, problem, raw).hash(&mut hash);
+    hash.finish()
 }
 
 /// Only explicitly supplied entries are checked. Stale saved entries survive unrelated changes.
@@ -3838,13 +3939,14 @@ fn theme_options_reply(app: &SolveApp) -> solidcraft_engine::schema::ui_prefs::T
             .to_string()
     };
     let (values, notices) = effective_theme_options(&app.preferences, file);
+    let blur = blur_availability(app);
     ThemeOptionsReply {
         theme_option_defs: crate::theme_files::ordered_options(file)
             .into_iter()
             .map(|o| {
                 let standard = crate::theme_options::standard(&o.id);
                 let provider = crate::theme_options::provider(&o.id, crate::theme_options::PROVIDERS);
-                let availability = provider.map(|p| (p.availability)());
+                let availability = crate::theme_options::availability(file, &o.id, crate::theme_options::PROVIDERS, blur);
                 ThemeOptionDef {
                     id: o.id.clone(),
                     kind: match &o.kind {
@@ -3863,11 +3965,10 @@ fn theme_options_reply(app: &SolveApp) -> solidcraft_engine::schema::ui_prefs::T
                     advanced: o.advanced,
                     section: o.section.clone(),
                     standard,
-                    available: !standard || availability == Some(crate::theme_options::Availability::Available),
+                    available: availability == crate::theme_options::Availability::Available,
                     reason: match availability {
-                        Some(crate::theme_options::Availability::Unavailable(reason)) => Some(app.tr(reason).to_owned()),
-                        None if standard => Some("not implemented".into()),
-                        _ => None,
+                        crate::theme_options::Availability::Unavailable(reason) => Some(app.tr(reason).to_owned()),
+                        crate::theme_options::Availability::Available => None,
                     },
                 }
             })
@@ -6538,12 +6639,12 @@ mod tests {
                 if count == 0 {
                     let strip = crate::scenario::rect_of("dialog:hint:tab_accent").unwrap();
                     let mut unknown = theme_options_fixture(base, count);
-                    unknown["options"] = json!([{"id":"blur","type":"range","default":0}]);
+                    unknown["options"] = json!([]);
                     h.call("ui.prefs", json!({"theme_import":unknown}));
                     h.frames(2);
                     assert!(crate::scenario::rect_of("prefs:theme_options_header").is_none());
                     assert!(crate::scenario::rect_of(&format!("prefs:theme_options_badge:{id}")).is_none());
-                    assert_eq!(crate::scenario::rect_of("dialog:hint:tab_accent").unwrap(), strip, "unknown providers add no gap or notice");
+                    assert_eq!(crate::scenario::rect_of("dialog:hint:tab_accent").unwrap(), strip, "empty declarations add no gap or notice");
                 }
                 if count == 12 {
                     assert!(crate::scenario::rect_of("prefs:theme_option:outline").is_none());
@@ -6752,11 +6853,11 @@ mod tests {
             {"id":"opacity","type":"range","default":100}
         ]}))
         .unwrap();
-        let rows = theme_option_rows(&file, "de", crate::theme_options::PROVIDERS);
-        assert_eq!(rows.iter().map(|r| r.definition.id.as_str()).collect::<Vec<_>>(), ["opacity", "tab_colours", "tab_fade_ms", "custom"]);
+        let rows = theme_option_rows(&file, "de", crate::theme_options::PROVIDERS, Availability::Available);
+        assert_eq!(rows.iter().map(|r| r.definition.id.as_str()).collect::<Vec<_>>(), ["opacity", "blur", "tab_colours", "tab_fade_ms", "custom"]);
         assert_eq!(rows[0].label, "Deckkraft");
-        assert_eq!(rows[3].label, "Eigene");
-        assert_eq!(theme_option_rows(&file, "ja", crate::theme_options::PROVIDERS)[3].label, "Custom", "English fallback");
+        assert_eq!(rows[4].label, "Eigene");
+        assert_eq!(theme_option_rows(&file, "ja", crate::theme_options::PROVIDERS, Availability::Available)[4].label, "Custom", "English fallback");
         let providers = [Provider {
             id: "blur",
             label: "prefs.theme_option_opacity",
@@ -6764,7 +6865,7 @@ mod tests {
             availability: || Availability::Unavailable("prefs.theme_options_unavailable"),
             apply: |_, _| {},
         }];
-        let rows = theme_option_rows(&file, "en", &providers);
+        let rows = theme_option_rows(&file, "en", &providers, Availability::Available);
         assert_eq!(rows.iter().map(|r| r.definition.id.as_str()).collect::<Vec<_>>(), ["blur", "custom"]);
         assert_eq!(rows[0].reason.as_deref(), Some("Unavailable on this device"));
         // The internal fixture goes through the real kit. No fake provider is shipped.
@@ -6798,6 +6899,179 @@ mod tests {
             draw(crate::test_support::pointer(at, false));
             assert_eq!(values, before, "unavailable controls stay visible and inert");
         }
+    }
+
+    #[test]
+    fn blur_slider_reserves_readout_meter_and_disabled_reason() {
+        use crate::theme_files::OptionValue;
+        use crate::theme_options::Availability;
+        let source: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/theme-blur.json")).unwrap();
+        let file = crate::theme_files::from_value(&source).unwrap();
+        for dark in [false, true] {
+            crate::theme::set_custom(None);
+            crate::theme::set_dark(dark);
+            for available in [Availability::Available, Availability::Unavailable("prefs.theme_options_unavailable")] {
+                let rows = theme_option_rows(&file, "en", crate::theme_options::PROVIDERS, available);
+                for radius in [0.0, 1.0, 8.0, 9.0, 18.0, 33.0, 40.0, 18.25] {
+                    let ctx = crate::fonts::test_context();
+                    let mut values = crate::theme_files::effective_values(&file, &BTreeMap::new()).0;
+                    values.insert("blur".into(), OptionValue::Num(radius));
+                    let before = values.clone();
+                    let mut output = egui::FullOutput::default();
+                    for _ in 0..2 {
+                        crate::scenario::clear_handles();
+                        output = crate::test_support::frame(
+                            &ctx,
+                            egui::RawInput {
+                                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0))),
+                                ..Default::default()
+                            },
+                            |ui| {
+                                ui_kit::scope(ui, |ui| {
+                                    ui_kit::theme_options_list(ui, &file.id, &file.name, &rows, &mut values);
+                                })
+                            },
+                        );
+                    }
+                    assert_eq!(values, before, "drawing must preserve fractional intent");
+                    let meter = crate::scenario::rect_of("prefs:blur_cost").unwrap();
+                    let readout = crate::scenario::rect_of("prefs:theme_option_readout:blur").unwrap();
+                    let slider = crate::scenario::rect_of("dialog:slider_track:Blur behind panels").unwrap();
+                    assert!(slider.width() > 300.0, "standalone blur fills remaining row width");
+                    assert!(slider.right() <= readout.left() && readout.right() <= meter.left());
+                    assert_eq!(crate::scenario::rect_of("prefs:theme_option_reason:blur").is_some(), available != Availability::Available);
+                    let mut heights = Vec::new();
+                    for clipped in &output.shapes {
+                        crate::test_support::each_shape(&clipped.shape, &mut |shape| {
+                            if let egui::Shape::Rect(rect) = shape
+                                && meter.contains_rect(rect.rect)
+                            {
+                                heights.push(rect.rect.height());
+                            }
+                        });
+                    }
+                    assert_eq!(heights, if radius == 0.0 { vec![2.0] } else { vec![4.0, 6.0, 8.0, 11.0, 14.0] });
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn blur_availability_preserves_saved_intent_and_parent_state() {
+        use crate::theme_options::{Availability, Provider};
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let source = json!({"format":"solidcraft-theme/1","name":"Blur parent","base":"dark","options":[
+            {"id":"enabled","type":"bool","default":true}, {"id":"blur","type":"range","default":0,"parent":"enabled"},
+            {"id":"amount","type":"range","default":5,"min":0,"max":10,"step":1,"parent":"enabled"}
+        ]});
+        control(&mut h.app, &json!({"theme_import":source,"theme_options":{"blur-parent":{"blur":18.25,"amount":7.5}}})).unwrap();
+        let file = active_theme_file(&h.app).unwrap().clone();
+        assert_eq!(file.options.iter().find(|o| o.id == "blur").unwrap().parent, None, "reserved blur ignores authored parenting");
+        assert_eq!(file.options.iter().find(|o| o.id == "amount").unwrap().parent.as_deref(), Some("enabled"));
+        let saved = h.app.preferences.theme_options.clone();
+        let values = effective_theme_options(&h.app.preferences, &file).0;
+        for reason in ["prefs.blur_software", "prefs.blur_web", "prefs.blur_reduce_transparency"] {
+            assert_eq!(crate::theme_options::blur_radius(&file, &values, Availability::Unavailable(reason)), 0.0);
+            assert_eq!(crate::theme_options::blur_radius(&file, &values, Availability::Available), 18.25);
+        }
+        assert_eq!(h.app.preferences.theme_options, saved);
+        let providers = [
+            Provider { id: "enabled", label: "", help: "", availability: || Availability::Unavailable("prefs.blur_software"), apply: |_, _| {} },
+            Provider {
+                id: "blur",
+                label: "prefs.theme_option_blur",
+                help: "prefs.theme_option_blur_help",
+                availability: || Availability::Available,
+                apply: |_, _| {},
+            },
+        ];
+        assert_eq!(
+            crate::theme_options::availability(&file, "amount", &providers, Availability::Available),
+            Availability::Unavailable("prefs.blur_software")
+        );
+        assert_eq!(
+            crate::theme_options::availability(&file, "blur", &providers, Availability::Available),
+            Availability::Available,
+            "standard blur remains independent of the unavailable custom parent"
+        );
+        let rows = theme_option_rows(&file, "en", &providers, Availability::Available);
+        let parent = rows.iter().find(|r| r.definition.id == "enabled").unwrap();
+        let child = rows.iter().find(|r| r.definition.id == "amount").unwrap();
+        let blur = rows.iter().find(|r| r.definition.id == "blur").unwrap();
+        assert!(parent.reason.is_some());
+        assert_eq!(child.reason, parent.reason, "the genuine custom child inherits its parent's unavailable reason");
+        assert!(blur.reason.is_none(), "the reserved blur control is unaffected by custom-parent availability");
+        let reduced = std::rc::Rc::new(std::cell::Cell::new(true));
+        let reading = reduced.clone();
+        h.app.services.reduce_transparency = Some(Box::new(move |_| Some(reading.get())));
+        assert_eq!(blur_availability(&h.app), Availability::Unavailable("prefs.blur_reduce_transparency"));
+        let reply = control(&mut h.app, &json!({})).unwrap();
+        assert_eq!(reply["theme_option_values"]["blur"], 18.25);
+        h.frames(2);
+        assert_eq!(h.app.blur.radius(), 18.25, "OS unavailability preserves requested intent");
+        assert_eq!(h.app.preferences.theme_options, saved);
+        assert_eq!(h.app.blur.counters().textures_created, 0);
+        assert_eq!(h.app.blur.counters().markers_emitted, 0);
+        reduced.set(false);
+        assert_ne!(blur_availability(&h.app), Availability::Unavailable("prefs.blur_reduce_transparency"));
+        h.frames(2);
+        assert_eq!(h.app.blur.radius(), 18.25, "renderer retains raw intent even without a GPU");
+        assert_eq!(h.app.blur.counters().textures_created, 0);
+        control(&mut h.app, &json!({"theme_options":{"blur-parent":{"enabled":false}}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.blur.radius(), 18.25, "an inactive custom parent cannot turn independent standard blur off");
+        assert_eq!(crate::theme::blur_intent(&h.ctx).radius, 18.25);
+        let reply = control(&mut h.app, &json!({})).unwrap();
+        assert_eq!(reply["theme_option_values"]["enabled"], false);
+        assert_eq!(reply["theme_option_values"]["amount"], 7.5, "an inactive custom child retains its saved value");
+        assert_eq!(h.app.preferences.theme_options["blur-parent"]["blur"], 18.25);
+        control(&mut h.app, &json!({"theme_options":{"blur-parent":{"enabled":true}}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.blur.radius(), 18.25);
+        assert_eq!(h.app.preferences.theme_options["blur-parent"]["amount"], 7.5);
+        let counts = h.app.blur.counters();
+        assert_eq!((counts.textures_created, counts.markers_emitted, counts.markers_drawn, counts.live_bytes), (0, 0, 0, 0));
+    }
+
+    #[test]
+    fn blur_notices_dismiss_by_problem_identity_and_preserve_raw_json() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":1100}));
+        h.call("ui.prefs", json!({"theme_import":option_theme_file("Notice blur"),"open":"Interface"}));
+        h.app.preferences.theme_options.insert("notice-blur".into(), BTreeMap::from([("blur".into(), json!({"future":18}))]));
+        h.frames(3);
+        assert!(crate::scenario::rect_of("prefs:theme_notice:blur").is_some());
+        h.step(&json!({"click":{"handle":"prefs:theme_notice_dismiss:blur"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:theme_notice:blur").is_none());
+        assert_eq!(h.app.preferences.theme_options["notice-blur"]["blur"], json!({"future":18}));
+        let reply = control(&mut h.app, &json!({})).unwrap();
+        assert_eq!(reply["theme_option_notices"], json!([{"id":"blur","kind":"wrong_type"}]));
+        h.app.preferences.theme_options.get_mut("notice-blur").unwrap().insert("blur".into(), json!({"future":19}));
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:theme_notice:blur").is_some(), "changed raw value must reappear");
+        h.call(
+            "ui.prefs",
+            json!({"theme_import":{"format":"solidcraft-theme/1","name":"Future blur","base":"dark","requires":2,
+            "options":[{"id":"blur","type":"range","default":18}]}}),
+        );
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:theme_notice:newer").is_some());
+        assert!(crate::scenario::rect_of("prefs:theme_options_header").is_none());
+        h.step(&json!({"click":{"handle":"prefs:theme_notice_dismiss:newer"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:theme_notice:newer").is_none());
+        assert!(active_theme_file(&h.app).unwrap().options.is_empty(), "unsupported tables were discarded, never auto-restored");
+        h.app.preferences.custom_themes.iter_mut().find(|f| f.id == "future-blur").unwrap().requires = 3;
+        h.frames(2);
+        assert!(crate::scenario::rect_of("prefs:theme_notice:newer").is_some());
+        for identity in 0..80 {
+            h.app.blur_session.dismiss(identity);
+        }
+        assert!(!h.app.blur_session.dismissed(0), "dismissal storage is bounded");
+        assert!(h.app.blur_session.dismissed(79));
     }
 
     fn option_theme_file(name: &str) -> serde_json::Value {
@@ -7088,7 +7362,8 @@ mod tests {
         assert_eq!(reply.options.theme_option_defs.iter().map(|o| o.id.as_str()).collect::<Vec<_>>(), ["blur", "enabled", "amount", "style"]);
         let defs = &reply.options.theme_option_defs;
         assert!(defs[0].standard && !defs[0].available);
-        assert_eq!(defs[0].reason.as_deref(), Some("not implemented"));
+        let crate::theme_options::Availability::Unavailable(reason) = blur_availability(&h.app) else { panic!("headless fixture has no GPU") };
+        assert_eq!(defs[0].reason.as_deref(), Some(crate::i18n::Locale::for_language("de").text(reason)));
         assert_eq!((&defs[1].label, &defs[1].help), (&"Aktiv".to_string(), &"Farben verwenden".to_string()));
         assert!(defs[1].available && defs[1].reason.is_none());
         assert!(defs[2].advanced && defs[2].section.as_deref() == Some("Details"));
@@ -9191,7 +9466,8 @@ mod ui_scale_regression_tests {
 /// View ▸ View angles and Preferences ▸ Graphics run the same command (#6032).
 pub(crate) fn view_angles_checkbox(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut enabled = app.preferences.show_view_angles;
-    let response = ui_kit::checkbox(ui, crate::i18n::tr("ui.view_angles"), &mut enabled).on_hover_text(crate::i18n::tr("ui.view_angles_help"));
+    let response =
+        ui_kit::checkbox(ui, crate::i18n::tr("ui.view_angles"), &mut enabled).backing_on_hover_text(crate::i18n::tr("ui.view_angles_help"));
     crate::scenario::publish_handle("view:view_angles", response.rect.center());
     if response.changed() {
         let _ = app.run("view.angle_readout", json!({"enabled": enabled}));

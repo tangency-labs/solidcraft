@@ -1,5 +1,6 @@
 //! Popup and tooltip skin from the approved navigation boards.
 use super::{Container, Surface, navigation::*};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{icons, navigation_bar::Edge, theme::Tokens};
 use egui::{Align2, FontId, Rect, Response, Sense, Ui, pos2, vec2};
 
@@ -88,7 +89,7 @@ impl<'a> NavigationMenuRow<'a> {
             icons::paint_ink(ui.painter(), arrow, "chevron", t.form_dim);
         }
         response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, self.enabled && ui.is_enabled(), self.selected, self.label));
-        if cut { response.on_hover_text(self.label) } else { response }
+        if cut { response.backing_on_hover_text(self.label) } else { response }
     }
 }
 

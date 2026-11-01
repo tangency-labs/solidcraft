@@ -90,7 +90,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui_kit::settings_section(ui, "slicer", app.tr("ui.slicer"), |ui| {
         ui_kit::settings_block(ui, app.tr("ui.slicer"), labels, |ui| {
             let (single, tip) = (app.tr("ui.slicer_single_instance").to_string(), app.tr("ui.slicer_single_instance_tip").to_string());
-            ui_kit::checkbox(ui, &single, &mut app.preferences.slicer_single_instance).on_hover_text(tip);
+            ui_kit::checkbox(ui, &single, &mut app.preferences.slicer_single_instance).backing_on_hover_text(tip);
         });
         ui_kit::settings_block(ui, app.tr("prefs.print_face_highlight"), labels, |ui| {
             let tip = app.tr("prefs.print_face_highlight_tip").to_string();
@@ -101,7 +101,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::Slider { step: Some(0.05), format: |v| format!("{:.0} %", v * 100.0), ..Default::default() },
             );
             crate::scenario::publish_target("prefs:print_face_highlight", response.rect);
-            response.on_hover_text(tip);
+            response.backing_on_hover_text(tip);
         });
     });
     ui_kit::settings_section(ui, "updates", app.tr("prefs.updates"), |ui| {

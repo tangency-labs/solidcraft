@@ -15,6 +15,7 @@
 //! Adapted from VectorCraft's `crates/ui-egui/src/titlebar.rs` (MIT OR Apache-2.0).
 
 use crate::icons::glyphs::paint_glyph;
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::{Color32, CursorIcon, Id, LayerId, Order, PointerButton, Pos2, Rect, ResizeDirection, Sense, Stroke, Ui, ViewportCommand, pos2, vec2};
 
 use crate::SolveApp;
@@ -116,7 +117,7 @@ pub fn caption_buttons(app: &mut SolveApp, ui: &mut Ui, bar: Rect) {
             Caption::Maximize => "Maximize",
             Caption::Close => "Close",
         };
-        if resp.on_hover_text(tip).clicked() {
+        if resp.backing_on_hover_text(tip).clicked() {
             clicked = Some(c);
         }
     }

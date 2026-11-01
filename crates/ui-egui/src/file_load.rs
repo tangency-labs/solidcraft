@@ -1183,7 +1183,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     Container::new(ctx, Surface::InputShield).area(id).order(egui::Order::Middle).fixed_pos(cover.min).interactable(true).show(ctx, |ui| {
         ui.set_min_size(cover.size());
         ui.interact(cover, egui::Id::new("file_loading_block"), egui::Sense::click_and_drag());
-        ui.painter().rect_filled(cover, 0.0, egui::Color32::from_black_alpha(70));
+        let shield = Container::new(ctx, Surface::InputShield);
+        shield.paint_background(ui.painter(), shield.frame(ctx, egui::Color32::from_black_alpha(70), crate::frame::Side::Left), cover);
     });
     // Anchored at its top: the card grows downwards (the saved preview) and Cancel stays put.
     let top = egui::pos2(centre.x, (centre.y - 120.0).max(cover.top() + 8.0));

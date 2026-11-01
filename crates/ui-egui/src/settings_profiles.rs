@@ -17,6 +17,7 @@
 use serde_json::{Map, Value, json};
 use solidcraft_engine::{MAX_PROFILE_NAME, profile_name};
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, prefs, theme_files, ui_kit};
 
 /// The format tag of a profile document.
@@ -642,7 +643,7 @@ pub(crate) fn sidebar(ui: &mut egui::Ui, app: &mut SolveApp) {
         });
         crate::scenario::publish_target("prefs:profile", response.rect);
         if edited {
-            let dot = ui_kit::status_line(ui, "●", ui_kit::StatusTone::Warning).on_hover_text(app.tr("prefs.structure.profile_edited"));
+            let dot = ui_kit::status_line(ui, "●", ui_kit::StatusTone::Warning).backing_on_hover_text(app.tr("prefs.structure.profile_edited"));
             crate::scenario::publish_target("prefs:profile:edited", dot.rect);
         }
     });
@@ -656,7 +657,7 @@ pub(crate) fn sidebar(ui: &mut egui::Ui, app: &mut SolveApp) {
 
 /// Page-title tag. Membership is descriptive; the stable key list above governs storage.
 pub(crate) fn tag(ui: &mut egui::Ui) {
-    let response =
-        ui_kit::workspace_chip(ui, crate::i18n::tr("prefs.structure.in_profile")).on_hover_text(crate::i18n::tr("prefs.structure.profile_hover"));
+    let response = ui_kit::workspace_chip(ui, crate::i18n::tr("prefs.structure.in_profile"))
+        .backing_on_hover_text(crate::i18n::tr("prefs.structure.profile_hover"));
     crate::scenario::publish_target("prefs:in_profile", response.rect);
 }

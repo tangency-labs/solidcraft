@@ -1,4 +1,5 @@
 //! Search-and-actions toolbar shared by settings tables and command lists.
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{icons, theme::Tokens};
 use egui::{Align, FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 
@@ -46,7 +47,7 @@ pub(crate) fn search_actions_row(
                 } else {
                     super::button(ui, item.label, super::Button::Normal)
                 };
-                let response = if let Some(tooltip) = item.tooltip { response.on_hover_text(tooltip) } else { response };
+                let response = if let Some(tooltip) = item.tooltip { response.backing_on_hover_text(tooltip) } else { response };
                 if response.clicked() {
                     action = Some(index);
                 }

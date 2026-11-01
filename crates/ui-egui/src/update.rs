@@ -16,6 +16,7 @@
 //! The host provides the HTTP client (`Services::http_get`), so this crate stays portable and
 //! the browser build never checks (it updates itself through its service worker).
 
+use crate::ui_kit::BackingTooltipExt as _;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -954,7 +955,7 @@ pub fn button(app: &mut SolveApp, ui: &mut egui::Ui, span: egui::Rect, labeled: 
     let full = crate::i18n::format("update.button_version", &[("version", &version)]);
     let labels = [full.as_str(), crate::i18n::tr("update.button")];
     let (rect, response) = crate::toolbar::offer_pill(ui, span, labeled, &labels, TAB_ROOM, "update", "titlebar:update")?;
-    if response.on_hover_text(crate::i18n::format("update.available", &[("version", &version)])).clicked() {
+    if response.backing_on_hover_text(crate::i18n::format("update.available", &[("version", &version)])).clicked() {
         app.updater.open = !app.updater.open;
     }
     Some(rect)
@@ -1383,7 +1384,7 @@ fn markdown(ui: &mut egui::Ui, src: &str, t: &Tokens) {
         ui.horizontal_wrapped(|ui| {
             ui.add_space(indent);
             for (text, url) in targets {
-                ui.hyperlink_to(RichText::new(text).size(t.font_caption), url).on_hover_text(url);
+                ui.hyperlink_to(RichText::new(text).size(t.font_caption), url).backing_on_hover_text(url);
             }
         });
     };
