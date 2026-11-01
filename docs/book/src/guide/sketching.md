@@ -123,7 +123,8 @@ points and references; Escape ends the tool.
 
 A command call can cut a horizontal, vertical, angle, parallel or perpendicular construction
 line to a length instead: `length` makes a segment from the point `at`, running towards `near`,
-and adds a length dimension that follows its expression (#10258).
+and adds a length dimension that follows its expression (#10258). With `construction: false` that
+segment is a normal sketch line, ready to close a profile.
 
 Tangents through an external point take a circle or circular arc, the external point, and a
 click choosing the desired preview. A common tangent takes two circles/arcs and a click choosing

@@ -42,7 +42,7 @@ fn construction_line_contracts_and_replies_match() {
     use super::{ConstructionLineParams, ConstructionLineResult};
     assert_keys(
         input_schema_for::<ConstructionLineParams>(),
-        &["alternate", "angle", "at", "curve", "curve2", "length", "mode", "near", "sketch", "solution", "through"],
+        &["alternate", "angle", "at", "construction", "curve", "curve2", "length", "mode", "near", "sketch", "solution", "through"],
     );
     let schema = output_schema_for::<ConstructionLineResult>();
     let schema = schema.as_value();

@@ -115,6 +115,30 @@ fn construction_lines_with_a_length_are_segments_held_by_a_dimension() {
 }
 
 #[test]
+fn a_construction_line_with_a_length_can_be_a_normal_line() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+    let p = json!({"at": [20, -10], "length": 40, "near": [20, 30]});
+    let guide = run(&mut s, "sketch.construction_line.vertical", p.clone());
+    assert!(curve(&sketch(&s), guide["curves"][0].as_str().unwrap()).construction);
+    assert_eq!(profiles(&s), 1, "by default it is construction geometry: no profile");
+    let mut p = p;
+    p["construction"] = json!(false);
+    let out = run(&mut s, "sketch.construction_line.vertical", p);
+    let sk = sketch(&s);
+    let c = curve(&sk, out["curves"][0].as_str().unwrap());
+    assert!(!c.construction && !c.infinite);
+    assert_eq!(profiles(&s), 2, "a normal line cuts the rectangle in two");
+    let back = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert!(!curve(back.sketch(s.active_sketch.unwrap()).unwrap(), out["curves"][0].as_str().unwrap()).construction);
+    for p in [json!({"at": [0, 0], "construction": false}), json!({"at": [0, 0], "length": 5, "construction": "no"})] {
+        let before = s.doc.to_json();
+        assert!(s.execute("sketch.construction_line.horizontal", &p).is_err(), "{p}");
+        assert_eq!(s.doc.to_json(), before, "{p}");
+    }
+}
+
+#[test]
 fn construction_angle_keeps_its_parameter_expression() {
     let mut s = new_sketch();
     run(&mut s, "parameters.add", json!({"name":"inclination","expression":"30 deg"}));
