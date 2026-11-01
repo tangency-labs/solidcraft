@@ -1316,7 +1316,7 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
             s.selection.push(x);
         }
     }
-    s.revision += 1;
+    s.refresh_display();
     Ok(json!({"selected": s.selection.len()}))
 }
 
@@ -1373,7 +1373,7 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
     s.selection.clear();
-    s.revision += 1;
+    s.refresh_display();
     Ok(json!({"selected": 0}))
 }
 

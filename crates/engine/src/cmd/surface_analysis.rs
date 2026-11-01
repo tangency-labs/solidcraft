@@ -91,7 +91,7 @@ fn set(s: &mut Session, p: &Value, a: SurfaceAnalysis) -> Result<Value> {
         s.analysis = Some(a);
     }
     s.status_analysis_changed((!bool_(p, "clear").unwrap_or(false)).then_some(crate::status_items::StatusId::SurfaceAnalysis));
-    s.revision += 1;
+    s.refresh_display();
     let vector = |v: Vec3| [v.x, v.y, v.z];
     let analysis = s.analysis.map(|a| match a {
         SurfaceAnalysis::Zebra { stripes } => contract::Analysis::Zebra { stripes },
@@ -155,7 +155,7 @@ fn continuity(s: &mut Session, p: &Value) -> Result<Value> {
     if bool_(p, "clear").unwrap_or(false) {
         s.continuity.clear();
         s.status_analysis_changed(None);
-        s.revision += 1;
+        s.refresh_display();
         return serde_json::to_value(contract::ContinuityResult::Cleared {
             analysis: "continuity".into(),
             cleared: true,
@@ -273,7 +273,7 @@ fn continuity(s: &mut Session, p: &Value) -> Result<Value> {
         s.continuity = seams;
     }
     s.status_analysis_changed(Some(crate::status_items::StatusId::Continuity));
-    s.revision += 1;
+    s.refresh_display();
     serde_json::to_value(contract::ContinuityResult::Measured {
         analysis: "continuity".into(),
         samples,
