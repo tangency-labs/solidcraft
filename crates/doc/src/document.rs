@@ -3159,8 +3159,8 @@ impl Document {
 
     /// The single body rename (old name, new name) that turns `previous` into this design,
     /// when that is all that changed: the features' stored body names (`made` gives the names
-    /// each feature's bodies have now, by feature id) and what [`Document::rename_body_keys`]
-    /// renames. `None` for any other change.
+    /// each feature's bodies have now, by feature id), typed body references, participants and
+    /// what [`Document::rename_body_keys`] renames. `None` for any other change.
     pub fn body_rename_from(&self, previous: &Document, made: impl Fn(u64) -> Vec<String>) -> Option<(String, String)> {
         if self.features.len() != previous.features.len() {
             return None;
@@ -3191,8 +3191,16 @@ impl Document {
         }
         let (old, new) = rename?;
         let mut expected = previous.clone();
+        let bodies = std::collections::BTreeMap::from([(old.clone(), new.clone())]);
         for (f, g) in expected.features.iter_mut().zip(&self.features) {
             f.body_names.clone_from(&g.body_names);
+            // Updating references to the renamed body changes no feature input other than its
+            // name (#6287). Keep the full comparison below: geometry, expressions, sketch links
+            // and face anchors must still agree before the model may reuse its geometry.
+            f.kind.remap_bodies(&bodies);
+            for body in f.participants.iter_mut().filter(|body| **body == old) {
+                body.clone_from(&new);
+            }
         }
         expected.rename_body_keys(&old, &new);
         (expected == *self).then_some((old, new))
