@@ -475,6 +475,10 @@ pub struct Session {
     pub(crate) followed: Option<cmd::inspect::Followed>,
     /// Project a face's edges into a sketch created on it (the default; `sketch.auto_project`).
     pub auto_project: bool,
+    /// Show/Hide (`V`) acts on the element under the cursor without selecting it first, in the
+    /// viewport and on rows of the Browser tree (the default; Preferences ▸ Interaction, #4128).
+    /// Off: `V` acts on the selection only, as it did before.
+    pub hide_under_cursor: bool,
     /// How calls that break a command's parameter contract are treated (off by default). It
     /// belongs to the session, not the design, so it survives opening and starting designs.
     pub param_check: schema::ParamCheck,
@@ -711,6 +715,7 @@ impl Session {
             document_id: cmd::inspect::new_document_id(),
             followed: None,
             auto_project: true,
+            hide_under_cursor: true,
             param_check: schema::ParamCheck::Off,
             easyprint_upload: None,
             live_links: None,
@@ -765,6 +770,7 @@ impl Session {
     /// checkpoint keeps, not the replaced session's file path (docs/mcp.md).
     pub fn replace_design(&mut self, fresh: Session) {
         let auto_project = self.auto_project;
+        let hide_under_cursor = self.hide_under_cursor;
         let single_surface_analysis = self.single_surface_analysis;
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
@@ -779,6 +785,7 @@ impl Session {
         *self = fresh;
         self.crash_journal = crash_journal;
         self.auto_project = auto_project;
+        self.hide_under_cursor = hide_under_cursor;
         self.set_single_surface_analysis(single_surface_analysis);
         self.param_check = param_check;
         self.easyprint_upload = easyprint_upload;
@@ -1677,6 +1684,7 @@ impl Session {
             document_id: self.document_id.clone(),
             followed: None,
             auto_project: self.auto_project,
+            hide_under_cursor: self.hide_under_cursor,
             param_check: self.param_check,
             easyprint_upload: self.easyprint_upload.clone(),
             live_links: None,
