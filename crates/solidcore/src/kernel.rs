@@ -218,6 +218,19 @@ pub struct UpstreamFixes {
     /// so the combined array misses any longer gap from the appended array (WR-90).
     /// Off by default for pinned C++ parity.
     pub gap_array_append_updates_longest: bool,
+    /// `SmTransform::EvaluateBoundingBoxSimple`'s aligned-basis fast path maps parameter
+    /// intervals by multiplying by each axis column's length (`|x|`, `|y|`, `|z|`) and
+    /// translating by the origin's component along each transformed basis vector
+    /// (`o_u * |x|`, `o_v * |y|`, `o_w * |z|` where `(o_u, o_v, o_w) = T_lin^-1(o)`),
+    /// permutes parameter axis `k`'s interval into basis slot `|alAxisMap[k]| - 1`
+    /// (negated when `alAxisMap[k] < 0`), circumscribes an axis-aligned projected
+    /// `PseudoBox` into `pOptProjBox` by basis (`WR-5`), and falls back to the general
+    /// corner/unbounded branch when the transform's linear part is singular, instead of
+    /// scaling by `1 / |axis|`, translating by `o · axis`, and indexing
+    /// `sIvls[|alAxisMap[k]| - 1]` (WR-8, #2148; see
+    /// `plan/upstream-issues/WR-8--addendum-2026-10-31-aligned-bbox-image.md`). Off by
+    /// default for pinned C++ parity.
+    pub transform_aligned_bbox_image: bool,
     /// `SmCurveLoops::GetLoopStartEnd` starts a later loop after the previous loop
     /// ends, keeping adjacency within that loop (WR-96). Off by default for C++ parity.
     pub curve_loop_start_after_previous_end: bool,

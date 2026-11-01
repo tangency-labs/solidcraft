@@ -30,7 +30,7 @@
 //! | [`Transform::invert_simple`]                      | `InvertSimple`                                        |
 //! | [`Transform::set_axis2_placement`]                | `SetAxis2Placement`                                   |
 //! | [`Transform::evaluate_simple`]                    | `EvaluateSimple`                                      |
-//! | [`Transform::evaluate_bounding_box_simple`]       | `EvaluateBoundingBoxSimple`                           |
+//! | [`Transform::evaluate_bounding_box_simple`], [`Transform::evaluate_bounding_box_simple_with_kernel`] | `EvaluateBoundingBoxSimple` |
 //! | [`Transform::inv_evaluate_guess_point_simple`]    | `InvEvaluateGuessPointSimple`                         |
 //! | [`Transform::global_point_solve_simple`]          | `GlobalPointSolveSimple`                              |
 //! | [`Transform::local_point_solve_simple`]           | `LocalPointSolveSimple`                               |
@@ -58,6 +58,11 @@
 //!   outputs' previous state matters). A requested output without a parameter
 //!   pseudo box is [`SolidError::InvalidInput`] (upstream dereferences the null
 //!   pointer, `plan/findings.md`).
+//! - **WR-8.** By default [`Transform::evaluate_bounding_box_simple`] keeps upstream's
+//!   aligned-basis interval formula (`scale(1 / |axis|)`, `translate(o · axis)`, and
+//!   axis-to-basis permutation); [`Transform::evaluate_bounding_box_simple_with_kernel`]
+//!   maps the exact box image behind `Kernel::fixes.transform_aligned_bbox_image`
+//!   (`plan/upstream-issues/WR-8--addendum-2026-10-31-aligned-bbox-image.md`).
 //! - Out-params become return values. `InvTransformPoint`, `InvTransformVector`
 //!   and `InvEvaluateGuessPointSimple` return `Err` (upstream `SM_ERR`, code 1001)
 //!   for a singular axes sub-matrix, where upstream leaves the output unset.
@@ -85,6 +90,7 @@ use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, SolutionType};
 use crate::geom::tol::is_zero;
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::kernel::Kernel;
 use crate::math::INFINITE_PARAMETER;
 use crate::surface::volume::p1::{
     is_kind_of as volume_is_kind_of, Discontinuities3d, Volume, VolumeKind,
@@ -461,7 +467,8 @@ impl Transform {
     }
 
     /// Projection-space bounding boxes of the parameter-space box `param_box`
-    /// (`EvaluateBoundingBoxSimple`), written into the requested outputs.
+    /// (`EvaluateBoundingBoxSimple`), written into the requested outputs using
+    /// [`Kernel::default`] (see [`Self::evaluate_bounding_box_simple_with_kernel`]).
     ///
     /// The output pseudo box takes the basis of `param_pseudo_box` mapped through the
     /// transform (kept as is when that basis is rejected). When `param_pseudo_box` is
@@ -484,10 +491,51 @@ impl Transform {
         &self,
         param_box: &Extent3d,
         param_pseudo_box: Option<&PseudoBox>,
+        proj_box: Option<&mut Extent3d>,
+        proj_pseudo_box: Option<&mut PseudoBox>,
+        evaluate_point: impl FnMut(Point3) -> Result<Point3>,
+    ) -> Result<()> {
+        self.evaluate_bounding_box_simple_with_kernel(
+            &Kernel::default(),
+            param_box,
+            param_pseudo_box,
+            proj_box,
+            proj_pseudo_box,
+            evaluate_point,
+        )
+    }
+
+    /// Projection-space bounding boxes of the parameter-space box `param_box`
+    /// (`EvaluateBoundingBoxSimple`), honouring
+    /// `k.fixes.transform_aligned_bbox_image` (WR-8).
+    ///
+    /// With `k.fixes.transform_aligned_bbox_image` off (the default), behaves
+    /// identically to [`Self::evaluate_bounding_box_simple`]. When enabled and
+    /// `param_pseudo_box` is aligned with the parameter axes on a non-singular
+    /// transform, maps each parameter interval by multiplying by `|axis|` and
+    /// translating by `o_param * |axis|` (where `o_param` is [`Self::to_origin`]
+    /// expressed in the transform's axis basis), permutes parameter axis `idx` into
+    /// basis slot `|axis_map[idx]| - 1` (negated when `axis_map[idx] < 0`), and
+    /// circumscribes an axis-aligned `proj_pseudo_box` into `proj_box` by basis
+    /// (WR-5); singular transforms fall back to the general unbounded/corner branch.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when an output is requested without
+    /// `param_pseudo_box` (upstream dereferences the null pointer);
+    /// [`SolidError::Unported`] from `evaluate_point`.
+    pub fn evaluate_bounding_box_simple_with_kernel<F>(
+        &self,
+        k: &Kernel,
+        param_box: &Extent3d,
+        param_pseudo_box: Option<&PseudoBox>,
         mut proj_box: Option<&mut Extent3d>,
         mut proj_pseudo_box: Option<&mut PseudoBox>,
-        mut evaluate_point: impl FnMut(Point3) -> Result<Point3>,
-    ) -> Result<()> {
+        mut evaluate_point: F,
+    ) -> Result<()>
+    where
+        F: FnMut(Point3) -> Result<Point3>,
+    {
         // no work - no output
         if proj_box.is_none() && proj_pseudo_box.is_none() {
             return Ok(());
@@ -513,11 +561,64 @@ impl Transform {
             self.transform_vector(b2),
         );
         // upstream ignores the status
-        let _ = this_proj_pb.set_basis(sx, sy, sz);
+        let basis_ok = this_proj_pb.set_basis(sx, sy, sz).is_ok();
         this_proj_pb.init();
 
         let axis_map = PseudoBox::new().are_aligned(param_pb);
-        if let Some(axis_map) = axis_map {
+        let aligned_origin =
+            if k.fixes.transform_aligned_bbox_image && basis_ok && axis_map.is_some() {
+                self.inv_transform_vector(self.to_origin()).ok()
+            } else {
+                None
+            };
+        if let (true, Some(axis_map), Some(o_param)) = (
+            k.fixes.transform_aligned_bbox_image,
+            axis_map,
+            aligned_origin,
+        ) {
+            let x_length = self.to_x_axis().length();
+            let y_length = self.to_y_axis().length();
+            let z_length = self.to_z_axis().length();
+
+            let mut ivls = [
+                *param_box
+                    .u_interval()
+                    .scale(x_length)
+                    .translate(o_param.x * x_length),
+                *param_box
+                    .v_interval()
+                    .scale(y_length)
+                    .translate(o_param.y * y_length),
+                *param_box
+                    .w_interval()
+                    .scale(z_length)
+                    .translate(o_param.z * z_length),
+            ];
+
+            if axis_map != [1, 2, 3] {
+                let mut tmps = [Extent1d::new(); 3];
+                for (src_ivl, m) in ivls.into_iter().zip(axis_map) {
+                    let slot = (m.unsigned_abs() as usize).wrapping_sub(1);
+                    if let Some(dst) = tmps.get_mut(slot) {
+                        let mut v = src_ivl;
+                        *dst = if m > 0 { v } else { *v.negate() };
+                    }
+                }
+                ivls = tmps;
+            }
+
+            let [i0, i1, i2] = ivls;
+            this_proj_pb.set_intervals(i0, i1, i2);
+
+            if let Some(pb) = proj_pseudo_box {
+                *pb = this_proj_pb;
+            }
+            if let Some(b) = proj_box {
+                let mut k_circ = Kernel::default();
+                k_circ.fixes.circumscribe_axis_map_by_basis = true;
+                b.circumscribe_with(&this_proj_pb, &k_circ);
+            }
+        } else if let (false, Some(axis_map)) = (k.fixes.transform_aligned_bbox_image, axis_map) {
             // get Ivls of mapping ParamBox directly to ProjSpace
             let o = self.to_origin();
             let x = self.to_x_axis();
@@ -776,6 +877,28 @@ mod tests {
         Vec3::new(x, y, z)
     }
 
+    fn map_point(t: &Transform, p: Point3) -> Point3 {
+        t.evaluate_simple(p, 0).unwrap()[0]
+    }
+
+    fn assert_corner_sets_match(actual: &[Point3; 8], expected: &[Point3; 8], tol: f64) {
+        let mut used = [false; 8];
+        for a in actual {
+            let idx = (0..8)
+                .find(|&i| !used[i] && (expected[i] - *a).length() < tol)
+                .expect("every pseudo-box corner should match a mapped corner");
+            used[idx] = true;
+        }
+    }
+
+    fn aabb_of_points(pts: &[Point3; 8]) -> Extent3d {
+        let mut b = Extent3d::new();
+        for p in pts {
+            b.add_point(*p);
+        }
+        b
+    }
+
     #[test]
     fn identity_and_canonical() {
         let t = Transform::default();
@@ -875,5 +998,365 @@ mod tests {
             proj_pb.interval(0).map(|i| i.max()),
             Some(INFINITE_PARAMETER)
         );
+    }
+
+    #[test]
+    fn wr8_non_uniform_scale_and_translation() {
+        let t = Transform::new(
+            v(10.0, -5.0, 3.0),
+            v(2.0, 0.0, 0.0),
+            v(0.0, 3.0, 0.0),
+            Some(v(0.0, 0.0, 4.0)),
+        );
+        let param_box = Extent3d::from_bounds(1.0, -1.0, 0.0, 2.0, 1.0, 0.5);
+        let param_pb = PseudoBox::new();
+
+        // Default (pinned C++ parity): scales by `1 / |axis|` and translates by `o · axis`.
+        let mut def_box = Extent3d::new();
+        let mut def_pb = PseudoBox::new();
+        t.evaluate_bounding_box_simple(
+            &param_box,
+            Some(&param_pb),
+            Some(&mut def_box),
+            Some(&mut def_pb),
+            |p| Ok(map_point(&t, p)),
+        )
+        .unwrap();
+        assert!((def_box.min() - v(20.5, -15.0 - 1.0 / 3.0, 12.0)).length() < 1e-12);
+        assert!((def_box.max() - v(21.0, -15.0 + 1.0 / 3.0, 12.125)).length() < 1e-12);
+        assert!(def_pb
+            .interval(0)
+            .unwrap()
+            .are_equal_bounds(20.5, 21.0, 1e-12));
+        assert!(def_pb.interval(1).unwrap().are_equal_bounds(
+            -15.0 - 1.0 / 3.0,
+            -15.0 + 1.0 / 3.0,
+            1e-12
+        ));
+        assert!(def_pb
+            .interval(2)
+            .unwrap()
+            .are_equal_bounds(12.0, 12.125, 1e-12));
+
+        let mut def_k_box = Extent3d::new();
+        let mut def_k_pb = PseudoBox::new();
+        t.evaluate_bounding_box_simple_with_kernel(
+            &Kernel::default(),
+            &param_box,
+            Some(&param_pb),
+            Some(&mut def_k_box),
+            Some(&mut def_k_pb),
+            |p| Ok(map_point(&t, p)),
+        )
+        .unwrap();
+        assert_eq!(def_k_box, def_box);
+        assert_eq!(def_k_pb, def_pb);
+
+        // Opt-in: exact affine image `[12, 14] x [-8, -2] x [3, 5]`.
+        let mut k_on = Kernel::default();
+        k_on.fixes.transform_aligned_bbox_image = true;
+        let mut opt_box = Extent3d::new();
+        let mut opt_pb = PseudoBox::new();
+        t.evaluate_bounding_box_simple_with_kernel(
+            &k_on,
+            &param_box,
+            Some(&param_pb),
+            Some(&mut opt_box),
+            Some(&mut opt_pb),
+            |p| Ok(map_point(&t, p)),
+        )
+        .unwrap();
+        assert!((opt_box.min() - v(12.0, -8.0, 3.0)).length() < 1e-12);
+        assert!((opt_box.max() - v(14.0, -2.0, 5.0)).length() < 1e-12);
+        assert!(opt_pb
+            .interval(0)
+            .unwrap()
+            .are_equal_bounds(12.0, 14.0, 1e-12));
+        assert!(opt_pb
+            .interval(1)
+            .unwrap()
+            .are_equal_bounds(-8.0, -2.0, 1e-12));
+        assert!(opt_pb
+            .interval(2)
+            .unwrap()
+            .are_equal_bounds(3.0, 5.0, 1e-12));
+        let expected_corners = param_box.corners().map(|c| map_point(&t, c));
+        assert_corner_sets_match(&opt_pb.corners(), &expected_corners, 1e-12);
+    }
+
+    #[test]
+    fn wr8_three_cycle_param_basis_and_three_cycle_transform() {
+        let mut k_on = Kernel::default();
+        k_on.fixes.transform_aligned_bbox_image = true;
+
+        // (a) 3-cycle and negated 3-cycle parameter PseudoBox bases under scale + translation.
+        let t = Transform::new(
+            v(4.0, -3.0, 2.0),
+            v(2.0, 0.0, 0.0),
+            v(0.0, 5.0, 0.0),
+            Some(v(0.0, 0.0, 3.0)),
+        );
+        let param_box = Extent3d::from_bounds(1.0, 2.0, -1.0, 3.0, 4.0, 2.0);
+        let expected_corners = param_box.corners().map(|c| map_point(&t, c));
+        let expected_aabb = aabb_of_points(&expected_corners);
+        assert_eq!(expected_aabb.min(), v(6.0, 7.0, -1.0));
+        assert_eq!(expected_aabb.max(), v(10.0, 17.0, 8.0));
+
+        // Even under Identity, default scrambles `[Y, Z, X]` intervals backwards (WR-8 bug 3):
+        // `axis_map = [3, 1, 2]` puts `w` (`[-1, 2]`) onto basis 0 (`Y`) instead of `v` (`[2, 4]`).
+        let mut pb_cycle = PseudoBox::new();
+        pb_cycle.set_basis(Vec3::Y, Vec3::Z, Vec3::X).unwrap();
+        let mut id_def_pb = PseudoBox::new();
+        Transform::IDENTITY
+            .evaluate_bounding_box_simple(
+                &param_box,
+                Some(&pb_cycle),
+                None,
+                Some(&mut id_def_pb),
+                Ok,
+            )
+            .unwrap();
+        assert!(id_def_pb
+            .interval(0)
+            .unwrap()
+            .are_equal_bounds(-1.0, 2.0, 1e-12));
+
+        for basis in [[Vec3::Y, Vec3::Z, Vec3::X], [-Vec3::Y, Vec3::Z, -Vec3::X]] {
+            let mut param_pb = PseudoBox::new();
+            param_pb.set_basis(basis[0], basis[1], basis[2]).unwrap();
+
+            let mut def_box = Extent3d::new();
+            let mut def_pb = PseudoBox::new();
+            t.evaluate_bounding_box_simple(
+                &param_box,
+                Some(&param_pb),
+                Some(&mut def_box),
+                Some(&mut def_pb),
+                |p| Ok(map_point(&t, p)),
+            )
+            .unwrap();
+            assert!((def_box.min() - expected_aabb.min()).length() > 10.0);
+
+            let mut opt_box = Extent3d::new();
+            let mut opt_pb = PseudoBox::new();
+            t.evaluate_bounding_box_simple_with_kernel(
+                &k_on,
+                &param_box,
+                Some(&param_pb),
+                Some(&mut opt_box),
+                Some(&mut opt_pb),
+                |p| Ok(map_point(&t, p)),
+            )
+            .unwrap();
+            assert_corner_sets_match(&opt_pb.corners(), &expected_corners, 1e-12);
+            assert!((opt_box.min() - expected_aabb.min()).length() < 1e-12);
+            assert!((opt_box.max() - expected_aabb.max()).length() < 1e-12);
+        }
+
+        // (b) Canonical `param_pb` under a 3-cycle rotation + translation transform:
+        // `opt_box` circumscribes `this_proj_pb` (`basis = [Y, Z, X]`) by basis without needing
+        // `circumscribe_axis_map_by_basis` separately enabled on `k_on`.
+        assert!(!k_on.fixes.circumscribe_axis_map_by_basis);
+        let t_rot = Transform::new(
+            v(10.0, -5.0, 7.0),
+            Vec3::Y * 2.0,
+            Vec3::Z * 3.0,
+            Some(Vec3::X * 4.0),
+        );
+        let rot_corners = param_box.corners().map(|c| map_point(&t_rot, c));
+        let rot_aabb = aabb_of_points(&rot_corners);
+        let mut rot_box = Extent3d::new();
+        let mut rot_pb = PseudoBox::new();
+        t_rot
+            .evaluate_bounding_box_simple_with_kernel(
+                &k_on,
+                &param_box,
+                Some(&PseudoBox::new()),
+                Some(&mut rot_box),
+                Some(&mut rot_pb),
+                |p| Ok(map_point(&t_rot, p)),
+            )
+            .unwrap();
+        assert_corner_sets_match(&rot_pb.corners(), &rot_corners, 1e-12);
+        assert!((rot_box.min() - rot_aabb.min()).length() < 1e-12);
+        assert!((rot_box.max() - rot_aabb.max()).length() < 1e-12);
+    }
+
+    #[test]
+    fn wr8_shear_with_translation() {
+        // Non-orthogonal linear map: columns have non-zero pairwise dot products, so
+        // `o · axis != o_param * |axis|^2`.
+        let t = Transform::new(
+            v(3.0, -2.0, 5.0),
+            v(2.0, 1.0, 0.0),
+            v(0.0, 3.0, 1.0),
+            Some(v(1.0, 0.0, 4.0)),
+        );
+        let param_box = Extent3d::from_bounds(-1.0, 0.5, -2.0, 2.0, 2.5, 1.0);
+        let expected_corners = param_box.corners().map(|c| map_point(&t, c));
+        let expected_aabb = aabb_of_points(&expected_corners);
+
+        let mut def_box = Extent3d::new();
+        let mut def_pb = PseudoBox::new();
+        t.evaluate_bounding_box_simple(
+            &param_box,
+            Some(&PseudoBox::new()),
+            Some(&mut def_box),
+            Some(&mut def_pb),
+            |p| Ok(map_point(&t, p)),
+        )
+        .unwrap();
+        assert!((def_box.min() - expected_aabb.min()).length() > 10.0);
+        assert!((def_box.max() - expected_aabb.max()).length() > 10.0);
+
+        let mut k_on = Kernel::default();
+        k_on.fixes.transform_aligned_bbox_image = true;
+        for basis in [[Vec3::X, Vec3::Y, Vec3::Z], [-Vec3::Z, Vec3::X, -Vec3::Y]] {
+            let mut param_pb = PseudoBox::new();
+            param_pb.set_basis(basis[0], basis[1], basis[2]).unwrap();
+
+            let mut opt_box = Extent3d::new();
+            let mut opt_pb = PseudoBox::new();
+            t.evaluate_bounding_box_simple_with_kernel(
+                &k_on,
+                &param_box,
+                Some(&param_pb),
+                Some(&mut opt_box),
+                Some(&mut opt_pb),
+                |p| Ok(map_point(&t, p)),
+            )
+            .unwrap();
+            assert!(!opt_pb.is_orthogonal_basis());
+            assert_corner_sets_match(&opt_pb.corners(), &expected_corners, 1e-12);
+            assert!((opt_box.min() - expected_aabb.min()).length() < 1e-12);
+            assert!((opt_box.max() - expected_aabb.max()).length() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn wr8_partially_unbounded_and_singular_and_volume_dispatch() {
+        let mut k_on = Kernel::default();
+        k_on.fixes.transform_aligned_bbox_image = true;
+
+        // 1. Partially unbounded `param_box`.
+        let t_scale = Transform::new(
+            v(5.0, -1.0, 2.0),
+            v(2.0, 0.0, 0.0),
+            v(0.0, 3.0, 0.0),
+            Some(v(0.0, 0.0, 4.0)),
+        );
+        let partial_box =
+            Extent3d::from_bounds(-INFINITE_PARAMETER, 1.0, -1.0, 2.0, 3.0, INFINITE_PARAMETER);
+        let mut p_box = Extent3d::new();
+        let mut p_pb = PseudoBox::new();
+        t_scale
+            .evaluate_bounding_box_simple_with_kernel(
+                &k_on,
+                &partial_box,
+                Some(&PseudoBox::new()),
+                Some(&mut p_box),
+                Some(&mut p_pb),
+                |p| Ok(map_point(&t_scale, p)),
+            )
+            .unwrap();
+        assert_eq!(p_box.u_min(), -INFINITE_PARAMETER);
+        assert!((p_box.u_max() - 9.0).abs() < 1e-12);
+        assert!((p_box.v_min() - 2.0).abs() < 1e-12);
+        assert!((p_box.v_max() - 8.0).abs() < 1e-12);
+        assert!((p_box.w_min() + 2.0).abs() < 1e-12);
+        assert_eq!(p_box.w_max(), INFINITE_PARAMETER);
+        assert_eq!(p_pb.interval(0).unwrap().min(), -INFINITE_PARAMETER);
+        assert!((p_pb.interval(0).unwrap().max() - 9.0).abs() < 1e-12);
+        assert!(p_pb.interval(1).unwrap().are_equal_bounds(2.0, 8.0, 1e-12));
+        assert!((p_pb.interval(2).unwrap().min() + 2.0).abs() < 1e-12);
+        assert_eq!(p_pb.interval(2).unwrap().max(), INFINITE_PARAMETER);
+
+        // 2. Singular transform (`rank < 3`): falls back to corner sampling on bounded boxes
+        // and to unbounded on unbounded boxes without `NaN` or division by zero.
+        let t_sing = Transform::new(v(1.0, 2.0, 3.0), v(2.0, 0.0, 0.0), v(4.0, 0.0, 0.0), None);
+        let bounded_box = Extent3d::from_bounds(-1.0, 0.5, -2.0, 3.0, 1.5, 4.0);
+        let sing_vol = Volume::new(VolumeKind::Transform(t_sing));
+        let mut sing_box = Extent3d::new();
+        let mut sing_pb = PseudoBox::new();
+        sing_vol
+            .evaluate_bounding_box_simple(
+                &k_on,
+                &bounded_box,
+                Some(&PseudoBox::new()),
+                Some(&mut sing_box),
+                Some(&mut sing_pb),
+            )
+            .unwrap();
+        assert!((sing_box.min() - v(1.0, 2.0, 3.0)).length() < 1e-12);
+        assert!((sing_box.max() - v(13.0, 2.0, 3.0)).length() < 1e-12);
+        assert!(sing_pb
+            .interval(0)
+            .unwrap()
+            .are_equal_bounds(1.0, 13.0, 1e-12));
+        assert!(sing_pb
+            .interval(1)
+            .unwrap()
+            .are_equal_bounds(2.0, 2.0, 1e-12));
+        assert!(sing_pb
+            .interval(2)
+            .unwrap()
+            .are_equal_bounds(3.0, 3.0, 1e-12));
+
+        let mut sing_unb_box = Extent3d::new();
+        let mut sing_unb_pb = PseudoBox::new();
+        sing_vol
+            .evaluate_bounding_box_simple(
+                &k_on,
+                &partial_box,
+                Some(&PseudoBox::new()),
+                Some(&mut sing_unb_box),
+                Some(&mut sing_unb_pb),
+            )
+            .unwrap();
+        assert_eq!(sing_unb_box.u_min(), -INFINITE_PARAMETER);
+        assert_eq!(sing_unb_box.w_max(), INFINITE_PARAMETER);
+        assert_eq!(sing_unb_pb.interval(1).unwrap().max(), INFINITE_PARAMETER);
+
+        // 3. `Volume` dispatch + `UpstreamFixes` flag reflection (`flag_mut` / `flags`).
+        let mut k_flag = Kernel::default();
+        assert!(!k_flag
+            .fixes
+            .flags()
+            .any(|f| f == ("transform_aligned_bbox_image", true)));
+        *k_flag
+            .fixes
+            .flag_mut("transform_aligned_bbox_image")
+            .unwrap() = true;
+        assert!(k_flag.fixes.transform_aligned_bbox_image);
+        assert!(k_flag
+            .fixes
+            .flags()
+            .any(|f| f == ("transform_aligned_bbox_image", true)));
+
+        let vol = Volume::new(VolumeKind::Transform(t_scale));
+        let mut vol_def_box = Extent3d::new();
+        let mut vol_opt_box = Extent3d::new();
+        let mut vol_opt_pb = PseudoBox::new();
+        vol.evaluate_bounding_box_simple(
+            &Kernel::default(),
+            &bounded_box,
+            Some(&PseudoBox::new()),
+            Some(&mut vol_def_box),
+            None,
+        )
+        .unwrap();
+        vol.evaluate_bounding_box_simple(
+            &k_flag,
+            &bounded_box,
+            Some(&PseudoBox::new()),
+            Some(&mut vol_opt_box),
+            Some(&mut vol_opt_pb),
+        )
+        .unwrap();
+        assert!((vol_opt_box.min() - v(3.0, 0.5, -6.0)).length() < 1e-12);
+        assert!((vol_opt_box.max() - v(11.0, 3.5, 18.0)).length() < 1e-12);
+        assert!((vol_def_box.min() - vol_opt_box.min()).length() > 10.0);
+        let expected_vol_corners = bounded_box.corners().map(|c| map_point(&t_scale, c));
+        assert_corner_sets_match(&vol_opt_pb.corners(), &expected_vol_corners, 1e-12);
     }
 }

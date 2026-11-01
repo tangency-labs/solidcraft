@@ -632,7 +632,8 @@ impl Volume {
             _ => {}
         }
         match &self.kind {
-            VolumeKind::Transform(t) => t.evaluate_bounding_box_simple(
+            VolumeKind::Transform(t) => t.evaluate_bounding_box_simple_with_kernel(
+                k,
                 param_box,
                 param_pseudo_box,
                 proj_box,
