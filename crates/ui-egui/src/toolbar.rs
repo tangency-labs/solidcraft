@@ -2396,9 +2396,9 @@ mod dropdown_tip_tests {
             (0.3, a, None), // hover registers around here; the first row's delay starts
             (0.5, a, None), // still inside the delay
             (0.9, a, Some(0)),
-            (1.0, b, None), // the first row lost hover the moment the pointer left it
-            (1.2, b, None), // the second row must not inherit the open tip's grace (#10481)
-            (1.4, b, None), // its own delay cannot have elapsed yet, whenever hover registered
+            (1.0, b, None),    // the first row lost hover the moment the pointer left it
+            (1.2, b, None),    // the second row must not inherit the open tip's grace (#10481)
+            (1.4, b, None),    // its own delay cannot have elapsed yet, whenever hover registered
             (2.2, b, Some(1)), // after its own full delay, with margin for late registration
         ] {
             let got = tip_pass(&ctx, menu, time, at);
