@@ -1,0 +1,83 @@
+{
+  "en": {
+    "parts.family.hex_cap_screw_inch": "Hex cap screw (inch)",
+    "parts.family.hex_nut_inch": "Hex nut (inch)",
+    "parts.family.washer_sae": "Plain washer, SAE (narrow)",
+    "parts.family.washer_uss": "Plain washer, USS (wide)",
+    "parts.system": "Unit system",
+    "parts.system.inch": "Inch",
+    "parts.system.metric": "Metric"
+  },
+  "ar": {
+    "parts.family.hex_cap_screw_inch": "برغي سداسي الرأس (بوصة)",
+    "parts.family.hex_nut_inch": "صامولة سداسية (بوصة)",
+    "parts.family.washer_sae": "حلقة مسطحة، SAE (ضيقة)",
+    "parts.family.washer_uss": "حلقة مسطحة، USS (عريضة)",
+    "parts.system": "نظام الوحدات",
+    "parts.system.inch": "بوصة",
+    "parts.system.metric": "متري"
+  },
+  "he": {
+    "parts.family.hex_cap_screw_inch": "בורג ראש משושה (אינץ')",
+    "parts.family.hex_nut_inch": "אום משושה (אינץ')",
+    "parts.family.washer_sae": "דסקית שטוחה, SAE (צרה)",
+    "parts.family.washer_uss": "דסקית שטוחה, USS (רחבה)",
+    "parts.system": "מערכת יחידות",
+    "parts.system.inch": "אינץ'",
+    "parts.system.metric": "מטרי"
+  },
+  "ja": {
+    "parts.family.hex_cap_screw_inch": "六角ボルト（インチ）",
+    "parts.family.hex_nut_inch": "六角ナット（インチ）",
+    "parts.family.washer_sae": "平座金、SAE（小形）",
+    "parts.family.washer_uss": "平座金、USS（大形）",
+    "parts.system": "単位系",
+    "parts.system.inch": "インチ",
+    "parts.system.metric": "メートル"
+  },
+  "vi": {
+    "parts.family.hex_cap_screw_inch": "Bu lông đầu lục giác (inch)",
+    "parts.family.hex_nut_inch": "Đai ốc lục giác (inch)",
+    "parts.family.washer_sae": "Vòng đệm phẳng, SAE (hẹp)",
+    "parts.family.washer_uss": "Vòng đệm phẳng, USS (rộng)",
+    "parts.system": "Hệ đơn vị",
+    "parts.system.inch": "Inch",
+    "parts.system.metric": "Hệ mét"
+  },
+  "zh": {
+    "parts.family.hex_cap_screw_inch": "六角头螺栓（英制）",
+    "parts.family.hex_nut_inch": "六角螺母（英制）",
+    "parts.family.washer_sae": "平垫圈，SAE（窄型）",
+    "parts.family.washer_uss": "平垫圈，USS（宽型）",
+    "parts.system": "单位制",
+    "parts.system.inch": "英制",
+    "parts.system.metric": "公制"
+  },
+  "de": {
+    "parts.family.hex_cap_screw_inch": "Sechskantschraube (Zoll)",
+    "parts.family.hex_nut_inch": "Sechskantmutter (Zoll)",
+    "parts.family.washer_sae": "Unterlegscheibe, SAE (schmal)",
+    "parts.family.washer_uss": "Unterlegscheibe, USS (breit)",
+    "parts.system": "Maßsystem",
+    "parts.system.inch": "Zoll",
+    "parts.system.metric": "Metrisch"
+  },
+  "es": {
+    "parts.family.hex_cap_screw_inch": "Tornillo de cabeza hexagonal (pulgadas)",
+    "parts.family.hex_nut_inch": "Tuerca hexagonal (pulgadas)",
+    "parts.family.washer_sae": "Arandela plana, SAE (estrecha)",
+    "parts.family.washer_uss": "Arandela plana, USS (ancha)",
+    "parts.system": "Sistema de unidades",
+    "parts.system.inch": "Pulgadas",
+    "parts.system.metric": "Métrico"
+  },
+  "fr": {
+    "parts.family.hex_cap_screw_inch": "Vis à tête hexagonale (pouces)",
+    "parts.family.hex_nut_inch": "Écrou hexagonal (pouces)",
+    "parts.family.washer_sae": "Rondelle plate, SAE (étroite)",
+    "parts.family.washer_uss": "Rondelle plate, USS (large)",
+    "parts.system": "Système d'unités",
+    "parts.system.inch": "Pouces",
+    "parts.system.metric": "Métrique"
+  }
+}
