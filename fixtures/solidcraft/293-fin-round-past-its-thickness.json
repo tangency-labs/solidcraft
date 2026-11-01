@@ -1,0 +1,74 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/293",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/496",
+ "test": "crates/kernel/src/tests.rs: fillet_max_each_reduces_only_where_the_radius_does_not_fit (SolidCraft refuses the fin's round of 4 and its fit reduces it; refs #293)",
+ "summary": "SolidCraft refuses a round of 4 on the top edge of a 2 mm fin standing on a block (larger than the fin's thickness) and reduces it to the largest that fits. With the cliff overflow (tangency-labs/solidcore#960) solidcore builds it as if the fin's far face were not there and removes only what lies in the fin: the round's corner between x = 19 and 21, along the fin's 30 mm. The pinned SMLib refuses it.",
+ "cases": [
+  {
+   "name": "fin_top_edge_round_4",
+   "note": "A 40 x 30 x 20 block with a 2 x 30 x 10 fin on it (x 19..21); the fin's top edge at x = 21 rounded r 4.",
+   "fixes": [
+    "fillet_refuse_rails_leaving_faces",
+    "fillet_cliff_overflow"
+   ],
+   "steps": [
+    {
+     "op": "box",
+     "id": "block",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      30,
+      20
+     ]
+    },
+    {
+     "op": "box",
+     "id": "fin",
+     "origin": [
+      19,
+      0,
+      20
+     ],
+     "size": [
+      2,
+      30,
+      10
+     ]
+    },
+    {
+     "op": "union",
+     "id": "body",
+     "a": "block",
+     "b": "fin"
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "body",
+     "edges": [
+      [
+       21,
+       15,
+       30
+      ]
+     ],
+     "radius": 4.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "removed": {
+     "from": "body",
+     "value": 92.5956361669492,
+     "tol": 0.0001,
+     "formula": "30 * (2*4 - integral_2^4 sqrt(16 - u^2) du) (the round's corner at x 19..21, centre (17, 26))"
+    }
+   }
+  }
+ ]
+}
