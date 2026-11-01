@@ -58,10 +58,6 @@ commands:
                   solidcore keeps results.json, dumps/ and report.md in DIR/solidcore/; smlib
                   writes docs/kernel-cases.md; both runs each case on each, and also writes the
                   side by side to docs/kernel-cases-backends.md and DIR/backends.json
-                  --route OP=solidcore[,...] (with --kernel solidcore|both): the solidcore side is
-                  SMLib with only those families on solidcore (SOLIDCRAFT_KERNEL=smlib plus
-                  SOLIDCRAFT_KERNEL_ROUTES), labelled solidcore[OP,...], into
-                  DIR/solidcore-OP[-OP...]/ with its backends.json and backends.md
                   --known-failing FILE: a regression gate instead of the report: fails on a case
                   that fails and FILE does not list, and on a listed case that passes
                   (tests/kernel-cases/<area>/KNOWN_FAILING, CI's Kernel rig workflow); it grades

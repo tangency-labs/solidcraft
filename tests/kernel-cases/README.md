@@ -30,18 +30,6 @@ backend, keeps `docs/kernel-cases.md` as the SMLib report and writes the two sid
 [`docs/kernel-cases-backends.md`](../../docs/kernel-cases-backends.md) (cases that differ first)
 and `<out>/backends.json`.
 
-`--route <op>=solidcore[,…]` (with `--kernel both` or `solidcore`) scores single operation
-families: the solidcore side runs on SMLib (`SOLIDCRAFT_KERNEL=smlib`) with only the families
-named moved to solidcore (`SOLIDCRAFT_KERNEL_ROUTES`), so an unported family (the body check, say)
-doesn't hide the others' score. The smlib side stays plain SMLib. The report labels the side
-`solidcore[boolean,measure]`, and its `results.json`, `dumps/`, `report.md`, `backends.json` and
-`backends.md` go to `<out>/solidcore-boolean-measure/`, so runs don't overwrite each other. The
-families are the lower-case names `diagnostics.kernel` prints:
-
-```sh
-cargo xtask kernel-cases --kernel both --route boolean=solidcore --cli target/release/solidcraft-cli
-```
-
 ## Rules
 
 - **The answer never comes from a kernel.** Not from truck's output, nor any commercial

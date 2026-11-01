@@ -13,11 +13,6 @@
 //! `<out>/solidcore/`; an smlib run writes `docs/kernel-cases.md`; `both` runs every case on each,
 //! keeps `docs/kernel-cases.md` as the SMLib report and writes the side by side to
 //! `docs/kernel-cases-backends.md` and `<out>/backends.json`.
-//!
-//! `--route <op>=solidcore[,…]` scores single operation families instead: the "solidcore" side runs
-//! on SMLib (`SOLIDCRAFT_KERNEL=smlib`) with only those families moved to solidcore
-//! (`SOLIDCRAFT_KERNEL_ROUTES`), its label names them (`solidcore[boolean,measure]`), and its
-//! results, report and `backends.json` / `backends.md` go to `<out>/solidcore-<op>[-<op>…]/`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -46,9 +41,6 @@ pub(crate) struct Options {
     out: PathBuf,
     /// The backends each case runs on (`--kernel`, default solidcore alone).
     pub(crate) kernels: Vec<&'static str>,
-    /// `--route`: the operation families the solidcore side moves to solidcore, on SMLib for the
-    /// rest; empty, solidcore answers every family.
-    routes: Vec<String>,
     /// `--known-failing FILE`: run as a regression gate against that baseline (see [`gate`]).
     known_failing: Option<PathBuf>,
     /// `--validation MODE`: when SMLib's full check runs on the cases' features (each_step,
@@ -57,55 +49,13 @@ pub(crate) struct Options {
 }
 
 impl Options {
-    /// A backend's output folder: the run's own for SMLib, `<out>/<backend>/` for any other, and
-    /// `<out>/solidcore-<op>[-<op>…]/` for routed families.
+    /// A backend's output folder: the run's own for SMLib, `<out>/<backend>/` for any other.
     fn out_of(&self, kernel: &str) -> PathBuf {
         match kernel {
             "smlib" => self.out.clone(),
-            "solidcore" if !self.routes.is_empty() => self.out.join(format!("solidcore-{}", self.routes.join("-"))),
             other => self.out.join(other),
         }
     }
-
-    /// What a backend's side is called in the reports: `solidcore[boolean,measure]` for routed
-    /// families.
-    fn label(&self, kernel: &str) -> String {
-        if kernel == "solidcore" && !self.routes.is_empty() { format!("solidcore[{}]", self.routes.join(",")) } else { kernel.to_string() }
-    }
-
-    /// The environment a backend's case processes get: `SOLIDCRAFT_KERNEL`, and for routed
-    /// families SMLib plus `SOLIDCRAFT_KERNEL_ROUTES`.
-    fn env(&self, kernel: &str) -> Vec<(&'static str, String)> {
-        if kernel == "solidcore" && !self.routes.is_empty() {
-            let routes = self.routes.iter().map(|op| format!("{op}=solidcore")).collect::<Vec<_>>().join(",");
-            vec![("SOLIDCRAFT_KERNEL", "smlib".into()), ("SOLIDCRAFT_KERNEL_ROUTES", routes)]
-        } else {
-            vec![("SOLIDCRAFT_KERNEL", kernel.into())]
-        }
-    }
-}
-
-/// The operation families `--route` may name: `Op::ALL` in crates/smlib/src/route.rs, as
-/// `Op::id` spells them (a test keeps the two together).
-const ROUTE_OPS: [&str; 12] =
-    ["convert", "primitive", "transform", "measure", "check", "boolean", "blend", "offset", "split", "sweep", "ssi", "file"];
-
-/// `--route boolean=solidcore,measure=solidcore`: the families, in table order, each once.
-fn parse_routes(text: &str) -> Result<Vec<String>, String> {
-    let mut ops = Vec::new();
-    for item in text.split(',').map(str::trim) {
-        let Some((op, backend)) = item.split_once('=') else {
-            return Err(format!("--route: `{item}` is not <op>=solidcore"));
-        };
-        if backend.trim() != "solidcore" {
-            return Err(format!("--route: `{item}`: only solidcore routes (the other side is SMLib already)"));
-        }
-        if !ROUTE_OPS.contains(&op.trim()) {
-            return Err(format!("--route: no operation family `{}` ({})", op.trim(), ROUTE_OPS.join(", ")));
-        }
-        ops.push(op.trim().to_string());
-    }
-    Ok(ROUTE_OPS.iter().filter(|op| ops.iter().any(|o| o == *op)).map(|op| op.to_string()).collect())
 }
 
 /// The run's options; `out` is its output folder unless `--out` gives one.
@@ -120,12 +70,9 @@ pub(crate) fn options(rest: &[&str], out: &str) -> Result<Options, String> {
         Some("both") => BACKENDS.to_vec(),
         Some(k) => return Err(format!("--kernel: unknown backend '{k}' (smlib, solidcore or both)")),
     };
-    let routes = match arg("--route") {
-        None if rest.contains(&"--route") => return Err("--route: give <op>=solidcore[,…]".into()),
-        None => Vec::new(),
-        Some(r) if kernels.contains(&"solidcore") => parse_routes(&r)?,
-        Some(_) => return Err("--route: needs --kernel solidcore or both".into()),
-    };
+    if rest.contains(&"--route") {
+        return Err("--route is gone: a run has one kernel, --kernel solidcore, smlib or both".into());
+    }
     let known_failing = arg("--known-failing").map(|p| {
         let p = PathBuf::from(p);
         if p.is_absolute() { p } else { root().join(p) }
@@ -138,7 +85,7 @@ pub(crate) fn options(rest: &[&str], out: &str) -> Result<Options, String> {
     if let Some(v) = validation.as_deref().filter(|v| !["each_step", "each_feature", "off"].contains(v)) {
         return Err(format!("--validation must be each_step, each_feature or off, not `{v}`"));
     }
-    Ok(Options { cli: arg("--cli"), area: arg("--area"), timeout: Duration::from_secs(secs), jobs, out, kernels, routes, known_failing, validation })
+    Ok(Options { cli: arg("--cli"), area: arg("--area"), timeout: Duration::from_secs(secs), jobs, out, kernels, known_failing, validation })
 }
 
 /// Every case's full result as JSON, into the run's output folder.
@@ -231,7 +178,7 @@ fn run_case(o: &Options, case: &Path, kernel: &str) -> Value {
     };
     let mut dumps = std::ffi::OsString::from("--dumps=");
     dumps.push(o.out_of(kernel).join("dumps"));
-    cmd.env_remove("SOLIDCRAFT_KERNEL_ROUTES").envs(o.env(kernel)).current_dir(root()).args(["kernel-cases", "--json"]).arg(dumps);
+    cmd.env("SOLIDCRAFT_KERNEL", kernel).current_dir(root()).args(["kernel-cases", "--json"]).arg(dumps);
     if let Some(v) = &o.validation {
         cmd.arg(format!("--validation={v}"));
     }
@@ -292,7 +239,7 @@ fn run_on(o: &Options, list: &[PathBuf], kernels: &[&str]) -> Vec<Vec<Value>> {
                     // Case by case, each on every backend in turn.
                     let (Some(case), Some(kernel)) = (list.get(i / kernels.len().max(1)), kernels.get(i % kernels.len().max(1))) else { return };
                     let r = run_one(o, case, kernel);
-                    let tag = if kernels.len() > 1 { format!("{:<10} ", o.label(kernel)) } else { String::new() };
+                    let tag = if kernels.len() > 1 { format!("{kernel:<10} ") } else { String::new() };
                     println!(
                         "{:<11} {tag}{}",
                         r["status"].as_str().unwrap_or("?").to_uppercase(),
@@ -498,9 +445,7 @@ fn seconds(r: &Value) -> Option<f64> {
 
 /// The two backends side by side: per case (area, id) each one's status, time and what went wrong,
 /// as JSON, and the Markdown report: a summary, then per area the cases that differ first.
-/// `labels` name the two sides in the report (`solidcore[boolean]` for routed families); the JSON
-/// keys stay `smlib` and `solidcore`.
-fn side_by_side(smlib: &[Value], solidcore: &[Value], labels: [&str; 2]) -> (Value, String) {
+fn side_by_side(smlib: &[Value], solidcore: &[Value]) -> (Value, String) {
     let key = |r: &Value| (r["area"].as_str().unwrap_or("").to_string(), r["case"].as_str().unwrap_or("").to_string());
     let mut pairs: BTreeMap<(String, String), [Option<&Value>; 2]> = BTreeMap::new();
     for (k, rs) in [smlib, solidcore].iter().enumerate() {
@@ -530,11 +475,8 @@ fn side_by_side(smlib: &[Value], solidcore: &[Value], labels: [&str; 2]) -> (Val
     let mut md = String::from(
         "# Kernel regression rig: SMLib and solidcore\n\nGenerated by `cargo xtask kernel-cases --kernel both`: every case in [`tests/kernel-cases/`](../tests/kernel-cases/) run on each backend (`SOLIDCRAFT_KERNEL`), graded against its own answer. Times are the commands' own. [`kernel-cases.md`](kernel-cases.md) is the SMLib run in full.\n\n",
     );
-    if labels[1] != BACKENDS[1] {
-        md += &format!("**This run: `{}` is SMLib with only those operation families on solidcore (`--route`).**\n\n", labels[1]);
-    }
     md += "## Summary\n\n| Backend | Pass | Fail | Other | Time (s) |\n|---|---|---|---|---|\n";
-    for (k, name) in labels.iter().enumerate() {
+    for (k, name) in BACKENDS.iter().enumerate() {
         let n = |b: &str| counts[k].get(b).copied().unwrap_or(0);
         md += &format!("| {name} | {} | {} | {} | {:.1} |\n", n("pass"), n("fail"), n("other"), times[k]);
     }
@@ -549,7 +491,7 @@ fn side_by_side(smlib: &[Value], solidcore: &[Value], labels: [&str; 2]) -> (Val
     }
     for (area, mut list) in by_area {
         list.sort_by_key(|r| (r["agree"].as_bool().unwrap_or(false), r["case"].as_str().unwrap_or("").to_string()));
-        md += &format!("\n## {area}\n\n| Case | {} | {} | |\n|---|---|---|---|\n", labels[0], labels[1]);
+        md += &format!("\n## {area}\n\n| Case | {} | {} | |\n|---|---|---|---|\n", BACKENDS[0], BACKENDS[1]);
         for r in list {
             let mark = if r["agree"].as_bool().unwrap_or(false) { "" } else { "**differ**" };
             md += &format!("| {} | {} | {} | {mark} |\n", r["case"].as_str().unwrap_or(""), side(&r["smlib"]), side(&r["solidcore"]));
@@ -561,7 +503,7 @@ fn side_by_side(smlib: &[Value], solidcore: &[Value], labels: [&str; 2]) -> (Val
         .map(|(k, name)| (name.to_string(), json!({"counts": counts[k], "seconds": times[k]})))
         .collect::<serde_json::Map<_, _>>()
         .into();
-    (json!({"labels": labels, "summary": summary, "agree": agree, "differ": differ, "cases": rows}), md)
+    (json!({"summary": summary, "agree": agree, "differ": differ, "cases": rows}), md)
 }
 
 pub fn run(rest: &[&str]) -> Result<(), String> {
@@ -599,18 +541,13 @@ pub fn run(rest: &[&str]) -> Result<(), String> {
     for (kernel, results) in o.kernels.iter().zip(&runs) {
         let out = o.out_of(kernel);
         let to = if *kernel == "smlib" { PathBuf::from("docs/kernel-cases.md") } else { out.join("report.md") };
-        let env = o.env(kernel).iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(" ");
-        println!("{}", write_report(&dir, &list, results, &o.label(kernel), &env, &to)?);
+        let env = format!("SOLIDCRAFT_KERNEL={kernel}");
+        println!("{}", write_report(&dir, &list, results, kernel, &env, &to)?);
     }
     if let [smlib, solidcore] = runs.as_slice() {
-        let labels = [o.label(BACKENDS[0]), o.label(BACKENDS[1])];
-        let (data, md) = side_by_side(smlib, solidcore, [&labels[0], &labels[1]]);
-        // Routed runs keep their side by side with their results, so runs don't overwrite each other.
-        let into = if o.routes.is_empty() { o.out.clone() } else { o.out_of(BACKENDS[1]) };
+        let (data, md) = side_by_side(smlib, solidcore);
+        let into = o.out.clone();
         save_json(&into, "backends.json", &data)?;
-        if !o.routes.is_empty() {
-            std::fs::write(into.join("backends.md"), &md).map_err(|e| format!("{}: {e}", into.join("backends.md").display()))?;
-        }
         std::fs::write(root().join("docs/kernel-cases-backends.md"), md).map_err(|e| format!("docs/kernel-cases-backends.md: {e}"))?;
         println!(
             "kernel-cases: {} agree, {} differ → docs/kernel-cases-backends.md, {}",
@@ -844,7 +781,7 @@ mod tests {
         let mut hang = json!({"area": "booleans", "case": "b", "status": "hang", "error": "no result after 180 s"});
         hang["process_seconds"] = json!(180.0);
         let solidcore = [r("booleans", "a", "pass", 0.5), hang, r("shell", "c", "fail", 1.5)];
-        let (data, md) = side_by_side(&smlib, &solidcore, ["smlib", "solidcore"]);
+        let (data, md) = side_by_side(&smlib, &solidcore);
         assert_eq!((data["agree"].as_u64(), data["differ"].as_u64()), (Some(1), Some(2)));
         assert_eq!(data["summary"]["smlib"]["counts"], json!({"pass": 2, "other": 1}));
         assert_eq!(data["summary"]["solidcore"]["counts"], json!({"pass": 1, "fail": 1, "other": 1}));
@@ -856,47 +793,16 @@ mod tests {
         assert!(pos_b.is_some() && pos_a.is_some() && pos_b < pos_a, "{md}");
         assert!(md.contains("| b | pass (2.00 s) | hang (180.00 s) | **differ** |"), "{md}");
         assert!(md.contains("3 cases: 1 agree, 2 differ."), "{md}");
-        let (data, md) = side_by_side(&smlib, &[], ["smlib", "solidcore[boolean,measure]"]);
-        assert_eq!(data["labels"], json!(["smlib", "solidcore[boolean,measure]"]));
-        assert!(md.contains("| solidcore[boolean,measure] | 0 | 0 | 3 |") && md.contains("| Case | smlib | solidcore[boolean,measure] | |"), "{md}");
     }
 
-    /// `--route` moves the named families on the solidcore side only: SMLib with
-    /// SOLIDCRAFT_KERNEL_ROUTES, labelled and kept in its own folder.
+    /// `--route`, the old per-family run, is no option: each case's process has one kernel. Passed
+    /// anyway, it is refused rather than run as something else.
     #[test]
-    fn routes_label_the_solidcore_side_and_keep_its_own_folder() {
-        let o = options(&["--kernel", "both", "--route", "measure=solidcore, boolean=solidcore", "--out", "/r"], "x").unwrap();
-        assert_eq!(o.routes, ["measure", "boolean"]);
-        assert_eq!((o.label("smlib"), o.label("solidcore")), ("smlib".into(), "solidcore[measure,boolean]".into()));
-        assert_eq!(o.env("smlib"), [("SOLIDCRAFT_KERNEL", "smlib".to_string())]);
-        assert_eq!(
-            o.env("solidcore"),
-            [("SOLIDCRAFT_KERNEL", "smlib".to_string()), ("SOLIDCRAFT_KERNEL_ROUTES", "measure=solidcore,boolean=solidcore".to_string())]
-        );
-        assert_eq!((o.out_of("smlib"), o.out_of("solidcore")), (PathBuf::from("/r"), PathBuf::from("/r/solidcore-measure-boolean")));
-        let plain = options(&["--kernel", "both", "--out", "/r"], "x").unwrap();
-        assert_eq!((plain.label("solidcore"), plain.out_of("solidcore")), ("solidcore".into(), PathBuf::from("/r/solidcore")));
-        assert_eq!(plain.env("solidcore"), [("SOLIDCRAFT_KERNEL", "solidcore".to_string())]);
-        // The default run is on solidcore, so it takes `--route` as `both` and `solidcore` do.
-        assert_eq!(options(&["--route", "file=solidcore"], "x").unwrap().routes, ["file"]);
-        for bad in [
-            &["--kernel", "both", "--route", "truck=solidcore"][..],
-            &["--kernel", "both", "--route", "boolean=smlib"],
-            &["--kernel", "both", "--route", "boolean"],
-            &["--kernel", "both", "--route", ""],
-            &["--kernel", "both", "--route"],
-            &["--kernel", "smlib", "--route", "boolean=solidcore"],
-        ] {
-            assert!(options(bad, "x").is_err(), "{bad:?}");
-        }
-    }
-
-    /// `--route` knows the families route.rs routes, `file` aside.
-    #[test]
-    fn route_ops_are_the_routing_tables_families() {
-        let text = std::fs::read_to_string(root().join("crates/smlib/src/route.rs")).unwrap_or_default();
-        let ids: Vec<&str> = text.lines().filter_map(|l| l.trim().strip_prefix("Op::")?.split_once(" => \"")?.1.strip_suffix("\",")).collect();
-        assert_eq!(ids, ROUTE_OPS, "{ids:?}");
+    fn a_kernel_has_its_own_folder_and_route_is_refused() {
+        let o = options(&["--kernel", "both", "--out", "/r"], "x").unwrap();
+        assert_eq!((o.out_of("smlib"), o.out_of("solidcore")), (PathBuf::from("/r"), PathBuf::from("/r/solidcore")));
+        assert!(options(&["--route", "boolean=solidcore"], "x").is_err());
+        assert!(options(&["--kernel", "both", "--route"], "x").is_err());
     }
 
     /// `--known-failing` follows the kernel given, solidcore by default: a list is one kernel's.
@@ -919,7 +825,6 @@ mod tests {
         assert_eq!(options(&[], "x").unwrap().kernels, ["solidcore"]);
         assert_eq!(options(&["--kernel", "smlib"], "x").unwrap().kernels, ["smlib"]);
         assert_eq!(options(&["--kernel", "both"], "x").unwrap().kernels, ["smlib", "solidcore"]);
-        assert_eq!(options(&[], "x").unwrap().env("solidcore"), [("SOLIDCRAFT_KERNEL", "solidcore".to_string())]);
     }
 
     fn gate_on(text: &str, cases: &[(&str, &str)]) -> Result<String, String> {
