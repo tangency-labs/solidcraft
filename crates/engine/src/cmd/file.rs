@@ -31,7 +31,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("open")
         .key("Ctrl+O")
         .noundo()
-        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh)"),
+        .params("path: .sc design (or a .solidcraft design from an earlier release), .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make), or a .ply/.xyz/.pts point cloud (opens as a new design holding it, as pointcloud.insert makes; its `units` and `max_points` as there); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); reuse_import?: bool (STEP/IGES: reuse an unchanged import from the local saved-model cache, default true; false recomputes without reading or writing the cache; → import_reused: bool, content_sha256: exact source digest); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh)"),
     CommandSpec::new("file.insert_step", "Insert STEP", insert_step)
         .at("SOLID", "INSERT")
         .icon("import")
@@ -112,7 +112,34 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.slicers", "Installed Slicers", slicers).icon("export")
         .noundo()
         .params("→ the slicers found on this machine: [{id, name, program, icon?}]; pass an id, a name or the program path as file.send_to_slicer's or file.save_mesh's `slicer`"),
+    CommandSpec::new("file.import_cache_clear", "Clear Reused Imports", crate::checked!("file.import_cache_clear", clear_import_cache))
+        .icon("delete")
+        .noundo()
+        .contract(&CLEAR_IMPORT_CACHE_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::file::ImportCacheClearResult>)
+        .params("→ removed: number of local cached imports deleted; leaves open designs and remembered stand-up answers unchanged"),
 ];
+
+const CLEAR_IMPORT_CACHE_CONTRACT: crate::schema::TypedContract<crate::schema::file::ImportCacheClearParams> = crate::schema::TypedContract::new();
+
+fn import_cache() -> Option<solidcraft_io::ImportCache> {
+    if cfg!(target_arch = "wasm32") {
+        return None;
+    }
+    if let Some(dir) = solidcraft_geom::env::var_os("IMPORT_CACHE_DIR").filter(|dir| !dir.is_empty()) {
+        return Some(solidcraft_io::ImportCache::new(dir.into()));
+    }
+    if cfg!(test) {
+        return Some(solidcraft_io::ImportCache::new(std::env::temp_dir().join(format!("solidcraft-test-imports-{}", std::process::id()))));
+    }
+    // The stable per-user data folder is adopted across app-id updates with the other data.
+    crate::recovery::data_dir().map(|dir| solidcraft_io::ImportCache::new(dir.join("imports")))
+}
+
+fn clear_import_cache(_: &mut Session, _: &Value) -> Result<Value> {
+    let removed = import_cache().map(|cache| cache.clear()).transpose().map_err(|e| EngineError::Other(e.to_string()))?.unwrap_or(0);
+    Ok(json!({"removed": removed}))
+}
 
 fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_(p, "name").unwrap_or("Untitled");
@@ -161,9 +188,10 @@ fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
 }
 
 /// Read a STEP file as an Import feature.
-fn read_step(path: &str, names: solidcraft_io::StepNames) -> Result<solidcraft_io::StepFeature> {
+fn read_step(path: &str, names: solidcraft_io::StepNames) -> Result<(solidcraft_io::StepFeature, Vec<u8>)> {
     let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    solidcraft_io::step_import_feature_named(&bytes, path, names).map_err(|e| EngineError::Other(format!("{path}: {e}")))
+    let feature = solidcraft_io::step_import_feature_named(&bytes, path, names).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    Ok((feature, bytes))
 }
 
 /// Which way is up in a STEP or IGES file, from the program its header names: `("y", name)` for
@@ -187,16 +215,46 @@ fn quarter_turn_x() -> solidcraft_doc::Mat {
 /// Add an Import feature for a STEP file to the session's design, in a new component named
 /// after the file (#1386).
 fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions) -> Result<Value> {
-    let sf = read_step(path, options.names)?;
+    let (sf, bytes) = read_step(path, options.names)?;
+    add_read_step(s, path, name, options, sf, &bytes)
+}
+
+fn add_read_step(
+    s: &mut Session,
+    path: &str,
+    name: Option<&str>,
+    options: &StepOptions,
+    sf: solidcraft_io::StepFeature,
+    bytes: &[u8],
+) -> Result<Value> {
+    // The evaluator already certifies the STEP payload with SHA-256. Reuse that digest only
+    // when it is exactly the source bytes (IGES conversion and legacy encodings differ).
+    let unchanged = matches!(&sf.kind, solidcraft_doc::FeatureKind::Import { step, .. } if step.as_bytes() == bytes);
     let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&sf.name).to_string();
     let cname = import::component_name(path, name);
     let (id, placed) = import::add_in_component(s, sf.kind, &fname, sf.body_names, &cname, import::Tree::Step(&sf.import))?;
+    let content_sha256 = unchanged
+        .then(|| {
+            s.model.state().bodies.iter().filter(|b| b.feature == id).find_map(|b| {
+                b.body.face_sources()?.iter().flatten().find_map(|source| match source {
+                    solidcraft_kernel::FaceSource::Imported { payload_sha256: Some(digest), producer: Some(producer), .. } if *producer == id => {
+                        Some(digest.clone())
+                    }
+                    _ => None,
+                })
+            })
+        })
+        .flatten()
+        .unwrap_or_else(|| {
+            use sha2::{Digest, Sha256};
+            format!("{:x}", Sha256::digest(bytes))
+        });
     // Y up: the import's component is turned a quarter turn about X (Y becomes Z), so an
     // assembly's parts and instances turn together.
     let turned = if options.y_up { turn_up(s, &placed)? } else { None };
     let created = created_bodies(s, id);
     let fname = s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
-    let mut out = json!({"path": path, "feature": id, "name": fname, "bodies": created, "created_bodies": created, "warnings": sf.warnings, "system": sf.import.system});
+    let mut out = json!({"path": path, "feature": id, "name": fname, "bodies": created, "created_bodies": created, "warnings": sf.warnings, "system": sf.import.system, "content_sha256": content_sha256});
     if let Some((up, exporter)) = exporter_up(&sf.import) {
         out["exporter"] = json!(exporter);
         out["exporter_up"] = json!(up);
@@ -206,6 +264,40 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptio
         out["stand_up"] = json!(turned);
     }
     Ok(out)
+}
+
+/// Cache only a fresh open, never a live design, insert, or later edit. Read the source once:
+/// the bytes hashed here are exactly the bytes imported on a miss.
+fn open_step(path: &str, p: &Value, cache: Option<&solidcraft_io::ImportCache>) -> Result<(Session, Value)> {
+    let options = step_options(p, "doc.open")?;
+    let reuse = match p.get("reuse_import") {
+        None | Some(Value::Null) => true,
+        Some(Value::Bool(reuse)) => *reuse,
+        _ => return Err(bad("doc.open", "`reuse_import` must be a boolean")),
+    };
+    let cache = cache.filter(|_| reuse && !solidcraft_io::is_native_cad_path(path) && solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none());
+    let bytes = solidcraft_io::limits::read(path, solidcraft_io::limits::Kind::Step).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let key = solidcraft_io::ImportCache::key(&bytes, path, &json!({"y_up": options.y_up, "names": format!("{:?}", options.names)}));
+    let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
+    if let Some((doc, saved, mut reply)) = cache.and_then(|cache| cache.read(&key)) {
+        let mut fresh = Session::opened(doc, Some(&saved));
+        // An import is still an unsaved design, with the same dirty state as a cold import.
+        fresh.saved = std::sync::Arc::new(Document::new(&stem));
+        reply["path"] = json!(path);
+        reply["import_reused"] = json!(true);
+        return Ok((fresh, reply));
+    }
+    let mut fresh = Session::new(Document::new(&stem));
+    let sf = solidcraft_io::step_import_feature_named(&bytes, path, options.names).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    let mut reply = add_read_step(&mut fresh, path, None, &options, sf, &bytes)?;
+    reply["import_reused"] = json!(false);
+    if let Some(cache) = cache
+        && let Some(saved) = saved_geometry(&fresh, &fresh.doc)
+        && let Err(e) = cache.write(&key, &fresh.doc, &saved, &reply)
+    {
+        log::info!("import was not cached: {e}");
+    }
+    Ok((fresh, reply))
 }
 
 /// The bodies an import feature built, by name.
@@ -356,11 +448,12 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     if solidcraft_io::is_step_path(path) || solidcraft_io::is_mesh_path(path) {
         // A new, unsaved design holding the file's bodies.
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
-        let mut fresh = Session::new(Document::new(&stem));
-        let r = if solidcraft_io::is_step_path(path) {
-            add_step(&mut fresh, path, None, &step_options(p, "doc.open")?)?
+        let (mut fresh, r) = if solidcraft_io::is_step_path(path) {
+            open_step(path, p, import_cache().as_ref())?
         } else {
-            add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?)?
+            let mut fresh = Session::new(Document::new(&stem));
+            let r = add_mesh(&mut fresh, path, None, mesh_up(p, path, "doc.open")?)?;
+            (fresh, r)
         };
         // The design is the file: its component is the one being worked in.
         if let Some(c) = r["component"].as_u64() {
@@ -371,7 +464,19 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         s.replace_design(fresh);
         let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
         let mut out = json!({"path": path, "features": s.doc.features.len(), "errors": errors, "bodies": r["bodies"], "warnings": r["warnings"]});
-        for k in ["component", "component_name", "occurrence", "subcomponents", "rigid_joints", "stand_up", "system", "exporter", "exporter_up"] {
+        for k in [
+            "component",
+            "component_name",
+            "occurrence",
+            "subcomponents",
+            "rigid_joints",
+            "stand_up",
+            "system",
+            "exporter",
+            "exporter_up",
+            "content_sha256",
+            "import_reused",
+        ] {
             if let Some(v) = r.get(k) {
                 out[k] = v.clone();
             }
@@ -1154,6 +1259,100 @@ mod tests {
         assert_eq!(r["format"], "Urdf");
         assert!(std::fs::read_to_string(at("robot.urdf")).unwrap().contains("<robot"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn reopening_import_reuses_only_unchanged_untouched_results() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-reuse-import-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let cache_dir = dir.join("imports");
+        let cache = solidcraft_io::ImportCache::new(cache_dir.clone());
+        let mut source = Session::default();
+        source.execute("solid.box", &json!({"length": 10, "width": 40, "height": 5})).unwrap();
+        let body = &source.model.state().bodies[0].body;
+        let iges = solidcraft_kernel::iges_export_bodies(
+            &[solidcraft_kernel::ExportBody { body, name: "Plate".into(), color: None }],
+            &solidcraft_kernel::StepHeader::default(),
+        )
+        .unwrap();
+        for extension in ["step", "igs"] {
+            let path = dir.join(format!("plate.{extension}")).to_string_lossy().to_string();
+            if extension == "step" {
+                source.execute("file.export", &json!({"path": path})).unwrap();
+            } else {
+                std::fs::write(&path, &iges).unwrap();
+            }
+            let (mut first, cold) = open_step(&path, &json!({}), Some(&cache)).unwrap();
+            assert_eq!(cold["import_reused"], false);
+            let before = first.doc.to_json();
+            let bounds = crate::view::bounds(&first);
+            assert!(first.is_dirty());
+            assert!((solidcraft_kernel::measure_mass(&first.model.state().bodies[0].body).unwrap().volume - 2000.0).abs() < 1e-6);
+            first.execute("solid.box", &json!({"length": 1, "width": 2, "height": 3})).unwrap();
+            let (mut reopened, hit) = open_step(&path, &json!({}), Some(&cache)).unwrap();
+            assert_eq!(hit["import_reused"], true);
+            assert_eq!(hit["content_sha256"], cold["content_sha256"]);
+            assert_eq!(hit["warnings"], cold["warnings"]);
+            assert_eq!(reopened.doc.to_json(), before, "subsequent edits never enter the cache");
+            assert_eq!(reopened.model.last_recomputed, 0, "cache hit adopts the model without importing");
+            assert!(reopened.is_dirty());
+            assert_eq!(crate::view::bounds(&reopened), bounds);
+            assert!((solidcraft_kernel::measure_mass(&reopened.model.state().bodies[0].body).unwrap().volume - 2000.0).abs() < 1e-6);
+            reopened.execute("solid.box", &json!({"length": 1, "width": 2, "height": 3})).unwrap();
+            assert!(reopened.model.results.iter().all(|r| r.error.is_none()), "cached import remains editable");
+            assert_eq!(open_step(&path, &json!({"reuse_import": false}), Some(&cache)).unwrap().1["import_reused"], false);
+            assert_eq!(open_step(&path, &json!({}), Some(&cache)).unwrap().1["import_reused"], true);
+            assert_eq!(open_step(&path, &json!({"up": "y", "names": "solid"}), Some(&cache)).unwrap().1["import_reused"], false);
+            assert_eq!(open_step(&path, &json!({"up": "y", "names": "solid"}), Some(&cache)).unwrap().1["import_reused"], true);
+            // Changed bytes, even unchanged geometry, must miss. IGES has fixed-width records,
+            // so exercise this with a legal STEP comment.
+            if extension == "step" {
+                let mut bytes = std::fs::read(&path).unwrap();
+                bytes.extend_from_slice(b"\n/* changed */\n");
+                std::fs::write(&path, bytes).unwrap();
+                let changed = open_step(&path, &json!({}), Some(&cache)).unwrap().1;
+                assert_eq!(changed["import_reused"], false);
+                assert_ne!(changed["content_sha256"], cold["content_sha256"]);
+            }
+        }
+        // Corruption is disposable; every open can recompute without losing the source.
+        for entry in std::fs::read_dir(&cache_dir).unwrap() {
+            std::fs::write(entry.unwrap().path(), b"damaged").unwrap();
+        }
+        let path = dir.join("plate.step").to_string_lossy().to_string();
+        assert_eq!(open_step(&path, &json!({}), Some(&cache)).unwrap().1["import_reused"], false);
+        assert!(cache.clear().unwrap() > 0);
+        assert_eq!(cache.clear().unwrap(), 0);
+        assert_eq!(open_step(&path, &json!({"reuse_import": false}), Some(&cache)).unwrap().1["import_reused"], false);
+        assert_eq!(std::fs::read_dir(&cache_dir).unwrap().count(), 0, "disabled reuse never stores an import");
+        assert_eq!(open_step(&path, &json!({}), Some(&cache)).unwrap().1["import_reused"], false);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn import_digest_is_of_original_bytes_for_open_and_insert() {
+        use sha2::{Digest, Sha256};
+        let dir = std::env::temp_dir().join(format!("solidcraft-import-digest-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("part.step").to_string_lossy().to_string();
+        let mut source = Session::default();
+        source.execute("solid.box", &json!({"length": 10, "width": 40, "height": 5})).unwrap();
+        source.execute("file.export", &json!({"path": path})).unwrap();
+        let mut bytes = std::fs::read(&path).unwrap();
+        for legacy in [false, true] {
+            if legacy {
+                bytes.extend_from_slice(b"\n/* legacy name: \xe9 */\n");
+                std::fs::write(&path, &bytes).unwrap();
+            }
+            let expected = format!("{:x}", Sha256::digest(&bytes));
+            for command in ["doc.open", "file.insert_step"] {
+                let mut session = Session::default();
+                let result = session.execute(command, &json!({"path": path})).unwrap();
+                assert_eq!(result["content_sha256"], expected, "{command}: legacy={legacy}");
+            }
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     /// #4747: a mesh export's `quality` follows curved faces more closely. A 3 mm hole in a

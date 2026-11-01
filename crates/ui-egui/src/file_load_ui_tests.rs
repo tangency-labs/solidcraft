@@ -427,6 +427,44 @@ fn a_control_import_passes_up_and_names_on() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The normal off-thread opening path uses the original file digest and the same remembered
+/// answer as synchronous opening, without adding a second offer.
+#[test]
+fn stand_up_memory_applies_after_an_off_thread_open() {
+    let dir = scratch("stand-up-memory");
+    let path = dir.join("plate.step").to_string_lossy().to_string();
+    let mut src = Session::default();
+    src.execute("solid.box", &json!({"length": 10, "width": 40, "height": 5})).unwrap();
+    src.execute("file.export", &json!({"path": path})).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap().replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'");
+    std::fs::write(&path, text).unwrap();
+    let mut w = Win::new();
+    w.app.preferences.stand_up_unknown = crate::prefs::StandUpUnknown::Ask;
+    let (tx, rx) = std::sync::mpsc::channel();
+    w.app.control_rx = Some(rx);
+    let open = |w: &mut Win| {
+        let (req, reply) = crate::control::ControlRequest::new("engine.execute", json!({"command":"doc.open", "params":{"path":path}}));
+        tx.send(req).unwrap();
+        for _ in 0..100_000 {
+            w.frame(vec![]);
+            if let Ok(reply) = reply.try_recv() {
+                assert_eq!(reply["ok"], true, "{reply}");
+                assert!(reply["result"]["content_sha256"].is_string());
+                return;
+            }
+        }
+        panic!("the import was not answered");
+    };
+    open(&mut w);
+    assert!(w.app.stand_up.is_some());
+    crate::prefs::control(&mut w.app, &json!({"stand_up":true})).unwrap();
+    let stood = solidcraft_engine::view::bounds(&w.app.session);
+    open(&mut w);
+    assert!(w.app.stand_up.is_none());
+    assert_eq!(solidcraft_engine::view::bounds(&w.app.session), stood);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 /// #4676: a control-channel import's `matrix` and `name` reach the command, as they do when it
 /// runs in a session: the part lands where the matrix puts it, under the name given.
 #[test]

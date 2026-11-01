@@ -29,6 +29,10 @@ fn evaluation() -> String {
     format!("{}/{}-{}", env!("SOLIDCRAFT_EVALUATION_SOURCE"), std::env::consts::ARCH, std::env::consts::OS)
 }
 
+pub(super) fn identity() -> Value {
+    json!([FORMAT, PRODUCER, env!("CARGO_PKG_VERSION"), build()])
+}
+
 /// A 4 x 4 matrix as its 16 numbers, in storage order.
 fn matrix(t: &[[f64; 4]; 4]) -> Vec<f64> {
     t.iter().flatten().copied().collect()

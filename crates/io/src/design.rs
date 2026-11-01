@@ -6,9 +6,11 @@ use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::sync::Arc;
 
 mod drawing;
+mod import_cache;
 mod native_cache;
 mod thumbnail;
 pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
+pub use import_cache::ImportCache;
 pub use native_cache::read_design_geometry;
 pub use thumbnail::{THUMBNAIL_SIZE, read_design_thumbnail, read_design_thumbnail_file};
 
@@ -1460,6 +1462,85 @@ mod tests {
         assert!(all > space);
         let (manifest, _) = native_cache::encode_model(&model, document, space).unwrap();
         assert_eq!(kept_states(&serde_json::from_slice::<Value>(&manifest).unwrap()["model"]), vec![false, false, false, true]);
+    }
+
+    #[test]
+    fn import_cache_uses_native_trust_checks_and_evicts_oldest_first() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-import-store-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut cache = ImportCache::new(dir.clone());
+        let body = native_geometry().bodies.remove(0);
+        let text = solidcraft_kernel::step_export_bodies(
+            &[solidcraft_kernel::ExportBody { body: &body, name: "Box".into(), color: None }],
+            &solidcraft_kernel::StepHeader::default(),
+        )
+        .unwrap();
+        let mut doc = Document::new("Box");
+        doc.add_feature(crate::step_import_feature(text.as_bytes(), "box.step").unwrap().kind, None).unwrap();
+        let mut model = solidcraft_doc::Model::new();
+        model.evaluate(&doc);
+        let saved = model.saved(&doc).unwrap();
+        let key = ImportCache::key(text.as_bytes(), "box.step", &json!({}));
+        let reply = json!({"content_sha256": digest(text.as_bytes())});
+        cache.write(&key, &doc, &saved, &reply).unwrap();
+        let path = dir.join(format!("{key}.sc"));
+        let original_bytes = std::fs::read(&path).unwrap();
+        let (back, saved, out) = cache.read(&key).unwrap();
+        assert_eq!(out, reply);
+        assert_eq!(back.to_json(), doc.to_json());
+        assert_eq!(solidcraft_doc::Model::adopt(&back, &saved).unwrap().last_recomputed, 0);
+        let original = parts(&original_bytes);
+        for field in ["format", "producer", "evaluation", "document", "payload"] {
+            let mut entries = original.clone();
+            let mut manifest: Value = serde_json::from_slice(&entries["cache/model.json"]).unwrap();
+            manifest[field] = json!("different");
+            entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
+            std::fs::write(&path, package(&entries)).unwrap();
+            assert!(cache.read(&key).is_none(), "{field} mismatch must miss");
+        }
+        for field in ["key", "reply"] {
+            let mut entries = original.clone();
+            let mut binding: Value = serde_json::from_slice(&entries["cache/import.json"]).unwrap();
+            binding[field] = Value::Null;
+            entries.insert("cache/import.json".into(), serde_json::to_vec(&binding).unwrap());
+            std::fs::write(&path, package(&entries)).unwrap();
+            assert!(cache.read(&key).is_none(), "damaged {field} must miss");
+        }
+        let mut entries = original;
+        entries.get_mut("cache/bodies.bin").unwrap()[0] ^= 1;
+        std::fs::write(&path, package(&entries)).unwrap();
+        assert!(cache.read(&key).is_none());
+        std::fs::write(&path, &original_bytes).unwrap();
+        assert!(cache.read(&key).is_some());
+        let unrelated = dir.join("my-design.sc");
+        std::fs::write(&unrelated, b"leave me").unwrap();
+
+        cache.budget = original_bytes.len() as u64 * 2 + 64;
+        std::fs::File::open(&path).unwrap().set_times(std::fs::FileTimes::new().set_modified(std::time::UNIX_EPOCH)).unwrap();
+        let second = "b".repeat(64);
+        cache.write(&second, &doc, &saved, &reply).unwrap();
+        assert!(cache.read(&key).is_some());
+        let third = "c".repeat(64);
+        cache.write(&third, &doc, &saved, &reply).unwrap();
+        assert!(cache.read(&key).is_none(), "oldest entry evicted without touching recent ones");
+        assert!(cache.read(&second).is_some() && cache.read(&third).is_some());
+        let size: u64 = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().metadata().unwrap().len()).sum();
+        assert!(size <= cache.budget);
+        assert_eq!(cache.clear().unwrap(), 2);
+        assert_eq!(cache.clear().unwrap(), 0);
+        assert_eq!(std::fs::read(unrelated).unwrap(), b"leave me", "clear only removes managed cache entries");
+        #[cfg(unix)]
+        {
+            let outside = dir.join("outside");
+            std::fs::create_dir(&outside).unwrap();
+            let target = outside.join("valuable.sc");
+            std::fs::write(&target, b"keep this design").unwrap();
+            std::os::unix::fs::symlink(&target, &path).unwrap();
+            assert!(cache.read(&key).is_none());
+            assert!(cache.write(&key, &doc, &saved, &reply).is_err());
+            assert_eq!(std::fs::read(&target).unwrap(), b"keep this design");
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

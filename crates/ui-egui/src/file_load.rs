@@ -268,10 +268,13 @@ pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
 }
 
 /// Queue a file operation; on the web (no threads) it runs now.
-pub fn begin_request(app: &mut SolveApp, request: Request) -> Result<(), String> {
+pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), String> {
     if crate::control::chat_turn_cancelled(request.chat_turn.as_deref()) {
         request.answer(Err("the agent chat turn ended".into()));
         return Ok(());
+    }
+    if request.kind == Kind::Open {
+        request.options.entry("reuse_import").or_insert(Value::Bool(app.preferences.reuse_imports));
     }
     if app.file_load.idle() && reuse_open(app, &request) {
         return Ok(());
