@@ -1,6 +1,8 @@
 # Labels new issues and PRs from fixed rules, `/triage` for maintainers, asks short bug reports
 # for reproduction steps (`needs-info`, closed after 14 days unanswered), and a manual backfill
-# (CONTRIBUTING.md, "Labels and triage"). The logic is in scripts/triage/ (tested in ci.yml).
+# (CONTRIBUTING.md, "Labels and triage"). The daily run also triages the issues and PRs of the
+# last few days that their own run never triaged (it failed, was cancelled or never got a runner).
+# The logic is in scripts/triage/ (tested in ci.yml).
 name: Triage
 
 on:
@@ -53,6 +55,9 @@ jobs:
         env:
           DRY_RUN: ${{ inputs.dry_run }}
         with:
+          # A GitHub server error (5xx) is retried instead of losing the item's labels. A retried
+          # write that had in fact gone through can post a comment twice; that is the lesser harm.
+          retries: 3
           script: |
             const triage = require('./scripts/triage/triage.js');
             const info = require('./scripts/triage/needs-info.js');
@@ -68,8 +73,26 @@ jobs:
             } else if (event === 'issues' && action === 'edited') {
               await info.handleReply({ github, context });
             } else if (event === 'schedule') {
-              const closed = await info.sweep({ github, context });
-              core.info(`Closed for missing information: ${closed.join(', ') || 'none'}`);
+              // The sweep and the triage of missed items don't depend on each other: one failing
+              // doesn't skip the other, and the run fails afterwards.
+              let failed = false;
+              try {
+                const closed = await info.sweep({ github, context });
+                core.info(`Closed for missing information: ${closed.join(', ') || 'none'}`);
+              } catch (e) {
+                failed = true;
+                core.error(`needs-info sweep: ${e.message}`);
+              }
+              try {
+                const heal = await triage.heal({ github, context });
+                core.info(`Triaged what their own run missed: ${heal.healed.map((h) => `#${h.number}`).join(', ') || 'none'}`);
+                if (heal.waiting) core.warning(`${heal.waiting} more items their own run missed were not reached; the next daily run takes the newest, Run workflow's backfill all of them`);
+                for (const f of heal.failed) core.warning(`#${f.number}: ${f.error}`);
+              } catch (e) {
+                failed = true;
+                core.error(`triage of missed items: ${e.message}`);
+              }
+              if (failed) core.setFailed('the daily run did not finish; see the errors above');
             } else if (event === 'workflow_dispatch') {
               const dryRun = process.env.DRY_RUN !== 'false';
               const plan = await triage.backfill({ github, context, dryRun });

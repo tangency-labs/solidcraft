@@ -393,7 +393,9 @@ fails when a lower-numbered open PR by someone else already closes the same issu
 ## Labels and triage
 
 The triage bot labels every new issue and PR (`.github/workflows/triage.yml`). It only adds labels;
-correct them freely and it won't put them back.
+correct them freely and it won't put them back. If its run for a new item fails or never starts,
+the daily run triages the item (one opened in the last four days, after the first 12 hours), unless
+someone already has.
 
 - **PRs** get `area:*` from the paths they change (`crates/kernel` and `crates/geom` →
   `area:kernel`, `crates/ui-egui` and the apps → `area:ui`, `.github/`, `scripts/`, `docs/` →
