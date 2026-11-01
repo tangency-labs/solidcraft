@@ -106,6 +106,8 @@ fn representative(h: &Harness, command: &str) -> Dialog {
             vec![Sel::Axis { name: axis.into() }]
         } else if input.accept & (FACES | PLANAR_FACES) != 0 {
             vec![face_sel(s, point).unwrap()]
+        } else if command == "surface.match" && index == 2 {
+            vec![edge_sel(s, Vec3::new(40.0, 0.0, 5.0)).unwrap()]
         } else if input.accept & EDGES != 0 {
             vec![edge_sel(s, Vec3::new(10.0, 0.0, 5.0)).unwrap()]
         } else {
@@ -186,6 +188,7 @@ fn check_form(command: &str, labels: &[&str]) {
         "solid.thread" => &["Modeled", "Full Length", "Automatic size"],
         "solid.boundary_fill" => &["Remove Tools"],
         "surface.offset" => &["Tangent chain"],
+        "surface.fair" => &["Keep edges"],
         "surface.trim" => &["Extend to meet", "Stitch the kept pieces"],
         "surface.ruled" => &["Flip"],
         "surface.untrim" => &["Restore outer boundary", "In place (surfaces)"],
@@ -234,6 +237,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
     Some(match label {
         "Type" if matches!(command, "sheet.flange" | "sheet.hem" | "solid.revolve" | "solid.emboss") => return None,
         "Direction" => return None, // segmented buttons, labelled by each choice
+        "ui.fair_strength" | "ui.fair_iterations" => return None,
         "Continuity" | "Corners" | "Cells" | "Profile" => return None,
         "Operation" if command == "solid.mirror" => return None,
         "Operation" | "Type" | "Orientation" | "Move Type" | "Object Type" | "Rule" | "Rim Edge" | "Catch Direction" | "Shape" | "Holes" | "Size"
@@ -468,6 +472,8 @@ form_case!(surface_reverse, "surface.reverse_normal", []);
 form_case!(surface_offset, "surface.offset", ["Distance"]);
 form_case!(surface_ruled, "surface.ruled", ["Distance", "Type", "Corners"]);
 form_case!(surface_stitch, "surface.stitch", ["Tolerance"]);
+form_case!(surface_fair, "surface.fair", ["ui.fair_strength", "ui.fair_iterations", "Tolerance"]);
+form_case!(surface_match, "surface.match", ["Continuity"]);
 form_case!(thicken, "surface.thicken", ["Thickness", "Direction", "Operation"]);
 form_case!(surface_extend, "surface.extend", ["Distance"]);
 form_case!(surface_trim, "surface.trim", []);

@@ -1,6 +1,6 @@
 //! Dialogs for the surface tools and face splitting (#19): Surface Extrude, Revolve, Sweep and
-//! Loft, Offset and Ruled Surface, Blend and Boundary Surface, Patch, Stitch, Thicken, Extend, Trim, Untrim
-//! and Split Face. Each has a live preview and Edit Feature.
+//! Loft, Offset and Ruled Surface, Blend and Boundary Surface, Patch, Stitch, Thicken, Extend, Trim, Untrim,
+//! Fair Surface, Match Surface and Split Face. Each has a live preview and Edit Feature.
 
 use crate::dialogs::put;
 use crate::ui_kit::{choice_row, expr_row, hint_row};
@@ -40,6 +40,17 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::SurfaceExtend { distance, .. }) {
             distance: String = "10 mm".into() => distance.to_string(),
         } => json!({"distance": distance});
+        Fair("surface.fair", "ui.fair_surface_title", [("Surface or faces", BODIES | FACES, true)],
+            FeatureKind::SurfaceFair { strength, iterations, keep_edges, tolerance, .. }) {
+            strength: f64 = 1.0 => *strength,
+            iterations: u32 = 1 => *iterations,
+            keep_edges: bool = true => *keep_edges,
+            tolerance: String = String::new() => tolerance.to_string(),
+        } => json!({"strength": strength, "iterations": iterations, "keep_edges": keep_edges});
+        Match("surface.match", "ui.match_surface_title", [("Surface or face", BODIES | FACES, true), ("Target", BODIES | FACES, false), ("Target edges", EDGES, true)],
+            FeatureKind::SurfaceMatch { order, .. }) {
+            order: usize = 1 => MATCH_CONTINUITY.iter().position(|(_, word)| *word == order.as_str()).unwrap_or(1),
+        } => json!({"order": MATCH_CONTINUITY.get(*order).map_or("g2", |(_, word)| *word)});
         ; custom {
             /// `direction`: an index into [`EXTRUDE_SIDES`].
             Extrude {
@@ -145,6 +156,9 @@ const PATCH_CONTINUITY: [(&str, &str); 3] = [("Position (G0)", "g0"), ("Tangent 
 const BLEND_CONTINUITY: [(&str, &str); 4] =
     [("Position (G0)", "g0"), ("Tangent (G1)", "g1"), ("Curvature (G2)", "g2"), ("Curvature change (G3)", "g3")];
 
+/// The continuity of a surface matched to its target's edge chain.
+const MATCH_CONTINUITY: [(&str, &str); 3] = [("Tangent (G1)", "g1"), ("Curvature (G2)", "g2"), ("Curvature change (G3)", "g3")];
+
 /// What a boundary surface becomes: a body of its own, or part of the body of its edges.
 const BOUNDARY_OPS: [&str; 2] = ["New Body", "Join"];
 
@@ -224,6 +238,19 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
     let mut enter = false;
     match k {
+        Surf::Fair { strength, iterations, keep_edges, tolerance } => {
+            form_row(ui, "ui.fair_strength", |ui| {
+                ui_kit::scalar_field(ui, strength, f64::MIN_POSITIVE..=1.0);
+            });
+            form_row(ui, "ui.fair_iterations", |ui| {
+                ui_kit::number_field(ui, iterations, 1..=1000, 1.0, "");
+            });
+            enter |= hint_row(ui, "Tolerance", tolerance, crate::i18n::tr_label("ui.fair_tolerance_default"));
+            ui_kit::options(ui, "fair_options", &mut [("ui.fair_keep_edges", keep_edges)]);
+        }
+        Surf::Match { order } => {
+            choice_row(ui, "Continuity", "match_order", order, &MATCH_CONTINUITY.map(|(label, _)| label));
+        }
         Surf::Stitch { tolerance } => {
             enter |= hint_row(ui, "Tolerance", tolerance, crate::i18n::tr("ui.stitch_tolerance_hint"));
         }
@@ -676,6 +703,24 @@ pub fn commands(app: &SolveApp, k: &Surf, inputs: &[SelInput], extra: &Map<Strin
             }
             ("surface.ruled", p)
         }
+        Surf::Fair { tolerance, .. } => {
+            let (body, faces) = body_and_faces(items(inputs, 0))?;
+            let mut p = json!({"body": body, "faces": faces});
+            put(&mut p, &[("tolerance", tolerance)]);
+            ("surface.fair", p)
+        }
+        Surf::Match { .. } => {
+            let (body, faces) = body_and_faces(items(inputs, 0))?;
+            if items(inputs, 1).len() != 1 {
+                return Err("select the target body first".into());
+            }
+            let (target, _) = body_and_faces(items(inputs, 1))?;
+            let (edge_body, edges) = body_and_edges(items(inputs, 2))?;
+            if edge_body != target {
+                return Err("pick edges of the target body".into());
+            }
+            ("surface.match", json!({"body": body, "faces": faces, "target": target, "edges": edges}))
+        }
         Surf::Unstitch | Surf::ReverseNormal => {
             need(0, "a body or some of its faces")?;
             let (body, faces) = body_and_faces(items(inputs, 0))?;
@@ -991,6 +1036,19 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind, frame: &Mat) -> Option<(K
                 extra.insert("direction".into(), pt(d.0));
             }
             return Some((Kind::Surface(k), ins, extra));
+        }
+        FeatureKind::SurfaceFair { body, faces, .. } | FeatureKind::SurfaceMatch { body, faces, .. } => {
+            let source = if faces.is_empty() {
+                vec![Sel::Body { name: body.to_string() }]
+            } else {
+                faces.iter().filter_map(|p| crate::dialogs::face_sel(s, p.0)).collect()
+            };
+            let mut fill = vec![source];
+            if let FeatureKind::SurfaceMatch { target, edges, .. } = kind {
+                fill.push(vec![Sel::Body { name: target.to_string() }]);
+                fill.push(edges.iter().filter_map(edge).collect());
+            }
+            (Surf::simple_restore(kind)?, fill)
         }
         FeatureKind::Unstitch { body, faces } | FeatureKind::ReverseNormal { body, faces } => {
             let sels: Vec<Sel> = if faces.is_empty() {
