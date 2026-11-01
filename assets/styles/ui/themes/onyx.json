@@ -214,14 +214,15 @@
     {
       "id": "opacity",
       "type": "range",
-      "default": 90,
+      "default": 87,
       "min": 85,
       "max": 100
     },
     {
       "id": "blur",
       "type": "range",
-      "default": 40
+      "default": 60,
+      "max": 60
     },
     {
       "id": "tab_colours",

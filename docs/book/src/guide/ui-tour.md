@@ -451,7 +451,7 @@ select the corresponding family and contrast. Selecting a family again restores 
 last contrast; Reset returns it to Standard.
 
 **Onyx** is an original dark stone-grey theme with quiet surface layers, fine etched edges
-and a restrained blue-grey accent. Its defaults pair **90% Opacity** with a broad **40 px Blur**:
+and a restrained blue-grey accent. Its defaults pair **87% Opacity** with a broad **60 px Blur**:
 Opacity sets how much of the scene shows through; Blur sets how widely its detail softens.
 It also offers **Contrast** (Soft or Defined), **Edge finish** (Flat, Etched or Soft bevel),
 **Accent** (Slate blue, Silver or Sage), and optional **Tab colours** with a Fade control.
