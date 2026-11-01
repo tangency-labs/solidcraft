@@ -1,6 +1,7 @@
-# While a new geometry kernel is evaluated, new issues, pull requests and discussions about kernel
-# work are labelled `kernel-paused` for a maintainer to answer (CONTRIBUTING.md, "Kernel work is
-# paused"). The logic is in scripts/kernel-paused/ (tested in ci.yml).
+# While a new geometry kernel is evaluated, new issues and discussions about kernel work, and new
+# pull requests that change the kernel directories, are labelled `kernel-paused` for a maintainer to
+# answer (CONTRIBUTING.md, "Kernel work is paused"). The logic is in scripts/kernel-paused/ (tested
+# in ci.yml).
 name: Kernel paused
 
 on:

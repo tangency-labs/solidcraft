@@ -19,12 +19,13 @@ Questions, ideas or want to say what you're working on? Join the [Discord](https
 
 ## Kernel work is paused
 
-We're evaluating a new geometry kernel. Until that's decided, please don't open issues, pull
-requests or discussions about kernel work: booleans, fillets, chamfers, shell, offsets, sweeps and
-lofts, threads and holes, STEP/IGES import and export, tessellation, or anything else that changes
-`crates/kernel/`. The pinned issue on the tracker explains it. New ones get the `kernel-paused`
-label (`.github/workflows/kernel-paused.yml`) and a maintainer answers them. Crashes and data loss
-are still taken as issues, and everything outside the kernel carries on as normal.
+We're moving to a new geometry kernel. Until that's done, please don't open pull requests that
+change `crates/kernel/`, `crates/geom/` or `vendor/truck*`, or issues and discussions about kernel
+work: booleans, fillets, chamfers, shell, offsets, sweeps and lofts, threads and holes, STEP/IGES
+import and export, or tessellation. The pinned issue on the tracker explains it. New ones get the
+`kernel-paused` label (`.github/workflows/kernel-paused.yml`) and a maintainer answers them. Crashes
+and data loss are still taken as issues. Pull requests outside those directories carry on as normal,
+including the dialogs and tools for these features.
 
 ## Get it running (about 10 minutes on a fast machine)
 

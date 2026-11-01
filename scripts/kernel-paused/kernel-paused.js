@@ -1,21 +1,21 @@
 'use strict';
-// While a new geometry kernel is evaluated, new issues, pull requests and discussions about
-// kernel work get the `kernel-paused` label, so a maintainer finds them and answers in person
-// (CONTRIBUTING.md, "Kernel work is paused"). Reports of crashes and data loss are left alone,
-// and so is anyone who can push to the repository.
+// While a new geometry kernel is evaluated, new issues and discussions about kernel work, and new
+// pull requests that change the kernel directories, get the `kernel-paused` label, so a maintainer
+// finds them and answers in person (CONTRIBUTING.md, "Kernel work is paused"). Reports of crashes
+// and data loss are left alone, and so is anyone who can push to the repository.
 
 const LABEL = 'kernel-paused';
 const LABEL_COLOR = 'b60205';
 const LABEL_DESCRIPTION = 'Kernel work is paused while a new geometry kernel is evaluated';
 
-// Kernel operations named in a title. "Hole" and "shell" are left out on purpose: they name UI
-// work too, and a pull request that changes the kernel is caught by its files.
+// Kernel operations named in the title of an issue or discussion. "Hole" and "shell" are left out
+// on purpose: they name UI work too. A pull request is judged by its files, never by its title.
 const TOPIC =
   /\b(booleans?|fillets?|chamfers?|offsets?|sweeps?|lofts?|threads?|step|stp|iges|igs|tessellat\w*|kernel|truck|b-?rep)\b/i;
 // Crashes and lost work come first whatever the kernel is.
 const URGENT = /\b(crash\w*|panic\w*|data loss|lost (my )?work|corrupt\w*)\b/i;
 // What a pull request changes that makes it kernel work.
-const KERNEL_PATHS = ['crates/kernel/', 'vendor/truck'];
+const KERNEL_PATHS = ['crates/kernel/', 'crates/geom/', 'vendor/truck'];
 
 function isTopic(title) {
   return TOPIC.test(title || '');
@@ -55,10 +55,12 @@ async function handleOpened({ github, context }) {
   const pull = Boolean(context.payload.pull_request);
   if (isUrgent(item.title, item.body)) return `#${item.number}: a crash or data-loss report, left alone`;
   if (await canPush({ github, context }, item.user.login)) return `#${item.number}: by a maintainer, left alone`;
-  let kernel = isTopic(item.title);
-  if (pull && !kernel) {
+  let kernel;
+  if (pull) {
     const files = await github.paginate(github.rest.pulls.listFiles, { ...context.repo, pull_number: item.number, per_page: 100 });
     kernel = touchesKernel(files.map((f) => f.filename));
+  } else {
+    kernel = isTopic(item.title);
   }
   if (!kernel) return `#${item.number}: not kernel work`;
   await ensureLabel({ github, context });
