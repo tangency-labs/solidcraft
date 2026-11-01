@@ -121,6 +121,12 @@ Parallel and perpendicular lines ask for a straight sketch line, then a point;
 the reference stays picked so you can place several lines. Right-click clears the current
 points and references; Escape ends the tool.
 
+The horizontal, vertical, parallel and perpendicular tools show a **Length** box beside the
+pointer, which stays empty (infinite) until you type a digit: letters still start other tools.
+With a length, the first click sets the start and a second click the side the segment runs to;
+the angle tool has the Length box beside its Angle box. The segment gets a length dimension
+that follows the typed expression. An empty box keeps the infinite line.
+
 A command call can cut a horizontal, vertical, angle, parallel or perpendicular construction
 line to a length instead: `length` makes a segment from the point `at`, running towards `near`,
 and adds a length dimension that follows its expression (#10258). With `construction: false` that

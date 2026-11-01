@@ -2792,6 +2792,8 @@ impl SolveApp {
             if !keymap::capturing(self) {
                 expression_complete::begin_frame(ctx);
             }
+            // A digit for a construction line's Length box is not a shortcut (#10258).
+            sketch_construction::claim_typed_length(self, ctx);
             if !self.embedded {
                 toolbar::shortcuts(self, ctx);
             }
