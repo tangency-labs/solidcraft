@@ -2,6 +2,7 @@
 use crate::navigation::NavCaps;
 use crate::navigation_bar::{self, Edge, Idle, Kind, Labels, MenuDisplay, NavigationBar, Position, Size, SlotOptions};
 use crate::navigation_bar_view;
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, scenario, theme::Tokens, ui_kit};
 use egui::{Rect, Sense, vec2};
 use serde_json::json;
@@ -317,7 +318,7 @@ fn inspector_header(app: &mut SolveApp, ui: &mut egui::Ui, state: &mut State, in
                 .inner
             })
             .inner
-            .on_hover_text(label);
+            .backing_on_hover_text(label);
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled && ui.is_enabled(), label));
         scenario::publish_target(&format!("prefs:navbar:{key}"), response.rect);
         if response.clicked() {

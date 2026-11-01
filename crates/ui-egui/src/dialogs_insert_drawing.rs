@@ -2,6 +2,7 @@
 //! its middle goes, its size in millimetres or as a factor, and an angle) with a live preview,
 //! and OK adds it (#2605, #3443).
 
+use crate::ui_kit::BackingTooltipExt as _;
 use serde_json::{Value, json};
 
 use crate::SolveApp;
@@ -46,7 +47,7 @@ pub fn title(p: &Place) -> &'static str {
 pub fn rows(ui: &mut egui::Ui, p: &mut Place) {
     let name = std::path::Path::new(&p.path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| p.path.clone());
     form_row(ui, "File", |ui| {
-        ui.label(name).on_hover_text(&p.path);
+        ui.label(name).backing_on_hover_text(&p.path);
     });
     for (label, v, handle) in [("X", &mut p.x, "dialog:insert:x"), ("Y", &mut p.y, "dialog:insert:y")] {
         form_row(ui, label, |ui| {

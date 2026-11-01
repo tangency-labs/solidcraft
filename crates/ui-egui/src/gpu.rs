@@ -649,18 +649,122 @@ mod tests {
     #[test]
     fn blur_radius_schedule_and_hostile_values() {
         use crate::blur::{schedule, validate_radius};
-        for radius in [f32::NAN, f32::INFINITY, -1.0, 40.01] {
+        for radius in [f32::NAN, f32::INFINITY, -1.0, 60.01] {
             assert!(validate_radius(radius).is_err());
             assert!(schedule(radius).is_none());
         }
         assert!(schedule(0.0).is_none());
-        for (radius, steps) in [(1.0, 2), (8.0, 2), (9.0, 3), (18.0, 3), (19.0, 4), (30.0, 4), (31.0, 5), (40.0, 5)] {
+        for (radius, steps) in [(1.0, 2), (8.0, 2), (9.0, 3), (18.0, 3), (19.0, 4), (30.0, 4), (31.0, 5), (40.0, 5), (60.0, 5)] {
             let (actual, offset) = schedule(radius).unwrap();
             assert_eq!(actual, steps);
             assert!(offset.is_finite() && offset > 0.0);
             let variance = (35.0 / 18.0) * (4.0_f32.powi(steps as i32) - 1.0);
             assert!((offset * variance.sqrt() - radius / 2.0).abs() < 0.0001);
         }
+        for cap in 2..=5 {
+            let (steps, offset) = crate::blur::schedule_capped(40.0, cap).unwrap();
+            assert_eq!(steps, cap);
+            let variance = (35.0 / 18.0) * (4.0_f32.powi(steps as i32) - 1.0);
+            assert!((offset * variance.sqrt() - 20.0).abs() < 0.0001, "tier cap must preserve target radius");
+        }
+    }
+
+    #[test]
+    fn blur_guard_threshold_idle_minimum_and_session_undo() {
+        let mut guard = crate::blur::Guard::default();
+        let radius = 40.0;
+        for _ in 0..59 {
+            guard.observe(radius, 23.0, true);
+        }
+        assert_eq!((guard.cap, guard.streak, guard.notice), (5, 59, false));
+        guard.observe(radius, 23.0, false); // idle, unavailable, hidden or no actual paint
+        assert_eq!((guard.cap, guard.streak), (5, 0));
+        for _ in 0..59 {
+            guard.observe(radius, 23.0, true);
+        }
+        guard.observe(radius, 22.0, true); // strictly over budget
+        assert_eq!((guard.cap, guard.streak), (5, 0));
+        for _ in 0..59 {
+            guard.observe(radius, 23.0, true);
+        }
+        assert_eq!(guard.cap, 5);
+        guard.observe(radius, 23.0, true);
+        assert_eq!((guard.cap, guard.notice), (4, true));
+        guard.notice = false; // Dismiss does not stop later reductions or reannounce.
+        for _ in 0..180 {
+            guard.observe(radius, 23.0, true);
+        }
+        assert_eq!((guard.cap, guard.streak, guard.notice), (2, 0, false));
+        assert_eq!(crate::blur::schedule_capped(radius, guard.cap).unwrap().0, 2);
+        assert_eq!(radius, 40.0, "quality guard never turns radius down or off");
+        guard.undo();
+        assert_eq!((guard.cap, guard.notice, guard.opted_out), (5, false, true));
+        guard.reset(); // theme/radius changes do not revoke the session opt-out
+        for _ in 0..120 {
+            guard.observe(18.0, 23.0, true);
+        }
+        assert_eq!(guard.cap, 5);
+        for radius in [0.0, 1.0, 8.0] {
+            let mut guard = crate::blur::Guard::default();
+            for _ in 0..120 {
+                guard.observe(radius, 23.0, true);
+            }
+            assert_eq!((guard.cap, guard.notice), (5, false));
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn blur_guard_requires_consecutive_visible_actual_paints() {
+        let ctx = egui::Context::default();
+        let mut session = crate::blur::Session::default();
+        let mut time = 0.0;
+        let mut feed =
+            |session: &mut crate::blur::Session, rendered: bool, continuous: bool, visible: bool, available: bool, revision: u64, radius: f32| {
+                time += 0.023;
+                let mut raw = egui::RawInput { time: Some(time), ..Default::default() };
+                raw.viewports.entry(egui::ViewportId::ROOT).or_default().occluded = Some(!visible);
+                let _ = ctx.run_ui(raw, |ui| {
+                    ui.ctx().request_repaint(); // Deterministic harness only; product never does this for sampling.
+                    let paint = rendered.then(|| crate::blur::PaintedFrame {
+                        frame: ui.ctx().cumulative_frame_nr().saturating_sub(1),
+                        interval_ms: Some(23.0),
+                        continuous,
+                    });
+                    session.sample(ui.ctx(), revision, radius, available, paint);
+                    session.sample(ui.ctx(), revision, radius, available, paint); // egui re-pass duplicate
+                });
+            };
+        feed(&mut session, false, true, true, true, 1, 40.0);
+        feed(&mut session, false, true, true, true, 1, 40.0);
+        for _ in 0..59 {
+            feed(&mut session, true, true, true, true, 1, 40.0);
+        }
+        assert_eq!((session.guard.cap, session.guard.streak), (5, 59));
+        for (rendered, continuous, visible, available) in
+            [(false, true, true, true), (true, false, true, true), (true, true, false, true), (true, true, true, false)]
+        {
+            feed(&mut session, rendered, continuous, visible, available, 1, 40.0);
+            assert_eq!((session.guard.cap, session.guard.streak), (5, 0));
+            feed(&mut session, true, true, true, true, 1, 40.0);
+            assert_eq!(session.guard.streak, 1);
+        }
+        feed(&mut session, true, true, true, true, 2, 40.0); // theme contents changed
+        assert_eq!(session.guard.streak, 0);
+        feed(&mut session, true, true, true, true, 2, 18.0); // radius changed
+        assert_eq!(session.guard.streak, 0);
+        for _ in 0..59 {
+            feed(&mut session, true, true, true, true, 2, 18.0);
+        }
+        assert_eq!((session.guard.cap, session.guard.streak), (5, 59));
+        feed(&mut session, true, true, true, true, 2, 18.0);
+        assert_eq!((session.guard.cap, session.guard.notice), (2, true));
+        session.guard.undo();
+        feed(&mut session, true, true, true, true, 3, 40.0);
+        for _ in 0..100 {
+            feed(&mut session, true, true, true, true, 3, 40.0);
+        }
+        assert_eq!((session.guard.cap, session.guard.opted_out), (5, true));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -694,6 +798,11 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     impl BlurFixture {
+        fn radius(&mut self, radius: f32) {
+            // Explicit PR5 rendering harness activation, independent of theme declarations.
+            self.app.blur_session.harness_radius = Some(radius);
+            self.app.blur.set_radius(radius).unwrap();
+        }
         fn new(srgb: bool, policy: crate::blur::FixturePolicy) -> Option<Self> {
             use super::*;
             let Some((adapter, device, queue)) = offscreen_device() else {
@@ -718,6 +827,11 @@ mod tests {
             app.viewport.draw_stats = Some(view.stats());
             renderer.write().callback_resources.insert(view);
             app.blur = crate::blur::fixture_state(&adapter, &device, &queue, &renderer, format, policy);
+            assert_eq!(
+                app.blur.software_adapter(),
+                adapter.get_info().device_type == wgpu::DeviceType::Cpu,
+                "fixture must retain real adapter identity"
+            );
             if policy == crate::blur::FixturePolicy::Rendering {
                 assert_eq!(app.blur.capability(), crate::blur::Capability::Available, "blur fixture requires real rendering capabilities");
             }
@@ -879,17 +993,49 @@ mod tests {
         }
         let unavailable = Capability::Unavailable("software adapter (gpu-software)");
         assert_eq!(f.app.blur.capability(), unavailable);
-        f.app.blur.set_radius(18.0).unwrap();
+        f.radius(18.0);
         for _ in 0..6 {
             f.frame();
+            assert_eq!(f.app.blur.radius(), 18.0, "each prepared fallback frame retains the requested radius");
         }
         assert_eq!(f.app.blur.capability(), unavailable);
+        assert_eq!(f.app.blur.radius(), 18.0, "production fallback preserves the actual requested radius through prepare_blur");
+        assert_eq!(f.app.blur_session.harness_radius, Some(18.0));
+        assert_eq!(crate::prefs::blur_availability(&f.app), crate::theme_options::Availability::Unavailable("prefs.blur_software"));
         let counts = f.app.blur.counters();
         assert_eq!((counts.textures_created, counts.buffers_created, counts.bind_groups_created, counts.pipelines_created), (0, 0, 0, 0));
         assert_eq!((counts.markers_emitted, counts.markers_drawn), (0, 0));
         assert_eq!(counts.live_bytes, 0);
         assert!(f.app.blur.source_texture().is_none());
         assert!(f.renderer.read().frame_compositor.is_none());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn blur_offered_zero_has_no_effect_work() {
+        let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Production) else { return };
+        assert!(f.app.blur_session.harness_radius.is_none(), "zero must come from the declared theme option");
+        crate::prefs::control(
+            &mut f.app,
+            &serde_json::json!({"theme_import":{
+                "format":"solidcraft-theme/1", "name":"Zero blur", "base":"dark",
+                "options":[{"id":"blur","type":"range","default":0}]
+            }}),
+        )
+        .unwrap();
+        for _ in 0..6 {
+            f.frame();
+        }
+        assert!(crate::theme::blur_intent(&f.ctx).offered);
+        assert_eq!(crate::theme::blur_intent(&f.ctx).radius, 0.0);
+        assert_eq!(f.app.blur.radius(), 0.0);
+        assert!(f.app.blur_session.harness_radius.is_none());
+        let counters = serde_json::to_value(f.app.blur.counters()).unwrap();
+        for (name, count) in counters.as_object().unwrap() {
+            assert_eq!(count, 0, "{name}");
+        }
+        assert!(f.renderer.read().frame_compositor.is_none());
+        assert!(f.app.blur.painted_frame().is_none());
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -914,7 +1060,7 @@ mod tests {
                 f.app.blur.set_surface_alpha(Some(180));
                 f.app.cam = original_camera;
                 f.app.preferences.viewport_background = original_background;
-                f.app.blur.set_radius(0.0).unwrap();
+                f.radius(0.0);
                 for _ in 0..3 {
                     f.frame();
                 }
@@ -926,11 +1072,18 @@ mod tests {
                 for radius in [8.0, 18.0, 40.0] {
                     f.app.cam = original_camera;
                     f.app.preferences.viewport_background = original_background;
-                    f.app.blur.set_radius(radius).unwrap();
+                    f.radius(radius);
                     for _ in 0..3 {
                         f.frame();
                     }
                     let before = f.app.blur.counters();
+                    assert_eq!(
+                        crate::prefs::blur_availability(&f.app),
+                        crate::theme_options::Availability::Available,
+                        "positive rendering fixtures must pass the shared app-aware capability policy"
+                    );
+                    assert_eq!(f.app.blur.radius(), radius);
+                    assert!(f.app.blur.painted_frame().is_some(), "guard evidence comes from actual submitted visible marker work");
                     let source = f.pixels(true);
                     f.frame();
                     let after = f.app.blur.counters();
@@ -974,7 +1127,19 @@ mod tests {
                     f.app.preferences.viewport_background = original_background;
                     f.frame();
                 }
-                f.app.blur.set_radius(0.0).unwrap();
+                let before = f.app.blur.counters();
+                f.app.blur_session.guard.cap = 3; // Explicit deterministic quality input in this GPU fixture.
+                f.frame();
+                let reduced = f.app.blur.counters();
+                assert_eq!(f.app.blur.radius(), 40.0);
+                assert_eq!(reduced.source_passes, before.source_passes + 1, "tier change invalidates the source cache");
+                assert_eq!(reduced.blur_passes, before.blur_passes + 6, "reduced tier encodes three down/up steps");
+                f.frame();
+                assert_eq!(f.app.blur.counters().blur_passes, reduced.blur_passes, "reduced tier has its own stable cache");
+                f.app.blur_session.guard.cap = 5;
+                f.frame();
+                assert_eq!(f.app.blur.counters().blur_passes, reduced.blur_passes + 10);
+                f.radius(0.0);
                 for _ in 0..2 {
                     f.frame();
                 }
@@ -1013,7 +1178,7 @@ mod tests {
         f.app.blur.set_surface_alpha(Some(180));
         let mut rows = Vec::new();
         for radius in [0.0, 18.0, 0.0] {
-            f.app.blur.set_radius(radius).unwrap();
+            f.radius(radius);
             for _ in 0..6 {
                 f.frame();
             }
@@ -1038,7 +1203,7 @@ mod tests {
     fn blur_suspend_releases_targets() {
         let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
         f.app.blur.set_surface_alpha(Some(180));
-        f.app.blur.set_radius(18.0).unwrap();
+        f.radius(18.0);
         for _ in 0..3 {
             f.frame();
         }
@@ -1047,7 +1212,7 @@ mod tests {
         assert_eq!(f.app.blur.counters().live_bytes, 0);
         f.frame();
         assert!(f.app.blur.counters().live_textures > 0);
-        f.app.blur.set_radius(0.0).unwrap();
+        f.radius(0.0);
         assert_eq!(f.app.blur.counters().live_textures, 0);
         assert_eq!(f.app.blur.counters().live_bind_groups, 0);
         assert_eq!(f.app.blur.counters().live_pipelines, 0);
@@ -1058,7 +1223,7 @@ mod tests {
     #[test]
     fn blur_late_layer_transform_moves_source_and_invalidates_cache() {
         let Some(mut f) = BlurFixture::new(false, crate::blur::FixturePolicy::Rendering) else { return };
-        f.app.blur.set_radius(18.0).unwrap();
+        f.radius(18.0);
         f.app.blur.set_surface_alpha(Some(180));
         for _ in 0..6 {
             f.frame();

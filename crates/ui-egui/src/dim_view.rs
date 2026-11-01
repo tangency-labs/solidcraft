@@ -13,6 +13,7 @@
 //! Everything acts through commands: `sketch.dimension_text`, `sketch.delete`,
 //! `sketch.toggle_driven`, `parameters.change`.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -977,11 +978,12 @@ fn edit_box(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // Background: under Preferences and Report a bug (#9016), like canvas value boxes.
     Container::new(ctx, Surface::Canvas).area(egui::Id::new("sc_dim_edit_area")).fixed_pos(anchor).order(egui::Order::Background).show(ctx, |ui| {
-        Container::popup_frame(ui.style()).fill(Tokens::get().dialog_body).inner_margin(Tokens::get().space_4).show(ui, |ui| {
+        let frame = Container::popup_frame(ui.style()).fill(Tokens::get().dialog_body).inner_margin(Tokens::get().space_4);
+        Container::show_backing(ui, frame, |ui| {
             crate::ui_kit::scope(ui, |ui| {
                 ui.set_max_width(popup_width);
                 crate::ui_kit::text(ui, &crate::i18n::format("dialog.dimension_name", &[("name", &e.param)]), crate::ui_kit::Text::Inline)
-                    .on_hover_text(crate::i18n::tr("dialog.dimension_insert_hint"));
+                    .backing_on_hover_text(crate::i18n::tr("dialog.dimension_insert_hint"));
                 let r = crate::ui_kit::cell_editor(ui, id, &mut e.expr, "", false);
                 crate::theme::TabAccent::number_focus(ui, &r);
                 if r.has_focus() {

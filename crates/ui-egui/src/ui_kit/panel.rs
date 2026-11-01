@@ -1,5 +1,6 @@
 //! Panel elements for dense cards; see `docs/ui-kit.md` for tokens and usage.
 use super::{actions::icon_button_at, metrics::*, text::paint_text};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{scenario, theme::Tokens};
 use egui::{Ui, vec2};
 
@@ -196,7 +197,7 @@ impl<'a> TopHeader<'a> {
         if state.busy {
             egui::Spinner::new().size(t.space_14).paint_at(ui, self.icon);
             let status = state.text.as_deref().unwrap_or_else(|| crate::i18n::tr_label("Updating the preview"));
-            ui.interact(self.icon, ui.id().with("compute_status"), egui::Sense::hover()).on_hover_text(status);
+            ui.interact(self.icon, ui.id().with("compute_status"), egui::Sense::hover()).backing_on_hover_text(status);
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
         } else {
             crate::icons::paint_icon(ui.painter(), self.icon, icon, 1.0);
@@ -210,7 +211,7 @@ impl<'a> TopHeader<'a> {
         title_response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
         // The buttons take the row's width first; a title that no longer fits says itself on hover.
         if ui.painter().layout_no_wrap(title.to_owned(), heading, t.form_ink).size().x > self.title.width() {
-            title_response.on_hover_text(title);
+            title_response.backing_on_hover_text(title);
         }
         self.actions.show(ui, ok_enabled)
     }
@@ -838,7 +839,7 @@ impl<'a> Panel<'a> {
                         egui::Spinner::new().size(t.space_14).paint_at(ui, rect);
                         scenario::publish_rect("dialog:footer:spinner", rect);
                         let status = state.text.as_deref().unwrap_or_else(|| crate::i18n::tr_label("Updating the preview"));
-                        ui.interact(rect, ui.id().with("compute_status"), egui::Sense::hover()).on_hover_text(status);
+                        ui.interact(rect, ui.id().with("compute_status"), egui::Sense::hover()).backing_on_hover_text(status);
                         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
                     }
                 },
@@ -1185,7 +1186,7 @@ impl<'a> Window<'a> {
             (None, Some((pivot, pos))) => window.pivot(pivot).default_pos(pos),
             (None, None) => window.pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center() - vec2(0.0, row_height() * 2.5)),
         };
-        let shown = window.show(ctx, |ui| {
+        let shown = super::container::FeatureWindow::new(window, self.id, frame).show(ctx, |ui| {
             let result = add(ui);
             super::Container::finish_content(ui, frame);
             result
@@ -1295,7 +1296,7 @@ fn page_list_sized<S>(
                     ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                 }
                 scenario::publish_target(page.handle, rect);
-                response.on_hover_text(label);
+                response.backing_on_hover_text(label);
             }
         });
     });

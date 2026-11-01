@@ -60,7 +60,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 egui::pos2(rect.left() + rect.width() * (index as f32 + 0.5) / 3.0, rect.center().y),
             );
         }
-        response.response.on_hover_text(app.tr("ui.graphics_preset_help"));
+        response.response.backing_on_hover_text(app.tr("ui.graphics_preset_help"));
     });
     ui_kit::text(ui, app.tr("prefs.graphics_presets_note"), ui_kit::Text::Hint("preset"));
     ui_kit::settings_section(ui, "quality", app.tr("prefs.curved_surfaces"), |ui| {
@@ -107,7 +107,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     enabled,
                     ui_kit::PreferenceFigure::Antialiasing(m),
                 )
-                .on_hover_text(app.tr("settings.msaa_applies_on_restart"));
+                .backing_on_hover_text(app.tr("settings.msaa_applies_on_restart"));
                 crate::scenario::publish_target(&format!("prefs:msaa:{m}"), response.rect);
                 if enabled && response.clicked() {
                     app.preferences.msaa = m;
@@ -134,7 +134,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
         ui_kit::text(ui, app.tr("prefs.supersampling_brief"), ui_kit::Text::Hint("supersampling"))
-            .on_hover_text(app.tr("settings.supersampling_note"));
+            .backing_on_hover_text(app.tr("settings.supersampling_note"));
         ui.add_space(t.space_6);
         ui_kit::text(ui, app.tr_label("Ambient occlusion"), ui_kit::Text::Heading("contact_shading"));
         ui.horizontal_wrapped(|ui| {
@@ -156,31 +156,32 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         });
         ui_kit::text(ui, app.tr("prefs.contact_shading_note"), ui_kit::Text::Hint("ao"));
-        let response = setting::dark_parts_shading(app, ui).on_hover_text(app.tr("prefs.dark_parts_shading_help"));
+        let response = setting::dark_parts_shading(app, ui).backing_on_hover_text(app.tr("prefs.dark_parts_shading_help"));
         crate::scenario::publish_handle("prefs:dark_parts_shading", response.rect.center());
     });
     ui_kit::settings_section(ui, "viewport", app.tr("prefs.viewport"), |ui| {
-        let analysis_policy = setting::single_surface_analysis(app, ui).on_hover_text(app.tr("prefs.single_surface_analysis_help"));
+        let analysis_policy = setting::single_surface_analysis(app, ui).backing_on_hover_text(app.tr("prefs.single_surface_analysis_help"));
         crate::scenario::publish_target("prefs:single_surface_analysis", analysis_policy.rect);
         if analysis_policy.changed() {
             sync_surface_analysis(app);
         }
 
         let response = ui_kit::checkbox(ui, app.tr("ui.cosmetic_thread_markings"), &mut app.preferences.cosmetic_threads)
-            .on_hover_text(app.tr("ui.cosmetic_thread_markings_help"));
+            .backing_on_hover_text(app.tr("ui.cosmetic_thread_markings_help"));
         crate::scenario::publish_handle("prefs:cosmetic_threads", response.rect.center());
         ui.columns(2, |columns| {
             if let Some(left) = columns.get_mut(0) {
                 ui_kit::checkbox(left, crate::i18n::tr_label("Grid"), &mut app.ui.show_grid);
                 ui_kit::checkbox(left, crate::i18n::tr_label("Perspective view"), &mut app.ui.perspective);
                 left.add_enabled_ui(app.ui.perspective || app.ui.auto_ortho_faces, |ui| field_of_view_row(app, ui));
-                setting::show_frame_rate(app, left).on_hover_text(app.tr("settings.frame_rate_note"));
+                setting::show_frame_rate(app, left).backing_on_hover_text(app.tr("settings.frame_rate_note"));
                 left.add_enabled_ui(app.preferences.show_frame_rate, |ui| {
                     ui_kit::checkbox(ui, app.tr("ui.frame_rate_details"), &mut app.preferences.frame_rate_details)
-                        .on_hover_text(app.tr("settings.frame_rate_details_note"));
+                        .backing_on_hover_text(app.tr("settings.frame_rate_details_note"));
                 });
                 crate::prefs::view_angles_checkbox(app, left);
-                setting::reference_geometry_through_bodies(app, left).on_hover_text(app.tr("settings.reference_geometry_through_bodies_help"));
+                setting::reference_geometry_through_bodies(app, left)
+                    .backing_on_hover_text(app.tr("settings.reference_geometry_through_bodies_help"));
                 setting::sketch_halo(app, left);
                 setting::vertex_markers(app, left);
             }
@@ -193,23 +194,23 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
         ui_kit::settings_form(ui, t.space_24 * 6.0 + t.space_6, |ui| {
             ui_kit::row(ui, "", |ui| {
-                let check = setting::quick_measure(app, ui).on_hover_text(app.tr("prefs.quick_measure_note"));
+                let check = setting::quick_measure(app, ui).backing_on_hover_text(app.tr("prefs.quick_measure_note"));
                 crate::scenario::publish_target("prefs:quick_measure", check.rect);
             });
             ui_kit::row(ui, "", |ui| {
-                let check = setting::viewport_analysis_status(app, ui).on_hover_text(app.tr("prefs.viewport_analysis_status_help"));
+                let check = setting::viewport_analysis_status(app, ui).backing_on_hover_text(app.tr("prefs.viewport_analysis_status_help"));
                 crate::scenario::publish_target("prefs:viewport_analysis_status", check.rect);
             });
             ui_kit::row(ui, "", |ui| {
-                let check = setting::viewport_section_status(app, ui).on_hover_text(app.tr("prefs.viewport_section_status_help"));
+                let check = setting::viewport_section_status(app, ui).backing_on_hover_text(app.tr("prefs.viewport_section_status_help"));
                 crate::scenario::publish_target("prefs:viewport_section_status", check.rect);
             });
             ui_kit::row(ui, "", |ui| {
-                let check = setting::viewport_status_details(app, ui).on_hover_text(app.tr("prefs.viewport_status_details_help"));
+                let check = setting::viewport_status_details(app, ui).backing_on_hover_text(app.tr("prefs.viewport_status_details_help"));
                 crate::scenario::publish_target("prefs:viewport_status_details", check.rect);
             });
             ui_kit::row(ui, "", |ui| {
-                let check = setting::viewport_status_summary(app, ui).on_hover_text(app.tr("prefs.viewport_status_summary_help"));
+                let check = setting::viewport_status_summary(app, ui).backing_on_hover_text(app.tr("prefs.viewport_status_summary_help"));
                 crate::scenario::publish_target("prefs:viewport_status_summary", check.rect);
             });
             ui_kit::row(ui, app.tr_label("Visual style"), |ui| {
@@ -221,7 +222,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     #[cfg(target_os = "linux")]
     ui_kit::settings_section(ui, "window_system", app.tr("ui.window_system"), |ui| window_system_row(app, ui));
-    setting::render_previous_geometry_budget(app, ui).on_hover_text(app.tr("prefs.render_previous_geometry_budget_help"));
+    setting::render_previous_geometry_budget(app, ui).backing_on_hover_text(app.tr("prefs.render_previous_geometry_budget_help"));
     ui.horizontal(|ui| {
         ui_kit::text(ui, app.tr_label("Renderer"), ui_kit::Text::Inline);
         let renderer = match (&app.viewport.gpu, &app.help.gpu) {

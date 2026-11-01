@@ -1,5 +1,6 @@
 //! Persistent viewport status content. The caller owns items and dispatches returned actions.
 use super::{Button, Container, Surface};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{fonts::RichTextExt as _, scenario, theme::Tokens};
 use egui::{Id, Rect, Response, RichText, Ui, vec2};
 
@@ -176,7 +177,7 @@ fn icon_action(ui: &mut Ui, item: &StatusItem, part: &str, icon: &str, label: &s
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
     scenario::publish_target(&target(item, part), response.rect);
     scenario::publish_target(&target(item, &format!("{part}_glyph")), glyph);
-    response.on_hover_text(hint)
+    response.backing_on_hover_text(hint)
 }
 
 /// One pill, with native keyboard controls and no engine or camera input.

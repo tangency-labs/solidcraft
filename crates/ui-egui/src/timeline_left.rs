@@ -1,5 +1,6 @@
 //! The left feature-history panel: named rows, folders, rollback and drag-and-drop.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Edge, Surface};
 use egui::{Rect, Sense, Stroke, pos2, vec2};
 use serde_json::json;
@@ -241,6 +242,8 @@ pub fn left_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
             return;
         }
         let container = Container::new(ui.ctx(), Surface::Panel).joined(crate::ui_kit::DockEdges { left: true, top: true, ..Default::default() });
+        let clear_backdrop = container.floating() && stacked(app) && app.ui.show_browser && app.preferences.browser_float;
+        let container = container.clear_backdrop(clear_backdrop);
         let fill = card_fill(app, container.floating());
         let frame = container.frame(ui.ctx(), fill, crate::frame::Side::Left).inner_margin(t.space_4);
         let inner = (bounds.size() - frame.total_margin().sum()).max(egui::Vec2::ZERO);
@@ -569,7 +572,7 @@ fn vertical_marker(app: &mut SolveApp, ui: &mut egui::Ui, drag: &mut Option<Drag
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
-    response.on_hover_text(crate::i18n::tr("ui.history_marker_tip"));
+    response.backing_on_hover_text(crate::i18n::tr("ui.history_marker_tip"));
     rect.center().y
 }
 
@@ -747,7 +750,7 @@ fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft
             ui.separator();
         }
         if crate::context_menu::button(ui, "Delete Selected Folders", "delete")
-            .on_hover_text(crate::i18n::tr("timeline.delete_folders_tip"))
+            .backing_on_hover_text(crate::i18n::tr("timeline.delete_folders_tip"))
             .clicked()
         {
             let ids = app.tree.picked_timeline_groups.clone();
@@ -765,14 +768,14 @@ fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft
             && joints.iter().all(|id| app.session.doc.assembly.joints.iter().any(|joint| joint.id == *id && joint.suppressed));
         let label = if all_suppressed { "Unsuppress Selected Folders" } else { "Suppress Selected Folders" };
         if crate::context_menu::button_enabled(ui, label, "suppress", has_contents)
-            .on_hover_text(crate::i18n::tr("timeline.suppress_folders_tip"))
+            .backing_on_hover_text(crate::i18n::tr("timeline.suppress_folders_tip"))
             .clicked()
         {
             let _ = app.run_heavy("timeline.suppress", json!({"groups": selected_groups, "suppressed": !all_suppressed}));
             ui.close();
         }
         if crate::context_menu::button(ui, "Delete Folders and Features…", "delete")
-            .on_hover_text(crate::i18n::tr("timeline.delete_folders_with_features_tip"))
+            .backing_on_hover_text(crate::i18n::tr("timeline.delete_folders_with_features_tip"))
             .clicked()
         {
             crate::timeline::delete_folders(app, selected_groups.clone(), contents);
@@ -1139,7 +1142,7 @@ fn vertical_group_row(
         crate::scenario::publish_handle(&format!("timeline-folder-status:{}:{}", status.icon(), group.name), mark.center());
     }
     let response = match tip {
-        Some(tip) => response.on_hover_text(tip),
+        Some(tip) => response.backing_on_hover_text(tip),
         None => response,
     };
     let renaming = timeline_group_name(app, ui, group, rect, offset, names, suppressed, &t);
@@ -1618,7 +1621,7 @@ fn feature_row_body(
     let listed_under = plan.host(id).and_then(|host| table.name(host));
     let mut tooltip = egui::Tooltip::for_enabled(&response);
     tooltip.popup = tooltip.popup.align(egui::RectAlign::RIGHT_START);
-    tooltip.show(|ui| {
+    crate::ui_kit::Container::show_tooltip(response.id, tooltip, |ui| {
         let summary = app
             .session
             .doc

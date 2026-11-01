@@ -1,5 +1,6 @@
 //! Standalone Environment inspector body. Drawing and source browsing never save a setup.
 use super::{ImageMethod, Stage, cpu, hdr, setups, studio};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, theme::Tokens, ui_kit};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::render_settings::{RenderJob, RenderSetup};
@@ -207,7 +208,7 @@ pub(super) fn ring_overlay(app: &mut SolveApp, ui: &mut egui::Ui, viewport: egui
         egui::Id::new("render_environment_rotation"),
         ring.center + egui::vec2(0.0, ring.radius - t.control_height - t.space_8),
         egui::Align2::CENTER_BOTTOM,
-        |ui| ui_kit::text(ui, &format!("{angle:.0}°"), ui_kit::Text::Inline).on_hover_text(app.tr("render.env_ring_help")),
+        |ui| ui_kit::text(ui, &format!("{angle:.0}°"), ui_kit::Text::Inline).backing_on_hover_text(app.tr("render.env_ring_help")),
     );
     crate::scenario::publish_target("render:environment:ring-degrees", chip.response.rect);
 }

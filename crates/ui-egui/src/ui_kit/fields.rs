@@ -4,6 +4,7 @@ use super::{
     metrics::*,
     text::paint_text,
 };
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::ui_kit::{Container, Surface};
 use crate::{scenario, theme::Tokens};
 use egui::{Response, RichText, Ui, vec2};
@@ -732,6 +733,8 @@ pub(crate) struct Slider {
     pub show_value: bool,
     pub integer: bool,
     pub workspace_accent: bool,
+    /// Blur's off endpoint uses a muted hollow thumb; positive values use solid accent.
+    pub off_endpoint: bool,
 }
 
 /// Bounded read-only code box for diagnostic payloads. Native selection and copying
@@ -750,7 +753,7 @@ pub(crate) fn read_only_text(ui: &mut Ui, text: &str) -> Response {
 
 impl Default for Slider {
     fn default() -> Self {
-        Self { step: None, format: |v| format!("{v:.2}"), show_value: true, integer: false, workspace_accent: false }
+        Self { step: None, format: |v| format!("{v:.2}"), show_value: true, integer: false, workspace_accent: false, off_endpoint: false }
     }
 }
 
@@ -782,6 +785,10 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
         };
         ui.spacing_mut().slider_width = dimension(ui.available_width() - reserved);
         let mut widget = egui::Slider::new(value, range).show_value(options.show_value).handle_shape(egui::style::HandleShape::Circle);
+        if options.off_endpoint {
+            // Blur's step is an editing affordance, not a persisted/API quantisation rule.
+            widget = widget.clamping(egui::SliderClamping::Edits);
+        }
         if options.show_value {
             widget = widget.custom_formatter(move |v, _| (options.format)(v));
         }
@@ -813,7 +820,15 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
         let center = egui::pos2(egui::lerp(track.x_range(), fraction), track.center().y);
         ui.painter().rect_filled(track, t.control_radius, t.dialog_rule);
         ui.painter().rect_filled(egui::Rect::from_min_max(track.min, egui::pos2(center.x, track.bottom())), t.control_radius, primary);
-        ui.painter().circle(center, t.space_8, t.control_fill, egui::Stroke::new(t.space_2, primary));
+        let off = options.off_endpoint && value.to_f64() == 0.0;
+        let fill = if off {
+            egui::Color32::TRANSPARENT
+        } else if options.off_endpoint {
+            primary
+        } else {
+            t.control_fill
+        };
+        ui.painter().circle(center, t.space_8, fill, egui::Stroke::new(t.space_2, if off { t.form_dim } else { primary }));
         publish(ui, &response, egui::WidgetType::Slider);
         response.widget_info(|| egui::WidgetInfo::slider(ui.is_enabled(), value.to_f64(), crate::i18n::tr_label(label(ui))));
         scenario::publish_rect(&format!("dialog:slider_track:{}", label(ui)), slider);
@@ -1146,7 +1161,7 @@ pub(crate) fn placement_field(ui: &mut Ui, id: egui::Id, value: &mut String, hin
     });
     crate::theme::TabAccent::number_focus(ui, &response);
     t.input_bevel(ui, &response);
-    response.on_hover_text(crate::i18n::tr_label(hint))
+    response.backing_on_hover_text(crate::i18n::tr_label(hint))
 }
 
 /// Attached Library dropdown and text editor inside one bordered control.
@@ -1174,7 +1189,7 @@ pub(crate) fn library_cell(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     if open {
         ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     }
-    if value.is_empty() { response.on_hover_text(crate::i18n::tr_label(hint)) } else { response }
+    if value.is_empty() { response.backing_on_hover_text(crate::i18n::tr_label(hint)) } else { response }
 }
 
 /// Inline tree-name editor in caller-owned geometry; preserves its native focus and selection ID.

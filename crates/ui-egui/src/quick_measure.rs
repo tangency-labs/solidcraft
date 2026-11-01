@@ -6,6 +6,7 @@
 //! the selection or the design changes; nothing shows while it computes, or for a selection with
 //! nothing to measure. A click copies the readout.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 
@@ -227,7 +228,8 @@ pub(crate) fn show(app: &mut SolveApp, ui: &egui::Ui, view: egui::Rect, taken: &
     if !view.contains_rect(r) {
         return None;
     }
-    let response = ui.interact(r, egui::Id::new("sc_quick_measure"), egui::Sense::click()).on_hover_text(crate::i18n::tr("measure.quick_copy"));
+    let response =
+        ui.interact(r, egui::Id::new("sc_quick_measure"), egui::Sense::click()).backing_on_hover_text(crate::i18n::tr("measure.quick_copy"));
     crate::scenario::publish_rect("measure:quick", r);
     painter.rect_filled(r, t.radius_sm, if response.hovered() { t.hover } else { t.overlay });
     painter.rect_stroke(r, t.radius_sm, egui::Stroke::new(1.0, t.border), egui::StrokeKind::Inside);

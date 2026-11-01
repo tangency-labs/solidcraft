@@ -40,9 +40,13 @@ impl ReviewAndApply<'_> {
         });
         if let Some(notice) = self.notice {
             let t = crate::theme::Tokens::get();
-            egui::Frame::NONE.fill(t.accent_soft).corner_radius(t.control_radius).inner_margin(egui::Margin::same(t.space_8 as i8)).show(ui, |ui| {
-                text(ui, notice, Text::Note("review:physical"));
-            });
+            crate::ui_kit::Container::show_backing(
+                ui,
+                egui::Frame::NONE.fill(t.accent_soft).corner_radius(t.control_radius).inner_margin(egui::Margin::same(t.space_8 as i8)),
+                |ui| {
+                    text(ui, notice, Text::Note("review:physical"));
+                },
+            );
         }
         content(ui);
         for (label, value, key) in

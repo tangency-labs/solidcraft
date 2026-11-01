@@ -1,6 +1,7 @@
 //! Contextual native Render UI. One workspace, existing command authority and shared controls.
 //! Page navigation is per document; unsupported backend capabilities never emit dummy parameters.
 use super::{ImageMethod, cpu, library, materials, setups, studio};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{SolveApp, ui_kit};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::Document;
@@ -577,7 +578,7 @@ fn scene_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let response = ui_kit::icon_label_action(ui, app.tr(label), None, ready.is_ok(), primary);
                 crate::scenario::publish_target(&format!("render:scene:{id}"), response.rect);
                 if let Err(reason) = ready {
-                    response.clone().on_disabled_hover_text(reason);
+                    response.clone().backing_on_disabled_hover_text(reason);
                 }
                 if response.clicked()
                     && let Err(error) = super::ribbon::perform_job(app, command)
@@ -870,7 +871,7 @@ fn output_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                         (true, Some((w, h))) => size_limit_reason(app, u32::try_from(w).unwrap_or(u32::MAX), u32::try_from(h).unwrap_or(u32::MAX)),
                         _ => app.tr("render.output_over_budget").to_string(),
                     };
-                    if response.on_disabled_hover_text(reason).clicked()
+                    if response.backing_on_disabled_hover_text(reason).clicked()
                         && let Some((w, h)) = allowed
                         && let (Ok(w), Ok(h)) = (u32::try_from(w), u32::try_from(h))
                         && let Err(error) = apply_size(app, w, h, false)
@@ -936,7 +937,7 @@ fn destination_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                 app.start(id);
             }
             if let Err(reason) = ready {
-                button.on_disabled_hover_text(reason);
+                button.backing_on_disabled_hover_text(reason);
             }
         }
     });
@@ -969,10 +970,10 @@ fn render_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.start("render.start");
         }
         if let Err(reason) = ready {
-            button.on_disabled_hover_text(reason);
+            button.backing_on_disabled_hover_text(reason);
         }
         ui_kit::button(ui, app.tr("render.children.all_shots"), ui_kit::Button::Enabled(false))
-            .on_disabled_hover_text(app.tr("render.queue_pending"));
+            .backing_on_disabled_hover_text(app.tr("render.queue_pending"));
     });
     ui_kit::text(ui, app.tr("render.queue_pending"), ui_kit::Text::Note("render.queue_pending"));
     if ui_kit::button(ui, app.tr("render.output_view_image"), ui_kit::Button::Enabled(app.render_workspace.view.completed.is_some())).clicked() {
@@ -1055,7 +1056,7 @@ fn check_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.start("render.preflight");
     }
     if let Err(reason) = ready {
-        check.on_disabled_hover_text(reason);
+        check.backing_on_disabled_hover_text(reason);
     }
     output_check(app, ui);
     let report = check_report(app);
@@ -1313,7 +1314,7 @@ pub(super) fn size_presets(app: &mut SolveApp, ui: &mut egui::Ui) {
                 })
                 .inner;
             let reason = size.map_or_else(String::new, |(w, h)| size_limit_reason(app, w, h));
-            if response.on_disabled_hover_text(reason).clicked() {
+            if response.backing_on_disabled_hover_text(reason).clicked() {
                 choose_size(app, size);
             }
         }
@@ -1330,7 +1331,7 @@ pub(super) fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
             let response = ui.add_enabled_ui(enabled, |ui| ui_kit::list_picker(ui, key, mark.as_deref().unwrap_or(app.tr(label)), false)).inner;
             crate::scenario::publish_target(&format!("render:stage:size:{key}"), response.rect);
             let reason = size.map_or_else(String::new, |(w, h)| size_limit_reason(app, w, h));
-            if response.on_disabled_hover_text(reason).clicked() {
+            if response.backing_on_disabled_hover_text(reason).clicked() {
                 choose_size(app, size);
                 ui.close();
             }
@@ -1340,7 +1341,7 @@ pub(super) fn stage_tools(app: &mut SolveApp, ui: &mut egui::Ui) {
     studio::format_choices(app, ui);
     quality_choices(app, ui);
     let summary = check_summary(app);
-    let response = ui_kit::button(ui, &summary, ui_kit::Button::Normal).on_hover_text(app.tr("render.output_check_help"));
+    let response = ui_kit::button(ui, &summary, ui_kit::Button::Normal).backing_on_hover_text(app.tr("render.output_check_help"));
     crate::scenario::publish_target("render:stage:check", response.rect);
     if response.clicked() {
         let _ = app.run("view.render_select", json!({"kind":"check"}));

@@ -1,4 +1,5 @@
 //! Small deterministic material previews; no textures, jobs or graphics device.
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{scenario, theme::Tokens};
 use egui::{Color32, Mesh, Rect, Response, Sense, Ui, pos2, vec2};
 use std::{collections::VecDeque, sync::Arc};
@@ -208,7 +209,7 @@ pub(crate) fn sphere_preview_with_source<R>(
                         .truncate()
                         .halign(egui::Align::Min),
                 )
-                .on_hover_text(name);
+                .backing_on_hover_text(name);
                 let (line, _) = ui.allocate_exact_size(vec2(text_width, t.control_height), Sense::hover());
                 let usage_width = (ui.painter().layout_no_wrap(usage.to_owned(), egui::FontId::proportional(t.font_caption), t.form_ink).size().x
                     + t.space_12)
@@ -297,7 +298,7 @@ impl SphereTile<'_> {
         scenario::publish_target(self.id, rect);
         let mut tip = egui::Tooltip::for_enabled(&response);
         tip.popup = tip.popup.frame(super::Container::new(ui.ctx(), super::Surface::Toast).tooltip_frame(ui.ctx()));
-        tip.show(|ui| {
+        crate::ui_kit::Container::show_tooltip(response.id, tip, |ui| {
             ui.label(self.tip);
         });
         response

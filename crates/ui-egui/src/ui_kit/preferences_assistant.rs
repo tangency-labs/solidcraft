@@ -1,5 +1,6 @@
 //! Shared concise choice cards and the agent-pointer settings specimen.
 use super::{metrics::dimension, text::paint_text};
+use crate::ui_kit::BackingTooltipExt as _;
 use crate::{scenario, theme::Tokens};
 use egui::{FontId, Rect, Response, Sense, Stroke, Ui, pos2, vec2};
 
@@ -104,7 +105,7 @@ fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: b
         egui::WidgetInfo::selected(egui::WidgetType::RadioButton, ui.is_enabled(), selected, format!("{}: {}", choice.title, choice.detail))
     });
     scenario::publish_target(choice.key, rect);
-    response.on_hover_text(choice.detail).on_hover_cursor(egui::CursorIcon::PointingHand)
+    response.backing_on_hover_text(choice.detail).on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// A static preview reuses the real agent cursor artwork; it never animates or requests frames.
@@ -129,7 +130,7 @@ pub(crate) fn settings_pointer_preview(ui: &mut Ui, visible: bool, speed: &str, 
     let caption_rect = Rect::from_min_max(rect.min + vec2(t.space_8, t.space_4), pos2(rect.right() - t.space_8, rect.top() + t.space_24));
     paint_text(ui, caption_rect, &caption, FontId::proportional(t.font_small), t.form_dim, false);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &caption));
-    response.on_hover_text(crate::i18n::tr(if follows_camera { "ai.prefs.follow_camera_on" } else { "ai.prefs.follow_camera_off" }));
+    response.backing_on_hover_text(crate::i18n::tr(if follows_camera { "ai.prefs.follow_camera_on" } else { "ai.prefs.follow_camera_off" }));
 }
 
 /// One muted metadata line; full commands, endpoints and tool lists remain available on hover.
@@ -138,5 +139,5 @@ pub(crate) fn settings_short_note(ui: &mut Ui, text: &str) -> Response {
     let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_16), Sense::hover());
     paint_text(ui, rect, text, FontId::proportional(t.font_small), t.form_dim, false);
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
-    response.on_hover_text(text)
+    response.backing_on_hover_text(text)
 }

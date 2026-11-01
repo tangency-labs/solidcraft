@@ -28,14 +28,34 @@ The control channel is **on by default**. SolidCraft listens on `127.0.0.1` only
 so agents can drive the app without a launch flag. Every connection still needs this launch's
 token (below); nothing else on the machine, and nothing off it, can send a command.
 
-Internal rendering harness: `ui.blur {radius_px?, surface_alpha?}` queries or sets
-session-only panel blur. Radius is finite physical pixels in 0..40; the optional
+Internal rendering harness: `ui.blur {radius_px?, surface_alpha?, fixture?}` queries or sets
+session-only panel blur. Radius is finite physical pixels in 0..60; the optional
 capture tint is 0..1 (`null` restores ordinary fills). This is not a saved
-preference. The reply contains requested radius, capability/reason and cumulative
+preference. Theme-authored blur is edited with `ui.prefs {theme_options:{theme_id:{blur:18}}}`;
+the theme must declare the option. Finite fractional values remain valid, although
+the UI slider edits in steps of one physical pixel. The `ui.prefs` option definition's
+`available`/translated `reason` describes current app/device/OS availability; its
+value remains the saved/default intent while unavailable.
+
+The `ui.blur` reply contains requested radius, renderer capability, app-aware
+`available`/`reason`, `guard` (tier cap, streak, notice, session opt-out), and cumulative
 actual effect counters, including live resources and encoded passes. Unsupported
 software/web/source contexts stay on ordinary painting. Use `ui.screenshot` for
 panel evidence; `ui.render` remains a model-only capture. Activation, full egui GPU
 fixture and manager-run evidence commands are in [blur-behind.md](blur-behind.md).
+Supplying `radius_px` selects the legacy session-only rendering harness override;
+`fixture:"clear"` removes that override and any injected availability reason,
+returning to theme intent. It does not revoke a quality-guard Undo opt-out.
+
+Explicit evidence-only fixtures are `gpu-software`, `reduce-transparency`, and
+`web-unsupported` (force an unavailable reason), plus `guard-60` (inject sixty
+eligible 23 ms samples into the transient guard at the current positive radius).
+The reply labels the active injection as `evidence_fixture`; `null` means none.
+These are not end-user settings, real adapter/OS readings or performance measurements.
+There is no fixture that makes an unsupported renderer available. They do not
+change saved options, host OS settings or document history. All supplied fields
+are validated before mutation. Capture fixture screenshots with that label in the
+evidence description, and clear the fixture before checking real capabilities.
 
 | Launch | What listens |
 |---|---|

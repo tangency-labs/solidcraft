@@ -4,6 +4,7 @@
 //! where it touches) or a flat face. Picking the profile on a part chooses the joint that part
 //! turns on. Play turns the cam a full turn so the follower shows its motion before OK.
 
+use crate::ui_kit::BackingTooltipExt as _;
 use egui::RichText;
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
@@ -133,7 +134,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut CamForm, inputs: &[Se
     form_row(ui, "Animate", |ui| {
         let label = crate::i18n::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
         let r = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
-            .on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"));
+            .backing_on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"));
         crate::scenario::publish_handle("dialog:Animate", r.rect.center());
         if r.clicked() {
             f.animate = !f.animate;

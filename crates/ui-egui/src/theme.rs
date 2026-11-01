@@ -199,6 +199,7 @@ impl Fade {
 
 #[derive(Clone, Default)]
 struct TabThemeState {
+    blur: BlurIntent,
     prepared: Option<PreparedTheme>,
     environment: Option<Environment>,
     targets: BTreeMap<String, TabTarget>,
@@ -220,6 +221,19 @@ struct TabTarget {
 
 const TAB_STATE: &str = "sc_tab_theme_state";
 
+/// Only authored/effective intent is cached. Runtime OS/device availability is never stored
+/// here. Reuse prepare_tabs' borrowed full-content/raw comparison, including followed reloads.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct BlurIntent {
+    pub offered: bool,
+    pub radius: f32,
+    pub revision: u64,
+}
+
+pub(crate) fn blur_intent(ctx: &egui::Context) -> BlurIntent {
+    ctx.data_mut(|data| data.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE)).blur)
+}
+
 /// Cache the authored theme and raw saved values before any effective-value normalization.
 /// Followed-file reloads use full content equality, including edits that keep the same id/base.
 /// The caller supplies its existing normalization contract only on a cache miss.
@@ -237,8 +251,13 @@ pub(crate) fn prepare_tabs(
             _ => false,
         };
         if !same {
+            state.blur = BlurIntent { revision: state.blur.revision.wrapping_add(1), ..Default::default() };
             state.prepared = file.map(|file| {
                 let values = values();
+                state.blur.offered = crate::theme_options::declares_blur(file);
+                if state.blur.offered {
+                    state.blur.radius = crate::theme_options::blur_radius(file, &values, crate::theme_options::Availability::Available);
+                }
                 let (enabled, fade_ms) = crate::theme_options::tab_settings(file, &values);
                 let base = Custom { dark: file.base.is_dark(), tokens: crate::theme_files::resolve_with(file, &values) };
                 PreparedTheme { file: file.clone(), raw: raw.cloned(), values, base, enabled, fade_ms }
@@ -1586,6 +1605,51 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn blur_intent_cache_resolves_only_when_theme_or_raw_values_change() {
+        let ctx = egui::Context::default();
+        let source: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/theme-blur.json")).unwrap();
+        let mut file = crate::theme_files::from_value(&source).unwrap();
+        let resolutions = Cell::new(0);
+        let prepare = |file: Option<&crate::theme_files::ThemeFile>, raw: Option<&BTreeMap<String, serde_json::Value>>| {
+            prepare_tabs(&ctx, file, raw, || {
+                resolutions.set(resolutions.get() + 1);
+                let saved = raw.into_iter().flatten().map(|(k, v)| (k.clone(), serde_json::from_value(v.clone()).unwrap())).collect();
+                file.map_or_else(BTreeMap::new, |file| crate::theme_files::effective_values(file, &saved).0)
+            });
+        };
+        for _ in 0..100 {
+            prepare(None, None);
+        }
+        assert_eq!(resolutions.get(), 0, "builtins do not normalize option tables");
+        prepare(Some(&file), None);
+        let zero = blur_intent(&ctx);
+        assert!(zero.offered);
+        assert_eq!(zero.radius, 0.0);
+        for _ in 0..100 {
+            prepare(Some(&file), None);
+        }
+        assert_eq!(resolutions.get(), 1, "offered zero is a borrowed cache hit");
+        assert_eq!(blur_intent(&ctx).revision, zero.revision);
+        let raw = BTreeMap::from([("blur".into(), serde_json::json!(18.25))]);
+        prepare(Some(&file), Some(&raw));
+        assert_eq!(blur_intent(&ctx).radius, 18.25);
+        assert_ne!(blur_intent(&ctx).revision, zero.revision);
+        for _ in 0..100 {
+            prepare(Some(&file), Some(&raw));
+        }
+        assert_eq!(resolutions.get(), 2);
+        // Followed reload keeps id/base, but content changes: it must invalidate.
+        file.options.retain(|o| o.id != "blur");
+        prepare(Some(&file), Some(&raw));
+        assert!(!blur_intent(&ctx).offered);
+        assert_eq!(blur_intent(&ctx).radius, 0.0);
+        for _ in 0..100 {
+            prepare(Some(&file), Some(&raw));
+        }
+        assert_eq!(resolutions.get(), 3, "undeclared themes also reuse the borrowed identity");
     }
 
     #[test]

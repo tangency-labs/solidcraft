@@ -176,14 +176,13 @@ impl CommandSearch {
 
     pub(crate) fn detail(ui: &mut Ui, text: &str) {
         let t = Tokens::get();
-        egui::Frame::NONE
-            .fill(t.control_fill)
-            .stroke(t.container_border(t.dialog_rule))
-            .corner_radius(t.control_radius)
-            .inner_margin(t.space_8)
-            .show(ui, |ui| {
+        crate::ui_kit::Container::show_backing(
+            ui,
+            egui::Frame::NONE.fill(t.control_fill).stroke(t.container_border(t.dialog_rule)).corner_radius(t.control_radius).inner_margin(t.space_8),
+            |ui| {
                 super::text(ui, text, super::Text::MonoNote("command_parameters"));
-            });
+            },
+        );
     }
 
     /// Lay out the full sheet, but allocate and paint only its unfolding height. The
@@ -215,7 +214,7 @@ impl CommandSearch {
         }
         let sheet = Rect::from_min_size(origin, vec2(width, natural * progress));
         let frame = super::Menu::frame().inner_margin(0);
-        ui.painter().set(background, frame.paint(sheet.shrink(frame.stroke.width)));
+        super::Container::set_backing(ui.painter(), background, frame, sheet.shrink(frame.stroke.width));
         // The edge-to-edge footer shares the card silhouette; keep the outer rule
         // above its fill, as an overflow-clipped footer would in the board.
         ui.painter().rect_stroke(sheet, t.radius_xl, frame.stroke, egui::StrokeKind::Inside);
@@ -236,8 +235,8 @@ impl CommandSearch {
             super::text(ui, crate::i18n::tr(if command { "search.command_keys" } else { "search.keys" }), super::Text::Note("search_keys"));
         });
         let r = Rect::from_min_max(start, pos2(start.x + width, ui.min_rect().bottom()));
-        ui.painter()
-            .set(background, egui::Shape::rect_filled(r, egui::CornerRadius { nw: 0, ne: 0, sw: t.radius_xl, se: t.radius_xl }, t.dialog_footer));
+        let frame = egui::Frame::NONE.fill(t.dialog_footer).corner_radius(egui::CornerRadius { nw: 0, ne: 0, sw: t.radius_xl, se: t.radius_xl });
+        super::Container::set_backing(ui.painter(), background, frame, r);
         t.secondary_hline(ui.painter(), r.x_range(), r.top(), t.dialog_rule);
         crate::scenario::publish_rect("ribbon:search_footer", r);
     }
