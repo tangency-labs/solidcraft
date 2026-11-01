@@ -779,6 +779,28 @@ fn graphics() -> Option<serde_json::Value> {
     graphics_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
 }
 
+fn restore_preferences(app: &mut SolveApp, stored_ui: Option<&str>, saved_graphics: Option<&serde_json::Value>, safe_mode: bool) {
+    if let Some(p) = stored_ui.filter(|_| !safe_mode) {
+        app.load_prefs(p);
+    }
+    // Even safe mode edits the real graphics.json. Keep its choices in Preferences so an
+    // anti-aliasing change cannot erase them; safe mode's renderer still uses its own defaults.
+    restore_graphics_preferences(app, saved_graphics);
+}
+
+/// Restore startup choices after loading the separately saved UI preferences.
+fn restore_graphics_preferences(app: &mut SolveApp, saved: Option<&serde_json::Value>) {
+    app.preferences.graphics_adapter = saved.and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str)).unwrap_or_default().to_string();
+    // graphics.json chooses the window before app.ron is loaded. Reflect that saved choice,
+    // not the current session's window system (which an environment override may change).
+    app.preferences.window_system = saved
+        .and_then(|v| v.get("window_system").and_then(serde_json::Value::as_str))
+        .map(str::trim)
+        .filter(|choice| matches!(*choice, "wayland" | "x11"))
+        .unwrap_or("auto")
+        .to_string();
+}
+
 /// The graphics backend preference (`graphics.json`'s `backend`: `auto`, `dx12`, `vulkan`, `gl`).
 fn backend_preference() -> Option<String> {
     graphics().and_then(|v| v.get("backend").and_then(serde_json::Value::as_str).map(str::to_string))
@@ -1097,9 +1119,8 @@ fn main() -> eframe::Result {
             app.integrated_titlebar = cfg!(target_os = "macos");
             app.cpu_meshing = safe_mode;
             app.graphics_fallback = fallback_note.clone();
-            if let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k))).filter(|_| !safe_mode) {
-                app.load_prefs(&p);
-            }
+            let stored_ui = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k)));
+            restore_preferences(&mut app, stored_ui.as_deref(), graphics().as_ref(), safe_mode);
             if let Some(path) = &theme_file
                 && let Err(e) = solidcraft_ui_egui::prefs::follow_theme_file_for_run(&mut app, path)
             {
@@ -1112,10 +1133,6 @@ fn main() -> eframe::Result {
                 lost_at: None,
                 reason: String::new(),
             });
-            if !safe_mode {
-                app.preferences.graphics_adapter =
-                    graphics().and_then(|v| v.get("adapter").and_then(serde_json::Value::as_str).map(str::to_string)).unwrap_or_default();
-            }
             if let Some(rs) = &cc.wgpu_render_state {
                 app.services.graphics_adapters = rs
                     .available_adapters
@@ -1707,6 +1724,88 @@ mod viewport_tests {
 
 #[cfg(test)]
 mod msaa_tests {
+    /// Safe mode uses default UI settings but edits the real graphics.json for the next start.
+    #[test]
+    fn safe_mode_preserves_graphics_choices_when_changing_antialiasing() {
+        use serde_json::{Value, json};
+        use solidcraft_ui_egui::scenario::Harness;
+
+        for choice in ["wayland", "x11"] {
+            let mut h = Harness::new();
+            let path = h.dir.join("graphics.json");
+            let saved = json!({"window_system": choice, "adapter": "Selected GPU", "backend": "vulkan", "msaa": 8});
+            std::fs::write(&path, saved.to_string()).unwrap();
+            h.app.services.graphics_path = Some(path.to_string_lossy().into_owned());
+            let defaults = h.app.preferences.clone();
+            let stored_ui = json!({"preferences": {"window_system": "auto", "graphics_adapter": "Stale GPU", "msaa": 2,
+                "display_quality": "fine"}})
+            .to_string();
+            super::restore_preferences(&mut h.app, Some(&stored_ui), Some(&saved), true);
+
+            assert_eq!(h.app.preferences.window_system, choice);
+            assert_eq!(h.app.preferences.graphics_adapter, "Selected GPU");
+            assert_eq!(h.app.preferences.msaa, defaults.msaa, "safe mode ignores saved anti-aliasing");
+            assert_eq!(h.app.preferences.display_quality, defaults.display_quality, "safe mode ignores saved UI settings");
+            assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&path).unwrap()).unwrap(), saved, "startup does not write settings");
+
+            assert_eq!(h.call("ui.prefs", json!({"open": "Graphics"}))["ok"], true);
+            assert_eq!(h.call("ui.prefs", json!({"msaa": 1}))["ok"], true);
+            assert_eq!(h.call("ui.prefs", json!({"button": "ok"}))["ok"], true);
+            let after: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(after, json!({"window_system": choice, "adapter": "Selected GPU", "backend": "vulkan", "msaa": 1}));
+
+            let mut normal = Harness::new();
+            super::restore_preferences(&mut normal.app, Some(&stored_ui), Some(&after), false);
+            assert_eq!(normal.app.preferences.window_system, choice);
+            assert_eq!(normal.app.preferences.graphics_adapter, "Selected GPU");
+            assert_eq!(normal.app.preferences.display_quality, "fine", "normal startup still restores UI settings");
+        }
+    }
+
+    #[test]
+    fn missing_or_invalid_startup_window_system_uses_automatic() {
+        use serde_json::json;
+
+        for saved in [None, Some(json!(null)), Some(json!({})), Some(json!({"window_system": 7})), Some(json!({"window_system": "unknown"}))] {
+            let mut app = super::SolveApp::new(super::Session::default(), super::Services::default());
+            app.preferences.window_system = "wayland".into();
+            super::restore_graphics_preferences(&mut app, saved.as_ref());
+            assert_eq!(app.preferences.window_system, "auto", "{saved:?}");
+        }
+    }
+
+    /// A manual graphics.json choice wins over stale app.ron preferences and survives an
+    /// unrelated graphics edit (#10116), including on a fresh launch with no saved UI state.
+    #[test]
+    fn startup_window_system_survives_changing_antialiasing() {
+        use serde_json::{Value, json};
+        use solidcraft_ui_egui::scenario::Harness;
+
+        for choice in ["wayland", "x11", "auto", " wayland ", " x11 "] {
+            for stale in [None, Some("auto"), Some("wayland"), Some("x11")] {
+                let mut h = Harness::new();
+                if let Some(stale) = stale {
+                    h.app.load_prefs(&json!({"preferences": {"window_system": stale}}).to_string());
+                }
+                let path = h.dir.join("graphics.json");
+                std::fs::write(&path, json!({"window_system": choice, "backend": "vulkan", "adapter": "Selected GPU", "msaa": 4}).to_string())
+                    .unwrap();
+                h.app.services.graphics_path = Some(path.to_string_lossy().into_owned());
+                let saved: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+                super::restore_graphics_preferences(&mut h.app, Some(&saved));
+
+                let result = h.call("ui.prefs", json!({"msaa": 2}));
+                assert_eq!(result["ok"], true, "{result}");
+                let after: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+                assert_eq!(after["window_system"], choice.trim(), "saved choice {choice:?}, stale UI choice {stale:?}");
+                assert_eq!(result["result"]["window_system"], choice.trim());
+                assert_eq!(after["msaa"], 2);
+                assert_eq!(after["backend"], "vulkan");
+                assert_eq!(after["adapter"], "Selected GPU");
+            }
+        }
+    }
+
     #[test]
     fn first_launch_adopts_the_previous_release_settings() {
         let d = std::env::temp_dir().join(format!("solidcraft-adopt-settings-{}", std::process::id()));
