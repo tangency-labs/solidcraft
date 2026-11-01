@@ -217,6 +217,7 @@ impl Executor {
             lost.store(false, Ordering::Release);
             log::warn!("gpu-path device lost ({reason:?}); executor unavailable: {message}");
         });
+        let compiling = one_compile_at_a_time();
         let scopes = scopes(&device);
         let shader =
             device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("gpu-path"), source: wgpu::ShaderSource::Wgsl(SHADER.into()) });
@@ -251,9 +252,19 @@ impl Executor {
             cache: None,
         });
         checked(scopes)?;
+        drop(compiling);
         warm_up(&device, &queue, &pipeline, &placeholder_bind(&device, &layout, 7)?, &healthy)?;
         Ok(Self { context: Arc::new(Context { healthy, device, queue, pipeline, layout, denoise: std::sync::OnceLock::new() }) })
     }
+}
+
+/// Native drivers compile the path pipeline for minutes and gigabytes on a cold shader cache.
+/// Executors opened side by side (parallel tests, each on its own device) compiled it together
+/// until memory ran out (#6706). One compile at a time per process: the first fills the driver's
+/// cache, and the waiting ones then get it from there.
+fn one_compile_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+    static COMPILE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    COMPILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 // Small zeroed bindings: binding 0 is a uniform whose zero work count makes every
