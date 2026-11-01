@@ -923,6 +923,143 @@ def assemblies_drive(d):
     d.wait(1.5)
 
 
+# getting-started.md: the start page, and a sample opened from it.
+
+
+def start_page(d):
+    d.ui("ui.home", {"open": True})
+    d.wait(2.0)
+    d.ui("ui.move", {"x": 700, "y": 790})
+    d.settle_camera()
+
+
+@shot("getting-started/start", "still", setup=start_page)
+def getting_started_start(d):
+    """The start page, numbered: 1 new design, 2 open, 3 import, 4 recent designs, 5 samples,
+    6 the File menu."""
+    n = {h["name"]: (h["x"], h["y"]) for h in d.ui("ui.handles")}
+    left = n["home:new_mm"][0] - 154  # the tiles' left edge
+    d.callouts += [
+        (n["home:new_mm"][0] + 128, n["home:new_mm"][1] - 18),
+        (n["home:open_tile"][0] + 112, n["home:open_tile"][1] - 18),
+        (n["home:import"][0] + 128, n["home:import"][1] - 18),
+        (left + 105, n["home:import"][1] + 81),
+        (left + 105, n["home:sample:0"][1] - 112),
+        (n["home:recover"][0] + 100, n["home:recover"][1] + 32),
+    ]
+
+
+@shot("getting-started/sample", "clip", setup=start_page)
+def getting_started_sample(d):
+    """Open a sample from the start page and turn it to look round."""
+    d.caption("Click a sample to open it")
+    d.click(d.at(handle="home:sample:0"), dur=0.8, settle=2.0)
+    for _ in range(50):
+        if not d.ui("ui.home").get("open"):
+            break
+        time.sleep(0.2)
+    else:
+        raise RuntimeError("the sample did not open")
+    d.settle_camera()
+    d.caption("")
+    d.wait(0.8)
+    d.orbit(220, 0, steps=60)
+    d.wait(1.5)
+
+
+# sheet-metal.md: a tray: a base flange from a sketched rectangle, two edge flanges, flat pattern.
+PLATE = (80, 50)
+
+
+def sheet_view(d):
+    d.ui("ui.camera", {"target": [PLATE[0] / 2, PLATE[1] / 2, 8], "yaw": -0.7854, "pitch": 0.6155, "distance": 170})
+    d.settle_camera()
+
+
+def plate_sketch(d):
+    d.execute("sketch.create", {"plane": "XY"})
+    d.execute("sketch.rectangle.two_point", {"p0": [0, 0], "p1": list(PLATE)})
+    d.execute("sketch.finish")
+    sheet_view(d)
+    d.click(d.at(handle="tab:SHEET METAL"), dur=0.2, settle=0.6)
+
+
+def base_flange(d, label=lambda text: None):
+    label("Flange: click the sketch's profile, OK")
+    d.tool("sheet.flange")
+    d.click(d.at(world=[PLATE[0] * 0.75, PLATE[1] * 0.8, 0]), dur=0.6, settle=1.0)
+    d.click(d.at(handle="dialog:ok"), dur=0.6, settle=1.0)
+    wait_feature(d, "BaseFlange1")
+
+
+def edge_flanges(d, label=lambda text: None):
+    label("Flange again: click two top edges, height 20, Enter")
+    d.tool("sheet.flange")
+    top = 2.5  # the default rule's thickness
+    for y in (0, PLATE[1]):
+        d.click(d.at(world=[PLATE[0] / 2, y, top]), dur=0.6, settle=0.8)
+    typed(d, "20")
+    wait_feature(d, "EdgeFlange1")
+
+
+def base(d):
+    plate_sketch(d)
+    base_flange(d)
+
+
+def tray(d):
+    base(d)
+    edge_flanges(d)
+
+
+@shot("sheet-metal/base", "clip", setup=plate_sketch)
+def sheet_metal_base(d):
+    """A base flange from a sketched rectangle, at the rule's thickness."""
+    base_flange(d, d.caption)
+    d.wait(1.5)
+
+
+@shot("sheet-metal/flange", "clip", setup=base)
+def sheet_metal_flange(d):
+    """Edge flanges up from two top edges, bent at the rule's radius."""
+    edge_flanges(d, d.caption)
+    d.wait(1.5)
+
+
+@shot("sheet-metal/flat", "clip", setup=tray)
+def sheet_metal_flat(d):
+    """Flat Pattern: the part unfolded with its bend lines and bend table."""
+    d.caption("Flat Pattern: the part unfolded, with its bends")
+    d.tool("sheet.flat_pattern")
+    d.wait(2.5)
+    d.settle_camera()
+    d.click(d.at(handle="dialog:cancel"), dur=0.8, settle=1.0)
+    d.caption("")
+    d.wait(1.0)
+
+
+# files.md: the File menu, where opening, inserting, saving and exporting start.
+
+
+@shot("files/menu", "still", start="sample")
+def files_menu(d):
+    """The File menu, numbered: 1 open, 2 insert into this design, 3 save, 4 export, 5 design
+    properties."""
+    d.click(d.at(handle="appbar:file"), dur=0.2, settle=0.8)
+    d.ui("ui.move", {"x": 700, "y": 790})
+    d.settle_camera()
+    n = {h["name"]: (h["x"], h["y"]) for h in d.ui("ui.handles")}
+    right = n["menu:Open…"][0] + 135  # past the shortcuts, inside the menu's right edge
+    d.crop = (0, 0, 640, 800)
+    d.callouts += [
+        (right + 40, n["menu:Open…"][1]),
+        (right + 40, (n["menu:Insert STEP…"][1] + n["menu:Insert Design…"][1]) / 2),
+        (right + 40, (n["menu:Save"][1] + n["menu:Save As JSON…"][1]) / 2),
+        (right + 40, (n["menu:Export STL…"][1] + n["menu:Export Design as JSON…"][1]) / 2),
+        (right + 40, n["menu:Design Properties…"][1]),
+    ]
+
+
 # -- main ---------------------------------------------------------------------------------------
 
 
