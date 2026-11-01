@@ -1,12 +1,8 @@
 {
  "sources": [],
- "what": "a box's top front edge rounded curvature-continuous size 3, then the top side edge meeting it at the corner rounded the same way alone (Tangent chain off)",
- "source": "invariants",
- "method": "box 40x30x20; the edge y=0, z=20 rounded type curvature 3 (every-box-edge-r3-curvature's section), then the edge x=40, z=20 (now y 3..30) rounded type curvature 3 alone: at y = 3 it runs on tangentially into the first round's end curve on x = 40 (the order-2 section, tangent to the top there), so the second round ends on a curved round, not a planar end face: no closed form. A valid body with every blend seam G2, or a refusal saying the edge continues tangentially (the 1207 precedent).",
- "body_count": 1,
- "outcome": "solid_or_refused",
- "refusal": "continues tangentially",
- "continuity": {
-  "order": "g2"
- }
+ "what": "a box's top front edge rounded curvature-continuous size 3, then the top side edge meeting it at the corner rounded the same way with its tangent chain, which runs on round the first round's end curve: refused, the size 3 has no room there",
+ "source": "analytic",
+ "method": "box 40x30x20; the edge y=0, z=20 rounded type curvature 3 (every-box-edge-r3-curvature's section), then the edge x=40, z=20 (now y 3..30) rounded type curvature 3 with its tangent chain: at y = 3 it runs on tangentially into the first round's end curve on x = 40 (the order-2 section, tangent to the top there; convex), which runs on at (40, 0, 17) into the front upright (x=40, y=0, z 0..17). Along the end curve the second blend's contact line on x = 40 is that curve offset 3 towards its centres of curvature. The section turns 90 degrees from (3, 0) on the top to (0, 3) on the side; with rho(phi) its radius of curvature at tangent angle phi, its setback along the top is 3 = Int_0^(pi/2) rho(phi) cos(phi) dphi, and Int_0^(pi/2) cos(phi) dphi = 1, so 3 is a weighted mean of rho; the order-2 section's curvature is 0 at both ends (rho unbounded there), so rho is not constant and its least value is below 3. The offset by 3 passes that curve's evolute and folds back on itself: the blend passes through itself (as ladder 07-fillets/016's r7 on the r5 round's arc). No such blend exists, so the right answer is a clean refusal for its size.",
+ "outcome": "refused",
+ "refusal": "larger than the faces beside its edges allow"
 }
