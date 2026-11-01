@@ -500,6 +500,11 @@ pub struct Session {
     /// of the design on every frame (#3892), and an answer that walked the hidden lists made a
     /// frame cost grow with the size of the design.
     visibility_index_cache: std::sync::Mutex<Option<occurrences::VisibilityIndex>>,
+    /// The sketches a feature uses, with the design they were read from
+    /// ([`view::sketch_consumed`]): the viewport asks about every sketch several times a frame,
+    /// and walking the features for each made that cost grow with sketches times features.
+    /// Keyed on the design itself, so an edit of any kind builds the set again.
+    consumed_sketches_cache: std::sync::Mutex<Option<view::ConsumedSketches>>,
     /// The bodies each feature made, by name, with the state they were read from
     /// ([`Session::pin_body_names`]).
     made_bodies: MadeBodies,
@@ -721,6 +726,7 @@ impl Session {
             joints_settled: None,
             occurrence_visibility_cache: Default::default(),
             visibility_index_cache: Default::default(),
+            consumed_sketches_cache: Default::default(),
             made_bodies: MadeBodies::new(),
             removed_later_cache: Default::default(),
             occurrence_bodies_cache: Default::default(),
@@ -916,6 +922,14 @@ impl Session {
         }
     }
 
+    /// Let the used sketches' set go before an edit in place: it holds the document weakly, and
+    /// `Arc::make_mut` would move a weakly held document to a new address.
+    fn forget_consumed_sketches(&self) {
+        if let Ok(mut cache) = self.consumed_sketches_cache.lock() {
+            *cache = None;
+        }
+    }
+
     /// Mutable document (copy-on-write).
     pub fn doc_mut(&mut self) -> &mut Document {
         // The placement index keeps the document alive with its answers; let it go before an
@@ -924,6 +938,7 @@ impl Session {
         if let Ok(mut index) = self.placement_index_cache.lock() {
             *index = None;
         }
+        self.forget_consumed_sketches();
         self.forget_dirty_answer();
         self.model.forget_fingerprints();
         Arc::make_mut(&mut self.doc)
@@ -1395,6 +1410,7 @@ impl Session {
             if let Ok(mut index) = self.placement_index_cache.lock() {
                 *index = None;
             }
+            self.forget_consumed_sketches();
             self.forget_dirty_answer();
             self.model.adopt_solved_sketches(Arc::make_mut(&mut self.doc));
         }
@@ -1690,6 +1706,7 @@ impl Session {
             made_bodies: MadeBodies::new(),
             occurrence_visibility_cache: Default::default(),
             visibility_index_cache: Default::default(),
+            consumed_sketches_cache: Default::default(),
             removed_later_cache: Default::default(),
             occurrence_bodies_cache: Default::default(),
             placement_index_cache: Default::default(),
