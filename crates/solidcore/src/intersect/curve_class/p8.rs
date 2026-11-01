@@ -9,6 +9,7 @@
 //! | [`CurveClassification::intersect_uv_discontinuities`] | `IntersectUVDiscontinuties` |
 //! | [`CurveClassification::intersect_3d_discontinuities`] | `Intersect3DDiscontinuties` (surface) |
 //! | [`CurveClassification::intersect_volume_discontinuities`] | `Intersect3DDiscontinuities` (volume) |
+//! | `intersect_volume_discontinuity_report` (private) | `Intersect3DDiscontinuities` (volume) report body |
 //! | `insert_solutions` (private) | `sm_InsertSolutions` call adapter (part 5) |
 //! | `plane_intersections` (private) | `SmSurface::GlobalCurveIntersect` call on a boundary plane |
 //! | [`uv_discontinuity_intervals`] | the classification in `SmCrvOnSurf::GetKnots` |
@@ -21,7 +22,9 @@
 //! omitted. Ignored ordinary statuses use initialized results where available;
 //! evaluation failures without defined outputs return errors, and Unported always propagates.
 //! Empty knot lists/interval arrays return errors instead of native undefined
-//! behaviour. The native U-only unaligned test is retained.
+//! behaviour. The native U-only unaligned volume discontinuity test (WR-156) is retained
+//! by default; `Kernel::fixes.volume_discontinuity_checks_vw_unaligned` opts into
+//! rejecting `V` and `W` unaligned discontinuities with `SM_ERR` as well.
 //! Volume slots 4 and 5 share one 20-solution borrowed buffer natively (WR-155): slot
 //! 5's final solutions overwrite slot 4's leading entries while slot 4 fits the buffer;
 //! an overflowing slot 5 over a borrowed slot 4 returns an error (native buffer state
@@ -738,6 +741,9 @@ impl<O: ClassObject> CurveClassification<O> {
 
     /// Intersect volume discontinuity planes, using parameter or input space as requested.
     /// UV curves return `SM_ERR`; no-discontinuity volumes leave all intervals unchanged.
+    /// By default only `d.u.unaligned` returns `SM_ERR`, matching pinned upstream
+    /// (WR-156); `k.fixes.volume_discontinuity_checks_vw_unaligned` rejects
+    /// `d.v.unaligned` and `d.w.unaligned` with `SM_ERR` as well.
     /// Plane intersections and part-5 insertion may return `Unported` from deeper callees.
     pub fn intersect_volume_discontinuities(
         &mut self,
@@ -755,9 +761,38 @@ impl<O: ClassObject> CurveClassification<O> {
         if !volume.has_discontinuities(k, Some(&mut d), false)? {
             return Ok(());
         }
+        self.intersect_volume_discontinuity_report(
+            k,
+            geometry,
+            curve,
+            volume,
+            &d,
+            handle,
+            in_param_space,
+        )
+    }
+
+    /// Intersects `curve` with the discontinuity planes reported in `d` for `volume`
+    /// (`SmCurveClassification::Intersect3DDiscontinuities(const SmVolume&, ...)` after
+    /// `SmVolume::HasDiscontinuities` reports discontinuities).
+    fn intersect_volume_discontinuity_report(
+        &mut self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        curve: &Curve,
+        volume: &Volume,
+        d: &Discontinuities3d,
+        handle: O,
+        in_param_space: bool,
+    ) -> Result<()> {
         let domain = volume.natural_param_domain()?;
-        // Native tests U three times, not U/V/W.
-        if d.u.unaligned {
+        // WR-156: native tests m_bUnalignedU three times instead of U/V/W.
+        let unaligned = if k.fixes.volume_discontinuity_checks_vw_unaligned {
+            d.u.unaligned || d.v.unaligned || d.w.unaligned
+        } else {
+            d.u.unaligned
+        };
+        if unaligned {
             return Err(SolidError::sm_err(OP));
         }
         let (umin, umax) = ends(&d.u.params)?;
@@ -1195,13 +1230,19 @@ pub fn volume_discontinuity_intervals(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::SM_ERR;
     use crate::geom::assert_array::labels::FACE_TYPE;
     use crate::geom::attribute::ObjectKey;
     use crate::geom::extent1d::Extent1d;
+    use crate::geom::geom_utility::p2::ContinuityType;
     use crate::geom::object::ObjectRef;
     use crate::geom::transform::Transform;
     use crate::intersect::point_class::ClassObjectKind;
-    use crate::surface::volume::VolumeKind;
+    use crate::kernel::UpstreamFixes;
+    use crate::nurbs::math::CPoint;
+    use crate::nurbs::spiral::allocate_nurb_volume;
+    use crate::surface::b_spline_volume::BSplineVolume;
+    use crate::surface::volume::{DirectionDiscontinuities, VolumeKind};
 
     #[derive(Debug, Clone, Copy, PartialEq)]
     enum H {
@@ -1305,5 +1346,271 @@ mod tests {
         assert!(cc
             .intersect_uv_discontinuities(&k, &g, &plane.into(), H::Surface)
             .is_err());
+    }
+
+    fn wr156_dir(unaligned: bool, params: &[f64]) -> DirectionDiscontinuities {
+        let mut conts = vec![ContinuityType::Discontinuous; params.len()];
+        if conts.len() > 2 {
+            for c in &mut conts[1..params.len() - 1] {
+                *c = ContinuityType::C0;
+            }
+        }
+        DirectionDiscontinuities {
+            unaligned,
+            min_cont: if params.len() > 2 {
+                ContinuityType::C0
+            } else {
+                ContinuityType::CInfinity
+            },
+            params: params.to_vec(),
+            conts,
+        }
+    }
+
+    fn wr156_c0_v_unit_cube() -> BSplineVolume {
+        let mut nurb = allocate_nurb_volume([1, 2, 1], [1, 1, 1], [3, 4, 3]).unwrap();
+        nurb.knots_mut(0).copy_from_slice(&[0.0, 0.0, 1.0, 1.0]);
+        nurb.knots_mut(1)
+            .copy_from_slice(&[0.0, 0.0, 0.5, 1.0, 1.0]);
+        nurb.knots_mut(2).copy_from_slice(&[0.0, 0.0, 1.0, 1.0]);
+        for (i, x) in [(0, 0.0), (1, 1.0)] {
+            for (j, y) in [(0, 0.0), (1, 0.5), (2, 1.0)] {
+                for (w, z) in [(0, 0.0), (1, 1.0)] {
+                    *nurb.cpt_mut(i, j, w).unwrap() = CPoint::new(x, y, z, 1.0);
+                }
+            }
+        }
+        BSplineVolume::new(nurb)
+    }
+
+    fn wr156_line() -> Curve {
+        Line::create_line_segment(
+            3,
+            Point3::new(0.5, -0.5, 0.25),
+            Point3::new(0.5, 1.5, 0.75),
+            None,
+        )
+        .unwrap()
+        .into()
+    }
+
+    fn assert_split_intervals(cc: &CurveClassification<FreeHandle>, expected: &[(f64, f64)]) {
+        assert_eq!(cc.intervals().len(), expected.len());
+        for (ivl, &(lo, hi)) in cc.intervals().iter().zip(expected) {
+            assert!((ivl.interval.min() - lo).abs() < 1e-12);
+            assert!((ivl.interval.max() - hi).abs() < 1e-12);
+        }
+    }
+
+    #[test]
+    fn wr156_flag_metadata_and_toggle() {
+        let mut fixes = UpstreamFixes::default();
+        assert!(!fixes.volume_discontinuity_checks_vw_unaligned);
+        assert!(UpstreamFixes::NAMES.contains(&"volume_discontinuity_checks_vw_unaligned"));
+        *fixes
+            .flag_mut("volume_discontinuity_checks_vw_unaligned")
+            .unwrap() = true;
+        assert!(fixes.volume_discontinuity_checks_vw_unaligned);
+        let enabled: Vec<&'static str> = fixes
+            .flags()
+            .filter_map(|(name, on)| on.then_some(name))
+            .collect();
+        assert_eq!(enabled, ["volume_discontinuity_checks_vw_unaligned"]);
+    }
+
+    #[test]
+    fn wr156_v_and_w_unaligned_reports_default_vs_opt_in() {
+        let k_def = Kernel::default();
+        let mut k_fix = Kernel::default();
+        k_fix.fixes.volume_discontinuity_checks_vw_unaligned = true;
+
+        let volume = Volume::oriented(
+            VolumeKind::BSpline(wr156_c0_v_unit_cube()),
+            Some(Transform::default()),
+        );
+        let curve = wr156_line();
+        let geometry = FreeGeometry {
+            curve: &curve,
+            target: FreeTarget::Volume(&volume),
+        };
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+
+        let v_only = Discontinuities3d {
+            has_discontinuities: true,
+            min_continuity: ContinuityType::C0,
+            u: wr156_dir(false, &[0.0, 1.0]),
+            v: wr156_dir(true, &[0.0, 0.5, 1.0]),
+            w: wr156_dir(false, &[0.0, 1.0]),
+        };
+        let w_only = Discontinuities3d {
+            has_discontinuities: true,
+            min_continuity: ContinuityType::C0,
+            u: wr156_dir(false, &[0.0, 1.0]),
+            v: wr156_dir(false, &[0.0, 1.0]),
+            w: wr156_dir(true, &[0.0, 0.5, 1.0]),
+        };
+        let vw_both = Discontinuities3d {
+            has_discontinuities: true,
+            min_continuity: ContinuityType::C0,
+            u: wr156_dir(false, &[0.0, 1.0]),
+            v: wr156_dir(true, &[0.0, 0.5, 1.0]),
+            w: wr156_dir(true, &[0.0, 0.55, 1.0]),
+        };
+
+        let four = [(0.0, 0.25), (0.25, 0.5), (0.5, 0.75), (0.75, 1.0)];
+        let five = [
+            (0.0, 0.25),
+            (0.25, 0.5),
+            (0.5, 0.6),
+            (0.6, 0.75),
+            (0.75, 1.0),
+        ];
+
+        for in_param_space in [true, false] {
+            for (report, expected) in [
+                (&v_only, &four[..]),
+                (&w_only, &four[..]),
+                (&vw_both, &five[..]),
+            ] {
+                let mut cc_def =
+                    CurveClassification::with_curve_interval(&k_def, FreeHandle::Curve, ivl, 1e-7);
+                cc_def
+                    .intersect_volume_discontinuity_report(
+                        &k_def,
+                        &geometry,
+                        &curve,
+                        &volume,
+                        report,
+                        FreeHandle::Target,
+                        in_param_space,
+                    )
+                    .unwrap();
+                assert_split_intervals(&cc_def, expected);
+
+                let mut cc_fix =
+                    CurveClassification::with_curve_interval(&k_fix, FreeHandle::Curve, ivl, 1e-7);
+                let before = cc_fix.intervals().to_vec();
+                let err = cc_fix
+                    .intersect_volume_discontinuity_report(
+                        &k_fix,
+                        &geometry,
+                        &curve,
+                        &volume,
+                        report,
+                        FreeHandle::Target,
+                        in_param_space,
+                    )
+                    .unwrap_err();
+                assert_eq!(err.sm_status(), Some(SM_ERR));
+                assert_eq!(cc_fix.intervals(), before);
+            }
+        }
+    }
+
+    #[test]
+    fn wr156_u_unaligned_compounded_and_aligned_volumes_match_across_modes() {
+        let k_def = Kernel::default();
+        let mut k_fix = Kernel::default();
+        k_fix.fixes.volume_discontinuity_checks_vw_unaligned = true;
+
+        let curve = wr156_line();
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+        let aligned = Volume::new(VolumeKind::BSpline(wr156_c0_v_unit_cube()));
+        let geometry = FreeGeometry {
+            curve: &curve,
+            target: FreeTarget::Volume(&aligned),
+        };
+
+        let u_only = Discontinuities3d {
+            has_discontinuities: true,
+            min_continuity: ContinuityType::C0,
+            u: wr156_dir(true, &[0.0, 0.5, 1.0]),
+            v: wr156_dir(false, &[0.0, 1.0]),
+            w: wr156_dir(false, &[0.0, 1.0]),
+        };
+        for k in [&k_def, &k_fix] {
+            let mut cc = CurveClassification::with_curve_interval(k, FreeHandle::Curve, ivl, 1e-7);
+            let before = cc.intervals().to_vec();
+            let err = cc
+                .intersect_volume_discontinuity_report(
+                    k,
+                    &geometry,
+                    &curve,
+                    &aligned,
+                    &u_only,
+                    FreeHandle::Target,
+                    true,
+                )
+                .unwrap_err();
+            assert_eq!(err.sm_status(), Some(SM_ERR));
+            assert_eq!(cc.intervals(), before);
+        }
+
+        let compounded = Volume::with_maps(
+            VolumeKind::Transform(Transform::default()),
+            None,
+            Some(Volume::new(VolumeKind::BSpline(wr156_c0_v_unit_cube()))),
+        )
+        .unwrap();
+        let mut disconts = Discontinuities3d::new();
+        assert!(compounded
+            .has_discontinuities(&k_def, Some(&mut disconts), false)
+            .unwrap());
+        assert!(disconts.u.unaligned && disconts.v.unaligned && disconts.w.unaligned);
+        let compounded_geom = FreeGeometry {
+            curve: &curve,
+            target: FreeTarget::Volume(&compounded),
+        };
+        for k in [&k_def, &k_fix] {
+            let mut cc = CurveClassification::with_curve_interval(k, FreeHandle::Curve, ivl, 1e-7);
+            let before = cc.intervals().to_vec();
+            let err = cc
+                .intersect_volume_discontinuities(
+                    k,
+                    &compounded_geom,
+                    &compounded,
+                    FreeHandle::Target,
+                    true,
+                )
+                .unwrap_err();
+            assert_eq!(err.sm_status(), Some(SM_ERR));
+            assert_eq!(cc.intervals(), before);
+            let err = volume_discontinuity_intervals(k, &curve, ivl, 1e-7, &compounded, true)
+                .unwrap_err();
+            assert_eq!(err.sm_status(), Some(SM_ERR));
+        }
+
+        let mut aligned_disconts = Discontinuities3d::new();
+        assert!(aligned
+            .has_discontinuities(&k_def, Some(&mut aligned_disconts), false)
+            .unwrap());
+        assert!(
+            !aligned_disconts.u.unaligned
+                && !aligned_disconts.v.unaligned
+                && !aligned_disconts.w.unaligned
+        );
+
+        let mut cc_def =
+            CurveClassification::with_curve_interval(&k_def, FreeHandle::Curve, ivl, 1e-7);
+        let mut cc_fix =
+            CurveClassification::with_curve_interval(&k_fix, FreeHandle::Curve, ivl, 1e-7);
+        cc_def
+            .intersect_volume_discontinuities(&k_def, &geometry, &aligned, FreeHandle::Target, true)
+            .unwrap();
+        cc_fix
+            .intersect_volume_discontinuities(&k_fix, &geometry, &aligned, FreeHandle::Target, true)
+            .unwrap();
+        assert_eq!(cc_def.intervals(), cc_fix.intervals());
+        assert_split_intervals(
+            &cc_def,
+            &[(0.0, 0.25), (0.25, 0.5), (0.5, 0.75), (0.75, 1.0)],
+        );
+
+        let ivls_def =
+            volume_discontinuity_intervals(&k_def, &curve, ivl, 1e-7, &aligned, true).unwrap();
+        let ivls_fix =
+            volume_discontinuity_intervals(&k_fix, &curve, ivl, 1e-7, &aligned, true).unwrap();
+        assert_eq!(ivls_def, ivls_fix);
+        assert_eq!(ivls_def.len(), 4);
     }
 }

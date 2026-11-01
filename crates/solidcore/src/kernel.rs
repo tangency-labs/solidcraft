@@ -471,6 +471,14 @@ pub struct UpstreamFixes {
     /// Volume line-domain checks using `SmExtent3d::ContainsLineSeg3d` require
     /// both endpoints inside the natural parameter box instead of either (WR-3).
     pub extent3d_contains_both_segment_endpoints: bool,
+    /// `SmCurveClassification::Intersect3DDiscontinuities(const SmVolume&, ...)` checks
+    /// `m_bUnalignedU || m_bUnalignedV || m_bUnalignedW` instead of testing
+    /// `m_bUnalignedU` three times, so unaligned `V` or `W` discontinuities return
+    /// `SM_ERR` rather than proceeding to build constant-parameter planes across them
+    /// (WR-156, #2171;
+    /// `plan/upstream-issues/WR-156--addendum-2026-11-01-check-vw-unaligned.md`).
+    /// Off by default for pinned C++ parity.
+    pub volume_discontinuity_checks_vw_unaligned: bool,
     /// `SmPeriodicExtent1d::AddInterval` on an empty extent sets `[from, to]` rather
     /// than assuming the full period `[0, period]` (WR-6, 2026-10-31 addendum).
     /// Off by default for pinned C++ parity.
