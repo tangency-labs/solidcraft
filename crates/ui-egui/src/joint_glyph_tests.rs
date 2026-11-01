@@ -1,10 +1,11 @@
 //! Joint glyphs in a crowded assembly (#6404): a rigid joint draws a small square without the
 //! motion axis and ring, glyphs shrink with the parts they join when zoomed out, and glyphs
-//! piled on one another are drawn faint, except a picked one.
+//! piled on one another are drawn faint, except a picked one. Hovering a glyph names the joint
+//! and its type.
 
 use serde_json::json;
 
-use crate::dialogs_assembly::{JointGlyph, joint_glyph_plan};
+use crate::dialogs_assembly::{JointGlyph, joint_glyph_at, joint_glyph_plan, joint_glyph_tip};
 use crate::scenario::Harness;
 
 /// Components A (grounded), B and C, 20 × 20 × 10 boxes (diagonal 30); B joined to A by a
@@ -48,6 +49,22 @@ fn a_rigid_joint_draws_a_square_and_a_moving_joint_its_axis() {
     assert!(glyph(&plan, glue).rigid, "a rigid joint has no motion to show");
     let order: Vec<u64> = plan.iter().map(|g| g.id).collect();
     assert_eq!(order, [hinge, glue], "moving joints are planned (and so drawn on top) before rigid ones");
+}
+
+#[test]
+fn hovering_a_glyph_names_its_joint_and_type() {
+    let mut h = harness();
+    let (hinge, glue) = (id(&h, "Hinge"), id(&h, "Glue"));
+    let plan = plan_at(&mut h, 120.0);
+    let (at_hinge, at_glue) = (glyph(&plan, hinge).centre, glyph(&plan, glue).centre);
+    assert_eq!(joint_glyph_at(&plan, at_glue + egui::vec2(3.0, -2.0)), Some(glue));
+    assert_eq!(joint_glyph_at(&plan, at_hinge), Some(hinge));
+    assert_eq!(joint_glyph_at(&plan, at_glue + egui::vec2(20.0, 0.0)), None, "off the glyph: no tooltip");
+    assert_eq!(joint_glyph_tip(&h.app, glue).as_deref(), Some("Glue · Rigid"));
+    assert_eq!(joint_glyph_tip(&h.app, hinge).as_deref(), Some("Hinge · Revolute"));
+    // Piled up far out, the pointer names the glyph drawn on top, not the faded one under it.
+    let far = plan_at(&mut h, 20_000.0);
+    assert_eq!(joint_glyph_at(&far, glyph(&far, hinge).centre), Some(hinge), "{far:?}");
 }
 
 #[test]
