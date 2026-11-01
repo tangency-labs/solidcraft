@@ -122,6 +122,19 @@ fn replaced_by_a_later_one(id: &str) -> bool {
 }
 
 impl SolveApp {
+    /// A direct exit or editor switch supersedes any queued sketch exit. A late worker must
+    /// never finish a different sketch that was opened while it computed.
+    pub(crate) fn take_sketch_exit(&mut self) -> Option<String> {
+        let is_exit = |id: &str| matches!(id, "sketch.finish" | "sketch.cancel");
+        let pending = self.deferred.as_ref().filter(|job| is_exit(&job.command.0)).map(|job| job.command.0.clone());
+        if pending.is_some() {
+            self.deferred = None;
+        }
+        let queued = self.deferred_queue.iter().find(|(id, _)| is_exit(id)).map(|(id, _)| id.clone());
+        self.deferred_queue.retain(|(id, _)| !is_exit(id));
+        pending.or(queued)
+    }
+
     /// Run a command that may recompute much of the history, off the window thread when it takes
     /// a while (see the module notes). `Ok(Null)` when it is left computing or waiting its turn:
     /// its outcome then shows as any command's does (an error in the status line).

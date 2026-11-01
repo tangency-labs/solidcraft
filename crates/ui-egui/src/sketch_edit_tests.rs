@@ -8,6 +8,86 @@ fn first_sketch(app: &SolveApp) -> u64 {
     app.session.doc.features.iter().find(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.id).unwrap()
 }
 
+fn plate_and_cylinder() -> crate::scenario::Harness {
+    use serde_json::json;
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Sketch1"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"name": "Plate", "distance": 10})),
+        ("solid.cylinder", json!({"name": "Cyl", "base": [60, 15, 0], "radius": 8, "height": 20, "operation": "new"})),
+    ] {
+        h.app.run(command, params).unwrap();
+    }
+    h
+}
+
+#[test]
+fn finishing_an_edited_sketch_undoes_the_edit_with_the_complete_design_visible() {
+    use serde_json::json;
+    for engine_finish in [false, true] {
+        let mut h = plate_and_cylinder();
+        let before = h.app.session.doc.to_json();
+        let id = first_sketch(&h.app);
+        h.app.edit_sketch(id);
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [20, 20]})).unwrap();
+        if engine_finish {
+            h.app.run("sketch.finish", json!({})).unwrap();
+        } else {
+            h.app.finish_sketch();
+        }
+        assert_eq!(h.app.session.doc.marker, None);
+        let edited = h.app.session.doc.to_json();
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.marker, None, "Undo must not expose the temporary sketch rollback");
+        assert_eq!(h.app.session.active_sketch, None);
+        assert_eq!(h.app.session.doc.to_json(), before, "one Undo takes back the sketch edit");
+        assert_eq!(h.app.session.model.state().bodies.len(), 2);
+        let volume = h.app.run("inspect.measure", json!({"bodies": ["Body1"]})).unwrap();
+        assert!((volume["total"]["volume_mm3"].as_f64().unwrap() - 12000.0).abs() < 1e-6);
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.to_json(), edited);
+        assert_eq!(h.app.session.active_sketch, None);
+        assert_eq!(h.app.session.model.state().bodies.len(), 2);
+    }
+}
+
+#[test]
+fn engine_finish_restores_the_marker_from_a_ui_sketch_edit() {
+    use serde_json::json;
+    for marker in [None, Some(0), Some(2)] {
+        let mut h = plate_and_cylinder();
+        h.app.run("timeline.roll_to", json!({"position": marker})).unwrap();
+        let before = h.app.session.doc.to_json();
+        let bodies = h.app.session.model.state().bodies.len();
+        let id = first_sketch(&h.app);
+        h.app.edit_sketch(id);
+        // Deliberately bypass the window's completion callback: the engine owns restoration.
+        h.app.session.execute("sketch.finish", &json!({})).unwrap();
+        assert_eq!(h.app.session.active_sketch, None);
+        assert_eq!(h.app.session.doc.to_json(), before);
+        assert_eq!(h.app.session.model.state().bodies.len(), bodies);
+    }
+}
+
+#[test]
+fn unchanged_sketch_edit_keeps_undo_and_redo() {
+    use serde_json::json;
+    let mut h = plate_and_cylinder();
+    h.app.run("edit.undo", json!({})).unwrap();
+    let before = h.app.session.doc.to_json();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let id = first_sketch(&h.app);
+    h.app.edit_sketch(id);
+    h.app.finish_sketch();
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+    h.app.run("edit.redo", json!({})).unwrap();
+    assert_eq!(h.app.session.model.state().bodies.len(), 2);
+}
+
 #[test]
 fn edit_sketch_rolls_back_and_finish_restores() {
     let mut app = sample_app();
@@ -456,9 +536,10 @@ mod exit_view_preference {
     #[test]
     fn a_sketch_opened_by_a_command_leaves_the_view_alone() {
         let (mut h, _) = sketching(SketchExitView::Previous);
-        // Finished by the command, so the views saved for this sketch stay behind.
+        // A programmatic finish clears this sketch's saved view too. A later sketch opened
+        // entirely by commands must not inherit that view.
         h.app.run("sketch.finish", json!({})).unwrap();
-        assert!(h.app.pre_sketch_cam.is_some());
+        assert!(h.app.pre_sketch_cam.is_none());
         h.app.run("sketch.create", json!({"plane": "XZ"})).unwrap();
         h.app.cam.orbit(60.0, -40.0);
         h.app.cam_anim = None;
