@@ -6597,7 +6597,7 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
         app.viewport.axis_drag = origin.filter(|p| match app.preferences.navigator_style {
             crate::prefs::NavigatorStyle::Axes => axis_rect(app, rect).contains(*p),
             crate::prefs::NavigatorStyle::Cube => {
-                navigation_cube::drag_origin(&app.cam, axis_center(app, rect), *p, axis_rect(app, rect).width() / navigation_cube::DESIGN_SIZE)
+                navigation_cube::drag_origin(app, axis_center(app, rect), *p, axis_rect(app, rect).width() / navigation_cube::DESIGN_SIZE)
             }
         });
         if app.viewport.axis_drag.is_some() {
