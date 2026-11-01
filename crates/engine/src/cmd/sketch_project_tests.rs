@@ -1298,3 +1298,56 @@ fn a_thicker_angle_moves_the_projected_face_of_the_sketch_on_it() {
     check(&s);
     check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
 }
+
+/// A second placement's body is projected where that placement puts it (#9957): a sketch sees
+/// "Block (Part:2)" as the browser shows it, not only the first placement's "Block", on a plane
+/// and on a face alike.
+#[test]
+fn a_second_placements_face_and_edge_project_where_it_is_placed() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":100,"width":40,"height":5,"body_name":"Plate"}));
+    let part = run(&mut s, "component.create", json!({"name":"Part"}));
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10,"body_name":"Block"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    run(&mut s, "occurrence.copy", json!({"component":part["component"],"translate":[50,0,5]}));
+    let mut sketches = Vec::new();
+    let picks = [
+        (json!({"plane":"XY","offset":15}), json!({"body":"Block (Part:2)","face":[60,10,15]})),
+        (json!({"plane":"XY","offset":15}), json!({"body":"Block (Part:2)","edge":[60,20,15]})),
+        (json!({"plane":{"face":[90,35,5]},"project_edges":false}), json!({"body":"Block (Part:2)","face":[60,10,15]})),
+    ];
+    for (plane, pick) in picks {
+        let id = run(&mut s, "sketch.create", plane)["sketch"].as_u64().unwrap();
+        let projected = run(&mut s, "sketch.project", json!({"refs":[pick]}));
+        assert_eq!(projected["links"].as_array().map(Vec::len), Some(1), "{projected}");
+        run(&mut s, "sketch.finish", json!({}));
+        sketches.push(id);
+    }
+    // Every projected point is on the copy (x 50..70, y from `y`), none on the original.
+    let check = |s: &Session, y: f64| {
+        let state = s.model.state();
+        for id in &sketches {
+            let ss = state.sketch(*id).unwrap();
+            let sk = &ss.sketch;
+            assert!(sk.links.iter().all(|l| !l.lost), "{:?}", sk.links);
+            let points: Vec<_> =
+                sk.links.iter().flat_map(|l| sk.link_points(&l.id)).filter_map(|p| sk.points.get(p)).map(|p| ss.plane.to_world(p.pos)).collect();
+            assert!(!points.is_empty());
+            assert!(points.iter().all(|p| p.x > 49.9 && p.x < 70.1 && p.y > y - 0.1 && p.y < y + 20.1), "sketch {id}, y {y}: {points:?}");
+        }
+    };
+    check(&s, 0.0);
+    // A design opened again, so rebuilt from its features, finds the copy as well.
+    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()), 0.0);
+    // Moving the copy moves what was projected from it.
+    let first = s.doc.occurrences[0].id;
+    let copy = s.doc.occurrences.iter().map(|o| o.id).find(|id| *id != first).unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence":copy,"translate":[0,15,0],"capture":true}));
+    check(&s, 15.0);
+    // Renaming the part or the body renames the copy ("Base (Housing:2)"): the links follow it.
+    run(&mut s, "component.rename", json!({"component":part["component"],"name":"Housing"}));
+    run(&mut s, "body.rename", json!({"body":"Block","name":"Base"}));
+    assert!(s.model.state().sketch(sketches[0]).unwrap().sketch.links.iter().all(|l| l.source.bodies() == ["Base (Housing:2)"]));
+    check(&s, 15.0);
+    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()), 15.0);
+}

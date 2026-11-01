@@ -288,7 +288,10 @@ impl Mapper<'_> {
                         m.insert(k.into(), y);
                     }
                 }
+                // A sketch's view of the model holds a further placement by the name the world
+                // gives it (`with_placed_copies`), so that name stays (#9957).
                 if let Some(bn) = &b
+                    && !self.here
                     && let Some(own) = self.own_name(bn)
                 {
                     m.insert("body".into(), Value::String(own));

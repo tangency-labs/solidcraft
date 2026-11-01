@@ -1689,6 +1689,9 @@ fn cache_key(f: &Feature, chain_fp: u64, local: u64, ctx: u64, state: &ModelStat
 #[derive(Default)]
 struct PlacementReads {
     all: bool,
+    /// A body named that `st` lacks: a further placement's (`Block (Part:2)`), found through
+    /// its occurrence (#9957), or gone.
+    unlisted: bool,
     components: std::collections::BTreeSet<u64>,
     paths: Vec<Vec<u64>>,
     bodies: std::collections::BTreeSet<String>,
@@ -1727,14 +1730,17 @@ impl PlacementReads {
         }
     }
 
-    /// The component of body `name` in `st`; every component when the body is not there (a
-    /// projection then takes the body nearest its point, wherever that is).
+    /// The component of body `name` in `st`; every component and every placement when the body
+    /// is not there (a further placement's body, or the body nearest its point, wherever that is).
     fn body(&mut self, doc: &Document, st: Option<&ModelState>, name: &str) {
         match st.and_then(|st| st.body(name)) {
             Some(b) => {
                 self.components.insert(doc.model_body_component(b));
             }
-            None => self.all = true,
+            None => {
+                self.all = true;
+                self.unlisted = true;
+            }
         }
     }
 
@@ -1961,6 +1967,9 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
         }
     }
     hash_placed_bodies(doc, st, &reads.bodies, &inverse, &mut h);
+    if reads.unlisted {
+        placements_hash(doc).hash(&mut h);
+    }
     // Legacy and component-wide reads still need the conservative offset dependency. Body
     // reads above already include just their own offsets, in the frame that evaluates them.
     if reads.all || !reads.components.is_empty() || !reads.paths.is_empty() {
@@ -7342,6 +7351,14 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 None if !plane_reads_geometry(plane) && sketch.links.is_empty() => std::borrow::Cow::Borrowed(st),
                 None => state_in_frame(doc, st, f.component),
             };
+            // A further placement a link reads is placed in its frame too (#9957).
+            let named: Vec<&str> = sketch.links.iter().flat_map(|l| l.source.bodies()).collect();
+            let fst = match anchor.map(|anchor| anchor.author_frame(doc, f.component)) {
+                _ if named.is_empty() => fst,
+                Some(Ok(frame)) => with_placed_copies(doc, st, fst, &frame, &named),
+                Some(Err(_)) => fst,
+                None => with_placed_copies(doc, st, fst, &doc.component_transform(f.component), &named),
+            };
             let (plane, face_warning) = match (anchor, plane) {
                 (Some(_), plane) => doc.resolve_attached_plane_noted(vals, plane, f.component, st, &fst)?,
                 // A flat face of a sheet: the panel's exact plane, from its flat region and fold.
@@ -8448,6 +8465,51 @@ pub fn state_in_frame_at<'a>(doc: &Document, st: &'a ModelState, comp: u64, fram
         }
     }
     Cow::Owned(out)
+}
+
+/// `framed` (the model `st` in the frame that `frame` places in the world) with the further
+/// placements `names` names (`Block (Part:2)`), where they are in the world. A component's model
+/// holds its first placement only, so a sketch projecting a copy's face found no body of that
+/// name and took the first placement's (#9957). Only the named ones are placed: placing every
+/// body of an assembly for each sketch made sketch edits as slow as the design is big.
+pub fn with_placed_copies<'a>(
+    doc: &Document,
+    st: &ModelState,
+    framed: std::borrow::Cow<'a, ModelState>,
+    frame: &Mat,
+    names: &[&str],
+) -> std::borrow::Cow<'a, ModelState> {
+    let missing: Vec<&str> = names.iter().copied().filter(|n| !n.is_empty() && framed.body(n).is_none()).collect();
+    if missing.is_empty() || doc.occurrences.is_empty() {
+        return framed;
+    }
+    let Some(inv) = crate::mat_inverse(frame) else { return framed };
+    let mut by_component: std::collections::HashMap<u64, Vec<&ModelBody>> = std::collections::HashMap::new();
+    for (b, owner) in st.bodies.iter().zip(doc.model_body_components(st)) {
+        by_component.entry(owner).or_default().push(b);
+    }
+    let world = crate::WorldNames::new(doc, st);
+    let mut placed: Vec<ModelBody> = Vec::new();
+    for (comp, path, m) in doc.placements() {
+        for b in by_component.get(&comp).into_iter().flatten() {
+            let name = world.name(&b.name, comp, &path);
+            if !missing.contains(&name.as_str()) || placed.iter().any(|p| p.name == name) {
+                continue;
+            }
+            let bm = doc.model_body_offset(b).map(|o| crate::mat_mul(&m, o)).unwrap_or(m);
+            if let Ok(mut copy) = st.body_in_frame(b, &crate::mat_mul(&inv, &bm)) {
+                copy.name = name;
+                copy.source_name = Some(b.definition_name().to_string());
+                placed.push(copy);
+            }
+        }
+    }
+    if placed.is_empty() {
+        return framed;
+    }
+    let mut out = framed.into_owned();
+    out.bodies.extend(placed);
+    std::borrow::Cow::Owned(out)
 }
 
 /// The model placed in the world: each component's bodies, sketches, threads and construction

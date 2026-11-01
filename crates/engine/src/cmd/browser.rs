@@ -1025,6 +1025,7 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let previous = s.doc.clone();
     let st = s.model.state();
+    let placed = s.doc.body_frames_with_source(&st);
     let b = st.body(&old).ok_or_else(|| bad(cmd, format!("no body `{old}`")))?;
     if st.body(name).is_some() {
         return Err(bad(cmd, format!("another body is called `{name}`")));
@@ -1142,6 +1143,8 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, e));
     }
     d.rename_body_keys(&old, name);
+    // A sketch projecting the body in another placement of its component keeps it.
+    super::sketch_project::follow_placed_renames(d, &st, &placed, Some((&old, name)));
     s.remember_body_rename(&previous, &old, name);
     Ok(json!({"body": old, "name": name}))
 }

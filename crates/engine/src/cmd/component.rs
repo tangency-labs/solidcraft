@@ -403,6 +403,8 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
     let id = component(s, p, "component", cmd)?;
     let name =
         str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` must be 1…128 characters"))?;
+    let st = s.model.state();
+    let placed = s.doc.body_frames_with_source(&st);
     let d = s.doc_mut();
     if id == 0 {
         d.name = name.to_string();
@@ -415,6 +417,8 @@ fn rename(s: &mut Session, p: &Value) -> Result<Value> {
                 o.name = format!("{name}:{k}");
             }
         }
+        // A sketch projecting a body of one of those placements keeps it.
+        super::sketch_project::follow_placed_renames(d, &st, &placed, None);
     }
     Ok(json!({"component": id, "name": name}))
 }
