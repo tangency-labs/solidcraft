@@ -68,9 +68,11 @@
 //!   of two different edges; an edge owns its curve in the port, so two edges never
 //!   share one (`bSingleCurveOnEdges` is always false), as in `query::edge`.
 //! - **`SmCrvOnSurf`** preserves a face surface's concrete dispatch.
-//! - **`FindElementInMaskedArray`** tests `lBitMask & (1<ii)` upstream (a comparison,
-//!   not a shift); the port keeps that test, so only elements `2..` are searched and only
-//!   when bit 0 of the mask is set (`plan/upstream-issues.md`).
+//! - **`FindElementInMaskedArray` (`WR-167`, opt-in).** Upstream tests `lBitMask & (1<ii)`
+//!   (a comparison, not a shift), so only elements `2..` are searched and only when bit 0
+//!   of the mask (`SM_SS_UMIN`) is set. The port keeps that test by default; with
+//!   [`Kernel::fixes`]'s `masked_array_uses_bit_shift` set, element `ii` is searched when
+//!   bit `ii` (`1 << ii`, shift-safe) of the mask is set (`plan/upstream-issues/` `WR-167`).
 //! - **Dropped** (no effect on results in the reference build, which defines neither
 //!   `SM_DEBUG_CODE` nor active asserts): the debug graphics and dumps, every
 //!   `SM_ASSERT*` and `SM_DBG_WARN`, `lFaceIndx` of `SectorClassifyCurveOn` (debug only),
@@ -1329,12 +1331,21 @@ pub struct LoopBisector {
     pub has_curve: bool,
 }
 
-/// `SmTArray<SmPoint3d>::FindElementInMaskedArray(p, mask, index)`, with upstream's
-/// `lBitMask & (1<ii)` test (see the module Deviations).
-fn find_element_in_masked_array(arr: &[Point3], p: Point3, mask: u64) -> bool {
-    arr.iter()
-        .enumerate()
-        .any(|(ii, &e)| (mask & u64::from(1 < ii)) != 0 && p.approx_eq(e))
+/// `SmTArray<SmPoint3d>::FindElementInMaskedArray(p, mask, index)`: with
+/// `use_bit_shift` `false` (default), upstream's `lBitMask & (1<ii)` test; with
+/// `use_bit_shift` `true` (`WR-167`), bit `ii` (`1 << ii`, shift-safe).
+fn find_element_in_masked_array(arr: &[Point3], p: Point3, mask: u64, use_bit_shift: bool) -> bool {
+    arr.iter().enumerate().any(|(ii, &e)| {
+        let bit = if use_bit_shift {
+            u32::try_from(ii)
+                .ok()
+                .and_then(|s| 1u64.checked_shl(s))
+                .unwrap_or(0)
+        } else {
+            u64::from(1 < ii)
+        };
+        (mask & bit) != 0 && p.approx_eq(e)
+    })
 }
 
 /// `sms_FindAndClassifyLoopBisector`: for `SmFace::ClassifyLoops`, classifies a UV
@@ -1551,7 +1562,12 @@ pub(crate) fn find_and_classify_loop_bisector_cached<O: LoopObject + PartialEq>(
 
         // skip edge evaluations on singularities
         if props.poles != SS_NONE
-            && find_element_in_masked_array(&props.pole_points, sp[0], props.poles)
+            && find_element_in_masked_array(
+                &props.pole_points,
+                sp[0],
+                props.poles,
+                k.fixes.masked_array_uses_bit_shift,
+            )
         {
             // when more edges remain to be tested - skip this edge on Singularity
             if !is_last {
@@ -3132,12 +3148,236 @@ mod tests {
             Point3::new(3.0, 0.0, 0.0),
         ];
         // elements 0 and 1 are never searched
-        assert!(!find_element_in_masked_array(&pts, pts[0], 0xF));
-        assert!(!find_element_in_masked_array(&pts, pts[1], 0xF));
+        assert!(!find_element_in_masked_array(&pts, pts[0], 0xF, false));
+        assert!(!find_element_in_masked_array(&pts, pts[1], 0xF, false));
         // elements 2.. only with bit 0 set
-        assert!(find_element_in_masked_array(&pts, pts[2], 1));
-        assert!(!find_element_in_masked_array(&pts, pts[2], 2));
-        assert!(find_element_in_masked_array(&pts, pts[3], 0x1));
+        assert!(find_element_in_masked_array(&pts, pts[2], 1, false));
+        assert!(!find_element_in_masked_array(&pts, pts[2], 2, false));
+        assert!(find_element_in_masked_array(&pts, pts[3], 0x1, false));
+    }
+
+    #[test]
+    fn wr167_find_element_in_masked_array_comparison_vs_bit_shift() {
+        let pts = [
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.0, 2.0, 0.0),
+            Point3::new(-3.0, 0.0, 0.0),
+            Point3::new(0.0, -4.0, 0.0),
+        ];
+        let side_masks = [SS_UMIN, SS_VMIN, SS_UMAX, SS_VMAX];
+        assert_eq!(side_masks, [1, 2, 4, 8]);
+
+        // Default (`false`) reproduces pinned v1.0.1 `(lBitMask & (1 < ii)) != 0`:
+        // - indices 0 and 1 are never matched under any mask, including u64::MAX;
+        // - indices 2 and 3 falsely match whenever SS_UMIN (bit 0) is set, even when
+        //   their own bits (SS_UMAX = 4, SS_VMAX = 8) are clear;
+        // - indices 2 and 3 miss when SS_UMAX or SS_VMAX is set without SS_UMIN.
+        for mask in [
+            SS_NONE,
+            SS_UMIN,
+            SS_VMIN,
+            SS_UMAX,
+            SS_VMAX,
+            SS_VMIN | SS_UMAX | SS_VMAX,
+            0xF,
+            u64::MAX,
+        ] {
+            assert!(!find_element_in_masked_array(&pts, pts[0], mask, false));
+            assert!(!find_element_in_masked_array(&pts, pts[1], mask, false));
+        }
+        assert!(find_element_in_masked_array(&pts, pts[2], SS_UMIN, false));
+        assert!(find_element_in_masked_array(&pts, pts[3], SS_UMIN, false));
+        for mask in [SS_VMIN, SS_UMAX, SS_VMAX, SS_VMIN | SS_UMAX | SS_VMAX] {
+            assert!(!find_element_in_masked_array(&pts, pts[2], mask, false));
+            assert!(!find_element_in_masked_array(&pts, pts[3], mask, false));
+        }
+
+        // Opt-in (`true`) matches element `ii` if and only if `(mask & (1 << ii)) != 0`:
+        for mask in 0u64..16 {
+            for (ii, &pt) in pts.iter().enumerate() {
+                let want = (mask & (1u64 << ii)) != 0;
+                assert_eq!(
+                    find_element_in_masked_array(&pts, pt, mask, true),
+                    want,
+                    "mask={mask:#x}, ii={ii}"
+                );
+            }
+        }
+        assert!(!find_element_in_masked_array(
+            &pts,
+            Point3::new(9.0, 9.0, 9.0),
+            0xF,
+            true
+        ));
+
+        // Shift bounds safety for indices >= 64 (and bit 63 boundary):
+        let mut long = vec![Point3::new(-1.0, -1.0, -1.0); 70];
+        let p63 = Point3::new(63.0, 0.0, 0.0);
+        let p64 = Point3::new(64.0, 0.0, 0.0);
+        let p69 = Point3::new(69.0, 0.0, 0.0);
+        long[63] = p63;
+        long[64] = p64;
+        long[69] = p69;
+        assert!(find_element_in_masked_array(&long, p63, 1u64 << 63, true));
+        assert!(!find_element_in_masked_array(
+            &long,
+            p63,
+            !(1u64 << 63),
+            true
+        ));
+        assert!(!find_element_in_masked_array(&long, p64, u64::MAX, true));
+        assert!(!find_element_in_masked_array(&long, p69, u64::MAX, true));
+    }
+
+    #[test]
+    fn wr167_bisector_skips_pole_edge_on_vmin_or_vmax_under_opt_in() {
+        use crate::heal::face_props::Tri;
+
+        let mut k_build = Kernel::default();
+        assert!(!k_build.fixes.masked_array_uses_bit_shift);
+        {
+            let flag = k_build
+                .fixes
+                .flag_mut("masked_array_uses_bit_shift")
+                .expect("masked_array_uses_bit_shift must be registered in UpstreamFixes");
+            *flag = true;
+        }
+        assert!(k_build.fixes.masked_array_uses_bit_shift);
+        k_build.fixes.masked_array_uses_bit_shift = false;
+
+        // Asymmetric rectangle `[2, 8] x [2, 7]` on the plane `S(u, v) = (u, v, 0)` over
+        // `[0, 12] x [0, 11]`, so adjacent edges are perpendicular and their classifying
+        // bisectors have distinct start points, midpoints and orthogonal directions.
+        let dom = Extent2d::from_bounds(0.0, 0.0, 12.0, 11.0);
+        let plane = Plane::new(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::X,
+            Vec3::Y,
+            Vec2::new(1.0, 1.0),
+            &dom,
+        );
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let corners = [(2.0, 2.0), (8.0, 2.0), (8.0, 7.0), (2.0, 7.0)];
+        let curves = (0..4)
+            .map(|i| {
+                let (x0, y0) = corners[i];
+                let (x1, y1) = corners[(i + 1) % 4];
+                Curve::from(
+                    Line::create_line_segment(
+                        3,
+                        Point3::new(x0, y0, 0.0),
+                        Point3::new(x1, y1, 0.0),
+                        Some(&interval),
+                    )
+                    .unwrap(),
+                )
+            })
+            .collect();
+        let b =
+            trim_surface_with_3d_curves(&mut k_build, Surface::from(plane), &[4], curves).unwrap();
+        let faces = crate::topology::brep::p1::faces(&b, None).unwrap();
+        assert_eq!(faces.len(), 1);
+        let f = faces[0];
+        let loops = crate::topology::face::p2::loops(&b, f, false, None).unwrap();
+        assert_eq!(loops.len(), 1);
+        let tgt_loop = loops[0];
+        let tgt_lu = b.loop_(tgt_loop).unwrap().loopuse.unwrap();
+        let eus = loopuse::edgeuses(&b, tgt_lu, None, None).unwrap();
+        assert_eq!(eus.len(), 4);
+
+        let edge_midpoint = |eu: EdgeuseId| -> Point3 {
+            let e = eu1::edge(&b, eu).unwrap().unwrap();
+            let rec = b.edge(e).unwrap();
+            rec.curve
+                .as_ref()
+                .unwrap()
+                .evaluate_point(&k_build, rec.interval.mid())
+                .unwrap()
+        };
+        let mid0 = edge_midpoint(eus[0]);
+        let mid1 = edge_midpoint(eus[1]);
+        assert!((mid0 - mid1).length() > 3.0);
+
+        let run_case =
+            |use_bit_shift: bool, poles: u64, pole_points: [Point3; 4]| -> (Point3, Point3, Vec3) {
+                let mut k = Kernel::default();
+                if use_bit_shift {
+                    *k.fixes.flag_mut("masked_array_uses_bit_shift").unwrap() = true;
+                }
+                let mut props: FaceProps<H> = FaceProps::for_face(f, 0);
+                props.closed_u = Tri::False;
+                props.closed_v = Tri::False;
+                props.zone_tol_3d = b.face(f).unwrap().tolerance;
+                props.poles = poles;
+                props.pole_points = pole_points.to_vec();
+
+                let mut objects: LoopObjectCurves<H> = LoopObjectCurves::new(&b, f).unwrap();
+                let mut cc: CurveClassification<H> = CurveClassification::new(&k);
+                let out = find_and_classify_loop_bisector(
+                    &k,
+                    &b,
+                    f,
+                    0,
+                    &[tgt_loop],
+                    &[ClassifyLoopIo::default()],
+                    &BTreeSet::new(),
+                    &props,
+                    &mut objects,
+                    &mut cc,
+                )
+                .unwrap();
+                assert!(out.has_curve);
+                assert_eq!(out.closed_3d, Some(false));
+                assert!(cc.size() >= 1);
+
+                let crv = objects.classify_curve().unwrap();
+                let ivl = crv.natural_interval();
+                let p_start = crv.evaluate_point(&k, ivl.min()).unwrap();
+                let p_mid = crv.evaluate_point(&k, ivl.mid()).unwrap();
+                let p_end = crv.evaluate_point(&k, ivl.max()).unwrap();
+                let dir = (p_end - p_start).unitize().unwrap();
+                (p_start, p_mid, dir)
+            };
+
+        let far = Point3::new(-99.0, -99.0, 0.0);
+
+        // Each singular side (SS_UMIN, SS_VMIN, SS_UMAX, SS_VMAX) with only its own bit
+        // set and edge 0's midpoint at its pole slot:
+        // - default (`false`) fails to skip edge 0 and classifies from `mid0`;
+        // - opt-in (`true`) skips singular edge 0 and classifies from edge 1 (`mid1`).
+        for (slot, side_mask) in [(0, SS_UMIN), (1, SS_VMIN), (2, SS_UMAX), (3, SS_VMAX)] {
+            let mut poles_arr = [far; 4];
+            poles_arr[slot] = mid0;
+
+            let (start_def, mid_def, dir_def) = run_case(false, side_mask, poles_arr);
+            let (start_opt, mid_opt, dir_opt) = run_case(true, side_mask, poles_arr);
+
+            assert!((mid0 - start_def).cross(dir_def).length() < 1e-9);
+            assert!((mid1 - start_def).cross(dir_def).length() > 2.0);
+
+            assert!((mid1 - start_opt).cross(dir_opt).length() < 1e-9);
+            assert!((mid0 - start_opt).cross(dir_opt).length() > 2.0);
+
+            assert!(dir_def.dot(dir_opt).abs() < 1e-9);
+            assert!((start_def - start_opt).length() > 2.0);
+            assert!((mid_def - mid_opt).length() > 1.0);
+        }
+
+        // Conversely, when ONLY `SS_UMIN` (bit 0) is set while `mid0` sits in an
+        // unmasked `SS_UMAX` or `SS_VMAX` slot (indices 2, 3), default (`false`) falsely
+        // skips edge 0 (`1 < ii` is 1, matching bit 0), whereas opt-in (`true`) keeps
+        // edge 0 because bits 2 and 3 are clear.
+        for slot in [2usize, 3] {
+            let mut poles_arr = [far; 4];
+            poles_arr[slot] = mid0;
+
+            let (start_def, _, dir_def) = run_case(false, SS_UMIN, poles_arr);
+            let (start_opt, _, dir_opt) = run_case(true, SS_UMIN, poles_arr);
+
+            assert!((mid1 - start_def).cross(dir_def).length() < 1e-9);
+            assert!((mid0 - start_opt).cross(dir_opt).length() < 1e-9);
+            assert!(dir_def.dot(dir_opt).abs() < 1e-9);
+        }
     }
 
     #[test]

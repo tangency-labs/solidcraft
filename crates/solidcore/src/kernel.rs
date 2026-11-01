@@ -421,6 +421,17 @@ pub struct UpstreamFixes {
     pub curve_check_zero_speed_tangent_end: bool,
     /// `SmFace::ComputeLoopOrientation`'s 3D path holds a loop's dimensionless area to a floor relative to the loop's own bounding box instead of the face's whole domain, so a loop far smaller than its face (a 0.002 hole in a 3 m plate) is oriented (WR-561, #1523; tangency-labs/smlib 54ca3e0).
     pub loop_orientation_floor_from_loop_box: bool,
+    /// `SmTArray::FindElementInMaskedArray` (called by `sms_FindAndClassifyLoopBisector`
+    /// on `SmFaceProps::m_sPolePoints` with `m_lPoles`) tests each element `ii`'s own bit
+    /// `(mask & (1 << ii)) != 0` (shift-safe: `0` for `ii >= 64`) so edge midpoints on any
+    /// singular side (`SS_UMIN` `1`, `SS_VMIN` `2`, `SS_UMAX` `4`, `SS_VMAX` `8`) are
+    /// skipped and non-singular `SS_UMAX`/`SS_VMAX` slots are not falsely matched when
+    /// `SS_UMIN` is set; pinned v1.0.1 evaluates `(lBitMask & (1 < ii)) != 0`, never
+    /// matching indices `0` or `1` and testing indices `2..` against bit `0` (`SS_UMIN`)
+    /// (WR-167, #2172;
+    /// `plan/upstream-issues/WR-167--addendum-2026-11-01-masked-array-bit-shift.md`).
+    /// Off by default for pinned C++ parity.
+    pub masked_array_uses_bit_shift: bool,
     /// The local solves take no value from a failed evaluation (WR-253; the fork's tangency-labs/smlib@d2757e1). The one-dimensional ones ignore a failed guess in `SolveOscillating`'s sign-change search (#481), and `SmLocalSolve1d::SolveIt` without an interval returns a failed first evaluation's status instead of iterating from it (no caller solves without an interval). The N-dimensional one (`SmLocalSolveNd::SolveIt`) sums no equations of a failed clamped or scaled evaluation, takes the clamped-and-scaled step only when it evaluated, and then with that evaluation's Jacobian and found flag (upstream kept the unscaled point's), stops the line search when the clamped step failed and no scaled one was taken, and finds no solution when the best guess cannot be re-evaluated (#1945), nor when the guess's first evaluation fails, where upstream reports the unevaluated guess as found (WR-20; the fork's tangency-labs/smlib@d5c5cfd).
     pub oscillating_skips_failed_guesses: bool,
     /// `sm_RefineCCSolutions` judges a range end's shift by its distance from 1 (WR-383, #527).
