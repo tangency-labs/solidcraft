@@ -1287,7 +1287,8 @@ const ELEMENTS: &[Element] = &[
         });
     }),
     element!("add_prompt", "dialog:table:add_prompt:add", Some("dialog:table:add_prompt:add"), |ui, _| {
-        table(ui, "add_prompt", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+        table_custom(ui, "add_prompt", &[Column::new("Name", 1.0).flex()], "Empty", |ui, table| {
+            table.headers(ui, |_, _| false);
             table.add_prompt(ui, "Add configuration", "Add configuration");
         });
     }),
@@ -1329,12 +1330,13 @@ const ELEMENTS: &[Element] = &[
         text(ui, "Invalid expression", Text::Error("gallery"));
     }),
     element!("table_flex", |ui, s| {
-        table(
+        table_custom(
             ui,
             "flex",
             &[Column::new("Name", 1.0).flex(), Column::new("Expression", 1.5).flex(), Column::new("Actions", 0.0).icon_only()],
             "Empty",
             |ui, table| {
+                table.headers(ui, |_, _| false);
                 table.row(ui, "row", false, |row| {
                     row.cell(|ui| {
                         text(ui, "Width", Text::Cell);
@@ -1431,7 +1433,8 @@ const ELEMENTS: &[Element] = &[
         });
     }),
     element!("table", "dialog:table:gallery:row", None, |ui, s| {
-        table(ui, "gallery", &[Column::new("Name", 1.0), Column::new("Expression", 1.5)], "No rows", |ui, table| {
+        table_custom(ui, "gallery", &[Column::new("Name", 1.0), Column::new("Expression", 1.5)], "No rows", |ui, table| {
+            table.headers(ui, |_, _| false);
             table.row(ui, "row", true, |row| {
                 row.cell(|ui| {
                     text(ui, "Width", Text::Cell);
@@ -1834,6 +1837,14 @@ const ELEMENTS: &[Element] = &[
         let (rect, _) = ui.allocate_exact_size(vec2(row_height(), row_height()), egui::Sense::hover());
         quiet_icon_button_at(ui, rect, "plus", "Add shortcut");
     }),
+    element!("shortcut_binding", |ui, _| {
+        ui.horizontal(|ui| {
+            shortcut_binding(ui, "Ctrl+Shift+PageDown", true);
+            shortcut_binding(ui, "Option+Enter", false);
+            shortcut_binding(ui, "Ctrl++", true);
+        });
+        shortcut_binding(ui, "", true);
+    }),
     element!("keyboard", |ui, _| {
         assert_eq!(keyboard(ui.ctx(), true), Action::None);
         ui.allocate_space(vec2(row_height(), row_height()));
@@ -2177,25 +2188,32 @@ fn table_cells_keep_alignment_fixed_rows_editing_and_action_targets() {
         let mut removed = false;
         let mut draw = |ui: &mut Ui| {
             scope(ui, |ui| {
-                table(ui, "cells", &[Column::new("Name", 1.0), Column::new("Expression", 1.5), Column::new("Actions", 0.7)], "Empty", |ui, table| {
-                    for (name, value) in [("Width", &mut first), ("Height", &mut second)] {
-                        table.row(ui, name, name == "Height", |row| {
-                            row.cell(|ui| {
-                                text(ui, name, Text::Cell);
+                table_custom(
+                    ui,
+                    "cells",
+                    &[Column::new("Name", 1.0), Column::new("Expression", 1.5), Column::new("Actions", 0.7)],
+                    "Empty",
+                    |ui, table| {
+                        table.headers(ui, |_, _| false);
+                        for (name, value) in [("Width", &mut first), ("Height", &mut second)] {
+                            table.row(ui, name, name == "Height", |row| {
+                                row.cell(|ui| {
+                                    text(ui, name, Text::Cell);
+                                });
+                                row.cell(|ui| {
+                                    let response = cell_editor(ui, ui.id().with("expression"), value, "Expression", false);
+                                    scenario::publish_handle(&format!("gallery:cell:{name}"), response.rect.center());
+                                    scenario::publish_rect(&format!("gallery:cell:{name}"), response.rect);
+                                });
+                                row.cell(|ui| {
+                                    if button(ui, "Delete", Button::Small).clicked() {
+                                        removed = true;
+                                    }
+                                });
                             });
-                            row.cell(|ui| {
-                                let response = cell_editor(ui, ui.id().with("expression"), value, "Expression", false);
-                                scenario::publish_handle(&format!("gallery:cell:{name}"), response.rect.center());
-                                scenario::publish_rect(&format!("gallery:cell:{name}"), response.rect);
-                            });
-                            row.cell(|ui| {
-                                if button(ui, "Delete", Button::Small).clicked() {
-                                    removed = true;
-                                }
-                            });
-                        });
-                    }
-                });
+                        }
+                    },
+                );
             });
         };
         for _ in 0..3 {

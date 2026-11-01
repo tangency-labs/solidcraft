@@ -600,57 +600,39 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut action: Option<(String, &str)> = None;
     ui_kit::scope(ui, |ui| {
         if !filtering {
-            let actions = [
-                ui_kit::SearchAction { label: app.tr_label("Reset All"), icon: None, visible: !app.keymap.read_only, tooltip: None },
-                ui_kit::SearchAction { label: app.tr_label("Import…"), icon: Some("import_tray"), visible: !app.keymap.read_only, tooltip: None },
-                ui_kit::SearchAction {
-                    label: app.tr_label("Export…"),
-                    icon: Some("export_tray"),
-                    visible: true,
-                    tooltip: Some(app.tr_label("Keys, S box favorites and the toolbar, as a file")),
-                },
-            ];
-            let (filter, toolbar_action) = ui_kit::search_actions_row(
-                ui,
-                egui::Id::new("sc_keymap_filter"),
-                &mut app.keymap.filter,
-                crate::i18n::tr_label("Filter commands or keys"),
-                &actions,
-            );
+            let filter =
+                ui_kit::search_field(ui, egui::Id::new("sc_keymap_filter"), &mut app.keymap.filter, crate::i18n::tr_label("Filter commands or keys"));
             crate::scenario::publish_target("keymap:filter", filter.rect);
             crate::scenario::publish_handle("shortcut:filter", filter.rect.center());
             if filter.clicked() {
                 action = Some((String::new(), "cancel"));
             }
-            if let Some(index) = toolbar_action {
-                action = Some((
-                    String::new(),
-                    match index {
-                        0 => "reset_all",
-                        1 => "import",
-                        _ => "export",
-                    },
-                ));
-            }
+            ui.horizontal_wrapped(|ui| {
+                if app.keymap.read_only {
+                    ui_kit::text(ui, app.tr_label("Read-only list: shortcuts can't be changed here."), ui_kit::Text::Note("shortcut_read_only"));
+                    let edit = ui_kit::button(ui, app.tr_label("Edit shortcuts"), ui_kit::Button::Normal);
+                    crate::scenario::publish_target("keymap:edit", edit.rect);
+                    if edit.clicked() { app.keymap.read_only = false; }
+                } else {
+                    let done = ui_kit::button(ui, app.tr("install.done"), ui_kit::Button::Primary);
+                    crate::scenario::publish_target("keymap:done", done.rect);
+                    if done.clicked() { action = Some((String::new(), "done")); }
+                }
+                let export = ui_kit::button(ui, app.tr("prefs.profile_export"), ui_kit::Button::Normal)
+                    .on_hover_text(app.tr_label("Keys, S box favorites and the toolbar, as a file"));
+                crate::scenario::publish_target("keymap:export", export.rect);
+                if export.clicked() { action = Some((String::new(), "export")); }
+                if !app.keymap.read_only {
+                    let import = ui_kit::button(ui, app.tr("prefs.shortcuts_import"), ui_kit::Button::Normal);
+                    crate::scenario::publish_target("keymap:import", import.rect);
+                    if import.clicked() { action = Some((String::new(), "import")); }
+                }
+                ui_kit::help_icon(ui, app.tr("ui.shortcut_capture_hint"))
+                    .on_hover_text(app.tr_label("Select Other: hold the left button still on the model (or right-click › Select Other…) to list everything under the cursor; click again on the same spot to select the next thing there. Double-click the middle button to go Home (Preferences › Navigation)."));
+            });
             if let Some(chosen) = outcome(app, ui) {
                 action = Some((String::new(), chosen));
             }
-            ui_kit::text(ui, app.tr_label("Select Other: hold the left button still on the model (or right-click › Select Other…) to list everything under the cursor; click again on the same spot to select the next thing there. Double-click the middle button to go Home (Preferences › Navigation)."), ui_kit::Text::Note("navigation"));
-        }
-        // The list Help and Home open looks like the Shortcuts page of Preferences: say it can't
-        // be changed here, and lead to the page where it can (#7409).
-        if !filtering && app.keymap.read_only {
-            ui.horizontal_wrapped(|ui| {
-                ui_kit::text(ui, app.tr_label("Read-only list: shortcuts can't be changed here."), ui_kit::Text::Note("shortcut_read_only"));
-                let edit = ui_kit::button(ui, app.tr_label("Edit shortcuts"), ui_kit::Button::Normal);
-                crate::scenario::publish_target("keymap:edit", edit.rect);
-                if edit.clicked() {
-                    app.keymap.read_only = false;
-                }
-            });
-        }
-        if !filtering && !app.keymap.read_only {
-            ui_kit::text(ui, app.tr("ui.shortcut_capture_hint"), ui_kit::Text::Note("shortcut_capture_help"));
             if app.keymap.capturing.is_some() {
                 let hint = ctx.input(|input| app.keymap.recorder.hint(input));
                 ui_kit::text(ui, app.tr(hint), ui_kit::Text::Hint("shortcut_capture_state"));
@@ -661,41 +643,47 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             .into_iter()
             .filter_map(|c| {
                 let keys = keys_for_spec(app, c);
+                let displayed: Vec<_> = keys.iter().map(|key| display(key)).collect();
                 let label = app.tr_label(c.label);
+                let group = shortcut_group(c);
                 let hit = if filtering {
-                    crate::prefs_search::matches_text(&q, &[c.label, c.id, label].into_iter().chain(keys.iter().copied()).collect::<Vec<_>>())
+                    crate::prefs_search::shows_all(ui)
+                        || crate::prefs_search::matches_text(
+                            &q,
+                            &[c.label, c.id, label, &group]
+                                .into_iter()
+                                .chain(keys.iter().copied())
+                                .chain(displayed.iter().map(String::as_str))
+                                .collect::<Vec<_>>(),
+                        )
                 } else {
-                    q.is_empty() || [c.label, c.id, label].iter().chain(&keys).any(|s| s.to_lowercase().contains(&q))
+                    q.is_empty()
+                        || [c.label, c.id, label, &group]
+                            .iter()
+                            .chain(&keys)
+                            .copied()
+                            .chain(displayed.iter().map(String::as_str))
+                            .any(|s| s.to_lowercase().contains(&q))
                 };
-                hit.then_some((c, keys, label))
+                hit.then_some((c, keys, label, group))
             })
             .collect();
         if filtering && commands.is_empty() {
             return;
         }
         let count = commands.len();
-        let shortcut_title = app.tr("prefs.shortcuts").to_string();
-        let paint = |ui: &mut egui::Ui| {
-            let t = crate::theme::Tokens::get();
-            let spacing = ui.spacing().item_spacing.x;
-            let key_width = commands
-                .iter()
-                .map(|(_, keys, _)| keys.iter().map(|key| ui_kit::ContentWidth::button(ui, &display(key)) + spacing).sum::<f32>() + t.control_height)
-                .chain(app.keymap.recorder.preview().filter(|_| app.keymap.capturing.is_some()).map(|text| ui_kit::ContentWidth::button(ui, &text)))
-                .fold(ui_kit::ContentWidth::button(ui, app.tr_label("press a key…")), f32::max)
-                .max(ui_kit::ContentWidth::label(ui, app.tr_label("Keyboard Shortcuts")) + t.space_8);
-            let action_width = if app.keymap.read_only {
-                t.control_height
+        // Keep registry order within each real registry group; no command is lost because it
+        // has no ribbon placement. Such commands use their registry id's namespace.
+        let mut groups: Vec<(String, Vec<_>)> = Vec::new();
+        for (c, keys, label, group) in commands {
+            if let Some((_, rows)) = groups.iter_mut().find(|(name, _)| name == &group) {
+                rows.push((c, keys, label));
             } else {
-                ui_kit::ContentWidth::button(ui, app.tr_label("Clear")) + ui_kit::ContentWidth::button(ui, app.tr_label("Reset")) + t.space_4
-            };
-            let columns = [
-                ui_kit::Column::new("Command", 1.5).flex().min_content_width(t.form_label_width),
-                ui_kit::Column::new(crate::i18n::tr("keymap.command_id"), 1.8).flex().min_content_width(t.form_label_width),
-                ui_kit::Column::new("Keyboard Shortcuts", 1.0).flex().min_content_width(key_width),
-                ui_kit::Column::new("", 0.0).icon_only().min_content_width(action_width),
-            ];
-            // A search shows a recording's outcome and its next step above the shortcuts it found.
+                groups.push((group, vec![(c, keys, label)]));
+            }
+        }
+        let shortcut_title = app.tr("prefs.shortcuts").to_string();
+        let mut paint = |ui: &mut egui::Ui| {
             if filtering {
                 if let Some(chosen) = outcome(app, ui) {
                     action = Some((String::new(), chosen));
@@ -705,76 +693,37 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                     ui_kit::text(ui, app.tr(hint), ui_kit::Text::Hint("shortcut_capture_state"));
                 }
             }
-            ui_kit::table(ui, "keymap", &columns, crate::i18n::tr("keymap.empty"), |ui, table| {
-                for (c, keys, translated_label) in commands {
-                    table.row_visible(ui, c.id, app.keymap.capturing.as_deref() == Some(c.id), false, |row| {
-                        row.cell(|ui| {
-                            ui_kit::text(ui, translated_label, ui_kit::Text::Cell);
-                        });
-                        row.cell(|ui| {
-                            ui_kit::text(ui, c.id, ui_kit::Text::Cell);
-                        });
-                        let capturing = app.keymap.capturing.as_deref() == Some(c.id);
-                        let changed = app.keymap.custom.contains_key(c.id);
-                        row.cell(|ui| {
-                            if app.keymap.read_only {
-                                let text = if keys.is_empty() {
-                                    "—".to_string()
-                                } else {
-                                    keys.iter().map(|key| display(key)).collect::<Vec<_>>().join(", ")
-                                };
-                                ui_kit::text(ui, &text, ui_kit::Text::Cell);
-                                return;
-                            }
-                            let tip = app.tr_label("Click, then press the new key");
-                            ui.horizontal(|ui| {
-                                // Each key replaces itself when clicked; the last slot adds one.
-                                for slot in 0..=keys.len() {
-                                    let capture = if capturing && app.keymap.slot == slot {
-                                        let text = app.keymap.recorder.preview().unwrap_or_else(|| app.tr_label("press a key…").to_string());
-                                        ui_kit::button(ui, &text, ui_kit::Button::Normal).on_hover_text(tip)
-                                    } else if let Some(key) = keys.get(slot) {
-                                        ui_kit::button(ui, display(key), ui_kit::Button::Normal).on_hover_text(tip)
-                                    } else {
-                                        let (rect, _) = ui.allocate_exact_size(egui::vec2(t.control_height, t.control_height), egui::Sense::hover());
-                                        ui_kit::quiet_icon_button_at(ui, rect, "plus", tip)
-                                    };
-                                    let name = if slot == 0 { c.id.to_string() } else { format!("{}:{slot}", c.id) };
-                                    crate::scenario::publish_target(&format!("keymap:capture:{name}"), capture.rect);
-                                    if ui.is_rect_visible(capture.rect) {
-                                        crate::scenario::publish_handle(&format!("shortcut:{name}"), capture.rect.center());
-                                    }
-                                    if capture.clicked() {
-                                        capture.surrender_focus();
-                                        action = Some((format!("{}\n{slot}", c.id), "capture"));
-                                    }
-                                }
-                            });
-                        });
-                        row.cell(|ui| {
-                            if !app.keymap.read_only {
-                                ui.horizontal(|ui| {
-                                    let clear = ui_kit::button(ui, app.tr_label("Clear"), ui_kit::Button::Enabled(!keys.is_empty()));
-                                    crate::scenario::publish_target(&format!("keymap:clear:{}", c.id), clear.rect);
-                                    if clear.clicked() {
-                                        action = Some((c.id.to_string(), "clear"));
-                                    }
-                                    let reset = ui_kit::button(ui, app.tr_label("Reset"), ui_kit::Button::Enabled(changed));
-                                    crate::scenario::publish_target(&format!("keymap:reset:{}", c.id), reset.rect);
-                                    if reset.clicked() {
-                                        action = Some((c.id.to_string(), "reset"));
-                                    }
-                                });
-                            }
-                        });
-                    });
+            if count == 0 {
+                ui_kit::text(ui, app.tr("keymap.empty"), ui_kit::Text::Hint("shortcuts_empty"));
+            }
+            for (group, rows) in &groups {
+                ui_kit::section_heading(ui, group);
+                let heading = crate::scenario::rect_of(&format!("dialog:heading:{group}"));
+                if let Some(rect) = heading {
+                    crate::prefs_search::remember(ui, group, rect);
+                    crate::prefs_search::follow(ui, group, rect);
                 }
-            });
+                for (command, keys, label) in rows {
+                    if let Some(chosen) = shortcut_row(app, ui, command, keys, label, filtering) {
+                        action = Some(chosen);
+                    }
+                }
+            }
         };
         if filtering {
-            ui_kit::search_fold(ui, &shortcut_title, count, paint);
+            let open = ui_kit::search_fold(ui, &shortcut_title, count, paint).is_some();
+            if !open && let Some(rect) = crate::scenario::rect_of("prefs:search:shortcuts") {
+                // Collapsed matches still participate in Up/Down and Enter. Enter lands on
+                // the real group or command, where follow() reveals its complete row.
+                for (group, rows) in &groups {
+                    crate::prefs_search::remember(ui, group, rect);
+                    for (command, keys, label) in rows {
+                        crate::prefs_search::remember(ui, &shortcut_search_label(command, label, keys), rect);
+                    }
+                }
+            }
         } else {
-            ui_kit::settings_scroll(ui, "sc_keymap_scroll", paint);
+            ui_kit::settings_scroll(ui, "sc_keymap_scroll", &mut paint);
         }
     });
     crate::scenario::publish_count("shortcut_recording", f64::from(app.keymap.capturing.is_some()));
@@ -793,7 +742,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         Some((id, "clear")) => drop(bind(app, &id, "", false)),
         Some((id, "reset")) => reset(app, Some(&id)),
-        Some((_, "reset_all")) => reset(app, None),
+        Some((_, "done")) => stop_capture(app),
         Some((_, "export")) => {
             let text = crate::toolbar_custom::export(app).to_string();
             app.pick_save("SolidCraft shortcuts.json", &["json"], move |app, path| {
@@ -827,6 +776,174 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         _ => {}
     }
+}
+
+/// A global search result must be visible even after the page's own filter was used.
+pub(crate) fn reveal(app: &mut SolveApp) {
+    app.keymap.filter.clear();
+}
+
+fn shortcut_group(command: &CommandSpec) -> String {
+    let group = if command.tab.is_empty() { command.id.split('.').next().unwrap_or(command.id) } else { command.tab };
+    crate::workspace::tab_name(group)
+}
+
+fn shortcut_search_label(command: &CommandSpec, label: &str, keys: &[&str]) -> String {
+    let displayed: Vec<_> = keys.iter().map(|key| display(key)).collect();
+    format!("{label} / {} ({}) · {} · {}", command.label, command.id, keys.join(", "), displayed.join(", "))
+}
+
+/// Keep every binding and recorder slot, while skipping the construction of off-screen rows.
+fn shortcut_row(
+    app: &SolveApp,
+    ui: &mut egui::Ui,
+    command: &CommandSpec,
+    keys: &[&str],
+    label: &str,
+    filtering: bool,
+) -> Option<(String, &'static str)> {
+    let t = crate::theme::Tokens::get();
+    let editing = !app.keymap.read_only;
+    let capturing = app.keymap.capturing.as_deref() == Some(command.id);
+    let mut slots: Vec<(usize, String, bool)> = keys.iter().enumerate().map(|(slot, key)| (slot, display(key), true)).collect();
+    if slots.is_empty() || (editing && slots.len() < MAX_KEYS) {
+        slots.push((slots.len(), String::new(), false));
+    }
+    for (slot, text, _) in &mut slots {
+        if capturing && *slot == app.keymap.slot {
+            *text = app.keymap.recorder.preview().unwrap_or_else(|| app.tr("prefs.shortcuts_press").to_owned());
+        }
+    }
+    let widths: Vec<f32> = slots
+        .iter()
+        .map(|(slot, text, assigned)| {
+            if capturing && *slot == app.keymap.slot {
+                ui_kit::ContentWidth::button(ui, text)
+            } else if *assigned {
+                ui_kit::shortcut_binding_width(ui, text)
+            } else if keys.is_empty() {
+                ui_kit::shortcut_binding_width(ui, "")
+            } else {
+                t.control_height
+            }
+        })
+        .collect();
+    let width = ui.available_width().max(0.0);
+    let actions_width = if editing { t.control_height * 2.0 + t.space_4 } else { 0.0 };
+    let name_width = ui_kit::ContentWidth::label(ui, label).min(width * 0.45);
+    let widest = widths.iter().copied().fold(0.0, f32::max);
+    let beside = width - name_width - t.space_14 - actions_width - t.space_8 >= widest;
+    let controls_width = (width - actions_width - t.space_8 - if beside { name_width + t.space_14 } else { 0.0 }).max(0.0);
+    let mut lines = 1usize;
+    let mut line_width = 0.0;
+    for next in &widths {
+        if line_width > 0.0 && line_width + t.space_8 + next > controls_width.max(widest) {
+            lines += 1;
+            line_width = 0.0;
+        }
+        line_width += if line_width > 0.0 { t.space_8 + next } else { *next };
+    }
+    let label_galley = ui.painter().layout(
+        label.to_owned(),
+        egui::FontId::proportional(t.font_label),
+        t.form_ink,
+        if beside { name_width.max(1.0) } else { width.max(1.0) },
+    );
+    let label_height = label_galley.size().y.max(t.control_height);
+    let control_height = lines as f32 * t.control_height + lines.saturating_sub(1) as f32 * t.space_4;
+    let height = if beside { label_height.max(control_height) } else { label_height + control_height + t.space_4 } + t.space_8;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    let search_label = shortcut_search_label(command, label, keys);
+    crate::prefs_search::follow(ui, &search_label, rect);
+    if !filtering && !capturing && !ui.is_rect_visible(rect) {
+        return None;
+    }
+    if filtering {
+        crate::prefs_search::reveal(ui);
+        crate::prefs_search::push_force(ui);
+    }
+    let mut action = None;
+    ui.push_id(command.id, |ui| {
+        let name =
+            egui::Rect::from_min_size(rect.min + egui::vec2(0.0, t.space_4), egui::vec2(if beside { name_width } else { width }, label_height));
+        ui.painter().galley(egui::pos2(name.left(), name.center().y - label_galley.size().y / 2.0), label_galley, t.form_ink);
+        let response = ui.interact(name, ui.id().with("command"), egui::Sense::hover()).on_hover_text(command.id);
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), format!("{label} ({})", command.id)));
+        let top = if beside { name.top() } else { name.bottom() + t.space_4 };
+        let total = widths.iter().sum::<f32>() + widths.len().saturating_sub(1) as f32 * t.space_8;
+        let left = if beside { rect.right() - actions_width - t.space_8 - total.min(controls_width) } else { rect.left() };
+        let used_width = total.min(controls_width);
+        let controls = egui::Rect::from_min_size(egui::pos2(left, top), egui::vec2(used_width, control_height));
+        crate::scenario::publish_rect(&format!("keymap:bindings:{}", command.id), controls);
+        let mut draw = |ui: &mut egui::Ui| {
+            ui.allocate_ui_with_layout(
+                egui::vec2(used_width.max(widest), t.control_height),
+                egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(true),
+                |ui| {
+                    ui.spacing_mut().item_spacing = egui::vec2(t.space_8, t.space_4);
+                    for (slot, text, assigned) in &slots {
+                        let active = capturing && *slot == app.keymap.slot;
+                        let capture = if active {
+                            ui_kit::button(ui, text, ui_kit::Button::Primary)
+                        } else if *assigned {
+                            ui_kit::shortcut_binding(ui, text, editing)
+                        } else if keys.is_empty() {
+                            ui_kit::shortcut_binding(ui, "", editing)
+                        } else {
+                            let (r, _) = ui.allocate_exact_size(egui::vec2(t.control_height, t.control_height), egui::Sense::hover());
+                            ui_kit::quiet_icon_button_at(ui, r, "plus", app.tr_label("Click, then press the new key"))
+                        };
+                        if editing {
+                            let capture = capture.on_hover_text(app.tr_label("Click, then press the new key"));
+                            let name = if *slot == 0 { command.id.to_owned() } else { format!("{}:{slot}", command.id) };
+                            crate::scenario::publish_target(&format!("keymap:capture:{name}"), capture.rect);
+                            if ui.is_rect_visible(capture.rect) {
+                                crate::scenario::publish_handle(&format!("shortcut:{name}"), capture.rect.center());
+                            }
+                            if capture.clicked() {
+                                capture.surrender_focus();
+                                action = Some((format!("{}\n{slot}", command.id), "capture"));
+                            }
+                        }
+                    }
+                },
+            );
+        };
+        ui.scope_builder(egui::UiBuilder::new().max_rect(controls).layout(egui::Layout::top_down(egui::Align::Min)), |ui| {
+            if widest > controls_width {
+                egui::ScrollArea::horizontal().id_salt("binding_scroll").auto_shrink([false, true]).show(ui, &mut draw);
+            } else {
+                draw(ui);
+            }
+        });
+        if editing {
+            let actions = egui::Rect::from_min_size(egui::pos2(rect.right() - actions_width, top), egui::vec2(actions_width, t.control_height));
+            ui.scope_builder(egui::UiBuilder::new().max_rect(actions).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+                ui.spacing_mut().item_spacing.x = t.space_4;
+                for (kind, icon, enabled, label) in [
+                    ("reset", "undo", app.keymap.custom.contains_key(command.id), app.tr_label("Reset")),
+                    ("clear", "close", !keys.is_empty(), app.tr_label("Clear")),
+                ] {
+                    let button = ui
+                        .add_enabled_ui(enabled, |ui| {
+                            let (r, _) = ui.allocate_exact_size(egui::vec2(t.control_height, t.control_height), egui::Sense::hover());
+                            ui_kit::quiet_icon_button_at(ui, r, icon, label)
+                        })
+                        .inner;
+                    crate::scenario::publish_target(&format!("keymap:{kind}:{}", command.id), button.rect);
+                    if button.clicked() {
+                        action = Some((command.id.to_owned(), kind));
+                    }
+                }
+            });
+        }
+    });
+    crate::prefs_search::remember(ui, &search_label, rect);
+    t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
+    if filtering {
+        crate::prefs_search::pop_force(ui);
+    }
+    action
 }
 
 /// A recording's outcome: its message, and for a key another command uses, Replace and Cancel
@@ -1552,6 +1669,118 @@ mod card_tests {
     use crate::scenario::{self, Harness};
 
     #[test]
+    fn preferences_shortcuts_uses_the_page_heading_and_right_aligned_profile_tag() {
+        for theme in ["light", "dark"] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1600,"height":1000}));
+            h.call("ui.prefs", json!({"open":"Shortcuts","theme":theme}));
+            h.frames(4);
+            assert!(!h.app.keymap.read_only, "fresh Preferences retains its editable default");
+            let heading = scenario::rect_of("prefs:page_heading").unwrap();
+            let body = scenario::rect_of("prefs:page_body").unwrap();
+            let tag = scenario::rect_of("prefs:in_profile").unwrap();
+            assert!(body.contains_rect(heading));
+            assert!((heading.right() - tag.right()).abs() <= 1.0, "the profile tag uses the production page's far-right alignment");
+            let mut page_font = false;
+            for shape in &h.shapes {
+                crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                    if let egui::Shape::Text(text) = shape {
+                        page_font |= text.galley.job.text == "Shortcuts"
+                            && text
+                                .galley
+                                .job
+                                .sections
+                                .iter()
+                                .all(|section| section.format.font_id.size == crate::theme::Tokens::get().font_page_heading);
+                    }
+                });
+            }
+            assert!(page_font, "the actual Preferences title uses the page-heading font");
+        }
+    }
+
+    #[test]
+    fn done_keeps_editing_and_all_bindings_and_cancel_restores_the_bundle() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        bind_at(&mut h.app, "solid.extrude", Some(1), "Shift+J", false).unwrap();
+        let original = crate::toolbar_custom::export(&h.app);
+        h.app.keymap.filter = "solid.extrude".into();
+        h.call("ui.prefs", json!({"open":"Shortcuts"}));
+        h.step(&json!({"click":{"handle":"keymap:capture:solid.extrude:1"}})).unwrap();
+        assert_eq!(h.app.keymap.capturing.as_deref(), Some("solid.extrude"));
+        h.step(&json!({"click":{"handle":"keymap:done"}})).unwrap();
+        assert!(h.app.keymap.capturing.is_none());
+        assert!(!h.app.keymap.read_only, "Done stops capture without changing the independent edit state");
+        assert_eq!(keys(&h.app, "solid.extrude"), ["E", "Shift+J"]);
+        h.step(&json!({"click":{"handle":"keymap:clear:solid.extrude"}})).unwrap();
+        assert!(keys(&h.app, "solid.extrude").is_empty());
+        assert!(h.app.keymap.custom.contains_key("solid.extrude"), "Clear stores a disabled override");
+        h.step(&json!({"click":{"handle":"keymap:reset:solid.extrude"}})).unwrap();
+        assert_eq!(keys(&h.app, "solid.extrude"), ["E"]);
+        assert!(!h.app.keymap.custom.contains_key("solid.extrude"), "Reset restores the registry default");
+        h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
+        assert_eq!(crate::toolbar_custom::export(&h.app), original, "Cancel restores the complete customization bundle");
+    }
+
+    #[test]
+    fn shared_page_defaults_stops_recording_without_resetting_favorites_or_toolbar() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.ai_features = false;
+        bind_at(&mut h.app, "solid.extrude", Some(0), "Shift+J", false).unwrap();
+        h.app.sbox.pinned = vec!["solid.box".into(), "solid.extrude".into()];
+        h.app.toolbar_custom.panels.insert("DESIGN/MODEL/CREATE".into(), vec!["solid.extrude".into(), "solid.box".into()]);
+        let favorites = h.app.sbox.pinned.clone();
+        let toolbar = h.app.toolbar_custom.prefs();
+        h.app.keymap.filter = "solid.extrude".into();
+        h.call("ui.prefs", json!({"open":"Shortcuts"}));
+        assert!(!h.app.keymap.custom.is_empty(), "the changed binding enables page defaults");
+        h.step(&json!({"click":{"handle":"keymap:capture:solid.extrude"}})).unwrap();
+        assert_eq!(h.app.keymap.capturing.as_deref(), Some("solid.extrude"));
+        h.step(&json!({"key":"ShiftLeft","shift":true,"pressed":true})).unwrap();
+        assert!(h.app.keymap.recorder.modifiers.shift, "the active recorder holds modifier state");
+        h.step(&json!({"click":{"handle":"prefs:defaults"}})).unwrap();
+        assert!(h.app.prefs_window.open && h.app.keymap.capturing.is_none());
+        assert!(h.app.keymap.recorder.key.is_none());
+        assert_eq!(h.app.keymap.recorder.modifiers, egui::Modifiers::NONE);
+        assert!(h.app.keymap.custom.is_empty());
+        assert_eq!(keys(&h.app, "solid.extrude"), ["E"]);
+        assert_eq!(h.app.sbox.pinned, favorites);
+        assert_eq!(h.app.toolbar_custom.prefs(), toolbar);
+        h.step(&json!({"key":"ShiftLeft","pressed":false})).unwrap();
+        h.step(&json!({"key":"K","pressed":true})).unwrap();
+        h.step(&json!({"key":"K","pressed":false})).unwrap();
+        h.frames(65);
+        assert!(h.app.keymap.capturing.is_none() && h.app.keymap.custom.is_empty(), "the next chord cannot recreate an override after defaults");
+        assert_eq!(keys(&h.app, "solid.extrude"), ["E"]);
+        assert_eq!(h.app.sbox.pinned, favorites);
+        assert_eq!(h.app.toolbar_custom.prefs(), toolbar);
+    }
+
+    #[test]
+    fn every_saved_binding_keeps_its_own_recorder_slot() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        let bindings = ["E", "Shift+J", "Shift+K", "Shift+L", "Alt+J", "Alt+K", "Alt+L", "Ctrl+Alt+Shift+J"];
+        for (slot, key) in bindings.iter().enumerate() {
+            bind_at(&mut h.app, "solid.extrude", Some(slot), key, true).unwrap();
+        }
+        h.app.keymap.filter = "solid.extrude".into();
+        h.call("ui.prefs", json!({"open":"Shortcuts"}));
+        for slot in 1..MAX_KEYS {
+            let handle = format!("keymap:capture:solid.extrude:{slot}");
+            assert!(scenario::handle_at(&handle).is_some(), "binding {slot} remains reachable");
+        }
+        h.step(&json!({"click":{"handle":"keymap:capture:solid.extrude:7"}})).unwrap();
+        assert_eq!(h.app.keymap.slot, 7);
+        h.step(&json!({"key":"Escape"})).unwrap();
+        assert!(h.app.prefs_window.open && h.app.keymap.capturing.is_none());
+        assert_eq!(keys(&h.app, "solid.extrude"), bindings);
+    }
+
+    #[test]
     fn live_chord_column_fits_all_modifiers() {
         let mut h = Harness::new();
         h.app.home.open = false;
@@ -1560,7 +1789,7 @@ mod card_tests {
         h.step(&json!({"click":{"handle":"keymap:capture:sketch.mirror"}})).unwrap();
         h.step(&json!({"key":"M","pressed":true,"shift":true,"cmd":true,"ctrl":true,"alt":true})).unwrap();
         let preview = h.app.keymap.recorder.preview().unwrap();
-        let cell = scenario::rect_of("dialog:table:keymap:sketch.mirror:cell:Keyboard Shortcuts").unwrap();
+        let cell = scenario::rect_of("keymap:bindings:sketch.mirror").unwrap();
         let ctx = crate::fonts::test_context();
         let mut needed = 0.0;
         let mut out = ctx.run_ui(Default::default(), |ui| {
@@ -1610,7 +1839,7 @@ mod card_tests {
             let answer = path.to_string_lossy().to_string();
             h.app.services.pick_save = Some(Box::new(move |_, _| Box::pin(std::future::ready(Some(answer.clone())))));
             vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || {
-                h.step(&json!({"widget":"Export…"})).unwrap();
+                h.step(&json!({"click":{"handle":"keymap:export"}})).unwrap();
                 h.frames(4);
             });
             let message = h.app.keymap.message.clone();
@@ -1632,6 +1861,7 @@ mod card_tests {
         h.app.keymap.filter = "solid.extrude".into();
         h.call("ui.help", json!({"item":"shortcuts"}));
         assert!(h.app.keymap.read_only);
+        assert!(scenario::rect_of("prefs:page_heading").is_none(), "Help retains its external read-only presentation");
         assert!(scenario::handle_at("keymap:filter").is_some());
         for action in ["capture", "clear", "reset"] {
             assert!(scenario::handle_at(&format!("keymap:{action}:solid.extrude")).is_none());
@@ -1661,7 +1891,7 @@ mod card_tests {
             let answer = path.to_string_lossy().to_string();
             h.app.services.pick_open = Some(Box::new(move |_| Box::pin(std::future::ready(Some(answer.clone())))));
             vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || {
-                h.step(&json!({"widget":"Import…"})).unwrap();
+                h.step(&json!({"click":{"handle":"keymap:import"}})).unwrap();
                 h.frames(4);
             });
             let message = h.app.keymap.message.clone();
@@ -1677,7 +1907,7 @@ mod card_tests {
 
     /// #7409: the read-only list (Home › Keyboard shortcuts, Help › Keyboard Shortcuts) looked
     /// like the editable page with Import… missing. It says it is read-only, and Edit shortcuts
-    /// turns the same page into the editable one: Import…, Reset All and recording are there.
+    /// turns the same page into the editable one: Import, page defaults and recording are there.
     #[test]
     fn read_only_shortcuts_say_so_and_edit_shortcuts_unlocks_them() {
         for open in ["home", "help"] {
@@ -1692,15 +1922,17 @@ mod card_tests {
             }
             h.frames(4);
             assert!(h.app.keymap.read_only, "{open}");
+            assert!(scenario::rect_of("prefs:page_heading").is_none(), "{open}: external read-only style is retained");
             assert!(h.widget("Read-only list: shortcuts can't be changed here.").is_some(), "{open}");
             assert!(h.widget("Import…").is_none(), "{open}: no Import… while read-only");
             assert!(scenario::handle_at("keymap:capture:solid.extrude").is_none());
             h.step(&json!({"widget":"Edit shortcuts"})).unwrap();
             h.frames(4);
             assert!(!h.app.keymap.read_only, "{open}: editable after Edit shortcuts");
+            assert!(scenario::rect_of("prefs:page_heading").is_some(), "{open}: Edit shortcuts enters the Preferences composition");
             assert!(h.widget("Read-only list: shortcuts can't be changed here.").is_none(), "{open}");
             assert!(h.widget("Edit shortcuts").is_none(), "{open}");
-            assert!(h.widget("Import…").is_some() && h.widget("Reset All").is_some(), "{open}");
+            assert!(scenario::handle_at("keymap:import").is_some() && h.widget("Restore page defaults").is_some(), "{open}");
             assert!(scenario::handle_at("keymap:capture:solid.extrude").is_some(), "{open}: a binding can be recorded");
         }
     }

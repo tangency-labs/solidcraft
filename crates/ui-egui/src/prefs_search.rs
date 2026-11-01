@@ -626,6 +626,22 @@ fn keywords(text: &str) -> &'static [&'static str] {
         "view center" | "view centre" => &["classic"],
         "axes (signed)" => &["axes", "signed axes"],
         "cube (compact)" => &["cube"],
+        "availability" => &["assistant controls"],
+        "let ai agents connect" => &["let ai agents connect (control channel / mcp)"],
+        "add solidcraft to ai apps" => &["make solidcraft available to ai apps on this computer"],
+        "run slow commands in the background" => &["run agent commands in the background"],
+        "connect the last agent at start" => &["connect the last-used agent when solidcraft starts"],
+        "open the chat at start" => &["open the assistant panel when solidcraft starts"],
+        "ask first" => &["ask before changes", "ask every time"],
+        "make edits" => &["allow model edits", "auto-allow model edits"],
+        "do everything" => &["allow everything"],
+        "dock the chat" => &["agent chat side"],
+        "show the agent's pointer" => &["show agent pointer"],
+        "follow the camera" => &["turn the camera to sketches"],
+        "speed" => &["motion speed"],
+        "agent pointer" => &["agent cursor"],
+        "assistant button in the application bar" => &["show assistant button in application bar"],
+        "same as above" => &["as set above"],
         _ => &[],
     }
 }
@@ -800,6 +816,78 @@ pub(crate) fn follow(ui: &Ui, label: &str, rect: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collapsed_shortcut_results_enter_reveals_the_command_despite_an_old_page_filter() {
+        use serde_json::json;
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.ai_features = false;
+            h.call("ui.resize", json!({"width":1600,"height":1000}));
+            h.call("ui.prefs", json!({"open":"Shortcuts","theme":theme}));
+            h.step(&json!({"click":{"handle":"keymap:filter"}})).unwrap();
+            h.step(&json!({"text":"solid.extrude"})).unwrap();
+            let command = solidcraft_engine::command_specs().last().unwrap().id;
+            let original = crate::toolbar_custom::export(&h.app);
+            h.app.prefs_window.filter = command.into();
+            h.frames(4);
+            let (_, _, hits) = nav(&h.ctx);
+            let matches: Vec<_> =
+                hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_SHORTCUTS && hit.label.contains(command)).collect();
+            assert_eq!(matches.len(), 1, "a collapsed result owns one real keyboard target");
+            set_cursor(&h.ctx, matches[0].0);
+            h.frames(2);
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.frames(4);
+            assert!(h.app.prefs_window.filter.is_empty());
+            assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_SHORTCUTS);
+            let target = crate::scenario::rect_of(&format!("keymap:capture:{command}")).unwrap();
+            let body = crate::scenario::rect_of("dialog:page_body").unwrap();
+            assert!(body.contains_rect(target), "Enter reveals the actual off-screen command, clearing the old local filter");
+            assert!(crate::scenario::handle_at("prefs:revealed").is_some());
+            assert_eq!(crate::toolbar_custom::export(&h.app), original);
+        }
+    }
+
+    #[test]
+    fn assistant_permission_options_and_limited_value_have_real_enter_targets_while_ai_is_off() {
+        use serde_json::json;
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.app.preferences.ai_features = false;
+            h.call("ui.resize", json!({"width":1600,"height":1200}));
+            h.call("ui.prefs", json!({"open":"General","theme":theme}));
+            let original = (h.app.preferences.ai_permissions, h.app.preferences.agent_chat_turn_limit);
+            for (query, target) in [
+                ("Ask first", "prefs:ai_mode:ask"),
+                ("Make edits", "prefs:ai_mode:edits"),
+                ("Do everything", "prefs:ai_mode:all"),
+                ("Limited", "prefs:agent_chat_turn_limit:mode"),
+            ] {
+                h.app.prefs_window.filter = query.into();
+                h.frames(5);
+                let (_, _, hits) = nav(&h.ctx);
+                let matches: Vec<_> =
+                    hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_ASSISTANT && hit.label == query).collect();
+                assert_eq!(matches.len(), 1, "{query} owns a single real setting target");
+                set_cursor(&h.ctx, matches[0].0);
+                h.frames(2);
+                h.step(&json!({"key":"Enter"})).unwrap();
+                h.frames(3);
+                assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_ASSISTANT);
+                let rect = crate::scenario::rect_of(target).unwrap();
+                let revealed = crate::scenario::handle_at("prefs:revealed").unwrap();
+                assert!(revealed.distance(rect.center()) <= 1.0, "{query} reveals its real control");
+                assert_eq!(
+                    (h.app.preferences.ai_permissions, h.app.preferences.agent_chat_turn_limit),
+                    original,
+                    "navigation never selects an option"
+                );
+            }
+        }
+    }
 
     #[test]
     fn layout_controls_keep_one_real_search_target_and_native_names() {

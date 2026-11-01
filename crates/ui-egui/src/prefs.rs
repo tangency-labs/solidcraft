@@ -537,6 +537,12 @@ fn place_search_cursor(ctx: &egui::Context, id: egui::Id, chars: usize) {
 }
 
 fn open_result(app: &mut SolveApp, page: usize, label: &str) {
+    if page == PAGE_SHORTCUTS {
+        crate::keymap::reveal(app);
+    }
+    if page == PAGE_PLUGINS {
+        app.prefs_window.plugin_query.clear();
+    }
     app.prefs_window.filter.clear();
     app.prefs_window.search_from = None;
     app.prefs_window.section = page;
@@ -2165,7 +2171,10 @@ fn defaults(app: &mut SolveApp, page: usize) {
         PAGE_ASSISTANT => app.ui.agent_cursor = Default::default(),
         PAGE_TOOLS => app.ui.tool_cursor = false,
         PAGE_DESIGN => {}
-        PAGE_SHORTCUTS => crate::keymap::reset(app, None),
+        PAGE_SHORTCUTS => {
+            crate::keymap::stop_capture(app);
+            crate::keymap::reset(app, None);
+        }
         PAGE_GRAPHICS => {
             app.ui.visual_style = 0;
             app.ui.show_grid = true;
@@ -2772,8 +2781,21 @@ fn page(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
 fn draw_page(app: &mut SolveApp, ui: &mut egui::Ui, index: usize, t: &Tokens) {
     match index {
         PAGE_SHORTCUTS => {
-            ui_kit::settings_heading_with_tag(ui, app.tr("prefs.shortcuts"), "", Some(crate::settings_profiles::tag));
-            crate::keymap::page(app, ui);
+            let read_only = app.keymap.read_only;
+            let mut show = |ui: &mut egui::Ui| {
+                ui_kit::settings_heading_with_tag(
+                    ui,
+                    app.tr("prefs.shortcuts"),
+                    app.tr("prefs.shortcuts_intro"),
+                    Some(crate::settings_profiles::tag),
+                );
+                crate::keymap::page(app, ui);
+            };
+            if read_only {
+                show(ui);
+            } else {
+                ui_kit::settings_page(ui, show);
+            }
         }
         PAGE_ASSISTANT => crate::agent_chat::settings::page(app, ui),
         PAGE_PLUGINS => crate::plugins::page(app, ui),

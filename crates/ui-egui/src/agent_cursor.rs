@@ -108,7 +108,7 @@ pub fn speed_slider(ui: &mut egui::Ui, speed: &mut Speed) -> egui::Response {
         1.0..=5.5,
         crate::ui_kit::Slider {
             step: Some(0.5),
-            format: |v| if v > 5.25 { crate::i18n::tr_label("Instant").into() } else { Speed::Times(v).label() },
+            format: |v| if v > 5.25 { crate::i18n::tr_label("Instant").into() } else { format!("{v:.2}x") },
             ..Default::default()
         },
     );

@@ -33,19 +33,27 @@ pub(crate) fn settings_choices(ui: &mut Ui, choices: &[SettingsChoice<'_>], sele
 fn choice_row(ui: &mut Ui, choices: &[SettingsChoice<'_>], selected: &mut usize, keep: &[usize]) -> bool {
     let t = Tokens::get();
     let count = keep.len().max(1);
-    let width = ((dimension(ui.available_width()) - t.space_8 * count.saturating_sub(1) as f32) / count as f32).max(0.0);
+    let minimum = keep
+        .iter()
+        .filter_map(|index| choices.get(*index))
+        .map(|choice| super::ContentWidth::name(ui, choice.title) + t.space_24 * 2.0)
+        .fold(t.form_label_width * 2.0, f32::max);
+    let columns = (((dimension(ui.available_width()) + t.space_8) / (minimum + t.space_8)).floor() as usize).clamp(1, count);
+    let width = ((dimension(ui.available_width()) - t.space_8 * columns.saturating_sub(1) as f32) / columns as f32).floor().max(0.0);
     let mut changed = false;
-    ui.horizontal_top(|ui| {
-        ui.spacing_mut().item_spacing.x = t.space_8;
-        for index in keep {
-            let Some(choice) = choices.get(*index) else { continue };
-            let response = choice_card(ui, width, choice, *selected == *index, false);
-            if response.clicked() {
-                *selected = *index;
-                changed = true;
+    for row in keep.chunks(columns) {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = t.space_8;
+            for index in row {
+                let Some(choice) = choices.get(*index) else { continue };
+                let response = choice_card(ui, width, choice, *selected == *index, false);
+                if response.clicked() {
+                    *selected = *index;
+                    changed = true;
+                }
             }
-        }
-    });
+        });
+    }
     changed
 }
 
@@ -59,7 +67,19 @@ fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: b
     let selected_bg = if row { accent.soft } else { t.selected_bg };
     let selected_ink = if row { accent.ink } else { t.selected_ink };
     let primary = if row { accent.color } else { t.form_primary };
-    let height = if row { t.space_24 + t.space_16 } else { t.space_24 * 3.0 + t.space_16 };
+    let title_galley = ui.painter().layout(
+        choice.title.to_owned(),
+        crate::fonts::semibold(t.font_label),
+        if selected { selected_ink } else { t.form_ink },
+        (width - t.space_24 * 2.0).max(1.0),
+    );
+    let summary_galley =
+        ui.painter().layout(choice.summary.to_owned(), FontId::proportional(t.font_small), t.form_dim, (width - t.space_12 * 2.0).max(1.0));
+    let height = if row {
+        t.space_24 + t.space_16
+    } else {
+        (t.space_10 + title_galley.size().y + t.space_6 + summary_galley.size().y + t.space_10).max(t.space_24 * 2.0 + t.space_16 + 1.0)
+    };
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
     ui.painter().rect(
         rect,
@@ -84,21 +104,25 @@ fn choice_card(ui: &mut Ui, width: f32, choice: &SettingsChoice<'_>, selected: b
     if selected {
         ui.painter().circle_filled(radio, t.space_3, primary);
     }
-    let title = if row {
-        Rect::from_min_max(pos2(radio.x + t.space_12, rect.top()), pos2(rect.right() - t.space_8, rect.bottom()))
-    } else {
-        Rect::from_min_max(pos2(radio.x + t.space_12, rect.top() + t.space_4), pos2(rect.right() - t.space_8, rect.top() + t.space_24 + t.space_4))
-    };
-    let summary_width = ui.painter().layout_no_wrap(choice.summary.into(), FontId::proportional(t.font_small), t.form_dim).size().x;
-    let title = if row { Rect::from_min_max(title.min, title.max - vec2(summary_width + t.space_8, 0.0)) } else { title };
-    paint_text(ui, title, choice.title, crate::fonts::semibold(t.font_label), if selected { selected_ink } else { t.form_ink }, false);
     if row {
+        let title = Rect::from_min_max(pos2(radio.x + t.space_12, rect.top()), pos2(rect.right() - t.space_8, rect.bottom()));
+        let summary_width = ui.painter().layout_no_wrap(choice.summary.into(), FontId::proportional(t.font_small), t.form_dim).size().x;
+        let title = Rect::from_min_max(title.min, title.max - vec2(summary_width + t.space_8, 0.0));
+        paint_text(ui, title, choice.title, crate::fonts::semibold(t.font_label), if selected { selected_ink } else { t.form_ink }, false);
         let body = Rect::from_min_max(pos2(rect.right() - t.space_8 - summary_width, rect.top()), rect.max - vec2(t.space_8, 0.0));
         paint_text(ui, body, choice.summary, FontId::proportional(t.font_small), t.form_dim, false);
     } else {
-        let body = Rect::from_min_max(pos2(rect.left() + t.space_12, title.bottom() + t.space_4), rect.max - vec2(t.space_12, t.space_8));
-        let galley = ui.painter().layout(choice.summary.to_owned(), FontId::proportional(t.font_small), t.form_dim, body.width());
-        ui.painter().with_clip_rect(ui.clip_rect().intersect(body)).galley(body.min, galley, t.form_dim);
+        let at = pos2(radio.x + t.space_12, rect.top() + t.space_10);
+        let summary_at = pos2(rect.left() + t.space_12, at.y + title_galley.size().y + t.space_6);
+        ui.painter().galley(at, title_galley, if selected { selected_ink } else { t.form_ink });
+        ui.painter().galley(summary_at, summary_galley, t.form_dim);
+    }
+    let texts = [choice.title, choice.summary];
+    if let Some(text) = texts.iter().find(|text| crate::prefs_search::texts_hit(ui, &[*text])) {
+        crate::prefs_search::remember(ui, text, rect);
+    }
+    for text in texts {
+        crate::prefs_search::follow(ui, text, rect);
     }
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::RadioButton, ui.is_enabled(), selected, format!("{}: {}", choice.title, choice.detail))

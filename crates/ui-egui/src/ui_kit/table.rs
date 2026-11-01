@@ -48,16 +48,7 @@ pub(crate) struct Table<'a> {
     reveal: Option<egui::Rect>,
 }
 
-/// Header, horizontally scrolling body and empty state. Regular rows use table_row_height.
-/// Tokens: form_label_width, font_label, dialog_label, space_4/8, dialog_rule, text/dim, selected_bg.
-pub(crate) fn table<R>(ui: &mut Ui, id: &str, columns: &[Column<'_>], empty: &str, add: impl FnOnce(&mut Ui, &mut Table<'_>) -> R) -> R {
-    table_custom(ui, id, columns, empty, |ui, table| {
-        table.headers(ui, |_, _| false);
-        add(ui, table)
-    })
-}
-
-/// The same table grid with caller-supplied header actions through Table::headers.
+/// Table grid with caller-supplied header actions through Table::headers.
 /// Custom cells own their actions; all body rows share the same widths and metrics.
 pub(crate) fn table_custom<R>(ui: &mut Ui, id: &str, columns: &[Column<'_>], empty: &str, add: impl FnOnce(&mut Ui, &mut Table<'_>) -> R) -> R {
     let mut reveal = None;
