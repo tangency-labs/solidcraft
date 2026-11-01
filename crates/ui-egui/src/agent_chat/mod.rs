@@ -49,7 +49,7 @@ use crate::i18n::{format as trf, tr};
 use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
 
-pub(crate) use panel::{left_inset, tool_space};
+pub(crate) use panel::{left_inset, owns_keyboard_input, tool_space};
 pub use panel::{show, tip as panel_tip, toggle};
 
 /// Most entries kept in the conversation; older ones are dropped.
@@ -375,6 +375,8 @@ pub struct AgentChat {
     pub confirm_new: bool,
     /// Where the panel was drawn last (for its shortcuts).
     pub panel_rect: Option<egui::Rect>,
+    /// A pointer press in the transcript owns keys just like a focused text editor.
+    keyboard_owned: bool,
     /// Unreserved sheet space, shared by the actual dock and its drag preview.
     pub(crate) dock_space: Option<egui::Rect>,
     /// The last message sent, kept to send again after a sign-in (its files too).
@@ -477,6 +479,7 @@ impl AgentChat {
         }
         // Hit regions must be measured again for the incoming conversation.
         self.panel_rect = None;
+        self.keyboard_owned = false;
         self.dock_space = None;
         self.drop_rect = None;
     }

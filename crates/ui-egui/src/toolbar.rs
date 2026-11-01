@@ -3125,7 +3125,8 @@ pub(crate) fn cancel_unfinished(app: &mut SolveApp) -> bool {
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     crate::viewport_status::reconcile(app, ctx);
     crate::browser::update_folder_pick(app, ctx);
-    if design_shown(app) {
+    let chat_owner = crate::agent_chat::owns_keyboard_input(app, ctx);
+    if design_shown(app) && !chat_owner {
         crate::navigation::step_key_hold(app, ctx);
     } else {
         app.viewport.key_hold = None;
@@ -3201,6 +3202,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     }
     if popup_owner
         || inline_editor
+        || chat_owner
         || (crate::viewport_status::enabled(app) && app.ui.palette_open)
         || (ctx.egui_wants_keyboard_input() && !(crate::viewport_status::enabled(app) && app.viewport_status.owns_focus(ctx)))
     {
