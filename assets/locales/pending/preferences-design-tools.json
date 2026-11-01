@@ -1,0 +1,109 @@
+{
+  "ar": {
+    "prefs.design_tools.ask": "اسأل",
+    "prefs.design_tools.degrees": "درجات",
+    "prefs.design_tools.double_click_help": "أو لتحرير مكوّن مرتبط في موضعه.",
+    "prefs.design_tools.ghost": "إظهار الموضع القديم للأجزاء المنقولة كشبح",
+    "prefs.design_tools.hole_moves_help": "اختيار الوجه مجددًا ينقل الثقب بدلًا من إزالته.",
+    "prefs.design_tools.hole_snaps_help": "منتصف الوجه ومراكز حوافه الدائرية.",
+    "prefs.design_tools.imported_files": "الملفات المستوردة",
+    "prefs.design_tools.note": "ملاحظة",
+    "prefs.design_tools.off": "إيقاف",
+    "prefs.design_tools.placement_group": "مسند، نتوء، تعشيق مرن",
+    "prefs.design_tools.rows": "صفوف"
+  },
+  "de": {
+    "prefs.design_tools.ask": "Fragen",
+    "prefs.design_tools.degrees": "Grad",
+    "prefs.design_tools.double_click_help": "Oder zum Bearbeiten einer verknüpften Komponente an Ort und Stelle.",
+    "prefs.design_tools.ghost": "Alte Position verschobener Teile als Geisterbild zeigen",
+    "prefs.design_tools.hole_moves_help": "Erneutes Auswählen der Fläche verschiebt die Bohrung, statt sie zu entfernen.",
+    "prefs.design_tools.hole_snaps_help": "Die Mitte einer Fläche und die Mittelpunkte ihrer kreisförmigen Kanten.",
+    "prefs.design_tools.imported_files": "Importierte Dateien",
+    "prefs.design_tools.note": "Hinweis",
+    "prefs.design_tools.off": "Aus",
+    "prefs.design_tools.placement_group": "Auflage, Zapfen, Schnappverbindung",
+    "prefs.design_tools.rows": "Zeilen"
+  },
+  "en": {
+    "prefs.design_tools.ask": "Ask",
+    "prefs.design_tools.degrees": "Degrees",
+    "prefs.design_tools.double_click_help": "Or to edit a linked one in place.",
+    "prefs.design_tools.ghost": "Show moved parts' old place as a ghost",
+    "prefs.design_tools.hole_moves_help": "Picking the face again moves the hole instead of removing it.",
+    "prefs.design_tools.hole_snaps_help": "The middle of a face and the centers of its round edges.",
+    "prefs.design_tools.imported_files": "Imported files",
+    "prefs.design_tools.note": "Note",
+    "prefs.design_tools.off": "Off",
+    "prefs.design_tools.placement_group": "Rest, Boss, Snap Fit",
+    "prefs.design_tools.rows": "Rows"
+  },
+  "en-GB": {
+    "prefs.design_tools.hole_snaps_help": "The middle of a face and the centres of its round edges."
+  },
+  "he": {
+    "prefs.design_tools.ask": "שאלה",
+    "prefs.design_tools.degrees": "מעלות",
+    "prefs.design_tools.double_click_help": "או לעריכת רכיב מקושר במקומו.",
+    "prefs.design_tools.ghost": "הצגת המיקום הקודם של חלקים שהוזזו כרפאים",
+    "prefs.design_tools.hole_moves_help": "בחירה חוזרת בפאה מזיזה את החור במקום להסירו.",
+    "prefs.design_tools.hole_snaps_help": "אמצע הפאה ומרכזי הקצוות העגולים שלה.",
+    "prefs.design_tools.imported_files": "קבצים מיובאים",
+    "prefs.design_tools.note": "הערה",
+    "prefs.design_tools.off": "כבוי",
+    "prefs.design_tools.placement_group": "משען, בליטה, חיבור נצמד",
+    "prefs.design_tools.rows": "שורות"
+  },
+  "ja": {
+    "prefs.design_tools.ask": "確認",
+    "prefs.design_tools.degrees": "度",
+    "prefs.design_tools.double_click_help": "リンクされたコンポーネントをその場で編集することもできます。",
+    "prefs.design_tools.ghost": "移動したパーツの元の位置をゴースト表示",
+    "prefs.design_tools.hole_moves_help": "面をもう一度選ぶと穴を削除せずに移動します。",
+    "prefs.design_tools.hole_snaps_help": "面の中央と円形エッジの中心。",
+    "prefs.design_tools.imported_files": "インポートしたファイル",
+    "prefs.design_tools.note": "通知",
+    "prefs.design_tools.off": "オフ",
+    "prefs.design_tools.placement_group": "レスト、ボス、スナップフィット",
+    "prefs.design_tools.rows": "行数"
+  },
+  "ko": {
+    "prefs.design_tools.ask": "묻기",
+    "prefs.design_tools.degrees": "도",
+    "prefs.design_tools.double_click_help": "연결된 구성요소를 제자리에서 편집할 수도 있습니다.",
+    "prefs.design_tools.ghost": "이동한 부품의 이전 위치를 고스트로 표시",
+    "prefs.design_tools.hole_moves_help": "면을 다시 선택하면 구멍을 제거하지 않고 이동합니다.",
+    "prefs.design_tools.hole_snaps_help": "면의 가운데와 원형 모서리의 중심입니다.",
+    "prefs.design_tools.imported_files": "가져온 파일",
+    "prefs.design_tools.note": "알림",
+    "prefs.design_tools.off": "끄기",
+    "prefs.design_tools.placement_group": "레스트, 보스, 스냅 핏",
+    "prefs.design_tools.rows": "행"
+  },
+  "vi": {
+    "prefs.design_tools.ask": "Hỏi",
+    "prefs.design_tools.degrees": "Độ",
+    "prefs.design_tools.double_click_help": "Hoặc để chỉnh sửa thành phần được liên kết tại chỗ.",
+    "prefs.design_tools.ghost": "Hiện vị trí cũ của chi tiết đã di chuyển dưới dạng bóng mờ",
+    "prefs.design_tools.hole_moves_help": "Chọn lại mặt sẽ di chuyển lỗ thay vì xóa lỗ.",
+    "prefs.design_tools.hole_snaps_help": "Điểm giữa của mặt và tâm các cạnh tròn của mặt đó.",
+    "prefs.design_tools.imported_files": "Tệp đã nhập",
+    "prefs.design_tools.note": "Thông báo",
+    "prefs.design_tools.off": "Tắt",
+    "prefs.design_tools.placement_group": "Gối đỡ, Trụ, Khớp gài",
+    "prefs.design_tools.rows": "Hàng"
+  },
+  "zh": {
+    "prefs.design_tools.ask": "询问",
+    "prefs.design_tools.degrees": "度",
+    "prefs.design_tools.double_click_help": "或就地编辑链接的组件。",
+    "prefs.design_tools.ghost": "以虚影显示已移动零件的原位置",
+    "prefs.design_tools.hole_moves_help": "再次选择该面会移动孔而非移除孔。",
+    "prefs.design_tools.hole_snaps_help": "面的中点及其圆形边的圆心。",
+    "prefs.design_tools.imported_files": "导入的文件",
+    "prefs.design_tools.note": "提示",
+    "prefs.design_tools.off": "关闭",
+    "prefs.design_tools.placement_group": "支座、凸台、卡扣",
+    "prefs.design_tools.rows": "行数"
+  }
+}
