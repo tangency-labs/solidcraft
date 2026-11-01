@@ -1004,6 +1004,33 @@ mod tests {
     }
 
     #[test]
+    fn tools_near_and_far_fields_edit_coarse_and_fine_without_ordering_them() {
+        for theme in ["light", "dark"] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", json!({"language":"en","theme":theme,"open":"Tools"}));
+            for (query, key, text, expected) in
+                [("Near-axis step", "joint_rotation_coarse", "0.025", (0.025, 0.1)), ("Far-axis step", "joint_rotation_fine", "12.5", (0.025, 12.5))]
+            {
+                h.app.prefs_window.filter = query.into();
+                h.frames(5);
+                let target = format!("prefs:{key}");
+                crate::prefs::reveal_preference(&mut h, &target);
+                h.step(&json!({"click":{"handle":target},"double":true})).unwrap();
+                h.step(&json!({"key":"A","cmd":true})).unwrap();
+                h.step(&json!({"text":text})).unwrap();
+                h.step(&json!({"key":"Enter"})).unwrap();
+                assert_eq!((h.app.preferences.joint_rotation_coarse, h.app.preferences.joint_rotation_fine), expected, "{theme}: {query}");
+            }
+            h.call("ui.prefs", json!({"button":"apply"}));
+            h.call("ui.prefs", json!({"button":"defaults"}));
+            assert_eq!((h.app.preferences.joint_rotation_coarse, h.app.preferences.joint_rotation_fine), (10.0, 0.1));
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!((h.app.preferences.joint_rotation_coarse, h.app.preferences.joint_rotation_fine), (0.025, 12.5));
+        }
+    }
+
+    #[test]
     fn precision_settings_persist_validate_and_read_old_preferences() {
         let mut app = SolveApp::new(Default::default(), Default::default());
         for key in ["joint_rotation_coarse", "joint_rotation_fine"] {
