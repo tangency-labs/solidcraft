@@ -5,5 +5,8 @@
  "method": "linear radius: the balls' envelope, a cone (union of the balls: in each plane x = const the corner cut off by rays from it, each meeting the union first at the least entry over the balls, integrated over x): 132.858501 removed (the balls' great circles, (1-pi/4) L (a^2 + ab + b^2)/3 (tests/oracle/77), would take 133.053)",
  "body_count": 1,
  "volume_mm3": 47867.141499,
- "faces": 7
+ "faces": 7,
+ "tolerance": {
+  "rel": 1e-06
+ }
 }
