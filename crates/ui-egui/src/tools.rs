@@ -97,6 +97,9 @@ pub struct Tool {
     /// Where each point was placed and the sketch points the snap lined it up with (#7828):
     /// constrained to them once the shape is made.
     pub lined: Vec<(Vec2, Vec<crate::sketch_tools::Lined>)>,
+    /// The Line tool's chain, which a rest on its last point switches to tangent arcs and back
+    /// (#9489).
+    pub chain: crate::sketch_line_arc::LineChain,
 }
 
 impl Tool {
@@ -149,6 +152,7 @@ impl Tool {
             dims_focus: false,
             arc_turn: 0.0,
             lined: Vec::new(),
+            chain: Default::default(),
         })
     }
 }
@@ -518,6 +522,10 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
     tool.pts.push(p);
     let before = crate::sketch_tools::point_ids(app);
     if tool.cmd == "sketch.line" {
+        // A new chain's first point: nothing drawn yet to go on tangent from.
+        if tool.pts.len() == 1 {
+            tool.chain = Default::default();
+        }
         if tool.pts.len() >= 2 {
             let (a, b) = (tool.pts[tool.pts.len() - 2].clone(), tool.pts[tool.pts.len() - 1].clone());
             let angled = crate::sketch_dims::has_locked(&tool, "Angle");
@@ -543,6 +551,7 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
                     tool.pts[last].1 = Some(format!("{id}.end"));
                     // The chain needs only its current endpoint, even after many segments.
                     tool.pts = vec![tool.pts[last].clone()];
+                    tool.chain.placed(id);
                 }
                 crate::sketch_dims::reset(&mut tool);
             } else {
@@ -626,7 +635,9 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
             v
         }
         "sketch.circle.two_point" => json!({"p0": xy(&p[0]), "p1": xy(&p[1])}),
-        "sketch.circle.three_point" => json!({"p0": xy(&p[0]), "p1": xy(&p[1]), "p2": xy(&p[2])}),
+        // Each click goes as its snap, as the 3-Point Arc's do: a click snapped to a point or
+        // curve keeps the circle on it (#9858).
+        "sketch.circle.three_point" => json!({"p0": arg(&p[0]), "p1": arg(&p[1]), "p2": arg(&p[2])}),
         "sketch.arc.three_point" => json!({"start": arg(&p[0]), "end": arg(&p[1]), "through": arg(&p[2])}),
         "sketch.arc.center_point" => {
             // A centre snapped to an existing point goes as its place, where `connect` ties
@@ -728,14 +739,7 @@ pub(crate) fn constraint_preselection(
             point_line_alignment(sketch?, &json!(id), line)
         }
         ("sketch.constraint.horizontal_vertical", _) => crate::selection::alignment_points(selection).map(|points| json!({"points": points})),
-        ("sketch.constraint.coincident", [a, b]) => {
-            let entity = |s: &solidcraft_engine::Sel| match s {
-                SketchPoint { id } | SketchCurve { id, .. } => Some(id.clone()),
-                _ => None,
-            };
-            let (a, b) = (entity(a)?, entity(b)?);
-            (a != b).then(|| json!({"a":a,"b":b}))
-        }
+        ("sketch.constraint.coincident", [_, _]) => crate::selection::coincident_operands(selection),
         (
             "sketch.constraint.midpoint",
             [SketchPoint { id: point }, SketchCurve { id: line, .. }] | [SketchCurve { id: line, .. }, SketchPoint { id: point }],
@@ -866,6 +870,9 @@ pub fn undo_spline_point(app: &mut SolveApp) -> bool {
 pub fn finish(app: &mut SolveApp) {
     crate::dim_view::cancel();
     if crate::sketch3d::finish(app) {
+        return;
+    }
+    if crate::sketch_line_arc::finish(app) {
         return;
     }
     if let Some(mut t) = app.tool.take_if(|t| t.kind == Kind::Ext) {

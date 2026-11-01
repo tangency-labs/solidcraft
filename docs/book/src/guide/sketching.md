@@ -12,6 +12,16 @@ an edited one goes back to how it was, as one step that Undo brings back.
 
 Opening a sketch turns the view to face it; to keep the view as it is and face the sketch only with **Look At**, turn off Preferences › Sketch › **Turn to face a sketch when it opens**. When the sketch ends, the view stays where it is by default. Preferences › Sketch › **When a sketch ends** changes that: **Return to the previous view** goes back to the view from before the sketch, and **Return unless rotated** goes back only when you panned or zoomed the sketch view but didn't turn it.
 
+In an assembly a new sketch belongs to the active component and is listed in its Sketches
+folder. Turn on Preferences › Sketch › **Sketching on a part's face makes that part active** to
+keep sketches with the part they are drawn on: a sketch started on a face of another component's
+body first activates that component, at the placement you picked, and is made there, as if you had
+activated the part yourself. The part stays active afterwards, so an extrude or cut made from the
+sketch lands in the same part; activate the design or another part again as usual. Off (the
+default), the sketch belongs to the active component. In scripts the same is
+`sketch.create {"plane": {"face": …}, "activate_part": true}`; the reply's `activated` names the
+component and placement it activated.
+
 In scripts, `XY`, `XZ`, `YZ` and their `Top`, `Front`, `Right` aliases name origin planes.
 Preferences › Interface › **Origin plane names** shows them as Top, Front and Right in the
 browser, dialogs and lists; scripts and saved designs keep XY, XZ and YZ.
@@ -60,13 +70,22 @@ fit-point and control-point splines, conics, points and text. **Construction** (
 into reference geometry that doesn't form profiles. Modify tools include trim (T), extend, break,
 fillet, chamfer, offset (O), mirror, patterns, move/copy and scale. With trim on, click a
 piece to remove it, or press and drag a path across several pieces: the ones it crosses light up
-and all go when you let go, in one undo step (`sketch.trim.path`).
+and all go when you let go, in one undo step (`sketch.trim.path`). Fillet and chamfer take
+several corners at once: pick the corners, set the size once, and every corner is rounded or
+cut alike in one undo step.
 
 Line draws a chain: each click adds a segment from the last point, and a right-click or Esc
 ends the chain. To draw one separate line with a press, a drag and the release instead, turn on
 **Preferences › Sketch › Press and drag draws one line**: the line runs from where you press to
 where you let go, snapping and lining up as clicks do, and ends there; clicks still draw a
 chain, and a drag shorter than about 24 points is still a click.
+
+To round corners without changing tool, turn on **Preferences › Sketch › Rest on a line's last
+point to switch to a tangent arc**. With a segment drawn, move the pointer away from the chain's
+last point, bring it back and hold it still for about a third of a second: a label next to the
+pointer says Tangent Arc, and the next click ends an arc tangent to the last segment. The same
+gesture goes back to lines. Arcs and lines join into one chain, each click is one undo step, and a
+right-click or Esc ends the chain as usual.
 
 Tools with several variants (line and midpoint line; two-point, three-point, centre and rounded
 rectangle; the circle, arc, slot, polygon and spline variants) share one toolbar button with a
@@ -75,7 +94,7 @@ shortcut such as L can start a Midpoint Line; pick the variant you want from the
 change it ([Keyboard shortcuts](shortcuts.md)).
 
 Once a shape's first point is down, value boxes (a line's length and angle, a rectangle's width
-and height, a circle's diameter…) follow the cursor. Typing goes into the first box, Tab moves to
+and height, a circle's diameter, an ellipse's major and minor radius…) follow the cursor. Typing goes into the first box, Tab moves to
 the next and Enter places the shape; each typed value becomes a dimension. A value is an
 expression (`25`, `1 in`, `d1 * 2`), or `width = 20` (also `#width = 20`), which also adds the
 user parameter `width` and dimensions with it, as when [placing a dimension](parameters.md). A
@@ -101,6 +120,10 @@ the direction. Angle expressions can refer to parameters and follow their later 
 Parallel and perpendicular lines ask for a straight sketch line, then a point;
 the reference stays picked so you can place several lines. Right-click clears the current
 points and references; Escape ends the tool.
+
+A command call can cut a horizontal, vertical, angle, parallel or perpendicular construction
+line to a length instead: `length` makes a segment from the point `at`, running towards `near`,
+and adds a length dimension that follows its expression (#10258).
 
 Tangents through an external point take a circle or circular arc, the external point, and a
 click choosing the desired preview. A common tangent takes two circles/arcs and a click choosing
@@ -322,9 +345,9 @@ and the tool stays on for the next dimension. The dimension's text always takes 
 lines take it only away from sketch points and curves, which still start a new dimension.
 
 To have shapes dimensioned as you draw them, turn on **Dimension new shapes** in Preferences ›
-Sketch (it is off by default). Each line, rectangle, circle, arc, slot or polygon you draw then
-gets all its dimensions at the sizes you drew: a line its length and angle, a rectangle its width
-and height, a circle its diameter, and so on. Values you type in the drawing boxes win, and a size
+Sketch (it is off by default). Each line, rectangle, circle, arc, slot, polygon or ellipse you draw
+then gets all its dimensions at the sizes you drew: a line its length and angle, a rectangle its
+width and height, a circle its diameter, an ellipse its major and minor radius, and so on. Values you type in the drawing boxes win, and a size
 the sketch already sets (the angle of a line that snapped horizontal) is left out. The shape and
 its dimensions are one undo step. In scripts, `sketch.draw.dimensioned` takes `"as_drawn": true`.
 

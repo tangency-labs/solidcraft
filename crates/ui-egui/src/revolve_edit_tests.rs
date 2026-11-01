@@ -274,7 +274,7 @@ fn only_the_active_selection_field_looks_active() {
     let filled = border(&h, "Profile");
     click(&mut h, "dialog:Angle");
     assert_eq!(h.app.dialog.as_ref().unwrap().active, 1, "picks still go to Axis while Angle is typed into");
-    assert_eq!(border(&h, "Axis"), t.form_primary);
+    assert_ne!(border(&h, "Axis"), t.form_primary, "only the field with the keyboard looks active (#10066)");
     click(&mut h, "dialog:clear:Axis");
     click(&mut h, "dialog:field:Profile");
     assert_eq!(crate::scenario::count_of("dialog:selection:Axis:filled"), Some(0.0));

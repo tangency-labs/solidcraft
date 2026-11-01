@@ -355,6 +355,10 @@ pub(crate) fn settings_scroll<R>(ui: &mut Ui, id: impl egui::AsIdSalt, add: impl
 }
 
 pub(crate) fn settings_heading(ui: &mut Ui, title: &str, description: &str) {
+    settings_heading_with_tag(ui, title, description, None);
+}
+
+pub(crate) fn settings_heading_with_tag(ui: &mut Ui, title: &str, description: &str, tag: Option<fn(&mut Ui)>) {
     if crate::prefs_search::querying(ui) {
         return;
     }
@@ -364,6 +368,12 @@ pub(crate) fn settings_heading(ui: &mut Ui, title: &str, description: &str) {
         let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), t.space_16 + t.space_3), Sense::hover());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
         paint_text(ui, rect, title, crate::fonts::semibold(t.font_intro), t.form_ink, false);
+        if let Some(tag) = tag {
+            let width = ui.painter().layout_no_wrap(title.to_owned(), crate::fonts::semibold(t.font_intro), t.form_ink).size().x;
+            let start = (rect.left() + width + t.space_8).min(rect.right());
+            let tag_rect = Rect::from_min_max(egui::pos2(start, rect.top()), rect.max);
+            ui.scope_builder(egui::UiBuilder::new().max_rect(tag_rect), tag);
+        }
         super::text(ui, description, super::Text::Hint("settings_heading"));
     });
 }

@@ -1126,6 +1126,12 @@ fn main() -> eframe::Result {
                     })
                     .collect();
                 let info = rs.adapter.get_info();
+                if !app.preferences.graphics_adapter.is_empty() && !info.name.eq_ignore_ascii_case(app.preferences.graphics_adapter.as_str()) {
+                    eprintln!(
+                        "SolidCraft graphics: preferred adapter {:?} was not used; using {:?} instead",
+                        app.preferences.graphics_adapter, info.name
+                    );
+                }
                 let samples = scene_msaa_request(saved_samples);
                 let supported = scene_sample_choices(depth_bits, STENCIL_BITS, |depth| {
                     eframe::egui_wgpu::supported_msaa_samples(&rs.adapter, &rs.device, rs.target_format, depth)

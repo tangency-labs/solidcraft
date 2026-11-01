@@ -670,18 +670,18 @@ impl<'a> Panel<'a> {
         self.joined.map_or(container, |edges| container.joined(edges)).tool_frame(self.frame, right >= self.viewport.right() - 0.5)
     }
 
-    pub(crate) fn window(&self, ctx: &egui::Context) -> egui::Window<'a> {
+    pub(crate) fn window(&self, ctx: &egui::Context) -> super::container::FeatureWindow<'a> {
         self.window_placed(ctx, None)
     }
 
     /// The same window for contents the caller holds to `size` (egui's `fixed_size`); the card
     /// is that plus its frame.
-    pub(crate) fn fixed_window(&self, ctx: &egui::Context, size: egui::Vec2) -> egui::Window<'a> {
+    pub(crate) fn fixed_window(&self, ctx: &egui::Context, size: egui::Vec2) -> super::container::FeatureWindow<'a> {
         let outer = size.x + self.positioned_frame(ctx).total_margin().sum().x;
         self.window_placed(ctx, Some(outer)).fixed_size(size)
     }
 
-    fn window_placed(&self, ctx: &egui::Context, outer_width: Option<f32>) -> egui::Window<'a> {
+    fn window_placed(&self, ctx: &egui::Context, outer_width: Option<f32>) -> super::container::FeatureWindow<'a> {
         let gap = super::Container::new(ctx, super::Surface::Feature).gap();
         let viewport = self.viewport;
         let anchor = self.bounded_anchor(ctx);
@@ -701,7 +701,7 @@ impl<'a> Panel<'a> {
         };
         // Keep drawing safe when even the header/footer cannot fit. egui clips the contents to
         // the remaining viewport; the normal small-height case still keeps both actions visible.
-        super::Container::new(ctx, super::Surface::Feature)
+        let window = super::Container::new(ctx, super::Surface::Feature)
             .window(self.title)
             .id(self.id)
             .title_bar(false)
@@ -720,7 +720,8 @@ impl<'a> Panel<'a> {
             .default_height(0.0)
             .fade_in(false)
             .fade_out(false)
-            .order(egui::Order::Middle)
+            .order(egui::Order::Middle);
+        super::container::FeatureWindow::new(window, self.id, frame)
     }
 
     /// Feature header, scrolling padded body, pinned actions, drag target and compute status.
@@ -851,6 +852,8 @@ impl<'a> Panel<'a> {
     /// Tokens: space_24 and form_footer_height; header/body/footer own their historical padding.
     pub(crate) fn palette(&self, ui: &mut Ui, bottom: f32, top: f32, mut add: impl FnMut(&mut Ui, Part)) {
         let t = Tokens::get();
+        // Dialog buttons at top (#9860): the footer row moves under the header, above the options.
+        let at_top = DialogButtons::current(ui.ctx()) == DialogButtons::Top;
         ui.set_max_height((bottom - ui.cursor().top()).max(0.0));
         super::scope(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -858,7 +861,11 @@ impl<'a> Panel<'a> {
             let short = height < t.space_24 * 6.0;
             let mut contents = |ui: &mut Ui| {
                 add(ui, Part::Header);
-                let body_height = (bottom - ui.cursor().top() - t.form_footer_height).max(0.0);
+                if at_top {
+                    add(ui, Part::Footer);
+                }
+                let footer_height = if at_top { 0.0 } else { t.form_footer_height };
+                let body_height = (bottom - ui.cursor().top() - footer_height).max(0.0);
                 let mut body = |ui: &mut Ui| {
                     egui::Frame::NONE.inner_margin(egui::Margin::symmetric(t.space_10 as i8, t.space_4 as i8)).show(ui, |ui| add(ui, Part::Body));
                 };
@@ -878,7 +885,9 @@ impl<'a> Panel<'a> {
                         .inner;
                     scenario::publish_rect("sketch_palette:options", scroll.inner_rect);
                 }
-                add(ui, Part::Footer);
+                if !at_top {
+                    add(ui, Part::Footer);
+                }
             };
             if short {
                 let scroll = egui::ScrollArea::vertical()
@@ -1098,7 +1107,7 @@ impl<'a> Window<'a> {
         state: &mut S,
         left: impl FnOnce(&mut Ui),
     ) -> (bool, super::Action) {
-        self.show_pages_inner(ctx, selected, pages, state, None, None, left)
+        self.show_pages_inner(ctx, selected, pages, state, None, None, None, left)
     }
 
     /// Page navigation with a strip above the page body (Preferences search).
@@ -1111,9 +1120,10 @@ impl<'a> Window<'a> {
         state: &mut S,
         header: fn(&mut Ui, &mut S),
         on_select: fn(&mut S),
+        sidebar_footer: Option<(f32, fn(&mut Ui, &mut S))>,
         left: impl FnOnce(&mut Ui),
     ) -> (bool, super::Action) {
-        self.show_pages_inner(ctx, selected, pages, state, Some(header), Some(on_select), left)
+        self.show_pages_inner(ctx, selected, pages, state, Some(header), Some(on_select), sidebar_footer, left)
     }
 
     fn show_pages_inner<S>(
@@ -1124,13 +1134,14 @@ impl<'a> Window<'a> {
         state: &mut S,
         header: Option<fn(&mut Ui, &mut S)>,
         on_select: Option<fn(&mut S)>,
+        sidebar_footer: Option<(f32, fn(&mut Ui, &mut S))>,
         left: impl FnOnce(&mut Ui),
     ) -> (bool, super::Action) {
         self.body_padding = false;
         self.page_chrome = true;
         let rows = self.page_rows;
         let padding = self.page_padding;
-        self.show_with_left(ctx, true, |ui| page_list_sized(ui, selected, pages, state, rows, padding, header, on_select), left)
+        self.show_with_left(ctx, true, |ui| page_list_sized(ui, selected, pages, state, rows, padding, header, on_select, sidebar_footer), left)
     }
 
     /// The same bounded card frame, either movable or an input-blocking modal.
@@ -1198,7 +1209,7 @@ pub(crate) struct WindowPage<S> {
 
 #[cfg(test)]
 pub(super) fn page_list<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<S>], state: &mut S) {
-    page_list_sized(ui, selected, pages, state, 16.0, egui::Margin::same(Tokens::get().space_16 as i8), None, None);
+    page_list_sized(ui, selected, pages, state, 16.0, egui::Margin::same(Tokens::get().space_16 as i8), None, None, None);
 }
 
 fn page_list_sized<S>(
@@ -1210,6 +1221,7 @@ fn page_list_sized<S>(
     padding: egui::Margin,
     header: Option<fn(&mut Ui, &mut S)>,
     on_select: Option<fn(&mut S)>,
+    sidebar_footer: Option<(f32, fn(&mut Ui, &mut S))>,
 ) {
     let t = Tokens::get();
     // The search strip, the gap under it, and the following item spacing sit above the page.
@@ -1229,10 +1241,19 @@ fn page_list_sized<S>(
     t.secondary_vline(ui.painter(), nav.right(), nav.y_range(), t.dialog_rule);
     scenario::publish_rect("dialog:pages", nav);
     *selected = (*selected).min(pages.len().saturating_sub(1));
-    ui.scope_builder(egui::UiBuilder::new().max_rect(nav.shrink2(vec2(t.space_8, t.space_6))), |ui| {
+    let nav_inner = nav.shrink2(vec2(t.space_8, t.space_6));
+    let footer_height = sidebar_footer.map_or(0.0, |(height, _)| dimension(height).min(nav_inner.height()));
+    let list = egui::Rect::from_min_max(nav_inner.min, egui::pos2(nav_inner.right(), nav_inner.bottom() - footer_height));
+    ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
         ui.set_clip_rect(ui.clip_rect().intersect(nav));
         ui.spacing_mut().item_spacing.y = t.space_2;
-        egui::ScrollArea::vertical().id_salt("window_pages").show(ui, |ui| {
+        let selection_id = ui.id().with("page_selection");
+        let changed = ui.data_mut(|data| {
+            let previous = data.get_temp::<usize>(selection_id);
+            data.insert_temp(selection_id, *selected);
+            previous != Some(*selected)
+        });
+        egui::ScrollArea::vertical().id_salt("window_pages").max_height(list.height()).show(ui, |ui| {
             for (index, page) in pages.iter().enumerate() {
                 if let Some(group) = page.group {
                     ui.add_space(t.space_8);
@@ -1250,6 +1271,9 @@ fn page_list_sized<S>(
                     }
                 }
                 let on = *selected == index;
+                if on && changed && sidebar_footer.is_some() && !list.contains_rect(rect) {
+                    response.scroll_to_me(Some(egui::Align::Center));
+                }
                 if on || response.hovered() || response.has_focus() {
                     ui.painter().rect_filled(rect, t.control_radius, if on { t.selected_bg } else { t.hover });
                 }
@@ -1275,6 +1299,14 @@ fn page_list_sized<S>(
             }
         });
     });
+    if let Some((_, footer)) = sidebar_footer {
+        let rect = egui::Rect::from_min_max(egui::pos2(nav_inner.left(), list.bottom()), nav_inner.max);
+        ui.scope_builder(egui::UiBuilder::new().id_salt("pages_footer").max_rect(rect), |ui| {
+            ui.set_clip_rect(ui.clip_rect().intersect(rect));
+            footer(ui, state);
+        });
+        scenario::publish_rect("dialog:pages_footer", rect);
+    }
     let content = egui::Rect::from_min_max(egui::pos2(nav.right(), body.top()), body.max);
     let padding = egui::epaint::MarginF32 {
         left: padding.leftf().min(content.width() / 2.0),

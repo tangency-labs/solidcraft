@@ -8,7 +8,8 @@
 //!   text (with `near`: the one in that label's row)
 //! - `{"click": AT, "double"?, "shift"?, "ctrl"?, "button"?}`, `{"move": AT, "shift"?, "alt"?, "ctrl"?, "cmd"?}`,
 //!   `{"hold": AT, "frames"?}` (press and hold still: Select Other),
-//!   `{"drag": [AT, AT], "shift"?, "ctrl"?, "steps"?}` where AT is `[x, y]` (screen), `{"world": [x,y,z]}`
+//!   `{"drag": [AT, AT, ...], "shift"?, "ctrl"?, "steps"?}` (through any points between, `steps` moves
+//!   each) where AT is `[x, y]` (screen), `{"world": [x,y,z]}`
 //!   or `{"sketch": [x,y]}` (the sketch being edited)
 //! - `{"queued": "engine.execute", "params": {…}, "min_frames"?: n, "max_frames"?: n}`: a request sent the way an
 //!   agent's arrive (through the app's request queue, answered between frames, so the agent
@@ -449,6 +450,19 @@ impl Harness {
         Err(format!("view_anim {v}: still animating after 240 frames"))
     }
 
+    /// A drag step's first and last points, and the screen points it passes through between them
+    /// (a lasso's loop, #4376).
+    fn drag_points(&mut self, d: &Value) -> Result<([f64; 2], [f64; 2], Vec<Value>), String> {
+        let pts = d.as_array().map(Vec::as_slice).unwrap_or_default();
+        let start = self.at(pts.first().unwrap_or(&Value::Null))?;
+        let end = self.at(pts.get(pts.len().saturating_sub(1).max(1)).unwrap_or(&Value::Null))?;
+        let mut via = Vec::new();
+        for q in pts.iter().skip(1).take(pts.len().saturating_sub(2)) {
+            via.push(json!(self.at(q)?));
+        }
+        Ok((start, end, via))
+    }
+
     /// Run one step.
     pub fn step(&mut self, s: &Value) -> Result<(), String> {
         let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
@@ -504,13 +518,12 @@ impl Harness {
                 let [x, y] = self.at(at)?;
                 self.call("ui.move", json!({"x": x, "y": y,"shift":flag("shift"),"alt":flag("alt"),"ctrl":flag("ctrl"),"cmd":flag("cmd")}))
             } else if let Some(d) = s.get("drag") {
-                let [x0, y0] = self.at(d.get(0).unwrap_or(&Value::Null))?;
-                let [x1, y1] = self.at(d.get(1).unwrap_or(&Value::Null))?;
+                let ([x0, y0], [x1, y1], via) = self.drag_points(d)?;
                 let steps = s.get("steps").cloned().unwrap_or(json!(8));
-                self.call(
-                    "ui.drag",
-                    json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift"), "ctrl": flag("ctrl"), "alt": flag("alt")}),
-                )
+                let mut p =
+                    json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift"), "ctrl": flag("ctrl"), "alt": flag("alt")});
+                p["via"] = Value::Array(via);
+                self.call("ui.drag", p)
             } else if let Some(m) = s.get("queued").and_then(Value::as_str) {
                 let (v, frames) = self.call_queued(m, s.get("params").cloned().unwrap_or(json!({})));
                 let min = s.get("min_frames").and_then(Value::as_u64).unwrap_or(0);

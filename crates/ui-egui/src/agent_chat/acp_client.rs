@@ -29,6 +29,8 @@ pub struct AcpBackend {
     proc: AgentProcess,
     cwd: std::path::PathBuf,
     bridge: Option<acp::McpBridge>,
+    /// The agent's `initialize` reply: which routes the system note can take into a session.
+    init: Value,
     next_id: u64,
     pending: HashMap<u64, Pending>,
     session: Option<String>,
@@ -56,6 +58,7 @@ impl AcpBackend {
             proc,
             cwd,
             bridge,
+            init: Value::Null,
             next_id: 0,
             pending: HashMap::new(),
             session: None,
@@ -82,7 +85,7 @@ impl AcpBackend {
     fn new_session(&mut self) {
         self.config_pending = None;
         self.pending.retain(|_, request| *request != Pending::SetConfig);
-        let params = acp::session_new_params(&self.cwd, self.bridge.as_ref());
+        let params = acp::session_new_params(&self.cwd, self.bridge.as_ref(), &self.init);
         self.request(Pending::SessionNew, "session/new", params);
     }
 
@@ -96,6 +99,7 @@ impl AcpBackend {
                         self.images = acp::takes_images(&v);
                         self.documents = acp::takes_documents(&v);
                         self.auth = acp::auth_methods(&v);
+                        self.init = v;
                         self.new_session();
                     }
                     (Pending::SessionNew, Ok(v)) => match v.get("sessionId").and_then(Value::as_str) {
@@ -138,6 +142,11 @@ impl AcpBackend {
                             };
                             out.push(Event::ConfigOptionFinished { id: config_id, result });
                         }
+                    }
+                    // `session/set_model` is still unstable in ACP: an agent can list `models` and
+                    // still not serve it (#9970). It keeps its own model; that is no error to show.
+                    (Pending::SetModel, Err((acp::METHOD_NOT_FOUND, message))) => {
+                        log::debug!("agent does not serve session/set_model: {message}");
                     }
                     (what, Err((code, message))) => {
                         let config_error = what == Pending::SetConfig;
@@ -317,7 +326,7 @@ pub fn test_agent(argv: &[String], cwd: &std::path::Path) -> Result<String, Test
     let init = wait_for(&p, 1);
     let session_cwd = if acp::runs_in_wsl(argv) { acp::wsl_path(cwd) } else { cwd.to_path_buf() };
     let result = init.and_then(|v| {
-        p.send(&acp::request(2, "session/new", acp::session_new_params(&session_cwd, None)));
+        p.send(&acp::request(2, "session/new", acp::session_new_params(&session_cwd, None, &v)));
         wait_for(&p, 2).map(|_| {
             let who = acp::agent_info(&v);
             crate::i18n::format("ui.ai_test_acp_ok", &[("agent", if who.is_empty() { "?" } else { &who })])

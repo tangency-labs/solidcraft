@@ -320,6 +320,9 @@ impl Loading {
 pub struct AgentChat {
     /// The panel is shown (View menu, the application bar's chat button, Ctrl+Shift+A).
     pub open: bool,
+    /// Only while dispatching this conversation's own admitted tool request. Window state:
+    /// creating/opening a design may carry the conversation, but a person's tab switch may not.
+    pub(crate) following_document: bool,
     pub items: Vec<Item>,
     pub input: String,
     /// The viewer, open on one message's pictures.
@@ -444,6 +447,7 @@ impl AgentChat {
     pub(crate) fn swap_document(&mut self, other: &mut Self) {
         std::mem::swap(self, other);
         std::mem::swap(&mut self.open, &mut other.open);
+        std::mem::swap(&mut self.following_document, &mut other.following_document);
         std::mem::swap(&mut self.settings, &mut other.settings);
         std::mem::swap(&mut self.control_starter, &mut other.control_starter);
         std::mem::swap(&mut self.models_cache, &mut other.models_cache);
@@ -963,6 +967,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
                         key,
                         http,
                         request_timeout_s: entry.request_timeout_s,
+                        reasoning_effort: entry.reasoning_effort.clone(),
                     },
                     start,
                 )
@@ -1050,6 +1055,66 @@ pub fn disconnect(app: &mut SolveApp) {
 pub fn shutdown(app: &mut SolveApp) {
     app.agent_chat.disconnect_document(&mut app.session, true);
     crate::documents::disconnect_background_chats(app, true);
+}
+
+/// Mark the origin only for this synchronous dispatch. Deferred work carries the same trusted
+/// turn flag and enters here when it applies; JSON parameters cannot opt into continuation.
+pub(crate) fn with_tool_request<T>(
+    app: &mut SolveApp,
+    active: Option<&Arc<std::sync::atomic::AtomicBool>>,
+    run: impl FnOnce(&mut SolveApp) -> T,
+) -> T {
+    let own = active.is_some_and(|active| {
+        active.load(std::sync::atomic::Ordering::Relaxed) && app.agent_chat.turn.as_ref().is_some_and(|turn| Arc::ptr_eq(active, &turn.active))
+    });
+    // A batch may replace the design and then roll back to its checkpoint. Keep the turn's
+    // original undo boundary when that happens, including edits made before the batch.
+    let before = app.agent_chat.turn.as_ref().filter(|_| own).map(|t| (app.session.doc.clone(), t.start_doc.clone(), t.start_undo));
+    let previous = std::mem::replace(&mut app.agent_chat.following_document, own);
+    let result = run(app);
+    app.agent_chat.following_document = previous;
+    if let Some((doc, start_doc, start_undo)) = before
+        && Arc::ptr_eq(&doc, &app.session.doc)
+        && let Some(turn) = app.agent_chat.turn.as_mut()
+        && active.is_some_and(|active| Arc::ptr_eq(active, &turn.active))
+    {
+        turn.start_doc = start_doc;
+        turn.start_undo = start_undo;
+    }
+    result
+}
+
+/// The agent's replacement succeeded. Keep its backend, transcript, queue, limits and validity
+/// flag; subsequent edits undo in this design and picked geometry belongs to the old one.
+pub(crate) fn continue_in_document(app: &mut SolveApp) {
+    if let Some(turn) = app.agent_chat.turn.as_mut() {
+        turn.start_doc = app.session.doc.clone();
+        turn.start_undo = app.session.undo.len();
+    }
+    app.agent_chat.picked.clear();
+    app.agent_chat.picked_context = Context::default();
+    app.agent_chat.selected_count = None;
+}
+
+/// A newly opened tab has no conversation to displace. Move the initiating chat into it,
+/// grouping the previous design's completed edits before its session is parked.
+pub(crate) fn follow_new_tab(app: &mut SolveApp, switch: impl FnOnce(&mut SolveApp)) {
+    if !app.agent_chat.following_document {
+        switch(app);
+        return;
+    }
+    if let Some(turn) = app.agent_chat.turn.as_ref() {
+        let steps =
+            merge_undo(&mut app.session.undo, &turn.start_doc, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]));
+        if steps > 0 {
+            app.agent_chat.push(Item::Changes { steps, doc: app.session.doc.clone(), undone: false });
+        }
+    }
+    let mut chat = AgentChat::default();
+    app.agent_chat.swap_document(&mut chat);
+    switch(app);
+    app.agent_chat.swap_document(&mut chat);
+    continue_in_document(app);
 }
 
 /// A tab switch stops this turn before its session leaves the app. Keep the backend's own

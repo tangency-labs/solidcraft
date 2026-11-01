@@ -139,6 +139,13 @@ completed changes in that design's undo history. Returning restores the conversa
 messages wait for **Send**. Closing a design closes its conversation. Conversations are kept
 only while the tabs remain open.
 
+When the agent itself creates a new design or opens a file, its conversation follows the new
+design and the same turn continues. Its completed changes stay in each design's own undo
+history. The original tab starts a fresh conversation if you return to it. Opening a file that
+is already in another tab returns an error instead of displacing that tab's conversation;
+select that tab yourself to continue there. Your own New, Open and tab switches still stop
+the current turn. Stop also cancels a file the agent is still opening.
+
 The input stays enabled during a turn. **Enter** queues the message: it shows in the conversation
 as a **Queued** bubble that you can **Edit** or remove (×) until it is sent. Several queued
 messages go as one prompt, in order, when the turn ends normally.
@@ -258,7 +265,12 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   take: 300 s by default, from 30 s to an hour. A slow local model (a large model on modest
   hardware, or a long message with many tool results) may need more; raise it here or in the
   endpoint's entry under **Agents**, where a change applies from the next request. A request that
-  runs out of time ends the message with the limit it hit and where to raise it.
+  runs out of time ends the message with the limit it hit and where to raise it. **Reasoning
+  effort** is optional and empty by default: nothing is sent and the provider's own default
+  applies. When set, the value goes out as `reasoning_effort` on each `/chat/completions`
+  request; accepted values differ per provider and model (for example `low`, `high` or `max`).
+  A value you set is never replaced by SolidCraft: if the endpoint refuses it, the refusal is
+  shown instead of being retried with `none`.
 
 **Edit** on an agent you added opens the same dialog filled with its name and command, or its
 protocol, endpoint, model and request timeout, and **Save** changes it in place: it keeps its id,

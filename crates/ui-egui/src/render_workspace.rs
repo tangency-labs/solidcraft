@@ -2019,7 +2019,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else {
         app.viewport.hover = None;
     }
-    crate::gpu::paint_background(ui.painter(), viewport, &preview_background(app));
+    let background = preview_background(app);
+    crate::gpu::paint_background(ui.painter(), viewport, &background);
     let result = (|| -> Result<(), String> {
         if app.viewport.gpu.is_none() {
             return Err(crate::i18n::tr("render.error_gpu_preview").into());
@@ -2115,6 +2116,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             // Product rendering has its own lighting; AO is a Design viewport setting.
             ao_radius: 0.0,
             ao_samples: solidcraft_gpu::view::AO_SAMPLES,
+            sky: [0.0; 4],
             eye: [eye.x as f32, eye.y as f32, eye.z as f32, if camera.fov > 0.0 { 1.0 } else { 0.0 }],
             ssaa: if width < full.0 { width as f32 / full.0 as f32 } else { 1.0 },
             hover_tint: [f32::from(Tokens::get().hover_face_lift) / 255.0; 3],
@@ -2123,7 +2125,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 [f32::from(c.r()) / 255.0, f32::from(c.g()) / 255.0, f32::from(c.b()) / 255.0]
             },
         });
-        ui.painter().add(egui_wgpu::Callback::new_paint_callback(rect, callback));
+        crate::blur::viewport(ui.painter(), rect, callback, viewport, [background.viewport_top, background.viewport_bottom]);
         Ok(())
     })();
     if let Err(error) = result {

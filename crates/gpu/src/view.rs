@@ -153,8 +153,8 @@ fn octahedral6(n: [f32; 3]) -> u32 {
 }
 /// The shader's `U`: the view-projection matrix, 10 `vec4`s (the tenth carries the ambient
 /// occlusion radius), the 8 analysis colours, their flags, the depth direction and the two
-/// whole-body highlight colours (`uniform_bytes`).
-const UNIFORM_SIZE: u64 = 416 + 16 + 21 * 64;
+/// whole-body highlight colours, the product lights, and the sky (`uniform_bytes`).
+const UNIFORM_SIZE: u64 = 416 + 16 + 21 * 64 + 16;
 
 /// A body drawn from its display plan, evaluated on the GPU: the plan, and a palette index per
 /// face (the plan's face numbering; faces past the end take the last index).
@@ -990,6 +990,9 @@ pub struct Frame {
     pub hover_tint: [f32; 3],
     /// Whole-body selection highlight: a selected body's colour before lighting (sRGB 0..1).
     pub selection_tint: [f32; 3],
+    /// The world's up direction and 1 to shade in linear light with a sky fill that follows it
+    /// (#7974); 0 shades as before.
+    pub sky: [f32; 4],
 }
 
 /// Heights of the model seen from a direction (an orthographic depth map): a point is reachable
@@ -3287,7 +3290,7 @@ fn can_reuse(ss_ready: bool, cached: Option<u64>, key: u64) -> bool {
 /// section, images, analysis, accessibility map, ambient occlusion and the theme's hover and
 /// selection tints. The same key draws the same picture (pipelines and shaders are fixed for the
 /// renderer).
-fn frame_key(cb: &Frame) -> u64 {
+pub fn frame_key(cb: &Frame) -> u64 {
     use std::hash::Hash as _;
     let mut h = std::collections::hash_map::DefaultHasher::new();
     cb.product.hash(&mut h);
@@ -3309,6 +3312,7 @@ fn frame_key(cb: &Frame) -> u64 {
     // picture cached under the previous theme's colours is not shown (#5802).
     cb.hover_tint.map(f32::to_bits).hash(&mut h);
     cb.selection_tint.map(f32::to_bits).hash(&mut h);
+    cb.sky.map(f32::to_bits).hash(&mut h);
     cb.outline.hash(&mut h);
     cb.ao_radius.to_bits().hash(&mut h);
     cb.ao_samples.hash(&mut h);
@@ -4169,6 +4173,7 @@ pub fn uniform_bytes(cb: &Frame, w: f32, h: f32, linear: bool, reversed: bool) -
         let light = cb.product_lights.as_ref().and_then(|lights| lights.get(index)).copied().unwrap_or([0.0; 16]);
         v.extend(light.map(|value| if value.is_finite() { value } else { 0.0 }));
     }
+    v.extend(cb.sky.map(|value| if value.is_finite() { value } else { 0.0 }));
     v.iter().flat_map(|x| x.to_le_bytes()).collect()
 }
 
@@ -4364,6 +4369,28 @@ mod tests {
         assert_eq!(samples_sent(1000), 32.0, "at most the shader's 32");
     }
 
+    /// The sky (#7974) is the uniform's last `vec4`: the world's up direction and the switch, with
+    /// anything not finite sent as zero (shaded as before).
+    #[test]
+    fn the_sky_rides_at_the_end_of_the_uniform() {
+        let last = |sky: [f32; 4]| {
+            let mut f = cached_frame();
+            f.sky = sky;
+            let bytes = super::uniform_bytes(&f, 64.0, 64.0, false, false);
+            assert_eq!(bytes.len() as u64, super::UNIFORM_SIZE);
+            let v: Vec<f32> = bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+            v[v.len() - 4..].to_vec()
+        };
+        assert_eq!(last([0.0, 0.0, 1.0, 1.0]), [0.0, 0.0, 1.0, 1.0]);
+        assert_eq!(last([0.0; 4]), [0.0; 4]);
+        assert_eq!(last([f32::NAN, 1.0, f32::INFINITY, 1.0]), [0.0, 1.0, 0.0, 1.0]);
+        // Turning it on draws the frame again.
+        let mut f = cached_frame();
+        let off = super::frame_key(&f);
+        f.sky = [0.0, 0.0, 1.0, 1.0];
+        assert_ne!(super::frame_key(&f), off);
+    }
+
     #[test]
     fn render_lights_preview_shader_uniform_and_frame_cache_include_light_state() {
         let source = format!("{}\n{}", super::SHADER, crate::pbr::SOURCE);
@@ -4415,6 +4442,7 @@ mod tests {
             eye: [0.0; 4],
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
+            sky: [0.0; 4],
             ssaa: 1.0,
         }
     }
@@ -4800,6 +4828,7 @@ mod glass_tests {
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
+            sky: [0.0; 4],
             ssaa: 1.0,
             hover_tint: [0.0; 3],
             selection_tint: [0.0; 3],
@@ -4977,6 +5006,7 @@ mod glass_tests {
             eye: [0.0, 0.0, 100.0, 0.0],
             ao_radius: 0.0,
             ao_samples: crate::view::AO_SAMPLES,
+            sky: [0.0; 4],
             ssaa,
         }
     }

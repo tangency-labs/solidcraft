@@ -95,10 +95,10 @@ mod tests {
     }
 
     #[test]
-    fn navigation_preference_restores_tool_badge_on_cancel_and_defaults() {
+    fn tools_preference_restores_tool_badge_on_cancel_and_defaults() {
         let mut h = Harness::new();
         h.app.home.open = false;
-        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.call("ui.prefs", json!({"open":"Tools"}));
         h.frames(4);
         crate::prefs::reveal_preference(&mut h, "view:tool_cursor");
         h.step(&json!({"click":{"handle":"view:tool_cursor"}})).unwrap();
@@ -106,7 +106,7 @@ mod tests {
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert!(!h.app.ui.tool_cursor);
         h.app.ui.tool_cursor = true;
-        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.call("ui.prefs", json!({"open":"Tools"}));
         h.call("ui.prefs", json!({"button":"defaults"}));
         assert!(!h.app.ui.tool_cursor);
         h.call("ui.prefs", json!({"button":"cancel"}));
@@ -114,24 +114,86 @@ mod tests {
     }
 
     #[test]
+    fn tools_preference_keeps_applied_tool_badge_after_restart() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"open":"Tools"}));
+        h.frames(4);
+        crate::prefs::reveal_preference(&mut h, "view:tool_cursor");
+        h.step(&json!({"click":{"handle":"view:tool_cursor"}})).unwrap();
+        assert!(h.app.ui.tool_cursor);
+        h.call("ui.prefs", json!({"button":"ok"}));
+
+        let mut restarted = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        restarted.load_prefs(&h.app.prefs());
+        assert!(restarted.ui.tool_cursor, "an explicitly enabled tool badge survives a restart");
+
+        // Turning it off must replace a previously saved true value too.
+        h.call("ui.prefs", json!({"open":"Tools"}));
+        h.frames(4);
+        crate::prefs::reveal_preference(&mut h, "view:tool_cursor");
+        h.step(&json!({"click":{"handle":"view:tool_cursor"}})).unwrap();
+        assert!(!h.app.ui.tool_cursor);
+        h.call("ui.prefs", json!({"button":"apply"}));
+        restarted.load_prefs(&h.app.prefs());
+        assert!(!restarted.ui.tool_cursor, "Apply also saves turning the tool badge off");
+    }
+
+    #[test]
+    fn tools_preference_does_not_save_unapplied_tool_badge_changes() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        let saved = |h: &Harness| serde_json::from_str::<serde_json::Value>(&h.app.prefs()).unwrap()["tool_cursor"].clone();
+        h.call("ui.prefs", json!({"open":"Tools"}));
+        h.frames(4);
+        crate::prefs::reveal_preference(&mut h, "view:tool_cursor");
+        h.step(&json!({"click":{"handle":"view:tool_cursor"}})).unwrap();
+        assert!(h.app.ui.tool_cursor);
+        assert_eq!(saved(&h), false, "periodic saves and quit keep the last applied value");
+        h.call("ui.prefs", json!({"button":"apply"}));
+        assert_eq!(saved(&h), true);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(!h.app.ui.tool_cursor);
+        assert_eq!(saved(&h), true, "Restore Defaults also waits for Apply or OK");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert!(h.app.ui.tool_cursor);
+        assert_eq!(saved(&h), true, "Cancel preserves the applied choice in the settings file");
+    }
+
+    #[test]
+    fn saved_tool_badge_requires_a_boolean_and_old_settings_keep_the_default() {
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.load_prefs("{}");
+        assert!(!app.ui.tool_cursor, "settings from before the option was saved keep it off");
+        for enabled in [true, false] {
+            app.load_prefs(&json!({"tool_cursor":enabled}).to_string());
+            assert_eq!(app.ui.tool_cursor, enabled);
+            for invalid in [json!({}), json!({"tool_cursor":null}), json!({"tool_cursor":"true"}), json!({"tool_cursor":1})] {
+                app.load_prefs(&invalid.to_string());
+                assert_eq!(app.ui.tool_cursor, enabled, "missing or malformed flags leave the current setting alone");
+            }
+        }
+    }
+
+    #[test]
     fn badge_shows_the_running_tool_beside_the_pointer() {
         let mut h = Harness::new();
         h.settle();
-        // Off by default: a running tool shows no badge until Navigation preferences turn it on.
+        // Off by default: a running tool shows no badge until Tools preferences turn it on.
         assert!(!h.app.ui.tool_cursor, "the badge is on by default");
         h.step(&json!({"start": "sketch.create"})).unwrap();
         let (_, badge) = hover_middle(&mut h);
         assert!(badge.is_none(), "off by default, yet a badge is drawn at {badge:?}");
         h.step(&json!({"key": "Escape"})).unwrap();
         h.settle();
-        // The board's Display menu omits this preference; Navigation keeps its checkbox.
-        h.call("ui.prefs", json!({"open":"Navigation"}));
+        // The board's Display menu omits this preference; Tools keeps its checkbox.
+        h.call("ui.prefs", json!({"open":"Tools"}));
         h.frames(4);
         crate::prefs::reveal_preference(&mut h, "view:tool_cursor");
         h.step(&json!({"click": {"handle": "view:tool_cursor"}})).unwrap();
         h.call("ui.prefs", json!({"button":"ok"}));
         h.frames(2);
-        assert!(h.app.ui.tool_cursor, "the Navigation preferences checkbox did not turn the badge on");
+        assert!(h.app.ui.tool_cursor, "the Tools preferences checkbox did not turn the badge on");
         let (_, badge) = hover_middle(&mut h);
         assert!(badge.is_none(), "no tool runs, yet a badge is drawn at {badge:?}");
 
@@ -152,7 +214,7 @@ mod tests {
         // The coordinate readout starts READOUT below and right of the pointer: no overlap.
         assert!(badge.bottom() < at.y + READOUT.y, "the badge {badge:?} covers the readout under {at:?}");
 
-        // Turned off in Navigation preferences.
+        // Turned off in Tools preferences.
         h.app.ui.tool_cursor = false;
         let (_, badge) = hover_middle(&mut h);
         assert!(badge.is_none(), "turned off, yet a badge is drawn at {badge:?}");

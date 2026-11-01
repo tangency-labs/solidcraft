@@ -35,9 +35,12 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "space_mouse_calibrations",
         "space_mouse_driver",
         "space_mouse_speed",
+        "dark_parts_shading",
         "msaa",
         "window_system",
         "default_units",
+        "extrude_view_isometric",
+        "extrude_view_return",
         "update",
         "agents",
         "custom_themes",
@@ -107,6 +110,54 @@ fn profiles_and_the_active_one_are_kept_between_runs() {
     assert_eq!(other.settings_profiles.names(), ["Laptop"]);
     assert_eq!(other.settings_profiles.active.as_deref(), Some("Laptop"));
     assert_eq!(other.settings_profiles.list, h.app.settings_profiles.list);
+}
+
+#[test]
+fn gruvbox_legacy_profiles_keep_their_selected_contrast_with_empty_option_maps() {
+    let mut h = Harness::new();
+    for (old, family, contrast) in crate::theme_files::GRUVBOX_ALIASES {
+        let profile = json!({"format":FORMAT,"name":old,"preferences":{"theme":old,"theme_options":{}}});
+        run(&mut h, "settings.profile.import", json!({"profile":profile}));
+        let out = run(&mut h, "settings.profile.apply", json!({"name":old}));
+        assert_eq!(out["skipped"], json!([]));
+        assert_eq!(h.app.preferences.theme, family);
+        assert_eq!(h.app.preferences.theme_options[family]["contrast"], contrast);
+    }
+    h.app.preferences.theme_options.insert("unrelated".into(), [("future".into(), json!({"keep":true}))].into());
+    let profile = json!({"format":FORMAT,"name":"Legacy without options","preferences":{"theme":"gruvbox-light-soft"}});
+    run(&mut h, "settings.profile.import", json!({"profile":profile}));
+    let out = run(&mut h, "settings.profile.apply", json!({"name":"Legacy without options"}));
+    assert_eq!(out["skipped"], json!([]));
+    assert_eq!(h.app.preferences.theme_options["gruvbox-light"]["contrast"], "soft");
+    assert_eq!(h.app.preferences.theme_options["unrelated"]["future"], json!({"keep":true}));
+    // A profile's own theme with a retired name is imported under a custom id,
+    // rather than being mistaken for a built-in contrast selection.
+    let profile = json!({"format":FORMAT,"name":"Named theme","preferences":{"theme":"gruvbox-dark-hard",
+        "theme_options":{"gruvbox-dark-hard":{"contrast":"personal"}}},
+        "themes":[{"id":"gruvbox-dark-hard","format":"solidcraft-theme/1","name":"Gruvbox Dark Hard","base":"light",
+            "options":[{"id":"contrast","type":"choice","default":"personal","values":[{"id":"personal","label":{"en":"Personal"}},{"id":"other","label":{"en":"Other"}}]}]}]});
+    run(&mut h, "settings.profile.import", json!({"profile":profile}));
+    let out = run(&mut h, "settings.profile.apply", json!({"name":"Named theme"}));
+    assert_eq!(out["skipped"], json!([]));
+    assert_eq!(h.app.preferences.theme, "custom-gruvbox-dark-hard");
+    assert_eq!(h.app.preferences.theme_options["custom-gruvbox-dark-hard"]["contrast"], "personal");
+}
+
+#[test]
+fn gruvbox_profile_migration_keeps_malformed_theme_fields_for_skipped_reporting() {
+    let mut h = Harness::new();
+    h.call("ui.prefs", json!({"theme":"gruvbox-light","theme_options":{"gruvbox-light":{"contrast":"soft"}}}));
+    for bad in [json!({"theme":42,"theme_options":"bad"}), json!({"theme":false,"theme_options":{"gruvbox-dark":"bad"}})] {
+        let before_theme = h.app.preferences.theme.clone();
+        let before_options = h.app.preferences.theme_options.clone();
+        let profile = json!({"format":FORMAT,"name":"Malformed","preferences":bad});
+        // Keep the per-key apply guard effective even for malformed in-memory documents.
+        h.app.settings_profiles.list = vec![profile];
+        let out = run(&mut h, "settings.profile.apply", json!({"name":"Malformed"}));
+        assert_eq!(out["skipped"], json!(["theme", "theme_options"]));
+        assert_eq!(h.app.preferences.theme, before_theme);
+        assert_eq!(h.app.preferences.theme_options, before_options);
+    }
 }
 
 #[test]
@@ -295,4 +346,182 @@ fn choosing_a_profile_in_preferences_applies_it() {
     h.frames(3);
     assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Large monitor"));
     assert!(h.app.preferences.zoom_reverse);
+}
+
+#[test]
+fn profile_keys_preserve_the_literal_pre_split_baseline() {
+    let expected = [
+        "browser_bodies_folders",
+        "browser_collapsed",
+        "browser_eye_left",
+        "browser_float",
+        "browser_share",
+        "browser_show",
+        "browser_width",
+        "center_arc_follows_cursor",
+        "color_vision",
+        "dialog_buttons",
+        "dialog_place",
+        "direct_interaction",
+        "free_orbit",
+        "free_orbit_upright",
+        "hidden_toolbar_tabs",
+        "hide_constraint_glyphs_zoomed_out",
+        "history_in_browser",
+        "history_play_button",
+        "history_sketches",
+        "keep_work_on_tab_switch",
+        "language",
+        "layout",
+        "line_drag_draws_one",
+        "line_hover_tangent_arc",
+        "logo_accent",
+        "look_at_anim",
+        "look_at_speed",
+        "manipulator_free_alt",
+        "middle_double_click",
+        "mouse_gestures",
+        "nav",
+        "nav_bridge_enabled",
+        "nav_bridge_port",
+        "navigation_bar",
+        "navigator_style",
+        "orbit_around",
+        "orbit_reverse",
+        "origin_plane_names",
+        "pan_reverse_x",
+        "pan_reverse_y",
+        "persistent_ribbon_pressed",
+        "prefer_free_sketch_points",
+        "project_options_dialog",
+        "quick_measure",
+        "radial_context_menu",
+        "ribbon_icon_grid",
+        "ribbon_labels",
+        "ribbon_menus_skip_pinned",
+        "ribbon_reveal",
+        "right_drag_orbits",
+        "select_other_hidden",
+        "selection_shift_add_only",
+        "shortcut_cycles_modes",
+        "sketch_align_points",
+        "sketch_auto_dimensions",
+        "sketch_auto_locate",
+        "sketch_conflict_colour",
+        "sketch_construction_lines",
+        "sketch_exit_view",
+        "sketch_open_look_at",
+        "sketch_recent_snap",
+        "sketch_state_icons",
+        "sketch_tab_always",
+        "sketch_tracking_guides",
+        "sketch_tracking_points",
+        "smooth_wheel_zoom",
+        "status_bar",
+        "suppress_sketch_snap",
+        "theme",
+        "theme_follow",
+        "theme_options",
+        "timeline_collapsed",
+        "timeline_left",
+        "timeline_left_browser_collapsed",
+        "timeline_left_width",
+        "timeline_origin_bodies",
+        "timeline_under_browser",
+        "toast_place",
+        "trackpad_pan",
+        "trackpad_zoom_modifier",
+        "ui_font",
+        "ui_scale",
+        "view_confirm_corner",
+        "viewport_analysis_status",
+        "viewport_background",
+        "viewport_section_status",
+        "viewport_status_details",
+        "viewport_status_summary",
+        "viewport_theme",
+        "wheel_zoom_speed",
+        "zoom_reverse",
+        "zoom_stop_at_model",
+        "zoom_to_cursor",
+    ];
+    let mut actual: Vec<_> = keys().collect();
+    actual.sort_unstable();
+    assert_eq!(expected.len(), 93);
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
+    let mut h = Harness::new();
+    let defaults = crate::prefs::Prefs::default();
+    assert!(!defaults.keep_work_on_tab_switch && !defaults.line_hover_tangent_arc);
+    for (key, page) in [("keep_work_on_tab_switch", crate::prefs::PAGE_LAYOUT), ("line_hover_tangent_arc", crate::prefs::PAGE_SKETCH)] {
+        let homes: Vec<_> = crate::prefs::FIELD_PAGES.iter().filter_map(|(field, page)| (*field == key).then_some(*page)).collect();
+        assert_eq!(homes, [Some(page)], "{key} keeps its new page home");
+    }
+    h.app.preferences.nav_bridge_enabled = true;
+    h.app.preferences.nav_bridge_port = 9876;
+    h.app.preferences.origin_plane_names = crate::prefs::OriginPlaneNames::TopFrontRight;
+    h.app.preferences.direct_interaction = true;
+    h.app.preferences.quick_measure = true;
+    h.app.preferences.viewport_analysis_status = false;
+    h.app.preferences.keep_work_on_tab_switch = true;
+    h.app.preferences.line_hover_tangent_arc = true;
+    run(&mut h, "settings.profile.save", json!({"name":"Moved"}));
+    let saved = h.app.settings_profiles.prefs();
+    let doc = h.app.settings_profiles.list[0].clone();
+    assert_eq!(doc["preferences"]["keep_work_on_tab_switch"], true);
+    assert_eq!(doc["preferences"]["line_hover_tangent_arc"], true);
+    assert!(doc["preferences"].get("dark_parts_shading").is_none());
+    assert_eq!(sanitize(&doc).unwrap(), doc);
+    h.app.settings_profiles.load(&serde_json::from_str::<Value>(&serde_json::to_string(&saved).unwrap()).unwrap());
+    assert_eq!(h.app.settings_profiles.list[0], doc);
+    h.app.preferences.nav_bridge_enabled = false;
+    h.app.preferences.nav_bridge_port = 8765;
+    h.app.preferences.origin_plane_names = crate::prefs::OriginPlaneNames::Xyz;
+    h.app.preferences.direct_interaction = false;
+    h.app.preferences.quick_measure = false;
+    h.app.preferences.viewport_analysis_status = true;
+    h.app.preferences.keep_work_on_tab_switch = false;
+    h.app.preferences.line_hover_tangent_arc = false;
+    let out = run(&mut h, "settings.profile.apply", json!({"name":"Moved"}));
+    assert_eq!(out["skipped"], json!([]));
+    assert!(h.app.preferences.keep_work_on_tab_switch && h.app.preferences.line_hover_tangent_arc);
+    assert_eq!(capture(&h.app, "Moved"), doc);
+}
+
+#[test]
+fn profile_sidebar_switches_saves_and_marks_edits_with_existing_commands() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    run(&mut h, "settings.profile.save", json!({"name":"Laptop"}));
+    h.app.preferences.zoom_reverse = true;
+    run(&mut h, "settings.profile.save", json!({"name":"Desk"}));
+    h.call("ui.prefs", json!({"open":"Tools"}));
+    h.frames(3);
+    assert!(crate::scenario::rect_of("prefs:profile:edited").is_none());
+    h.step(&json!({"click":{"handle":"prefs:profile"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"dialog:list:Laptop"}})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.settings_profiles.active.as_deref(), Some("Laptop"));
+    assert!(!h.app.preferences.zoom_reverse);
+    h.app.preferences.direct_interaction = true;
+    h.frames(3);
+    assert!(crate::scenario::rect_of("prefs:profile:edited").is_some());
+    h.step(&json!({"click":{"handle":"prefs:profile"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget":"Save"})).unwrap();
+    h.frames(3);
+    assert!(crate::scenario::rect_of("prefs:profile:edited").is_none());
+    assert!(h.app.prefs_window.open, "saving a profile keeps Preferences open");
+    let saved = run(&mut h, "settings.profile.export", json!({"name":"Laptop"}));
+    assert_eq!(saved["profile"]["preferences"]["direct_interaction"], true);
+    h.step(&json!({"click":{"handle":"prefs:profile"}})).unwrap();
+    h.frames(2);
+    let profiles_label = h.app.tr("prefs.profiles").to_string();
+    h.step(&json!({"widget":profiles_label})).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GENERAL);
 }

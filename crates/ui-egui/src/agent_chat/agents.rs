@@ -113,6 +113,9 @@ pub struct AgentConfig {
     /// API: how long one model request may take, in seconds (clamped to
     /// [`MIN_REQUEST_TIMEOUT_S`]..=[`MAX_REQUEST_TIMEOUT_S`] where it is used).
     pub request_timeout_s: u64,
+    /// API: the reasoning effort to send as `reasoning_effort`; empty sends nothing and the
+    /// provider's own default applies (trimmed and length-capped by [`reasoning_effort`]).
+    pub reasoning_effort: String,
 }
 
 impl Default for AgentConfig {
@@ -127,6 +130,7 @@ impl Default for AgentConfig {
             ollama: false,
             key: false,
             request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
+            reasoning_effort: String::new(),
         }
     }
 }
@@ -148,6 +152,15 @@ pub fn request_timeout_s(secs: f64) -> u64 {
     secs.round().clamp(MIN_REQUEST_TIMEOUT_S as f64, MAX_REQUEST_TIMEOUT_S as f64) as u64
 }
 
+/// The longest reasoning effort an endpoint can be given (no provider names one near this).
+pub const MAX_REASONING_EFFORT_LEN: usize = 64;
+
+/// A reasoning effort as stored: trimmed, and capped so a hand-edited preferences file or the
+/// control channel cannot carry an absurd value into every request. Empty means "send nothing".
+pub fn reasoning_effort(raw: &str) -> String {
+    raw.trim().chars().take(MAX_REASONING_EFFORT_LEN).collect()
+}
+
 /// An agent as the picker and the switcher show it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
@@ -167,6 +180,8 @@ pub struct Entry {
     pub key: bool,
     /// API: seconds one model request may take (in range).
     pub request_timeout_s: u64,
+    /// API: the reasoning effort to send, empty for none (trimmed, in length).
+    pub reasoning_effort: String,
     /// Found installed, but its program didn't start when asked its version: why (#9034).
     pub problem: Option<String>,
     /// Found installed: the command that installs it again.
@@ -187,6 +202,7 @@ impl Entry {
             model: c.model.clone(),
             key: c.key,
             request_timeout_s: c.request_timeout_s.clamp(MIN_REQUEST_TIMEOUT_S, MAX_REQUEST_TIMEOUT_S),
+            reasoning_effort: reasoning_effort(&c.reasoning_effort),
             problem: None,
             install: "",
         }
@@ -231,6 +247,7 @@ pub fn entries(app: &crate::SolveApp) -> Vec<Entry> {
             model: String::new(),
             key: false,
             request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
+            reasoning_effort: String::new(),
             problem: f.problem.clone(),
             install: f.install,
         }));
@@ -400,5 +417,24 @@ mod tests {
         let saved = AgentConfig { id: "api-3".into(), kind: Kind::Api, request_timeout_s: 1200, ..Default::default() };
         let back: AgentConfig = serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
         assert_eq!(back, saved);
+    }
+
+    #[test]
+    fn reasoning_effort_defaults_to_empty_and_is_trimmed_and_capped() {
+        assert!(AgentConfig::default().reasoning_effort.is_empty());
+        // An older preferences file has no effort: empty, so nothing is sent.
+        let old: AgentConfig = serde_json::from_str(r#"{"id":"api-1","kind":"api","base_url":"http://localhost:11434/v1","model":"m"}"#).unwrap();
+        assert!(old.reasoning_effort.is_empty());
+        assert_eq!(reasoning_effort("  high "), "high");
+        assert!(reasoning_effort("   ").is_empty());
+        let long = reasoning_effort(&"x".repeat(500));
+        assert_eq!(long.chars().count(), MAX_REASONING_EFFORT_LEN);
+        let saved = AgentConfig { id: "api-2".into(), kind: Kind::Api, reasoning_effort: "max".into(), ..Default::default() };
+        let back: AgentConfig = serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
+        assert_eq!(back, saved);
+        // The entry carries it trimmed; a hand-edited over-long one is capped where used.
+        assert_eq!(Entry::from_config(&saved).reasoning_effort, "max");
+        let wild: AgentConfig = serde_json::from_str(&format!(r#"{{"id":"api-3","kind":"api","reasoning_effort":"{}"}}"#, "y".repeat(500))).unwrap();
+        assert_eq!(Entry::from_config(&wild).reasoning_effort.chars().count(), MAX_REASONING_EFFORT_LEN);
     }
 }

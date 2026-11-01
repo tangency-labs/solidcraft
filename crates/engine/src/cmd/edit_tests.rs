@@ -9,6 +9,107 @@ fn run(s: &mut Session, id: &str, params: Value) -> Value {
 }
 
 #[test]
+fn select_geometry_resolves_points_and_indices_without_changing_history() {
+    use solidcraft_geom::Vec3;
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name":"Block", "corner":[20,30,40], "length":10, "width":10, "height":10}));
+    let before = (s.doc.to_json(), s.undo.len());
+    for (kind, point) in [("face", Vec3::new(25.0, 35.0, 50.0)), ("edge", Vec3::new(25.0, 30.0, 50.0))] {
+        assert_eq!(run(&mut s, "select.set", json!({"items":[{"type":kind,"body":"Block","point":point}]}))["selected"], 1);
+        let index = match &s.selection[0] {
+            Sel::Face { index, point: actual, .. } | Sel::Edge { index, point: actual, .. } => {
+                assert_eq!(*actual, point);
+                *index
+            }
+            other => panic!("unexpected selection: {other:?}"),
+        };
+        let measured = s.measure_items(&s.selection);
+        let (field, expected) = if kind == "face" { ("area_mm2", 100.0) } else { ("length_mm", 10.0) };
+        assert!((measured["items"][0][field].as_f64().unwrap() - expected).abs() < 1e-9, "{measured}");
+        run(&mut s, "select.set", json!({"items":[{"type":kind,"body":"Block","index":index}]}));
+        let complete = serde_json::to_value(&s.selection[0]).unwrap();
+        assert_eq!(complete["index"], index);
+        let mut point_only = complete.clone();
+        point_only.as_object_mut().unwrap().remove("index");
+        run(&mut s, "select.set", json!({"items":[point_only]}));
+        assert_eq!(serde_json::to_value(&s.selection[0]).unwrap(), complete);
+    }
+    assert_eq!((s.doc.to_json(), s.undo.len()), before);
+}
+
+#[test]
+fn select_geometry_curved_picks_round_trip_and_add_without_duplicates() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"body_name":"Round", "radius":5, "height":10}));
+    for (kind, point) in [("face", [3, 4, 5]), ("edge", [3, 4, 10])] {
+        run(&mut s, "select.set", json!({"items":[{"type":kind,"body":"Round","point":point}]}));
+        let index = serde_json::to_value(&s.selection[0]).unwrap()["index"].clone();
+        run(&mut s, "select.set", json!({"items":[{"type":kind,"body":"Round","index":index}]}));
+        let complete = serde_json::to_value(&s.selection[0]).unwrap();
+        let pick: solidcraft_geom::Vec3 = serde_json::from_value(complete["point"].clone()).unwrap();
+        assert!((pick.x.hypot(pick.y) - 5.0).abs() < 1e-6, "the inferred point lies on the cylinder: {complete}");
+        let mut partial = complete.clone();
+        partial.as_object_mut().unwrap().remove("index");
+        run(&mut s, "select.set", json!({"items":[partial, complete],"add":true}));
+        assert_eq!(s.selection.len(), 1);
+        assert_eq!(serde_json::to_value(&s.selection[0]).unwrap(), complete);
+        let measured = s.measure_items(&s.selection);
+        assert!((measured["items"][0]["diameter"].as_f64().unwrap() - 10.0).abs() < 1e-6, "{measured}");
+    }
+}
+
+#[test]
+fn select_geometry_uses_the_placed_body_in_world_coordinates() {
+    let mut s = Session::default();
+    let created = run(&mut s, "component.create", json!({"name":"Part"}));
+    run(&mut s, "solid.box", json!({"body_name":"Block", "length":2, "width":3, "height":4}));
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence":created["occurrence"]}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence":second,"translate":[10,20,0],"axis":[0,0,1],"angle":"90 deg","capture":false}));
+    let name = s.occurrence_placement(&[second]).unwrap().bodies[0].world.clone();
+    for (kind, point) in [("face", [8.5, 21.0, 4.0]), ("edge", [8.5, 20.0, 4.0])] {
+        run(&mut s, "select.set", json!({"items":[{"type":kind,"body":name,"point":point}]}));
+        let complete = serde_json::to_value(&s.selection[0]).unwrap();
+        assert_eq!(complete["body"], name);
+        run(&mut s, "select.set", json!({"items":[{"type":kind,"body":name,"index":complete["index"]}]}));
+        let inferred = serde_json::to_value(&s.selection[0]).unwrap();
+        let pick: solidcraft_geom::Vec3 = serde_json::from_value(inferred["point"].clone()).unwrap();
+        assert!((pick.z - 4.0).abs() < 1e-9 && (7.0..=10.0).contains(&pick.x) && (20.0..=22.0).contains(&pick.y), "{inferred}");
+        assert!(s.execute("select.set", &json!({"items":[{"type":kind,"body":name,"point":[1,1,4]}]})).is_err());
+        assert_eq!(serde_json::to_value(&s.selection[0]).unwrap(), inferred);
+    }
+}
+
+#[test]
+fn select_geometry_invalid_partial_picks_leave_selection_and_revision_unchanged() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"body_name":"Block", "length":10, "width":10, "height":10}));
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"Block"}]}));
+    let before = (s.selection.clone(), s.revision, s.undo.len());
+    for kind in ["face", "edge"] {
+        for fields in [
+            json!({}),
+            json!({"index":999999}),
+            json!({"index":-1}),
+            json!({"index":"0"}),
+            json!({"point":[500,500,500]}),
+            json!({"point":[1,2]}),
+            json!({"point":[1e308,1e308,1e308]}),
+        ] {
+            let mut item = json!({"type":kind,"body":"Block"});
+            item.as_object_mut().unwrap().extend(fields.as_object().unwrap().clone());
+            for add in [false, true] {
+                let result = s.execute("select.set", &json!({"items":[{"type":"face","body":"Block","point":[5,5,10]},item],"add":add}));
+                assert!(result.is_err(), "accepted {item}");
+                assert_eq!((s.selection.clone(), s.revision, s.undo.len()), before, "{item}");
+            }
+        }
+    }
+    assert!(s.execute("select.set", &json!({"items":[{"type":"face","body":"Missing","point":[5,5,10]}]})).is_err());
+    assert_eq!((s.selection, s.revision, s.undo.len()), before);
+}
+
+#[test]
 fn history_playback_is_a_typed_display_request_without_history_edits() {
     let mut s = Session::default();
     let revision = s.revision;
@@ -1106,6 +1207,57 @@ fn counted_body_names_stay_when_the_timeline_changes() {
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [60, 0, 0], "name": "E"}));
     assert_eq!(bodies(&s), named(&[("Body2", "B"), ("Body3", "C"), ("Body4", "E")]));
+}
+
+/// Pinning reads each feature's bodies once and keeps them with the state it read them from;
+/// the names it pins and reserves, and the fingerprints it leaves, are those of reading every
+/// feature's bodies again: random boxes (named and counted), moves, suppressions, deletions,
+/// reorders, undo and redo, against a session that forgets what it read before every command and
+/// against fingerprinting the whole timeline again.
+#[test]
+fn pinning_with_the_bodies_it_read_before_pins_as_reading_them_again() {
+    let (mut kept, mut fresh) = (Session::default(), Session::default());
+    let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = |n: usize| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed % n as u64) as usize
+    };
+    for step in 0..60 {
+        let features: Vec<String> = kept.doc.features.iter().map(|f| f.name.clone()).collect();
+        let counted: Vec<String> = kept.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+        let pick = |names: &[String], k: usize| names.get(k % names.len().max(1)).cloned().unwrap_or_default();
+        let x = 15 * step;
+        let (id, params) = match next(9) {
+            _ if features.len() < 3 => ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})),
+            0 | 1 => ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]})),
+            2 => ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "body_name": format!("Named {step}")})),
+            3 => ("solid.move", json!({"bodies": [pick(&counted, next(64))], "translate": [0, 5, 0]})),
+            4 => ("timeline.suppress", json!({"feature": pick(&features, next(64)), "suppressed": next(2) == 0})),
+            5 => ("timeline.delete", json!({"feature": pick(&features, next(64))})),
+            6 => ("timeline.reorder", json!({"feature": pick(&features, next(64)), "position": next(features.len()), "active": true})),
+            7 => ("edit.undo", json!({})),
+            _ => ("edit.redo", json!({})),
+        };
+        fresh.made_bodies.clear();
+        let (a, b) = (kept.execute(id, &params), fresh.execute(id, &params));
+        assert_eq!(a.is_ok(), b.is_ok(), "step {step}: {id} {params}");
+        assert_eq!(kept.doc.to_json(), fresh.doc.to_json(), "step {step}: {id} {params}");
+        // The fingerprints match the design as fingerprinting the whole timeline again makes them
+        // match it: evaluating it again reuses the same results (all, as a rule; the others are
+        // computed or taken from the cache the copies share).
+        let again = |model: &solidcraft_doc::Model| {
+            let mut m = model.clone();
+            m.evaluate(&kept.doc);
+            m.last_recomputed + m.last_restored
+        };
+        let mut full = kept.model.clone();
+        full.refingerprint(&kept.doc);
+        assert_eq!(again(&kept.model), again(&full), "step {step}: {id} {params}");
+        assert_eq!(again(&kept.model), again(&fresh.model), "step {step}: {id} {params}");
+    }
+    assert!(kept.doc.features.len() > 5 && !kept.doc.reserved_body_names.is_empty());
 }
 
 /// The value at a dotted path of a definition.

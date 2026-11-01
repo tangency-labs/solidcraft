@@ -63,6 +63,8 @@ pub enum StopReason {
     ResidualTolerance,
     NoImprovement,
     IterationLimit,
+    /// A status-only solve gave up: the iteration stalled far from a solution.
+    Stalled,
     /// The shared frame-work budget was exhausted after evaluating the initial residual.
     WorkBudget,
 }

@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::project::resolve;
 use solidcraft_doc::{Document, FeatureKind};
 use solidcraft_geom::{Plane, Vec2, Vec3};
-use solidcraft_sketch::{ConstraintKind, LinkKind, LinkSource, Sketch, nearest_crossing};
+use solidcraft_sketch::{ConstraintKind, LinkKind, LinkSource, Sketch};
 
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
@@ -685,9 +685,9 @@ pub(super) fn snap_points(s: &mut Session, p: &Value, cmd: &str) -> Result<Value
             if ci == cj {
                 return Err(bad(cmd, "`x:` needs two distinct curves"));
             }
-            let sha = sk.shape(ci).ok_or_else(|| bad(cmd, format!("`{a}` is not a line, circle or arc")))?;
-            let shb = sk.shape(cj).ok_or_else(|| bad(cmd, format!("`{b}` is not a line, circle or arc")))?;
-            let at = nearest_crossing(&sha, &shb, near).ok_or_else(|| bad(cmd, "those curves do not meet"))?;
+            sk.shape(ci).ok_or_else(|| bad(cmd, format!("`{a}` is not a line, circle or arc")))?;
+            sk.shape(cj).ok_or_else(|| bad(cmd, format!("`{b}` is not a line, circle or arc")))?;
+            let at = sk.nearest_crossing(ci, cj, near).ok_or_else(|| bad(cmd, "those curves do not meet"))?;
             let pi = sk.add_point(at, None)?;
             sk.add_constraint(ConstraintKind::PointOnCurve { p: pi, c: ci }, None)?;
             sk.add_constraint(ConstraintKind::PointOnCurve { p: pi, c: cj }, None)?;

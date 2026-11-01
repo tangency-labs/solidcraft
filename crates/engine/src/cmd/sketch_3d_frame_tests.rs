@@ -439,3 +439,36 @@ fn line3d_spline3d_point3d_need_a_3d_sketch() {
         assert!(info.enabled, "{id} not offered inside a 3D sketch: {:?}", info.disabled_reason);
     }
 }
+
+#[test]
+fn wire_frame_copies_keep_component_and_legacy_coordinates() {
+    let (mut s, _, first, second) = second_frame();
+    let sketch = s.active_sketch.unwrap();
+    let fit = [Vec3::new(20.0, 40.0, 45.0), Vec3::new(10.0, 30.0, 45.0), Vec3::new(20.0, 20.0, 45.0)];
+    let local = run(&mut s, "sketch.arc3d", json!({"start":fit[0],"through":fit[1],"end":fit[2]}))["curves"][0].as_str().unwrap().to_owned();
+    let legacy = s.doc_mut().sketch_mut(sketch).unwrap().add_drawn_arc_in(&fit, WireSpace::World).unwrap();
+    s.refresh();
+    let originals = s.doc.sketch(sketch).unwrap().wires.clone();
+    let out = run(&mut s, "sketch.move", json!({"entities":[local,legacy],"copy":true,"translate":[1.6,0],"angle":90}));
+    let copied: Vec<_> = out["curves"].as_array().unwrap().iter().map(|id| id.as_str().unwrap().to_owned()).collect();
+    assert_eq!(copied.len(), 2);
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert_eq!(&sk.wires[..2], &originals);
+    assert_eq!(sk.wires[2].space, WireSpace::Component);
+    assert_eq!(sk.wires[3].space, WireSpace::World);
+    near(sk.wires[2].arc.unwrap().center, Vec3::new(1.6, 0.0, 5.0));
+    near(sk.wires[3].arc.unwrap().center, Vec3::new(20.0, 31.6, 45.0));
+    for wire in s.world_state().sketch(sketch).unwrap().sketch.wires.iter().filter(|w| copied.contains(&w.id)) {
+        near(wire.arc.unwrap().center, Vec3::new(20.0, 31.6, 45.0));
+        near(wire.fit[0], Vec3::new(10.0, 31.6, 45.0));
+    }
+    let component = s.active_component;
+    run(&mut s, "component.activate", json!({"component":component,"occurrence":first,"path":[first]}));
+    let world = s.world_state();
+    let wires = &world.sketch(sketch).unwrap().sketch.wires;
+    near(wires.iter().find(|w| w.id == copied[0]).unwrap().arc.unwrap().center, Vec3::new(1.6, 0.0, 5.0));
+    near(wires.iter().find(|w| w.id == copied[1]).unwrap().arc.unwrap().center, Vec3::new(20.0, 31.6, 45.0));
+    run(&mut s, "component.activate", json!({"component":component,"occurrence":second,"path":[second]}));
+    let restored = solidcraft_doc::format::read(&s.doc.to_json()).unwrap();
+    assert_eq!(restored.sketch(sketch).unwrap().wires, s.doc.sketch(sketch).unwrap().wires);
+}

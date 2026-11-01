@@ -1194,13 +1194,21 @@ impl ModelState {
     /// to the budget keep only its last few states, so setting a parameter back recomputed what
     /// had dropped out.
     fn added_bytes(&self, before: &ModelState) -> usize {
+        // `before`'s bodies by solid, and its sketches by address: looked up per body and sketch,
+        // not searched (every feature's result is charged, so searching was bodies² per feature).
+        // Bodies sharing a solid are still told apart by `same_shape` (the mesh as well).
+        let mut solids: std::collections::HashMap<usize, Vec<&Body>> = std::collections::HashMap::with_capacity(before.bodies.len());
+        for o in &before.bodies {
+            solids.entry(o.body.solid_id()).or_default().push(&o.body);
+        }
         let bodies: usize = self
             .bodies
             .iter()
-            .filter(|b| !before.bodies.iter().any(|o| o.body.same_shape(&b.body)))
+            .filter(|b| !solids.get(&b.body.solid_id()).is_some_and(|os| os.iter().any(|o| o.same_shape(&b.body))))
             .map(|b| if b.bytes > 0 { b.bytes } else { b.body.retained_bytes() })
             .sum();
-        let sketches: usize = self.sketches.iter().filter(|s| !before.sketches.iter().any(|o| Arc::ptr_eq(o, s))).map(|s| s.retained_bytes()).sum();
+        let kept: std::collections::HashSet<*const SolvedSketch> = before.sketches.iter().map(Arc::as_ptr).collect();
+        let sketches: usize = self.sketches.iter().filter(|s| !kept.contains(&Arc::as_ptr(s))).map(|s| s.retained_bytes()).sum();
         bodies + sketches + self.sheets.len() * 4096 + self.threads.len() * 192 + self.construct.len() * 192
     }
 
@@ -1299,6 +1307,10 @@ pub struct Model {
     kept: KeptSlot,
     /// The imported texts' digests the last `evaluate` fingerprinted the features with.
     step_digests: StepDigests,
+    /// The address of the shared document whose fingerprints the results were last given in
+    /// full, with [`fingerprints_digest`] of them then ([`Model::pinned_prefix`]). Only an
+    /// address: a reference to the document would make every in-place edit of it a copy.
+    fingerprinted: Option<(usize, u64)>,
     /// The document context the last `evaluate` ran in ([`context_digest`]).
     context: u64,
     /// The last active result of each feature hidden by the history marker, with its document
@@ -1418,32 +1430,40 @@ fn quantize(sk: &mut solidcraft_sketch::Sketch) {
 /// file's text by its digest.
 /// Hash [`feature_json`] of `f` into `h`. Every evaluation fingerprints every feature, and in a
 /// design built command by command almost all of them are the same as last time: the text of a
-/// feature is kept (per thread, by id) with the feature it was written from, and written again
-/// only when the feature differs. An Import's text also depends on its STEP digest, so it is
-/// written each time as before.
+/// feature is kept (by id) with the feature it was written from, and written again only when the
+/// feature differs. An Import's text also depends on its STEP digest, so it is written each time
+/// as before.
+///
+/// The texts are shared by every thread: a command evaluated ahead runs on a new worker thread
+/// each time (the desktop's deferred commands and delete checks, the control channel's ahead
+/// jobs), and a per-thread store started empty there, so every ahead run wrote out every
+/// feature again. The lock is held only to look up or store an entry, never while a feature is
+/// compared or written; an entry is the same whichever thread wrote it, since the text is a
+/// function of the feature alone.
 fn hash_feature_json(f: &Feature, steps: &StepDigests, h: &mut impl Hasher) {
+    type Written = std::collections::HashMap<u64, Arc<(Feature, String)>>;
+    static WRITTEN: std::sync::LazyLock<std::sync::Mutex<Written>> = std::sync::LazyLock::new(Default::default);
     if matches!(f.kind, FeatureKind::Import { .. }) {
         feature_json(f, steps).hash(h);
         return;
     }
-    thread_local! {
-        static WRITTEN: std::cell::RefCell<std::collections::HashMap<u64, (Feature, String)>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    let seen = WRITTEN.lock().unwrap_or_else(|e| e.into_inner()).get(&f.id).cloned();
+    if let Some(seen) = seen
+        && seen.0 == *f
+    {
+        seen.1.hash(h);
+        return;
     }
-    WRITTEN.with(|written| {
-        let mut written = written.borrow_mut();
-        if let Some((seen, json)) = written.get(&f.id)
-            && seen == f
-        {
-            json.hash(h);
-            return;
-        }
-        let json = feature_json(f, steps);
-        json.hash(h);
-        if written.len() >= 1 << 15 {
-            written.clear();
-        }
-        written.insert(f.id, (f.clone(), json));
-    });
+    #[cfg(test)]
+    cost_tests::count_written();
+    let json = feature_json(f, steps);
+    json.hash(h);
+    let entry = Arc::new((f.clone(), json));
+    let mut written = WRITTEN.lock().unwrap_or_else(|e| e.into_inner());
+    if written.len() >= 1 << 15 {
+        written.clear();
+    }
+    written.insert(f.id, entry);
 }
 
 fn feature_json(f: &Feature, steps: &StepDigests) -> String {
@@ -2131,6 +2151,7 @@ impl Model {
     /// Re-evaluate the document, reusing results up to the first changed feature.
     pub fn evaluate(&mut self, doc: &Document) {
         self.placement_inputs = None;
+        self.fingerprinted = None;
         self.placement_local = true;
         let (vals, perr) = evaluation_values(doc);
         self.param_errors = perr;
@@ -2532,19 +2553,76 @@ impl Model {
     /// Set every result's fingerprint to `doc`'s, so the next evaluation reuses every result
     /// (after a change that builds nothing differently).
     pub fn refingerprint(&mut self, doc: &Document) {
+        self.refingerprint_from(doc, 0);
+    }
+
+    /// How many leading results keep their fingerprints when `doc` has the body names of the
+    /// features `renamed` pinned, and nothing else changed (see [`Model::refingerprint_shared`]).
+    /// Every command pins, and fingerprinting the whole timeline again for it cost as much as
+    /// the fingerprinting of the evaluation itself. When the results hold `doc`'s fingerprints
+    /// (the address and digest kept when they were given prove it), those before the first
+    /// renamed feature stand, since nothing they read changes, unless a pattern or mirror of
+    /// features among them replays a renamed one (it fingerprints its sources' definitions
+    /// wherever they are). Without that proof: none.
+    pub fn pinned_prefix(&self, doc: &Arc<Document>, renamed: &[u64]) -> usize {
+        let proven = self.fingerprinted.is_some_and(|(of, digest)| of == Arc::as_ptr(doc) as usize && digest == fingerprints_digest(&self.results));
+        if !proven {
+            return 0;
+        }
+        let Some(first) = doc.features.iter().position(|f| renamed.contains(&f.id)) else { return doc.features.len() };
+        let replays_renamed = |f: &Feature| match &f.kind {
+            FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } => {
+                bodies.is_empty() && !features.is_empty() && replayed_sources(doc, features).iter().any(|g| renamed.contains(&g.id))
+            }
+            _ => false,
+        };
+        doc.features.iter().take(first).position(replays_renamed).unwrap_or(first)
+    }
+
+    /// Drop the proof [`Model::pinned_prefix`] reads: the document at that address is about to
+    /// change in place.
+    pub fn forget_fingerprints(&mut self) {
+        self.fingerprinted = None;
+    }
+
+    /// Fingerprint the results from `start` on for `doc`, chained onto the fingerprint before.
+    pub(crate) fn refingerprint_from(&mut self, doc: &Document, start: usize) {
         self.placement_inputs = None;
+        self.fingerprinted = None;
+        self.step_digests = StepDigests::of(doc, &self.step_digests);
+        let start = start.min(self.results.len()).min(doc.features.len());
+        if start == self.results.len().min(doc.features.len()) {
+            return;
+        }
         let (vals, _) = evaluation_values(doc);
         let marker = doc.marker.unwrap_or(usize::MAX);
-        self.step_digests = StepDigests::of(doc, &self.step_digests);
-        let mut prev = 0;
+        let last = start.checked_sub(1).and_then(|i| self.results.get(i));
+        let mut prev = last.map_or(0, |r| r.fingerprint);
         // Each feature's fingerprint reads the model it starts from, as evaluating does.
-        let mut before = Arc::new(ModelState::default());
-        for (i, (r, f)) in self.results.iter_mut().zip(&doc.features).enumerate() {
+        let mut before = last.map_or_else(|| Arc::new(ModelState::default()), |r| r.state.clone());
+        for (i, (r, f)) in self.results.iter_mut().zip(&doc.features).enumerate().skip(start) {
             prev = chain_fingerprint(doc, &vals, f, prev, i >= marker, &self.step_digests, Some(&before));
             r.fingerprint = prev;
             before = r.state.clone();
         }
     }
+
+    /// Note that the results now hold `doc`'s fingerprints (for [`Model::pinned_prefix`]).
+    pub(crate) fn mark_fingerprinted(&mut self, doc: &Arc<Document>) {
+        self.fingerprinted = Some((Arc::as_ptr(doc) as usize, fingerprints_digest(&self.results)));
+    }
+}
+
+/// A digest of the results' features and fingerprints, which proves they are still the ones
+/// [`Model::mark_fingerprinted`] saw (whatever changed them since).
+fn fingerprints_digest(results: &[FeatureResult]) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    results.len().hash(&mut h);
+    for r in results {
+        r.id.hash(&mut h);
+        r.fingerprint.hash(&mut h);
+    }
+    h.finish()
 }
 
 /// Key of the design's length unit (mm per unit) among the values (no parameter can be named
@@ -3238,6 +3316,11 @@ fn apply_traced_with(
             // Not yet: a cut that splits one piece of such a body still splits all of them; keeping
             // the untouched ones together needs each new piece traced to the piece it came from.
             let mut taken: std::collections::BTreeSet<String> = state.bodies.iter().map(|b| b.name.clone()).collect();
+            // The pieces past the first belong to this feature, like a split's pieces (#10123):
+            // `body.rename` stores their names in this feature's `body_names`, in this order, so a
+            // renamed piece keeps its own name through a rebuild instead of landing on a sibling
+            // of the body it was cut from.
+            let mut extra = 0usize;
             let mut split: Vec<ModelBody> = Vec::new();
             for mb in std::mem::take(&mut state.bodies) {
                 let Some(&had) = affected.get(&mb.name).filter(|_| !state.sheets.iter().any(|s| s.body == mb.name)) else {
@@ -3253,13 +3336,18 @@ fn apply_traced_with(
                 // (so pieces of one face in different bodies are told apart).
                 let lineages = crate::lineage::Lineage::lumps(&mb.body, mb.lineage().as_deref(), &pieces);
                 for (k, (p, lineage)) in pieces.into_iter().zip(lineages).enumerate() {
-                    let name = if k == 0 {
-                        mb.name.clone()
+                    let (name, made_by) = if k == 0 {
+                        (mb.name.clone(), mb.feature)
                     } else {
-                        (k..=k + taken.len()).map(|j| format!("{} ({j})", mb.name)).find(|n| !taken.contains(n)).unwrap_or_default()
+                        let stored = f.body_names.get(extra).filter(|n| !n.trim().is_empty() && !taken.contains(*n)).cloned();
+                        extra += 1;
+                        let name = stored.unwrap_or_else(|| {
+                            (k..=k + taken.len()).map(|j| format!("{} ({j})", mb.name)).find(|n| !taken.contains(n)).unwrap_or_default()
+                        });
+                        (name, f.id)
                     };
                     taken.insert(name.clone());
-                    split.push(ModelBody::new(name, p, mb.feature).with_lineage(lineage));
+                    split.push(ModelBody::new(name, p, made_by).with_lineage(lineage));
                 }
             }
             state.bodies = split;

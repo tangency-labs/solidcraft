@@ -1491,8 +1491,52 @@ fn quiet_joint_answers_and_a_drive_to_where_it_is() {
     assert!(r["dof"].is_array() && r["moved"] == false && r.get("reason").is_none(), "{r}");
     // A suppressed joint with no motion link moves nothing, and says why.
     run(&mut s, "joint.edit", json!({"joint": "Rail", "suppressed": true}));
+    let (doc, undo) = (s.doc.clone(), s.undo.len());
     let r = run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 8}));
     assert!(r["moved"] == false && r["reason"] == "Rail is suppressed" && r.get("unconnected").is_none(), "{r}");
+    // Nor does it store the value, as it did with an undo step: unsuppressed, the part jumped to
+    // it (#9742). The reply keeps what was asked apart from what the joint holds.
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc) && s.undo.len() == undo, "a drive of a suppressed joint changed the design");
+    assert_eq!((&r["requested"][0]["value"], &r["values"][0]["value"]), (&json!(8.0), &json!(5.0)), "{r}");
+    assert!(r.get("held").is_none(), "{r}");
+}
+
+/// A screw's travel follows its turn, so a distance asked of it is not reached: the reply says
+/// what was asked and why the joint holds another value, and a drive of the distance alone,
+/// which moves nothing, says why. A limit is named the same way (#9742).
+#[test]
+fn a_drive_says_which_values_a_motion_link_or_a_limit_held() {
+    let mut s = two_cubes();
+    run(&mut s, "joint.create", json!({"type": "cylindrical", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}, "name": "Cy"}));
+    run(&mut s, "joint.screw", json!({"joint": "Cy", "pitch": 2}));
+    let follows = json!("distance follows its angle through a motion link (screw)");
+    let r = run(&mut s, "joint.drive", json!({"joint": "Cy", "values": [90, 5]}));
+    assert!(r["moved"] == true && r.get("reason").is_none(), "{r}");
+    assert_eq!((&r["requested"][0]["value"], &r["requested"][1]["value"]), (&json!(90.0), &json!(5.0)), "{r}");
+    let held = r["held"].as_array().cloned().unwrap_or_default();
+    assert_eq!(held.len(), 1, "only the distance is held: {r}");
+    assert_eq!(
+        (&held[0]["name"], &held[0]["requested"], &held[0]["unit"], &held[0]["why"]),
+        (&json!("distance"), &json!(5.0), &json!("mm"), &follows),
+        "{r}"
+    );
+    assert!((held[0]["value"].as_f64().unwrap_or(f64::NAN) - 0.5).abs() < 1e-9, "a quarter turn at pitch 2 travels 0.5 mm: {r}");
+    // The distance alone: nothing moves, and the reply says why.
+    let r = run(&mut s, "joint.drive", json!({"joint": "Cy", "index": 1, "value": 4}));
+    assert_eq!((&r["moved"], &r["reason"], &r["held"][0]["requested"]), (&json!(false), &follows, &json!(4.0)), "{r}");
+
+    let mut s = two_cubes();
+    run(&mut s, "joint.as_built", json!({"type": "slider", "a": "A", "b": "B", "name": "Rail", "limits": [[0, 5]]}));
+    let r = run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 20}));
+    assert!(r["moved"] == true && r.get("reason").is_none(), "{r}");
+    assert_eq!(
+        r["held"],
+        json!([{"name": "distance", "requested": 20.0, "value": 5.0, "unit": "mm", "why": "distance is held to its limits, 0 to 5 mm"}]),
+        "{r}"
+    );
+    // Within the limits, nothing is held.
+    let r = run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 3}));
+    assert!(r.get("held").is_none() && r["requested"][0]["value"] == 3.0, "{r}");
 }
 
 /// An as-built joint takes a name and limits like any other joint.

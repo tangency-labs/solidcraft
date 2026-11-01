@@ -107,6 +107,8 @@ rules. Its compass is 110 pt; the 48 pt Shots strip clears the docks by 8 pt.
   puts the actions in the header row through `HeaderActions` instead of a footer: the same
   buttons, enabled states, keyboard and handles, each as wide as its bold label, with Cancel
   standing in for the close button and the compute status in the title's place.
+  `palette` (the Sketch panel) follows the same preference: its footer row moves under the
+  header, above the options.
   `body_rows` caps a manager's scrolling body independently of its position; short
   viewports still keep the header and actions visible.
 - `Window` composes the shared Panel frame with a 40 pt icon/title/close header,
@@ -316,6 +318,11 @@ board test captures both strip widths with expanded and collapsed browsers
 | `Text::MonoCell`, `Text::Value(key, error)` | Monospace unit/value cells; clipped to one row with full tooltips. Value/error cells retain `dialog:report:KEY`. |
 | `Text::Inline` | Native truncated label; rect/handle `dialog:inline:TEXT` |
 | `Text::Cell` | Fixed-height clipped clickable cell with tooltip; rect/handle `dialog:cell:TEXT` |
+
+`name_cell_with_hint(ui, name, strong, hint)` keeps the name cell's allocation and
+scenario identity, but owns its single tooltip: the action hint alone when the
+name fits, or the full name followed by the hint when it is clipped. Use it instead
+of adding a second hover tooltip to `Text::NameCell`.
 
 Examples:
 

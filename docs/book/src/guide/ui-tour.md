@@ -124,7 +124,8 @@
   wide as that column; the column comes back as it was when the dialog closes.
   Interface › **Dialog buttons** › **Top** puts OK, Cancel and Apply in
   the dialog's title row, right of the title, where they stay while sections open and close;
-  Cancel then also takes the place of the close button. Enter and Esc work as before.
+  Cancel then also takes the place of the close button. Enter and Esc work as before. The Sketch
+  panel's Finish Sketch, Look at and Slice move up under its title, above the options.
 - **Timeline** (bottom). Every feature in order. Double-click to edit, drag the marker to roll
   back, and drag features to reorder them. A sketch's icon, here and in the browser, takes the
   colour of its state: the sketch colour while it is under constrained, the fully constrained
@@ -441,6 +442,13 @@ gradient backdrops and saved setups keep their existing background instead. Save
 not record whether their background was explicitly chosen, so even a setup saved only for its
 camera conservatively retains its scene backplate. With tab surfaces absent/off, Render keeps
 its original flat scene background. Theme surfaces never change rendered images or exports.
+
+Gruvbox has two cards, **Gruvbox Dark** and **Gruvbox Light**. Each offers a
+**Contrast** choice: **Soft**, **Standard** (the default), or **Hard**. These are the
+same six palettes as the former separate cards, including their icon colours.
+Saved selections and settings profiles using the former `-soft` and `-hard` ids
+select the corresponding family and contrast. Selecting a family again restores its
+last contrast; Reset returns it to Standard.
 
 Up to 32 overlays apply in file order, after the base palette and the theme's own value tables.
 Later matching entries win by key. Every overlay has one `when`: `{"opt":"id","eq":value}`

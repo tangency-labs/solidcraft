@@ -1190,6 +1190,25 @@ mod tests {
         }
     }
 
+    /// The model cache's manifest, written straight from the model's records (not copied into a
+    /// JSON tree first), is byte for byte what writing it as a tree wrote: the same keys in the
+    /// same (sorted) order, the same numbers.
+    #[test]
+    fn the_model_cache_manifest_is_what_a_json_tree_writes() {
+        use solidcraft_geom::Vec3;
+        let part = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 20., 30.)).unwrap();
+        let share = solidcraft_kernel::DisplayShare::new(part.clone());
+        let t = [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.], [50.5, -0.25, 1e-7, 1.]];
+        let moved = solidcraft_kernel::transform(&part, Vec3::new(50.5, -0.25, 1e-7), Vec3::ZERO, Vec3::Z, 0.).unwrap();
+        let model = saved_model(vec![part.clone(), moved.with_display_share(&share, t)]);
+        let bytes = write_design_container_with_cache(&document(), DesignCompression::Fast, None, Some(&model)).unwrap();
+        let manifest = &parts(&bytes)["cache/model.json"];
+        let tree: Value = serde_json::from_slice(manifest).unwrap();
+        assert_eq!(serde_json::to_vec(&tree).unwrap(), *manifest);
+        assert_eq!(tree["model"], model.records);
+        assert_eq!(tree.as_object().unwrap().len(), 11, "{:?}", tree.as_object().unwrap().keys().collect::<Vec<_>>());
+    }
+
     /// #9170: a mesh body (an imported STL) is kept in the model cache with the rest of the
     /// model, as its own triangles, colour and paint. One mesh body left the whole cache out, so
     /// opening the design evaluated every feature again.

@@ -30,6 +30,8 @@ pub struct AddState {
     pub key: String,
     /// Seconds one model request may take.
     pub request_timeout_s: u64,
+    /// Optional reasoning effort sent as `reasoning_effort`; empty sends nothing.
+    pub reasoning_effort: String,
     pub error: Option<String>,
     /// Editing this added agent (its id) instead of adding a new one.
     pub editing: Option<String>,
@@ -181,6 +183,7 @@ pub fn open_edit(app: &mut SolveApp, id: &str) -> bool {
     let mut s = AddState {
         name: c.name.clone(),
         request_timeout_s: c.request_timeout_s.clamp(agents::MIN_REQUEST_TIMEOUT_S, agents::MAX_REQUEST_TIMEOUT_S),
+        reasoning_effort: c.reasoning_effort.clone(),
         editing: Some(c.id.clone()),
         ..Default::default()
     };
@@ -259,6 +262,13 @@ fn timeout_field(ui: &mut egui::Ui, secs: &mut u64, handle: &str) -> bool {
     r.changed()
 }
 
+/// The free-text reasoning effort field with its hover hint; true when the text changed.
+fn effort_field(ui: &mut egui::Ui, effort: &mut String) -> bool {
+    ui_kit::cell_editor(ui, ui.id().with("ai_reasoning_effort"), effort, tr("ui.ai_reasoning_effort_field_hint"), false)
+        .on_hover_text(tr("ui.ai_reasoning_effort_hint"))
+        .changed()
+}
+
 fn test_line(ui: &mut egui::Ui, test: &Option<&Test>) {
     match test {
         Some(Test::Running(_)) => {
@@ -311,7 +321,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !cfg!(target_arch = "wasm32") && app.preferences.ai_features {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let browsing = !crate::prefs_search::querying(ui) || app.prefs_window.section == crate::prefs::PAGE_AI;
+            let browsing = !crate::prefs_search::querying(ui) || app.prefs_window.section == crate::prefs::PAGE_ASSISTANT;
             if browsing && app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
                 refresh(app, &ui.ctx().clone());
             }
@@ -444,6 +454,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut test: Option<agents::Entry> = None;
     let mut edit: Option<String> = None;
     let mut retimed: Option<(String, u64)> = None;
+    let mut reeffort: Option<(String, String)> = None;
     let t = crate::theme::Tokens::get();
     ui_kit::settings_section(ui, "agents", tr("ui.ai_agents"), |ui| {
         if app.agent_chat.detecting.is_some() {
@@ -504,8 +515,11 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                     });
                     ui_kit::settings_short_note(ui, &entry.detail());
-                    // Wide enough for an endpoint's "Request timeout" too, so both rows line up.
-                    let label_w = (t.form_label_width + t.space_16).max(ui_kit::ContentWidth::label(ui, tr("ui.ai_request_timeout")) + t.space_16);
+                    // Wide enough for an endpoint's "Request timeout" or "Reasoning effort" too,
+                    // so all rows line up.
+                    let label_w = (t.form_label_width + t.space_16)
+                        .max(ui_kit::ContentWidth::label(ui, tr("ui.ai_request_timeout")) + t.space_16)
+                        .max(ui_kit::ContentWidth::label(ui, tr("ui.ai_reasoning_effort")) + t.space_16);
                     ui_kit::settings_form(ui, label_w, |ui| {
                         ui_kit::row(ui, tr("ui.ai_permissions"), |ui| {
                             let current = app.preferences.agent_permissions.get(&entry.id).copied();
@@ -543,6 +557,14 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     retimed = Some((entry.id.clone(), secs));
                                 }
                             });
+                            ui_kit::row(ui, tr("ui.ai_reasoning_effort"), |ui| {
+                                let mut effort = c.reasoning_effort.clone();
+                                if effort_field(ui, &mut effort) {
+                                    let effort = agents::reasoning_effort(&effort);
+                                    c.reasoning_effort = effort.clone();
+                                    reeffort = Some((entry.id.clone(), effort));
+                                }
+                            });
                         });
                     }
                     if app.preferences.agent_permissions.get(&entry.id) == Some(&Mode::All) {
@@ -578,6 +600,13 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         && let Some(b) = app.agent_chat.backend.as_mut()
     {
         b.set_request_timeout(secs);
+    }
+    // A new reasoning effort likewise takes effect from the next request on.
+    if let Some((id, effort)) = reeffort
+        && app.agent_chat.running_id == id
+        && let Some(b) = app.agent_chat.backend.as_mut()
+    {
+        b.set_reasoning_effort(&effort);
     }
     if let Some(id) = remove {
         app.agent_chat.login_results.remove(&id);
@@ -727,6 +756,9 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::row(ui, tr("ui.ai_request_timeout"), |ui| {
                         timeout_field(ui, &mut s.request_timeout_s, "ai_add:request_timeout");
                     });
+                    ui_kit::row(ui, tr("ui.ai_reasoning_effort"), |ui| {
+                        effort_field(ui, &mut s.reasoning_effort);
+                    });
                     ui_kit::row(ui, tr("ui.ai_key"), |ui| {
                         ui.add_enabled_ui(has_keychain, |ui| {
                             let hint = tr(if s.saved_key { "ui.ai_key_keep_hint" } else { "ui.ai_key_hint" });
@@ -766,6 +798,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                 model: s.model.trim().to_string(),
                 key: false,
                 request_timeout_s: s.request_timeout_s,
+                reasoning_effort: agents::reasoning_effort(&s.reasoning_effort),
                 problem: None,
                 install: "",
             };
@@ -829,6 +862,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
             c.base_url = agents::normalize_url(&s.base_url)?;
             c.model = s.model.trim().to_string();
             c.request_timeout_s = s.request_timeout_s.clamp(agents::MIN_REQUEST_TIMEOUT_S, agents::MAX_REQUEST_TIMEOUT_S);
+            c.reasoning_effort = agents::reasoning_effort(&s.reasoning_effort);
             if c.model.is_empty() {
                 return Err(tr("ui.ai_need_model").to_string());
             }
@@ -870,6 +904,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
             *old = c;
             let id = old.id.clone();
             let secs = old.request_timeout_s;
+            let effort = old.reasoning_effort.clone();
             // A new command, endpoint or key has not been tested or signed in yet.
             app.agent_chat.settings.tests.remove(&id);
             app.agent_chat.login_results.remove(&id);
@@ -879,6 +914,7 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
                 && let Some(b) = app.agent_chat.backend.as_mut()
             {
                 b.set_request_timeout(secs);
+                b.set_reasoning_effort(&effort);
             }
         }
     }
@@ -1069,6 +1105,7 @@ mod card_tests {
             model: "model-a".into(),
             key: true,
             request_timeout_s: 600,
+            reasoning_effort: "high".into(),
             ..Default::default()
         });
         assert!(open_edit(&mut h.app, "api-1"));
@@ -1079,11 +1116,13 @@ mod card_tests {
             assert_eq!((s.kind, s.protocol), (AddKind::Api, Protocol::OpenAi));
             assert_eq!(agents::presets(Protocol::OpenAi).get(s.preset).map(|p| p.name), Some("OpenAI"));
             assert_eq!((s.base_url.as_str(), s.model.as_str(), s.request_timeout_s), ("https://api.openai.com/v1", "model-a", 600));
+            assert_eq!(s.reasoning_effort, "high", "the chosen effort comes back into the dialog");
         }
         h.app.agent_chat.settings.add.as_mut().unwrap().model = "model-b".into();
         add_agent(&mut h.app).unwrap();
         let saved = &h.app.preferences.agents[0];
         assert_eq!((saved.id.as_str(), saved.model.as_str(), saved.key, saved.request_timeout_s), ("api-1", "model-b", true, 600));
+        assert_eq!(saved.reasoning_effort, "high", "the effort survives an edit");
         assert_eq!(keys.get("api-1").unwrap().as_deref(), Some("test-key-1"), "an empty field keeps the key");
         // A kept key does not go to a plain-HTTP address elsewhere.
         assert!(open_edit(&mut h.app, "api-1"));

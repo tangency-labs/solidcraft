@@ -509,6 +509,24 @@ fn relink_rejects_bad_sources_and_targets_without_touching_the_design_or_undo() 
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// Relink takes any design Insert Design takes: a plain JSON design too, and back to a container.
+#[test]
+fn relink_takes_a_json_design_as_insert_design_does() {
+    let dir = folder("json");
+    let (container, plain) = (dir.join("source.sc"), dir.join("source.json"));
+    part(&container, 30);
+    part(&plain, 45);
+    assert!(!solidcraft_io::is_design_container(&std::fs::read(&plain).unwrap()), "file.save writes a .json design as plain JSON");
+    let mut s = Session::default();
+    let component = run(&mut s, "component.insert_design", json!({"path": container}))["component"].as_u64().unwrap();
+    let to_json = run(&mut s, "component.relink", json!({"component": component, "path": plain}));
+    assert_eq!(to_json["geometry_changed"], true);
+    assert!((volume(&mut s) - 9000.0).abs() < 1e-5);
+    run(&mut s, "component.relink", json!({"component": component, "path": container}));
+    assert!((volume(&mut s) - 6000.0).abs() < 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn relink_keeps_joint_definitions_and_reports_solver_diagnostics() {
     let dir = folder("joints");
