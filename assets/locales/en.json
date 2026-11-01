@@ -4979,6 +4979,8 @@
   "ui.right": "Right",
   "ui.save": "Save",
   "ui.save_as": "Save As",
+  "ui.save_mesh_bad_deviation": "\"{value}\" is not a positive number of millimetres",
+  "ui.save_mesh_deviation": "Deviation (mm)",
   "ui.save_mesh_no_slicer_open": "No slicer found: choose Custom… and pick your slicer program",
   "ui.save_mesh_pick_bodies": "Select the bodies to save",
   "ui.saved_to": "Saved {path}",

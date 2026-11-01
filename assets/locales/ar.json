@@ -4979,6 +4979,8 @@
   "ui.right": "يمين",
   "ui.save": "حفظ",
   "ui.save_as": "حفظ باسم",
+  "ui.save_mesh_bad_deviation": "«{value}» ليس عددًا موجبًا بالمليمتر",
+  "ui.save_mesh_deviation": "الانحراف (مم)",
   "ui.save_mesh_no_slicer_open": "لم يُعثر على برنامج تقطيع: اختر «مخصص…» وحدد برنامج التقطيع الخاص بك",
   "ui.save_mesh_pick_bodies": "حدد الأجسام المراد حفظها",
   "ui.saved_to": "تم الحفظ في {path}",

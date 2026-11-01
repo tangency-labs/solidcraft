@@ -4979,6 +4979,8 @@
   "ui.right": "右视",
   "ui.save": "保存",
   "ui.save_as": "另存为",
+  "ui.save_mesh_bad_deviation": "「{value}」不是正的毫米数",
+  "ui.save_mesh_deviation": "偏差 (mm)",
   "ui.save_mesh_no_slicer_open": "未找到切片软件：请选择“自定义…”并指定切片软件程序",
   "ui.save_mesh_pick_bodies": "请选择要保存的实体",
   "ui.saved_to": "已保存：{path}",

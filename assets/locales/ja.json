@@ -4979,6 +4979,8 @@
   "ui.right": "右側面",
   "ui.save": "保存",
   "ui.save_as": "名前を付けて保存",
+  "ui.save_mesh_bad_deviation": "「{value}」は正のミリ数ではありません",
+  "ui.save_mesh_deviation": "偏差 (mm)",
   "ui.save_mesh_no_slicer_open": "スライサーが見つかりません。「カスタム…」でスライサーのプログラムを選んでください",
   "ui.save_mesh_pick_bodies": "保存するボディを選択してください",
   "ui.saved_to": "保存しました: {path}",
