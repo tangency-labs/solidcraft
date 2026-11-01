@@ -19,6 +19,7 @@ pub mod normal_section;
 pub mod part;
 pub mod pcurve;
 pub mod placement;
+pub mod query;
 mod split;
 mod topology;
 pub use curve2::Curve2;

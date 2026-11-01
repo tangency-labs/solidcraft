@@ -1,4 +1,5 @@
 use super::*;
+use crate::Vec3;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 fn segment(a: f64, b: f64) -> Curve2 {
@@ -1043,4 +1044,52 @@ fn a_form_on_arcs_of_its_own_is_the_surface_and_does_not_close_around_an_open_fa
     let (whole, _) = form::surface_on_own_arcs(&torus, [[0.3, 1.2], [-FRAC_PI_2, -FRAC_PI_2 + TAU]], tol).unwrap();
     assert_eq!(tube(&whole), (-1.0, 3.0));
     assert!(form::surface_on_own_arcs(&Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] }, label, tol).is_none());
+}
+
+/// Exact queries on a record: a tetrahedron's faces, one point on each, its outward normals, and
+/// rays from inside it meeting the faces they should at the distances they should.
+#[test]
+fn queries_find_a_tetrahedrons_faces_from_its_record() {
+    let b = tetra();
+    let q = query::Query::new(&b);
+    let third = 1.0 / 3.0;
+    let middles = [[third, third, 0.], [third, 0., third], [third, third, third], [0., third, third]];
+    for (f, m) in middles.iter().enumerate() {
+        let p = Vec3::new(m[0], m[1], m[2]);
+        assert!(q.face_contains(f, p, 1e-9), "face {f} at {p:?}");
+        assert_eq!(q.faces_at(p, 1e-9).first().map(|x| x.1), Some(f));
+    }
+    // Off a face's outline, in its plane: not on it.
+    assert!(!q.face_contains(0, Vec3::new(0.9, 0.9, 0.), 1e-9));
+    // The floor's normal points down, out of the solid.
+    let uv = q.face_uv(0, Vec3::new(0.2, 0.2, 0.), 1e-9).unwrap_or_default();
+    let n = q.face_normal(0, uv).unwrap_or_default();
+    assert!((n - Vec3::new(0., 0., -1.)).len() < 1e-12, "{n:?}");
+    // From inside: down to the floor 0.1 away, and along x to the slanted face x + y + z = 1.
+    let o = Vec3::new(0.1, 0.1, 0.1);
+    let down = q.ray(o, Vec3::new(0., 0., -1.), 1e-9);
+    assert!(down.first().is_some_and(|h| h.1 == 0 && (h.0 - 0.1).abs() < 1e-12), "{down:?}");
+    let along = q.ray(o, Vec3::X, 1e-9);
+    assert!(along.first().is_some_and(|h| h.1 == 2 && (h.0 - 0.7).abs() < 1e-12), "{along:?}");
+}
+
+/// A tube's side on its NURBS form, as SMLib holds it: its circles drawn within the sag asked
+/// for, a line drawn as its ends, the distance from the axis to its seam, points on it and off
+/// its ends, and a ray from the axis meeting it at its radius.
+#[test]
+fn queries_read_a_tube_side_on_its_form() {
+    let b = tube();
+    let q = query::Query::new(&b);
+    let axis = Vec3::new(1., 2., 0.);
+    let off_axis = |p: Vec3| Vec3::new(p.x - axis.x, p.y - axis.y, 0.).len();
+    let circle = q.edge_points(0, 1e-4).unwrap_or_default();
+    assert!(circle.len() > 20 && circle.iter().all(|(_, p)| (off_axis(*p) - 2.0).abs() < 1e-9), "{}", circle.len());
+    assert_eq!(q.edge_points(1, 1e-4).map(|v| v.len()), Some(2));
+    let d = q.edge_distance(1, Vec3::new(1., 2., 5.5), 1e-4).unwrap_or(f64::NAN);
+    assert!((d - 2.0).abs() < 1e-12, "{d}");
+    assert!(q.face_contains(0, Vec3::new(1., 4., 5.5), 1e-9));
+    assert!(q.face_contains(0, Vec3::new(3., 2., 5.5), 1e-9), "on the seam");
+    assert!(!q.face_contains(0, Vec3::new(1., 4., 9.), 1e-9), "past the top circle");
+    let hit = q.ray(Vec3::new(1., 2., 5.5), Vec3::Y, 1e-9);
+    assert!(hit.first().is_some_and(|h| h.1 == 0 && (h.0 - 2.0).abs() < 1e-12), "{hit:?}");
 }

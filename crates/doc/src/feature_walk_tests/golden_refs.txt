@@ -155,6 +155,8 @@ sheet_unfold
   remap_bodies: body
 sheet_convert
   remap_bodies: body
+sheet_surface_convert
+  remap_bodies: body
 boss
   remap_bodies: body
 lip

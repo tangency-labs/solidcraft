@@ -432,8 +432,8 @@ fn hermite7(p: [[f64; 2]; 4], r: [[f64; 2]; 4], h: f64) -> [[f64; 2]; 8] {
 /// on the edge's own parameter, matching the point and first three derivatives of its angle about
 /// the axis (through the form's quarter parameter when `form` is given) and of its height along
 /// the axis at each piece's ends. The pieces break where the angle crosses a quarter (the form's
-/// parameter is only once differentiable there) and are halved until they lift onto the edge
-/// within [`FOLD_TOL`]. An approximation by construction from exact derivatives, like the edge
+/// parameter is only once differentiable there) and at the edge's own corners (a chain's
+/// joints), and are halved until they lift onto the edge within [`FOLD_TOL`]. An approximation by construction from exact derivatives, like the edge
 /// itself; nothing is fitted. `None` for another face or curve, or past the piece budget.
 fn folded_pcurve(label: &b::Surface, form: Option<&b::Surface>, curve: &b::Curve, [t0, t1]: [f64; 2]) -> Option<Curve2> {
     use solidcraft_geom::bspline::{HPoint, bezier_point};
@@ -492,6 +492,18 @@ fn folded_pcurve(label: &b::Surface, form: Option<&b::Surface>, curve: &b::Curve
             breaks.push((0.5 * (lo + hi), target));
         }
     }
+    // And at the edge's own corners, knots as many as its degree (a chain's joints): no piece
+    // matches the edge's derivatives across one.
+    let degree = knots.len().checked_sub(points.len() + 1)?;
+    let mut inner: Vec<f64> = knots.iter().copied().filter(|k| *k > t0 && *k < t1).collect();
+    inner.dedup();
+    for k in inner {
+        if knots.iter().filter(|x| **x == k).count() >= degree {
+            let i = ts.partition_point(|t| *t <= k).saturating_sub(1);
+            breaks.push((k, angle_near(k, *angles.get(i)?)?));
+        }
+    }
+    breaks.sort_by(|a, b| a.0.total_cmp(&b.0));
     breaks.push((t1, *angles.last()?));
     let size = points.iter().fold(1.0f64, |m, h| [h[0], h[1], h[2]].iter().fold(m, |m, c| m.max((c / h[3]).abs())));
     // A crossing within rounding of another break (or of an end), or nearer to it on the edge
@@ -554,7 +566,9 @@ fn folded_pcurve(label: &b::Surface, form: Option<&b::Surface>, curve: &b::Curve
                 let (s0, s1) = (a + (e - a) * k as f64 / pieces as f64, a + (e - a) * (k + 1) as f64 / pieces as f64);
                 let (b0, b1) = (last, if k + 1 == pieces { ea } else { angle_near(s1, last)? });
                 last = b1;
-                let piece = hermite7(uv(s0, b0, q)?, uv(s1, b1, q)?, s1 - s0);
+                // Its end read from its own side of a joint there, where the edge turns.
+                let end = s1 - 1e-12 * (s1 - s0);
+                let piece = hermite7(uv(s0, b0, q)?, uv(end, b1, q)?, s1 - s0);
                 ctrl.extend_from_slice(if ctrl.is_empty() { &piece[..] } else { &piece[1..] });
                 knots2.extend(std::iter::repeat_n(s1, 7));
                 let h = piece.map(|c| HPoint { x: c[0], y: c[1], z: 0.0, w: 1.0 });

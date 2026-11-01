@@ -9,8 +9,11 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
 - [**Hem**](../reference/commands.md#command-sheet.hem) returns a sheet edge back toward the sheet; no new sketch is required.
 - **Fold** (`sheet.fold`) bends the sheet along a sketch line.
 - **Unfold / Refold** (`sheet.unfold`, `sheet.refold`) for working on the flat part.
-- **Convert** (`sheet.convert`) turns a plate of constant thickness into sheet metal, or, with
-  bend edges, a solid or a shelled body.
+- **Convert** (`sheet.convert`) turns a body into sheet metal from its faces: every face becomes
+  a panel, with no face fixed; sharp edges are cut open but the ones picked as bends, and
+  cylinders and cones become rolls at their own radius. Its **Thicken** mode (`mode: thicken`)
+  turns a plate of constant thickness into sheet metal from a fixed face, or, with bend edges, a
+  solid or a shelled body.
 - **Create Flat Pattern** (`sheet.flat_pattern`) shows the flat part with its bend lines and a
   bend table, and exports it as DXF or a bend-table CSV through the save picker.
 
@@ -224,9 +227,9 @@ open with a warning. Side-edge setbacks on curved panels or on only part of an e
 a cut-out are not supported yet. The edge connecting a panel to its existing bend is not a
 free edge. See `examples/regressions/sheet-side-flange-corner.json` for a small reproduction.
 
-**Convert** also takes a solid or a shelled body: pick the face that stays fixed and the sharp
-edges that become bends (`bends`; Bend Edges in the dialog). The flat faces reached from the
-fixed face across those edges become the sheet. A shelled body keeps its walls and their
+**Thicken** (Convert's `mode: thicken`) also takes a solid or a shelled body: pick the face that
+stays fixed and the sharp edges that become bends (`bends`; Bend Edges in the dialog). The flat
+faces reached from the fixed face across those edges become the sheet. A shelled body keeps its walls and their
 thickness; any other solid's faces become the outside of the sheet, with the rule's thickness
 taken into the body. Each sharp edge stays where the faces of its bend would meet, so the part
 keeps its envelope and the flat pattern is the outside lengths less a bend deduction per bend,
@@ -243,7 +246,7 @@ converts the same way: the sheet is bent there with the rule's radius and K-fact
 modelled radius, so the flat pattern is the one the rule makes. The result is an
 ordinary sheet body: edge flanges, cuts, Unfold, the flat pattern and its exports work on it,
 and it follows the solid when a parameter changes (the edges and the fixed face are found by
-their names). Without bend edges Convert expects a plate, as before. Either way round walls
+their names). Without bend edges Thicken expects a plate, as before. Either way round walls
 (holes, slot ends, rounded corners, notches) stay circles and arcs in the flat pattern and the
 DXF, also where a STEP file writes one in pieces, and the holes and slots of every face of the
 sheet are its cut-outs, where the bends put them. An engraving in a face of the sheet (a recess
@@ -268,7 +271,7 @@ any pocket, so fold or flange clear of an engraving.
 ```json
 {"command":"solid.box","params":{"length":100,"width":60,"height":30,"body_name":"Tray"}}
 {"command":"solid.shell","params":{"faces":[[50,30,30]],"thickness":2}}
-{"command":"sheet.convert","params":{"body":"Tray","face":[50,30,0],
+{"command":"sheet.convert","params":{"body":"Tray","mode":"thicken","face":[50,30,0],
  "bends":[[50,0,0],[100,30,0],[50,60,0],[0,30,0]]}}
 ```
 
