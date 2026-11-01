@@ -1543,8 +1543,9 @@ fn snap_tangent_arcs(out: &mut [LinkGeom], tol: f64) {
     for i in 0..out.len() {
         let Some(LinkGeom::Arc { c, a, b }) = out.get(i).cloned() else { continue };
         let r = (c.dist(a) + c.dist(b)) / 2.0;
-        // (arc end, line index, line end index, tangent point, unit normal towards the centre, centre distance)
-        let mut hits: Vec<(usize, usize, usize, Vec2, Vec2, f64)> = Vec::new();
+        // Per arc end: (gap to the line's end, line index, line end index, tangent point, unit
+        // normal towards the centre, centre distance)
+        let mut hits: [Vec<(f64, usize, usize, Vec2, Vec2, f64)>; 2] = [Vec::new(), Vec::new()];
         for (end, e) in [a, b].into_iter().enumerate() {
             for (j, g) in out.iter().enumerate() {
                 let LinkGeom::Line(p, q) = g else { continue };
@@ -1562,17 +1563,39 @@ fn snap_tangent_arcs(out: &mut [LinkGeom], tol: f64) {
                 if (foot - far).dot(near_pt - far) <= 0.0 || near_pt.dist(foot) > 0.25 * r {
                     continue;
                 }
-                hits.push((end, j, near, foot, n, d));
+                // When this end of the arc already meets another piece of the outline and the line
+                // doesn't end there, the line lies further along (past that piece, as along a
+                // conic fitted with several arcs): moving the end onto it would leave a gap.
+                let gap = near_pt.dist(e);
+                let meets = |g: &LinkGeom| match *g {
+                    LinkGeom::Line(s, t) | LinkGeom::Arc { a: s, b: t, .. } => s.dist(e) <= tol || t.dist(e) <= tol,
+                    _ => false,
+                };
+                if gap > tol && out.iter().enumerate().any(|(k, g)| k != i && k != j && meets(g)) {
+                    continue;
+                }
+                if let Some(h) = hits.get_mut(end) {
+                    h.push((gap, j, near, foot, n, d));
+                }
             }
         }
-        let mut hits_by_end: [Option<(usize, usize, Vec2, Vec2, f64)>; 2] = [None, None];
-        for (end, j, near, foot, n, d) in hits {
-            if let Some(slot) = hits_by_end.get_mut(end)
-                && slot.is_none()
-            {
-                *slot = Some((j, near, foot, n, d));
-            }
+        for h in &mut hits {
+            h.sort_by(|x, y| x.0.total_cmp(&y.0));
         }
+        // Each end takes the line ending nearest it. Both ends on one line would pull the arc down
+        // to a point: the end nearer that line's end keeps it, the other takes its next line.
+        let [ha, hb] = &hits;
+        let (ta, tb) = match (ha.first(), hb.first()) {
+            (Some(x), Some(y)) if x.1 == y.1 => {
+                if x.0 <= y.0 {
+                    (Some(x), hb.iter().find(|h| h.1 != x.1))
+                } else {
+                    (ha.iter().find(|h| h.1 != y.1), Some(y))
+                }
+            }
+            pair => pair,
+        };
+        let hits_by_end: [Option<(usize, usize, Vec2, Vec2, f64)>; 2] = [ta, tb].map(|h| h.map(|&(_, j, near, foot, n, d)| (j, near, foot, n, d)));
         let (mut c, mut r) = (c, r);
         if let [Some((_, _, _, n1, d1)), Some((_, _, _, n2, d2))] = hits_by_end {
             // One circle tangent to both lines: equal distance to each.

@@ -1298,3 +1298,46 @@ fn a_thicker_angle_moves_the_projected_face_of_the_sketch_on_it() {
     check(&s);
     check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
 }
+
+/// The silhouette of a square with a conic round at each corner (rho 0.19, 0.4, 0.5 and 0.7) is
+/// one closed outline of the square's true area. Fitted arcs along a conic were snapped onto lines
+/// that ended further along the outline, which left gaps of up to 3.6 mm: no profile.
+#[test]
+fn the_silhouette_of_conic_rounds_closes() {
+    let mut s = Session::default();
+    let corners = [
+        ([-75., 65.], [-75., 75.], [-65., 75.], 0.19),
+        ([65., 75.], [75., 75.], [75., 65.], 0.4),
+        ([75., -65.], [75., -75.], [65., -75.], 0.5),
+        ([-65., -75.], [-75., -75.], [-75., -65.], 0.7),
+    ];
+    run(&mut s, "sketch.create", json!({"plane": "XZ"}));
+    for (i, (start, apex, end, rho)) in corners.iter().enumerate() {
+        run(&mut s, "sketch.conic", json!({"start": start, "apex": apex, "end": end, "rho": rho}));
+        let next = corners[(i + 1) % 4].0;
+        run(&mut s, "sketch.line", json!({"points": [end, next]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 55, "body_name": "Part"}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "offset": -10}));
+    run(&mut s, "sketch.project", json!({"refs": [{"body": "Part"}]}));
+    // The true area: the outline through the four rational quadratic Béziers (apex weight
+    // rho / (1 - rho)), finely sampled, and the straight sides between them.
+    let mut outline: Vec<[f64; 2]> = Vec::new();
+    for (start, apex, end, rho) in corners {
+        let w = rho / (1. - rho);
+        for k in 0..=2000 {
+            let t = f64::from(k) / 2000.;
+            let (b0, b1, b2) = ((1. - t) * (1. - t), 2. * t * (1. - t) * w, t * t);
+            let sum = b0 + b1 + b2;
+            outline.push([(b0 * start[0] + b1 * apex[0] + b2 * end[0]) / sum, (b0 * start[1] + b1 * apex[1] + b2 * end[1]) / sum]);
+        }
+    }
+    let n = outline.len();
+    let exact = (0..n).map(|i| outline[i][0] * outline[(i + 1) % n][1] - outline[(i + 1) % n][0] * outline[i][1]).sum::<f64>().abs() / 2.;
+    let si = inspect(&mut s);
+    let profiles = si["profiles"].as_array().unwrap();
+    assert_eq!(profiles.len(), 1, "{}", si["profiles"]);
+    let area = profiles[0]["area_mm2"].as_f64().unwrap();
+    assert!((area - exact).abs() < exact * 2e-4, "area {area}, exact {exact}");
+}
