@@ -129,6 +129,9 @@ impl SolveApp {
         if id == "timeline.play" {
             return self.run(id, params);
         }
+        if matches!(id, "edit.undo" | "edit.redo" | "timeline.roll_to") {
+            self.close_editor_for_history()?;
+        }
         // A manual history action takes over from playback. Playback takes its state out
         // while submitting its own next step, then puts it back to wait for that step.
         crate::timeline::stop_playback(self);

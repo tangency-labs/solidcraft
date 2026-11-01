@@ -1155,6 +1155,10 @@ impl SolveApp {
         if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
             return Err("a file operation is in progress".into());
         }
+        // The editor's own marker moves come through here, so only Undo, Redo and Play close it.
+        if matches!(id, "edit.undo" | "edit.redo" | "timeline.play") {
+            self.close_editor_for_history()?;
+        }
         // Commands may start only detected slicers and the programs the user added under Custom….
         if matches!(id, "file.save_mesh" | "file.send_to_slicer") {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
@@ -2071,6 +2075,22 @@ impl SolveApp {
             return;
         }
         self.open_feature_edit(id, marker, original);
+    }
+
+    /// Undo, Redo and the History bar would change the design under an open feature editor (Edit
+    /// Hole, Edit Box, …), whose OK and Cancel then refuse it (#10688). They cancel the editor
+    /// first, putting its marker back, as starting another tool does; while it is still opening
+    /// they wait for it.
+    pub(crate) fn close_editor_for_history(&mut self) -> Result<(), String> {
+        if self.pending_feature_edit.is_some() {
+            let why = i18n::tr("ui.history_waits_for_editor").to_string();
+            self.set_status(why.clone(), true);
+            return Err(why);
+        }
+        if self.editing_state.is_some() || self.dialog.as_ref().is_some_and(|d| d.editing.is_some()) {
+            dialogs::cancel(self);
+        }
+        Ok(())
     }
 
     fn open_feature_edit(&mut self, id: u64, marker: Option<usize>, original: Session) {
