@@ -5,7 +5,7 @@
 
 use super::HlrError;
 use crate::Vec3;
-use crate::brep::eval::CurveEval;
+use crate::brep::eval::{CurveEval, SurfaceEval};
 use crate::brep::{Curve, Edge, Frame};
 use crate::section::CurveAccuracy;
 
@@ -44,6 +44,24 @@ pub(crate) fn frame_axes(f: &Frame) -> (Vec3, Vec3, Vec3) {
     (v3(f.origin), x, y)
 }
 
+/// Whether every sample of `c`, a few to each of its breaks, lies within `tolerance` of both
+/// `surfaces`.
+fn on_both_surfaces(c: &C3, surfaces: &[Box<crate::brep::Surface>; 2], tolerance: f64) -> bool {
+    /// Most samples checked; a longer curve's are spread evenly over it.
+    const MAX_SAMPLES: usize = 512;
+    let [Ok(a), Ok(b)] = [SurfaceEval::new(&surfaces[0]), SurfaceEval::new(&surfaces[1])] else { return false };
+    let breaks = c.breaks();
+    let samples: Vec<f64> = breaks.windows(2).flat_map(|w| (0..4).map(move |i| w[0] + (w[1] - w[0]) * f64::from(i) / 4.0)).chain(breaks.last().copied()).collect();
+    let stride = (samples.len() / MAX_SAMPLES).max(1);
+    samples.iter().step_by(stride).all(|t| {
+        let p = c.at(*t);
+        // A plane's `project` answers with the foot of a point however far off, so the distance
+        // is measured here.
+        let on = |s: &SurfaceEval| s.project(p, None, tolerance).and_then(|uv| s.point(uv)).is_some_and(|q| q.dist(p) <= tolerance);
+        p.is_finite() && on(&a) && on(&b)
+    })
+}
+
 impl C3 {
     /// The bounded curve of an edge. A line, circle or ellipse with a NURBS form has its bounds
     /// on the form ([`Edge::parameters`]): a line's ends are evaluated there, a conic's angles come
@@ -51,7 +69,7 @@ impl C3 {
     pub fn of_edge(e: &Edge) -> Result<(C3, CurveAccuracy), HlrError> {
         let exact = |c: C3| (c, CurveAccuracy::Analytic);
         match (&e.curve, &e.nurbs) {
-            (Curve::SurfaceIntersection { leader, tolerance, .. }, form) => {
+            (Curve::SurfaceIntersection { surfaces, leader, tolerance }, form) => {
                 // Procedural: traced on demand from its leader. A spline to follow (its form, or
                 // the leader itself) is a fitted curve, good to the record's tolerance; a polyline
                 // leader carries no such curve.
@@ -59,7 +77,13 @@ impl C3 {
                     (Some(n @ (Curve::Spline { .. } | Curve::RationalSpline { .. })), _) | (None, n @ Curve::Spline { .. }) => n,
                     _ => return Err(HlrError::Unsupported("surface intersection curve")),
                 };
-                Ok((C3::bounded(fitted, e.interval)?, CurveAccuracy::Bounded { max_deviation_mm: *tolerance }))
+                let c = C3::bounded(fitted, e.interval)?;
+                // What is drawn is that spline: it has to lie on both surfaces, or the tolerance
+                // the record claims says nothing and the drawing would show a wrong line.
+                if !on_both_surfaces(&c, surfaces, *tolerance) {
+                    return Err(HlrError::Unsupported("surface intersection curve"));
+                }
+                Ok((c, CurveAccuracy::Bounded { max_deviation_mm: *tolerance }))
             }
             (Curve::Line { .. }, Some(form)) => {
                 let eval = CurveEval::new(form).map_err(|_| HlrError::Invalid("edge form"))?;

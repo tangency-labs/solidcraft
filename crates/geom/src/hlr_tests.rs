@@ -2682,17 +2682,21 @@ fn an_edge_is_cut_to_its_interval_on_its_unbounded_curve() {
     let (part, _) = C3::of_edge(&bounded_edge(spline.clone(), None, [0.1, 0.2])).unwrap();
     assert_eq!(part.breaks(), vec![0.1, 0.2]);
     assert!(part.at(0.15).dist(whole.at(0.15)) < 1e-12);
-    // A traced intersection with a spline leader is that spline, good to its tolerance; with a
-    // polyline leader there is no curve to follow.
+    // A traced intersection with a spline leader on its surfaces is that spline, good to its
+    // tolerance; with a polyline leader there is no curve to follow.
     let plane = Box::new(brep::Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] });
     let traced = |leader: brep::Curve| brep::Curve::SurfaceIntersection {
         surfaces: [plane.clone(), plane.clone()],
         leader: Box::new(leader),
         tolerance: 1e-4,
     };
-    let (c, acc) = C3::of_edge(&bounded_edge(traced(spline), None, [0.25, 0.75])).unwrap();
+    let flat = brep::Curve::Spline { knots: vec![0., 0., 0., 0., 0.5, 1., 1., 1., 1.], points: vec![[0., 0., 0.], [1., 3., 0.], [2., -3., 0.], [3., 3., 0.], [4., 0., 0.]] };
+    let (whole, _) = C3::of_edge(&bounded_edge(flat.clone(), None, [0., 1.])).unwrap();
+    let (c, acc) = C3::of_edge(&bounded_edge(traced(flat), None, [0.25, 0.75])).unwrap();
     assert_eq!(acc, CurveAccuracy::Bounded { max_deviation_mm: 1e-4 });
     assert!(c.at(0.5).dist(whole.at(0.5)) < 1e-12);
+    // That spline leaves the plane: it is not their intersection.
+    assert!(matches!(C3::of_edge(&bounded_edge(traced(spline), None, [0.25, 0.75])), Err(HlrError::Unsupported("surface intersection curve"))));
     let leader = brep::Curve::Polyline { points: vec![[0.; 3], [1., 0., 0.]] };
     assert!(matches!(C3::of_edge(&bounded_edge(traced(leader), None, [0., 1.])), Err(HlrError::Unsupported("surface intersection curve"))));
 }
@@ -2775,4 +2779,46 @@ fn an_edge_no_face_uses_is_drawn_like_any_other() {
     let view = View::new(Vec3::new(0., 1., 0.), Vec3::new(0., 0., 1.)).unwrap();
     let d = hidden_lines(&[def], &[identity(0, [0.; 3])], &view, &Options::default(), &never).unwrap();
     assert!(edge_line(&d, 0, 12).pieces.iter().all(|p| p.visibility == Visibility::Visible), "{d:?}");
+}
+
+/// A traced intersection is drawn from its spline leader only where that spline lies on both
+/// surfaces, so the drawn line is the true intersection to the record's tolerance. The top rim of
+/// a cylinder of radius 10 and height 10, stored as the meeting of its side and the plane z = 10,
+/// its leader four cubic quarter circles (2.8e-3 from the circle at most): seen from above the
+/// drawn rim is that circle, and from the side the plane, within the tolerance. The same leader
+/// 1 mm off the plane is refused: it would draw a wrong line.
+#[test]
+fn a_traced_rim_is_drawn_on_the_true_intersection_or_refused() {
+    let tolerance = 5e-3;
+    let k = 10. * 4. / 3. * (std::f64::consts::FRAC_PI_8).tan();
+    let knots = vec![0., 0., 0., 0., 1., 1., 1., 2., 2., 2., 3., 3., 3., 4., 4., 4., 4.];
+    let quarter = [[10., 0.], [10., k], [k, 10.], [0., 10.], [-k, 10.], [-10., k], [-10., 0.], [-10., -k], [-k, -10.], [0., -10.], [k, -10.], [10., -k], [10., 0.]];
+    let traced = |z: f64| {
+        let mut body = cylinder(10., 10.);
+        let side = Box::new(body.shells[0].faces[0].surface.clone());
+        let top = Box::new(Surface::Plane { origin: [0., 0., 10.], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] });
+        let points = quarter.iter().map(|[x, y]| [*x, *y, z]).collect();
+        let leader = Box::new(Curve::Spline { knots: knots.clone(), points });
+        body.shells[0].edges[1].curve = Curve::SurfaceIntersection { surfaces: [side, top], leader, tolerance };
+        body
+    };
+    let o = Options::default();
+    let def = prepare(&traced(10.), &o).unwrap();
+    let rim_points = |view: &View| -> Vec<[f64; 2]> {
+        let d = hidden_lines(std::slice::from_ref(&def), &[identity(0, [0.; 3])], view, &o, &never).unwrap();
+        let rim: Vec<_> = d.lines.iter().filter(|l| matches!(l.source, Source::Edge { edge: 1, .. })).flat_map(|l| &l.pieces).flat_map(|p| p.points.iter().copied()).collect();
+        assert!(rim.len() > 16, "{rim:?}");
+        rim
+    };
+    let above = rim_points(&View::new(Vec3::new(0., 0., -1.), Vec3::new(0., 1., 0.)).unwrap());
+    assert!(above.iter().all(|p| (p[0].hypot(p[1]) - 10.).abs() <= tolerance), "{above:?}");
+    let spread = |at: usize| above.iter().map(|p| p[at]).fold(f64::MIN, f64::max) - above.iter().map(|p| p[at]).fold(f64::MAX, f64::min);
+    assert!(spread(0) > 19.9 && spread(1) > 19.9, "the whole circle");
+    let side = rim_points(&View::new(Vec3::new(0., 1., 0.), Vec3::new(0., 0., 1.)).unwrap());
+    let height = side.first().map_or(f64::NAN, |p| p[1]);
+    let lowest = hidden_lines(std::slice::from_ref(&def), &[identity(0, [0.; 3])], &View::new(Vec3::new(0., 1., 0.), Vec3::new(0., 0., 1.)).unwrap(), &o, &never).unwrap();
+    let bottom = lowest.lines.iter().filter(|l| matches!(l.source, Source::Edge { edge: 0, .. })).flat_map(|l| &l.pieces).flat_map(|p| p.points.iter()).next().map_or(f64::NAN, |p| p[1]);
+    assert!(side.iter().all(|p| (p[1] - height).abs() <= tolerance) && ((height - bottom) - 10.).abs() <= tolerance, "{side:?} over {bottom}");
+    let off = prepare(&traced(11.), &o).err();
+    assert!(matches!(off, Some(HlrError::Unsupported("surface intersection curve"))), "{off:?}");
 }
