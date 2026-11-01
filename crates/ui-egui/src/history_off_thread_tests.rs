@@ -280,6 +280,47 @@ fn switching_sketches_keeps_the_original_marker_with_background_rebuilds() {
 }
 
 #[test]
+fn finishing_a_sketch_in_the_background_restores_the_design_and_its_undo_snapshot() {
+    let (mut h, sketches) = sketches_with_later_bodies();
+    let before = h.app.session.doc.to_json();
+    h.app.edit_sketch(sketches[0]);
+    h.app.run("sketch.line", json!({"points": [[0, 2], [10, 2]]})).unwrap();
+    h.app.finish_sketch();
+    assert!(h.app.deferred.is_some());
+    until_settled(&mut h);
+    assert_eq!(marker(&h), None);
+    assert_eq!(h.app.session.active_sketch, None);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert_eq!(h.app.session.active_sketch, None);
+}
+
+#[test]
+fn a_pending_sketch_exit_cannot_close_the_next_editor() {
+    for cancel in [false, true] {
+        let (mut h, sketches) = sketches_with_later_bodies();
+        let curves = h.app.session.doc.sketch(sketches[0]).unwrap().curves.len();
+        h.app.edit_sketch(sketches[0]);
+        h.app.run("sketch.line", json!({"points": [[0, 2], [10, 2]]})).unwrap();
+        if cancel {
+            h.app.cancel_sketch();
+        } else {
+            h.app.finish_sketch();
+        }
+        assert!(h.app.deferred.is_some());
+        h.app.edit_sketch(sketches[1]);
+        until_settled(&mut h);
+        assert_eq!(h.app.session.active_sketch, Some(sketches[1]));
+        assert_eq!(marker(&h), Some(3));
+        assert_eq!(h.app.session.doc.sketch(sketches[0]).unwrap().curves.len(), curves + usize::from(!cancel));
+        h.app.finish_sketch();
+        until_settled(&mut h);
+        assert_eq!(h.app.session.active_sketch, None);
+        assert_eq!(marker(&h), None);
+    }
+}
+
+#[test]
 fn switching_from_a_sketch_to_a_feature_keeps_the_original_marker_with_background_rebuilds() {
     let (mut h, sketches) = sketches_with_later_bodies();
     let feature = h.app.session.doc.features[3].id;

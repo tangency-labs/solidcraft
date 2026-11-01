@@ -297,6 +297,10 @@ pub(crate) struct SketchEntry {
     pub(crate) doc: Arc<Document>,
     pub(crate) undo_len: usize,
     pub(crate) undo_top: Option<Arc<Document>>,
+    /// A temporary editor rollback, restored by the engine even without a window.
+    pub(crate) restore_marker: Option<Option<usize>>,
+    pub(crate) pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    pub(crate) visibility: Visibility,
 }
 
 /// A copy of a session that evaluates commands ahead of it ([`Session::ahead`]).
@@ -928,6 +932,12 @@ impl Session {
         if let Ok(mut cache) = self.consumed_sketches_cache.lock() {
             *cache = None;
         }
+    }
+
+    /// The marker an active temporary sketch edit returns to. `Some(None)` means the end of
+    /// the timeline; `None` means this sketch was opened without a temporary rollback.
+    pub fn sketch_restore_marker(&self) -> Option<Option<usize>> {
+        self.sketch_entry.as_ref().filter(|entry| Some(entry.sketch) == self.active_sketch).and_then(|entry| entry.restore_marker)
     }
 
     /// Mutable document (copy-on-write).
@@ -1997,6 +2007,7 @@ impl Session {
         let mut copy = self.scratch();
         copy.undo.clone_from(&self.undo);
         copy.redo.clone_from(&self.redo);
+        copy.sketch_entry.clone_from(&self.sketch_entry);
         copy.model.keep(Some(Arc::default()));
         Ahead(copy)
     }

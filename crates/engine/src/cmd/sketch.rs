@@ -7,7 +7,9 @@ use solidcraft_sketch::{Analysis, Budget, ConstraintKind, CurveKind, Hold, Point
 
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, expr, num, req_expr, req_vec2, str_, string_list, vec2, vec3};
-use crate::{EngineError, Result, Session, SketchEntry};
+use crate::schema::sketch::{CancelResult, EditParams, EditResult, ExitParams, FinishResult};
+use crate::schema::{TypedContract, output_schema_for};
+use crate::{EngineError, Result, Session, SketchEntry, Snapshot};
 
 #[path = "sketch_dimensioned.rs"]
 mod dimensioned;
@@ -33,18 +35,28 @@ macro_rules! model_operand_doc {
     };
 }
 
+const EDIT_CONTRACT: TypedContract<EditParams> = TypedContract::new();
+const EXIT_CONTRACT: TypedContract<ExitParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.create", "Create Sketch", create_sketch)
         .at("SOLID", "CREATE")
         .icon("sketch")
         .params("plane: XY|XZ|YZ (sketch x, y along world +X, +Y on XY; +X, -Z on XZ; +Y, +Z on YZ) | construction plane name or id | {origin?: [x,y,z] numbers in mm, default [0,0,0] (not an expression), x_dir, y_dir} (in world coordinates unless frame says otherwise; a named plane is the active component's own) | {face: [world x,y,z], body?: exact world body, index?: face index, path?: complete occurrence ids, fixed?: bool}; new face attachments require a unique certified source (a flat face of a sheet metal body attaches to its panel instead, in the flat pattern's coordinates), fixed:true explicitly freezes the selected plane; offset?: expr, flip?: bool | \"x\" | \"y\" (not on a face: sketch the plane from its other side, so the normal and the default extrude direction are reversed; a half turn about the plane's own x or y axis, true picks the one keeping the sketch's y axis upward; offset still moves along the unflipped normal), frame?: world (default) | component (which coordinates an explicit plane is in; the reply's `frame` says which, with a `note` when the active component is moved or turned), project_edges?: bool, activate_part?: bool (default false; on a face of a body of another component than the active one: activate that component at the picked placement first, as component.activate would, and make the sketch there; it stays active afterwards and the reply's `activated` names it), name?"),
-    CommandSpec::new("sketch.edit", "Edit Sketch", edit_sketch).noundo().icon("sketch").params("sketch: id or name"),
-    CommandSpec::new("sketch.finish", "Finish Sketch", finish_sketch).at("SKETCH", "FINISH SKETCH").icon("finish").enabled(in_sketch).noundo(),
-    CommandSpec::new("sketch.cancel", "Cancel Sketch", cancel_sketch)
+    CommandSpec::new("sketch.edit", "Edit Sketch", crate::checked!("sketch.edit", edit_sketch))
+        .noundo().icon("sketch")
+        .contract(&EDIT_CONTRACT).output(output_schema_for::<EditResult>)
+        .params("sketch: id or name; restore_marker?: nonnegative timeline position or null (end). When provided, temporarily roll to this sketch and restore that position on Finish or Cancel; Finish groups the edit into one Undo step. Omit to leave the timeline in place"),
+    CommandSpec::new("sketch.finish", "Finish Sketch", crate::checked!("sketch.finish", finish_sketch))
+        .at("SKETCH", "FINISH SKETCH").icon("finish").enabled(in_sketch).noundo()
+        .contract(&EXIT_CONTRACT).output(output_schema_for::<FinishResult>)
+        .params("restore_marker?: bool (default true); false transfers the temporary marker directly to another editor without rebuilding the intervening timeline"),
+    CommandSpec::new("sketch.cancel", "Cancel Sketch", crate::checked!("sketch.cancel", cancel_sketch))
         .at("SKETCH", "FINISH SKETCH")
         .icon("sketch_cancel")
         .enabled(in_sketch)
-        .params("Leaves the sketch without keeping what changed since it was created or opened for editing: the design goes back to how it was then (a new sketch is removed), as one step that Undo brings back. Refused when the undo history no longer leads back to that point (use Undo instead)"),
+        .contract(&EXIT_CONTRACT).output(output_schema_for::<CancelResult>)
+        .params("Leaves the sketch without keeping what changed since it was created or opened for editing: the design goes back to how it was then (a new sketch is removed), as one step that Undo brings back. Refused when the undo history no longer leads back to that point (use Undo instead). restore_marker?: bool (default true); false transfers the temporary marker to another editor"),
     CommandSpec::new("sketch.line", "Line", draw_line)
         .at("SKETCH", "CREATE")
         .icon("line")
@@ -940,6 +952,16 @@ pub(super) fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneR
 }
 
 fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
+    let restore_marker = p
+        .get("restore_marker")
+        .map(|v| {
+            serde_json::from_value::<Option<usize>>(v.clone())
+                .map_err(|_| bad("sketch.edit", "`restore_marker` must be a nonnegative timeline position or null"))
+        })
+        .transpose()?;
+    if restore_marker.flatten().is_some_and(|m| m > s.doc.features.len()) {
+        return Err(bad("sketch.edit", "`restore_marker` is past the end of the timeline"));
+    }
     let key = match p.get("sketch") {
         Some(Value::Number(n)) => n.to_string(),
         Some(Value::String(x)) => x.clone(),
@@ -961,7 +983,16 @@ fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
         s.active_occurrence_path = (!path.is_empty()).then_some(path);
     }
     if s.active_sketch != Some(id) || s.sketch_entry.as_ref().is_none_or(|entry| entry.sketch != id) {
-        s.sketch_entry = Some(SketchEntry { sketch: id, ..entry_point(s) });
+        s.sketch_entry = Some(SketchEntry { sketch: id, restore_marker, ..entry_point(s) });
+        if restore_marker.is_some()
+            && let Some(index) = s.doc.feature_index(id)
+        {
+            let marker = (index + 1 < s.doc.features.len()).then_some(index + 1);
+            if s.doc.marker != marker {
+                s.doc_mut().marker = marker;
+            }
+            s.selection.clear();
+        }
     }
     s.active_sketch = Some(id);
     s.revision += 1;
@@ -970,15 +1001,32 @@ fn edit_sketch(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// The design and undo history as they are now, where a sketch is entered (its id set after).
 fn entry_point(s: &Session) -> SketchEntry {
-    SketchEntry { sketch: 0, doc: s.doc.clone(), undo_len: s.undo.len(), undo_top: s.undo.last().map(|snap| snap.doc.clone()) }
+    SketchEntry {
+        sketch: 0,
+        doc: s.doc.clone(),
+        undo_len: s.undo.len(),
+        undo_top: s.undo.last().map(|snap| snap.doc.clone()),
+        restore_marker: None,
+        pending_moves: s.pending_moves.clone(),
+        visibility: s.visibility.clone(),
+    }
+}
+
+fn restore_on_exit(cmd: &str, p: &Value) -> Result<bool> {
+    match p.get("restore_marker") {
+        None => Ok(true),
+        Some(Value::Bool(restore)) => Ok(*restore),
+        _ => Err(bad(cmd, "`restore_marker` must be a boolean")),
+    }
 }
 
 /// Cancel Sketch (#3838): the design as it was when the open sketch was entered. The entry is
 /// used only while the undo history still runs through it: the same steps before it, and every
 /// step since taken in this sketch. Otherwise the steps since can't be told apart from others,
 /// and Undo is the way back.
-fn cancel_sketch(s: &mut Session, _p: &Value) -> Result<Value> {
+fn cancel_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.cancel";
+    let restore = restore_on_exit(cmd, p)?;
     let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch is being edited"))?;
     let entry = s.sketch_entry.clone().filter(|entry| entry.sketch == id);
     let current = entry.filter(|entry| {
@@ -998,21 +1046,82 @@ fn cancel_sketch(s: &mut Session, _p: &Value) -> Result<Value> {
         return Err(bad(cmd, "the undo history no longer leads back to where this sketch was opened: use Undo to go back"));
     };
     let created = entry.doc.feature(id).is_none();
+    let marker = if restore { entry.restore_marker.unwrap_or(entry.doc.marker) } else { s.doc.marker };
     // As Undo does: the session evaluates the design it is given.
+    // Undo of Cancel reopens this edit, so retain its return position for a later Finish.
+    s.sketch_entry = entry.restore_marker.map(|_| entry.clone());
     s.doc = entry.doc;
+    let marker = marker.filter(|m| *m < s.doc.features.len());
+    if s.doc.marker != marker {
+        s.doc_mut().marker = marker;
+    }
     s.active_sketch = None;
-    s.sketch_entry = None;
     s.selection.clear();
     s.revision += 1;
     Ok(json!({"sketch": id, "removed": created}))
 }
 
-fn finish_sketch(s: &mut Session, _p: &Value) -> Result<Value> {
+fn finish_sketch(s: &mut Session, p: &Value) -> Result<Value> {
+    let restore = restore_on_exit("sketch.finish", p)?;
     let id = s.active_sketch.take();
-    s.sketch_entry = None;
-    s.revision += 1;
     let profiles = id.and_then(|i| s.model.state().sketch(i).map(|ss| ss.profiles.len())).unwrap_or(0);
+    if let Some(entry) = s.sketch_entry.take().filter(|entry| Some(entry.sketch) == id)
+        && let Some(marker) = entry.restore_marker
+    {
+        finish_edit_history(s, &entry, marker);
+        if restore {
+            let marker = marker.filter(|m| *m < s.doc.features.len());
+            if s.doc.marker != marker {
+                s.doc_mut().marker = marker;
+            }
+        }
+        s.selection.clear();
+    }
+    s.revision += 1;
     Ok(json!({"sketch": id, "profiles": profiles}))
+}
+
+/// Fold only the steps still belonging to this edit. Its snapshots describe the complete
+/// design, never the temporary marker. The anchor may have moved when the undo limit trimmed
+/// older steps; if it is gone, only a stack entirely from this sketch can be folded safely.
+fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usize>) {
+    use std::sync::Arc;
+    let start = match &entry.undo_top {
+        Some(top) => s.undo.iter().rposition(|snap| Arc::ptr_eq(&snap.doc, top)).map(|i| i + 1),
+        None => Some(0),
+    }
+    .or_else(|| (s.undo.len() == crate::MAX_UNDO && s.undo.iter().all(|snap| snap.active_sketch == Some(entry.sketch))).then_some(0));
+    let Some(start) =
+        start.filter(|&start| s.undo.get(start..).is_some_and(|steps| steps.iter().all(|snap| snap.active_sketch == Some(entry.sketch))))
+    else {
+        return;
+    };
+    let mut before = (*entry.doc).clone();
+    before.marker = marker.filter(|m| *m < before.features.len());
+    let mut after = (*s.doc).clone();
+    after.marker = marker.filter(|m| *m < after.features.len());
+    let changed = before != after || entry.pending_moves != s.pending_moves || entry.visibility != s.visibility;
+    s.undo.truncate(start);
+    if changed {
+        s.undo.push(Snapshot {
+            label: "Edit Sketch".into(),
+            doc: Arc::new(before),
+            active_sketch: None,
+            pending_moves: entry.pending_moves.clone(),
+            visibility: entry.visibility.clone(),
+        });
+        if s.undo.len() > crate::MAX_UNDO {
+            s.undo.remove(0);
+        }
+    }
+    // Redo of a step undone while editing must not reopen a finished temporary rollback.
+    for snap in &mut s.redo {
+        if snap.active_sketch == Some(entry.sketch) {
+            let doc = Arc::make_mut(&mut snap.doc);
+            doc.marker = marker.filter(|m| *m < doc.features.len());
+            snap.active_sketch = None;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
