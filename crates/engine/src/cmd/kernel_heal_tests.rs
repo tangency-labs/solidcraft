@@ -40,6 +40,76 @@ fn shell_a_box_with_a_drilled_hole() {
     assert!((v_shell - want).abs() < 2e-4 * want, "{v_shell} vs {want}");
 }
 
+/// #6333: after a mid-split box, two unnamed outside-shells on the same cut pick must hollow
+/// both halves. AABB body picks kept hitting the first (already opened) half and reported
+/// `no face at` for the bottom.
+#[test]
+fn shell_outside_the_lower_half_after_a_split() {
+    let pick = [-6.775204233387228, 36.56830266326779, 0.0];
+    let stock = json!({"corner": [-50.0, 0.0, -25.0], "length": 100, "width": 80, "height": 50, "body_name": "Stock"});
+    let half_vol = 100.0 * 80.0 * 25.0;
+    let mut s = Session::default();
+    run(&mut s, "solid.box", stock);
+    run(&mut s, "solid.split_body", json!({"body": "Stock", "plane": "XY"}));
+    for pass in 1..=2 {
+        match s.execute(
+            "solid.shell",
+            &json!({"direction": "outside", "faces": [pick], "thickness": 3.5, "tangent_chain": true}),
+        ) {
+            Ok(_) => {}
+            Err(e) => panic!("unnamed outside shell pass {pass} at cut pick: {e}"),
+        }
+    }
+    let after = run(&mut s, "inspect.measure", json!({}));
+    let vols: Vec<(String, f64)> = after["bodies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|b| Some((b["name"].as_str()?.to_string(), b["volume_mm3"].as_f64()?)))
+        .collect();
+    assert_eq!(vols.len(), 2, "{vols:?}");
+    assert!(vols.iter().all(|(_, v)| *v > 0.0 && *v < half_vol * 0.95), "both halves hollow: {vols:?}");
+}
+
+/// #6564: two boxes in the same place — a face pick for the second must hollow B, not the
+/// already-shelled twin (equal-distance body picks used to prefer the older body).
+#[test]
+fn shell_second_box_at_the_same_place() {
+    let before_b = 40.0 * 30.0 * 20.0;
+    // First shelled by its top (gone): the pick must still find B.
+    {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "A"}));
+        run(&mut s, "solid.shell", json!({"body": "A", "faces": [[20, 15, 20]], "thickness": 2}));
+        let v_a = run(&mut s, "inspect.measure", json!({}))["bodies"].as_array().unwrap().iter().find(|b| b["name"] == "A").unwrap()["volume_mm3"]
+            .as_f64()
+            .unwrap();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "B"}));
+        run(&mut s, "solid.shell", json!({"faces": [[20, 15, 20]], "thickness": 2, "tangent_chain": true}));
+        let after = run(&mut s, "inspect.measure", json!({}));
+        let a = after["bodies"].as_array().unwrap().iter().find(|b| b["name"] == "A").unwrap()["volume_mm3"].as_f64().unwrap();
+        let b = after["bodies"].as_array().unwrap().iter().find(|b| b["name"] == "B").unwrap()["volume_mm3"].as_f64().unwrap();
+        assert!((a - v_a).abs() < 1e-3, "A should stay as shelled: {a} vs {v_a}");
+        assert!(b < before_b * 0.75 && b > 0.0, "B should be hollow: {b}");
+    }
+    // First shelled by a side (top remains on both): the shared top must pick B, not re-shell A.
+    {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "A"}));
+        run(&mut s, "solid.shell", json!({"body": "A", "faces": [[40, 15, 10]], "thickness": 2}));
+        let v_a = run(&mut s, "inspect.measure", json!({}))["bodies"].as_array().unwrap().iter().find(|b| b["name"] == "A").unwrap()["volume_mm3"]
+            .as_f64()
+            .unwrap();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "B"}));
+        run(&mut s, "solid.shell", json!({"faces": [[20, 15, 20]], "thickness": 2}));
+        let after = run(&mut s, "inspect.measure", json!({}));
+        let a = after["bodies"].as_array().unwrap().iter().find(|b| b["name"] == "A").unwrap()["volume_mm3"].as_f64().unwrap();
+        let b = after["bodies"].as_array().unwrap().iter().find(|b| b["name"] == "B").unwrap()["volume_mm3"].as_f64().unwrap();
+        assert!((a - v_a).abs() < 1e-3, "A should stay as shelled: {a} vs {v_a}");
+        assert!(b < before_b * 0.75 && b > 0.0, "B should be hollow: {b}");
+    }
+}
+
 /// Offset Face on a cone and a sphere move them exactly.
 #[test]
 fn offset_cone_and_sphere_faces() {
