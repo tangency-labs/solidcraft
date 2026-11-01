@@ -735,6 +735,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn appearance_controls_keep_one_search_result_and_their_page() {
+        use egui::accesskit::Role;
+        for width in [520, 1600] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", serde_json::json!({"width":width,"height":1100}));
+            h.call("ui.prefs", serde_json::json!({"language":"en","open":"Appearance"}));
+            for (query, label, native) in [
+                ("3D view colors", "3D view colors", None),
+                ("Interface scale", "Interface scale", Some((Role::Slider, "Interface scale", "prefs:scale"))),
+                ("Follow a theme file", "Follow a theme file", None),
+                ("Background", "Background", Some((Role::Button, "Color", "dialog:Background:Color"))),
+                ("Font", "Font", Some((Role::ComboBox, "Interface font", "prefs:ui_font"))),
+            ] {
+                h.app.prefs_window.filter = query.into();
+                h.frames(5);
+                let (_, _, hits) = nav(&h.ctx);
+                let matching: Vec<_> = hits.iter().filter(|hit| hit.label == label).collect();
+                assert_eq!(matching.len(), 1, "width={width}: {query} needs exactly one real navigation hit");
+                assert_eq!(matching[0].page, crate::prefs::PAGE_APPEARANCE);
+                let at = h.widget(label).unwrap();
+                let body = crate::scenario::rect_of("prefs:page_body").unwrap();
+                assert!(body.contains(egui::pos2(at[0] as f32, at[1] as f32)));
+                if let Some((role, name, target)) = native {
+                    let tree = h.output.accesskit_update.as_ref().unwrap();
+                    let controls: Vec<_> =
+                        tree.nodes.iter().filter(|(_, node)| !node.is_disabled() && node.role() == role && node.label() == Some(name)).collect();
+                    assert_eq!(controls.len(), 1, "width={width}: {query} must expose one enabled native {name} control");
+                    let bounds = controls[0].1.bounds().unwrap();
+                    let centre = egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32);
+                    let rect = crate::scenario::rect_of(target).unwrap();
+                    assert!(body.contains_rect(rect) && rect.contains(centre), "width={width}: {name} is visible at its real target");
+                    if name == "Interface scale" {
+                        let row = crate::scenario::rect_of("dialog:row:Interface scale").unwrap();
+                        assert!((rect.left() - row.left()).abs() <= 1.0, "accessible-only name reserves no label column");
+                    }
+                    if name == "Color" {
+                        h.step(&serde_json::json!({"click":{"handle":target}})).unwrap();
+                        h.frames(2);
+                        assert_eq!(h.app.preferences.viewport_background, Some([255, 255, 255]), "the search hit edits the real setting");
+                    }
+                    if name == "Interface font" {
+                        h.step(&serde_json::json!({"click":{"handle":target}})).unwrap();
+                        h.frames(2);
+                        assert!(crate::scenario::handle_at("prefs:font_builtin").is_some(), "real searchable font picker opens at either width");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn search_matches_a_label_a_subsequence_and_the_english_source() {
         assert!(matches_text("zoom", &["Reverse zoom direction"]));
         assert!(matches_text("zo", &["Reverse zoom direction"]));

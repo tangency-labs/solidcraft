@@ -1117,33 +1117,86 @@ fn ui_prefs_sets_each_mode_and_refuses_anything_else() {
 /// colours. The status chips beside it keep theirs in every mode.
 #[test]
 fn the_sample_previews_the_mode_being_chosen() {
-    let mut h = crate::scenario::Harness::new();
-    crate::prefs::control(&mut h.app, &json!({"open": "Interface"})).unwrap();
-    let lines = |h: &crate::scenario::Harness| {
-        let mut out = BTreeSet::new();
-        for s in &h.shapes {
-            crate::test_support::each_shape(&s.shape, &mut |shape| {
-                if let egui::Shape::LineSegment { stroke, .. } = shape {
-                    out.insert(stroke.color.to_array());
-                }
-            });
+    for base in ["light", "dark"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        crate::prefs::control(&mut h.app, &json!({"theme":base,"language":"en","open":"Interface"})).unwrap();
+        h.frames(3);
+        for mode in ColorVision::ALL {
+            let handle = format!("prefs:color_vision:{}", mode.id());
+            crate::prefs::reveal_preference(&mut h, &handle);
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.preferences.color_vision, mode, "the real Appearance segments edit the preference");
+            crate::prefs::reveal_preference(&mut h, "prefs:colour_vision_samples");
+            let (want, off) = (Tokens::get_in(mode), Tokens::get_in(ColorVision::Off));
+            if mode != ColorVision::Off {
+                assert!(
+                    want.axis_x != off.axis_x || want.sketch_locked != off.sketch_locked,
+                    "{base} {mode:?}: axis X or locked sketch geometry must differ from Off"
+                );
+            }
+            // The shared painter clips each figure to its fitted cell. Isolate those actual
+            // page shapes by that clip, preserving their order and geometry. Cropping the whole
+            // page still tessellates unrelated atlas content, which requires its real textures.
+            // Rounded vector shapes also use atlas-backed discs, so retain the rendered page's atlas.
+            let textures = std::collections::HashMap::from([(egui::TextureId::default(), h.ctx.fonts(|fonts| fonts.image()))]);
+            let images: Vec<_> = (0..6)
+                .map(|i| {
+                    let cell = crate::scenario::rect_of(&format!("prefs:colour_vision_sample:{i}")).unwrap();
+                    let artwork: Vec<_> = h
+                        .shapes
+                        .iter()
+                        .filter(|shape| shape.clip_rect.min.distance(cell.min) < 0.01 && shape.clip_rect.max.distance(cell.max) < 0.01)
+                        .cloned()
+                        .collect();
+                    assert!(!artwork.is_empty(), "{base} {mode:?}: sample {i} has actual cell-clipped artwork");
+                    crate::ui_kit::raster_test_shapes(&h.ctx, artwork, 1.0, cell, &textures)
+                })
+                .collect();
+            let near = |actual: [u8; 4], expected: egui::Color32| actual.into_iter().zip(expected.to_array()).all(|(a, b)| a.abs_diff(b) <= 2);
+            let pixel = |i: usize, x, y, colour| {
+                assert!(
+                    near(images[i].get_pixel(x, y).0, colour),
+                    "{base} {mode:?}: sample {i} pixel {x},{y} must be {colour:?}, got {:?}",
+                    images[i].get_pixel(x, y)
+                );
+            };
+            pixel(0, 42, 22, want.sketch_locked);
+            pixel(1, 42, 22, want.sketch_projected);
+            pixel(2, 40, 34, want.axis_x);
+            pixel(2, 14, 20, want.axis_y);
+            // The canonical bends are dashed. Require visible runs in each semantic colour.
+            for (colour, y) in [(want.bend_up, 14), (want.bend_down, 30)] {
+                assert!((12..72).any(|x| near(images[3].get_pixel(x, y).0, colour)), "{base} {mode:?}: bend stroke {colour:?}");
+            }
+            pixel(4, 18, 18, crate::theme::srgb(want.analysis.draft[0]));
+            pixel(4, 40, 18, crate::theme::srgb(want.analysis.draft[1]));
+            pixel(4, 2, 2, want.figure_ground);
+            let negative = crate::theme::srgb(want.analysis.draft[2]);
+            let hatch = crate::theme::srgb(want.analysis.draft[2].map(|c| c * 0.6));
+            let draft = &images[4];
+            let band: Vec<_> = (54..74).flat_map(|x| (24..34).map(move |y| draft.get_pixel(x, y).0)).collect();
+            assert!(band.iter().any(|p| near(*p, negative)), "{base} {mode:?}: Draft retains its negative analysis colour");
+            assert!(band.iter().any(|p| near(*p, hatch)), "{base} {mode:?}: Draft hatching is visible, including Off");
+            // Both diagonals must be visible inside the error box; a blank rounded box fails.
+            for (x, y) in [(38, 19), (46, 18), (38, 25), (46, 25)] {
+                pixel(5, x, y, want.error);
+            }
+            pixel(5, 24, 22, want.timeline_item_error);
+            let area = crate::scenario::rect_of("prefs:colour_vision_samples").unwrap();
+            let page = crate::scenario::rect_of("prefs:page_body").unwrap();
+            assert!(page.expand(1.0).contains_rect(area));
+            for i in 0..6 {
+                let cell = crate::scenario::rect_of(&format!("prefs:colour_vision_sample:{i}")).unwrap();
+                assert!(area.contains_rect(cell));
+                assert_eq!(cell.size(), egui::vec2(84.0, 44.0));
+            }
+            assert_eq!(crate::scenario::rects("prefs:status_sample:").len(), 4);
         }
-        out
-    };
-    for mode in [ColorVision::Protan, ColorVision::Tritan, ColorVision::Off] {
-        crate::prefs::control(&mut h.app, &json!({"color_vision": mode.id()})).unwrap();
-        h.frames(2);
-        let (want, off) = (Tokens::get_in(mode), Tokens::get_in(ColorVision::Off));
-        let painted = lines(&h);
-        for (name, c) in [("axis_x", want.axis_x), ("axis_y", want.axis_y), ("sketch_locked", want.sketch_locked)] {
-            assert!(painted.contains(&c.to_array()), "{mode:?}: the sample draws {name} {c:?}");
-        }
-        if mode != ColorVision::Off {
-            let changed = [(want.axis_x, off.axis_x), (want.sketch_locked, off.sketch_locked)];
-            assert!(changed.iter().any(|(a, b)| a != b), "{mode:?} recolours what the sample shows");
-        }
+        crate::prefs::control(&mut h.app, &json!({"button":"cancel"})).unwrap();
+        assert_eq!(h.app.preferences.color_vision, ColorVision::Off);
     }
-    crate::prefs::control(&mut h.app, &json!({"button": "cancel"})).unwrap();
 }
 
 #[test]

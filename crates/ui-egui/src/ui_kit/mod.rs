@@ -91,6 +91,7 @@ pub(crate) use preferences::*;
 pub(crate) use preferences_assistant::*;
 #[allow(unused_imports, reason = "composed by the Preferences pages of #9875 to #9883")]
 pub(crate) use preferences_cards::*;
+pub(crate) use preferences_figures::{ThemeSample, paint_theme_system, paint_theme_thumbnail};
 pub(crate) use preferences_navigation::*;
 pub(crate) use preferences_small::*;
 pub(crate) use radial::{RADIAL_RADIUS, radial_menu};
@@ -135,3 +136,7 @@ pub(crate) fn fits_steadily(ui: &egui::Ui, key: impl std::hash::Hash + std::fmt:
     ui.data_mut(|data| data.insert_temp(id, fits));
     fits
 }
+
+// Share the existing CPU rasteriser with page-level artwork regressions.
+#[cfg(test)]
+pub(crate) use checks::tests::raster as raster_test_shapes;

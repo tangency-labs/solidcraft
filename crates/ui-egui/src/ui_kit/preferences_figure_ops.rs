@@ -160,6 +160,8 @@ const MAX_POINTS: usize = 512;
 struct Ctx<'a> {
     t: &'a Tokens,
     sample: Option<&'a ThemeSample>,
+    /// Only the Appearance samples interpret the legacy SVG colour roles semantically.
+    colour_vision: Option<usize>,
     origin: Pos2,
     scale: f32,
 }
@@ -167,7 +169,23 @@ struct Ctx<'a> {
 impl Ctx<'_> {
     fn ink(&self, ink: Ink, a: f32) -> Color32 {
         let t = self.t;
-        let c = match ink {
+        let semantic = match (self.colour_vision, ink) {
+            (Some(0), Ink::Cv0) => Some(t.sketch_locked),
+            (Some(1), Ink::Cv1) => Some(t.sketch_projected),
+            (Some(2), Ink::Cv2 | Ink::AxisX) => Some(t.axis_x),
+            (Some(2), Ink::Cv0 | Ink::AxisY) => Some(t.axis_y),
+            (Some(2), Ink::AxisZ) => Some(t.axis_z),
+            (Some(3), Ink::Cv1) => Some(t.bend_up),
+            (Some(3), Ink::Cv3) => Some(t.bend_down),
+            (Some(4), Ink::Cv3) => Some(crate::theme::srgb(t.analysis.draft[0])),
+            (Some(4), Ink::Cv1) => Some(crate::theme::srgb(t.analysis.draft[1])),
+            (Some(4), Ink::Cv4) => Some(crate::theme::srgb(t.analysis.draft[2])),
+            (Some(4), Ink::Black) => Some(crate::theme::srgb(t.analysis.draft[2].map(|c| c * 0.6))),
+            (Some(5), Ink::Cv2) => Some(t.error),
+            (Some(5), Ink::NoteFill) => Some(t.timeline_item_error),
+            _ => None,
+        };
+        let c = semantic.unwrap_or_else(|| match ink {
             Ink::Ground => t.figure_ground,
             Ink::Line => t.figure_line,
             Ink::Top => t.figure_face_top,
@@ -198,7 +216,7 @@ impl Ctx<'_> {
             Ink::Cv3 => t.bend_up,
             Ink::Cv4 => t.bend_down,
             Ink::Slot(n) => self.sample.and_then(|s| s.slots.get(n as usize).copied()).unwrap_or(Color32::TRANSPARENT),
-        };
+        });
         if a >= 1.0 { c } else { c.gamma_multiply(a.clamp(0.0, 1.0)) }
     }
 
@@ -217,6 +235,33 @@ impl Ctx<'_> {
 
 /// Paints `figure` into `rect`, scaled to fit and centred, with `Tokens::get()` colours.
 pub(super) fn paint(p: &Painter, rect: Rect, figure: &Figure, sample: Option<&ThemeSample>, clip: Option<&[[f32; 2]]>) {
+    paint_with_tokens(p, rect, figure, sample, clip, &Tokens::get(), None);
+}
+
+/// Reuse the six canonical figures with the semantic palette being previewed, without global state.
+pub(super) fn paint_colour_vision(p: &Painter, rect: Rect, index: usize, t: &Tokens) {
+    use super::preferences_figure_data as figures;
+    let figure = match index {
+        0 => &figures::COLOUR_VISION_FIXED,
+        1 => &figures::COLOUR_VISION_PROJECTED,
+        2 => &figures::COLOUR_VISION_AXES,
+        3 => &figures::COLOUR_VISION_BENDS,
+        4 => &figures::COLOUR_VISION_DRAFT,
+        5 => &figures::COLOUR_VISION_FAILED,
+        _ => return,
+    };
+    paint_with_tokens(p, rect, figure, None, None, t, Some(index));
+}
+
+fn paint_with_tokens(
+    p: &Painter,
+    rect: Rect,
+    figure: &Figure,
+    sample: Option<&ThemeSample>,
+    clip: Option<&[[f32; 2]]>,
+    t: &Tokens,
+    colour_vision: Option<usize>,
+) {
     let size = rect.size();
     if !rect.min.is_finite() || !size.is_finite() || size.x < 1.0 || size.y < 1.0 || size.x > MAX_SIDE || size.y > MAX_SIDE {
         return;
@@ -227,8 +272,7 @@ pub(super) fn paint(p: &Painter, rect: Rect, figure: &Figure, sample: Option<&Th
     }
     let scale = (size.x / fw).min(size.y / fh);
     let fitted = Rect::from_center_size(rect.center(), vec2(fw * scale, fh * scale));
-    let t = Tokens::get();
-    let ctx = Ctx { t: &t, sample, origin: fitted.min, scale };
+    let ctx = Ctx { t, sample, colour_vision, origin: fitted.min, scale };
     let p = p.with_clip_rect(fitted.intersect(p.clip_rect()));
     let outer: Option<Vec<Pos2>> = clip.map(|c| c.iter().map(|&q| ctx.at(q)).collect());
     // Nested clips are inside one another in every figure, so the innermost one is the clip.
