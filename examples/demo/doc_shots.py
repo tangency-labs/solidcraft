@@ -96,7 +96,7 @@ class App:
     def wait_ready(self):
         from enclosure_mcp import control
 
-        for _ in range(600):
+        for _ in range(1800):
             if self.p.poll() is not None:
                 raise RuntimeError(f"the app exited ({self.p.returncode}); see {self.log.name}")
             try:
@@ -106,7 +106,7 @@ class App:
             except OSError:
                 pass
             time.sleep(0.1)
-        raise RuntimeError("the app did not answer on its control port within 60 s")
+        raise RuntimeError("the app did not answer on its control port within 3 minutes")
 
     def close(self):
         from enclosure_mcp import control
@@ -598,6 +598,143 @@ def sketching_parts(d):
         (names["sketch_palette:status_header"][0] - 128, names["sketch_palette:status_header"][1] + 8),
         (names["sketch_palette:finish"][0] - 130, names["sketch_palette:finish"][1]),
     ]
+
+
+# features.md: the sketch above made solid, hollowed, rounded and edited from the timeline. Shell
+# comes before Fillet: a shell through rounded edges needs the kernel's boolean retry (a warning
+# on the timeline), and a 1.5 mm round on the 2 mm wall's outer edge needs nothing.
+HEIGHT = 12
+TOP_EDGES = [[RECT[0] / 2, 0, HEIGHT], [RECT[0], RECT[1] / 2, HEIGHT], [RECT[0] / 2, RECT[1], HEIGHT], [0, RECT[1] / 2, HEIGHT]]
+TOP = [RECT[0] * 0.75, RECT[1] * 0.75, HEIGHT]
+
+
+def model_view(d):
+    """The same three-quarter view for every feature clip, the part left of the dialog."""
+    d.ui("ui.camera", {"target": [RECT[0] / 2 + 6, RECT[1] / 2, HEIGHT / 2], "yaw": -0.7854, "pitch": 0.6155, "distance": 125})
+    d.settle_camera()
+
+
+def features(d):
+    return [h["name"].split(":", 1)[1] for h in d.ui("ui.handles") if h["name"].startswith("timeline:")]
+
+
+def wait_feature(d, name):
+    """Wait for `name` on the timeline (a shell can take a few seconds to build), and fail on a
+    feature with a warning or an error: a figure must not show one."""
+    for _ in range(300):
+        if name in features(d):
+            d.settle_camera()
+            r = d.execute("timeline.inspect", {"feature": name})
+            if r.get("warning") or r.get("error"):
+                raise RuntimeError(f"{name}: {r.get('warning') or r.get('error')}")
+            return
+        time.sleep(0.1)
+    raise RuntimeError(f"no {name} on the timeline: {features(d)}")
+
+
+def typed(d, value):
+    """Replace the focused value and press Enter (Enter is OK in a feature dialog)."""
+    d.wait(0.4)
+    d.ui("ui.key", {"key": "A", "cmd": True})
+    d.type(value)
+
+
+def extrude(d, label=lambda text: None):
+    label("Extrude: click the profile")
+    d.tool("solid.extrude")
+    d.click(d.at(world=[RECT[0] * 0.8, RECT[1] * 0.8, 0]), dur=0.6, settle=0.8)
+    label("Drag the arrow, or type the distance: 12, Enter")
+    a = d.at(handle="arrow")
+    d.drag(a, (a[0], a[1] - 50), steps=40)
+    typed(d, str(HEIGHT))
+    wait_feature(d, "Extrude1")
+
+
+def shell(d, label=lambda text: None):
+    label("Shell: click the face to remove")
+    d.tool("solid.shell")
+    d.click(d.at(world=TOP), dur=0.6, settle=0.8)
+    label("Wall thickness: 2, Enter")
+    typed(d, "2")
+    wait_feature(d, "Shell1")
+
+
+def fillet(d, label=lambda text: None):
+    label("Fillet: click the edges to round")
+    d.tool("solid.fillet")
+    for edge in TOP_EDGES:
+        d.click(d.at(world=edge), dur=0.4, settle=0.3)
+    label("Radius: 1.5, Enter")
+    typed(d, "1.5")
+    wait_feature(d, "Fillet1")
+
+
+def sketched(d):
+    drawn(d)
+    dimension_hole(d)
+    d.tool("sketch.finish")
+    model_view(d)
+    time.sleep(6)  # the "Dimension applied" notice fades
+
+
+def extruded(d):
+    sketched(d)
+    extrude(d)
+
+
+def shelled(d):
+    extruded(d)
+    shell(d)
+
+
+def filleted(d):
+    shelled(d)
+    fillet(d)
+
+
+@shot("features/extrude", "clip", setup=sketched)
+def features_extrude(d):
+    """Extrude the sketch's profile: drag the arrow, type 12, Enter."""
+    extrude(d, d.caption)
+    d.wait(1.5)
+
+
+@shot("features/shell", "clip", setup=extruded)
+def features_shell(d):
+    """Shell: pick the top face to open, keep the 2 mm wall, Enter; then a turn to look in."""
+    shell(d, d.caption)
+    d.caption("")
+    d.orbit(0, 60, steps=40)
+    d.wait(1.5)
+
+
+@shot("features/fillet", "clip", setup=shelled)
+def features_fillet(d):
+    """Fillet the four outer top edges: pick them, type 1.5, Enter."""
+    fillet(d, d.caption)
+    d.wait(1.5)
+
+
+@shot("features/edit", "clip", setup=filleted)
+def features_edit(d):
+    """Double-click Extrude1 on the timeline, make it 20 mm: the shell and the fillet follow."""
+    d.caption("Double-click a feature on the timeline")
+    t = d.at(handle="timeline:Extrude1")
+    d.glide(t, 0.8)
+    d.ui("ui.click", {"x": t[0], "y": t[1], "double": True})
+    d.mark(cursor=list(t), click=True)
+    d.wait(1.2)
+    d.settle_camera()
+    d.caption("Change it: 20, Enter. The features after it follow")
+    typed(d, "20")
+    for name in ("Extrude1", "Shell1", "Fillet1"):
+        wait_feature(d, name)
+    if features(d)[-1:] != ["Fillet1"]:
+        raise RuntimeError(f"the timeline did not rebuild: {features(d)}")
+    # Off the timeline (a feature under the pointer lights up its body), nothing selected.
+    d.glide((SIZE[0] * 0.55, SIZE[1] * 0.75), 0.8)
+    d.key("Escape")
+    d.wait(2.0)
 
 
 # -- main ---------------------------------------------------------------------------------------
