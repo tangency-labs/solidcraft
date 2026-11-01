@@ -935,72 +935,143 @@ fn cut_triangle(m: &solidcraft_geom::Mesh, t: &[u32; 3], o: Vec3, n: Vec3, eps: 
     }
 }
 
-/// A mesh's triangles sorted into slabs along one normal, so cuts with that normal at any
-/// height look only at the triangles of one slab: dragging a Section Analysis keeps the normal
-/// and moves the cut, and an imported part can have millions of triangles. The same segments
-/// as [`section_segments`].
+/// A mesh's triangles sorted into the cells of a grid by where their boxes sit, each cell
+/// keeping the box around its triangles, so a cut with any plane looks only at the triangles of
+/// the cells the plane crosses: an imported part can have millions of triangles, and dragging a
+/// Section Analysis moves the cut and, when tilted, turns its normal every frame (#10373). The
+/// same segments, in the same order, as [`section_segments`].
 pub struct SectionIndex {
-    normal: Vec3,
-    /// The lowest height (`normal · p`) of the mesh, and the slab thickness.
-    start: f64,
-    step: f64,
-    /// Per slab, the triangles whose heights reach into it.
-    slabs: Vec<Vec<u32>>,
+    /// Per cell holding triangles, the centre and half size of the box around them, and where
+    /// they are in `tris` (in mesh order).
+    cells: Vec<(Vec3, Vec3, u32, u32)>,
+    tris: Vec<u32>,
+    /// Triangles with a corner that is not finite: cut on every plane, as `section_segments`
+    /// does.
+    always: Vec<u32>,
+    /// The largest coordinate of the mesh, for the cell test's rounding margin.
+    reach: f64,
     eps: f64,
 }
 
-/// Slabs a [`SectionIndex`] makes, at most.
-const SECTION_SLABS: usize = 4096;
+/// How many mean triangle widths a [`SectionIndex`] cell is wide, and most cells of its grid.
+const SECTION_CELL_WIDTHS: f64 = 4.0;
+const SECTION_GRID: usize = 1 << 22;
 
 impl SectionIndex {
-    pub fn new(m: &solidcraft_geom::Mesh, normal: Vec3) -> SectionIndex {
-        let heights: Vec<Option<(f64, f64)>> = m
+    pub fn new(m: &solidcraft_geom::Mesh) -> SectionIndex {
+        let finite_tri = |t: &[u32; 3]| m.tri(t).filter(|p| p.iter().all(|q| q.is_finite()));
+        let mut always = Vec::new();
+        let mut centres = Aabb3::EMPTY;
+        let (mut widths, mut count) = (0.0, 0usize);
+        for (i, t) in m.triangles.iter().enumerate() {
+            match finite_tri(t) {
+                Some([a, b, c]) => {
+                    let (lo, hi) = (a.min(b).min(c), a.max(b).max(c));
+                    centres.add((lo + hi) * 0.5);
+                    widths += (hi - lo).len();
+                    count += 1;
+                }
+                None if m.tri(t).is_some() => always.extend(u32::try_from(i)),
+                None => {}
+            }
+        }
+        // Cells as wide as a few triangles, on the axes the part spans: a part's triangles lie
+        // on its surface, so cells sized from the part's volume would hold far more.
+        let size = if centres.is_empty() { Vec3::ZERO } else { centres.size() };
+        let ext = [size.x, size.y, size.z];
+        let dims_for = |side: f64| ext.map(|e| if e > 0.0 && side > 0.0 { (e / side).ceil().clamp(1.0, SECTION_GRID as f64) as usize } else { 1 });
+        let cells_of = |d: [usize; 3]| d.iter().fold(1usize, |p, k| p.saturating_mul(*k));
+        let mut side = widths / count.max(1) as f64 * SECTION_CELL_WIDTHS;
+        while cells_of(dims_for(side)) > SECTION_GRID && side.is_finite() {
+            side *= 1.25;
+        }
+        let dims = dims_for(side);
+        let cells = cells_of(dims).min(SECTION_GRID);
+        let at = |v: f64, lo: f64, e: f64, d: usize| {
+            let k = if e > 0.0 { ((v - lo) / e * d as f64).floor() } else { 0.0 };
+            if k.is_finite() { (k.max(0.0) as usize).min(d.saturating_sub(1)) } else { 0 }
+        };
+        let of: Vec<Option<usize>> = m
             .triangles
             .iter()
             .map(|t| {
-                let d = m.tri(t)?.map(|q| normal.dot(q));
-                Some((d[0].min(d[1]).min(d[2]), d[0].max(d[1]).max(d[2])))
+                let [a, b, c] = finite_tri(t)?;
+                let p = (a.min(b).min(c) + a.max(b).max(c)) * 0.5;
+                let [x, y, z] =
+                    [at(p.x, centres.min.x, ext[0], dims[0]), at(p.y, centres.min.y, ext[1], dims[1]), at(p.z, centres.min.z, ext[2], dims[2])];
+                Some(((z * dims[1] + y) * dims[0] + x).min(cells.saturating_sub(1)))
             })
             .collect();
-        let (lo, hi) = heights.iter().flatten().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (l, h)| (a.min(*l), b.max(*h)));
-        let count = if lo.is_finite() && hi.is_finite() { (m.triangles.len() / 64).clamp(1, SECTION_SLABS) } else { 0 };
-        let step = if count > 0 && hi > lo { (hi - lo) / count as f64 } else { 1.0 };
-        let mut index = SectionIndex { normal, start: lo, step, slabs: vec![Vec::new(); count], eps: section_nudge(m) };
-        for (i, h) in heights.iter().enumerate() {
-            let (Some((l, h)), Ok(i)) = (h, u32::try_from(i)) else { continue };
-            for k in index.slab(*l)..=index.slab(*h) {
-                if let Some(slab) = index.slabs.get_mut(k) {
-                    slab.push(i);
-                }
+        // Counted per cell, then each cell's first slot (the last entry: the total).
+        let mut starts = vec![0u32; cells + 1];
+        for c in of.iter().flatten() {
+            if let Some(s) = starts.get_mut(*c) {
+                *s += 1;
             }
         }
-        index
-    }
-
-    /// The normal this index was made for.
-    pub fn normal(&self) -> Vec3 {
-        self.normal
-    }
-
-    fn slab(&self, height: f64) -> usize {
-        let k = ((height - self.start) / self.step).floor();
-        if k.is_finite() { (k.max(0.0) as usize).min(self.slabs.len().saturating_sub(1)) } else { 0 }
+        let mut total = 0u32;
+        for s in &mut starts {
+            (*s, total) = (total, total.saturating_add(*s));
+        }
+        let mut fill = starts.clone();
+        let mut tris = vec![0u32; total as usize];
+        for (i, c) in of.iter().enumerate() {
+            let (Some(c), Ok(i)) = (c, u32::try_from(i)) else { continue };
+            if let Some(at) = fill.get_mut(*c) {
+                if let Some(slot) = tris.get_mut(*at as usize) {
+                    *slot = i;
+                }
+                *at += 1;
+            }
+        }
+        let mut reach: f64 = 0.0;
+        let cells = starts
+            .windows(2)
+            .filter_map(|w| match *w {
+                [a, e] if e > a => {
+                    let mut b = Aabb3::EMPTY;
+                    for i in tris.get(a as usize..e as usize).unwrap_or(&[]) {
+                        for p in m.triangles.get(*i as usize).and_then(|t| m.tri(t)).into_iter().flatten() {
+                            b.add(p);
+                        }
+                    }
+                    reach = reach.max(b.min.x.abs().max(b.min.y.abs()).max(b.min.z.abs()).max(b.max.x.abs()).max(b.max.y.abs()).max(b.max.z.abs()));
+                    Some((b.center(), b.size() * 0.5, a, e))
+                }
+                _ => None,
+            })
+            .collect();
+        SectionIndex { cells, tris, always, reach, eps: section_nudge(m) }
     }
 
     /// [`section_segments`] of `m` (the mesh this index was made from) at the plane through
-    /// `o` with this index's normal.
-    pub fn segments(&self, m: &solidcraft_geom::Mesh, o: Vec3) -> Vec<(Vec3, Vec3)> {
-        let mut out = Vec::new();
-        let at = self.normal.dot(o);
-        if self.slabs.is_empty() || !at.is_finite() || at < self.start {
-            return out;
+    /// `o` with normal `n`; nothing for a plane that is not finite.
+    pub fn segments(&self, m: &solidcraft_geom::Mesh, o: Vec3, n: Vec3) -> Vec<(Vec3, Vec3)> {
+        if !(o.is_finite() && n.is_finite()) {
+            return Vec::new();
         }
-        for i in self.slabs.get(self.slab(at)).into_iter().flatten() {
-            if let Some(t) = m.triangles.get(*i as usize) {
-                cut_triangle(m, t, o, self.normal, self.eps, &mut out);
+        let an = Vec3::new(n.x.abs(), n.y.abs(), n.z.abs());
+        // Rounding in `cut_triangle`'s heights is far below this margin, so a cell left out
+        // holds no triangle it would cut.
+        let margin = 1e-9 * (an.x + an.y + an.z) * (self.reach + o.x.abs().max(o.y.abs()).max(o.z.abs()) + 1.0);
+        let at = n.dot(o);
+        // The cut triangles' segments, by triangle, then in mesh order.
+        let mut found: Vec<(u32, (Vec3, Vec3))> = Vec::new();
+        let mut out = Vec::with_capacity(1);
+        let mut cut = |i: u32| {
+            if let Some(t) = m.triangles.get(i as usize) {
+                cut_triangle(m, t, o, n, self.eps, &mut out);
+                found.extend(out.pop().map(|seg| (i, seg)));
+            }
+        };
+        self.always.iter().for_each(|i| cut(*i));
+        for (centre, half, first, end) in &self.cells {
+            if (n.dot(*centre) - at).abs() <= an.dot(*half) + margin {
+                self.tris.get(*first as usize..*end as usize).unwrap_or(&[]).iter().for_each(|i| cut(*i));
             }
         }
-        out
+        found.sort_unstable_by_key(|(i, _)| *i);
+        found.into_iter().map(|(_, seg)| seg).collect()
     }
 }
 
