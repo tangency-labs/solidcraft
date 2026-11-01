@@ -249,12 +249,22 @@ pub struct SheetRule {
     /// brake is set). A choice, not an expression; saved only when it isn't `bend`.
     #[serde(default = "rule_angle_display", skip_serializing_if = "is_bend_display")]
     pub angle_display: String,
+    /// How the rule's bends unfold: `k_factor` (the `k_factor` expression, the default), or
+    /// `deduction` / `allowance`, a press brake chart's bend deduction or bend allowance of a 90°
+    /// bend at the rule's thickness and bend radius (`unfold_value`), which sets the K-factor
+    /// that gives exactly that. A choice, not an expression; saved only when it isn't `k_factor`.
+    #[serde(default = "rule_unfold_method", skip_serializing_if = "is_k_factor_method")]
+    pub unfold_method: String,
+    /// The 90° bend deduction or allowance `unfold_method` reads (a length expression). The
+    /// K-factor method doesn't use it; saved only when it isn't empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub unfold_value: String,
 }
 
 impl SheetRule {
     /// The expressions, by field name (as commands name them), with the kind each evaluates to.
     /// (`corner_relief_shape` is a choice, not an expression.)
-    pub fn fields(&self) -> [(&'static str, &String, Kind); 8] {
+    pub fn fields(&self) -> [(&'static str, &String, Kind); 9] {
         [
             ("thickness", &self.thickness, Kind::Length),
             ("k_factor", &self.k_factor, Kind::Unitless),
@@ -264,11 +274,12 @@ impl SheetRule {
             ("corner_relief", &self.corner_relief, Kind::Length),
             ("hem_gap", &self.hem_gap, Kind::Length),
             ("gap", &self.gap, Kind::Length),
+            ("unfold_value", &self.unfold_value, Kind::Length),
         ]
     }
 
     /// The expressions to change, by field name, in the order of [`SheetRule::fields`].
-    pub fn fields_mut(&mut self) -> [(&'static str, &mut String); 8] {
+    pub fn fields_mut(&mut self) -> [(&'static str, &mut String); 9] {
         [
             ("thickness", &mut self.thickness),
             ("k_factor", &mut self.k_factor),
@@ -278,6 +289,7 @@ impl SheetRule {
             ("corner_relief", &mut self.corner_relief),
             ("hem_gap", &mut self.hem_gap),
             ("gap", &mut self.gap),
+            ("unfold_value", &mut self.unfold_value),
         ]
     }
 }
@@ -309,6 +321,14 @@ fn rule_angle_display() -> String {
 fn is_bend_display(s: &str) -> bool {
     AngleDisplay::parse(s) == Some(AngleDisplay::Bend)
 }
+fn rule_unfold_method() -> String {
+    UnfoldMethod::KFactor.name().into()
+}
+/// A rule that unfolds by its K-factor leaves the setting out of the design, which then saves as
+/// it did before the setting existed.
+fn is_k_factor_method(s: &str) -> bool {
+    UnfoldMethod::parse(s) == Some(UnfoldMethod::KFactor)
+}
 
 impl SheetRule {
     /// Default: Steel (mm), 2.5 mm, K 0.44, bend radius = Thickness.
@@ -325,6 +345,8 @@ impl SheetRule {
             hem_gap: rule_hem_gap(),
             gap: rule_gap(),
             angle_display: rule_angle_display(),
+            unfold_method: rule_unfold_method(),
+            unfold_value: String::new(),
         }
     }
 }
@@ -425,6 +447,41 @@ impl AngleDisplay {
     }
 }
 
+/// What sets a rule's K-factor (a rule's `unfold_method`). Every bend unfolds by the K-factor,
+/// BA = θ·(R + K·T); a 90° value gives the K-factor that makes a 90° bend at the rule's radius
+/// come out at exactly that value, and other angles and radii follow from the same K.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnfoldMethod {
+    /// The rule's `k_factor` expression.
+    #[default]
+    KFactor,
+    /// The bend deduction of a 90° bend: the two outside setbacks (R + T each) less the bend
+    /// allowance, so what to take off a part's outside dimensions for each bend.
+    Deduction,
+    /// The bend allowance of a 90° bend: the length of the bend along the neutral axis.
+    Allowance,
+}
+
+impl UnfoldMethod {
+    pub fn parse(s: &str) -> Option<UnfoldMethod> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "k_factor" => Some(UnfoldMethod::KFactor),
+            "deduction" => Some(UnfoldMethod::Deduction),
+            "allowance" => Some(UnfoldMethod::Allowance),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            UnfoldMethod::KFactor => "k_factor",
+            UnfoldMethod::Deduction => "deduction",
+            UnfoldMethod::Allowance => "allowance",
+        }
+    }
+}
+
 /// The corner relief an edge flange feature asks for in place of the rule's. A value left out
 /// follows the rule.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -447,6 +504,56 @@ pub struct RuleValues {
     pub hem_gap: f64,
     pub gap: f64,
     pub angle_display: AngleDisplay,
+    /// What set `k_factor`: the rule's K-factor, or the K-factor its 90° bend deduction or
+    /// allowance works out to.
+    pub unfold_method: UnfoldMethod,
+}
+
+impl RuleValues {
+    /// The bend allowance of a 90° bend at the rule's radius (mm): π/2 · (R + K·T).
+    pub fn allowance_90(&self) -> f64 {
+        std::f64::consts::FRAC_PI_2 * (self.bend_radius + self.k_factor * self.thickness)
+    }
+
+    /// The bend deduction of a 90° bend at the rule's radius (mm): the two outside setbacks,
+    /// R + T each, less the bend allowance.
+    pub fn deduction_90(&self) -> f64 {
+        2.0 * (self.bend_radius + self.thickness) - self.allowance_90()
+    }
+}
+
+/// The K-factor that makes a 90° bend of radius `radius` (mm) in a sheet `thickness` (mm) thick
+/// come out at the bend deduction or allowance `value` (mm). A K-factor above 1 is accepted,
+/// since a chart measured with an air-bent radius larger than the rule's implies one; one below
+/// 0 is refused, as it would put the neutral axis inside the bend, where a flange with a smaller
+/// radius of its own would get no bend at all.
+pub fn k_factor_from_90(method: UnfoldMethod, value: f64, radius: f64, thickness: f64) -> Result<f64> {
+    use std::f64::consts::FRAC_PI_2;
+    let allowance = match method {
+        UnfoldMethod::KFactor => return Err(DocError::Invalid("the K-factor method has no 90° value".into())),
+        UnfoldMethod::Deduction => 2.0 * (radius + thickness) - value,
+        UnfoldMethod::Allowance => value,
+    };
+    let k = (allowance / FRAC_PI_2 - radius) / thickness;
+    if !(value.is_finite() && k.is_finite() && thickness > 0.0) {
+        return Err(DocError::Invalid(format!("the 90° bend {} must be a finite length", method_value_name(method))));
+    }
+    // Rounding may leave a value meant to give K 0 a hair below it.
+    if k < -1e-9 {
+        let limit = match method {
+            UnfoldMethod::Deduction => format!("at most {:.6} mm", 2.0 * (radius + thickness) - FRAC_PI_2 * radius),
+            _ => format!("at least {:.6} mm, the inner arc", FRAC_PI_2 * radius),
+        };
+        return Err(DocError::Invalid(format!(
+            "the 90° bend {} must be {limit} for a {radius} mm bend radius and {thickness} mm sheet; past that the neutral axis would be inside the bend",
+            method_value_name(method)
+        )));
+    }
+    Ok(k.max(0.0))
+}
+
+fn method_value_name(method: UnfoldMethod) -> &'static str {
+    if method == UnfoldMethod::Deduction { "deduction" } else { "allowance" }
 }
 
 impl Document {
@@ -470,10 +577,23 @@ impl Document {
             let f = |n: &str| if n == "Thickness" && !vals.contains_key("Thickness") { Ok(Value::length(t)) } else { look(n) };
             expr::eval_with(e, &f)?.to_kind(k)
         };
+        let unfold_method = UnfoldMethod::parse(&r.unfold_method)
+            .ok_or_else(|| DocError::Invalid(format!("unknown unfold method `{}` (k_factor, deduction or allowance)", r.unfold_method)))?;
+        let bend_radius = with_t(&r.bend_radius, Kind::Length)?;
+        let k_factor = match unfold_method {
+            UnfoldMethod::KFactor => with_t(&r.k_factor, Kind::Unitless)?,
+            method => {
+                if r.unfold_value.trim().is_empty() {
+                    return Err(DocError::Invalid(format!("the {} method needs the 90° value (`unfold_value`)", method.name())));
+                }
+                let value = with_t(&r.unfold_value, Kind::Length)?;
+                k_factor_from_90(method, value, bend_radius.max(0.0), t)?
+            }
+        };
         let v = RuleValues {
             thickness: t,
-            k_factor: with_t(&r.k_factor, Kind::Unitless)?,
-            bend_radius: with_t(&r.bend_radius, Kind::Length)?,
+            k_factor,
+            bend_radius,
             relief_width: with_t(&r.relief_width, Kind::Length)?,
             relief_depth: with_t(&r.relief_depth, Kind::Length)?,
             corner_relief: with_t(&r.corner_relief, Kind::Length)?,
@@ -484,8 +604,11 @@ impl Document {
             gap: with_t(&r.gap, Kind::Length)?,
             angle_display: AngleDisplay::parse(&r.angle_display)
                 .ok_or_else(|| DocError::Invalid(format!("unknown bend angle display `{}` (bend or included)", r.angle_display)))?,
+            unfold_method,
         };
-        if !(0.0..=1.0).contains(&v.k_factor) || v.bend_radius < 0.0 {
+        // A K-factor worked out from a 90° value keeps its own check (`k_factor_from_90`).
+        let typed_k = unfold_method == UnfoldMethod::KFactor;
+        if (typed_k && !(0.0..=1.0).contains(&v.k_factor)) || v.bend_radius < 0.0 {
             return Err(DocError::Invalid("the K-factor must be 0…1 and the bend radius positive".into()));
         }
         Ok(v)
@@ -4956,6 +5079,7 @@ mod tests {
             hem_gap: 0.01,
             gap: 2.5,
             angle_display: AngleDisplay::Bend,
+            unfold_method: UnfoldMethod::KFactor,
         }
     }
 
@@ -5509,6 +5633,7 @@ mod tests {
             hem_gap: 0.01,
             gap: 2.0,
             angle_display: AngleDisplay::Bend,
+            unfold_method: UnfoldMethod::KFactor,
         };
         let r = rect(Vec2::new(0.0, 0.0), Vec2::new(100.0, 0.0), Vec2::new(100.0, 80.0), Vec2::new(0.0, 80.0));
         let mut s = base_flange("Body1", "AL2", &rule, Plane::XY, r);
@@ -5605,6 +5730,7 @@ mod tests {
             hem_gap: 0.01,
             gap: 0.5,
             angle_display: AngleDisplay::Bend,
+            unfold_method: UnfoldMethod::KFactor,
         }
     }
 
@@ -5893,6 +6019,83 @@ mod tests {
         assert_eq!(base_flange("Body1", "Steel", &steel(), Plane::XY, r.clone()).angle_display, AngleDisplay::Bend);
         let shop = RuleValues { angle_display: AngleDisplay::Included, ..steel() };
         assert_eq!(base_flange("Body1", "Shop", &shop, Plane::XY, r).angle_display, AngleDisplay::Included);
+    }
+
+    /// A rule can unfold by a press brake chart's 90° bend deduction or allowance (#6794): every
+    /// bend then uses the K-factor that gives exactly that value at the rule's radius.
+    #[test]
+    fn a_90_degree_bend_deduction_or_allowance_sets_the_k_factor() {
+        use std::f64::consts::FRAC_PI_2;
+        let (doc, vals) = (Document::default(), std::collections::BTreeMap::new());
+        // A rule saved before the setting existed unfolds by its K-factor, and saves as it did.
+        let old: SheetRule = serde_json::from_str(r#"{"name":"Old","thickness":"1.6 mm","k_factor":"0.42","bend_radius":"Thickness"}"#).unwrap();
+        assert_eq!((old.unfold_method.as_str(), old.unfold_value.as_str()), ("k_factor", ""));
+        assert_eq!(SheetRule::steel().unfold_method, "k_factor");
+        let saved = serde_json::to_value(&old).unwrap();
+        assert!(saved.get("unfold_method").is_none() && saved.get("unfold_value").is_none(), "{saved}");
+        let k = doc.rule_values(&vals, &old).unwrap();
+        assert_eq!(k.unfold_method, UnfoldMethod::KFactor);
+        // K 0.42 at T 1.6 and R 1.6: BA90 = π/2 · (1.6 + 0.672), BD90 = 2 · (1.6 + 1.6) − BA90.
+        assert!((k.allowance_90() - FRAC_PI_2 * 2.272).abs() < 1e-12, "{}", k.allowance_90());
+        assert!((k.deduction_90() - (6.4 - FRAC_PI_2 * 2.272)).abs() < 1e-12, "{}", k.deduction_90());
+
+        // A chart's 2.83 mm deduction: BA90 = 6.4 − 2.83 = 3.57, K = (3.57 / (π/2) − 1.6) / 1.6.
+        let bd = SheetRule { unfold_method: "deduction".into(), unfold_value: "2.83 mm".into(), ..old.clone() };
+        let v = doc.rule_values(&vals, &bd).unwrap();
+        assert_eq!(v.unfold_method, UnfoldMethod::Deduction);
+        assert!((v.k_factor - (3.57 / FRAC_PI_2 - 1.6) / 1.6).abs() < 1e-12, "{}", v.k_factor);
+        assert!((v.k_factor - 0.4204578671).abs() < 1e-10, "{}", v.k_factor);
+        assert!((v.deduction_90() - 2.83).abs() < 1e-12 && (v.allowance_90() - 3.57).abs() < 1e-12);
+        // The same bend as an allowance gives the same K-factor, and each round-trips K 0.42.
+        let ba = SheetRule { unfold_method: "allowance".into(), unfold_value: "3.57 mm".into(), ..old.clone() };
+        assert!((doc.rule_values(&vals, &ba).unwrap().k_factor - v.k_factor).abs() < 1e-12);
+        for (method, value) in [("deduction", k.deduction_90()), ("allowance", k.allowance_90())] {
+            let rule = SheetRule { unfold_method: method.into(), unfold_value: format!("{value} mm"), ..old.clone() };
+            assert!((doc.rule_values(&vals, &rule).unwrap().k_factor - 0.42).abs() < 1e-12, "{method}");
+        }
+        // The value is a length expression: a bare number is millimetres, and `Thickness` is the
+        // rule's thickness.
+        for text in ["2.83", "Thickness * 1.76875", " 0.283 cm "] {
+            let rule = SheetRule { unfold_value: text.into(), ..bd.clone() };
+            assert!((doc.rule_values(&vals, &rule).unwrap().deduction_90() - 2.83).abs() < 1e-12, "{text}");
+        }
+        // Saved with its method and value, and read back the same.
+        let saved = serde_json::to_value(&bd).unwrap();
+        assert_eq!((saved["unfold_method"].as_str(), saved["unfold_value"].as_str()), (Some("deduction"), Some("2.83 mm")));
+        assert_eq!(serde_json::from_value::<SheetRule>(saved).unwrap(), bd);
+
+        // A chart measured at an air-bent radius larger than the rule's implies a K-factor above
+        // 1: R 2.5 and K 0.42 in 2 mm sheet, under a rule radius of 0.8 mm, gives 1.27.
+        let air = SheetRule {
+            thickness: "2 mm".into(),
+            bend_radius: "0.8 mm".into(),
+            unfold_method: "allowance".into(),
+            unfold_value: format!("{} mm", FRAC_PI_2 * (2.5 + 0.42 * 2.0)),
+            ..old.clone()
+        };
+        assert!((doc.rule_values(&vals, &air).unwrap().k_factor - 1.27).abs() < 1e-12);
+        // One that would put the neutral axis inside the bend (K below 0), or none at all, is refused.
+        for (method, value, says) in [
+            ("deduction", "4 mm", "the 90° bend deduction must be at most 3.886726 mm for a 1.6 mm bend radius and 1.6 mm sheet"),
+            ("allowance", "2 mm", "the 90° bend allowance must be at least 2.513274 mm, the inner arc"),
+            ("deduction", " ", "the deduction method needs the 90° value (`unfold_value`)"),
+            ("allowance", "2 deg", "length"),
+        ] {
+            let rule = SheetRule { unfold_method: method.into(), unfold_value: value.into(), ..old.clone() };
+            let err = doc.rule_values(&vals, &rule).unwrap_err().to_string();
+            assert!(err.contains(says), "{method} {value}: {err}");
+        }
+        // The deduction that leaves the neutral axis on the inner surface is K 0 exactly.
+        let edge = SheetRule { unfold_method: "deduction".into(), unfold_value: format!("{} mm", 6.4 - FRAC_PI_2 * 1.6), ..old.clone() };
+        assert!(doc.rule_values(&vals, &edge).unwrap().k_factor.abs() < 1e-12);
+        // A typed K-factor keeps its 0…1 check, and no other word is a method.
+        assert!(doc.rule_values(&vals, &SheetRule { k_factor: "1.2".into(), ..old.clone() }).is_err());
+        let err = doc.rule_values(&vals, &SheetRule { unfold_method: "table".into(), ..old.clone() }).unwrap_err().to_string();
+        assert!(err.contains("unknown unfold method `table` (k_factor, deduction or allowance)"), "{err}");
+        for method in [UnfoldMethod::KFactor, UnfoldMethod::Deduction, UnfoldMethod::Allowance] {
+            assert_eq!(UnfoldMethod::parse(method.name()), Some(method));
+        }
+        assert_eq!(UnfoldMethod::parse(" Deduction "), Some(UnfoldMethod::Deduction));
     }
 
     #[test]

@@ -4,12 +4,12 @@
 //! design keeps its own copy, so it builds the same where the profile has no such rule.
 
 use serde::{Deserialize, Serialize, de};
-use solidcraft_engine::doc::sheet::{AngleDisplay, ReliefShape, SheetRule};
+use solidcraft_engine::doc::sheet::{AngleDisplay, ReliefShape, SheetRule, UnfoldMethod};
 use solidcraft_engine::doc::{DocError, Document, expr};
 use std::collections::BTreeMap;
 
 use crate::dialogs::{Dialog, Kind};
-use crate::dialogs_sheet::{ANGLE_DISPLAYS, RELIEF_SHAPES, RULE_FIELDS, Sm, design_rules};
+use crate::dialogs_sheet::{ANGLE_DISPLAYS, RELIEF_SHAPES, RULE_FIELDS, Sm, UNFOLD_METHODS, design_rules};
 use crate::i18n::tr;
 use crate::ui_kit::{self, Text};
 
@@ -37,10 +37,25 @@ struct Rule {
     hem_gap: String,
     gap: String,
     angle_display: String,
+    /// What sets the K-factor (`SheetRule::unfold_method`). Saved only when it isn't the K-factor,
+    /// so a library without such rules reads the same in versions before the setting.
+    #[serde(default = "k_factor_method", skip_serializing_if = "is_k_factor_method")]
+    unfold_method: String,
+    /// The 90° bend deduction or allowance, with its unit; empty, and not saved, for the K-factor.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    unfold_value: String,
     /// Values a newer version saved. They survive renaming and are never dropped silently: a rule
     /// that has them can't be recalled or overwritten here.
     #[serde(flatten)]
     unknown: BTreeMap<String, serde_json::Value>,
+}
+
+fn k_factor_method() -> String {
+    UnfoldMethod::KFactor.name().into()
+}
+
+fn is_k_factor_method(method: &str) -> bool {
+    UnfoldMethod::parse(method) == Some(UnfoldMethod::KFactor)
 }
 
 fn valid_text(text: &str, max: usize) -> bool {
@@ -83,6 +98,7 @@ impl Rule {
             "corner_relief" => &self.corner_relief,
             "hem_gap" => &self.hem_gap,
             "gap" => &self.gap,
+            "unfold_value" => &self.unfold_value,
             _ => return None,
         })
     }
@@ -104,6 +120,8 @@ impl Rule {
             hem_gap: self.hem_gap.clone(),
             gap: self.gap.clone(),
             angle_display: self.angle_display.clone(),
+            unfold_method: self.unfold_method.clone(),
+            unfold_value: self.unfold_value.clone(),
         }
     }
 
@@ -116,6 +134,7 @@ impl Rule {
         if self.expressions().into_iter().any(|text| text.trim().is_empty() || !valid_text(text, MAX_EXPRESSION))
             || ReliefShape::parse(&self.corner_relief_shape).is_none()
             || AngleDisplay::parse(&self.angle_display).is_none()
+            || !self.unfold_valid()
             || self.unknown.len() > 8
             || self.unknown.iter().any(|(key, value)| {
                 key.is_empty()
@@ -132,10 +151,19 @@ impl Rule {
         Ok(())
     }
 
+    /// A known unfold method, with a 90° value exactly when the method reads one.
+    fn unfold_valid(&self) -> bool {
+        match UnfoldMethod::parse(&self.unfold_method) {
+            Some(UnfoldMethod::KFactor) => self.unfold_value.is_empty(),
+            Some(_) => !self.unfold_value.trim().is_empty() && valid_text(&self.unfold_value, MAX_EXPRESSION),
+            None => false,
+        }
+    }
+
     /// The rule the manager shows, under `name`. The design must accept it as the manager's OK
     /// would: a positive thickness and a K factor from 0 to 1.
     fn capture(sm: &Sm, name: &str, doc: &Document) -> Result<Self, &'static str> {
-        let Sm::Rules { values, relief, angles, .. } = sm else {
+        let Sm::Rules { values, relief, angles, method, .. } = sm else {
             return Err(INVALID_VALUES);
         };
         let (vals, _) = doc.param_values();
@@ -150,6 +178,9 @@ impl Rule {
         if k_factor.is_empty() || !valid_text(k_factor, MAX_EXPRESSION) || expr::definition(k_factor).is_some() {
             return Err(INVALID_VALUES);
         }
+        // The K-factor method reads no 90° value, so one left in its hidden field isn't kept.
+        let unfold_method = UNFOLD_METHODS.get(*method).copied().unwrap_or("k_factor");
+        let unfold_value = if is_k_factor_method(unfold_method) { String::new() } else { length("unfold_value")? };
         let rule = Self {
             name: name.trim().into(),
             thickness,
@@ -162,6 +193,8 @@ impl Rule {
             hem_gap: length("hem_gap")?,
             gap: length("gap")?,
             angle_display: ANGLE_DISPLAYS.get(*angles).copied().unwrap_or("bend").into(),
+            unfold_method: unfold_method.into(),
+            unfold_value,
             unknown: BTreeMap::new(),
         };
         rule.validate()?;
@@ -186,7 +219,7 @@ impl Rule {
         if !self.unknown.is_empty() {
             return Err("sheet.personal_rules.unsupported");
         }
-        let Sm::Rules { pick, name, values, relief, angles, active, loaded } = sm else {
+        let Sm::Rules { pick, name, values, relief, angles, method, active, loaded } = sm else {
             return Err(INVALID_VALUES);
         };
         let rules = design_rules(doc);
@@ -195,6 +228,7 @@ impl Rule {
         *values = RULE_FIELDS.iter().map(|(key, _)| self.value(key).cloned().unwrap_or_default()).collect();
         *relief = RELIEF_SHAPES.iter().position(|s| s.eq_ignore_ascii_case(self.corner_relief_shape.trim())).unwrap_or(0);
         *angles = ANGLE_DISPLAYS.iter().position(|d| d.eq_ignore_ascii_case(self.angle_display.trim())).unwrap_or(0);
+        *method = UNFOLD_METHODS.iter().position(|m| m.eq_ignore_ascii_case(self.unfold_method.trim())).unwrap_or(0);
         *active = doc.sheet_rule(None).name == self.name || *pick >= rules.len();
         // The manager loads a rule's values only when its Rule box changes: these are now its own.
         *loaded = Some(*pick);
