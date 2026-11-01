@@ -1003,6 +1003,48 @@ fn reference_parts_stop_at_the_boundary_of_the_model_and_its_margin() {
     assert_lengths(&v, true, 50.0, 0.0);
 }
 
+/// Reference lines test against everything: with both parts reference, the block hides 20 mm of the
+/// plate, the setting off.
+#[test]
+fn reference_parts_hide_each_other_whatever_the_setting() {
+    let (mut s, [plate, _]) = plate_and_block(5.0);
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": plate, "bom_type": "reference"}));
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "reference_style": "visible_hidden"}));
+    assert_lengths(&v, true, 220.0, 20.0);
+}
+
+/// A reference part's edge on a model part's: the block's right edge moved onto the plate's. Merged
+/// apart, each keeps its whole outline, so the model's line is drawn in the model's width.
+#[test]
+fn a_reference_line_never_takes_a_stretch_from_a_model_line() {
+    let (mut s, [_, block]) = plate_and_block(5.0);
+    run(&mut s, "occurrence.move", json!({"occurrence": block, "translate": [-10, 0, 0]}));
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
+    assert_lengths(&v, false, 160.0, 0.0);
+    assert_lengths(&v, true, 80.0, 0.0);
+}
+
+/// A plate, a hinge holding a pin, and the pin placed again at the top: with the hinge a reference
+/// component, the pin is a reference part through the hinge and a model part on its own.
+#[test]
+fn an_assemblys_type_reaches_its_parts_through_that_path_only() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 3}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "component.create", json!({"name": "Hinge", "activate": false}));
+    run(&mut s, "component.create", json!({"name": "Pin", "parent": "Hinge"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 4, "height": 30}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.copy", json!({"component": "Pin", "translate": [0, 50, 0]}));
+    run(&mut s, "component.metadata.set", json!({"component": "Hinge", "bom_type": "reference"}));
+    let through = |line: &Value| line["occurrence"].as_array().unwrap().len() == 2;
+    let all = snap(&mut s, json!({}));
+    let lines = all["lines"].as_array().unwrap();
+    assert!(lines.iter().any(through) && !lines.iter().all(through), "{all}");
+    assert!(lines.iter().all(|l| l["reference"] == through(l)), "{all}");
+}
+
 /// A view of only reference parts is measured by them and draws them whole.
 #[test]
 fn a_view_of_only_reference_parts_draws_them() {

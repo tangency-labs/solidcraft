@@ -25,6 +25,11 @@ fn refused(s: &mut Session, p: Value) -> String {
 fn front_view() -> (Session, u64) {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 80, "width": 40, "height": 30, "body_name": "Box"}));
+    drawn_from_the_front(s)
+}
+
+/// A drawing of `s`, open, with its front view at 1:1: the session and the view's id.
+fn drawn_from_the_front(mut s: Session) -> (Session, u64) {
     run(&mut s, "drawing.create", json!({}));
     let mut d = (**s.drawing("test").unwrap()).clone();
     let id = d.allocate_id(&mut ids::IdSource::seeded(4896)).unwrap();
@@ -611,6 +616,27 @@ fn hostile_dimension_params_never_panic() {
         }
     }
     assert!(internal.is_empty(), "dimension commands panicked:\n{}", internal.join("\n"));
+}
+
+/// A dimension on a reference part's edge: added by its occurrence, reading its length, and the same
+/// after the part stops being reference. The finder doesn't ask what a part's type is.
+#[test]
+fn a_dimension_can_measure_a_reference_parts_edge() {
+    let mut s = Session::default();
+    let block = run(&mut s, "component.create", json!({"name": "Block"}))["occurrence"].clone();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 30, "height": 10, "body_name": "Block", "operation": "new"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "component.metadata.set", json!({"component": "Block", "bom_type": "reference"}));
+    let (mut s, view) = drawn_from_the_front(s);
+    let edge = json!({"point": [10, 0, 10], "path": [block]});
+    let added = run(&mut s, ADD, json!({"view": ids::encode(view), "kind": {"length": {"edge": edge}}}));
+    assert!((added["value"].as_f64().unwrap() - 20.0).abs() < 1e-9, "{added}");
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "component.metadata.set", json!({"component": "Block", "bom_type": "normal"}));
+    run(&mut s, "drawing.open", json!({"drawing": drawing}));
+    let read = run(&mut s, INSPECT, json!({"dimension": added["dimension"]}));
+    assert_eq!((&read["status"], &read["value"]), (&json!("ok"), &added["value"]), "{read}");
 }
 
 /// A box with an 80 mm dimension on its top front edge, read once, and the drawing closed: the

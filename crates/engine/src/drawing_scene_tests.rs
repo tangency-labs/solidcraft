@@ -436,9 +436,12 @@ fn a_change_of_reference_parts_redraws_the_views() {
     let (mut s, sheet, [front, top]) = front_and_top_of(design);
     let before = settled(&mut s, sheet);
     let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
-    run(&mut s, "drawing.close", json!({}));
-    run(&mut s, "occurrence.bom_type", json!({"occurrence": over, "bom_type": "reference"}));
-    run(&mut s, "drawing.open", drawing);
+    let in_the_model = |s: &mut Session, id: &str, p: Value| {
+        run(s, "drawing.close", json!({}));
+        run(s, id, p);
+        run(s, "drawing.open", drawing.clone());
+    };
+    in_the_model(&mut s, "occurrence.bom_type", json!({"occurrence": over, "bom_type": "reference"}));
     let stale = extract(&mut s, sheet).unwrap().stale;
     assert!(stale.len() == 2 && stale.contains(&front) && stale.contains(&top), "{stale:?}");
     let after = settled(&mut s, sheet);
@@ -451,4 +454,20 @@ fn a_change_of_reference_parts_redraws_the_views() {
     assert!(thin(&after.scene) > 0);
     let scene = built(&s, sheet);
     assert_eq!(bytes(&scene.scene), bytes(&after.scene), "the provider and a build draw one thing");
+    // Undone, the views draw again, as they were; redone, as they were then.
+    in_the_model(&mut s, "edit.undo", json!({}));
+    assert_eq!(extract(&mut s, sheet).unwrap().stale.len(), 2);
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&before.scene));
+    in_the_model(&mut s, "edit.redo", json!({}));
+    assert_eq!(extract(&mut s, sheet).unwrap().stale.len(), 2);
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&after.scene));
+    // Set on its component, it draws the same.
+    in_the_model(&mut s, "occurrence.bom_type", json!({"occurrence": over, "bom_type": null}));
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&before.scene));
+    in_the_model(&mut s, "component.metadata.set", json!({"component": "Over", "bom_type": "reference"}));
+    assert_eq!(extract(&mut s, sheet).unwrap().stale.len(), 2);
+    assert_eq!(bytes(&settled(&mut s, sheet).scene), bytes(&after.scene));
+    // A saved view takes the setting: the reference part now covers what is under it.
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"reference_hides_model": true}}));
+    assert_ne!(bytes(&settled(&mut s, sheet).scene), bytes(&after.scene));
 }
