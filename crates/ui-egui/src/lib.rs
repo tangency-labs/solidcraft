@@ -107,6 +107,8 @@ mod linked_source;
 mod loft_rails_dialog_tests;
 #[cfg(test)]
 mod look_at_tests;
+mod macro_run;
+mod macro_ui;
 #[cfg(test)]
 mod manage_dialogs_tests;
 mod material_card_review;
@@ -547,6 +549,11 @@ pub struct SolveApp {
     pub dialog: Option<dialogs::Dialog>,
     /// The Change Parameters window, when open.
     pub params: Option<params_dialog::ParamsDialog>,
+    /// The Play Macro prompt, when a loaded macro asks for values.
+    pub macro_run: Option<macro_run::MacroRun>,
+    /// The values macros last ran with, keyed by [`macro_run::macro_key`]; remembered between
+    /// plays and restarts (docs/macros.md), cleared per macro by the Play prompt's reset.
+    pub macro_values: std::collections::BTreeMap<String, serde_json::Value>,
     /// The Design Properties window, when open.
     pub design_properties: Option<design_properties::DesignProperties>,
     /// The Sketch report window (`sketch.inspect` from the ribbon), when open.
@@ -802,6 +809,8 @@ impl SolveApp {
             tool: None,
             dialog: None,
             params: None,
+            macro_run: None,
+            macro_values: std::collections::BTreeMap::new(),
             design_properties: None,
             sketch_report: None,
             bom: None,
@@ -1035,6 +1044,7 @@ impl SolveApp {
             "recent_colors": self.ui.recent_colors,
             "preferences": self.preferences,
             "gpu_path_setup_seconds": self.render_workspace.setup_seconds,
+            "macro_values": self.macro_values,
         });
         // While the Preferences dialog is open the file holds what Cancel would restore: a change
         // that was never applied must not reach disk through the periodic save, a quit or a
@@ -1143,6 +1153,9 @@ impl SolveApp {
             .and_then(Value::as_array)
             .map(|a| a.iter().filter_map(|c| serde_json::from_value::<[u8; 3]>(c.clone()).ok()).take(recent_colors::MAX_RECENT_COLORS).collect())
             .unwrap_or_default();
+        if let Some(m) = v.get("macro_values") {
+            self.macro_values = macro_run::clean_macro_values(m);
+        }
     }
 
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {
@@ -1656,6 +1669,12 @@ impl SolveApp {
         }
         if id == "library.export" {
             dialogs_library::start_export(self);
+            return;
+        }
+        // MACRO tab: record, pause and play. The commands live in the engine, so the CLI and
+        // the control channel reach the same behaviour without any of this (docs/macros.md).
+        if matches!(id, "macro.record" | "macro.pause" | "macro.resume" | "macro.stop" | "macro.play" | "macro.open" | "macro.save" | "macro.clear") {
+            macro_ui::toolbar(self, id);
             return;
         }
         // A display toggle leaves the current modelling tool and camera in place.
@@ -2936,6 +2955,7 @@ impl SolveApp {
         if !self.embedded {
             toolbar::app_bar(self, ui);
         }
+        macro_ui::chip(self, ui.ctx());
         issue_report::CadInput::block(self, ui, report_input);
         file_load::show(self, ui.ctx());
         open_meshing::show(self, ui.ctx());
@@ -3068,6 +3088,7 @@ impl SolveApp {
         // Before the dialog: a click on the view's OK or Cancel is for this frame's dialog.
         view_confirm::show(self, ui.ctx());
         dialogs::show(self, ui.ctx());
+        macro_run::show(self, ui.ctx());
         issue_report::CadInput::block(self, ui, report_input);
         sketch_palette::show(self, ui.ctx());
         self.resolve_fit(ui.ctx());

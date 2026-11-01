@@ -8,8 +8,10 @@ use std::sync::{Arc, OnceLock, Weak};
 use serde_json::{Value, json};
 use solidcraft_sketch::CurveKind;
 
+use solidcraft_geom::Vec3;
+
 use super::CommandSpec;
-use crate::params::{bad, bool_, str_, string_list};
+use crate::params::{bad, bool_, expr, str_, string_list};
 use crate::{EngineError, Result, Session};
 
 #[path = "appearance_chain.rs"]
@@ -43,6 +45,16 @@ pub static COMMANDS: &[CommandSpec] = &[
          taken wherever a face name is, and it holds while sizes change and flanges come and go)",
     ),
     CommandSpec::new("model.threads", "List Threads", model_threads).icon("inspect").noundo(),
+    CommandSpec::new("inspect.find_holes", "Find Holes", find_holes)
+        .at("INSPECT", "MEASURE")
+        .icon("hole")
+        .noundo()
+        .params(
+            "max_diameter?: expr (only holes no wider than this); min_diameter?: expr (only holes wider than this); bodies?: [names] (default all); holes_only?: bool (default true: cylinders that lean in, holes not bosses); \
+             type?: feature type (Hole, Extrude, the feature's base name, or solid.hole); feature?: feature name or id. \
+             At least one of max_diameter, min_diameter, type and feature. \
+             → holes: [{body, diameter, axis, center, concave, edges: [[x,y,z] on the round edges that close the hole, both ends, as solid.chamfer takes them], feature?: {id, name, type}}], count, edges (every closing edge, flat)",
+        ),
     CommandSpec::new("material.assign", "Physical Material", physical_material)
         .at("SOLID", "MODIFY")
         .icon("material")
@@ -451,6 +463,265 @@ fn describe(_s: &mut Session, p: &Value) -> Result<Value> {
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
+fn find_holes(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "inspect.find_holes";
+    let length = |key: &str| -> Result<Option<f64>> {
+        match expr(p, key) {
+            Some(e) => {
+                let d = s.doc.eval(&e, solidcraft_doc::expr::Kind::Length)?;
+                if !(d.is_finite() && d > 0.0 && d <= 1e6) {
+                    return Err(bad(cmd, format!("`{key}` must be a positive length in millimetres")));
+                }
+                Ok(Some(d))
+            }
+            None => Ok(None),
+        }
+    };
+    let max_diameter = length("max_diameter")?;
+    let min_diameter = length("min_diameter")?;
+    let type_filter = str_(p, "type").map(str::trim).filter(|s| !s.is_empty());
+    let feature_filter = str_(p, "feature").map(str::trim).filter(|s| !s.is_empty());
+    if max_diameter.is_none() && min_diameter.is_none() && type_filter.is_none() && feature_filter.is_none() {
+        return Err(bad(cmd, "give `max_diameter`, `min_diameter`, `type` or `feature`"));
+    }
+    if let Some(want) = feature_filter
+        && !s.doc.features.iter().any(|f| f.name.eq_ignore_ascii_case(want) || f.id.to_string() == want)
+    {
+        return Err(bad(cmd, format!("no feature `{want}`")));
+    }
+    let want_bodies = string_list(cmd, p, "bodies")?;
+    let holes_only = bool_(p, "holes_only").unwrap_or(true);
+    let feats = hole_features(s);
+    let st = s.world_state();
+    let selected: Vec<_> = st.bodies.iter().filter(|b| want_bodies.is_empty() || want_bodies.iter().any(|n| n == &b.name)).collect();
+    if !want_bodies.is_empty() && selected.len() != want_bodies.len() {
+        return Err(bad(cmd, "unknown body name"));
+    }
+    let mut holes: Vec<Value> = Vec::new();
+    for b in selected {
+        let tol = (b.body.size() * 2e-3).max(1e-3);
+        let Ok(edges) = b.body.edges(tol) else { continue };
+        let Ok(faces) = b.body.faces(tol) else { continue };
+        let spots = solidcraft_doc::naming::face_spots(b);
+        let face_names = solidcraft_doc::naming::face_names(b);
+        let mesh = b.mesh();
+        // One hole per cylinder: a drilled hole's wall splits into halves that share axis and radius.
+        let mut found: Vec<HoleGroup> = Vec::new();
+        for f in faces {
+            let Some(Some(spot)) = spots.get(f.index).copied() else { continue };
+            let Some(solidcraft_kernel::FaceSurface::Cylinder { origin, axis, radius }) = spot.surface else { continue };
+            let diameter = 2.0 * radius;
+            if max_diameter.is_some_and(|max| diameter > max + tol) {
+                continue;
+            }
+            if min_diameter.is_some_and(|min| diameter <= min + tol) {
+                continue;
+            }
+            let axis = Vec3::from(axis);
+            let concave = cylinder_leans_in(&mesh, f.index, origin, axis, f.centroid);
+            if holes_only && concave == Some(false) {
+                continue;
+            }
+            let mut edge_points: Vec<[f64; 3]> = edges
+                .iter()
+                .filter(|e| {
+                    let on = |q: &Vec3| (radial_distance(*q, origin, axis) - radius).abs() <= tol;
+                    let curved = e.points.len() > 2 && {
+                        let Some(a) = e.points.first() else { return false };
+                        let Some(b) = e.points.last() else { return false };
+                        let along: f64 = e.points.windows(2).map(|w| w[0].dist(w[1])).sum();
+                        along - a.dist(*b) > (0.02 * radius).max(1e-3)
+                    };
+                    curved && e.points.iter().all(on)
+                })
+                .map(|e| [e.mid.x, e.mid.y, e.mid.z])
+                .collect();
+            edge_points.sort_unstable_by_key(key3);
+            edge_points.dedup_by(|a, b| Vec3::from(*a).dist(Vec3::from(*b)) <= tol);
+            let mentioned = face_names.get(f.index).cloned().unwrap_or_default();
+            if let Some(group) = found
+                .iter_mut()
+                .find(|g| (g.radius - radius).abs() <= tol && axis.cross(g.axis).len() <= 1e-3 && g.axis.cross(g.origin - origin).len() <= tol)
+            {
+                group.concave = group.concave.or(concave);
+                group.edges.extend(edge_points);
+                if !mentioned.is_empty() {
+                    group.names.push(mentioned);
+                }
+            } else {
+                found.push(HoleGroup {
+                    origin,
+                    axis,
+                    radius,
+                    concave,
+                    edges: edge_points,
+                    names: if mentioned.is_empty() { Vec::new() } else { vec![mentioned] },
+                });
+            }
+        }
+        for mut group in found {
+            group.edges.sort_unstable_by_key(key3);
+            group.edges.dedup_by(|a, b| Vec3::from(*a).dist(Vec3::from(*b)) <= tol);
+            let n = group.edges.len().max(1) as f64;
+            let mut sum = Vec3::ZERO;
+            for pt in &group.edges {
+                sum += Vec3::from(*pt);
+            }
+            let center = if group.edges.is_empty() { group.origin } else { Vec3::new(sum.x / n, sum.y / n, sum.z / n) };
+            let feat = attribute_hole(&feats, group.radius * 2.0, group.axis, center, &group.names, tol);
+            if let Some(want) = feature_filter
+                && !feat.as_ref().is_some_and(|f| f.name.eq_ignore_ascii_case(want) || f.id.to_string() == want)
+            {
+                continue;
+            }
+            if let Some(want) = type_filter
+                && !feat.as_ref().is_some_and(|f| hole_feat_matches_type(f, want))
+            {
+                continue;
+            }
+            let mut hole = json!({
+                "body": b.name,
+                "diameter": 2.0 * group.radius,
+                "axis": [group.axis.x, group.axis.y, group.axis.z],
+                "center": [center.x, center.y, center.z],
+                "concave": group.concave,
+                "edges": group.edges,
+            });
+            if let Some(f) = feat
+                && let Some(o) = hole.as_object_mut()
+            {
+                o.insert("feature".into(), json!({"id": f.id, "name": f.name, "type": f.kind}));
+            }
+            holes.push(hole);
+        }
+    }
+    holes.sort_by(|a, b| {
+        let k = |h: &Value| {
+            (
+                h.get("body").and_then(Value::as_str).unwrap_or_default().to_string(),
+                h.get("center")
+                    .and_then(Value::as_array)
+                    .map(|c| c.iter().filter_map(Value::as_f64).map(|x| (x * 1e6) as i64).collect::<Vec<_>>())
+                    .unwrap_or_default(),
+            )
+        };
+        k(a).cmp(&k(b))
+    });
+    let mut all_edges = Vec::new();
+    for h in &holes {
+        if let Some(es) = h.get("edges").and_then(Value::as_array) {
+            all_edges.extend(es.iter().cloned());
+        }
+    }
+    Ok(json!({"max_diameter": max_diameter, "min_diameter": min_diameter, "holes": holes, "count": holes.len(), "edges": all_edges}))
+}
+
+struct HoleGroup {
+    origin: Vec3,
+    axis: Vec3,
+    radius: f64,
+    concave: Option<bool>,
+    edges: Vec<[f64; 3]>,
+    names: Vec<String>,
+}
+
+struct HoleFeat {
+    id: u64,
+    name: String,
+    kind: String,
+    kind_label: String,
+    diameter: Option<f64>,
+    origin: Option<Vec3>,
+    axis: Option<Vec3>,
+}
+
+fn hole_features(s: &Session) -> Vec<HoleFeat> {
+    s.doc
+        .features
+        .iter()
+        .filter(|f| !f.suppressed)
+        .map(|f| {
+            let (diameter, origin, axis) = if let solidcraft_doc::FeatureKind::Hole { position, direction, diameter, .. } = &f.kind {
+                let dia = s.doc.eval(diameter, solidcraft_doc::expr::Kind::Length).ok().filter(|d| d.is_finite() && *d > 0.0);
+                (dia, Some(position.0), direction.normalized())
+            } else {
+                (None, None, None)
+            };
+            HoleFeat {
+                id: f.id,
+                name: f.name.clone(),
+                kind: f.kind.base_name().to_string(),
+                kind_label: f.kind.type_name().to_string(),
+                diameter,
+                origin,
+                axis,
+            }
+        })
+        .collect()
+}
+
+fn hole_feat_matches_type(f: &HoleFeat, want: &str) -> bool {
+    f.kind.eq_ignore_ascii_case(want)
+        || f.kind_label.eq_ignore_ascii_case(want)
+        || want.eq_ignore_ascii_case(&format!("solid.{}", f.kind.to_ascii_lowercase()))
+}
+
+fn attribute_hole<'a>(feats: &'a [HoleFeat], diameter: f64, axis: Vec3, center: Vec3, names: &[String], tol: f64) -> Option<&'a HoleFeat> {
+    let mut best: Option<(&HoleFeat, f64)> = None;
+    for f in feats.iter().filter(|f| f.kind.eq_ignore_ascii_case("Hole")) {
+        let (Some(d), Some(ax), Some(origin)) = (f.diameter, f.axis, f.origin) else { continue };
+        if (d - diameter).abs() > (0.02 * d).max(tol) {
+            continue;
+        }
+        if ax.cross(axis).len() > 1e-2 && ax.cross(-axis).len() > 1e-2 {
+            continue;
+        }
+        let radial = radial_distance(origin, center, axis);
+        if radial > (0.05 * d).max(1.0) {
+            continue;
+        }
+        if best.is_none_or(|(_, old)| radial < old) {
+            best = Some((f, radial));
+        }
+    }
+    if let Some((f, _)) = best {
+        return Some(f);
+    }
+    feats.iter().find(|f| names.iter().any(|n| name_mentions(n, &f.name)))
+}
+
+fn name_mentions(face: &str, feature: &str) -> bool {
+    face.split([':', ' ', '/']).any(|part| part.eq_ignore_ascii_case(feature))
+}
+
+fn key3(p: &[f64; 3]) -> [i64; 3] {
+    [p[0], p[1], p[2]].map(|x| (x * 1e6) as i64)
+}
+
+fn radial_distance(p: Vec3, origin: Vec3, axis: Vec3) -> f64 {
+    let d = p - origin;
+    (d - axis * d.dot(axis)).len()
+}
+
+fn cylinder_leans_in(mesh: &solidcraft_geom::Mesh, face: usize, origin: Vec3, axis: Vec3, centroid: Vec3) -> Option<bool> {
+    let mut n = Vec3::ZERO;
+    for (t, f) in mesh.triangles.iter().zip(&mesh.tri_face) {
+        if *f as usize != face {
+            continue;
+        }
+        if let Some([a, b, c]) = mesh.tri(t) {
+            n += (b - a).cross(c - b);
+        }
+    }
+    let len = n.dot(n).sqrt();
+    if !(len > 1e-9) {
+        return None;
+    }
+    let d = centroid - origin;
+    let radial = d - axis * d.dot(axis);
+    Some(n.dot(radial) < 0.0)
 }
 
 fn commands(s: &mut Session, _p: &Value) -> Result<Value> {

@@ -572,6 +572,9 @@ pub struct Session {
     /// Record this session's top-level commands in the crash journal (the app's own design;
     /// never previews or other scratch sessions). See [`crash`].
     pub crash_journal: bool,
+    /// The macro recorder (`macro.record`, `macro.play`): the commands that changed the design
+    /// while a recording ran. Not part of the design: opening another design starts afresh.
+    pub macros: cmd::macros::Recorder,
     /// Full model evaluations (`refresh`), for tests.
     #[cfg(test)]
     pub(crate) evaluations: usize,
@@ -760,6 +763,7 @@ impl Session {
             evaluations: 0,
             motion_traces: Default::default(),
             crash_journal: false,
+            macros: Default::default(),
         }
     }
 
@@ -1539,6 +1543,12 @@ impl Session {
         let result = match r {
             Ok((v, live_edit)) => {
                 let v = if changed { self.with_created(spec.id, params, &before, v) } else { v };
+                // Macro recording: what the session really ran, including commands that do not
+                // change the design (a flat pattern, an export, a hole search). Live gesture
+                // frames are not recorded; a paused recording captures nothing. See `cmd::macros`.
+                if outermost && live.is_none() {
+                    self.macros.note(spec.id, given);
+                }
                 if changed || hidden {
                     // Another design opened, started or recovered is refreshed in full, however
                     // little it differs from the one before: the shortcut proves a session's own
@@ -1758,6 +1768,7 @@ impl Session {
             evaluations: 0,
             motion_traces: self.motion_traces.clone(),
             crash_journal: false,
+            macros: Default::default(),
         }
     }
 
