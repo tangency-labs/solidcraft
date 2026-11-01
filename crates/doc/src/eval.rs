@@ -6577,17 +6577,22 @@ fn path_at(segs: &[kernel::PathSeg], d: f64) -> (Vec3, Vec3) {
 }
 
 /// Whether a copy has no material to cut in any of its eligible targets.
+/// The bodies a hole cuts: those its feature names, else its component's and its own (as
+/// `apply_traced` picks a cut's targets).
+fn hole_targets<'a>(st: &'a ModelState, f: &Feature) -> Vec<&'a ModelBody> {
+    let all = f.participants.len() == 1 && f.participants.first().is_some_and(|t| t == "*");
+    st.bodies
+        .iter()
+        .filter(|b| all || if f.participants.is_empty() { b.component == f.component || b.feature == f.id } else { f.participants.contains(&b.name) })
+        .collect()
+}
+
 /// Whether hole tool `tool` is clear of every body the hole cuts, by their boxes (#10701). Boxes
 /// only: a probe boolean for every hole of a large hole pattern would double its work, and the
 /// bodies' meshes are there already (the hole found its face on them). A body of another
 /// component is in another frame: the hole is then not known to miss.
 fn hole_misses(st: &ModelState, f: &Feature, tool: &Body) -> bool {
-    let all = f.participants.len() == 1 && f.participants.first().is_some_and(|t| t == "*");
-    let targets: Vec<&ModelBody> = st
-        .bodies
-        .iter()
-        .filter(|b| all || if f.participants.is_empty() { b.component == f.component || b.feature == f.id } else { f.participants.contains(&b.name) })
-        .collect();
+    let targets = hole_targets(st, f);
     let bounds = tool.outline_bounds();
     if targets.is_empty()
         || targets.iter().any(|b| b.component != f.component)
@@ -7454,11 +7459,18 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 // cuts nothing: it says so, as a pattern does of its copies (#10701).
                 let missed = tools.iter().filter(|tool| hole_misses(st, f, &tool.body)).count();
                 let total = tools.len();
+                let targets: Vec<String> = hole_targets(st, f).iter().map(|b| b.name.clone()).collect();
                 apply_traced(doc, st, f, tools, Operation::Cut, &[])?;
                 match (missed, total) {
                     (0, _) => {}
                     (_, 1) => append_warning(warning, "the hole removes no material".into()),
                     _ => append_warning(warning, format!("{missed} of {total} holes remove no material")),
+                }
+                // A hole wider than the part takes all of it away (#10702): almost never what a
+                // hole means, so it says which bodies are gone.
+                let gone: Vec<&str> = targets.iter().map(String::as_str).filter(|n| st.body(n).is_none()).collect();
+                if !gone.is_empty() {
+                    append_warning(warning, format!("the hole removes all of {}", gone.join(", ")));
                 }
             } else {
                 apply_beside_sheet_cut(doc, st, f, tools, Operation::Cut, &[], &handled)?;
