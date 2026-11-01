@@ -1213,6 +1213,8 @@ impl ModelState {
     }
 
     pub fn body(&self, name: &str) -> Option<&ModelBody> {
+        #[cfg(test)]
+        cost_tests::count(|c| c.body_searches += 1);
         self.bodies.iter().find(|b| b.name == name)
     }
 
@@ -1958,13 +1960,7 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
             None => u8::MAX.hash(&mut h),
         }
     }
-    for name in &reads.bodies {
-        name.hash(&mut h);
-        match st.and_then(|st| st.body(name)) {
-            Some(b) => hash_placement(&crate::mat_mul(&inverse, &body_world(doc, b)), &mut h),
-            None => u8::MAX.hash(&mut h),
-        }
-    }
+    hash_placed_bodies(doc, st, &reads.bodies, &inverse, &mut h);
     // Legacy and component-wide reads still need the conservative offset dependency. Body
     // reads above already include just their own offsets, in the frame that evaluates them.
     if reads.all || !reads.components.is_empty() || !reads.paths.is_empty() {
@@ -1972,6 +1968,38 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
     }
     // Never 0: the feature reads placements.
     h.finish() | 1
+}
+
+/// The bodies part of [`placement_digest`]: each body read, in name order, and where it is placed
+/// relative to the reading frame `inverse` (`u8::MAX` for one not in `st`), as [`body_world`]
+/// places it. The bodies, their components and the components' frames are looked up once: a
+/// join or cut without targets reads every body of its component, and searching the model, the
+/// timeline and the placements again for each of them made every evaluation, even one served
+/// from the cache, quadratic in the bodies.
+fn hash_placed_bodies(doc: &Document, st: Option<&ModelState>, names: &std::collections::BTreeSet<String>, inverse: &Mat, h: &mut impl Hasher) {
+    let (Some(st), false) = (st, names.is_empty()) else {
+        names.iter().for_each(|name| (name, u8::MAX).hash(h));
+        return;
+    };
+    // The first body of a name, as `ModelState::body` finds it.
+    let mut index: std::collections::HashMap<&str, usize> = std::collections::HashMap::with_capacity(st.bodies.len());
+    for (i, b) in st.bodies.iter().enumerate() {
+        index.entry(b.name.as_str()).or_insert(i);
+    }
+    let components = doc.model_body_components(st);
+    let mut frames: std::collections::HashMap<u64, Mat> = std::collections::HashMap::new();
+    for name in names {
+        name.hash(h);
+        let found = index.get(name.as_str()).and_then(|&i| Some((st.bodies.get(i)?, *components.get(i)?)));
+        match found {
+            Some((b, component)) => {
+                let m = *frames.entry(component).or_insert_with(|| doc.component_transform(component));
+                let world = doc.model_body_offset(b).map(|offset| crate::mat_mul(&m, offset)).unwrap_or(m);
+                hash_placement(&crate::mat_mul(inverse, &world), h);
+            }
+            None => u8::MAX.hash(h),
+        }
+    }
 }
 
 /// Every occurrence's placement and every body offset (a feature read from a frame that cannot

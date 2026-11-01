@@ -12,20 +12,22 @@ use solidcraft_geom::{Plane, Vec2, Vec3};
 use solidcraft_kernel as kernel;
 use solidcraft_sketch::Sketch;
 
+use crate::eval::{PlacementReads, body_world, hash_placement, placement_digest};
 use crate::*;
 
 /// Work counted on this thread: bodies moved, STEP texts digested, joint faces and bodies
-/// measured.
+/// measured, bodies searched for by name.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
     pub digested: usize,
     pub joint_faces: usize,
     pub measures: usize,
+    pub body_searches: usize,
 }
 
 thread_local! {
-    static COUNTS: Cell<Counts> = const { Cell::new(Counts { moved: 0, digested: 0, joint_faces: 0, measures: 0 }) };
+    static COUNTS: Cell<Counts> = const { Cell::new(Counts { moved: 0, digested: 0, joint_faces: 0, measures: 0, body_searches: 0 }) };
 }
 
 pub(super) fn count(f: impl FnOnce(&mut Counts)) {
@@ -879,4 +881,89 @@ fn comparing_a_copied_mesh_does_not_read_its_shared_arrays() {
     assert!(equal == finite, "equal values in other arrays are the same mesh");
     let flipped = MeshData { triangles: Arc::from([0, 2, 1]), ..finite.clone() };
     assert!(flipped != finite);
+}
+
+/// `blocks` boxes, each its own body, in component `comp`, then a cut box without targets
+/// through each of the first `cuts` (it cuts every body of its component).
+fn blocks_with_cuts(doc: &mut Document, comp: u64, blocks: usize, cuts: usize) {
+    let y = 100.0 * comp as f64;
+    for k in 0..blocks {
+        let corner = point_expr(Vec3::new(20.0 * k as f64, y, 0.0));
+        let kind = FeatureKind::Box { corner, length: "10".into(), width: "10".into(), height: "4".into(), operation: Operation::NewBody };
+        let id = doc.add_feature(kind, None).unwrap();
+        doc.feature_mut(id).unwrap().component = comp;
+    }
+    for k in 0..cuts {
+        let corner = point_expr(Vec3::new(20.0 * k as f64 + 4.0, y + 4.0, -1.0));
+        let kind = FeatureKind::Box { corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut };
+        let id = doc.add_feature(kind, None).unwrap();
+        doc.feature_mut(id).unwrap().component = comp;
+    }
+}
+
+#[test]
+fn an_evaluation_from_the_cache_does_not_search_the_bodies_for_each_cut() {
+    // Each cut reads where every body of its component is placed; looking each one up by name
+    // made an evaluation quadratic in the bodies, even with every feature taken from the cache.
+    let searches = |blocks: usize| {
+        let mut doc = Document::new("blocks");
+        blocks_with_cuts(&mut doc, 0, blocks, 3);
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+        let work = counted(|| model.evaluate(&doc));
+        assert_eq!(model.last_recomputed, 0);
+        work.body_searches
+    };
+    let (few, many) = (searches(4), searches(24));
+    assert_eq!(few, many, "searches grew with the bodies: {few} for 4 blocks, {many} for 24");
+}
+
+/// The bodies part of the placement digest as it was before the bodies were looked up once:
+/// each body searched by name, placed through [`body_world`].
+fn digest_searching_each_body(doc: &Document, f: &Feature, st: &ModelState) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut reads = PlacementReads::default();
+    reads.drawn_targets(Some(st), f);
+    let inverse = mat_inverse(&doc.component_transform(f.component)).unwrap();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for name in &reads.bodies {
+        name.hash(&mut h);
+        match st.body(name) {
+            Some(b) => hash_placement(&mat_mul(&inverse, &body_world(doc, b)), &mut h),
+            None => u8::MAX.hash(&mut h),
+        }
+    }
+    h.finish() | 1
+}
+
+#[test]
+fn looking_bodies_up_once_keeps_every_placement_digest() {
+    // Two parts placed apart, a body moved into the other part and one moved within its part:
+    // each cut's digest is the one searching each body gave, bit for bit, so saved caches stay
+    // valid.
+    let mut doc = Document::new("digests");
+    let a = doc.add_component(Some("A"), 0).unwrap();
+    let b = doc.add_component(Some("B"), 0).unwrap();
+    blocks_with_cuts(&mut doc, a, 5, 2);
+    blocks_with_cuts(&mut doc, b, 4, 2);
+    blocks_with_cuts(&mut doc, 0, 3, 1);
+    place(&mut doc, a, rigid(Vec3::new(3.0, -7.0, 1.5), Vec3::ZERO, Vec3::Z, 0.4));
+    place(&mut doc, b, rigid(Vec3::new(-20.0, 5.0, 0.0), Vec3::ZERO, Vec3::X, 0.25));
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let names: Vec<String> = model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names.len(), 12);
+    doc.body_components.insert(names[1].clone(), b);
+    doc.body_offsets.insert(names[2].clone(), rigid(Vec3::new(0.0, 0.0, 2.0), Vec3::ZERO, Vec3::Y, 0.1));
+    doc.body_offsets.insert(names[6].clone(), rigid(Vec3::new(1.0, 1.0, 0.0), Vec3::ZERO, Vec3::Z, -0.3));
+    model.evaluate(&doc);
+    let st = model.state();
+    let cuts: Vec<&Feature> = doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Box { operation: Operation::Cut, .. })).collect();
+    assert_eq!(cuts.len(), 5);
+    for f in cuts {
+        let digest = placement_digest(&doc, f, Some(&st));
+        assert_ne!(digest, 0);
+        assert_eq!(digest, digest_searching_each_body(&doc, f, &st), "cut {}", f.id);
+    }
 }
