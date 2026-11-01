@@ -748,8 +748,8 @@ impl JsonSchema for SceneResult {
 }
 
 /// A paper scene's schema ([`solidcraft_geom::paper::Scene`]): its groups of `kinds`, each holding
-/// strokes, and fills too when `fills`.
-pub(super) fn paper_scene_schema(generator: &mut SchemaGenerator, kinds: &[ObjectKind], fills: bool) -> Schema {
+/// strokes, and fills and pictures too when it is a `whole_sheet`'s.
+pub(super) fn paper_scene_schema(generator: &mut SchemaGenerator, kinds: &[ObjectKind], whole_sheet: bool) -> Schema {
     let point = json!({"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2});
     let segment = generator.subschema_for::<PathSegResult>();
     let stroke = json!({
@@ -776,7 +776,19 @@ pub(super) fn paper_scene_schema(generator: &mut SchemaGenerator, kinds: &[Objec
         "required": ["kind", "region"],
         "additionalProperties": false
     });
-    let items = if fills { json!({"anyOf": [stroke, fill]}) } else { stroke };
+    let rect = json!({
+        "type": "object",
+        "properties": {"min": point, "max": point},
+        "required": ["min", "max"],
+        "additionalProperties": false
+    });
+    let picture = json!({
+        "type": "object",
+        "properties": {"kind": {"const": "picture"}, "source": {"type": "integer", "minimum": 0}, "rect": rect, "opacity": {"type": "number"}},
+        "required": ["kind", "source", "rect", "opacity"],
+        "additionalProperties": false
+    });
+    let items = if whole_sheet { json!({"anyOf": [stroke, fill, picture]}) } else { stroke };
     let kinds: Vec<Value> = kinds.iter().filter_map(|kind| serde_json::to_value(kind).ok()).collect();
     let group = json!({
         "type": "object",
