@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 solidcraft-engine = { workspace = true }
+solidcraft-ui-widgets = { workspace = true }
 egui = { workspace = true }
 egui-wgpu = { workspace = true }
 solidcraft-gpu = { workspace = true }
