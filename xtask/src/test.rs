@@ -4,9 +4,10 @@
 //! splits each binary's libtest threads and action-matrix workers across the binaries in flight.
 
 use std::ffi::OsStr;
-use std::process::{Command, Stdio};
+use std::io::{Read, Seek};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Mutex, mpsc};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::{cargo, root};
 
@@ -22,40 +23,56 @@ struct TestBin {
 /// Each prints a line when it ends; a failure prints its whole output and does not cancel work.
 pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>) -> Result<(), String> {
     let limit = job_limit(std::env::var_os("SOLIDCRAFT_TEST_JOBS").as_deref())?;
+    let timeout = binary_timeout(std::env::var_os("SOLIDCRAFT_TEST_TIMEOUT_SECONDS").as_deref())?;
     let split = thread_split(limit, std::thread::available_parallelism().map_or(1, |n| n.get()));
     let bins = build(cargo_args)?;
     let start = Instant::now();
     let side_count = side.len();
     let mut batches = Vec::with_capacity(bins.len() + 1);
     if !side.is_empty() {
-        batches.push(side);
+        batches.push(side.into_iter().map(|(label, c)| (label, c, None)).collect());
     }
     for b in &bins {
-        batches.push(vec![(b.label.clone(), binary_command(b, test_args, split))]);
+        batches.push(vec![(b.label.clone(), binary_command(b, test_args, split), timeout)]);
     }
     let jobs = limit.unwrap_or(batches.len()).min(batches.len());
     let split_note = split.map_or(String::new(), |t| format!("; {t} test threads and matrix workers per binary unless overridden"));
     eprintln!("test: {} binaries, {side_count} side jobs; at most {jobs} concurrent top-level commands{split_note}", bins.len());
+    match timeout {
+        Some(limit) => eprintln!("test: each test binary has a {}s timeout (SOLIDCRAFT_TEST_TIMEOUT_SECONDS; 0 disables it)", limit.as_secs()),
+        None => eprintln!("test: test-binary timeout disabled (SOLIDCRAFT_TEST_TIMEOUT_SECONDS=0)"),
+    }
     let mut failed = Vec::new();
-    run_bounded(
-        batches,
-        jobs,
-        |batch, tx| {
-            for (label, c) in batch {
-                let t0 = Instant::now();
-                let _ = tx.send((label, finish(c), t0.elapsed().as_secs_f64()));
-            }
-        },
-        |(label, result, secs)| match result {
-            Ok(summary) => println!("ok    {label:<44} {secs:6.1}s  {summary}"),
-            Err(output) => {
-                println!("FAIL  {label:<44} {secs:6.1}s\n{output}");
-                failed.push(label);
-            }
-        },
-    );
+    run_bounded(batches, jobs, run_batch, |(label, result, secs)| match result {
+        Ok(summary) => println!("ok    {label:<44} {secs:6.1}s  {summary}"),
+        Err(output) => {
+            println!("FAIL  {label:<44} {secs:6.1}s\n{output}");
+            failed.push(label);
+        }
+    });
     println!("test: {} binaries in {:.1}s", bins.len(), start.elapsed().as_secs_f64());
     if failed.is_empty() { Ok(()) } else { Err(format!("failed: {}", failed.join(", "))) }
+}
+
+/// A generous per-executable deadline, not a per-test limit. Zero restores unlimited waiting.
+fn binary_timeout(value: Option<&OsStr>) -> Result<Option<Duration>, String> {
+    let Some(value) = value else { return Ok(Some(Duration::from_secs(3600))) };
+    let seconds = value
+        .to_str()
+        .filter(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|v| v.parse::<u64>().ok())
+        .ok_or("SOLIDCRAFT_TEST_TIMEOUT_SECONDS must be a nonnegative integer (0 disables the timeout)")?;
+    Ok((seconds != 0).then(|| Duration::from_secs(seconds)))
+}
+
+type TestJob = (String, Command, Option<Duration>);
+type TestResult = (String, Result<String, String>, f64);
+
+fn run_batch(batch: Vec<TestJob>, tx: &mpsc::Sender<TestResult>) {
+    for (label, c, timeout) in batch {
+        let t0 = Instant::now();
+        let _ = tx.send((label, finish(c, timeout), t0.elapsed().as_secs_f64()));
+    }
 }
 
 /// An absent limit preserves the existing unbounded default; invalid input fails before the test build.
@@ -122,13 +139,67 @@ fn binary_command(b: &TestBin, test_args: &[&str], split: Option<usize>) -> Comm
 }
 
 /// Run to the end: the last `test result:` line on success, all output on failure.
-fn finish(mut c: Command) -> Result<String, String> {
-    let out = c.stdin(Stdio::null()).output().map_err(|e| format!("failed to spawn: {e}"))?;
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    if out.status.success() {
+fn finish(c: Command, timeout: Option<Duration>) -> Result<String, String> {
+    let started = Instant::now();
+    finish_with_clock(c, timeout, || started.elapsed())
+}
+
+/// Files keep output capture independent of pipe capacity and inherited handles: even a
+/// descendant retaining stdout cannot hold the runner's reader open after the direct child exits.
+fn finish_with_clock(mut c: Command, timeout: Option<Duration>, elapsed: impl FnMut() -> Duration) -> Result<String, String> {
+    let mut stdout_file = tempfile::NamedTempFile::new().map_err(|e| format!("create stdout capture: {e}"))?;
+    let mut stderr_file = tempfile::NamedTempFile::new().map_err(|e| format!("create stderr capture: {e}"))?;
+    c.stdin(Stdio::null())
+        .stdout(stdout_file.reopen().map_err(|e| format!("reopen stdout capture: {e}"))?)
+        .stderr(stderr_file.reopen().map_err(|e| format!("reopen stderr capture: {e}"))?);
+    let mut child = c.spawn().map_err(|e| format!("failed to spawn: {e}"))?;
+    let result = wait_for_binary(&mut child, timeout, elapsed);
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    for (file, text) in [(&mut stdout_file, &mut stdout), (&mut stderr_file, &mut stderr)] {
+        file.rewind().map_err(|e| format!("rewind test output: {e}"))?;
+        // Snapshot the length: a descendant can keep writing after its parent exits. Reopened
+        // handles also keep those writes from moving the reader's independent file offset.
+        let length = file.as_file().metadata().map_err(|e| format!("stat test output: {e}"))?.len();
+        let mut bytes = Vec::new();
+        file.take(length).read_to_end(&mut bytes).map_err(|e| format!("read test output: {e}"))?;
+        *text = String::from_utf8_lossy(&bytes).into_owned();
+    }
+    let status = result.map_err(|e| format!("{stdout}{stderr}\n{e}"))?;
+    if status.success() {
         Ok(stdout.lines().rev().find(|l| l.starts_with("test result:")).unwrap_or("").trim_start_matches("test result: ").to_string())
     } else {
-        Err(format!("{stdout}{}\n({})", String::from_utf8_lossy(&out.stderr), out.status))
+        Err(format!("{stdout}{stderr}\n({status})"))
+    }
+}
+
+fn wait_for_binary(child: &mut Child, timeout: Option<Duration>, mut elapsed: impl FnMut() -> Duration) -> Result<ExitStatus, String> {
+    if timeout.is_none() {
+        return child.wait().map_err(|e| format!("wait for test binary: {e}"));
+    }
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) => {}
+            Err(e) => {
+                let cleanup = terminate_binary(child);
+                return Err(format!("wait for test binary: {e}{cleanup}"));
+            }
+        }
+        if let Some(limit) = timeout.filter(|limit| elapsed() >= *limit) {
+            let cleanup = terminate_binary(child);
+            return Err(format!("timed out after {}s (SOLIDCRAFT_TEST_TIMEOUT_SECONDS; 0 disables the timeout){cleanup}", limit.as_secs()));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Always reap the direct child, including the race where it exited just before `kill`.
+fn terminate_binary(child: &mut Child) -> String {
+    let kill = child.kill();
+    match child.wait() {
+        Ok(_) => String::new(),
+        Err(e) => format!("; failed to reap test binary: {e}; kill result: {kill:?}"),
     }
 }
 
@@ -172,11 +243,109 @@ pub fn doc_tests(cargo_args: &[&str], test_args: &[&str]) -> (String, Command) {
 
 #[cfg(test)]
 mod tests {
-    use super::{TestBin, binary_command, budget_env, job_limit, run_bounded, thread_split};
+    use super::{TestBin, binary_command, binary_timeout, budget_env, finish, finish_with_clock, job_limit, run_batch, run_bounded, thread_split};
     use std::ffi::OsStr;
     use std::path::Path;
     use std::sync::Barrier;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    #[test]
+    fn binary_timeout_defaults_to_sixty_minutes_and_can_be_disabled() {
+        assert_eq!(binary_timeout(None).unwrap(), Some(Duration::from_secs(3600)));
+        assert_eq!(binary_timeout(Some(OsStr::new("0"))).unwrap(), None);
+        for value in [1, 60, u64::MAX] {
+            assert_eq!(binary_timeout(Some(OsStr::new(&value.to_string()))).unwrap(), Some(Duration::from_secs(value)));
+        }
+        for value in ["", "-1", "+1", "1.5", " 2", "2 ", "forever", "18446744073709551616"] {
+            assert!(binary_timeout(Some(OsStr::new(value))).is_err(), "{value:?}");
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::ffi::OsStrExt;
+            assert!(binary_timeout(Some(OsStr::from_bytes(b"\xff"))).is_err());
+        }
+    }
+
+    #[test]
+    fn timeout_subprocess_fixture() {
+        let Some(mode) = std::env::var_os("SOLIDCRAFT_TIMEOUT_FIXTURE") else { return };
+        // Exceed a typical pipe buffer on each stream: output capture must not block the child.
+        use std::io::Write;
+        println!("{}", "x".repeat(128 * 1024));
+        eprintln!("{}", "y".repeat(128 * 1024));
+        println!("stdout marker");
+        eprintln!("stderr marker");
+        std::io::stdout().flush().unwrap();
+        std::io::stderr().flush().unwrap();
+        if mode == "hang" {
+            if let Some(ready) = std::env::var_os("SOLIDCRAFT_TIMEOUT_READY") {
+                std::fs::write(ready, b"ready").unwrap();
+            }
+            loop {
+                std::thread::park();
+            }
+        }
+        assert_ne!(mode, "fail", "deliberate subprocess failure");
+    }
+
+    fn timeout_fixture(mode: &str) -> std::process::Command {
+        let mut c = std::process::Command::new(std::env::current_exe().unwrap());
+        c.args(["--exact", "test::tests::timeout_subprocess_fixture", "--nocapture", "--test-threads=1"]).env("SOLIDCRAFT_TIMEOUT_FIXTURE", mode);
+        c
+    }
+
+    #[test]
+    fn timeout_retains_both_streams_and_reaps_the_hung_binary() {
+        let ready = tempfile::NamedTempFile::new().unwrap();
+        let mut c = timeout_fixture("hang");
+        c.env("SOLIDCRAFT_TIMEOUT_READY", ready.path());
+        // Expire only after the child flushed both streams. The fake clock makes correctness
+        // independent of machine load or startup time; no elapsed-time assertion is needed.
+        let result = finish_with_clock(c, Some(Duration::from_secs(30)), || {
+            if std::fs::read(ready.path()).unwrap() == b"ready" { Duration::from_secs(30) } else { Duration::ZERO }
+        });
+        let error = result.unwrap_err();
+        assert!(error.contains("stdout marker"), "stdout lost");
+        assert!(error.contains("stderr marker"), "stderr lost");
+        assert!(error.contains("timed out after 30s"), "{error}");
+        assert!(!error.contains("failed to reap"), "{error}");
+    }
+
+    #[test]
+    fn completed_binary_keeps_its_summary_and_failures_keep_output() {
+        for timeout in [None, Some(Duration::from_secs(1800))] {
+            let summary = finish(timeout_fixture("pass"), timeout).unwrap();
+            assert!(summary.starts_with("ok. 1 passed; 0 failed;"), "{summary}");
+            let error = finish(timeout_fixture("fail"), timeout).unwrap_err();
+            assert!(error.contains("stdout marker") && error.contains("stderr marker"), "output lost");
+            assert!(error.contains("deliberate subprocess failure"), "{error}");
+            assert!(!error.contains("timed out"), "{error}");
+        }
+    }
+
+    #[test]
+    fn timeout_does_not_skip_later_binaries_or_side_jobs() {
+        for budget in [1, 2] {
+            let batches = vec![
+                vec![
+                    ("hung binary".into(), timeout_fixture("hang"), Some(Duration::ZERO)),
+                    ("later binary".into(), timeout_fixture("pass"), Some(Duration::from_secs(1800))),
+                ],
+                vec![("first side job".into(), timeout_fixture("fail"), None), ("later side job".into(), timeout_fixture("pass"), None)],
+            ];
+            let mut results = Vec::new();
+            run_bounded(batches, budget, run_batch, |result| results.push(result));
+            assert_eq!(results.len(), 4);
+            for (label, result, _) in results {
+                match label.as_str() {
+                    "hung binary" => assert!(result.unwrap_err().contains("timed out after 0s")),
+                    "first side job" => assert!(result.unwrap_err().contains("deliberate subprocess failure")),
+                    _ => assert!(result.unwrap().starts_with("ok. 1 passed; 0 failed;")),
+                }
+            }
+        }
+    }
 
     #[test]
     fn job_limit_is_opt_in_and_rejects_invalid_values() {
