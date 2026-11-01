@@ -1,0 +1,6 @@
+{
+  "en": {
+    "nav.touchscreen.help": "Drag one finger to orbit, two fingers to pan, and pinch to zoom. Turn off to use the mouse mapping for finger drags.",
+    "nav.touchscreen.label": "Touchscreen navigation"
+  }
+}
