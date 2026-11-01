@@ -202,6 +202,102 @@ fn the_grid_never_draws_two_levels_that_do_not_nest_at_once() {
     assert!(at(1.0) > 0.3 && at(1.0) < 0.7 && at(2.0) > 0.999, "{} {}", at(1.0), at(2.0));
 }
 
+/// The camera frame's direction toward the eye for a view at `yaw` and `pitch` degrees.
+fn camera_at(yaw_deg: f64, pitch_deg: f64) -> Camera {
+    Camera { yaw: yaw_deg.to_radians(), pitch: pitch_deg.to_radians(), ..Camera::default() }
+}
+
+/// The viewport's grid as segments: on the ground, finite, and with every fade in 0..1.
+#[test]
+fn grid_segments_lie_on_the_ground_and_are_finite() {
+    let cam = camera_at(30.0, 35.0);
+    let mut last = GridPlane::Ground;
+    let segments = grid_segments(&cam, 1e6, true, &mut last);
+    assert!(!segments.is_empty(), "the grid is drawn");
+    assert_eq!(last, GridPlane::Ground);
+    for seg in &segments {
+        for p in [seg.a, seg.b] {
+            assert!(p.is_finite(), "{p:?} in {seg:?}");
+            assert!(p.z.abs() < 1e-9, "the ground is Z = 0: {p:?}");
+        }
+        assert!((0.0..=1.0).contains(&seg.alpha), "alpha {} in {seg:?}", seg.alpha);
+        assert!((0.0..=1.0).contains(&seg.major), "major {} in {seg:?}", seg.major);
+    }
+}
+
+/// At the edge-on threshold the grid takes the wall facing the view, and the hysteresis keeps
+/// the wall already drawn until the view clearly leaves it (#1993).
+#[test]
+fn grid_segments_choose_the_side_plane_and_keep_it_at_the_threshold() {
+    let mut last = GridPlane::Ground;
+    let edge = camera_at(0.0, 9.0);
+    let segments = grid_segments(&edge, 1e6, true, &mut last);
+    assert_eq!(last, GridPlane::Xz, "9 degrees above the ground takes the wall");
+    assert!(!segments.is_empty());
+    assert!(segments.iter().all(|s| s.a.y.abs() < 1e-9 && s.b.y.abs() < 1e-9), "Xz is the world's Y = 0 plane");
+    // 12 degrees: past the entering threshold, but a wall already drawn stays.
+    let near = camera_at(0.0, 12.0);
+    let segments = grid_segments(&near, 1e6, true, &mut last);
+    assert_eq!(last, GridPlane::Xz, "a wobble does not flicker");
+    assert!(segments.iter().all(|s| s.a.y.abs() < 1e-9 && s.b.y.abs() < 1e-9));
+    // Coming from the ground, the same view is still the ground.
+    let mut ground = GridPlane::Ground;
+    let segments = grid_segments(&near, 1e6, true, &mut ground);
+    assert_eq!(ground, GridPlane::Ground, "12 degrees is not edge-on enough to enter");
+    assert!(segments.iter().all(|s| s.a.z.abs() < 1e-9 && s.b.z.abs() < 1e-9));
+}
+
+/// With the follow-the-view preference off, the grid stays on the ground and the plane the
+/// last frame drew is left alone.
+#[test]
+fn grid_segments_stay_on_the_ground_when_the_view_does_not_follow() {
+    // A Right view: following the view would take the YZ wall.
+    let cam = camera_at(90.0, 0.0);
+    let mut last = GridPlane::Xz;
+    let segments = grid_segments(&cam, 1e6, false, &mut last);
+    assert_eq!(last, GridPlane::Xz, "the remembered plane is unchanged");
+    assert!(!segments.is_empty());
+    assert!(segments.iter().all(|s| s.a.z.abs() < 1e-9 && s.b.z.abs() < 1e-9), "the ground is Z = 0");
+}
+
+/// At a half height where the spacing cross-fades from 2 to 5, a line the two levels share
+/// blends the major and minor looks, and both line families are drawn.
+#[test]
+fn grid_segments_cross_fade_levels_and_draw_both_families() {
+    let mut cam = camera_at(0.0, 90.0);
+    cam.distance = 50.0 / 0.4;
+    let mut last = GridPlane::Ground;
+    let segments = grid_segments(&cam, 1e6, true, &mut last);
+    assert!(segments.iter().any(|s| s.major > 0.0 && s.major < 1.0), "a line shared by the cross-fading levels blends the looks");
+    assert!(segments.iter().any(|s| (s.a.x - s.b.x).abs() < 1e-9), "a line along Y");
+    assert!(segments.iter().any(|s| (s.a.y - s.b.y).abs() < 1e-9), "a line along X");
+}
+
+/// [`grid_segments_on`] is exactly the grid's lines drawn in pieces at the fade's strength.
+#[test]
+fn grid_segments_on_matches_grid_lines_and_the_fade() {
+    let cam = Camera::default();
+    let fade = GridFade::new(cam.half_height(), 0.8, 100.0, 70.0);
+    let frame = GridFrame { centre: Vec3::new(3.0, -4.0, 0.0), u: Vec3::X, v: Vec3::Y, origin: Vec3::new(1.0, 2.0, 0.0), fade };
+    let got = grid_segments_on(&cam, &frame, 7);
+    let mut want = Vec::new();
+    let (at_u, at_v) = ((frame.centre - frame.origin).dot(frame.u), (frame.centre - frame.origin).dot(frame.v));
+    for (along, across, at) in [(frame.v, frame.u, at_u), (frame.u, frame.v, at_v)] {
+        for line in grid_lines(cam.half_height(), at, frame.fade.end, 7) {
+            for (s0, s1, alpha) in frame.fade.pieces(line.offset) {
+                want.push(GridSegment {
+                    a: frame.centre + across * line.offset + along * s0,
+                    b: frame.centre + across * line.offset + along * s1,
+                    alpha: alpha * line.weight,
+                    major: line.major,
+                });
+            }
+        }
+    }
+    assert!(!want.is_empty(), "the frame draws a grid");
+    assert_eq!(got, want);
+}
+
 /// No colour here is one of [`colors`] or an appearance below, and each field has its own.
 const MARK: Palette = Palette {
     background: (Rgb(1, 2, 3), Rgb(4, 5, 6)),
