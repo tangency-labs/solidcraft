@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.construction.side_hint": "Construction line: click the side the line runs towards; right-click to restart"
+  },
+  "de": {
+    "ui.construction.side_hint": "Konstruktionslinie: die Seite anklicken, zu der die Linie läuft; Rechtsklick beginnt neu"
+  },
+  "ja": {
+    "ui.construction.side_hint": "補助直線: 線を伸ばす側をクリック。右クリックで最初から"
+  },
+  "ko": {
+    "ui.construction.side_hint": "보조 직선: 선이 뻗어 나갈 쪽 클릭; 마우스 오른쪽 버튼으로 다시 시작"
+  },
+  "zh": {
+    "ui.construction.side_hint": "构造直线：单击直线延伸的一侧；右键单击重新开始"
+  },
+  "ar": {
+    "ui.construction.side_hint": "خط إنشائي: انقر الجهة التي يمتد نحوها الخط؛ انقر بزر الفأرة الأيمن للبدء من جديد"
+  },
+  "he": {
+    "ui.construction.side_hint": "ישר עזר: לחיצה על הצד שאליו הקו נמשך; לחיצה ימנית להתחלה מחדש"
+  },
+  "vi": {
+    "ui.construction.side_hint": "Đường dựng hình: nhấp phía mà đường kéo dài tới; nhấp chuột phải để bắt đầu lại"
+  }
+}
