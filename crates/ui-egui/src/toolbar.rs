@@ -2148,7 +2148,7 @@ fn assistant_button(app: &mut SolveApp, ui: &mut egui::Ui, at: Rect) {
     let resp = ui.interact(at, ui.id().with("assistant_button"), Sense::click());
     crate::scenario::publish_target("titlebar:assistant", at);
     let mark = crate::agent_chat::assistant_mark(app);
-    let tip = crate::agent_chat::assistant_tip(mark);
+    let tip = crate::agent_chat::assistant_tip(app, mark);
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &tip));
     let state = match mark {
         AssistantMark::Quiet => crate::ui_kit::AssistantEntryState::Quiet,
@@ -3215,13 +3215,15 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         }
         return;
     }
-    let (keys, mods) = ctx.input(|i| {
-        let keys: Vec<(egui::Key, bool)> = i
-            .events
+    // A quick chord can press and release all modifiers in one frame. Dispatch each key
+    // with its own modifiers, not the final frame state (an unbound Ctrl+Shift+A is not A).
+    let keys: Vec<_> = ctx.input(|i| {
+        i.events
             .iter()
-            .filter_map(|e| if let egui::Event::Key { key, pressed: true, repeat, .. } = e { Some((*key, *repeat)) } else { None })
-            .collect();
-        (keys, i.modifiers)
+            .filter_map(
+                |e| if let egui::Event::Key { key, pressed: true, repeat, modifiers, .. } = e { Some((*key, *repeat, *modifiers)) } else { None },
+            )
+            .collect()
     });
     // A theme pasted on the Interface page is a theme, not copied components (#8226).
     crate::prefs::take_theme_paste(app, ctx);
@@ -3232,7 +3234,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     } else {
         crate::edit_clipboard::flush(app, ctx);
     }
-    for (k, repeat) in keys {
+    for (k, repeat, mods) in keys {
         use egui::Key;
         // Only Esc pressed twice in a row finishes a sketch: any other key in between resets it.
         if k != Key::Escape {

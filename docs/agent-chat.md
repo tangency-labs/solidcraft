@@ -478,3 +478,5 @@ the agent and puts your permission setting back.
 - `--markdown` writes the issue's comment template filled in; add the quantization, download
   size, and runtime before you post it. `--json` keeps each task's failed rules, conversation, and
   design before and after. Both files are rewritten after every task.
+
+The show/hide shortcut defaults to Ctrl+Shift+A (Cmd+Shift+A on macOS). Change, clear or reset **Toggle Assistant** (`ui.assistant`) in Preferences → Shortcuts. The binding is saved with the other keyboard shortcuts; the assistant button tooltip follows it. Disabling AI features also disables the toggle.

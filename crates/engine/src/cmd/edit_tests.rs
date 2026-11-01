@@ -1650,3 +1650,14 @@ fn edits_after_a_canvas_share_its_image_with_every_undo_state() {
     assert_eq!(s.doc.canvases[0].data.as_ptr(), image, "undo brings back the same image");
     assert_eq!(s.doc.canvases[0].bytes().as_deref(), Some(png.as_slice()));
 }
+
+#[test]
+fn assistant_toggle_is_refused_headlessly_without_changing_the_document() {
+    let mut s = Session::default();
+    let before = (s.doc.to_json(), s.undo.len());
+    let error = s.execute("ui.assistant", &json!({})).unwrap_err().to_string();
+    assert!(error.contains("headless session"), "{error}");
+    assert_eq!((s.doc.to_json(), s.undo.len()), before);
+    let spec = crate::find_command("ui.assistant").unwrap();
+    assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("Ctrl+Shift+A"), "", false));
+}

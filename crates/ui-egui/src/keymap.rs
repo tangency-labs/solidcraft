@@ -28,7 +28,6 @@ pub const RESERVED: &[&str] = &[
     "Ctrl+O",
     "Ctrl+W",
     "Ctrl+Comma",
-    "Ctrl+Shift+A",
     "Ctrl+C",
     "Ctrl+X",
     "Ctrl+V",
@@ -871,6 +870,92 @@ pub fn capturing(app: &SolveApp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn assistant_shortcut_can_be_rebound_cleared_saved_and_reset() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(2);
+        assert_eq!(effective(&h.app, "ui.assistant").as_deref(), Some("Ctrl+Shift+A"));
+        bind(&mut h.app, "ui.assistant", "Ctrl+Shift+J", false).unwrap();
+        h.step(&json!({"key":"A", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "the old key no longer opens Assistant");
+        let held_key = |pressed, repeat| egui::Event::Key {
+            key: egui::Key::J,
+            physical_key: None,
+            pressed,
+            repeat,
+            modifiers: egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT),
+        };
+        h.frame_with(vec![held_key(true, false)]);
+        assert!(h.app.agent_chat.open, "the custom key opens Assistant");
+        h.frame_with(vec![held_key(true, true)]);
+        assert!(h.app.agent_chat.open, "holding the key does not repeatedly toggle");
+        h.frame_with(vec![held_key(false, false)]);
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "the custom key also hides Assistant");
+        let saved = h.app.keymap.prefs();
+        let mut restored = app();
+        restored.keymap.load(&saved);
+        assert_eq!(keys(&restored, "ui.assistant"), ["Ctrl+Shift+J"]);
+        assert!(bind(&mut h.app, "solid.box", "Ctrl+Shift+J", false).is_err(), "conflicts are reported");
+        bind(&mut h.app, "ui.assistant", "", false).unwrap();
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "clearing disables the shortcut");
+        reset(&mut h.app, Some("ui.assistant"));
+        h.step(&json!({"key":"A", "cmd":true, "shift":true})).unwrap();
+        assert!(h.app.agent_chat.open, "reset restores the original shortcut");
+    }
+
+    #[test]
+    fn a_released_unbound_assistant_chord_does_not_start_a_plain_letter_command() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+        bind(&mut h.app, "ui.assistant", "Ctrl+Shift+J", false).unwrap();
+        h.frames(2);
+        let modifiers = egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT);
+        h.frame_with(vec![
+            egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: true, repeat: false, modifiers },
+            egui::Event::Key { key: egui::Key::A, physical_key: None, pressed: false, repeat: false, modifiers },
+            egui::Event::ModifiersChanged(egui::Modifiers::NONE),
+        ]);
+        assert!(!h.app.agent_chat.open, "the old chord is unbound");
+        assert!(h.app.dialog.is_none() && h.app.tool.is_none(), "Ctrl+Shift+A must not become plain A (Appearance) after release");
+    }
+
+    #[test]
+    fn assistant_shortcut_respects_text_focus_ai_switch_and_capture() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        bind(&mut h.app, "ui.assistant", "Ctrl+Shift+J", false).unwrap();
+        h.app.preferences.ai_features = false;
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open);
+        h.app.preferences.ai_features = true;
+        h.step(&json!({"key":"J", "cmd":true, "shift":true, "alt":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "extra modifiers do not match");
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(h.app.agent_chat.open);
+        h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("sc_agent_chat_input")));
+        h.frames(2);
+        h.step(&json!({"key":"J", "cmd":true, "shift":true})).unwrap();
+        assert!(!h.app.agent_chat.open, "a chord can hide Assistant from its input field");
+        bind(&mut h.app, "ui.assistant", "J", true).unwrap();
+        h.call("ui.palette", json!({}));
+        h.frames(3);
+        h.step(&json!({"key":"J"})).unwrap();
+        assert!(!h.app.agent_chat.open, "a bare letter in a text field remains text");
+        h.call("ui.palette", json!({"open":false}));
+        h.frames(2);
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_SHORTCUTS);
+        h.app.keymap.capturing = Some("solid.box".into());
+        h.step(&json!({"key":"J"})).unwrap();
+        assert!(!h.app.agent_chat.open, "recording a shortcut must not activate it");
+        assert!(crate::agent_chat::assistant_tip(&h.app, crate::agent_chat::AssistantMark::Ready).contains("(J)"));
+        bind(&mut h.app, "ui.assistant", "", false).unwrap();
+        assert!(!crate::agent_chat::assistant_tip(&h.app, crate::agent_chat::AssistantMark::Ready).contains("(J)"));
+    }
 
     fn app() -> SolveApp {
         SolveApp::new(solidcraft_engine::Session::default(), Default::default())

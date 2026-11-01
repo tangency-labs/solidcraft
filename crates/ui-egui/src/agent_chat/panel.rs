@@ -14,8 +14,34 @@ pub const MIN_WIDTH: f32 = 280.0;
 pub const MAX_WIDTH: f32 = 760.0;
 /// The folded panel's width.
 const STRIP: f32 = 30.0;
-/// The keyboard shortcut that shows and hides the panel (also from its own text field).
-pub const SHORTCUT: egui::KeyboardShortcut = egui::KeyboardShortcut::new(egui::Modifiers::COMMAND.plus(egui::Modifiers::SHIFT), egui::Key::A);
+/// Consume the configured toggle before CAD shortcuts, including in the chat's own window.
+/// Bare character keys remain text while a field owns the keyboard; chords still hide chat.
+pub fn toggle_shortcut(app: &mut SolveApp, ctx: &egui::Context) {
+    if !shown(app) || crate::keymap::capturing(app) {
+        return;
+    }
+    let keys = crate::keymap::keys(app, "ui.assistant");
+    let typing = ctx.egui_wants_keyboard_input();
+    let pressed = ctx.input_mut(|input| {
+        let mut pressed = false;
+        input.events.retain(|event| {
+            if let egui::Event::Key { key, modifiers, pressed: true, repeat, .. } = event {
+                if typing && !modifiers.command && !modifiers.ctrl && !modifiers.alt {
+                    return true;
+                }
+                if keys.contains(&crate::keymap::key_name(*key, *modifiers)) {
+                    pressed |= !repeat;
+                    return false;
+                }
+            }
+            true
+        });
+        pressed
+    });
+    if pressed {
+        toggle(app);
+    }
+}
 
 fn panel_id(left: bool) -> Id {
     Id::new(if left { "sc_agent_chat_left" } else { "sc_agent_chat_right" })
@@ -50,9 +76,11 @@ pub fn toggle(app: &mut SolveApp) {
 }
 
 /// The tooltip of the chat's buttons: its name and shortcut.
-pub fn tip() -> String {
-    let key = if cfg!(target_os = "macos") { "Cmd+Shift+A" } else { "Ctrl+Shift+A" };
-    format!("{} ({key})", tr("ui.agent_chat"))
+pub fn tip(app: &SolveApp) -> String {
+    match crate::keymap::display_for(app, "ui.assistant") {
+        Some(key) => format!("{} ({key})", tr("ui.agent_chat")),
+        None => tr("ui.agent_chat").to_string(),
+    }
 }
 
 /// The panel, when the chat is turned on and open. Call before the central viewport is laid out.
@@ -68,9 +96,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     // With AI features off nothing of the chat is drawn, and the shortcut does nothing.
     if !shown(app) {
         return;
-    }
-    if ctx.input_mut(|i| i.consume_shortcut(&SHORTCUT)) {
-        toggle(app);
     }
     // A window that isn't drawn this frame closes; the next one opens at the saved place.
     if !(app.agent_chat.open && app.preferences.agent_chat_popped) {
@@ -531,6 +556,11 @@ fn window(app: &mut SolveApp, ctx: &egui::Context) {
     // The side panel isn't drawn: its place no longer counts as "in the chat".
     app.agent_chat.panel_rect = None;
     ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("sc_agent_chat_window"), builder, |ui, class| {
+        // Root/embedded inputs are handled by SolveApp::logic. A native chat window owns
+        // its input and must see the toggle before its text editor can consume the chord.
+        if class != egui::ViewportClass::EmbeddedWindow {
+            toggle_shortcut(app, ui.ctx());
+        }
         let t = Tokens::get();
         let frame = Container::new(ui.ctx(), Surface::Panel).edge_frame(t.dialog_body);
         let r = Container::new(ui.ctx(), Surface::Viewport).central().frame(frame).show(ui, |ui| ui_kit::scope(ui, |ui| body(app, ui, false)));
@@ -554,9 +584,6 @@ fn window(app: &mut SolveApp, ctx: &egui::Context) {
         }
         if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
             drop_hint(&ctx, r.response.rect);
-        }
-        if ctx.input_mut(|i| i.consume_shortcut(&SHORTCUT)) {
-            toggle(app);
         }
         // The whole window is the chat, so New chat works anywhere in it.
         if ctx.input_mut(|i| i.consume_shortcut(&NEW_CHAT_SHORTCUT)) {
@@ -667,7 +694,7 @@ fn strip(app: &mut SolveApp, ui: &mut egui::Ui) {
         if app.preferences.agent_chat_side == "left" { [r.right_top(), r.right_bottom()] } else { [r.left_top(), r.left_bottom()] },
         t.primary_border(t.border),
     );
-    let tip = format!("{} · {}", tip(), state.label());
+    let tip = format!("{} · {}", tip(app), state.label());
     if resp.on_hover_text(tip).clicked() {
         app.preferences.agent_chat_minimized = false;
     }

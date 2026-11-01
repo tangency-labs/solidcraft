@@ -3,6 +3,15 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Assistant visibility is UI-owned and takes no parameters.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AssistantParams {}
+
+/// Headless sessions refuse Assistant display requests and produce no result.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AssistantResult {}
+
 /// `edit.repeat` takes no parameters: it starts the last tool with its defaults.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
@@ -39,12 +48,13 @@ pub struct TimelinePlayResult {
 
 #[cfg(test)]
 mod tests {
-    use super::RepeatParams;
+    use super::{AssistantParams, RepeatParams};
     use crate::schema::input_schema_for;
     use crate::schema::tests::assert_keys;
 
     #[test]
     fn schemas_and_the_key_check_agree() {
         assert_keys(input_schema_for::<RepeatParams>(), &[]);
+        assert_keys(input_schema_for::<AssistantParams>(), &[]);
     }
 }

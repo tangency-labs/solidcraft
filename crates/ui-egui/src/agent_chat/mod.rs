@@ -50,7 +50,7 @@ use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
 
 pub(crate) use panel::{left_inset, tool_space};
-pub use panel::{show, tip as panel_tip, toggle};
+pub use panel::{show, tip as panel_tip, toggle, toggle_shortcut};
 
 /// Most entries kept in the conversation; older ones are dropped.
 const MAX_ITEMS: usize = 2000;
@@ -856,7 +856,7 @@ pub(crate) fn assistant_mark(app: &SolveApp) -> AssistantMark {
     )
 }
 
-pub(crate) fn assistant_tip(mark: AssistantMark) -> String {
+pub(crate) fn assistant_tip(app: &SolveApp, mark: AssistantMark) -> String {
     let state = match mark {
         AssistantMark::Quiet => tr("ui.agent_chat_state_off").to_string(),
         AssistantMark::Ready => tr("ui.agent_chat_state_ready").to_string(),
@@ -865,7 +865,11 @@ pub(crate) fn assistant_tip(mark: AssistantMark) -> String {
         AssistantMark::Stopped => tr("ui.agent_chat_state_exited").to_string(),
         AssistantMark::Waiting(count) => trf("ui.assistant_waiting", &[("count", &count.to_string())]),
     };
-    format!("{} (Ctrl+Shift+A) — {state}", tr("ui.assistant"))
+    let name = match crate::keymap::display_for(app, "ui.assistant") {
+        Some(key) => format!("{} ({key})", tr("ui.assistant")),
+        None => tr("ui.assistant").to_string(),
+    };
+    format!("{name} — {state}")
 }
 
 /// Whether a permission question is about one of SolidCraft's own tools (which SolidCraft's own

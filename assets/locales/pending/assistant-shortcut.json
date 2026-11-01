@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "cmd.ui.assistant": "إظهار المساعد أو إخفاؤه"
+  },
+  "de": {
+    "cmd.ui.assistant": "Assistenten ein-/ausblenden"
+  },
+  "en": {
+    "cmd.ui.assistant": "Toggle Assistant"
+  },
+  "he": {
+    "cmd.ui.assistant": "הצגה או הסתרה של העוזר"
+  },
+  "ja": {
+    "cmd.ui.assistant": "アシスタントの表示切り替え"
+  },
+  "ko": {
+    "cmd.ui.assistant": "도우미 표시 전환"
+  },
+  "vi": {
+    "cmd.ui.assistant": "Bật/tắt trợ lý"
+  },
+  "zh": {
+    "cmd.ui.assistant": "切换助手显示"
+  }
+}

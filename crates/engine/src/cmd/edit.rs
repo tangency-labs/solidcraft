@@ -10,6 +10,14 @@ use crate::params::{bad, bool_, name_or_id_values, num, str_};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
 
 pub static COMMANDS: &[CommandSpec] = &[
+    CommandSpec::new("ui.assistant", "Toggle Assistant", crate::checked!("ui.assistant", assistant))
+        .icon("assistant")
+        .key("Ctrl+Shift+A")
+        .noundo()
+        .doc_only()
+        .contract(&ASSISTANT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::AssistantResult>)
+        .params("Show or hide Assistant in the app. Headless calls are refused without changing the design"),
     CommandSpec::new("edit.undo", "Undo", undo).icon("undo").key("Ctrl+Z").noundo().doc_only(),
     CommandSpec::new("edit.redo", "Redo", redo).icon("redo").key("Ctrl+Y").noundo().doc_only(),
     CommandSpec::new("edit.repeat", "Repeat Last Command", crate::checked!("edit.repeat", repeat))
@@ -117,6 +125,12 @@ fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
     let label = now.label.clone();
     s.undo.push(now);
     Ok(json!({"redone": label}))
+}
+
+const ASSISTANT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::AssistantParams> = crate::schema::TypedContract::new();
+
+fn assistant(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(EngineError::Other("ui.assistant shows or hides Assistant in the app; no assistant panel exists in a headless session".into()))
 }
 
 const REPEAT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RepeatParams> = crate::schema::TypedContract::new();
