@@ -25,26 +25,24 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: us
         let suffix = pattern.id.strip_prefix("pat").unwrap_or(&pattern.id);
         let label = format!("{} {suffix}", crate::i18n::tr_label(name));
         let active = app.session.active_sketch == Some(sketch);
-        let curves: Vec<_> = app
-            .session
-            .doc
-            .sketch(sketch)
-            .map(|sk| {
+        // The sources are inputs to the pattern: selecting its row must only delete copies.
+        // Select point copies when the point itself is a source; curve endpoints go with curves.
+        let sources: std::collections::BTreeSet<_> = pattern.entities.iter().collect();
+        let copies: Vec<_> = pattern
+            .instances
+            .iter()
+            .flat_map(|instance| &instance.curves)
+            .map(|id| Sel::SketchCurve { id: id.clone(), sketch: None })
+            .chain(
                 pattern
-                    .entities
+                    .instances
                     .iter()
-                    .chain(pattern.instances.iter().flat_map(|i| &i.curves))
-                    .map(|id| {
-                        if sk.curve_index(id).is_some() {
-                            Sel::SketchCurve { id: id.clone(), sketch: None }
-                        } else {
-                            Sel::SketchPoint { id: id.clone() }
-                        }
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-        let selected = active && !curves.is_empty() && curves.iter().all(|curve| app.session.selection.contains(curve));
+                    .flat_map(|instance| &instance.points)
+                    .filter(|(source, _)| sources.contains(source))
+                    .map(|(_, id)| Sel::SketchPoint { id: id.clone() }),
+            )
+            .collect();
+        let selected = active && !copies.is_empty() && copies.iter().all(|copy| app.session.selection.contains(copy));
         let response = draw_row(
             ui,
             ui.id().with(("sketch_pattern", sketch, &pattern.id)),
@@ -62,7 +60,7 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: us
                 crate::sketch_modify_ui::edit_pattern(app, &pattern.id);
             }
         } else if response.clicked {
-            let items = if active { curves } else { vec![Sel::Feature { id: sketch }] };
+            let items = if active { copies } else { vec![Sel::Feature { id: sketch }] };
             let _ = app.run("select.set", json!({"items":items}));
         }
     }
@@ -135,6 +133,59 @@ mod tests {
         h.app.run("edit.undo", json!({})).unwrap();
         h.frames(3);
         assert!(crate::scenario::handle_at(&handle).is_some());
+    }
+
+    #[test]
+    fn deleting_a_pattern_row_preserves_sources_and_other_patterns() {
+        for left_history in [false, true] {
+            for circular in [false, true] {
+                for entities in [json!(["source"]), json!(["marker"]), json!(["source", "marker"])] {
+                    let mut h = Harness::new();
+                    h.app.home.open = false;
+                    h.app.ui.show_browser = true;
+                    h.app.preferences.timeline_left = left_history;
+                    h.app.run("sketch.create", json!({"plane":"XY","name":"Patterned Sketch"})).unwrap();
+                    let sketch = h.app.session.active_sketch.unwrap();
+                    h.app.run("sketch.line", json!({"points":[[10,5],[15,5]],"ids":["source"]})).unwrap();
+                    h.app.run("sketch.point", json!({"point":[10,10],"id":"marker"})).unwrap();
+                    h.app.run("sketch.constraint.fix", json!({"entities":["source","marker"]})).unwrap();
+                    let sibling = h.app.run("sketch.pattern.rectangular", json!({"entities":entities,"count":2,"spacing":50})).unwrap();
+                    let command = if circular { "sketch.pattern.circular" } else { "sketch.pattern.rectangular" };
+                    let params = if circular {
+                        json!({"entities":entities,"count":3,"center":"origin"})
+                    } else {
+                        json!({"entities":entities,"count":3,"spacing":20})
+                    };
+                    let target = h.app.run(command, params).unwrap();
+                    let sk = h.app.session.doc.sketch(sketch).unwrap();
+                    let pattern = sk.patterns.iter().find(|p| p.id == target["pattern"]).unwrap().clone();
+                    let before = serde_json::to_value(sk).unwrap();
+                    h.frames(6);
+                    let scope = if left_history { "timeline" } else { "browser" };
+                    h.step(&json!({"click":{"handle":format!("{scope}:sketch-pattern:{sketch}:{}", pattern.id)}})).unwrap();
+                    h.step(&json!({"key":"Delete"})).unwrap();
+                    h.frames(3);
+
+                    let sk = h.app.session.doc.sketch(sketch).unwrap();
+                    assert!(sk.curve_index("source").is_some(), "source curve lost: {scope}, {command}, {entities}");
+                    assert!(sk.point_index("marker").is_some(), "source point lost: {scope}, {command}, {entities}");
+                    assert_eq!(sk.patterns.len(), 1, "only the selected pattern should go");
+                    assert_eq!(sk.patterns[0].id, sibling["pattern"]);
+                    for instance in &pattern.instances {
+                        assert!(instance.curves.iter().all(|id| sk.curve_index(id).is_none()));
+                        assert!(instance.points.iter().all(|(_, id)| sk.point_index(id).is_none()));
+                        assert!(instance.constraints.iter().all(|id| sk.constraints.iter().all(|c| &c.id != id)));
+                    }
+                    let report = h.app.run("sketch.inspect", json!({})).unwrap();
+                    assert_eq!(report["dof"], 0, "fixed sources and the surviving pattern stay constrained");
+                    let after = serde_json::to_value(h.app.session.doc.sketch(sketch).unwrap()).unwrap();
+                    h.app.run("edit.undo", json!({})).unwrap();
+                    assert_eq!(serde_json::to_value(h.app.session.doc.sketch(sketch).unwrap()).unwrap(), before);
+                    h.app.run("edit.redo", json!({})).unwrap();
+                    assert_eq!(serde_json::to_value(h.app.session.doc.sketch(sketch).unwrap()).unwrap(), after);
+                }
+            }
+        }
     }
 
     /// Where a text starts, drawn inside `within`.
