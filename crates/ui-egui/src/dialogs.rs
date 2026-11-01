@@ -2843,6 +2843,16 @@ fn missing_pick(error: &str) -> bool {
     awaiting_selection(error) || error.get(..5).is_some_and(|start| start.eq_ignore_ascii_case("pick "))
 }
 
+/// A refusal that says the command is not available in this context ("`sketch.project` is not
+/// available right now: no sketch is being edited"): the engine's own `Disabled` refusal for the
+/// command this dialog runs, so the sketch ended or the mode changed under it. Guidance, not a
+/// failure of the design: there is nothing to report (#10181).
+fn context_refusal(app: &SolveApp, d: &Dialog, error: &str) -> bool {
+    let Some(id) = d.command() else { return false };
+    let Some(spec) = solidcraft_engine::find_command(id) else { return false };
+    spec.disabled_refusal(&app.session).is_some_and(|refusal| refusal == error)
+}
+
 fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) {
     if matches!(d.kind, Kind::SketchModify(_))
         && d.previews()
@@ -2867,8 +2877,13 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
         }
         // Other dialogs say so on OK ("select a plane first", "pick an axis"): that is what is
         // left to pick, not a failure, so it is shown plainly, with no Create Issue (#3292, #3773).
+        // A command that is not available in this context ("`sketch.project` is not available
+        // right now: no sketch is being edited") is guidance too: the context went away, not the
+        // design, so there is nothing to report (#10181).
         let rect = if missing_pick(&error) {
             crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("missing_pick")).rect
+        } else if context_refusal(app, d, &error) {
+            crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Hint("context")).rect
         } else {
             ui.vertical(|ui| {
                 crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Report("error", true));

@@ -246,6 +246,12 @@ impl CommandSpec {
             other => other,
         }
     }
+    /// The refusal this command gives when it is not available in this session: none when it
+    /// is. It is the engine's own wording (`EngineError::Disabled`), so a caller that only has
+    /// the message can tell it from a failure of the command itself.
+    pub fn disabled_refusal(&self, s: &Session) -> Option<String> {
+        (self.enabled)(s).err().map(|why| crate::EngineError::Disabled(self.id.to_string(), why).to_string())
+    }
     pub fn info(&self, s: &Session) -> CommandInfo {
         let e = (self.enabled)(s);
         let (label, icon) = match self.id {
