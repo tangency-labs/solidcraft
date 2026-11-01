@@ -3,8 +3,9 @@
 //! would draw rather than the display triangles.
 //!
 //! A display tessellation ([`TessPlan`]) is a set of triangles per B-rep face. Here each face
-//! becomes polygons: a planar face with one boundary loop is a single n-gon (its interior points
-//! are dropped), the cells of structured grids, strips and patches become quads again (two
+//! becomes polygons: a planar face with one boundary loop is a single n-gon, a planar face with
+//! holes a few convex n-gons through its boundary points (interior points are dropped either
+//! way), the cells of structured grids, strips and patches become quads again (two
 //! triangles that together form a convex, nearly rectangular quad), and what is left stays
 //! triangles. Vertices are shared across faces, every corner keeps the face's own normal (so
 //! creases stay crisp), every polygon names its B-rep face, and the segments of B-rep edges
@@ -12,8 +13,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::convex_parts::convex_parts;
 use crate::tess::{EvalSurface, TessPlan};
-use crate::{Mesh, Vec3};
+use crate::{Mesh, Vec2, Vec3};
 
 /// Most vertices a polygon mesh may be made from (the plan's or mesh's vertices).
 pub const MAX_POLY_VERTICES: usize = 1 << 24;
@@ -25,7 +27,8 @@ pub enum PolyTopology {
     Triangles,
     /// Triangles paired into quads where they form good ones.
     Quads,
-    /// As [`PolyTopology::Quads`], and a planar face with one boundary loop is one n-gon.
+    /// As [`PolyTopology::Quads`], and a planar face with one boundary loop is one n-gon (with
+    /// holes, a few convex n-gons).
     #[default]
     NGons,
 }
@@ -277,12 +280,21 @@ fn build(w: Welder, faces: Vec<FaceTris>, brep_edges: &[Vec<Vec3>], flags: Optio
         if tris.is_empty() {
             continue;
         }
-        if o.topology == PolyTopology::NGons
-            && f.planar
-            && let Some(corners) = single_boundary(&tris)
-        {
-            polys.push(Poly { face: f.face, corners, tris });
-            continue;
+        if o.topology == PolyTopology::NGons && f.planar {
+            match boundary_loops(&tris) {
+                Some(mut loops) if loops.len() == 1 => {
+                    let corners = loops.pop().unwrap_or_default();
+                    polys.push(Poly { face: f.face, corners, tris });
+                    continue;
+                }
+                Some(loops) => {
+                    if let Some(parts) = holed_ngons(f.face, &tris, &loops, &w.positions) {
+                        polys.extend(parts);
+                        continue;
+                    }
+                }
+                None => {}
+            }
         }
         if o.topology == PolyTopology::Triangles {
             polys.extend(tris.into_iter().map(|t| Poly { face: f.face, corners: t.to_vec(), tris: vec![t] }));
@@ -469,9 +481,9 @@ fn dissolve_collinear(polys: &mut [(u32, Vec<Corner>)], positions: &[Vec3], keep
     }
 }
 
-/// The one boundary loop of a face's triangles, as the corners of an n-gon; `None` when the
-/// boundary is not a single simple loop (holes, a pinch, a strip closing on itself).
-fn single_boundary(tris: &[[Corner; 3]]) -> Option<Vec<Corner>> {
+/// The boundary loops of a face's triangles, each wound as the triangles are; `None` when the
+/// boundary is not a set of simple loops (a pinch, where two loops share a point).
+fn boundary_loops(tris: &[[Corner; 3]]) -> Option<Vec<Vec<Corner>>> {
     let mut directed: HashSet<(u32, u32)> = HashSet::new();
     for t in tris {
         for i in 0..3 {
@@ -479,7 +491,6 @@ fn single_boundary(tris: &[[Corner; 3]]) -> Option<Vec<Corner>> {
         }
     }
     let mut next: HashMap<u32, (u32, Vec3)> = HashMap::new();
-    let mut start = None;
     for t in tris {
         for i in 0..3 {
             let (a, b) = (t[i].v, t[(i + 1) % 3].v);
@@ -489,24 +500,63 @@ fn single_boundary(tris: &[[Corner; 3]]) -> Option<Vec<Corner>> {
             if next.insert(a, (b, t[i].n)).is_some() {
                 return None;
             }
-            start = Some(start.map_or(a, |s: u32| s.min(a)));
         }
     }
-    let start = start?;
-    let mut corners = Vec::with_capacity(next.len());
-    let mut at = start;
-    loop {
-        let &(to, n) = next.get(&at)?;
-        corners.push(Corner { v: at, n });
-        at = to;
-        if at == start {
-            break;
+    let mut starts: Vec<u32> = next.keys().copied().collect();
+    starts.sort_unstable();
+    let mut seen: HashSet<u32> = HashSet::with_capacity(next.len());
+    let mut loops = Vec::new();
+    for start in starts {
+        if seen.contains(&start) {
+            continue;
         }
-        if corners.len() > next.len() {
+        let mut corners = Vec::new();
+        let mut at = start;
+        loop {
+            let &(to, n) = next.get(&at)?;
+            if !seen.insert(at) {
+                return None;
+            }
+            corners.push(Corner { v: at, n });
+            at = to;
+            if at == start {
+                break;
+            }
+        }
+        if corners.len() < 3 {
             return None;
         }
+        loops.push(corners);
     }
-    (corners.len() == next.len() && corners.len() >= 3).then_some(corners)
+    (!loops.is_empty()).then_some(loops)
+}
+
+/// A planar face with holes as convex polygons through its boundary points; `None` when its
+/// loops are not one outer loop around holes, or cannot be cut.
+fn holed_ngons(face: u32, tris: &[[Corner; 3]], loops: &[Vec<Corner>], positions: &[Vec3]) -> Option<Vec<Poly>> {
+    let pos = |c: &Corner| positions.get(c.v as usize).copied().unwrap_or(Vec3::ZERO);
+    // The face's normal as its triangles wind, and a frame in its plane.
+    let n = tris.iter().fold(Vec3::ZERO, |s, t| s + (pos(&t[1]) - pos(&t[0])).cross(pos(&t[2]) - pos(&t[0]))).normalized()?;
+    let (du, dv) = (n.any_perp(), n.cross(n.any_perp()));
+    let origin = loops.first().and_then(|l| l.first()).map(pos)?;
+    let flat = |l: &Vec<Corner>| -> Vec<Vec2> { l.iter().map(|c| pos(c) - origin).map(|d| Vec2::new(d.dot(du), d.dot(dv))).collect() };
+    let signed = |l: &[Vec2]| (0..l.len()).filter_map(|k| Some(l.get(k)?.cross(*l.get((k + 1) % l.len())?))).sum::<f64>();
+    // The one loop wound counter-clockwise is the outer one; the rest are holes.
+    let mut flats: Vec<(Vec<Vec2>, &Vec<Corner>)> = loops.iter().map(|l| (flat(l), l)).collect();
+    if flats.iter().filter(|(f, _)| signed(f) > 0.0).count() != 1 {
+        return None;
+    }
+    flats.sort_by_key(|(f, _)| !(signed(f) > 0.0));
+    let flat_loops: Vec<Vec<Vec2>> = flats.iter().map(|(f, _)| f.clone()).collect();
+    let parts = convex_parts(&flat_loops)?;
+    let mut out = Vec::with_capacity(parts.len());
+    for part in parts {
+        let corners: Vec<Corner> = part.iter().map(|&(l, i)| flats.get(l).and_then(|(_, c)| c.get(i)).copied()).collect::<Option<_>>()?;
+        let (first, rest) = corners.split_first()?;
+        let fan = rest.windows(2).map(|w| [*first, w[0], w[1]]).collect();
+        out.push(Poly { face, corners, tris: fan });
+    }
+    Some(out)
 }
 
 /// A face's triangles, pairs of them joined into quads where the pair makes a good one.
