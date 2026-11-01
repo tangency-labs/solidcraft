@@ -42,7 +42,7 @@ fn construction_line_contracts_and_replies_match() {
     use super::{ConstructionLineParams, ConstructionLineResult};
     assert_keys(
         input_schema_for::<ConstructionLineParams>(),
-        &["alternate", "angle", "at", "curve", "curve2", "mode", "near", "sketch", "solution", "through"],
+        &["alternate", "angle", "at", "curve", "curve2", "length", "mode", "near", "sketch", "solution", "through"],
     );
     let schema = output_schema_for::<ConstructionLineResult>();
     let schema = schema.as_value();
@@ -52,6 +52,7 @@ fn construction_line_contracts_and_replies_match() {
         ("sketch.construction_line", json!({"at":[0,0],"through":[5,5]})),
         ("sketch.construction_line.horizontal", json!({"at":[0,10]})),
         ("sketch.construction_line.angle", json!({"at":[10,10],"angle":30})),
+        ("sketch.construction_line.vertical", json!({"at":[20,0],"length":"12 mm","near":[20,-5]})),
     ] {
         let r = s.execute(id, &p).unwrap();
         assert!(conforms(schema, schema, &r), "{r}");

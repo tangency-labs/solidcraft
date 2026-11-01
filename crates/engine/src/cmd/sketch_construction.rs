@@ -1,4 +1,5 @@
-//! Fast infinite reference lines. Preview and creation use the same analytic solutions.
+//! Fast reference lines, infinite or with a length (#10258). Preview and creation use the same
+//! analytic solutions.
 
 use serde_json::{Value, json};
 use solidcraft_geom::{Seg2, Vec2};
@@ -23,7 +24,7 @@ macro_rules! variant {
         .enabled(in_sketch)
         .contract(&CONTRACT)
         .output(output_schema_for::<ConstructionLineResult>)
-        .params(concat!("Infinite construction line, ", $mode, ". at: point; through?: second point; curve?, curve2?: sketch references; angle?: degrees from sketch X; near?: solution selector; solution?: zero-based solution index. Tangents take circles/arcs, or an open spline/conic endpoint for tangent_at.", created_doc!()))
+        .params(concat!("Construction line, ", $mode, ". at: point; through?: second point; curve?, curve2?: sketch references; angle?: degrees from sketch X; near?: solution selector, and the side a line with a length runs towards; solution?: zero-based solution index; length?: a segment of this length from `at`, held by a length dimension, instead of an infinite line (horizontal, vertical, angle, parallel, perpendicular). Tangents take circles/arcs, or an open spline/conic endpoint for tangent_at.", created_doc!()))
     };
 }
 
@@ -52,6 +53,19 @@ impl ConstructionLine {
     fn distance(self, p: Vec2) -> f64 {
         (p - self.start).cross(self.direction).abs()
     }
+}
+
+/// The methods that take a `length`: the ones whose line starts at `at` with a known direction.
+pub fn construction_line_takes_length(mode: &str) -> bool {
+    matches!(mode, "horizontal" | "vertical" | "angle" | "parallel" | "perpendicular")
+}
+
+/// The two ends of a construction line cut to `length` from its start: along its direction, or
+/// the other way when `near` lies behind the start. The preview draws exactly what is created.
+pub fn construction_segment(line: ConstructionLine, length: f64, near: Option<Vec2>) -> (Vec2, Vec2) {
+    let behind = near.is_some_and(|q| (q - line.start).dot(line.direction) < 0.0);
+    let direction = if behind { -line.direction } else { line.direction };
+    (line.start, line.start + direction * length)
 }
 
 /// The method belonging to an interactive command. The generic command defaults to two points.
@@ -277,6 +291,21 @@ fn run(s: &mut Session, p: &Value, default_mode: &str) -> Result<Value> {
         } else {
             None
         };
+        let length = match p.get("length") {
+            None | Some(Value::Null) => None,
+            Some(_) if !construction_line_takes_length(mode) => {
+                return Err(bad(CMD, "`length` is for the horizontal, vertical, angle, parallel and perpendicular methods"));
+            }
+            Some(_) => {
+                let e = expr(&p, "length").ok_or_else(|| bad(CMD, "`length` must be a length or expression"))?;
+                let e = doc.with_design_unit(e.as_str(), solidcraft_doc::expr::Kind::Length);
+                let value = doc.eval(&e, solidcraft_doc::expr::Kind::Length).map_err(|e| bad(CMD, format!("length: {e}")))?;
+                if !(value > 1e-9 && value < 1e8) {
+                    return Err(bad(CMD, "length must be positive"));
+                }
+                Some((e, value))
+            }
+        };
         let solutions = construction_line_solutions(sk, &params, mode)?;
         let choice = construction_line_choice(&solutions, &params)?;
         let chosen = solutions.get(choice).ok_or_else(|| bad(CMD, "no solution"))?;
@@ -294,10 +323,14 @@ fn run(s: &mut Session, p: &Value, default_mode: &str) -> Result<Value> {
         } else {
             at.idx()
         };
-        let end = through.as_ref().map_or(chosen.start + chosen.direction * 10.0, |q| q.pos());
-        let l = sk.add_line(chosen.start, end, start_ref, through.as_ref().and_then(|q| q.idx()), None)?;
+        let near = p.get("near").and_then(vec2);
+        let (start, end) = match &length {
+            Some((_, value)) => construction_segment(*chosen, *value, near),
+            None => (chosen.start, through.as_ref().map_or(chosen.start + chosen.direction * 10.0, |q| q.pos())),
+        };
+        let l = sk.add_line(start, end, start_ref, through.as_ref().and_then(|q| q.idx()), None)?;
         if let Some(c) = sk.curves.get_mut(l) {
-            c.infinite = true;
+            c.infinite = length.is_none();
             c.construction = true;
         }
         let mut cons = Vec::new();
@@ -313,6 +346,11 @@ fn run(s: &mut Session, p: &Value, default_mode: &str) -> Result<Value> {
         if let Some(k) = kind {
             let parameter = angle_expression.map(|e| doc.new_model_param(&e, "deg"));
             cons.push(sk.add_constraint(k, parameter)?);
+        }
+        if let Some((e, value)) = &length {
+            let unit = solidcraft_doc::expr::length_unit_or_mm(&doc.units).to_string();
+            let parameter = doc.new_model_param(e, &unit);
+            cons.push(sk.add_constraint(ConstraintKind::Length { l, value: *value }, Some(parameter))?);
         }
         if let ("tangent_two", Some(b)) = (mode, second) {
             cons.push(add_c(sk, ConstraintKind::Tangent { a: l, b })?);

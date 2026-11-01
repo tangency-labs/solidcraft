@@ -4,9 +4,9 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::types::{AngleExpr, SketchRef, present};
+use super::types::{AngleExpr, LengthExpr, SketchRef, present};
 
-/// Create an infinite reference line in the active sketch.
+/// Create a reference line in the active sketch: infinite, or a segment of a given length.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ConstructionLineParams {
@@ -16,7 +16,8 @@ pub struct ConstructionLineParams {
     pub at: Value,
     /// Second point of a two-point construction line.
     pub through: Option<Value>,
-    /// Point used to select the closest solution when several exist.
+    /// Point used to select the closest solution when several exist; for a line with a
+    /// `length`, the side of `at` it runs towards.
     pub near: Option<[f64; 2]>,
     /// Zero-based index in the deterministic list of solutions.
     pub solution: Option<usize>,
@@ -28,6 +29,9 @@ pub struct ConstructionLineParams {
     pub alternate: Option<bool>,
     /// Direction measured counter-clockwise from sketch X, in degrees.
     pub angle: Option<AngleExpr>,
+    /// A segment of this length from `at` instead of an infinite line, held by a length
+    /// dimension. For the horizontal, vertical, angle, parallel and perpendicular methods.
+    pub length: Option<LengthExpr>,
     /// The sketch (default: the one being edited).
     pub sketch: Option<SketchRef>,
 }
