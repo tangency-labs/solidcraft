@@ -1157,8 +1157,7 @@ pub(crate) fn follow_new_tab(app: &mut SolveApp, switch: impl FnOnce(&mut SolveA
         return;
     }
     if let Some(turn) = app.agent_chat.turn.as_ref() {
-        let steps =
-            merge_undo(&mut app.session.undo, &turn.start_doc, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]));
+        let steps = app.session.merge_undo_since(&turn.start_doc, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]));
         if steps > 0 {
             app.agent_chat.push(Item::Changes { steps, doc: app.session.doc.clone(), undone: false });
         }
@@ -1729,7 +1728,7 @@ fn end_turn(app: &mut SolveApp) {
 fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
     let Some(turn) = chat.turn.take() else { return };
     turn.active.store(false, std::sync::atomic::Ordering::Relaxed);
-    let steps = merge_undo(&mut session.undo, &turn.start_doc, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]));
+    let steps = session.merge_undo_since(&turn.start_doc, turn.start_undo, &trf("ui.agent_chat_undo_label", &[("message", &turn.label)]));
     if chat.ended.as_deref() == Some("")
         && !chat.stopped
         && turn.tools_available
@@ -1748,27 +1747,6 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
         let doc = session.doc.clone();
         chat.push(Item::Changes { steps, doc, undone: false });
     }
-}
-
-/// Merge the undo steps made since `start_doc` (at depth `start_undo`) into one, labelled `label`;
-/// how many steps it took in (0: none were made, or the history no longer reaches that far).
-fn merge_undo(
-    undo: &mut Vec<solidcraft_engine::Snapshot>,
-    start_doc: &Arc<solidcraft_engine::doc::Document>,
-    start_undo: usize,
-    label: &str,
-) -> usize {
-    // The first change of the turn saved the design as it was when the turn began. When the
-    // history is full its oldest steps go, so look for it at or below where it was put.
-    let Some(first) = (0..undo.len().min(start_undo + 1)).rev().find(|&i| undo.get(i).is_some_and(|s| Arc::ptr_eq(&s.doc, start_doc))) else {
-        return 0;
-    };
-    let steps = undo.len() - first;
-    undo.truncate(first + 1);
-    if let Some(s) = undo.get_mut(first) {
-        s.label = label.to_string();
-    }
-    steps
 }
 
 /// Undo a message's changes from the conversation (only while they are the last thing done).
