@@ -5,5 +5,8 @@
  "method": "as 005 with b = 1e-3: the round's end a 1e-3 mm circle on the end face; 107.077487 removed (great circles: 107.322)",
  "body_count": 1,
  "volume_mm3": 47892.922513,
- "faces": 7
+ "faces": 7,
+ "tolerance": {
+  "rel": 1e-06
+ }
 }
