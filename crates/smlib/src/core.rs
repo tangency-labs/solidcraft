@@ -363,6 +363,8 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.is_topological_vertex_rejects_cusps_and_tangent_errors = true;
     f.cone_create_canonical_preserves_inside_out_and_checks_height = true;
     f.point_class_gap_3d_propagates_no_drop_error = true;
+    f.fillet_surface_plane_curve_on_plane_equation = true;
+    f.fillet_extended_rail_end_at_side_edge_crossing = true;
     f
 }
 
