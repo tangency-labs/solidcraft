@@ -7561,7 +7561,7 @@ mod tests {
         let proj = projection(&h.app, rect);
         let bx = BoxSel::from_drag(rect.min + vec2(2.0, 2.0), rect.max - vec2(2.0, 2.0));
         h.app.run("select.filter", json!({"mode": "face"})).unwrap();
-        box_select(&mut h.app, &proj, bx, false);
+        box_select(&mut h.app, &proj, bx.clone(), false);
         let faces = h.app.session.selection.iter().filter(|s| matches!(s, solidcraft_engine::Sel::Face { .. })).count();
         assert!(faces > 0, "a box with the face filter picks faces: {:?}", h.app.session.selection);
         h.app.run("select.filter", json!({"mode": "body"})).unwrap();
