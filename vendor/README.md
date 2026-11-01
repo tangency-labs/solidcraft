@@ -56,6 +56,14 @@ Changes:
   holds what lies outside it. Faces with reversed surfaces (a revolved body's) counted the wrong
   way, and a void dropped every face outside it: a cut beside a sealed void came out empty or
   with the body gone. An OR keeps truck's count.
+- `transversal/integrate/mod.rs`: in an OR with an operand of one shell, a void of the other
+  operand (an inward shell) is not folded in with the other shells but taken with that one shell
+  alone, the faces counted as oriented: what of the void it does not fill is a void of the
+  result. Folded in, the void was taken for a solid of its own: a union beside a small sealed
+  void filled it, and beside a larger one came out open. Not yet: an outward shell after the
+  first (a lump inside a void) is still folded into the outer shell with truck's count, which
+  drops it (a body with a 2 mm cube inside a spherical void, joined with a box across its outer
+  face, loses the cube).
 
 ## truck-geometry 0.5.0 (Apache-2.0, © RICOS Co. Ltd., https://github.com/ricosjp/truck)
 
