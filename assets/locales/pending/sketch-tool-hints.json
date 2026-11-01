@@ -54,5 +54,33 @@
     "sketch.error.offset_fillet_chamfer": "`{id}` es un desfase, y sus esquinas siguen sus curvas origen: redondee o corte las esquinas origen antes de desfasar, o rompa la asociación de desfase primero",
     "sketch.error.nothing_to_break": "no hay nada que romper ahí",
     "sketch.error.closed_curve_two_crossings": "una curva cerrada necesita dos cruces para recortar"
+  },
+  "ca": {
+    "sketch.hint.open_done": "Obert",
+    "sketch.hint.line": "Línia: premeu punts; clic dret o Esc per acabar",
+    "sketch.hint.rectangle.two_point": "Rectangle: premeu dos cantons oposats",
+    "sketch.hint.rectangle.center": "Rectangle centrat: premeu el centre, després un canton",
+    "sketch.hint.rectangle.rounded": "Rectangle arrodonit: premeu dos cantons oposats (Tab al quadre de radi per escriure el radi de cantonada)",
+    "sketch.hint.rectangle.three_point": "Rectangle de 3 punts: premeu dos punts d'un borde, llavors l'amplada",
+    "sketch.hint.circle.center": "Cercle: premeu el centre, llavors un punt a la circumferència",
+    "sketch.hint.arc.three_point": "Arc: premeu inici, fi, llavors un punt a l'arc",
+    "sketch.hint.arc3d": "Arc 3D: premeu inici, fi, llavors un punt a l'arc (els punts poden sortir del pla del bocet)",
+    "sketch.hint.line3d": "Línia 3D: premeu punts al món; clic dret o Esc per acabar (els punts poden sortir del pla del bocet)",
+    "sketch.hint.spline3d": "Spline 3D: premeu punts d'ajust en 3D; clic dret o Esc per acabar",
+    "sketch.hint.point3d": "Punt 3D: premeu on va un punt 3D",
+    "sketch.hint.arc.center_point": "Arc: premeu centre i inici, aneu cap a qualsevol banda i premeu el final, o escriviu un barrat amb signe",
+    "sketch.hint.dimension": "Cota: trieu una o dues entitats i escriviu el valor (o premeu per col·locar-la primer); premeu una cota per editar-la; Entrada aplica",
+    "sketch.hint.constraint.horizontal_vertical": "Horitzontal/Vertical: trieu una línia, dos punts, o un punt i una línia; mantingueu Shift per triar el punt mig d'una línia",
+    "sketch.hint.slot": "Ratlla: premeu ambdós extrems, llavors l'amplada",
+    "sketch.hint.constraint.midpoint": "Punt mig: trieu un punt i una línia, o dues línies per centrar la segona a la primera",
+    "sketch.hint.constraint.generic": "Restricció: trieu les entitats del bocet",
+    "sketch.hint.fallback": "Premeu al bocet",
+    "sketch.hint.trim": "Retallar: premeu el tros de corba a eliminar, o arrossegueu sobre els trossos a eliminar",
+    "sketch.hint.extend": "Estendre: premeu una corba a prop del final per estendre (Shift: premeu dues corbes per estendre-les dues fins on es trobin)",
+    "sketch.hint.break": "Trencar: premeu una corba on ha de dividir-se",
+    "sketch.error.offset_trim": "`{id}` és un desplaçament, i els seus extrems segueixen les seves corbes d'origen: retalleu les corbes d'origen en el seu lloc, o trencau l'associació de desplaçament primer",
+    "sketch.error.offset_fillet_chamfer": "`{id}` és un desplaçament, i les seves cantonades segueixen les seves corbes d'origen: arrodoniu o tallau les cantonades d'origen abans de desplaçar, o trencau l'associació de desplaçament primer",
+    "sketch.error.nothing_to_break": "no hi ha res a trencar aquí",
+    "sketch.error.closed_curve_two_crossings": "una corba tancada necessita dos creuaments per retallar"
   }
 }
