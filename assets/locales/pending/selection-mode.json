@@ -1,0 +1,56 @@
+{
+  "en": {
+    "Faces & edges": "Faces & edges",
+    "Features": "Features",
+    "Sketch geometry": "Sketch geometry",
+    "cmd.select_mode": "Selection Mode",
+    "navbar.description.selection_mode": "Chooses what a click picks: faces and edges, bodies, features, parts, components or sketch geometry.",
+    "navbar.selection.heading": "What a click picks",
+    "navbar.selection_mode": "Selection mode"
+  },
+  "ar": {
+    "Faces & edges": "الأوجه والحواف",
+    "Features": "الميزات",
+    "Sketch geometry": "هندسة الرسم",
+    "cmd.select_mode": "وضع التحديد",
+    "navbar.description.selection_mode": "يختار ما تحدده النقرة: الأوجه والحواف أو الأجسام أو الميزات أو القطع أو المكوّنات أو هندسة الرسم.",
+    "navbar.selection.heading": "ما تحدده النقرة",
+    "navbar.selection_mode": "وضع التحديد"
+  },
+  "he": {
+    "Faces & edges": "פאות ומקצועות",
+    "Features": "פיצ'רים",
+    "Sketch geometry": "גאומטריית סקיצה",
+    "cmd.select_mode": "מצב בחירה",
+    "navbar.description.selection_mode": "קובע מה לחיצה בוחרת: פאות ומקצועות, גופים, פיצ'רים, חלקים, רכיבים או גאומטריית סקיצה.",
+    "navbar.selection.heading": "מה לחיצה בוחרת",
+    "navbar.selection_mode": "מצב בחירה"
+  },
+  "ja": {
+    "Faces & edges": "面とエッジ",
+    "Features": "フィーチャー",
+    "Sketch geometry": "スケッチジオメトリ",
+    "cmd.select_mode": "選択モード",
+    "navbar.description.selection_mode": "クリックで選択する対象（面とエッジ、ボディ、フィーチャー、部品、コンポーネント、スケッチジオメトリ）を切り替えます。",
+    "navbar.selection.heading": "クリックで選択する対象",
+    "navbar.selection_mode": "選択モード"
+  },
+  "vi": {
+    "Faces & edges": "Bề mặt và cạnh",
+    "Features": "Các tính năng",
+    "Sketch geometry": "Hình học phác thảo",
+    "cmd.select_mode": "Chế độ chọn",
+    "navbar.description.selection_mode": "Chọn thứ mà một lần nhấp chuột sẽ chọn: bề mặt và cạnh, thân khối, tính năng, chi tiết, thành phần hoặc hình học phác thảo.",
+    "navbar.selection.heading": "Thứ một lần nhấp chuột chọn",
+    "navbar.selection_mode": "Chế độ chọn"
+  },
+  "zh": {
+    "Faces & edges": "面和边",
+    "Features": "特征",
+    "Sketch geometry": "草图几何",
+    "cmd.select_mode": "选择模式",
+    "navbar.description.selection_mode": "切换单击时选取的对象：面和边、实体、特征、零件、组件或草图几何。",
+    "navbar.selection.heading": "单击选取的对象",
+    "navbar.selection_mode": "选择模式"
+  }
+}

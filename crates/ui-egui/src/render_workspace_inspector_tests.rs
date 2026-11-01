@@ -1938,13 +1938,13 @@ fn appearance_inspector_real_controls_switch_targets_inspect_chain_and_edit_fini
     assert_ne!(h.app.session.doc.appearances.bodies["Subject"].pbr.unwrap().roughness(), 0.32);
     let edited_undo = h.app.session.undo.len();
     h.step(&json!({"click":{"handle":format!("dialog::{}",h.app.tr("render.pick_body"))}})).unwrap();
-    assert!(h.app.ui.pick_bodies);
+    assert_eq!(h.app.ui.pick_mode, solidcraft_engine::PickMode::Bodies);
     assert_eq!(h.app.session.undo.len(), edited_undo);
     h.step(&json!({"click":{"handle":format!("dialog::{}",h.app.tr("render.pick_component"))}})).unwrap();
-    assert!(h.app.ui.pick_components);
+    assert_eq!(h.app.ui.pick_mode, solidcraft_engine::PickMode::Parts);
     assert!(h.widget(h.app.tr("render.inspector_pick_target")).is_some(), "root bodies have no component override target");
     h.step(&json!({"click":{"handle":format!("dialog::{}",h.app.tr("render.pick_face"))}})).unwrap();
-    assert!(!h.app.ui.pick_components && !h.app.ui.pick_bodies);
+    assert_eq!(h.app.ui.pick_mode, solidcraft_engine::PickMode::Faces);
     h.step(&json!({"click":{"handle":format!("dialog::{}",h.app.tr("render.pick_body"))}})).unwrap();
     assert_eq!(h.app.session.undo.len(), edited_undo);
     appearance_inspector_capture(&mut h, "body");
@@ -2402,7 +2402,7 @@ fn appearance_editor_e2_sections_are_ordered_collapsed_and_expand_for_each_metho
     {
         h.app.session.selection = vec![selection];
         if matches!(h.app.session.selection.first(), Some(Sel::Body { .. })) {
-            h.app.ui.pick_components = true;
+            h.app.ui.pick_mode = solidcraft_engine::PickMode::Parts;
         }
         h.frames(3);
         assert!(h.widget(h.app.tr("render.appearance_editor.body_reason")).is_some());
