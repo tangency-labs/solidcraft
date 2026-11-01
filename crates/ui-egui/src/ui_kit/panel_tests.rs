@@ -347,6 +347,23 @@ fn checkbox_grid_and_close_header_are_clickable() {
     assert!(first && second && closed);
 }
 
+/// #9083: Options checkboxes size to their labels when the row fits, so "Reverse Direction" is
+/// not clipped to half the band while empty space sits beside it.
+#[test]
+fn checkbox_grid_gives_a_long_label_its_natural_width() {
+    let ctx = crate::fonts::test_context();
+    let (mut thin, mut reverse) = (false, false);
+    frame(&ctx, vec![], &mut |ui: &mut Ui| {
+        ui.set_width(320.0);
+        scope(ui, |ui| {
+            checkbox_grid(ui, &mut [("Thin Extrude", &mut thin), ("Reverse Direction", &mut reverse)], 2);
+        });
+    });
+    let thin_r = scenario::rect_of("dialog:checkbox:Thin Extrude").expect("Thin Extrude");
+    let reverse_r = scenario::rect_of("dialog:checkbox:Reverse Direction").expect("Reverse Direction");
+    assert!(reverse_r.width() > thin_r.width() + 8.0, "longer label gets a wider cell: thin={} reverse={}", thin_r.width(), reverse_r.width());
+}
+
 #[test]
 fn heading_weight_field_surfaces_and_disclosures_follow_tokens_in_both_themes() {
     fn inspect(shape: &egui::Shape, t: Tokens, title: &mut usize, section: &mut usize, fields: &mut usize) {

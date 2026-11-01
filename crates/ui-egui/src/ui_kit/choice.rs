@@ -292,11 +292,26 @@ pub(crate) fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[Icon
 pub(crate) fn checkbox_grid(ui: &mut Ui, items: &mut [(&str, &mut bool)], columns: usize) {
     let t = Tokens::get();
     let columns = columns.clamp(1, items.len().max(1));
-    let width = ((dimension(ui.available_width()) - t.space_8 * columns.saturating_sub(1) as f32) / columns as f32).max(0.0);
+    let gap = t.space_8 * columns.saturating_sub(1) as f32;
+    let available = (dimension(ui.available_width()) - gap).max(0.0);
+    let equal = (available / columns as f32).max(0.0);
     for chunk in items.chunks_mut(columns) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = vec2(t.space_8, 0.0);
-            for (label, value) in chunk {
+            // Prefer each option's natural width when the row still fits, so "Reverse Direction"
+            // is not clipped to half the Options band while the other half is empty (#9083).
+            let natural: Vec<f32> = chunk
+                .iter()
+                .map(|(label, _)| {
+                    let translated = crate::i18n::tr_label(label);
+                    let text = if translated == "Tangent Chain" { "Tangent chain" } else { translated };
+                    let text_w = ui.fonts_mut(|f| f.layout_no_wrap(text.to_owned(), egui::FontId::proportional(t.font_body), t.form_ink).size().x);
+                    (t.space_14 + t.space_6 + text_w + t.space_8).max(t.control_height)
+                })
+                .collect();
+            let total: f32 = natural.iter().sum();
+            let widths: Vec<f32> = if total <= available + 0.5 { natural } else { chunk.iter().map(|_| equal).collect() };
+            for ((label, value), width) in chunk.iter_mut().zip(widths) {
                 let (rect, mut response) = ui.allocate_exact_size(vec2(width, t.form_checkbox_height), egui::Sense::click());
                 if response.clicked() {
                     **value = !**value;
@@ -308,6 +323,7 @@ pub(crate) fn checkbox_grid(ui: &mut Ui, items: &mut [(&str, &mut bool)], column
                 let text = if translated == "Tangent Chain" { "Tangent chain" } else { translated };
                 let text_rect = egui::Rect::from_min_max(egui::pos2((square.right() + t.space_6).min(rect.right()), rect.top()), rect.max);
                 paint_text(ui, text_rect, text, egui::FontId::proportional(t.font_body), t.form_ink, false);
+                response = response.on_hover_text(translated);
                 response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), **value, translated));
                 scenario::publish_target_as(&format!("dialog:{label}"), &format!("dialog:checkbox:{label}"), rect);
             }

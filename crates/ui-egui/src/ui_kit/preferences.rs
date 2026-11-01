@@ -664,7 +664,9 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
     } else {
         t.space_24 * 3.0 + t.space_3
     };
-    let label_height = if matches!(figure, PreferenceFigure::ContactShading(_)) { t.space_16 * 2.0 } else { t.space_16 };
+    // Theme names like "Gruvbox Dark Hard" need two lines; ContactShading already did (#9083).
+    let label_rows = if matches!(figure, PreferenceFigure::ContactShading(_) | PreferenceFigure::Theme { .. }) { 2 } else { 1 };
+    let label_height = t.space_16 * label_rows as f32;
     let height = preview_height + t.space_6 * 2.0 + t.space_4 + label_height + if note.is_some() { t.space_16 } else { 0.0 };
     let enabled = enabled && ui.is_enabled();
     let (rect, response) = ui.allocate_exact_size(
@@ -705,7 +707,7 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
         label,
         if selected { crate::fonts::semibold(t.font_label) } else { FontId::proportional(t.font_label) },
         ink,
-        if matches!(figure, PreferenceFigure::ContactShading(_)) { 2 } else { 1 },
+        label_rows,
     );
     if let Some(note) = note {
         centred_text(
