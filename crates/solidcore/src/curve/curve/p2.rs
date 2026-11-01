@@ -180,6 +180,12 @@
 //!   `SM_CP_PERPENDICULAR_TO_VECTOR` and `SM_CP_MAXIMA_TO_PLANE`, and
 //!   [`CurvePropertyGs::new`] populates [`GlobalSolver::opt_vectors`] (`base.opt_vectors`)
 //!   instead of leaving the base `SmGlobalSolver::m_cpOptVectors` shadowed and empty.
+//! - **Conic zero-tangent evaluation (`WR-27`, #2202).** [`Curve::evaluate`],
+//!   [`Curve::evaluate_into`], and `<Conic as CurveEvaluate>::evaluate` forward
+//!   [`Kernel::fixes`] ([`crate::kernel::UpstreamFixes::conic_evaluate_uses_computed_second_deriv`])
+//!   to [`Conic::evaluate_with_fixes`], using the computed second derivative in
+//!   `SmConic::Evaluate`'s `bNonZeroTangents` fallback when `num_derivs == 2`
+//!   (off by default for pinned C++ parity).
 
 use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::conic::Conic;
@@ -430,13 +436,13 @@ impl CurveEvaluate for Conic {
 
     fn evaluate(
         &self,
-        _k: &Kernel,
+        k: &Kernel,
         t: f64,
         num_derivs: usize,
         _from_left: bool,
         non_zero_tangents: bool,
     ) -> Result<Vec<Vec3>> {
-        Self::evaluate(self, t, num_derivs, non_zero_tangents)
+        Self::evaluate_with_fixes(self, t, num_derivs, non_zero_tangents, &k.fixes)
     }
 
     fn evaluate_point(&self, _k: &Kernel, t: f64) -> Result<Point3> {
@@ -1351,7 +1357,9 @@ impl Curve {
             CurveKind::Ellipse(c) => c
                 .base()
                 .evaluate(t, num_derivs, from_left, non_zero_tangents),
-            CurveKind::Conic(c) => c.evaluate(t, num_derivs, non_zero_tangents),
+            CurveKind::Conic(c) => {
+                c.evaluate_with_fixes(t, num_derivs, non_zero_tangents, &k.fixes)
+            }
             CurveKind::Parabola(c) => {
                 c.base()
                     .evaluate(t, num_derivs, from_left, non_zero_tangents)

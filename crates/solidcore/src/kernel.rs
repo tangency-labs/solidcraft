@@ -432,6 +432,17 @@ pub struct UpstreamFixes {
     /// `plan/upstream-issues/WR-167--addendum-2026-11-01-masked-array-bit-shift.md`).
     /// Off by default for pinned C++ parity.
     pub masked_array_uses_bit_shift: bool,
+    /// `SmConic::Evaluate` ([`crate::curve::conic::Conic::evaluate_with_fixes`], forwarded by
+    /// [`crate::curve::curve::Curve::evaluate`], [`crate::curve::curve::Curve::evaluate_into`],
+    /// and `<Conic as CurveEvaluate>::evaluate`) uses the computed second derivative `sSec`
+    /// when `bNonZeroTangents` replaces a near-zero first derivative (`|C'| < 1.1 * dScaledZero`)
+    /// for `lNumDerivatives == 2`, scaling `sSec` to `1.1 * dScaledZero` (negated above the
+    /// natural interval midpoint) when `|sSec| > 1.1 * dScaledZero`. Pinned v1.0.1 reads
+    /// `aPointAndDerivatives[2]` (`Vec3::UNDEF` on a fresh array, never exceeding
+    /// `1.1 * dScaledZero`) before writing `sSec` into slot `2` (WR-27, #2202;
+    /// `plan/upstream-issues/WR-27--addendum-2026-11-01-conic-zero-tangent-second-deriv.md`).
+    /// Off by default for pinned C++ parity.
+    pub conic_evaluate_uses_computed_second_deriv: bool,
     /// The local solves take no value from a failed evaluation (WR-253; the fork's tangency-labs/smlib@d2757e1). The one-dimensional ones ignore a failed guess in `SolveOscillating`'s sign-change search (#481), and `SmLocalSolve1d::SolveIt` without an interval returns a failed first evaluation's status instead of iterating from it (no caller solves without an interval). The N-dimensional one (`SmLocalSolveNd::SolveIt`) sums no equations of a failed clamped or scaled evaluation, takes the clamped-and-scaled step only when it evaluated, and then with that evaluation's Jacobian and found flag (upstream kept the unscaled point's), stops the line search when the clamped step failed and no scaled one was taken, and finds no solution when the best guess cannot be re-evaluated (#1945), nor when the guess's first evaluation fails, where upstream reports the unevaluated guess as found (WR-20; the fork's tangency-labs/smlib@d5c5cfd).
     pub oscillating_skips_failed_guesses: bool,
     /// `sm_RefineCCSolutions` judges a range end's shift by its distance from 1 (WR-383, #527).

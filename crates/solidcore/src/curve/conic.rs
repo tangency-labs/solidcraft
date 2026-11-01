@@ -16,7 +16,7 @@
 //! | [`Conic::calculate_continuities`]      | `SmConic::CalculateContinuities`               |
 //! | [`Conic::natural_interval`]            | `SmConic::GetNaturalInterval`                  |
 //! | [`Conic::knots`]                       | `SmConic::GetKnots`                            |
-//! | [`Conic::evaluate`]                    | `SmConic::Evaluate`                            |
+//! | [`Conic::evaluate`], [`Conic::evaluate_with_fixes`] | `SmConic::Evaluate`               |
 //! | [`Conic::evaluate_point`]              | `SmConic::EvaluatePoint`                       |
 //! | [`Conic::compute_implicit_equation`]   | `SmConic::ComputeImplicitEquation`             |
 //! | [`Conic::intersect_implicit_conic`]    | `SmConic::IntersectImplicitConic`              |
@@ -44,10 +44,14 @@
 //!   becomes a `Vec` of [`ConicIntersection`]; `IntersectImplicitConic`'s
 //!   multiplicity array (never written) is dropped; `InvertPointOnConic`'s success
 //!   flag and parameter become an `Option`.
-//! - **Uninitialised data.** `Evaluate`'s zero-tangent fix reads the second
-//!   derivative slot of the caller's array *before* writing it; the port reads a
-//!   fresh `SmVector3d` there ([`Vec3::UNDEF`]), whose length never exceeds the
-//!   threshold, so the fix never fires (`plan/findings.md`). `EvaluatePoint` of an
+//! - **Uninitialised data.** By default (`WR-27`,
+//!   `plan/findings/curve.conic--notes.md`), `Evaluate`'s zero-tangent fix reads
+//!   the second-derivative slot of the caller's array *before* writing it; the
+//!   port reads a fresh `SmVector3d` there ([`Vec3::UNDEF`]), whose length never
+//!   exceeds the threshold, so the fix never fires. With the opt-in
+//!   [`UpstreamFixes::conic_evaluate_uses_computed_second_deriv`],
+//!   [`Conic::evaluate_with_fixes`] (and [`crate::curve::curve::Curve::evaluate`])
+//!   uses the computed second derivative instead. `EvaluatePoint` of an
 //!   [`ConicType::Unknown`] conic leaves `x`, `y` of the caller's point unwritten;
 //!   the port starts from a fresh point ([`crate::math::UNDEF_DOUBLE`]).
 //!   `IntersectImplicitConic` (and so `IntersectConic`) of an unknown conic solves a
@@ -70,6 +74,7 @@ use crate::geom::polynomial::{solve_quadratic, solve_quartic};
 use crate::geom::tol::is_zero;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::kernel::UpstreamFixes;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQRT, UNDEF_DOUBLE};
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
@@ -302,11 +307,12 @@ impl Conic {
         (knots, mults)
     }
 
-    /// Position and the first `num_derivs` derivatives at `param` (`Evaluate`).
+    /// Position and the first `num_derivs` derivatives at `param` (`Evaluate`), with
+    /// default pinned SMLib behaviour ([`UpstreamFixes::default`]).
     ///
     /// With `non_zero_tangents` and two derivatives, upstream's zero-tangent fix
-    /// reads the not yet written second-derivative slot (see the module
-    /// deviations).
+    /// reads the not yet written second-derivative slot (`WR-27`; see
+    /// [`Self::evaluate_with_fixes`] for the opt-in fix).
     ///
     /// # Errors
     ///
@@ -317,6 +323,36 @@ impl Conic {
         param: f64,
         num_derivs: usize,
         non_zero_tangents: bool,
+    ) -> Result<Vec<Vec3>> {
+        self.evaluate_with_fixes(
+            param,
+            num_derivs,
+            non_zero_tangents,
+            &UpstreamFixes::default(),
+        )
+    }
+
+    /// Position and the first `num_derivs` derivatives at `param` (`Evaluate`),
+    /// honouring [`UpstreamFixes::conic_evaluate_uses_computed_second_deriv`] (`WR-27`).
+    ///
+    /// When `fixes.conic_evaluate_uses_computed_second_deriv` is `false` (default),
+    /// the `non_zero_tangents` fallback for `num_derivs == 2` reads the unwritten
+    /// slot `out[2]` ([`Vec3::UNDEF`]), matching pinned v1.0.1 C++ on a fresh buffer.
+    /// When `true`, it uses the computed second derivative `sec` to orient and scale
+    /// a near-zero first derivative (`|tan| < 1.1 * scaled_zero`) whenever
+    /// `|sec| > 1.1 * scaled_zero` (negating above the midpoint of
+    /// [`Self::natural_interval`]).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` for `num_derivs > 2` (upstream also fills the first three
+    /// vectors).
+    pub fn evaluate_with_fixes(
+        &self,
+        param: f64,
+        num_derivs: usize,
+        non_zero_tangents: bool,
+        fixes: &UpstreamFixes,
     ) -> Result<Vec<Vec3>> {
         // At most three slots: `num_derivs > 2` is `SM_ERR` below, so a huge caller
         // order must not size the allocation.
@@ -418,9 +454,14 @@ impl Conic {
             // continuous modified function)
             if tan.length_squared() < new_len * new_len {
                 // num_derivs >= 2 here: upstream's recursion for fewer derivatives
-                // cannot be reached. Fix the zero 1st derivative function here; the
-                // 2nd derivative slot still holds the caller's (fresh) value.
-                let second = out.get(2).copied().unwrap_or(Vec3::UNDEF);
+                // cannot be reached. Fix the zero 1st derivative function here; by
+                // default (WR-27) the 2nd derivative slot still holds the caller's
+                // fresh value (`Vec3::UNDEF`), whereas the opt-in fix uses `sec`.
+                let second = if fixes.conic_evaluate_uses_computed_second_deriv {
+                    sec
+                } else {
+                    out.get(2).copied().unwrap_or(Vec3::UNDEF)
+                };
                 let len = second.length();
                 if len > new_len {
                     let mut fixed = (new_len / len) * second;
@@ -897,7 +938,9 @@ impl Conic {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::curve::curve::{Curve, CurveEvaluate};
     use crate::geom::tol::ZONE_TOL_3D;
+    use crate::kernel::Kernel;
     use crate::math::PI;
 
     #[test]
@@ -1002,5 +1045,206 @@ mod tests {
         let c = Conic::read_from_db(&mut db).unwrap();
         assert_eq!(c.conic_type(), ConicType::Line);
         assert_eq!(c.a(), 0.5);
+    }
+
+    #[test]
+    fn wr27_flag_lookup_and_toggle() {
+        let name = "conic_evaluate_uses_computed_second_deriv";
+        assert!(UpstreamFixes::NAMES.contains(&name));
+
+        let mut k = Kernel::default();
+        assert!(!k.fixes.conic_evaluate_uses_computed_second_deriv);
+        assert_eq!(k.fixes.flag_mut(name).copied(), Some(false));
+
+        *k.fixes.flag_mut(name).unwrap() = true;
+        assert!(k.fixes.conic_evaluate_uses_computed_second_deriv);
+        assert_eq!(k.fixes.flag_mut(name).copied(), Some(true));
+
+        *k.fixes.flag_mut(name).unwrap() = false;
+        assert_eq!(k.fixes, UpstreamFixes::default());
+    }
+
+    #[test]
+    fn wr27_zero_and_tiny_tangent_ellipse_uses_computed_second_deriv() {
+        let fixes_off = UpstreamFixes::default();
+        let fixes_on = UpstreamFixes {
+            conic_evaluate_uses_computed_second_deriv: true,
+            ..Default::default()
+        };
+
+        // Flat horizontal ellipse (a = 2, b = 0): natural interval [-1, 3], mid = 1.
+        // At param = 0 (< mid): pos = (2, 0, 0), tan = (0, 0, 0), sec = (-8, 0, 0).
+        let flat = Conic::new(ConicType::Ellipse, 2.0, 0.0);
+        let new_len = 1.1 * (EFF_ZERO * (1.0 + 2.0));
+
+        let v_def = flat.evaluate_with_fixes(0.0, 2, true, &fixes_off).unwrap();
+        assert_eq!(v_def, flat.evaluate(0.0, 2, true).unwrap());
+        assert_eq!(v_def[0], Vec3::new(2.0, 0.0, 0.0));
+        // Default reads out[2] = Vec3::UNDEF (length ~2.14e-61 <= new_len), leaving tan zero.
+        assert_eq!(v_def[1], Vec3::ZERO);
+        assert_eq!(v_def[2], Vec3::new(-8.0, 0.0, 0.0));
+
+        let v_fix = flat.evaluate_with_fixes(0.0, 2, true, &fixes_on).unwrap();
+        let expected_0 = (new_len / v_fix[2].length()) * v_fix[2];
+        assert_eq!(v_fix[0], Vec3::new(2.0, 0.0, 0.0));
+        assert_eq!(v_fix[1], expected_0);
+        assert!(v_fix[1].x < 0.0 && v_fix[1].y == 0.0 && v_fix[1].z == 0.0);
+        assert!((v_fix[1].length() - new_len).abs() <= 1.0e-27);
+        assert_eq!(v_fix[2], Vec3::new(-8.0, 0.0, 0.0));
+
+        // At param = 2 (> mid = 1): pos = (-2, 0, 0), tan = 0, sec = (+8, 0, 0);
+        // entering upper domain half negates the fallback tangent so it points along -X.
+        let v_def_top = flat.evaluate_with_fixes(2.0, 2, true, &fixes_off).unwrap();
+        assert_eq!(v_def_top[1], Vec3::ZERO);
+        assert_eq!(v_def_top[2], Vec3::new(8.0, 0.0, 0.0));
+
+        let v_fix_top = flat.evaluate_with_fixes(2.0, 2, true, &fixes_on).unwrap();
+        let mut expected_2 = (new_len / v_fix_top[2].length()) * v_fix_top[2];
+        expected_2 *= -1.0;
+        assert_eq!(v_fix_top[0], Vec3::new(-2.0, 0.0, 0.0));
+        assert_eq!(v_fix_top[1], expected_2);
+        assert!(v_fix_top[1].x < 0.0);
+        assert_eq!(v_fix_top[2], Vec3::new(8.0, 0.0, 0.0));
+
+        // Tiny non-zero tangent (|tan| = 2e-15 < new_len = 3.3e-12) also triggers the fallback.
+        let tiny = Conic::new(ConicType::Ellipse, 2.0, 1.0e-15);
+        let t_def = tiny.evaluate_with_fixes(0.0, 2, true, &fixes_off).unwrap();
+        assert_eq!(t_def[1], Vec3::new(0.0, 2.0e-15, 0.0));
+        assert!(t_def[1].length() < new_len);
+
+        let t_fix = tiny.evaluate_with_fixes(0.0, 2, true, &fixes_on).unwrap();
+        assert_eq!(t_fix[1], expected_0);
+        // With non_zero_tangents = false, exact tangent is preserved even under opt-in.
+        let t_exact = tiny.evaluate_with_fixes(0.0, 2, false, &fixes_on).unwrap();
+        assert_eq!(t_exact[1], Vec3::new(0.0, 2.0e-15, 0.0));
+
+        // Vertical degenerate ellipse (a = 0, b = 3) at -1 (< mid), 1 (== mid), and 3 (> mid).
+        let vert = Conic::new(ConicType::Ellipse, 0.0, 3.0);
+        let v_len = 1.1 * (EFF_ZERO * (1.0 + 3.0));
+        let vm1 = vert.evaluate_with_fixes(-1.0, 2, true, &fixes_on).unwrap();
+        assert!(vm1[1].y > 0.0 && (vm1[1].length() - v_len).abs() <= 1.0e-27);
+        let vp1 = vert.evaluate_with_fixes(1.0, 2, true, &fixes_on).unwrap();
+        assert!(vp1[1].y < 0.0 && (vp1[1].length() - v_len).abs() <= 1.0e-27);
+        let vp3 = vert.evaluate_with_fixes(3.0, 2, true, &fixes_on).unwrap();
+        assert!(vp3[1].y < 0.0 && (vp3[1].length() - v_len).abs() <= 1.0e-27);
+    }
+
+    #[test]
+    fn wr27_hyperbola_transformed_conic_and_curve_dispatch() {
+        let k_def = Kernel::default();
+        let mut k_fix = Kernel::default();
+        k_fix.fixes.conic_evaluate_uses_computed_second_deriv = true;
+
+        // Degenerate hyperbola (a = 2, b = 0), natural interval mid = 0.
+        let hyp = Conic::new(ConicType::Hyperbola, 2.0, 0.0);
+        let h_len = 1.1 * (EFF_ZERO * (1.0 + 2.0));
+        let h0_def = hyp.evaluate_with_fixes(0.0, 2, true, &k_def.fixes).unwrap();
+        assert_eq!(h0_def[1], Vec3::ZERO);
+        let h0_fix = hyp.evaluate_with_fixes(0.0, 2, true, &k_fix.fixes).unwrap();
+        assert!(h0_fix[1].x > 0.0 && (h0_fix[1].length() - h_len).abs() <= 1.0e-27);
+
+        // Above mid (param = 1e-15 > 0): |tan| = 8e-15 < 3.3e-12, negated to -X.
+        let hp_fix = hyp
+            .evaluate_with_fixes(1.0e-15, 2, true, &k_fix.fixes)
+            .unwrap();
+        assert!(hp_fix[1].x < 0.0);
+
+        // Rotated & translated degenerate ellipse dispatched via Curve and CurveEvaluate.
+        let mut rot = Conic::new(ConicType::Ellipse, 2.0, 0.0);
+        rot.transform_2d(PI / 3.0, Vec2::new(10.0, -4.0));
+        let crv = Curve::from(rot);
+        let pos = rot.evaluate_point(0.0);
+        let r_len = 1.1 * (EFF_ZERO * (1.0 + pos.max_dimension()));
+
+        let c_def = crv.evaluate(&k_def, 0.0, 2, false, true).unwrap();
+        assert_eq!(c_def[1], Vec3::ZERO);
+
+        let c_fix = crv.evaluate(&k_fix, 0.0, 2, false, true).unwrap();
+        let direct_fix = rot.evaluate_with_fixes(0.0, 2, true, &k_fix.fixes).unwrap();
+        let trait_fix = CurveEvaluate::evaluate(&rot, &k_fix, 0.0, 2, true, true).unwrap();
+        assert_eq!(c_fix, direct_fix);
+        assert_eq!(trait_fix, direct_fix);
+        assert!((c_fix[1].length() - r_len).abs() <= 1.0e-25);
+        assert!(c_fix[1].dot(c_fix[2]) > 0.0);
+
+        let mut buf = [Vec3::new(99.0, -77.0, 55.0); 3];
+        crv.evaluate_into(&k_def, 0.0, false, true, &mut buf)
+            .unwrap();
+        assert_eq!(buf.as_slice(), c_def.as_slice());
+
+        buf = [Vec3::new(99.0, -77.0, 55.0); 3];
+        crv.evaluate_into(&k_fix, 0.0, false, true, &mut buf)
+            .unwrap();
+        assert_eq!(buf.as_slice(), c_fix.as_slice());
+
+        // Totally collapsed conic (sec == 0): len > new_len is false in both modes (no NaN).
+        let zero_conic = Conic::new(ConicType::Ellipse, 0.0, 0.0);
+        assert_eq!(
+            zero_conic
+                .evaluate_with_fixes(0.0, 2, true, &k_def.fixes)
+                .unwrap(),
+            zero_conic
+                .evaluate_with_fixes(0.0, 2, true, &k_fix.fixes)
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn wr27_non_degenerate_and_other_deriv_orders_identical() {
+        let fixes_off = UpstreamFixes::default();
+        let fixes_on = UpstreamFixes {
+            conic_evaluate_uses_computed_second_deriv: true,
+            ..Default::default()
+        };
+
+        let mut ellipse = Conic::new(ConicType::Ellipse, 2.0, 1.0);
+        ellipse.transform_2d(0.35, Vec2::new(1.5, -0.5));
+        let mut hyperbola = Conic::new(ConicType::Hyperbola, 1.5, 0.7);
+        hyperbola.transform_2d(-0.2, Vec2::new(-0.4, 2.1));
+        let mut parabola = Conic::new(ConicType::Parabola, 1.2, 0.0);
+        parabola.transform_2d(0.6, Vec2::new(0.2, 0.8));
+        let mut line = Conic::new(ConicType::Line, 0.5, 0.0);
+        line.transform_2d(-0.9, Vec2::new(-3.0, 1.0));
+
+        for conic in [ellipse, hyperbola, parabola, line] {
+            for param in [-0.6, 0.0, 0.4, 0.85] {
+                for nzt in [false, true] {
+                    for d in [0, 1, 2] {
+                        assert_eq!(
+                            conic
+                                .evaluate_with_fixes(param, d, nzt, &fixes_off)
+                                .unwrap(),
+                            conic.evaluate_with_fixes(param, d, nzt, &fixes_on).unwrap(),
+                        );
+                    }
+                    assert!(conic
+                        .evaluate_with_fixes(param, 3, nzt, &fixes_off)
+                        .is_err());
+                    assert!(conic.evaluate_with_fixes(param, 3, nzt, &fixes_on).is_err());
+                }
+            }
+        }
+
+        // Even on a zero-tangent conic, derivative orders 0, 1, and 3 behave identically.
+        let degen = Conic::new(ConicType::Ellipse, 2.0, 0.0);
+        for param in [0.0, 2.0] {
+            for d in [0, 1] {
+                assert_eq!(
+                    degen
+                        .evaluate_with_fixes(param, d, true, &fixes_off)
+                        .unwrap(),
+                    degen
+                        .evaluate_with_fixes(param, d, true, &fixes_on)
+                        .unwrap(),
+                );
+            }
+            let err_off = degen
+                .evaluate_with_fixes(param, 3, true, &fixes_off)
+                .unwrap_err();
+            let err_on = degen
+                .evaluate_with_fixes(param, 3, true, &fixes_on)
+                .unwrap_err();
+            assert_eq!(format!("{err_off:?}"), format!("{err_on:?}"));
+        }
     }
 }
