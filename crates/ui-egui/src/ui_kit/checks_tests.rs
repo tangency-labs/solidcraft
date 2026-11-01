@@ -247,6 +247,9 @@ fn actual_config_appearance_preferences_and_menu_boxes_and_ticks_match_at_1x_2x(
                 appearance.pbr = Some(Default::default());
                 appearance.local.overwrite = true;
                 app.ui.pick_bodies = true;
+                // The SELECT panel's checkbox is the component pick now (the body pick is the
+                // type filter's Solid body row).
+                app.ui.pick_components = name == "menu";
                 if name == "preferences" {
                     crate::prefs::open_at(&mut app, crate::prefs::PAGE_GRAPHICS);
                 }

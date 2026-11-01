@@ -14,7 +14,6 @@
   },
   "zh": {
     "No selection filter": "无选择过滤器",
-    "No filter": "无过滤器",
     "Sketch": "草图",
     "Machining feature": "加工特征",
     "Datum coordinate system": "坐标系",
@@ -64,5 +63,44 @@
     "Point": "점",
     "Sheet body": "시트 바디",
     "View": "뷰"
+  },
+  "ar": {
+    "No selection filter": "بلا مرشّح اختيار",
+    "Machining feature": "ميزة تشغيل",
+    "Datum coordinate system": "نظام إحداثيات مرجعي",
+    "Datum": "مرجع",
+    "Solid body": "جسم صلب",
+    "Curve": "منحنى",
+    "Curve feature": "ميزة منحنى",
+    "Point": "نقطة",
+    "Sheet body": "جسم صفيحي",
+    "Sketch": "رسم تخطيطي",
+    "View": "منظر"
+  },
+  "he": {
+    "No selection filter": "ללא מסנן בחירה",
+    "Machining feature": "תכונת עיבוד",
+    "Datum coordinate system": "מערכת צירים",
+    "Datum": "דאטום",
+    "Solid body": "גוף מוצק",
+    "Curve": "עקומה",
+    "Curve feature": "תכונת עקומה",
+    "Point": "נקודה",
+    "Sheet body": "גוף יריעתי",
+    "Sketch": "סקיצה",
+    "View": "תצוגה"
+  },
+  "vi": {
+    "No selection filter": "Không có bộ lọc chọn",
+    "Machining feature": "Tính năng gia công",
+    "Datum coordinate system": "Hệ tọa độ chuẩn",
+    "Datum": "Chuẩn",
+    "Solid body": "Khối đặc",
+    "Curve": "Đường cong",
+    "Curve feature": "Tính năng đường cong",
+    "Point": "Điểm",
+    "Sheet body": "Khối tấm",
+    "Sketch": "Bản phác",
+    "View": "Khung nhìn"
   }
 }
