@@ -251,6 +251,24 @@ fn with_fallback(mut fonts: egui::FontDefinitions, name: &str, bytes: Vec<u8>) -
     Some(fonts)
 }
 
+/// `fonts` with the Georgian fallback moved ahead of Hack. Hack (egui's built-in last resort, see
+/// [`with_symbol_fallback`]) has Mkhedruli in a monospace design, so a fallback after it would
+/// only ever draw the Asomtavruli and Mtavruli letters Hack lacks. The monospace family keeps Hack's
+/// own design.
+fn georgian_before_symbols(mut fonts: egui::FontDefinitions) -> egui::FontDefinitions {
+    for family in sans_families() {
+        let Some(list) = fonts.families.get_mut(&family) else { continue };
+        if let Some(georgian) = list.iter().position(|name| name == GEORGIAN_FALLBACK)
+            && let Some(hack) = list.iter().position(|name| name == SYMBOL_FALLBACK)
+            && georgian > hack
+        {
+            let item = list.remove(georgian);
+            list.insert(hack, item);
+        }
+    }
+    fonts
+}
+
 /// Use one primary CJK face for mixed-script labels in every sans weight family.
 /// An explicit interface font stays first; Plex and the other fallbacks remain available.
 fn promote_font_to_front(fonts: &mut FontDefinitions, name: &str) {
@@ -911,6 +929,7 @@ fn install_fonts(ctx: &egui::Context, language: &str, ui_font: &str, system: Opt
             fonts = with_fallback;
         }
     }
+    fonts = georgian_before_symbols(fonts);
     if needs_cjk_font(language) {
         // Select the first installed face in language order (a duplicate Chinese face may
         // already be installed as CJK_FALLBACK). Keep explicit interface choices ahead of it.
@@ -1384,9 +1403,15 @@ mod tests {
             ctx.run_ui(egui::RawInput::default(), |_| {}).textures_delta.clear();
             ctx.fonts_mut(|f| f.has_glyphs(&egui::FontId::proportional(14.0), "გამარჯობა"))
         };
-        assert!(!georgian(base_font_definitions()), "the bundled faces have no Georgian");
+        // Hack draws Mkhedruli too, so the system face must come before it to be the one used.
         let Some(bytes) = found.into_iter().next() else { return };
-        assert!(georgian(with_fallback(base_font_definitions(), GEORGIAN_FALLBACK, bytes).unwrap()), "Georgian draws with the fallback");
+        let fonts = georgian_before_symbols(with_fallback(base_font_definitions(), GEORGIAN_FALLBACK, bytes).unwrap());
+        for family in sans_families() {
+            let list = &fonts.families[&family];
+            let at = |name: &str| list.iter().position(|entry| entry == name).unwrap();
+            assert!(at(GEORGIAN_FALLBACK) < at(SYMBOL_FALLBACK), "the Georgian face comes before Hack");
+        }
+        assert!(georgian(fonts), "Georgian draws with the fallback");
     }
 
     /// What a Hebrew interface shows depends on egui's own shaping as much as on `bidi::visual`:
