@@ -30,7 +30,13 @@ pub struct AddState {
     pub key: String,
     /// Seconds one model request may take.
     pub request_timeout_s: u64,
+    /// Optional reasoning effort sent as `reasoning_effort`; empty sends nothing.
+    pub reasoning_effort: String,
     pub error: Option<String>,
+    /// Editing this added agent (its id) instead of adding a new one.
+    pub editing: Option<String>,
+    /// Editing an endpoint whose key is in the keychain: an empty key field keeps it.
+    pub saved_key: bool,
     test: Option<Test>,
 }
 
@@ -169,6 +175,41 @@ pub fn open_add(app: &mut SolveApp) {
     });
 }
 
+/// Open the agent dialog on an agent you added, filled with what it holds. The key is never read
+/// back: its field stays empty, and saving with it empty keeps the stored key. Returns false when
+/// `id` is not an added agent (found agents have nothing of yours to edit).
+pub fn open_edit(app: &mut SolveApp, id: &str) -> bool {
+    let Some(c) = app.preferences.agents.iter().find(|c| c.id == id) else { return false };
+    let mut s = AddState {
+        name: c.name.clone(),
+        request_timeout_s: c.request_timeout_s.clamp(agents::MIN_REQUEST_TIMEOUT_S, agents::MAX_REQUEST_TIMEOUT_S),
+        reasoning_effort: c.reasoning_effort.clone(),
+        editing: Some(c.id.clone()),
+        ..Default::default()
+    };
+    if c.kind.is_api() {
+        let protocol = if c.kind == Kind::Anthropic { Protocol::Anthropic } else { Protocol::OpenAi };
+        let presets = agents::presets(protocol);
+        // The Ollama preset stays chosen even if its URL was changed, as `ollama` records.
+        let preset = if protocol == Protocol::OpenAi && c.ollama {
+            Some(0)
+        } else {
+            presets.iter().position(|p| agents::normalize_url(p.base_url).ok().as_deref() == Some(c.base_url.as_str()))
+        };
+        s.kind = AddKind::Api;
+        s.protocol = protocol;
+        s.preset = preset.unwrap_or(presets.len());
+        s.base_url = c.base_url.clone();
+        s.model = c.model.clone();
+        s.saved_key = c.key;
+    } else {
+        s.kind = AddKind::Custom;
+        s.command = c.command.clone();
+    }
+    app.agent_chat.settings.add = Some(s);
+    true
+}
+
 /// Take `index` from the protocol's presets, or make the URL empty for a custom endpoint.
 pub(super) fn choose_preset(s: &mut AddState, protocol: Protocol, index: usize) {
     s.protocol = protocol;
@@ -221,6 +262,13 @@ fn timeout_field(ui: &mut egui::Ui, secs: &mut u64, handle: &str) -> bool {
     r.changed()
 }
 
+/// The free-text reasoning effort field with its hover hint; true when the text changed.
+fn effort_field(ui: &mut egui::Ui, effort: &mut String) -> bool {
+    ui_kit::cell_editor(ui, ui.id().with("ai_reasoning_effort"), effort, tr("ui.ai_reasoning_effort_field_hint"), false)
+        .on_hover_text(tr("ui.ai_reasoning_effort_hint"))
+        .changed()
+}
+
 fn test_line(ui: &mut egui::Ui, test: &Option<&Test>) {
     match test {
         Some(Test::Running(_)) => {
@@ -249,6 +297,12 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let response = ui_kit::checkbox(ui, tr("ui.ai_toolbar_button"), &mut app.preferences.ai_toolbar_button)
                     .on_hover_text(tr("ui.ai_toolbar_button_note"));
                 crate::scenario::publish_handle("prefs:ai_toolbar_button", response.rect.center());
+                let response = ui_kit::checkbox(ui, tr("ai.prefs.connect_at_start"), &mut app.preferences.agent_connect_at_start)
+                    .on_hover_text(tr("ai.prefs.connect_at_start_note"));
+                crate::scenario::publish_handle("prefs:agent_connect_at_start", response.rect.center());
+                let response = ui_kit::checkbox(ui, tr("ai.prefs.open_at_start"), &mut app.preferences.agent_chat_open_at_start)
+                    .on_hover_text(tr("ai.prefs.open_at_start_note"));
+                crate::scenario::publish_handle("prefs:agent_chat_open_at_start", response.rect.center());
             }
             let response = ui_kit::checkbox(ui, tr("ai.prefs.background_commands"), &mut app.preferences.agent_off_thread)
                 .on_hover_text(tr("ui.agent_off_thread_note"));
@@ -267,7 +321,8 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !cfg!(target_arch = "wasm32") && app.preferences.ai_features {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            if app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
+            let browsing = !crate::prefs_search::querying(ui) || app.prefs_window.section == crate::prefs::PAGE_ASSISTANT;
+            if browsing && app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
                 refresh(app, &ui.ctx().clone());
             }
             agents_section(app, ui);
@@ -397,7 +452,9 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let default = if all.iter().any(|e| &e.id == d) { Some(d.clone()) } else { all.first().map(|e| e.id.clone()) };
     let mut remove: Option<String> = None;
     let mut test: Option<agents::Entry> = None;
+    let mut edit: Option<String> = None;
     let mut retimed: Option<(String, u64)> = None;
+    let mut reeffort: Option<(String, String)> = None;
     let t = crate::theme::Tokens::get();
     ui_kit::settings_section(ui, "agents", tr("ui.ai_agents"), |ui| {
         if app.agent_chat.detecting.is_some() {
@@ -436,6 +493,13 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                         if test_button.on_hover_text(tr(tip)).clicked() {
                             test = Some(entry.clone());
                         }
+                        if !entry.found {
+                            let edit_button = ui_kit::button(ui, tr("ui.ai_edit"), ui_kit::Button::Small);
+                            crate::scenario::publish_handle(&format!("prefs:ai_edit:{}", entry.id), edit_button.rect.center());
+                            if edit_button.on_hover_text(tr("ui.ai_edit_tip")).clicked() {
+                                edit = Some(entry.id.clone());
+                            }
+                        }
                         if !entry.found && ui_kit::button(ui, tr("ui.ai_remove"), ui_kit::Button::Ghost).clicked() {
                             remove = Some(entry.id.clone());
                         }
@@ -451,8 +515,11 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                     });
                     ui_kit::settings_short_note(ui, &entry.detail());
-                    // Wide enough for an endpoint's "Request timeout" too, so both rows line up.
-                    let label_w = (t.form_label_width + t.space_16).max(ui_kit::ContentWidth::label(ui, tr("ui.ai_request_timeout")) + t.space_16);
+                    // Wide enough for an endpoint's "Request timeout" or "Reasoning effort" too,
+                    // so all rows line up.
+                    let label_w = (t.form_label_width + t.space_16)
+                        .max(ui_kit::ContentWidth::label(ui, tr("ui.ai_request_timeout")) + t.space_16)
+                        .max(ui_kit::ContentWidth::label(ui, tr("ui.ai_reasoning_effort")) + t.space_16);
                     ui_kit::settings_form(ui, label_w, |ui| {
                         ui_kit::row(ui, tr("ui.ai_permissions"), |ui| {
                             let current = app.preferences.agent_permissions.get(&entry.id).copied();
@@ -490,6 +557,14 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     retimed = Some((entry.id.clone(), secs));
                                 }
                             });
+                            ui_kit::row(ui, tr("ui.ai_reasoning_effort"), |ui| {
+                                let mut effort = c.reasoning_effort.clone();
+                                if effort_field(ui, &mut effort) {
+                                    let effort = agents::reasoning_effort(&effort);
+                                    c.reasoning_effort = effort.clone();
+                                    reeffort = Some((entry.id.clone(), effort));
+                                }
+                            });
                         });
                     }
                     if app.preferences.agent_permissions.get(&entry.id) == Some(&Mode::All) {
@@ -516,12 +591,22 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         let started = start_test(app, &e, key);
         app.agent_chat.settings.tests.insert(e.id.clone(), started);
     }
+    if let Some(id) = edit {
+        open_edit(app, &id);
+    }
     // The running conversation uses a new timeout from its next request on.
     if let Some((id, secs)) = retimed
         && app.agent_chat.running_id == id
         && let Some(b) = app.agent_chat.backend.as_mut()
     {
         b.set_request_timeout(secs);
+    }
+    // A new reasoning effort likewise takes effect from the next request on.
+    if let Some((id, effort)) = reeffort
+        && app.agent_chat.running_id == id
+        && let Some(b) = app.agent_chat.backend.as_mut()
+    {
+        b.set_reasoning_effort(&effort);
     }
     if let Some(id) = remove {
         app.agent_chat.login_results.remove(&id);
@@ -534,6 +619,10 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if app.agent_chat.agent_id.as_deref() == Some(id.as_str()) {
             app.agent_chat.agent_id = None;
+        }
+        // A removed agent is not missed at the next start: the default connects instead.
+        if app.preferences.agent_last == id {
+            app.preferences.agent_last.clear();
         }
     }
     if app.agent_chat.settings.tests.values().any(|t| matches!(t, Test::Running(_))) {
@@ -554,32 +643,37 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
     let mut open = true;
     let mut add = false;
     let mut test = false;
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_ai_add"), "settings", tr("ui.ai_add_agent_title"))
+    // Editing keeps the agent's kind: the kind switch is for adding only.
+    let editing = app.agent_chat.settings.add.as_ref().is_some_and(|s| s.editing.is_some());
+    let (title, ok) = if editing { ("ui.ai_edit_agent_title", "ui.ai_save") } else { ("ui.ai_add_agent_title", "ui.ai_add") };
+    let (closed, action) = ui_kit::Window::new(egui::Id::new("sc_ai_add"), "settings", tr(title))
         .cards(2.0)
         .fields()
-        .actions(tr("ui.ai_add"), "Cancel", None)
+        .actions(tr(ok), "Cancel", None)
         .show(ctx, true, |ui| {
             let Some(s) = app.agent_chat.settings.add.as_mut() else { return };
             if let Some(test) = s.test.as_mut() {
                 let _ = test.poll();
             }
             let kinds = [(AddKind::Installed, "ui.ai_add_installed"), (AddKind::Custom, "ui.ai_add_custom"), (AddKind::Api, "ui.ai_add_endpoint")];
-            ui_kit::row(ui, tr("ui.ai_kind"), |ui| {
-                let mut selected = kinds.iter().position(|(k, _)| *k == s.kind).unwrap_or(0);
-                let labels = kinds.map(|(_, key)| tr(key));
-                if ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { compact: true, ..Default::default() })
-                    && let Some((kind, _)) = kinds.get(selected)
-                {
-                    s.kind = *kind;
-                    s.error = None;
-                    s.test = None;
-                }
-                for (_, key) in kinds {
-                    if let Some(at) = crate::scenario::handle_at(&format!("dialog:{}:{}", tr("ui.ai_kind"), tr(key))) {
-                        crate::scenario::publish_handle(&format!("ai_add:{key}"), at);
+            if !editing {
+                ui_kit::row(ui, tr("ui.ai_kind"), |ui| {
+                    let mut selected = kinds.iter().position(|(k, _)| *k == s.kind).unwrap_or(0);
+                    let labels = kinds.map(|(_, key)| tr(key));
+                    if ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments { compact: true, ..Default::default() })
+                        && let Some((kind, _)) = kinds.get(selected)
+                    {
+                        s.kind = *kind;
+                        s.error = None;
+                        s.test = None;
                     }
-                }
-            });
+                    for (_, key) in kinds {
+                        if let Some(at) = crate::scenario::handle_at(&format!("dialog:{}:{}", tr("ui.ai_kind"), tr(key))) {
+                            crate::scenario::publish_handle(&format!("ai_add:{key}"), at);
+                        }
+                    }
+                });
+            }
             match s.kind {
                 AddKind::Installed => {
                     ui_kit::row(ui, tr("ui.agent_chat_pick"), |ui| {
@@ -662,9 +756,13 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                     ui_kit::row(ui, tr("ui.ai_request_timeout"), |ui| {
                         timeout_field(ui, &mut s.request_timeout_s, "ai_add:request_timeout");
                     });
+                    ui_kit::row(ui, tr("ui.ai_reasoning_effort"), |ui| {
+                        effort_field(ui, &mut s.reasoning_effort);
+                    });
                     ui_kit::row(ui, tr("ui.ai_key"), |ui| {
                         ui.add_enabled_ui(has_keychain, |ui| {
-                            let r = ui_kit::password_field(ui, egui::Id::new("sc_ai_add_key"), &mut s.key, tr("ui.ai_key_hint"));
+                            let hint = tr(if s.saved_key { "ui.ai_key_keep_hint" } else { "ui.ai_key_hint" });
+                            let r = ui_kit::password_field(ui, egui::Id::new("sc_ai_add_key"), &mut s.key, hint);
                             crate::scenario::publish_target("ai_add:key", r.rect);
                         });
                     });
@@ -700,8 +798,16 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                 model: s.model.trim().to_string(),
                 key: false,
                 request_timeout_s: s.request_timeout_s,
+                reasoning_effort: agents::reasoning_effort(&s.reasoning_effort),
+                problem: None,
+                install: "",
             };
-            let key = Some(s.key.trim().to_string()).filter(|k| !k.is_empty());
+            // Editing with the key field left empty tests with the stored key, which is only ever
+            // sent where a saved key may go (HTTPS or this computer).
+            let key = Some(s.key.trim().to_string()).filter(|k| !k.is_empty()).or_else(|| {
+                let id = s.editing.as_deref().filter(|_| s.saved_key && url.as_deref().is_ok_and(agents::key_safe_for))?;
+                app.services.secrets.as_ref().and_then(|store| store.get(id).ok().flatten())
+            });
             let result = match url {
                 Ok(_) => start_test(app, &e, key),
                 Err(err) => Test::Done(Err(TestError::Other(err))),
@@ -729,9 +835,14 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
-/// Add what the dialog holds; its key goes to the keychain.
+/// Add what the dialog holds, or save it over the agent being edited; its key goes to the keychain.
 fn add_agent(app: &mut SolveApp) -> Result<(), String> {
     let Some(s) = app.agent_chat.settings.add.as_ref() else { return Ok(()) };
+    // The agent being edited must still be there (it may have been removed meanwhile).
+    let editing = match &s.editing {
+        Some(id) => Some(app.preferences.agents.iter().position(|c| &c.id == id).ok_or_else(|| tr("ui.ai_edit_gone").to_string())?),
+        None => None,
+    };
     let name = s.name.trim().chars().take(80).collect::<String>();
     let mut c = AgentConfig { name, ..Default::default() };
     let mut key: Option<String> = None;
@@ -751,15 +862,22 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
             c.base_url = agents::normalize_url(&s.base_url)?;
             c.model = s.model.trim().to_string();
             c.request_timeout_s = s.request_timeout_s.clamp(agents::MIN_REQUEST_TIMEOUT_S, agents::MAX_REQUEST_TIMEOUT_S);
+            c.reasoning_effort = agents::reasoning_effort(&s.reasoning_effort);
             if c.model.is_empty() {
                 return Err(tr("ui.ai_need_model").to_string());
             }
             key = Some(s.key.trim().to_string()).filter(|k| !k.is_empty());
-            if key.is_some() && !agents::key_safe_for(&c.base_url) {
+            // Editing with the key field left empty keeps the stored key.
+            let kept = key.is_none() && editing.is_some() && s.saved_key;
+            if (key.is_some() || kept) && !agents::key_safe_for(&c.base_url) {
                 return Err(tr("ui.ai_key_needs_https").to_string());
             }
+            c.key = kept;
             c.id = agents::new_id(&app.preferences, c.kind.id());
         }
+    }
+    if let Some(id) = &s.editing {
+        c.id = id.clone();
     }
     if c.name.is_empty() {
         c.name = c.id.clone();
@@ -769,12 +887,43 @@ fn add_agent(app: &mut SolveApp) -> Result<(), String> {
         store.set(&c.id, &k).map_err(|e| trf("ui.ai_keychain_error", &[("error", &e)]))?;
         c.key = true;
     }
-    app.preferences.agents.push(c);
+    let Some(at) = editing else {
+        app.preferences.agents.push(c);
+        return Ok(());
+    };
+    match app.preferences.agents.get_mut(at) {
+        None => return Err(tr("ui.ai_edit_gone").to_string()),
+        Some(old) => {
+            // An endpoint edited into a program (or one whose key was dropped) leaves no key behind.
+            if old.key
+                && !c.key
+                && let Some(store) = &app.services.secrets
+            {
+                let _ = store.delete(&c.id);
+            }
+            *old = c;
+            let id = old.id.clone();
+            let secs = old.request_timeout_s;
+            let effort = old.reasoning_effort.clone();
+            // A new command, endpoint or key has not been tested or signed in yet.
+            app.agent_chat.settings.tests.remove(&id);
+            app.agent_chat.login_results.remove(&id);
+            // The running conversation takes a new timeout from its next request on; the rest
+            // applies the next time the agent connects.
+            if app.agent_chat.running_id == id
+                && let Some(b) = app.agent_chat.backend.as_mut()
+            {
+                b.set_request_timeout(secs);
+                b.set_reasoning_effort(&effort);
+            }
+        }
+    }
     Ok(())
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod card_tests {
+    use super::super::backend::Secrets;
     use super::*;
     use crate::scenario::{self, Harness};
     use serde_json::json;
@@ -873,5 +1022,161 @@ mod card_tests {
         assert_eq!(saved.kind, Kind::Anthropic);
         assert_eq!(saved.base_url, "https://api.anthropic.com/v1");
         assert_eq!(saved.model, "claude-opus-5-5");
+    }
+
+    /// A keychain in memory, for tests.
+    #[derive(Default)]
+    struct MemoryKeys(std::sync::Mutex<std::collections::HashMap<String, String>>);
+
+    impl Secrets for MemoryKeys {
+        fn get(&self, id: &str) -> Result<Option<String>, String> {
+            Ok(self.0.lock().map_err(|e| e.to_string())?.get(id).cloned())
+        }
+        fn set(&self, id: &str, secret: &str) -> Result<(), String> {
+            self.0.lock().map_err(|e| e.to_string())?.insert(id.into(), secret.into());
+            Ok(())
+        }
+        fn delete(&self, id: &str) -> Result<(), String> {
+            self.0.lock().map_err(|e| e.to_string())?.remove(id);
+            Ok(())
+        }
+    }
+
+    /// Edit on an added agent reopens the dialog filled in; Save changes it in place, keeping its
+    /// id, its permission override and its always-allowed tools (#9619).
+    #[test]
+    fn edit_reopens_an_added_agent_and_saves_it_in_place() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width": 1600.0, "height": 1000.0}));
+        h.app.home.open = false;
+        h.app.preferences.ai_features = true;
+        h.app.agent_chat.detection = Some(Default::default());
+        h.app.preferences.agents.push(AgentConfig {
+            id: "custom-1".into(),
+            name: "Mine".into(),
+            command: "my-agent --acp".into(),
+            ..Default::default()
+        });
+        h.app.preferences.agent_permissions.insert("custom-1".into(), Mode::Edits);
+        h.app.preferences.agent_always_allow.insert("custom-1".into(), vec!["read".into()]);
+        h.call("ui.prefs", json!({"open": "AI"}));
+        h.frames(4);
+        let edit = scenario::handle_at("prefs:ai_edit:custom-1").expect("an added agent has Edit");
+        h.call("ui.click", json!({"x": edit.x, "y": edit.y}));
+        h.frames(4);
+        {
+            let s = h.app.agent_chat.settings.add.as_ref().expect("Edit opened the dialog");
+            assert_eq!(s.editing.as_deref(), Some("custom-1"));
+            assert_eq!(s.kind, AddKind::Custom);
+            assert_eq!((s.name.as_str(), s.command.as_str()), ("Mine", "my-agent --acp"));
+        }
+        assert!(scenario::handle_at("ai_add:ui.ai_add_custom").is_none(), "editing keeps the agent's kind");
+        let s = h.app.agent_chat.settings.add.as_mut().unwrap();
+        s.name = "Mine, verbose".into();
+        s.command = "my-agent --acp --verbose".into();
+        h.frames(3);
+        h.step(&json!({"click":{"handle":"ai_add:add"}})).unwrap();
+        assert!(h.app.agent_chat.settings.add.is_none(), "Save closed the dialog");
+        assert_eq!(h.app.preferences.agents.len(), 1, "saved in place, not added");
+        let saved = &h.app.preferences.agents[0];
+        assert_eq!((saved.id.as_str(), saved.name.as_str(), saved.command.as_str()), ("custom-1", "Mine, verbose", "my-agent --acp --verbose"));
+        assert_eq!(h.app.preferences.agent_permissions.get("custom-1"), Some(&Mode::Edits));
+        assert!(h.app.preferences.agent_always_allow.contains_key("custom-1"));
+        // An empty command is refused as when adding.
+        assert!(open_edit(&mut h.app, "custom-1"));
+        h.app.agent_chat.settings.add.as_mut().unwrap().command = "  ".into();
+        assert_eq!(add_agent(&mut h.app), Err(tr("ui.ai_need_command").to_string()));
+        assert_eq!(h.app.preferences.agents[0].command, "my-agent --acp --verbose");
+    }
+
+    /// Editing an endpoint never shows its stored key: an empty key field keeps it, a new one
+    /// replaces it, and a kept key still only goes to HTTPS or this computer (#9619).
+    #[test]
+    fn edit_keeps_or_replaces_a_stored_key_without_showing_it() {
+        let mut h = Harness::new();
+        let keys = std::sync::Arc::new(MemoryKeys::default());
+        h.app.services.secrets = Some(keys.clone());
+        keys.set("api-1", "test-key-1").unwrap();
+        h.app.preferences.agents.push(AgentConfig {
+            id: "api-1".into(),
+            name: "OpenAI".into(),
+            kind: Kind::Api,
+            base_url: "https://api.openai.com/v1".into(),
+            model: "model-a".into(),
+            key: true,
+            request_timeout_s: 600,
+            reasoning_effort: "high".into(),
+            ..Default::default()
+        });
+        assert!(open_edit(&mut h.app, "api-1"));
+        {
+            let s = h.app.agent_chat.settings.add.as_ref().unwrap();
+            assert!(s.key.is_empty(), "the stored key is never read back into the dialog");
+            assert!(s.saved_key);
+            assert_eq!((s.kind, s.protocol), (AddKind::Api, Protocol::OpenAi));
+            assert_eq!(agents::presets(Protocol::OpenAi).get(s.preset).map(|p| p.name), Some("OpenAI"));
+            assert_eq!((s.base_url.as_str(), s.model.as_str(), s.request_timeout_s), ("https://api.openai.com/v1", "model-a", 600));
+            assert_eq!(s.reasoning_effort, "high", "the chosen effort comes back into the dialog");
+        }
+        h.app.agent_chat.settings.add.as_mut().unwrap().model = "model-b".into();
+        add_agent(&mut h.app).unwrap();
+        let saved = &h.app.preferences.agents[0];
+        assert_eq!((saved.id.as_str(), saved.model.as_str(), saved.key, saved.request_timeout_s), ("api-1", "model-b", true, 600));
+        assert_eq!(saved.reasoning_effort, "high", "the effort survives an edit");
+        assert_eq!(keys.get("api-1").unwrap().as_deref(), Some("test-key-1"), "an empty field keeps the key");
+        // A kept key does not go to a plain-HTTP address elsewhere.
+        assert!(open_edit(&mut h.app, "api-1"));
+        h.app.agent_chat.settings.add.as_mut().unwrap().base_url = "http://example.com/v1".into();
+        assert_eq!(add_agent(&mut h.app), Err(tr("ui.ai_key_needs_https").to_string()));
+        assert_eq!(h.app.preferences.agents[0].base_url, "https://api.openai.com/v1");
+        // A new key replaces the stored one.
+        assert!(open_edit(&mut h.app, "api-1"));
+        h.app.agent_chat.settings.add.as_mut().unwrap().key = "test-key-2".into();
+        add_agent(&mut h.app).unwrap();
+        assert_eq!(keys.get("api-1").unwrap().as_deref(), Some("test-key-2"));
+        assert_eq!(h.app.preferences.agents.len(), 1);
+        // Custom URLs and the Ollama preset come back as they were chosen.
+        h.app.preferences.agents.push(AgentConfig {
+            id: "api-2".into(),
+            kind: Kind::Api,
+            base_url: "http://192.168.1.20:11434/v1".into(),
+            model: "m".into(),
+            ollama: true,
+            ..Default::default()
+        });
+        h.app.preferences.agents.push(AgentConfig {
+            id: "anthropic-1".into(),
+            kind: Kind::Anthropic,
+            base_url: "https://example.com/anthropic/v1".into(),
+            model: "m".into(),
+            ..Default::default()
+        });
+        assert!(open_edit(&mut h.app, "api-2"));
+        assert_eq!(h.app.agent_chat.settings.add.as_ref().map(|s| (s.preset, s.saved_key)), Some((0, false)));
+        add_agent(&mut h.app).unwrap();
+        assert!(h.app.preferences.agents.iter().any(|c| c.id == "api-2" && c.ollama && c.base_url == "http://192.168.1.20:11434/v1"));
+        assert!(open_edit(&mut h.app, "anthropic-1"));
+        let s = h.app.agent_chat.settings.add.as_ref().unwrap();
+        assert_eq!((s.protocol, s.preset), (Protocol::Anthropic, agents::ANTHROPIC_PRESETS.len()), "a custom URL");
+        add_agent(&mut h.app).unwrap();
+        assert!(h.app.preferences.agents.iter().any(|c| c.id == "anthropic-1" && c.kind == Kind::Anthropic));
+        assert_eq!(h.app.preferences.agents.len(), 3);
+    }
+
+    /// Only added agents can be edited, and an agent removed while its dialog is open is not
+    /// brought back by Save; the control channel opens the same dialog (#9619).
+    #[test]
+    fn edit_only_for_added_agents_and_not_after_removal() {
+        let mut h = Harness::new();
+        assert!(!open_edit(&mut h.app, "claude"), "a found agent has nothing of yours to edit");
+        assert!(h.app.agent_chat.settings.add.is_none());
+        h.app.preferences.agents.push(AgentConfig { id: "custom-1".into(), command: "a --acp".into(), ..Default::default() });
+        let err = control(&mut h.app, &h.ctx, &json!({"edit_dialog": "nope"})).unwrap_err();
+        assert!(err.contains("nope"), "{err}");
+        control(&mut h.app, &h.ctx, &json!({"edit_dialog": "custom-1"})).unwrap();
+        assert_eq!(h.app.agent_chat.settings.add.as_ref().and_then(|s| s.editing.as_deref()), Some("custom-1"));
+        h.app.preferences.agents.clear();
+        assert_eq!(add_agent(&mut h.app), Err(tr("ui.ai_edit_gone").to_string()));
+        assert!(h.app.preferences.agents.is_empty());
     }
 }

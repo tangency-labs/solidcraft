@@ -107,13 +107,15 @@ impl Painter {
 
     /// SolidCraft: a configuration the device refuses (D3D12: "Failed to wait for GPU to come
     /// idle before reconfiguring the Surface", #1935) comes back as the error instead of reaching
-    /// the device's uncaptured-error handler, which panics. Called only through
-    /// [`Self::try_configure`], which says what follows.
+    /// the device's uncaptured-error handler, which panics; so does a configure that met a lost
+    /// device, or a surface the adapter doesn't support, neither of which configured it (#7007).
+    /// Called only through [`Self::try_configure`], which says what follows.
     fn configure_surface(
+        viewport_id: ViewportId,
         surface_state: &SurfaceState,
         render_state: &RenderState,
         config: &SurfaceConfig,
-    ) -> Result<(), wgpu::Error> {
+    ) -> Result<(), crate::ConfigureError> {
         profiling::function_scope!();
 
         let SurfaceConfig {
@@ -133,14 +135,24 @@ impl Painter {
         let width = surface_state.width;
         let height = surface_state.height;
 
-        // SolidCraft: an unsupported surface is logged, not a panic.
+        // SolidCraft: an unsupported surface is a refused configure, not a panic.
         let Some(default_config) = surface_state
             .surface
             .get_default_config(&render_state.adapter, width, height)
         else {
-            log::error!("The surface isn't supported by this adapter");
-            return Ok(());
+            return Err(crate::ConfigureError::Unsupported);
         };
+        // SolidCraft: a window other than the main one presents without waiting for the display
+        // where its surface can (`crate::viewport_present_mode`).
+        let supported = surface_state
+            .surface
+            .get_capabilities(&render_state.adapter)
+            .present_modes;
+        let present_mode = crate::viewport_present_mode(
+            viewport_id == ViewportId::ROOT,
+            present_mode,
+            &supported,
+        );
         let mut surf_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: render_state.target_format,
@@ -155,10 +167,9 @@ impl Painter {
         }
 
         let device = &render_state.device;
-        let ((), failed) = crate::capture_errors(device, || {
-            surface_state.surface.configure(device, &surf_config)
-        });
-        failed.map_or(Ok(()), Err)
+        crate::configure_captured(device, &render_state.device_lost, || {
+            surface_state.surface.configure(device, &surf_config);
+        })
     }
 
     /// SolidCraft: configures the surface at `now` unless a refused configure's retry isn't due
@@ -178,7 +189,9 @@ impl Painter {
     ) -> bool {
         // A copy, as the configure borrows the whole surface state.
         let mut retry = state.retry;
-        let attempt = retry.attempt(now, || Self::configure_surface(state, render_state, config));
+        let attempt = retry.attempt(now, || {
+            Self::configure_surface(viewport_id, state, render_state, config)
+        });
         state.retry = retry;
         match attempt {
             crate::Attempt::Took(refusals) => {
@@ -650,6 +663,11 @@ impl Painter {
             .as_ref()
             .is_some_and(|rs| rs.device_lost.is_lost())
         {
+            if let Some(rs) = &self.render_state
+                && let Some(effect) = &rs.renderer.read().frame_compositor
+            {
+                effect.suspend();
+            }
             // The app's frame (not this paint) acts on it: keep its frames coming.
             self.context
                 .request_repaint_after_for(std::time::Duration::from_millis(250), viewport_id);
@@ -689,11 +707,22 @@ impl Painter {
         let Some(render_state) = self.render_state.as_mut() else {
             return vsync_sec;
         };
+        if let Some(effect) = &render_state.renderer.read().frame_compositor {
+            effect.begin_viewport(viewport_id.0.value());
+        }
 
         let mut render_queue_guard = RendererQueueGuard {
             queue: &render_state.queue,
             commands_submitted: false,
         };
+        // SolidCraft: a minimized native window may retain a clamped 1x1 surface.
+        if let Some(effect) = &render_state.renderer.read().frame_compositor {
+            let extent = window.inner_size();
+            if extent.width == 0 || extent.height == 0 {
+                effect.suspend();
+                return vsync_sec;
+            }
+        }
 
         let Some(surface_state) = self.surfaces.get_mut(&viewport_id) else {
             return vsync_sec;
@@ -723,12 +752,20 @@ impl Painter {
             if !FIRST_PRESENT.swap(true, std::sync::atomic::Ordering::Relaxed) {
                 crate::startup_step(crate::STEP_FIRST_PRESENT, "");
             }
-            let output_frame = surface_state.surface.get_current_texture();
+            // SolidCraft: an acquire wgpu refuses (a surface left without its configuration,
+            // #7007) comes back as `CurrentSurfaceTexture::Validation` instead of reaching the
+            // device's uncaptured-error handler, which panics by default.
+            let (output_frame, failed) = crate::capture_errors(&render_state.device, || {
+                surface_state.surface.get_current_texture()
+            });
+            if let Some(error) = failed {
+                log::warn!("The surface gave no frame: {error}");
+            }
             vsync_sec += start.elapsed().as_secs_f32();
             output_frame
         };
 
-        let output_frame = match output_frame {
+        let frame = match output_frame {
             wgpu::CurrentSurfaceTexture::Success(frame) => frame,
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
                 surface_state.needs_reconfigure = true;
@@ -763,11 +800,19 @@ impl Painter {
                 return vsync_sec;
             }
         };
+        // SolidCraft: however this frame ends (presented, dropped by an early return below, or
+        // dropped while a panic unwinds), the surface gets its image back, also on a lost device,
+        // where wgpu's present and discard keep it and the surface's drop then panicked (#7148).
+        let texture = frame.texture.clone();
+        let output_frame = crate::AcquiredFrame::new(frame, texture);
 
         // SolidCraft: before the uploads, an empty submission asks the driver whether the device
         // is still there. The first queue write to meet a lost device panics inside wgpu (#4172);
         // the submission meets it instead, marks it lost, and the frame is dropped unpresented.
         if render_state.device_lost.probe(&render_state.queue) {
+            if let Some(effect) = &render_state.renderer.read().frame_compositor {
+                effect.suspend();
+            }
             render_queue_guard.commands_submitted = true;
             log::error!(
                 "The graphics device was lost: {}",
@@ -824,13 +869,13 @@ impl Painter {
 
             let target_texture = if capture {
                 let capture_state = self.screen_capture_state.get_or_insert_with(|| {
-                    CaptureState::new(&render_state.device, &output_frame.texture)
+                    CaptureState::new(&render_state.device, &output_frame.frame.texture)
                 });
-                capture_state.update(&render_state.device, &output_frame.texture);
+                capture_state.update(&render_state.device, &output_frame.frame.texture);
 
                 &capture_state.texture
             } else {
-                &output_frame.texture
+                &output_frame.frame.texture
             };
             let target_view = target_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -841,67 +886,84 @@ impl Painter {
                     (texture_view, Some(&target_view))
                 });
 
-            let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("egui_render"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view,
-                    resolve_target,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: clear_color[0] as f64,
-                            g: clear_color[1] as f64,
-                            b: clear_color[2] as f64,
-                            a: clear_color[3] as f64,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: self.depth_texture_view.get(&viewport_id).map(|view| {
-                    wgpu::RenderPassDepthStencilAttachment {
+            // SolidCraft: the pass owner selects offscreen composition once, never in render's loop.
+            let composed = self.options.msaa_samples == 1
+                && self.options.depth_stencil_format.is_none()
+                && renderer.frame_compositor.as_ref().is_some_and(|effect| {
+                    effect.render(
+                        &renderer,
+                        &mut encoder,
+                        &target_view,
+                        clipped_primitives,
+                        &screen_descriptor,
+                        clear_color,
+                    )
+                });
+            if !composed {
+                let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("egui_render"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view,
-                        depth_ops: self
-                            .options
-                            .depth_stencil_format
-                            .is_some_and(|depth_stencil_format| {
-                                depth_stencil_format.has_depth_aspect()
-                            })
-                            .then_some(wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(1.0),
-                                // It is very unlikely that the depth buffer is needed after egui finished rendering
-                                // so no need to store it. (this can improve performance on tiling GPUs like mobile chips or Apple Silicon)
-                                store: wgpu::StoreOp::Discard,
+                        resolve_target,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: clear_color[0] as f64,
+                                g: clear_color[1] as f64,
+                                b: clear_color[2] as f64,
+                                a: clear_color[3] as f64,
                             }),
-                        stencil_ops: self
-                            .options
-                            .depth_stencil_format
-                            .is_some_and(|depth_stencil_format| {
-                                depth_stencil_format.has_stencil_aspect()
-                            })
-                            .then_some(wgpu::Operations {
-                                load: wgpu::LoadOp::Clear(0),
-                                store: wgpu::StoreOp::Discard,
-                            }),
-                    }
-                }),
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: self.depth_texture_view.get(&viewport_id).map(
+                        |view| {
+                            wgpu::RenderPassDepthStencilAttachment {
+                                view,
+                                depth_ops: self
+                                    .options
+                                    .depth_stencil_format
+                                    .is_some_and(|depth_stencil_format| {
+                                        depth_stencil_format.has_depth_aspect()
+                                    })
+                                    .then_some(wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(1.0),
+                                        // It is very unlikely that the depth buffer is needed after egui finished rendering
+                                        // so no need to store it. (this can improve performance on tiling GPUs like mobile chips or Apple Silicon)
+                                        store: wgpu::StoreOp::Discard,
+                                    }),
+                                stencil_ops: self
+                                    .options
+                                    .depth_stencil_format
+                                    .is_some_and(|depth_stencil_format| {
+                                        depth_stencil_format.has_stencil_aspect()
+                                    })
+                                    .then_some(wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(0),
+                                        store: wgpu::StoreOp::Discard,
+                                    }),
+                            }
+                        },
+                    ),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
 
-            // Forgetting the pass' lifetime means that we are no longer compile-time protected from
-            // runtime errors caused by accessing the parent encoder before the render pass is dropped.
-            // Since we don't pass it on to the renderer, we should be perfectly safe against this mistake here!
-            renderer.render(
-                &mut render_pass.forget_lifetime(),
-                clipped_primitives,
-                &screen_descriptor,
-            );
+                // Forgetting the pass' lifetime means that we are no longer compile-time protected from
+                // runtime errors caused by accessing the parent encoder before the render pass is dropped.
+                // Since we don't pass it on to the renderer, we should be perfectly safe against this mistake here!
+                renderer.render(
+                    &mut render_pass.forget_lifetime(),
+                    clipped_primitives,
+                    &screen_descriptor,
+                );
+            }
 
             if capture && let Some(capture_state) = &mut self.screen_capture_state {
                 capture_buffer = Some(capture_state.copy_textures(
                     &render_state.device,
-                    &output_frame,
+                    &output_frame.frame,
                     &mut encoder,
                 ));
             }
@@ -925,6 +987,10 @@ impl Painter {
 
         // Ensure that the queue guard does not do unnecessary work when dropped
         render_queue_guard.commands_submitted = true;
+        // SolidCraft: caches become valid only after the producer encoder was submitted.
+        if let Some(effect) = &render_state.renderer.read().frame_compositor {
+            effect.submitted();
+        }
 
         // Free textures marked for destruction **after** queue submit since they might still be used in the current frame.
         // Calling `wgpu::Texture::destroy` on a texture that is still in use would invalidate the command buffer(s) it is used in.
@@ -955,7 +1021,7 @@ impl Painter {
             profiling::scope!("present");
             // wgpu doesn't document where vsync can happen. Maybe here?
             let start = web_time::Instant::now();
-            render_state.queue.present(output_frame);
+            output_frame.present(|frame| render_state.queue.present(frame));
             vsync_sec += start.elapsed().as_secs_f32();
         }
 
@@ -989,4 +1055,3 @@ impl Painter {
         // TODO(emilk): something here?
     }
 }
-

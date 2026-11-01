@@ -5,7 +5,7 @@ members = ["crates/*", "apps/*", "xtask"]
 exclude = ["vendor"]
 
 [workspace.package]
-version = "0.24.0"
+version = "0.29.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.95"
@@ -31,6 +31,11 @@ solidcraft-space-mouse = { path = "crates/space-mouse" }
 solidcraft-mcp = { path = "crates/mcp" }
 solidcraft-derive = { path = "crates/derive" }
 solidcraft-3dx-client = { path = "crates/threedx-client" }
+# The Rust port of NVIDIA's SMLib (Apache-2.0), the kernel crates/smlib routes operations to once
+# they reach parity (crates/smlib/src/route.rs). Pinned; move the rev on its own commit. For a
+# local checkout, add `[patch."https://github.com/tangency-labs/solidcore"] solidcore = { path =
+# "../solidcore/crates/solidcore" }` to a `.cargo/config.toml` outside the repository.
+solidcore = { git = "https://github.com/tangency-labs/solidcore", rev = "c9a06dc7c25568c01ba3db6da0e24fcabd3d3583" }
 
 # foundation
 thiserror = "2"
@@ -76,7 +81,7 @@ cadmpeg-ir = "=0.6.3"
 cadmpeg-registry = { version = "=0.6.3", default-features = false, features = ["fcstd", "rhino", "step"] }
 
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
-ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
+ttf-parser = { version = "0.25", default-features = false, features = ["std", "variable-fonts"] }
 
 # Ends a process group with the system call (MIT; already in the tree through zip).
 nix = { version = "0.31", default-features = false, features = ["signal"] }
@@ -149,6 +154,13 @@ debug = "line-tables-only"
 [patch.crates-io]
 # Keep OpenGL pipelines, resolve textures and CAD callbacks at the same safe sample count.
 egui-wgpu = { path = "vendor/egui-wgpu" }
+
+# Deliver trackpad pinch and rotation gestures on Wayland (zwp_pointer_gestures_v1), which
+# winit 0.30 never binds and eframe 0.36 still requires winit 0.30.
+winit = { path = "vendor/winit" }
+
+# macOS: dropping the accessibility adapter leaves AppKit's key-value observers intact (#7535).
+accesskit_macos = { path = "vendor/accesskit_macos" }
 
 # Mutation testing (cargo-mutants, docs/mutation-testing.md): the ci profile with incremental
 # builds, since every mutant rebuilds the crates above the one it changes.

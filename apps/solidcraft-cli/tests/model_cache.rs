@@ -341,3 +341,88 @@ fn a_later_round_after_opening_blends_the_saved_rounds_again() {
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_file(format!("{}.bak", path.display()));
 }
+
+/// A design saved before body names were pinned (#6403) pins them as it opens, as its first
+/// command would, and opening it is no change. That command pinned them as part of itself, so
+/// undoing it went back to the unpinned design, which no evaluated result matched: the first
+/// undo after opening from the command line evaluated every feature again (82-93 s in a
+/// 5,484-feature design); `doc.open` pinned them after opening, which marked the design changed.
+#[test]
+fn a_design_saved_before_names_were_pinned_opens_pinned_and_unchanged() {
+    let plate = solidcraft_engine::sample::samples().into_iter().find(|s| s.name == "Sample Plate").unwrap();
+    let mut built = Session::default();
+    for c in (plate.script)()["commands"].as_array().unwrap() {
+        built.execute(c["command"].as_str().unwrap(), &c["params"]).unwrap();
+    }
+    let mut doc = built.design().into_owned();
+    for f in &mut doc.features {
+        f.body_names.clear();
+    }
+    doc.reserved_body_names.clear();
+    let unpinned = Session::new(doc);
+    let design = unpinned.design();
+    let saved = unpinned.model.saved(&design).unwrap();
+    let bytes = solidcraft_engine::io::write_design_container_with_cache(&design, solidcraft_engine::io::DesignCompression::Fast, None, Some(&saved))
+        .unwrap();
+    let path = temp("unpinned");
+    std::fs::write(&path, &bytes).unwrap();
+    let file = path.to_string_lossy().to_string();
+    // As the command line opens a design (`load`), and as the app does (`doc.open`).
+    let (doc, saved) = solidcraft_engine::io::read_design_file(&file, None::<fn(solidcraft_engine::io::DesignPreview)>).unwrap();
+    for (how, mut s) in [("opened_at", Session::opened_at(doc, saved.as_ref(), Some(&file))), ("doc.open", open(&path))] {
+        assert_eq!(s.model.last_recomputed, 0, "{how}: taken from the file");
+        assert!(s.doc.features.iter().any(|f| !f.body_names.is_empty()), "{how}: the names are pinned");
+        assert!(!s.is_dirty(), "{how}: opening is no change");
+        let read: Vec<Arc<ModelState>> = s.model.results.iter().map(|r| r.state.clone()).collect();
+        s.execute("solid.box", &json!({"length": 3, "width": 3, "height": 3, "operation": "new"})).unwrap();
+        // As in a large design, whose evaluation cache keeps only a few results: undo finds the
+        // results in the model itself or evaluates them again.
+        *s.model.cache.lock().unwrap() = Default::default();
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.model.last_recomputed, 0, "{how}: the first undo evaluates nothing");
+        assert!(s.model.results.iter().zip(&read).all(|(r, st)| Arc::ptr_eq(&r.state, st)), "{how}: the states read from the file");
+        assert!(!s.is_dirty(), "{how}: undone to the design as opened");
+    }
+    let _ = std::fs::remove_file(&path);
+}
+
+/// A saved model is its kernel's: the two differ in tolerances and in what they refuse, so a design
+/// opened on the other kernel is evaluated on it, in both directions; on the kernel that saved it the
+/// model is taken as it is. A process each, since the kernel is chosen for the process.
+/// It reaches the C++ kernel on purpose: SOLIDCRAFT_KERNEL=smlib is the option under test.
+#[cfg(feature = "smlib")]
+#[test]
+fn a_model_saved_on_one_kernel_is_evaluated_again_on_the_other() {
+    let cli = || {
+        let mut c = std::process::Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"));
+        c.env_remove("SOLIDCRAFT_NO_MODEL_CACHE");
+        c
+    };
+    // Under the build's own temporary folder: the files are the command line's, not this process's.
+    let temp = |name: &str| Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("model-cache-{}-{name}.solidcraft", std::process::id()));
+    let script = temp("kernels-script").with_extension("json");
+    let recipe = json!({"commands": [
+        {"command": "solid.box", "params": {"length": 20, "width": 20, "height": 10, "body_name": "Plate"}},
+        {"command": "solid.cylinder", "params": {"diameter": 8, "height": 10, "base": [10, 10, 10], "operation": "join", "targets": ["Plate"]}},
+    ]});
+    std::fs::write(&script, recipe.to_string()).unwrap();
+    // Whether opening found a model in the file it may take, whether it took it, and how many
+    // features it evaluated.
+    let open = |design: &Path, kernel: &str| {
+        let out = cli().env("SOLIDCRAFT_KERNEL", kernel).arg("bench-open").arg(design).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let lines: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        let step = |name: &str| lines.iter().find(|l| l["step"] == name).cloned().unwrap();
+        let (parse, evaluated) = (step("parse"), step("evaluate"));
+        (parse["saved_model"].as_bool().unwrap(), evaluated["adopted"].as_bool().unwrap(), evaluated["recomputed"].as_u64().unwrap())
+    };
+    for (saved, other) in [("solidcore", "smlib"), ("smlib", "solidcore")] {
+        let design = temp(&format!("kernels-{saved}"));
+        let out = cli().env("SOLIDCRAFT_KERNEL", saved).arg("run").arg(&script).arg("--save").arg(&design).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(open(&design, saved), (true, true, 0), "saved on {saved}, opened on it");
+        assert_eq!(open(&design, other), (false, false, 2), "saved on {saved}, opened on {other}");
+        std::fs::remove_file(&design).unwrap();
+    }
+    std::fs::remove_file(&script).unwrap();
+}

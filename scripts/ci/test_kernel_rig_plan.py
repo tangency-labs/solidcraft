@@ -118,6 +118,7 @@ class Real(unittest.TestCase):
         for area, globs in {"PATHS-ALL": shared, **areas}.items():
             if area != "PATHS-ALL":
                 self.assertTrue(os.path.isfile(os.path.join(ROOT, plan.CASES, area, "KNOWN_FAILING")), area)
+                self.assertTrue(os.path.isfile(os.path.join(ROOT, plan.CASES, area, "KNOWN_FAILING.solidcore")), area)
             for g in globs:
                 with self.subTest(area=area, glob=g):
                     rx = plan.glob_regex(g)

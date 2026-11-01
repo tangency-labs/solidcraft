@@ -668,7 +668,10 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>, validation: solidcraft
             return out;
         }
     };
-    if !solidcraft_engine::kernel::smlib_built() {
+    // The C++ kernel is needed only if it is the one asked for.
+    if !solidcraft_engine::kernel::smlib_built()
+        && solidcraft_engine::kernel::kernel_route::backend() == solidcraft_engine::kernel::kernel_route::Backend::Smlib
+    {
         out["status"] = json!("unsupported");
         out["error"] = json!("this build has no SMLib: build solidcraft-cli with --features smlib");
         return out;

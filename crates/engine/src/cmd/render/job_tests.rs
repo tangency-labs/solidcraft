@@ -481,6 +481,60 @@ fn compiled_out_raytrace_is_rejected_before_scene_capture() {
 }
 
 #[test]
+fn preflight_and_start_reject_excessive_pixel_work_without_reserving_a_job() {
+    let (mut s, host) = session();
+    for _ in 0..8 {
+        s.execute("solid.box", &json!({"length":20,"width":20,"height":20,"corner":[-10,-10,-10]})).unwrap();
+    }
+    let mut camera = solidcraft_render::Camera { distance: 1.0, fov: 0.0, ..Default::default() };
+    camera.set_view(solidcraft_render::StandardView::Front);
+    let params = json!({"settings":{"width":1024,"height":1024,"camera":camera}});
+    let doc = s.doc.clone();
+    let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
+    for command in ["render.preflight", "render.start"] {
+        let error = s.execute(command, &params).unwrap_err().to_string();
+        assert!(error.contains("128000000 pixel tests"), "{error}");
+        assert_eq!(host.admitted_bytes(), 0);
+    }
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+    assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len()));
+
+    #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
+    {
+        let raytrace_host = CpuHost::for_platform().unwrap();
+        s.set_render_job_host(Some(raytrace_host.clone())).unwrap();
+        let params = json!({"settings":{"width":1024,"height":1024,"camera":camera},
+            "integrator":"raytrace","transparent_background":false});
+        let preflight = s.execute("render.preflight", &params).unwrap();
+        assert_eq!(preflight["resolved"]["executor"], "cpu-raytrace");
+        assert!(preflight["admission"].get("projected_pixel_tests").is_none());
+        assert_eq!(raytrace_host.admitted_bytes(), 0);
+        let started = s.execute("render.start", &params).unwrap();
+        let id: JobId = serde_json::from_value(started["job"].clone()).unwrap();
+        s.execute("render.cancel", &json!({"job":id})).unwrap();
+        let status = s.render_job_handle(id).unwrap().wait_timeout(std::time::Duration::from_secs(10)).unwrap();
+        assert_eq!(status.progress.phase, solidcraft_render::job::Phase::Cancelled);
+        // The worker drops its reservation just after the job turns terminal.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while raytrace_host.admitted_bytes() != 0 {
+            assert!(std::time::Instant::now() < deadline, "worker did not release the cancelled job's reservation");
+            std::thread::yield_now();
+        }
+        assert!(Arc::ptr_eq(&doc, &s.doc));
+        assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len()));
+        s.set_render_job_host(Some(host.clone())).unwrap();
+    }
+
+    let params = json!({"settings":{"width":16,"height":16,"camera":camera}});
+    let preflight = s.execute("render.preflight", &params).unwrap();
+    assert!(preflight["admission"]["projected_pixel_tests"].as_u64().unwrap() > 0);
+    assert_eq!(host.admitted_bytes(), 0);
+    let id = s.execute("render.start", &params).unwrap()["job"].clone();
+    finish(&host);
+    assert_eq!(s.execute("render.status", &json!({"job":id})).unwrap()["progress"]["phase"], "completed");
+}
+
+#[test]
 fn identities_are_isolated_across_documents_scratch_and_new() {
     let (mut a, host) = session();
     let mut b = Session::default();
@@ -1044,9 +1098,13 @@ fn dielectric_preflight_and_start_resolve_refraction_without_broadening_boundari
     let mut s = Session::default();
     s.set_render_job_host(Some(host.clone())).unwrap();
     s.execute("solid.box", &json!({"length":20,"width":20,"height":2,"body_name":"Glass"})).unwrap();
+    // The default view sends the single pixel's ray exactly through a box edge, which the optics reject
+    // as an ambiguous interface normal. Whether the job then ends Failed or Cancelled would depend on
+    // whether the cancel below beats the render thread, so view the glass off-axis.
+    let camera = solidcraft_render::Camera { yaw: 0.3, pitch: 0.4, ..Default::default() };
     let document = s.doc.clone();
     let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
-    let params = json!({"integrator":"raytrace","settings":{"width":1,"height":1},"raytrace":{"dielectrics":[{
+    let params = json!({"integrator":"raytrace","settings":{"width":1,"height":1,"camera":camera},"raytrace":{"dielectrics":[{
         "body_index":0,"body_name":"Glass","boundary":"closed_box","ior":1.5,"absorption_per_mm":[0,0,0],"thickness_mm":0
     }]}});
     for command in ["render.preflight", "render.start"] {
@@ -1065,7 +1123,12 @@ fn dielectric_preflight_and_start_resolve_refraction_without_broadening_boundari
             let handle = s.render_job_handle(id).unwrap();
             s.execute("render.cancel", &json!({"job":id})).unwrap();
             let status = handle.wait_timeout(std::time::Duration::from_secs(10)).unwrap();
-            assert!(matches!(status.progress.phase, solidcraft_render::job::Phase::Cancelled | solidcraft_render::job::Phase::Completed));
+            assert!(
+                matches!(status.progress.phase, solidcraft_render::job::Phase::Cancelled | solidcraft_render::job::Phase::Completed),
+                "phase {:?}, error {:?}; full status {status:?}",
+                status.progress.phase,
+                status.error
+            );
         }
     }
     for boundary in ["closed_mesh", "thin_sheet"] {
@@ -1120,9 +1183,26 @@ fn registered_product_camera_fit_changes_only_view_and_keeps_orientation() {
     assert_eq!(fitted["document_changed"], false);
     let after = s.camera.unwrap();
     assert_eq!((after.yaw, after.pitch, after.roll), (camera.yaw, camera.pitch, camera.roll));
+    // A picture taller than wide moves the camera back by the ratio, keeping the orientation
+    // and the target; a wide one is the plain fit.
+    let tall = s.execute("render.camera.fit", &json!({"aspect":0.5})).unwrap();
+    assert_eq!(tall["document_changed"], false);
+    let back = s.camera.unwrap();
+    assert!((back.distance - 2.0 * after.distance).abs() < 1e-9, "{} vs {}", back.distance, after.distance);
+    assert_eq!((back.yaw, back.pitch, back.roll, back.target), (after.yaw, after.pitch, after.roll, after.target));
+    s.execute("render.camera.fit", &json!({"aspect":2.0})).unwrap();
+    assert_eq!(s.camera.unwrap(), after);
     assert_eq!(s.doc.to_json(), doc);
     assert_eq!(s.undo.len(), undo);
+    // Hostile aspects are refused and leave the finite camera, the document and undo alone:
+    // a subnormal one would otherwise divide the fitted distance into infinity.
+    for aspect in [json!(0), json!(-1), json!(1e-320), json!(1e-7), json!(1e7), json!("tall")] {
+        assert!(s.execute("render.camera.fit", &json!({"aspect":aspect})).is_err(), "aspect {aspect}");
+        assert_eq!(s.camera.unwrap(), after);
+    }
     assert!(s.execute("render.camera.fit", &json!({"scale":0})).is_err());
+    assert_eq!(s.doc.to_json(), doc);
+    assert_eq!(s.undo.len(), undo);
 }
 
 #[test]
@@ -1187,4 +1267,23 @@ fn a_setup_saved_with_exposure_renders_and_names_the_controls_it_leaves_out() {
     finish(&host);
     let id: JobId = serde_json::from_value(started["job"].clone()).unwrap();
     assert_eq!(s.execute("render.status", &json!({"job":id})).unwrap()["progress"]["phase"], "completed");
+}
+
+#[test]
+fn output_viewer_copy_validates_completed_job_without_mutation_or_pixel_payloads() {
+    let (mut s, host) = session();
+    let job = start(&mut s);
+    assert!(s.execute("render.result.copy", &json!({"job":job})).is_err());
+    finish(&host);
+    let document = s.doc.clone();
+    let before = (s.revision, s.undo.len(), s.redo.len(), host.admitted_bytes());
+    let copied = s.execute("render.result.copy", &json!({"job":job})).unwrap();
+    assert_eq!(copied["frame"]["job"], json!(job));
+    assert_eq!(copied["frame"]["width"], 16);
+    assert!(copied.get("png").is_none());
+    for params in [json!({}), json!(null), json!({"job":job,"extra":true}), json!({"job":{"session":0,"serial":0,"generation":0}})] {
+        assert!(s.execute("render.result.copy", &params).is_err());
+    }
+    assert!(Arc::ptr_eq(&document, &s.doc));
+    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), host.admitted_bytes()));
 }

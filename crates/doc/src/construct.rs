@@ -212,10 +212,16 @@ fn named_vertex(st: &ModelState, at: Vec3, names: &[String]) -> Option<Vec3> {
     let ends: Vec<[Vec3; 2]> = names
         .iter()
         .map(|n| {
-            // The edge with that name itself, never the one nearest the old pick.
-            let on = bodies(st).find_map(|b| crate::naming::find_edge(b, n, at).ok())?;
-            let pts = edge_points(st, on, &None).ok()?;
-            Some([*pts.first()?, *pts.last()?])
+            // The edge with that name itself, never the one nearest the old pick, and its ends
+            // on the body that has it: picked again by a point on it, a corner found the first
+            // edge of any body through that corner, such as another body's edge running past
+            // it, so a vertex took that edge's end (#8650).
+            bodies(st).find_map(|b| {
+                let hit = crate::name_lookup::locate_edge(b, n, at).ok()?;
+                let m = b.mesh();
+                let pts = m.edges.get(hit.edge)?;
+                Some([*pts.first()?, *pts.last()?])
+            })
         })
         .collect::<Option<_>>()?;
     let (first, rest) = ends.split_first()?;
@@ -335,9 +341,12 @@ fn model_line(st: &ModelState, g: &GeoRef) -> Result<(Vec3, Vec3)> {
                 _ => Err(bad("the face is not a cylinder, cone or torus")),
             }
         }
-        _ => Err(bad("pick a straight or circular edge, or a cylinder, cone or torus face")),
+        _ => Err(bad(MODEL_AXIS_REFS)),
     }
 }
+
+/// What [`model_axis`] says about a reference that is neither an edge nor a face.
+pub const MODEL_AXIS_REFS: &str = "pick a straight or circular edge, or a cylinder, cone or torus face";
 
 /// The axis a feature turns about when an edge or face of the model is picked for it (a revolve,
 /// a circular pattern, a plane at an angle), as [`model_line`] finds it. The direction is
@@ -643,6 +652,16 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
             };
             Plane::new(o1, d1, n.cross(d1)).ok_or_else(degenerate)
         }
+        PlaneRef::AxisPoint { axis, point: at } => {
+            let (origin, dir) = line(ctx, axis)?;
+            let dir = dir.normalized().ok_or_else(|| bad("the axis has no direction"))?;
+            let delta = point(ctx, at)? - origin;
+            let across = delta - dir * delta.dot(dir);
+            if !across.len().is_finite() || across.len() < 1e-9 {
+                return Err(bad("the point is on the axis: pick a point off the axis to define a unique plane"));
+            }
+            Plane::new(origin, dir, across).ok_or_else(degenerate)
+        }
         PlaneRef::ThreePoints { a, b, c } => {
             let (pa, pb, pc) = (point(ctx, a)?, point(ctx, b)?, point(ctx, c)?);
             if (pb - pa).cross(pc - pa).len() < 1e-9 {
@@ -794,7 +813,7 @@ impl PlaneRef {
     /// The references of a plane built from model geometry.
     pub fn refs_mut(&mut self) -> Vec<&mut GeoRef> {
         match self {
-            PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } => vec![a.as_mut(), b.as_mut()],
+            PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } | PlaneRef::AxisPoint { axis: a, point: b } => vec![a.as_mut(), b.as_mut()],
             PlaneRef::Perpendicular { plane, line } => vec![plane.as_mut(), line.as_mut()],
             PlaneRef::ThreePoints { a, b, c } => vec![a.as_mut(), b.as_mut(), c.as_mut()],
             PlaneRef::Tangent { face, .. } => vec![face.as_mut()],

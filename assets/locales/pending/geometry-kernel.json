@@ -1,0 +1,58 @@
+{
+  "en": {
+    "cmd.diagnostics_kernel": "Geometry Kernel",
+    "prefs.geometry_kernel": "Geometry kernel",
+    "prefs.geometry_kernel_environment": "The SOLIDCRAFT_KERNEL environment variable is set; it wins over this setting.",
+    "prefs.geometry_kernel_note": "solidcore, the default, answers every operation. Choose SMLib for the C++ kernel. A solidcore failure is reported, never retried on SMLib.",
+    "prefs.geometry_kernel_unavailable": "SMLib is not available in this build. Operations run on solidcore."
+  },
+  "ar": {
+    "cmd.diagnostics_kernel": "نواة الهندسة",
+    "prefs.geometry_kernel": "نواة الهندسة",
+    "prefs.geometry_kernel_environment": "متغير البيئة SOLIDCRAFT_KERNEL مضبوط، وله الأولوية على هذا الإعداد.",
+    "prefs.geometry_kernel_note": "يجيب solidcore، وهو الافتراضي، عن كل العمليات. اختر SMLib لاستخدام نواة C++‎. ويُبلَّغ عن إخفاق solidcore ولا تُعاد المحاولة أبدًا على SMLib.",
+    "prefs.geometry_kernel_unavailable": "SMLib غير متاح في هذا الإصدار. تعمل العمليات على solidcore."
+  },
+  "de": {
+    "cmd.diagnostics_kernel": "Geometriekernel",
+    "prefs.geometry_kernel": "Geometriekernel",
+    "prefs.geometry_kernel_environment": "Die Umgebungsvariable SOLIDCRAFT_KERNEL ist gesetzt; sie hat Vorrang vor dieser Einstellung.",
+    "prefs.geometry_kernel_note": "solidcore, die Standardeinstellung, führt alle Vorgänge aus. Wählen Sie SMLib für den C++-Kernel. Ein Fehler in solidcore wird gemeldet, nie mit SMLib wiederholt.",
+    "prefs.geometry_kernel_unavailable": "SMLib ist in diesem Build nicht verfügbar. Vorgänge laufen auf solidcore."
+  },
+  "fr": {
+    "cmd.diagnostics_kernel": "Noyau géométrique",
+    "prefs.geometry_kernel": "Noyau géométrique",
+    "prefs.geometry_kernel_environment": "La variable d’environnement SOLIDCRAFT_KERNEL est définie ; elle l’emporte sur ce réglage.",
+    "prefs.geometry_kernel_note": "solidcore, le réglage par défaut, traite toutes les opérations. Choisissez SMLib pour le noyau C++. Un échec de solidcore est signalé, jamais réessayé avec SMLib.",
+    "prefs.geometry_kernel_unavailable": "SMLib n’est pas disponible dans cette version. Les opérations s’exécutent sur solidcore."
+  },
+  "he": {
+    "cmd.diagnostics_kernel": "ליבת גאומטריה",
+    "prefs.geometry_kernel": "ליבת גאומטריה",
+    "prefs.geometry_kernel_environment": "משתנה הסביבה SOLIDCRAFT_KERNEL מוגדר, והוא גובר על הגדרה זו.",
+    "prefs.geometry_kernel_note": "solidcore, ברירת המחדל, מבצע את כל הפעולות. בחרו ב-SMLib עבור ליבת ה-C++‎. כשל של solidcore מדווח, ולעולם אינו מנוסה שוב ב-SMLib.",
+    "prefs.geometry_kernel_unavailable": "SMLib אינו זמין בגרסה זו. הפעולות מתבצעות ב-solidcore."
+  },
+  "ja": {
+    "cmd.diagnostics_kernel": "ジオメトリ カーネル",
+    "prefs.geometry_kernel": "ジオメトリ カーネル",
+    "prefs.geometry_kernel_environment": "環境変数 SOLIDCRAFT_KERNEL が設定されているため、この設定より優先されます。",
+    "prefs.geometry_kernel_note": "既定の solidcore がすべての処理を行います。C++ カーネルを使うには SMLib を選択してください。solidcore の失敗は報告され、SMLib で再試行されることはありません。",
+    "prefs.geometry_kernel_unavailable": "このビルドでは SMLib を利用できません。処理は solidcore で実行されます。"
+  },
+  "vi": {
+    "cmd.diagnostics_kernel": "Nhân hình học",
+    "prefs.geometry_kernel": "Nhân hình học",
+    "prefs.geometry_kernel_environment": "Biến môi trường SOLIDCRAFT_KERNEL đã được đặt; biến này được ưu tiên hơn thiết lập này.",
+    "prefs.geometry_kernel_note": "solidcore, mặc định, xử lý mọi thao tác. Chọn SMLib để dùng nhân C++. Lỗi của solidcore được báo cáo, không bao giờ thử lại trên SMLib.",
+    "prefs.geometry_kernel_unavailable": "Bản dựng này không có SMLib. Các thao tác chạy trên solidcore."
+  },
+  "zh": {
+    "cmd.diagnostics_kernel": "几何内核",
+    "prefs.geometry_kernel": "几何内核",
+    "prefs.geometry_kernel_environment": "已设置环境变量 SOLIDCRAFT_KERNEL，它优先于此设置。",
+    "prefs.geometry_kernel_note": "默认的 solidcore 处理所有操作。如需使用 C++ 内核，请选择 SMLib。solidcore 失败时会报告，绝不会改用 SMLib 重试。",
+    "prefs.geometry_kernel_unavailable": "此版本不提供 SMLib。操作在 solidcore 上运行。"
+  }
+}

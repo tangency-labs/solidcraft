@@ -2998,7 +2998,7 @@ fn fold_accepts_a_fixed_point_on_the_top_face() {
                               [440, 229.25], [440, 239.36], [30, 239.36], [30, 229.25], [1.7, 229.25]], "closed": true}),
         );
         run(&mut s, "sketch.finish", json!({}));
-        run(&mut s, "sheet.flange", json!({"base": {"sketch": "Blank"}, "rule": "SGCC 0.8"}));
+        run(&mut s, "sheet.flange", json!({"sketch": "Blank", "rule": "SGCC 0.8"}));
         let flat = volume(&mut s);
         run(&mut s, "sheet.fold", json!({"points": [[30, 230.255, 508.2], [440, 230.255, 508.2]], "fixed": [420, 120, fixed_z], "flip": true}));
         assert!(rel(volume(&mut s), flat) < 1e-3, "fixed z {fixed_z}: a fold keeps the material");

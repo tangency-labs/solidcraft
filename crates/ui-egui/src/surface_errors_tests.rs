@@ -5,9 +5,14 @@
 //! driver's refusal can't be provoked here, so these check the capture on a real device with an
 //! error the validation always reports, and the retry policy with a stand-in clock and device.
 //! An error no scope catches at all is reported by the device's handler
-//! (`gpu::log_uncaptured_errors`) instead of panicking (#5486).
+//! (`gpu::log_uncaptured_errors`) instead of panicking (#5486). A configure that meets a lost
+//! device isn't taken as configured, and an acquire wgpu refuses configures the surface again
+//! (#7007).
 
-use egui_wgpu::{Attempt, ConfigureRetry, SURFACE_RECREATE_AFTER, capture_errors, wgpu};
+use egui_wgpu::{
+    Attempt, ConfigureError, ConfigureRetry, DeviceLost, SURFACE_RECREATE_AFTER, SurfaceErrorAction, WgpuConfiguration, capture_errors,
+    configure_captured, wgpu,
+};
 use std::time::Duration;
 use web_time::Instant;
 
@@ -25,6 +30,57 @@ fn an_error_under_capture_is_returned_not_a_panic() {
     });
     assert!(error.is_none(), "{error:?}");
     assert_eq!(buffer.size(), 4);
+}
+
+/// A driver reset found by a surface configure (D3D12 waits for the present queue after wgpu has
+/// dropped the surface's old configuration) reports nothing: wgpu passes device-loss errors to no
+/// error scope. The configure was taken, the next acquire met a surface without a configuration,
+/// and the device's default handler panicked: "Surface is not configured for presentation"
+/// (#7007). `destroy` loses the device as a driver reset does; wgpu calls the lost callback once
+/// it has polled.
+#[test]
+fn a_configure_that_meets_a_lost_device_is_not_taken() {
+    // The queue is kept: wgpu calls a destroyed device's lost callback only while it has one.
+    let Some((_, device, _queue)) = crate::gpu::offscreen_device() else { return };
+    let lost = DeviceLost::watch(&device);
+    let bad = wgpu::BufferDescriptor { label: Some("bad"), size: 3, usage: wgpu::BufferUsages::MAP_WRITE, mapped_at_creation: true };
+    // On a working device a clean configure is taken and a refused one returns its error.
+    assert!(configure_captured(&device, &lost, || {}).is_ok());
+    let refused = configure_captured(&device, &lost, || {
+        let _ = device.create_buffer(&bad);
+    });
+    assert!(matches!(refused, Err(ConfigureError::Refused(wgpu::Error::Validation { .. }))), "{refused:?}");
+
+    // The device is lost during the configure, which goes on and fails quietly.
+    let met_loss = configure_captured(&device, &lost, || {
+        device.destroy();
+        let _ = device.poll(wgpu::PollType::wait_indefinitely());
+        let _ = device.create_buffer(&bad);
+    });
+    assert!(matches!(met_loss, Err(ConfigureError::DeviceLost)), "{met_loss:?}");
+    assert!(met_loss.is_err_and(|e| e.to_string() == "the graphics device was lost"));
+    // Why the scope alone can't tell: on the lost device the same invalid call reports nothing.
+    let (_, error) = capture_errors(&device, || device.create_buffer(&bad));
+    assert!(error.is_none(), "{error:?}");
+}
+
+/// wgpu hands back `CurrentSurfaceTexture::Validation` for an acquire whose error was captured:
+/// most often a surface without a configuration. Skipping the frame, as before, met the same
+/// error on every later frame (#7007); the surface is configured again instead. The other
+/// statuses keep their actions.
+#[test]
+fn an_acquire_wgpu_refuses_configures_the_surface_again() {
+    let status = WgpuConfiguration::default().on_surface_status;
+    let action = |s: wgpu::CurrentSurfaceTexture| match status(&s) {
+        SurfaceErrorAction::SkipFrame => "skip",
+        SurfaceErrorAction::Reconfigure => "reconfigure",
+        SurfaceErrorAction::RecreateSurface => "recreate",
+    };
+    assert_eq!(action(wgpu::CurrentSurfaceTexture::Validation), "reconfigure");
+    assert_eq!(action(wgpu::CurrentSurfaceTexture::Outdated), "reconfigure");
+    assert_eq!(action(wgpu::CurrentSurfaceTexture::Lost), "recreate");
+    assert_eq!(action(wgpu::CurrentSurfaceTexture::Occluded), "skip");
+    assert_eq!(action(wgpu::CurrentSurfaceTexture::Timeout), "skip");
 }
 
 /// An error no scope caught on the window's device used to reach wgpu's default handler, which

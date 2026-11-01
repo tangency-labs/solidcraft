@@ -1,7 +1,7 @@
 //! Untrim and extend of a sheet's faces. Each returns a new body and leaves its input unchanged;
 //! faces and holes are chosen by points, as [`crate::ops`] chooses them.
 
-use crate::{Brep, Result, error, ffi, init};
+use crate::{Brep, Result, core, error, ffi, init, route};
 
 /// How [`Brep::extend_sheet`] continues a surface past its side.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,12 +29,15 @@ impl Brep {
     /// all the way round closes on the surface's seam). The face alone, or
     /// with `in_place` the whole body with it replaced. Tags follow the face and its edges.
     pub fn untrim_face(&self, point: [f64; 3], tolerance: f64, holes: Holes, outer: bool, in_place: bool) -> Result<Brep> {
-        init()?;
         let holes = match holes {
             Holes::All => None,
             Holes::At(at) => Some(at),
         };
-        ffi::trim::untrim_face(&self.0, &point, tolerance, holes, outer, in_place).map(Brep).map_err(|s| match s {
+        if route::backend() == route::Backend::Solidcore {
+            return core::trim::untrim_face(self.core()?, point, tolerance, holes, outer, in_place).map(Brep::made_core);
+        }
+        init()?;
+        ffi::trim::untrim_face(self.cpp()?, &point, tolerance, holes, outer, in_place).map(Brep::made).map_err(|s| match s {
             ffi::ops::ERR_PICK_NONE => crate::Error::NoMatch { point: 0 },
             s => error(s),
         })
@@ -45,13 +48,16 @@ impl Brep {
     /// `how` says: SMLib's extended surface over the grown box, the face and its sides carrying
     /// the tags of those they continue. A sheet of another shape is [`crate::Error::Unsupported`].
     pub fn extend_sheet(&self, point: [f64; 3], tolerance: f64, distance: f64, how: Continuation) -> Result<Brep> {
+        if route::backend() == route::Backend::Solidcore {
+            return core::trim::extend_sheet(self.core()?, point, tolerance, distance, how).map(Brep::made_core);
+        }
         init()?;
         let mode = match how {
             Continuation::Natural => ffi::trim::EXTEND_NATURAL,
             Continuation::Tangent => ffi::trim::EXTEND_TANGENT,
             Continuation::Curvature => ffi::trim::EXTEND_CURVATURE,
         };
-        ffi::trim::extend_sheet(&self.0, &point, tolerance, distance, mode).map(Brep).map_err(|s| match s {
+        ffi::trim::extend_sheet(self.cpp()?, &point, tolerance, distance, mode).map(Brep::made).map_err(|s| match s {
             ffi::ops::ERR_PICK_NONE => crate::Error::NoMatch { point: 0 },
             s => error(s),
         })
@@ -60,8 +66,11 @@ impl Brep {
     /// A point inside each face, in SMLib's face order: on the face's surface, inside its trims
     /// (`SmFace::CalculateAnInternalPoint`).
     pub fn face_points(&self) -> Result<Vec<[f64; 3]>> {
+        if route::backend() == route::Backend::Solidcore {
+            return core::trim::face_points(self.core()?);
+        }
         init()?;
         let [faces, _, _] = self.counts()?;
-        ffi::trim::face_points(&self.0, faces).map_err(error)
+        ffi::trim::face_points(self.cpp()?, faces).map_err(error)
     }
 }

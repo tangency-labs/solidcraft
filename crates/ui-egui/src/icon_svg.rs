@@ -829,7 +829,7 @@ mod tests {
                 Some("surface")
             } else if c.panel == "CONSTRAINTS" {
                 Some("constraint")
-            } else if matches!(c.id, "sketch.construction" | "sketch.centerline") {
+            } else if matches!(c.id, "sketch.construction" | "sketch.centerline") || c.id.starts_with("sketch.construction_line") {
                 Some("construction")
             } else if c.id.starts_with("sketch.") && matches!(c.panel, "CREATE" | "MODIFY" | "PATTERN" | "FINISH SKETCH") {
                 Some("sketch")
@@ -853,7 +853,8 @@ mod tests {
         for file in crate::theme_files::builtin() {
             let tokens = crate::theme_files::resolve(file);
             let palette = tokens.icon_palette.expect("shipped icon palette");
-            for ramp in palette.accents.into_iter().flatten() {
+            // Two colours can't make a pale/medium/strong ramp three distinct shades (1-bit, 1-bit Dark).
+            for ramp in palette.accents.into_iter().flatten().filter(|_| !crate::theme_files::is_two_colour(&file.id)) {
                 // Ordered faces stay visibly distinct without changing accepted paths.
                 assert_ne!(ramp[0], ramp[1], "{} pale/medium", file.id);
                 assert_ne!(ramp[1], ramp[2], "{} medium/strong", file.id);
@@ -927,7 +928,8 @@ mod tests {
         }
         let construction: Vec<_> = specs.iter().filter(|c| c.panel == "CONSTRUCT").collect();
         let distinct: std::collections::HashSet<_> = construction.iter().map(|c| c.icon).collect();
-        assert_eq!(construction.len(), 19);
+        assert_eq!(construction.len(), 20);
+        assert_eq!(construction.iter().find(|c| c.id == "construct.plane.axis_point").unwrap().icon, "plane_axis_point");
         assert_eq!(distinct.len(), construction.len(), "construction methods need distinct visual identities");
     }
 
@@ -941,6 +943,7 @@ mod tests {
     #[test]
     fn sketch_construction_modes_have_distinct_icons() {
         let families: &[&[&str]] = &[
+            crate::sketch_families::family("sketch.construction_line").unwrap().commands,
             &["sketch.polygon.inscribed", "sketch.polygon.circumscribed", "sketch.polygon.edge"],
             &["sketch.slot.center_to_center", "sketch.slot.overall", "sketch.slot.center_point"],
             &["sketch.slot.arc_three_point", "sketch.slot.arc_center"],

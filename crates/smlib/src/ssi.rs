@@ -8,10 +8,30 @@
 
 use solidcraft_geom::brep as b;
 
-use crate::{Error, Result, error, ffi, init};
+use std::sync::OnceLock;
 
-/// A surface with its UV domain, owned on the C side.
-pub struct Surface(ffi::ssi::SurfaceHandle);
+use crate::{Error, Result, error, ffi, init, route};
+
+/// A surface with its UV domain: the description it was made from, from which solidcore makes its
+/// own ([`crate::core::split`]), and the C side's, made when the C++ kernel needs it.
+pub struct Surface {
+    handle: OnceLock<Result<ffi::ssi::SurfaceHandle>>,
+    /// solidcore's, made when it is first needed.
+    core: OnceLock<Result<crate::core::split::Tool>>,
+    spec: Spec,
+}
+
+/// What a [`Surface`] was made from: its constructor's arguments, checked as the C API checks them
+/// ([`Spec::check`]).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Spec {
+    Plane { origin: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], u: [f64; 2], v: [f64; 2] },
+    Cylinder { origin: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], radius: f64, angle_deg: [f64; 2], height: [f64; 2] },
+    Cone { apex: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], half_angle_deg: f64, height: [f64; 2] },
+    Sphere { center: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], radius: f64, lon_deg: [f64; 2], lat_deg: [f64; 2] },
+    Torus { center: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], major_radius: f64, minor_radius: f64, major_deg: [f64; 2], minor_deg: [f64; 2] },
+    Nurbs { degree: [usize; 2], nu: usize, nv: usize, knots_u: Vec<f64>, knots_v: Vec<f64>, points: Vec<[f64; 3]>, weights: Option<Vec<f64>> },
+}
 
 impl std::fmt::Debug for Surface {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -23,35 +43,166 @@ fn int(n: usize) -> Result<i32> {
     i32::try_from(n).map_err(|_| Error::Argument)
 }
 
+/// The largest coordinate, degree and control net the C API takes (`SMLIB_SURFACE_MAX_*`).
+const MAX_COORD: f64 = 1e8;
+const MAX_DEGREE: usize = 25;
+const MAX_POLES: usize = 1_000_000;
+
+fn bounded(v: &[f64]) -> bool {
+    v.iter().all(|x| x.is_finite() && x.abs() <= MAX_COORD)
+}
+
+/// Two non-zero axes that are not (nearly) parallel.
+fn axes(x: &[f64; 3], y: &[f64; 3]) -> bool {
+    let len = |a: &[f64; 3]| (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+    let c = [x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]];
+    bounded(x) && bounded(y) && len(x) > 1e-12 && len(y) > 1e-12 && len(&c) > 1e-9 * len(x) * len(y)
+}
+
+/// An increasing interval inside `[lo, hi]` spanning at most `span`.
+fn range(r: &[f64; 2], lo: f64, hi: f64, span: f64) -> bool {
+    bounded(r) && r[0] < r[1] && r[0] >= lo && r[1] <= hi && r[1] - r[0] <= span
+}
+
+fn length(x: f64) -> bool {
+    x.is_finite() && x > 1e-9 && x <= MAX_COORD
+}
+
+/// A knot vector of n + p + 1 non-decreasing values with a non-empty domain `[k[p], k[n]]`, no
+/// interior knot repeated more than p times and no end knot more than p + 1.
+fn knots(k: &[f64], n: usize, p: usize) -> bool {
+    if k.len() != n + p + 1 || !bounded(k) || k.windows(2).any(|w| w[1] < w[0]) {
+        return false;
+    }
+    let (Some(lo), Some(hi)) = (k.get(p).copied(), k.get(n).copied()) else { return false };
+    let mut run = 1;
+    for w in k.windows(2) {
+        run = if w[1] == w[0] { run + 1 } else { 1 };
+        if run > p + 1 || (run > p && w[1] > lo && w[1] < hi) {
+            return false;
+        }
+    }
+    lo < hi
+}
+
+impl Spec {
+    /// The checks each of the C API's constructors makes of its arguments, so that a surface is
+    /// refused alike on either kernel, and without the C++ kernel.
+    fn check(&self) -> Result<()> {
+        let whole = |r: &[f64; 2]| range(r, -MAX_COORD, MAX_COORD, 2.0 * MAX_COORD);
+        let turn = |r: &[f64; 2]| range(r, -360.0, 360.0, 360.0);
+        let ok = match self {
+            Spec::Plane { origin, xaxis, yaxis, u, v } => bounded(origin) && axes(xaxis, yaxis) && whole(u) && whole(v),
+            Spec::Cylinder { origin, xaxis, yaxis, radius, angle_deg, height } => {
+                bounded(origin) && axes(xaxis, yaxis) && length(*radius) && turn(angle_deg) && range(height, -MAX_COORD, MAX_COORD, MAX_COORD)
+            }
+            Spec::Cone { apex, xaxis, yaxis, half_angle_deg, height } => {
+                bounded(apex)
+                    && axes(xaxis, yaxis)
+                    && (0.01..=89.0).contains(half_angle_deg)
+                    && range(height, 0.0, MAX_COORD, MAX_COORD)
+                    && height[1] - height[0] > 1e-9
+            }
+            Spec::Sphere { center, xaxis, yaxis, radius, lon_deg, lat_deg } => {
+                bounded(center) && axes(xaxis, yaxis) && length(*radius) && turn(lon_deg) && range(lat_deg, -90.0, 90.0, 180.0)
+            }
+            Spec::Torus { center, xaxis, yaxis, major_radius, minor_radius, major_deg, minor_deg } => {
+                bounded(center)
+                    && axes(xaxis, yaxis)
+                    && length(*major_radius)
+                    && length(*minor_radius)
+                    && minor_radius < major_radius
+                    && turn(major_deg)
+                    && turn(minor_deg)
+            }
+            Spec::Nurbs { degree: [p, q], nu, nv, knots_u, knots_v, points, weights } => {
+                (1..=MAX_DEGREE).contains(p)
+                    && (1..=MAX_DEGREE).contains(q)
+                    && *nu > *p
+                    && *nv > *q
+                    && nu.checked_mul(*nv).is_some_and(|n| n <= MAX_POLES && points.len() == n)
+                    && knots(knots_u, *nu, *p)
+                    && knots(knots_v, *nv, *q)
+                    && points.iter().all(|c| bounded(c))
+                    && weights.as_ref().is_none_or(|w| w.len() == points.len() && w.iter().all(|x| (1e-6..=1e6).contains(x)))
+            }
+        };
+        if ok { Ok(()) } else { Err(Error::Argument) }
+    }
+
+    /// The C side's surface.
+    fn on_cpp(&self) -> Result<ffi::ssi::SurfaceHandle> {
+        init()?;
+        match self {
+            Spec::Plane { origin, xaxis, yaxis, u, v } => ffi::ssi::plane(origin, xaxis, yaxis, u, v),
+            Spec::Cylinder { origin, xaxis, yaxis, radius, angle_deg, height } => {
+                ffi::ssi::cylinder(origin, xaxis, yaxis, *radius, angle_deg, height)
+            }
+            Spec::Cone { apex, xaxis, yaxis, half_angle_deg, height } => ffi::ssi::cone(apex, xaxis, yaxis, *half_angle_deg, height),
+            Spec::Sphere { center, xaxis, yaxis, radius, lon_deg, lat_deg } => ffi::ssi::sphere(center, xaxis, yaxis, *radius, lon_deg, lat_deg),
+            Spec::Torus { center, xaxis, yaxis, major_radius, minor_radius, major_deg, minor_deg } => {
+                ffi::ssi::torus(center, xaxis, yaxis, *major_radius, *minor_radius, major_deg, minor_deg)
+            }
+            Spec::Nurbs { degree, nu, nv, knots_u, knots_v, points, weights } => {
+                let flat: Vec<f64> = points.iter().flatten().copied().collect();
+                ffi::ssi::nurbs([int(degree[0])?, int(degree[1])?], int(*nu)?, int(*nv)?, knots_u, knots_v, &flat, weights.as_deref())
+            }
+        }
+        .map_err(error)
+    }
+}
+
+/// Whether intersections run on the C++ kernel ([`route::backend`]).
+fn ssi_on_cpp() -> bool {
+    route::backend() == route::Backend::Smlib
+}
+
 impl Surface {
-    pub(crate) fn handle(&self) -> &ffi::ssi::SurfaceHandle {
-        &self.0
+    /// The C side's surface, made the first time the C++ kernel needs it.
+    pub(crate) fn handle(&self) -> Result<&ffi::ssi::SurfaceHandle> {
+        self.handle.get_or_init(|| self.spec.on_cpp()).as_ref().map_err(Clone::clone)
+    }
+
+    /// solidcore's surface, made the first time it is needed.
+    fn core(&self) -> Result<&crate::core::split::Tool> {
+        self.core.get_or_init(|| crate::core::ssi::surface(&self.spec)).as_ref().map_err(Clone::clone)
+    }
+
+    pub(crate) fn spec(&self) -> &Spec {
+        &self.spec
+    }
+
+    /// A surface from its checked description. On the C++
+    /// kernel, its side is made now, so that what it refuses is refused here.
+    fn made(spec: Spec) -> Result<Surface> {
+        spec.check()?;
+        let s = Surface { handle: OnceLock::new(), core: OnceLock::new(), spec };
+        if ssi_on_cpp() {
+            s.handle()?;
+        }
+        Ok(s)
     }
 
     /// `origin + u*x + v*y` (x, y the axes made unit), for u in `u`, v in `v`.
     pub fn plane(origin: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], u: [f64; 2], v: [f64; 2]) -> Result<Surface> {
-        init()?;
-        ffi::ssi::plane(&origin, &xaxis, &yaxis, &u, &v).map(Surface).map_err(error)
+        Surface::made(Spec::Plane { origin, xaxis, yaxis, u, v })
     }
 
     /// A cylinder of `radius` about the axis through `origin` along `xaxis × yaxis`, angle
     /// `angle_deg` from `xaxis` towards `yaxis`, for heights `height` measured from `origin`.
     pub fn cylinder(origin: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], radius: f64, angle_deg: [f64; 2], height: [f64; 2]) -> Result<Surface> {
-        init()?;
-        ffi::ssi::cylinder(&origin, &xaxis, &yaxis, radius, &angle_deg, &height).map(Surface).map_err(error)
+        Surface::made(Spec::Cylinder { origin, xaxis, yaxis, radius, angle_deg, height })
     }
 
     /// A full cone with its apex at `apex` along `xaxis × yaxis`, radius `h * tan(half_angle_deg)`
     /// at distance h along the axis, for h in `height` (from 0: through the apex).
     pub fn cone(apex: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], half_angle_deg: f64, height: [f64; 2]) -> Result<Surface> {
-        init()?;
-        ffi::ssi::cone(&apex, &xaxis, &yaxis, half_angle_deg, &height).map(Surface).map_err(error)
+        Surface::made(Spec::Cone { apex, xaxis, yaxis, half_angle_deg, height })
     }
 
     /// A sphere of `radius` at `center`, over longitudes `lon_deg` and latitudes `lat_deg`.
     pub fn sphere(center: [f64; 3], xaxis: [f64; 3], yaxis: [f64; 3], radius: f64, lon_deg: [f64; 2], lat_deg: [f64; 2]) -> Result<Surface> {
-        init()?;
-        ffi::ssi::sphere(&center, &xaxis, &yaxis, radius, &lon_deg, &lat_deg).map(Surface).map_err(error)
+        Surface::made(Spec::Sphere { center, xaxis, yaxis, radius, lon_deg, lat_deg })
     }
 
     /// A ring torus at `center` about `xaxis × yaxis`, `major_deg` round the axis and `minor_deg`
@@ -65,8 +216,7 @@ impl Surface {
         major_deg: [f64; 2],
         minor_deg: [f64; 2],
     ) -> Result<Surface> {
-        init()?;
-        ffi::ssi::torus(&center, &xaxis, &yaxis, major_radius, minor_radius, &major_deg, &minor_deg).map(Surface).map_err(error)
+        Surface::made(Spec::Torus { center, xaxis, yaxis, major_radius, minor_radius, major_deg, minor_deg })
     }
 
     /// A (rational) B-spline surface: `nu × nv` control points, point (i, j) (i along u) at
@@ -80,9 +230,15 @@ impl Surface {
         points: &[[f64; 3]],
         weights: Option<&[f64]>,
     ) -> Result<Surface> {
-        init()?;
-        let flat: Vec<f64> = points.iter().flatten().copied().collect();
-        ffi::ssi::nurbs([int(degree[0])?, int(degree[1])?], int(nu)?, int(nv)?, knots_u, knots_v, &flat, weights).map(Surface).map_err(error)
+        Surface::made(Spec::Nurbs {
+            degree,
+            nu,
+            nv,
+            knots_u: knots_u.to_vec(),
+            knots_v: knots_v.to_vec(),
+            points: points.to_vec(),
+            weights: weights.map(<[f64]>::to_vec),
+        })
     }
 
     /// A schema 4 record surface over the parameter box `domain` (`[[u0, u1], [v0, v1]]`, the
@@ -141,12 +297,18 @@ impl Surface {
 
     /// The UV domain the intersection runs within, as `[u0, u1, v0, v1]`.
     pub fn domain(&self) -> Result<[f64; 4]> {
-        ffi::ssi::domain(&self.0).map_err(error)
+        if !ssi_on_cpp() {
+            return self.core().map(crate::core::ssi::domain);
+        }
+        ffi::ssi::domain(self.handle()?).map_err(error)
     }
 
     /// The surface's point at (u, v).
     pub fn evaluate(&self, u: f64, v: f64) -> Result<[f64; 3]> {
-        ffi::ssi::evaluate(&self.0, u, v).map_err(error)
+        if !ssi_on_cpp() {
+            return crate::core::ssi::evaluate(self.core()?, u, v);
+        }
+        ffi::ssi::evaluate(self.handle()?, u, v).map_err(error)
     }
 }
 
@@ -157,8 +319,6 @@ pub enum Method {
     Global,
     /// `SmAdvSurfaceIntersector`, the general NURBS path.
     Advanced,
-    /// `SmSurfaceIntersector`, the basic intersector.
-    Basic,
 }
 
 impl Method {
@@ -166,7 +326,6 @@ impl Method {
         match self {
             Method::Global => 0,
             Method::Advanced => 1,
-            Method::Basic => 2,
         }
     }
 }
@@ -243,7 +402,7 @@ pub struct SsiResult {
 }
 
 /// The 3D B-spline: polynomial where every weight is 1.
-fn curve3(c: ffi::ssi::Nurbs) -> b::Curve {
+pub(crate) fn curve3(c: ffi::ssi::Nurbs) -> b::Curve {
     let points = c.points.as_chunks::<3>().0;
     if c.weights.iter().all(|w| *w == 1.0) {
         b::Curve::Spline { knots: c.knots, points: points.to_vec() }
@@ -256,7 +415,7 @@ fn curve3(c: ffi::ssi::Nurbs) -> b::Curve {
 }
 
 /// A UV B-spline, as [`curve3`].
-fn curve2(c: ffi::ssi::Nurbs) -> b::Curve2 {
+pub(crate) fn curve2(c: ffi::ssi::Nurbs) -> b::Curve2 {
     let points = c.points.as_chunks::<2>().0;
     if c.weights.iter().all(|w| *w == 1.0) {
         b::Curve2::Spline { knots: c.knots, points: points.to_vec() }
@@ -278,7 +437,10 @@ fn uv(r: &ffi::ssi::ResultHandle, i: i32, which: i32) -> Result<Option<b::Curve2
 /// `approx_tol` (<= 0: SMLib's default, 1/1000 of the surfaces' size). An intersector failure is
 /// SMLib's status; a curve SMLib does not hold as a B-spline is [`Error::Unsupported`].
 pub fn intersect(a: &Surface, b: &Surface, method: Method, approx_tol: f64) -> Result<SsiResult> {
-    let r = ffi::ssi::ssi(&a.0, &b.0, method.code(), approx_tol).map_err(error)?;
+    if !ssi_on_cpp() {
+        return crate::core::ssi::intersect(a.core()?, b.core()?, method, approx_tol);
+    }
+    let r = ffi::ssi::ssi(a.handle()?, b.handle()?, method.code(), approx_tol).map_err(error)?;
     let n = ffi::ssi::curve_count(&r).map_err(error)?;
     let mut curves = Vec::new();
     for i in 0..n {
@@ -308,6 +470,8 @@ mod tests {
     /// A plane through a sphere's centre: one great circle.
     #[test]
     fn plane_through_sphere_is_a_circle() {
+        #[cfg(feature = "native")]
+        let _cpp = route::on_cpp();
         let z = [0.0, 0.0, 1.0];
         let (x, y) = ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
         let plane = Surface::plane([0.0; 3], x, y, [-2.0, 2.0], [-2.0, 2.0]);
@@ -329,15 +493,52 @@ mod tests {
         }
     }
 
+    /// Refused here, before any kernel: alike on either, and with no C++ kernel.
     #[test]
     fn bad_input_is_an_argument_error() {
-        match Surface::plane([0.0; 3], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0], [0.0, 1.0]) {
-            Err(Error::NotBuilt) => {}
-            r => assert_eq!(r.err(), Some(Error::Argument)),
+        let (x, y) = ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let refused = [
+            Surface::plane([0.0; 3], x, x, [0.0, 1.0], [0.0, 1.0]),
+            Surface::plane([0.0; 3], x, y, [1.0, 0.0], [0.0, 1.0]),
+            Surface::plane([f64::NAN; 3], x, y, [0.0, 1.0], [0.0, 1.0]),
+            Surface::cylinder([0.0; 3], x, y, 0.0, [0.0, 360.0], [0.0, 1.0]),
+            Surface::cone([0.0; 3], x, y, f64::NAN, [0.0, 1.0]),
+            Surface::sphere([0.0; 3], x, y, 1.0, [0.0, 360.0], [-91.0, 90.0]),
+            Surface::torus([0.0; 3], x, y, 1.0, 2.0, [0.0, 360.0], [0.0, 360.0]),
+            Surface::nurbs([1, 1], 2, 2, &[0.0, 0.0, 1.0, 1.0], &[0.0, 0.0, 1.0, 1.0], &[[0.0; 3]; 3], None),
+            Surface::nurbs([1, 1], 2, 2, &[0.0, 0.0, 1.0], &[0.0, 0.0, 1.0, 1.0], &[[0.0; 3]; 4], None),
+            Surface::nurbs([1, 1], 2, 2, &[0.0, 0.0, 1.0, 1.0], &[0.0, 0.0, 1.0, 1.0], &[[0.0; 3]; 4], Some(&[0.0; 4])),
+            Surface::nurbs([0, 1], 2, 2, &[0.0, 0.0, 1.0], &[0.0, 0.0, 1.0, 1.0], &[[0.0; 3]; 4], None),
+        ];
+        for (i, r) in refused.iter().enumerate() {
+            assert_eq!(r.as_ref().err(), Some(&Error::Argument), "{i}");
         }
-        match Surface::nurbs([1, 1], 2, 2, &[0.0, 0.0, 1.0, 1.0], &[0.0, 0.0, 1.0, 1.0], &[[0.0; 3]; 3], None) {
-            Err(Error::NotBuilt) => {}
-            r => assert_eq!(r.err(), Some(Error::Argument)),
+    }
+
+    /// On solidcore a surface needs no C++ kernel, and answers by itself. The basic intersector is
+    /// the one method solidcore has no public entry for, and it says so; nothing falls back.
+    #[test]
+    fn surfaces_on_solidcore_answer_without_the_cpp_kernel() {
+        if ssi_on_cpp() {
+            return;
+        }
+        let (x, y, z) = ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+        let plane = Surface::plane([0.0; 3], x, y, [-2.0, 2.0], [-3.0, 3.0]).unwrap();
+        assert_eq!(plane.domain().unwrap(), [-2.0, 2.0, -3.0, 3.0]);
+        assert_eq!(plane.evaluate(1.0, -2.0).unwrap(), [1.0, -2.0, 0.0]);
+        assert_eq!(plane.evaluate(f64::NAN, 0.0).unwrap_err(), Error::Argument);
+        let sphere = Surface::sphere([0.0; 3], x, z, 1.0, [0.0, 360.0], [-90.0, 90.0]).unwrap();
+        for method in [Method::Global, Method::Advanced] {
+            let r = intersect(&plane, &sphere, method, 1e-6).unwrap();
+            assert!(!r.curves.is_empty(), "{method:?}");
+            for c in &r.curves {
+                let eval = b::eval::CurveEval::new(&c.curve).unwrap();
+                let [t0, t1] = c.interval;
+                for k in 0..=100 {
+                    let p = eval.point(t0 + (t1 - t0) * f64::from(k) / 100.0).unwrap();
+                    assert!((p.x.hypot(p.y) - 1.0).abs() < 1e-5 && p.z.abs() < 1e-5, "{method:?}: {p:?}");
+                }
+            }
         }
     }
 }

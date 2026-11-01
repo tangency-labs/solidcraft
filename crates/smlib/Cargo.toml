@@ -28,6 +28,7 @@ native = []
 log = { workspace = true }
 solidcraft-geom = { workspace = true }
 solidcraft-profile = { workspace = true }
+solidcore = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # The clocks SMLib's C library asks for in a browser build (src/ffi.rs).

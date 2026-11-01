@@ -1,11 +1,18 @@
 //! Native feature rows in the component browser, separate from timeline layout and order.
 
 use super::*;
+use crate::history_rows::{HistoryFeature, HistoryRows};
 
 #[derive(Clone, Debug)]
 pub(crate) struct Reveal {
     pub id: u64,
     pub path: Vec<u64>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Folded Features folders whose mark was worked out (the tests count them).
+    static MARKS_WORKED_OUT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Open the Features folder that lists this feature and scroll to its row, without changing the
@@ -42,87 +49,365 @@ pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
     app.tree.reveal_feature = Some(Reveal { id, path });
 }
 
+/// With the history in the browser: open the feature's component and history, and scroll to it.
+pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
+    let Some(component) = app.session.doc.feature(id).map(|feature| feature.component) else { return };
+    app.ui.show_browser = true;
+    app.tree.collapsed.remove("c0");
+    app.tree.collapsed.remove(&format!("c{component}"));
+    app.tree.collapsed.remove(&format!("c{component}/history"));
+    app.tree.reveal_feature = Some(Reveal { id, path: Vec::new() });
+}
+
+/// Feature folders hide later rows only while editing; history always lists every feature.
+fn shown_features(app: &SolveApp, compact: bool) -> usize {
+    let n = app.session.doc.features.len();
+    if !compact && app.dialog.as_ref().is_some_and(|d| d.editing.is_some()) { app.session.doc.marker.unwrap_or(n) } else { n }
+}
+
 pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: &[u64], depth: usize, acts: &mut Actions) {
-    let has_features = match app.tree.model.as_ref().filter(|m| m.matches(&app.session)) {
-        Some(model) => model.features.get(&component).is_some_and(|features| !features.is_empty()),
-        None => app.session.doc.features.iter().any(|feature| feature.component == component && !matches!(feature.kind, FeatureKind::Sketch { .. })),
+    // Compact history: every feature of the component, sketches too, in history order with the
+    // marker, in place of the timeline.
+    let compact = app.preferences.history_in_browser;
+    let shown = shown_features(app, compact);
+    let has_features = match app.tree.model.as_ref().filter(|m| m.matches(&app.session) && !compact) {
+        Some(model) => model.features.get(&component).is_some_and(|features| features.iter().any(|&index| index < shown)),
+        None => app
+            .session
+            .doc
+            .features
+            .iter()
+            .take(shown)
+            .any(|feature| feature.component == component && (compact || !matches!(feature.kind, FeatureKind::Sketch { .. }))),
     };
     if !has_features {
         return;
     }
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(path) };
-    let key = format!("{scope}/features");
-    let open = is_open(app, &key, false);
-    let r = draw_row(ui, ui.id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label: "Features", ..Default::default() });
+    // The history opens by default; the Features folder stays closed until opened.
+    let (key, label) =
+        if compact { (format!("{scope}/history"), crate::i18n::tr("ui.history_title")) } else { (format!("{scope}/features"), "Features") };
+    let open = is_open(app, &key, compact);
+    // Folded, it carries the worst mark of what it holds. A row scrolled out of view paints
+    // nothing, so its mark is not worked out: in a long tree of placements of a part with a long
+    // history, every folder's mark scanned the design's whole history on every frame (#6083).
+    let ids: Vec<u64> = if open || !ui.is_rect_visible(row_rect(ui)) {
+        Vec::new()
+    } else {
+        #[cfg(test)]
+        MARKS_WORKED_OUT.with(|n| n.set(n.get() + 1));
+        app.session
+            .doc
+            .features
+            .iter()
+            .filter(|f| f.component == component && (compact || !matches!(f.kind, FeatureKind::Sketch { .. })))
+            .map(|f| f.id)
+            .collect()
+    };
+    let (status, tip) = crate::timeline::worst_status(app, &ids);
+    let r =
+        draw_row(ui, ui.id().with(&key), &Row { depth, fold: Some(open), icon: "folder", label, status, tip: tip.as_deref(), ..Default::default() });
     if r.fold || r.clicked {
-        toggle(app, &key, false);
+        toggle(app, &key, compact);
     }
     if !open {
         return;
     }
-    let indices = match app.tree.model.as_ref().filter(|m| m.matches(&app.session)) {
+    let indices = match app.tree.model.as_ref().filter(|m| m.matches(&app.session) && !compact) {
         Some(model) => model.features.get(&component).cloned().unwrap_or_default(),
         None => app
             .session
             .doc
             .features
             .iter()
+            .take(shown)
             .enumerate()
-            .filter_map(|(i, f)| (f.component == component && !matches!(f.kind, FeatureKind::Sketch { .. })).then_some(i))
+            .filter_map(|(i, f)| (f.component == component && (compact || !matches!(f.kind, FeatureKind::Sketch { .. }))).then_some(i))
             .collect(),
     };
-    for index in indices {
-        let Some(feature) = app.session.doc.features.get(index) else { continue };
-        let (id, label, icon) = (feature.id, feature.name.clone(), crate::timeline::icon_of(&feature.kind));
-        let sketch = crate::timeline::TimelineKind::of(&feature.kind).profile_sketch();
-        // Behind the history marker or suppressed: not built, drawn faint as in the timeline.
-        let dim = feature.suppressed || app.session.doc.marker.is_some_and(|marker| index >= marker);
-        let selected = app.session.selection.contains(&Sel::Feature { id });
-        app.tree.remember(&format!("f:{id}"));
-        let action = sketch.map(|_| ("sketch", "Edit Profile Sketch"));
-        // The bodies it made show and hide with its eye (#5099); a component listed on its own
-        // stands for all of its placements.
-        let placement = (component == 0 || !path.is_empty()).then_some((component, path));
-        let bodies = app.session.feature_bodies(&[id], placement);
-        let visible = bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b));
-        let eye = (!bodies.is_empty()).then_some(visible);
-        let r = draw_row(
-            ui,
-            ui.id().with(("browser_feature", id)),
-            &Row { depth: depth + 1, eye, icon, label: &label, selected, dim: dim || eye == Some(false), action, ..Default::default() },
-        );
-        if r.eye {
-            let mut p = json!({"visible": !visible, "features": [id]});
-            if !path.is_empty() {
-                p["path"] = json!(path);
+    let here = Here { component, path, scope: &scope };
+    // The feature that made what is under the cursor or picked in the viewport, as the history
+    // lights it, and in the history layout what a selected history row lights.
+    let from_view = [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)];
+    let lit = if compact { lit_by_selection(app) } else { BTreeSet::new() };
+    let mark = |app: &SolveApp, index: usize| {
+        let id = app.session.doc.features.get(index).map(|f| f.id);
+        if id.is_some_and(|id| lit.contains(&id) || from_view.contains(&Some(id))) { Mark::Here } else { Mark::None }
+    };
+    if !compact {
+        for index in indices.into_iter().take_while(|&index| index < shown) {
+            let _ = feature_row(app, ui, acts, &here, index, depth + 1, None, mark(app, index), None);
+        }
+        return;
+    }
+    let n = app.session.doc.features.len();
+    let marker = app.session.doc.marker.unwrap_or(n);
+    let plan = history_plan(app, &indices, marker);
+    // `plan` counts in the component's own features; a timeline position is a global index.
+    let global = |at: usize| indices.get(at).copied().unwrap_or_else(|| indices.last().map_or(n, |last| last + 1));
+    // Where the marker can be dropped: the top of each row (it and the sketches listed under it
+    // first rolled back) and below the last.
+    let mut slots: Vec<(f32, usize)> = Vec::new();
+    // Where dragged rows can be dropped, as in the History at the left: these slots and one
+    // before the marker, each with the folder the rows join (#9565).
+    let drag_id = egui::Id::new(("sc_browser_history_drag", &scope));
+    let mut dragged: Option<Vec<u64>> = ui.data(|d| d.get_temp(drag_id));
+    let mut drops: Vec<DropSlot> = Vec::new();
+    let mut marker_resp = None;
+    for row in &plan.rows {
+        let index = global(row.index);
+        let drop = DropSlot {
+            y: ui.cursor().min.y,
+            position: global(row.slot.min(row.index)),
+            group: crate::timeline_left::group_for(&app.session.doc.timeline_groups, row.feature),
+        };
+        if marker_resp.is_none() && index >= marker {
+            drops.push(drop);
+            marker_resp = Some(marker_row(app, ui, depth + 1));
+        }
+        slots.push((ui.cursor().min.y, global(row.slot)));
+        drops.push(DropSlot { y: ui.cursor().min.y, ..drop });
+        // The same fold as in the vertical History, so it stays open when the layout changes.
+        let key = crate::timeline_left::sketches_key(row.feature);
+        let open = is_open(app, &key, false);
+        let listed: Vec<usize> = row.listed.iter().filter(|listed| !listed.reference).map(|listed| global(listed.index)).collect();
+        let fold = (!listed.is_empty()).then_some(open);
+        if feature_row(app, ui, acts, &here, index, depth + 1, fold, mark(app, index), Some(&mut dragged)) {
+            toggle(app, &key, false);
+        }
+        if open {
+            for index in listed {
+                let _ = feature_row(app, ui, acts, &here, index, depth + 2, None, mark(app, index), Some(&mut dragged));
             }
-            let _ = app.run("browser.visibility", p);
-        }
-        if r.action
-            && let Some(sketch) = sketch
-        {
-            app.edit_sketch(sketch.0);
-            continue;
-        }
-        if let Some(rect) = r.rect {
-            crate::scenario::publish_handle(&format!("row:browser-feature:{scope}:{id}"), rect.center());
-            if app.tree.reveal_feature.as_ref().is_some_and(|target| target.id == id && target.path == path) {
-                ui.scroll_to_rect(rect, Some(egui::Align::Center));
-                app.tree.reveal_feature = None;
-            }
-        }
-        if r.double {
-            if !path.is_empty() {
-                let _ = app.run("component.activate", json!({"component":component,"occurrence":path.last(),"path":path}));
-            }
-            app.edit_feature(id);
-        } else if r.clicked {
-            click_select(app, ui, format!("f:{id}"), Some(Sel::Feature { id }));
-        }
-        if let Some(at) = r.secondary {
-            acts.menu = Some((at, Target::Feature { id }));
         }
     }
+    let end = global(indices.len());
+    if marker_resp.is_none() {
+        drops.push(DropSlot { y: ui.cursor().min.y, position: end, group: None });
+    }
+    let resp = marker_resp.unwrap_or_else(|| marker_row(app, ui, depth + 1));
+    if !plan.rows.is_empty() {
+        slots.push((ui.cursor().min.y, end));
+        drops.push(DropSlot { y: ui.cursor().min.y, position: end, group: None });
+    }
+    drag_marker(app, ui, &resp, &slots, marker);
+    drag_rows(app, ui, &plan, drag_id, dragged, &drops, resp.rect.center().y);
+}
+
+/// A place in the browser's History where dragged rows can land: its height, the timeline
+/// position they move to and the folder they join (`None`: the timeline root).
+#[derive(Clone, Copy)]
+struct DropSlot {
+    y: f32,
+    position: usize,
+    group: Option<u64>,
+}
+
+/// Where a history row is drawn: its component and placement.
+struct Here<'a> {
+    component: u64,
+    path: &'a [u64],
+    scope: &'a str,
+}
+
+/// The component's history rows, `indices` its features' timeline positions: with Sketches:
+/// Under their feature, each sketch listed under the feature built from it as the vertical
+/// History lists it (`history_rows`, without reference rows); otherwise in creation order.
+fn history_plan(app: &SolveApp, indices: &[usize], marker: usize) -> HistoryRows {
+    let doc = &app.session.doc;
+    let features: Vec<HistoryFeature> = indices.iter().filter_map(|index| doc.features.get(*index)).map(HistoryFeature::of).collect();
+    if !crate::timeline_left::nests(app) {
+        return HistoryRows::in_order(features.iter().map(|feature| (feature.id, feature.sketch)));
+    }
+    let local = indices.iter().take_while(|index| **index < marker).count();
+    crate::history_rows::rows(&features, &doc.timeline_groups, (local < features.len()).then_some(local), false)
+}
+
+/// What a selected history row lights up: a feature's sketches, and the features built from a
+/// selected sketch.
+fn lit_by_selection(app: &SolveApp) -> BTreeSet<u64> {
+    let mut lit = BTreeSet::new();
+    let doc = &app.session.doc;
+    for selection in &app.session.selection {
+        let Sel::Feature { id } = selection else { continue };
+        let Some(feature) = doc.feature(*id) else { continue };
+        if matches!(feature.kind, FeatureKind::Sketch { .. }) {
+            lit.extend(doc.features.iter().filter(|f| f.kind.input_sketches().contains(id)).map(|f| f.id));
+        } else {
+            lit.extend(feature.kind.input_sketches());
+        }
+    }
+    lit
+}
+
+/// One feature or sketch row; returns whether its fold arrow was clicked.
+#[allow(clippy::too_many_arguments)]
+fn feature_row(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    acts: &mut Actions,
+    here: &Here,
+    index: usize,
+    depth: usize,
+    fold: Option<bool>,
+    mark: Mark,
+    drag: Option<&mut Option<Vec<u64>>>,
+) -> bool {
+    let Some(feature) = app.session.doc.features.get(index) else { return false };
+    let (component, path) = (here.component, here.path);
+    let (id, label, icon) = (feature.id, feature.name.clone(), crate::timeline::icon_of(&feature.kind));
+    let is_sketch = matches!(feature.kind, FeatureKind::Sketch { .. });
+    let sketch = crate::timeline::TimelineKind::of(&feature.kind).profile_sketch();
+    // Behind the history marker or suppressed: not built, drawn faint as in the timeline.
+    let dim = feature.suppressed || app.session.doc.marker.is_some_and(|marker| index >= marker);
+    // A feature picked by its geometry (a face or edge of it chosen in the view) shows as
+    // selected in the tree, as NX marks the feature of a picked face; the session's selection
+    // stays the face or edge.
+    let by_geometry = !app.session.selection.contains(&Sel::Feature { id }) && crate::timeline::picked_feature(app) == Some(id);
+    let selected = app.session.selection.contains(&Sel::Feature { id }) || by_geometry;
+    app.tree.remember(&format!("f:{id}"));
+    let action = sketch.map(|_| ("sketch", "Edit Profile Sketch"));
+    // A sketch row has the eye its Sketches folder row has. A feature's eye shows and hides the
+    // bodies it made (#5099); a component listed on its own stands for all of its placements.
+    let placement = (component == 0 || !path.is_empty()).then_some((component, path));
+    let bodies = if is_sketch { Vec::new() } else { app.session.feature_bodies(&[id], placement) };
+    let visible =
+        if is_sketch { crate::browser::sketch_visible(app, id) } else { bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b)) };
+    let eye = (is_sketch || !bodies.is_empty()).then_some(visible);
+    let status = crate::timeline::feature_status(app, id);
+    let tip = status.and_then(|_| crate::timeline::feature_message(app, id));
+    // A cut feature has a dashed outline until Paste moves it.
+    let cut = app.cut.features.contains(&id);
+    let r = draw_row(
+        ui,
+        ui.id().with(("browser_feature", id)),
+        &Row {
+            depth,
+            fold,
+            eye,
+            icon,
+            label: &label,
+            selected,
+            dim: dim || (!is_sketch && eye == Some(false)),
+            cut,
+            action,
+            mark,
+            status,
+            tip: tip.as_deref(),
+            ..Default::default()
+        },
+    );
+    if r.eye && is_sketch {
+        crate::browser::set_sketch_visible(app, id, !visible);
+    } else if r.eye {
+        let mut p = json!({"visible": !visible, "features": [id]});
+        if !path.is_empty() {
+            p["path"] = json!(path);
+        }
+        let _ = app.run("browser.visibility", p);
+    }
+    if r.action
+        && let Some(sketch) = sketch
+    {
+        app.edit_sketch(sketch.0);
+        return false;
+    }
+    let scope = here.scope;
+    if let Some(rect) = r.rect {
+        crate::scenario::publish_handle(&format!("row:browser-feature:{scope}:{id}"), rect.center());
+        if app.tree.reveal_feature.as_ref().is_some_and(|target| target.id == id && target.path == path) {
+            ui.scroll_to_rect(rect, Some(egui::Align::Center));
+            app.tree.reveal_feature = None;
+        }
+    }
+    if r.double {
+        if !path.is_empty() {
+            let _ = app.run("component.activate", json!({"component":component,"occurrence":path.last(),"path":path}));
+        }
+        app.edit_feature(id);
+    } else if r.clicked {
+        click_select(app, ui, format!("f:{id}"), Some(Sel::Feature { id }));
+    }
+    if let Some(at) = r.secondary {
+        acts.menu = Some((at, if is_sketch { Target::Sketch { id } } else { Target::Feature { id } }));
+    }
+    // In the History: a drag of the row (not of its fold arrow or eye) moves the feature (#9565).
+    if let Some(drag) = drag
+        && !r.on_control
+        && r.resp.as_ref().is_some_and(egui::Response::drag_started)
+    {
+        *drag = Some(crate::timeline_left::drag_features(app, id, selected));
+    }
+    r.fold
+}
+
+/// The history marker between the rows, as in the vertical timeline.
+fn marker_row(app: &SolveApp, ui: &mut egui::Ui, depth: usize) -> egui::Response {
+    let t = Tokens::get();
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_12), Sense::drag());
+    let line = Rect::from_min_max(pos2(rect.left() + 2.0 + depth as f32 * INDENT, rect.top()), rect.max);
+    crate::ui_kit::history_marker(ui.painter(), line, true, crate::theme::TabAccent::for_tab(&t, &app.ui.tab));
+    crate::scenario::publish_handle("browser:rollback", rect.center());
+    if response.hovered() || response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+    }
+    response.on_hover_text(crate::i18n::tr("ui.history_marker_tip"))
+}
+
+/// Dragging the marker shows where it lands; letting go rolls the history there, through the
+/// timeline's own command.
+fn drag_marker(app: &mut SolveApp, ui: &egui::Ui, resp: &egui::Response, slots: &[(f32, usize)], marker: usize) {
+    if !resp.dragged() && !resp.drag_stopped() {
+        return;
+    }
+    let Some(y) = ui.ctx().pointer_latest_pos().map(|p| p.y) else { return };
+    let Some(&(slot_y, position)) = slots.iter().min_by(|a, b| (a.0 - y).abs().total_cmp(&(b.0 - y).abs())) else { return };
+    if resp.dragged() && position != marker {
+        let accent = crate::theme::TabAccent::current(ui.ctx()).color;
+        ui.painter().hline(resp.rect.left() + 4.0..=resp.rect.right() - 4.0, slot_y, Stroke::new(2.0, accent));
+    }
+    if resp.drag_stopped() && position != marker {
+        let n = app.session.doc.features.len();
+        let _ = app.run_heavy("timeline.roll_to", if position >= n { json!({}) } else { json!({ "position": position }) });
+    }
+}
+
+/// Dragging feature rows shows where they land with the History's drop bar; letting go moves them
+/// with the History's own move, before or behind the marker by the side of it they land on.
+fn drag_rows(app: &mut SolveApp, ui: &egui::Ui, plan: &HistoryRows, drag_id: egui::Id, dragged: Option<Vec<u64>>, drops: &[DropSlot], marker_y: f32) {
+    let Some(features) = dragged else { return };
+    let (released, down) = ui.input(|i| (i.pointer.any_released(), i.pointer.any_down()));
+    if released || !down {
+        ui.data_mut(|d| d.remove::<Vec<u64>>(drag_id));
+    }
+    if !released && !down {
+        return;
+    }
+    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    // Only over the History's rows: let go anywhere else, nothing moves.
+    let reach = crate::ui_kit::TREE_ROW_HEIGHT;
+    let (top, bottom) = drops.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(top, bottom), drop| (top.min(drop.y), bottom.max(drop.y)));
+    let slot = ui
+        .ctx()
+        .pointer_latest_pos()
+        .filter(|p| ui.max_rect().x_range().contains(p.x) && p.y >= top - reach && p.y <= bottom + reach)
+        .and_then(|p| drops.iter().min_by(|a, b| (a.y - p.y).abs().total_cmp(&(b.y - p.y).abs())).copied());
+    if released {
+        if let Some(drop) = slot {
+            crate::timeline_left::drop_items(app, plan, &features, &[], drop.group, drop.position, drop.y < marker_y);
+        }
+        return;
+    }
+    if let Some(drop) = slot {
+        let rect = ui.max_rect();
+        crate::ui_kit::history_drop_bar(
+            ui.painter(),
+            Rect::from_min_max(pos2(rect.left() + 4.0, drop.y), pos2(rect.right() - 5.0, drop.y)),
+            true,
+            Tokens::get().sketch_accent,
+        );
+    }
+    ui.data_mut(|d| d.insert_temp(drag_id, features));
 }
 
 #[cfg(test)]
@@ -155,6 +440,48 @@ mod tests {
         assert_eq!(h.app.session.visibility.hidden_bodies, ["Plate"]);
         h.step(&json!({"click":{"handle":"eye:Box1"}})).unwrap();
         assert!(h.app.session.visibility.hidden_bodies.is_empty());
+    }
+
+    #[test]
+    fn browser_feature_rows_stay_listed_after_manual_rollback() {
+        let mut h = Harness::new();
+        for name in ["Before", "After"] {
+            h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":name})).unwrap();
+        }
+        h.app.run("timeline.roll_to", json!({"position":1})).unwrap();
+        for cache in ["current", "missing", "stale"] {
+            assert_eq!(feature_rows(&mut h, cache), ["Features", "Before", "After"], "{cache}");
+        }
+        h.app.run("timeline.roll_to", json!({})).unwrap();
+        for cache in ["current", "missing", "stale"] {
+            assert_eq!(feature_rows(&mut h, cache), ["Features", "Before", "After"], "{cache}");
+        }
+    }
+
+    #[test]
+    fn browser_feature_rows_follow_the_editor_and_restore_the_manual_marker() {
+        let mut h = Harness::new();
+        let mut ids = Vec::new();
+        for name in ["Before", "Edited", "After"] {
+            ids.push(h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"name":name})).unwrap()["feature"].as_u64().unwrap());
+        }
+        h.app.run("timeline.roll_to", json!({"position":2})).unwrap();
+        h.app.edit_feature(ids[1]);
+        assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some()));
+        for cache in ["current", "missing", "stale"] {
+            assert_eq!(feature_rows(&mut h, cache), ["Features", "Before"], "{cache}");
+            assert_eq!(shown_features(&h.app, true), 3, "history keeps all rows during editing");
+        }
+        crate::dialogs::cancel(&mut h.app);
+        assert_eq!(h.app.session.doc.marker, Some(2));
+        for cache in ["current", "missing", "stale"] {
+            assert_eq!(feature_rows(&mut h, cache), ["Features", "Before", "Edited", "After"], "{cache}");
+        }
+        h.app.edit_feature(ids[0]);
+        for cache in ["current", "missing", "stale"] {
+            assert!(feature_rows(&mut h, cache).is_empty(), "{cache}: no feature precedes the editor");
+        }
+        crate::dialogs::cancel(&mut h.app);
     }
 
     #[test]
@@ -398,6 +725,61 @@ mod tests {
         }
     }
 
+    /// #6083: in a long tree of placements, only the folded Features folders on screen work out
+    /// their mark (each scanned the design's whole history, every frame); those on screen still
+    /// show it.
+    #[test]
+    fn only_folded_features_folders_on_screen_work_out_their_mark() {
+        let mut h = Harness::new();
+        let component = h.app.run("component.create", json!({"name":"Part"})).unwrap();
+        let feature = h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        let first = component["occurrence"].as_u64().unwrap();
+        for i in 1..=80 {
+            h.app.run("occurrence.copy", json!({"occurrence":first,"translate":[20.0 * f64::from(i),0,0]})).unwrap();
+        }
+        h.frames(2);
+        let result = h.app.session.model.results.iter_mut().find(|r| r.id == feature).unwrap();
+        result.error = Some("the blend is larger than the neighbouring faces".into());
+        MARKS_WORKED_OUT.with(|n| n.set(0));
+        h.frame();
+        let worked = MARKS_WORKED_OUT.with(std::cell::Cell::get);
+        assert!(worked > 0 && worked < 40, "{worked} of 81 folded Features folders worked out their mark");
+        assert!(!crate::scenario::handles("status:error:Features").is_empty(), "a folder on screen shows its mark");
+    }
+
+    #[test]
+    fn browser_find_reveals_a_placed_body_whose_row_is_off_screen() {
+        let mut h = Harness::new();
+        let component = h.app.run("component.create", json!({"name":"Part"})).unwrap();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        let first = component["occurrence"].as_u64().unwrap();
+        // Enough placements that the last one's row sits below the Browser's visible height.
+        let mut last = first;
+        for i in 1..=80 {
+            last = h.app.run("occurrence.copy", json!({"occurrence":first,"translate":[20.0 * f64::from(i),0,0]})).unwrap()["occurrence"]
+                .as_u64()
+                .unwrap();
+        }
+        h.app.run("browser.collapse_all", json!({})).unwrap();
+        h.frames(2);
+        let world_body = h.app.session.occurrence_bodies(&[last], false).unwrap()[0].clone();
+        // A later placement's body has its own world name; the row's label stays the local one.
+        assert_ne!(world_body, "Plate");
+        let plate_rows = || drawn_rows().into_iter().filter(|(label, ..)| label == "Plate").count();
+        assert_eq!(plate_rows(), 0, "the body starts off screen and collapsed");
+        find_in_browser(&mut h.app, face(&world_body));
+        // The row is off screen, so the reveal only gives it a rect to scroll to; the scroll then
+        // animates over several frames until the row is on screen and drawn.
+        let arrived = (0..240).any(|_| {
+            h.frames(1);
+            plate_rows() == 1
+        });
+        assert!(arrived, "the off-screen placed body row was never scrolled into view");
+        assert_eq!(h.app.session.selection, [Sel::Body { name: world_body }]);
+    }
+
     #[test]
     fn browser_feature_imported_source_ids_never_reveal_an_unrelated_native_feature() {
         struct Source(std::path::PathBuf);
@@ -475,5 +857,260 @@ mod tests {
         assert_eq!(h.app.session.doc.marker, Some(pad_index + 1), "the marker goes right after the feature");
         let labels: Vec<_> = drawn_rows().into_iter().map(|(label, ..)| label).collect();
         assert!(labels.contains(&block_name), "a rolled-back feature stays listed: {labels:?}");
+    }
+
+    /// #10079: three extrusions of one visible sketch, the first renamed. A click just past the end
+    /// of a feature's name, or a press on the name that slips a few points before its release,
+    /// selects the feature; only the sketch button itself opens the sketch.
+    #[test]
+    fn clicking_just_past_a_feature_name_selects_it_without_opening_its_sketch() {
+        let mut h = Harness::new();
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Sketch1"})).unwrap()["sketch"].as_u64().unwrap();
+        for (p0, p1) in [([0, 0], [10, 10]), ([20, 0], [30, 10]), ([40, 0], [50, 10])] {
+            h.app.run("sketch.rectangle.two_point", json!({"p0":p0,"p1":p1})).unwrap();
+        }
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let mut ids = Vec::new();
+        for profile in 0..3 {
+            let made = h.app.run("solid.extrude", json!({"sketch":sketch,"profiles":[profile],"distance":5})).unwrap();
+            ids.push(made["feature"].as_u64().unwrap());
+            if profile == 0 {
+                h.app.run("timeline.rename", json!({"feature":ids[0],"name":"Lid"})).unwrap();
+            }
+        }
+        // The sketch stays shown, as in the report.
+        crate::browser::set_sketch_visible(&mut h.app, sketch, true);
+        h.app.tree.expanded.insert("c0/features".into());
+        h.settle();
+        assert!(crate::browser::sketch_visible(&h.app, sketch));
+        let press = |h: &mut Harness, at: Pos2, pressed: bool| {
+            h.frame_with(vec![egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() }]);
+        };
+        // A press at `from` released at `to`, then long enough that the next click is not a double.
+        let click = |h: &mut Harness, from: Pos2, to: Pos2| {
+            h.frame_with(vec![egui::Event::PointerMoved(from)]);
+            press(h, from, true);
+            h.frame_with(vec![egui::Event::PointerMoved(to)]);
+            press(h, to, false);
+            h.frames(30);
+        };
+        for (round, id) in ids.iter().chain(&ids).enumerate() {
+            let name = h.app.session.doc.feature(*id).unwrap().name.clone();
+            for (from, to) in [(1.0, 1.0), (5.0, 5.0), (-2.0, 4.0)] {
+                // Selected rows draw their name in semibold, wider: measure it each time.
+                let label = crate::scenario::rect_of(&format!("row_label:{name}")).unwrap();
+                let at = |dx: f32| pos2(label.right() + dx, label.center().y);
+                click(&mut h, at(from), at(to));
+                assert_eq!(h.app.session.active_sketch, None, "round {round}: {name} clicked {from}..{to} points past its name opened the sketch");
+                assert!(h.app.dialog.is_none(), "round {round}: {name} opened a dialog");
+                assert_eq!(h.app.session.selection, [Sel::Feature { id: *id }], "round {round}: {name} {from}..{to}");
+            }
+        }
+        h.step(&json!({"click": {"handle": "action:Extrude1"}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.active_sketch, Some(sketch), "the sketch button still opens the sketch");
+    }
+
+    fn settle_heavy(h: &mut Harness) {
+        for _ in 0..500 {
+            if h.app.deferred.is_none() && h.app.deferred_queue.is_empty() {
+                break;
+            }
+            h.frame();
+        }
+        h.frames(2);
+    }
+
+    fn count(label: &str) -> usize {
+        drawn_rows().iter().filter(|(l, ..)| l == label).count()
+    }
+
+    fn fold_of(label: &str) -> Option<bool> {
+        drawn_rows().into_iter().find(|(l, ..)| l == label).and_then(|(.., open)| open)
+    }
+
+    /// History in the browser: no timeline; with Sketches: Under their feature a sketch sits
+    /// under its extrusion, folded; dragging the marker above that extrusion rolls both back with
+    /// the timeline's command.
+    #[test]
+    fn browser_history_mode_nests_a_sketch_under_its_feature_and_drags_the_marker() {
+        let mut h = Harness::new();
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Profile"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,15]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let pad = h.app.run("solid.extrude", json!({"distance":10,"name":"Pad","body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"name":"Block","body_name":"Block"})).unwrap();
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        assert!(h.app.preferences.history_in_browser && !h.app.preferences.timeline_left);
+        h.frames(3);
+        assert!(h.app.shell.history.is_none(), "no timeline beside the browser history");
+        assert_eq!(count("Profile"), 1, "the Sketches folder starts closed: only the sketch's history row");
+        assert_eq!(fold_of("Pad"), None, "in creation order nothing is listed under the extrusion");
+
+        h.app.preferences.history_sketches = crate::prefs::HistorySketches::UnderFeature;
+        h.frames(2);
+        assert_eq!(fold_of("Pad"), Some(false), "the extrusion folds over its sketch");
+        assert_eq!(count("Profile"), 0, "folded: the sketch is not a row of its own");
+        h.step(&json!({"click": {"handle": "fold:Pad"}})).unwrap();
+        h.frames(2);
+        assert_eq!(count("Profile"), 1, "unfolded: the sketch is under the extrusion");
+        assert!(h.app.tree.expanded.contains(&crate::timeline_left::sketches_key(pad)), "the same fold as the vertical History");
+        let rows = drawn_rows();
+        let (sketch_row, pad_row) = (rows.iter().find(|(l, ..)| l == "Profile").unwrap().1, rows.iter().find(|(l, ..)| l == "Pad").unwrap().1);
+        assert!(sketch_row.top() > pad_row.top(), "the sketch is below its feature");
+
+        let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{pad}")).unwrap();
+        h.step(&json!({"drag":[{"handle":"browser:rollback"},[row.x, row.y - 8.0]]})).unwrap();
+        settle_heavy(&mut h);
+        let sketch_index = h.app.session.doc.feature_index(sketch).unwrap();
+        assert_eq!(h.app.session.doc.marker, Some(sketch_index), "dropped above the extrusion: it and its sketch are rolled back");
+        assert_eq!(fold_of("Pad"), Some(true), "rolled back together, the sketch stays under it");
+
+        h.app.run("view.history_layout", json!({"dock":"bottom"})).unwrap();
+        assert!(!h.app.preferences.history_in_browser);
+    }
+
+    /// The browser lists sketches as the vertical History does (`history_rows`): a shared sketch
+    /// under its first feature, an unused one and one the marker separates from its feature as
+    /// rows of their own; selecting a feature lights its sketch.
+    #[test]
+    fn browser_history_mode_lists_sketches_like_the_vertical_history() {
+        let mut h = Harness::new();
+        let two = h.app.run("sketch.create", json!({"plane":"XY","name":"Two"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[20,0],"p1":[30,10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"sketch":"Two","profiles":[0],"distance":5,"name":"Low","body_name":"A"})).unwrap();
+        let high = h.app.run("solid.extrude", json!({"sketch":"Two","profiles":[1],"distance":15,"name":"High","body_name":"B"})).unwrap()["feature"]
+            .as_u64()
+            .unwrap();
+        let post = h.app.run("sketch.create", json!({"plane":"XY","name":"PostSketch"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[50,5],"radius":3})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"distance":8,"name":"Post","body_name":"C"})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XZ","name":"Unused"})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":3})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.preferences.history_sketches = crate::prefs::HistorySketches::UnderFeature;
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        h.frames(3);
+        assert_eq!(fold_of("Low"), Some(false), "a shared sketch is listed under its first feature");
+        assert_eq!(fold_of("High"), None, "no reference rows in the browser");
+        assert_eq!(count("Unused"), 1, "an unused sketch is its own row");
+        assert_eq!(fold_of("Post"), Some(false), "the post's own sketch is under it");
+
+        // Selecting a feature lights the row of the sketch it is built from.
+        h.app.run("select.set", json!({"items":[{"type":"feature","id":high}]})).unwrap();
+        h.frames(2);
+        assert!(lit_by_selection(&h.app).contains(&two));
+
+        // The marker between the post's sketch and the post: the sketch is built, the post is
+        // not, so the sketch shows on its own above the marker.
+        let index = h.app.session.doc.feature_index(post).unwrap();
+        h.app.run("timeline.roll_to", json!({"position": index + 1})).unwrap();
+        h.frames(2);
+        assert_eq!(fold_of("Post"), None, "split by the marker: nothing under the post");
+        assert_eq!(count("PostSketch"), 1, "the sketch is its own row");
+    }
+
+    /// A sketch row in the browser's history has the eye its Sketches folder row has.
+    #[test]
+    fn browser_history_sketch_rows_have_an_eye() {
+        let mut h = Harness::new();
+        h.app.preferences.history_sketches = crate::prefs::HistorySketches::UnderFeature;
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        let two = h.app.run("sketch.create", json!({"plane":"XY","name":"Two"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"sketch":"Two","profiles":[0],"distance":5,"name":"Low","body_name":"A"})).unwrap();
+        let shown = |h: &Harness| solidcraft_engine::view::sketch_shown(&h.app.session, two);
+        h.frames(2);
+        assert!(!shown(&h), "a used sketch is hidden");
+        h.step(&json!({"click": {"handle": "fold:Low"}})).unwrap();
+        h.frames(2);
+        let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{two}")).unwrap();
+        let eye = crate::scenario::handle_at("eye:Two").unwrap();
+        assert!((eye.y - row.y).abs() < 2.0, "the eye is on the sketch's history row");
+        h.step(&json!({"click": {"handle": "eye:Two"}})).unwrap();
+        h.frames(2);
+        assert!(shown(&h), "its eye shows it");
+        h.step(&json!({"click": {"handle": "eye:Two"}})).unwrap();
+        h.frames(2);
+        assert!(!shown(&h), "and hides it again");
+    }
+
+    /// #8592: a feature that failed has an error mark in the browser's history, one that built
+    /// with a warning a warning mark, and the others none; the folded History carries the worst
+    /// of its features, and a suppressed feature none.
+    #[test]
+    fn browser_history_marks_errors_and_warnings_and_the_folded_history_takes_the_worst() {
+        let mut h = Harness::new();
+        let mut boxes = Vec::new();
+        for (i, name) in ["Clean", "Broken", "Warned"].into_iter().enumerate() {
+            let size = 5 + i as u64;
+            let r = h.app.run("solid.box", json!({"length":size,"width":size,"height":size,"name":name,"body_name":name})).unwrap();
+            boxes.push(r["feature"].as_u64().unwrap());
+        }
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        settle_heavy(&mut h);
+        let set = |h: &mut Harness| {
+            for (id, error, warning) in [
+                (boxes[1], Some("the blend is larger than the neighbouring faces"), None),
+                (boxes[2], None, Some("edge 3 no longer exists; using the edge at the picked point")),
+            ] {
+                let result = h.app.session.model.results.iter_mut().find(|r| r.id == id).unwrap();
+                result.error = error.map(str::to_string);
+                result.warning = warning.map(str::to_string);
+            }
+        };
+        set(&mut h);
+        h.frames(2);
+        let marks = || {
+            let mut marks: Vec<String> = crate::scenario::handles("status:").into_iter().map(|(name, _)| name).collect();
+            marks.sort();
+            marks.dedup();
+            marks
+        };
+        assert_eq!(marks(), ["status:error:Broken", "status:warning:Warned"]);
+
+        h.app.tree.collapsed.insert("c0/history".into());
+        h.frames(2);
+        assert_eq!(marks(), ["status:error:History"], "the folded History shows its worst feature's mark");
+
+        h.app.tree.collapsed.remove("c0/history");
+        h.app.run("timeline.suppress", json!({"feature":boxes[1],"suppressed":true})).unwrap();
+        settle_heavy(&mut h);
+        set(&mut h);
+        h.frames(2);
+        assert_eq!(marks(), ["status:warning:Warned"], "a suppressed feature isn't built and has no mark");
+    }
+
+    /// #9565: with the History in the browser, dragging a feature row moves the feature as the
+    /// History at the left does, and the marker still drags on its own.
+    #[test]
+    fn browser_history_rows_reorder_by_drag_and_the_marker_still_rolls_back() {
+        let mut h = Harness::new();
+        let mut ids = Vec::new();
+        for (i, name) in ["First", "Second", "Third"].into_iter().enumerate() {
+            let size = 5 + i as u64;
+            let r = h.app.run("solid.box", json!({"length":size,"width":size,"height":size,"name":name,"body_name":name})).unwrap();
+            ids.push(r["feature"].as_u64().unwrap());
+        }
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        settle_heavy(&mut h);
+        let order = |h: &Harness| h.app.session.doc.features.iter().map(|f| f.id).collect::<Vec<_>>();
+        assert_eq!(order(&h), ids);
+
+        let first = crate::scenario::handle_at(&format!("row:browser-feature:c0:{}", ids[0])).unwrap();
+        h.step(&json!({"drag":[{"handle":format!("row:browser-feature:c0:{}", ids[2])},[first.x, first.y - 8.0]]})).unwrap();
+        settle_heavy(&mut h);
+        assert_eq!(order(&h), [ids[2], ids[0], ids[1]], "dropped above the first row: the third feature moves to the top");
+        assert_eq!(h.app.session.doc.marker, None, "dropped above the marker: still built");
+
+        let second = crate::scenario::handle_at(&format!("row:browser-feature:c0:{}", ids[1])).unwrap();
+        h.step(&json!({"drag":[{"handle":"browser:rollback"},[second.x, second.y - 8.0]]})).unwrap();
+        settle_heavy(&mut h);
+        assert_eq!(h.app.session.doc.marker, Some(2), "the marker drag still rolls back");
+        assert_eq!(order(&h), [ids[2], ids[0], ids[1]], "rolling back moves no feature");
     }
 }

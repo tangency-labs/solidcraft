@@ -1,23 +1,34 @@
 # Kernel regression rig
 
 Every geometry case the old kernel (truck) got wrong, recorded in an issue, a pull request or a
-crash report, is a use case here with its own right answer. The kernel, SMLib, is held to all of
-them. `cargo xtask kernel-cases` runs them and writes [`docs/kernel-cases.md`](../../docs/kernel-cases.md).
+crash report, is a use case here with its own right answer. The kernel, solidcore, is held to all
+of them, as is the C++ SMLib kernel it was ported from when asked for. `cargo xtask kernel-cases`
+runs them on solidcore; `--kernel smlib` runs them on C++ and writes
+[`docs/kernel-cases.md`](../../docs/kernel-cases.md).
 
 ```sh
-cargo xtask kernel-cases                                    # every case
+cargo xtask kernel-cases                                    # every case, on solidcore
 cargo xtask kernel-cases --cli target/release/solidcraft-cli --out /tmp/run   # with a CLI already built
+cargo xtask kernel-cases --kernel both --cli target/release/solidcraft-cli  # SMLib and solidcore side by side
 cargo run -p solidcraft-cli --features smlib -- kernel-cases tests/kernel-cases/booleans/<id>   # one case
 ```
 
 The CLI links SMLib by default (`scripts/fetch-smlib.sh` fetches the prebuilt library first);
-built with `--no-default-features`, every operation answers that SMLib is not built. The run's output folder (`--out`, default `target/kernel-cases`)
+built with `--no-default-features`, solidcore still answers every operation, and asking for SMLib
+answers that it is not built. The run's output folder (`--out`, default `target/kernel-cases`)
 gets `results.json`, every case's full result, and `dumps/<area>-<case>/`: the inputs of each
 SMLib call a case failed in, for replay (the CLI's `--dumps=DIR`, which the rig always passes).
 `--validation MODE` runs the cases' features under that mode of SMLib's check
 (`diagnostics.validation`): `each_feature` (the default: the bodies each feature keeps are checked
 once), `each_step` (after every sweep, boolean and blend, as before) or `off`; the
 `KNOWN_FAILING` lists are each_feature's.
+
+`--kernel solidcore|smlib|both` (default `solidcore`) picks the backend each case's process runs on,
+through `SOLIDCRAFT_KERNEL`. A `solidcore` run keeps its `results.json`, `dumps/` and `report.md`
+in `<out>/solidcore/` and leaves `docs/kernel-cases.md`, which is the `smlib` run's, alone. `both` runs every case on each
+backend, keeps `docs/kernel-cases.md` as the SMLib report and writes the two side by side to
+[`docs/kernel-cases-backends.md`](../../docs/kernel-cases-backends.md) (cases that differ first)
+and `<out>/backends.json`.
 
 ## Rules
 
@@ -133,10 +144,12 @@ release gate (`release-gate.yml`) and a run by hand run every area. Each area's 
 
 ```sh
 cargo xtask kernel-cases --area <area> --cli target/release/solidcraft-cli \
-  --known-failing tests/kernel-cases/<area>/KNOWN_FAILING
+  --known-failing tests/kernel-cases/<area>/KNOWN_FAILING.solidcore
 ```
 
-`<area>/KNOWN_FAILING` lists the cases of that area that fail today, sorted, one a line with its
+The gate grades the kernel the run is on, so a list is one kernel's: `<area>/KNOWN_FAILING.solidcore`
+for the default, `<area>/KNOWN_FAILING` with `--kernel smlib` (`--kernel both` is refused). Each lists
+the cases of that area that fail today on it, sorted, one a line with its
 cause (`<case> <why it fails today>`; `#` starts a comment; the header names the baseline: the
 develop commit and SMLib revision it was taken from). The gate fails on a **regression**, a
 case that fails (or crashes, hangs, or is not supported yet) and is not listed, and on a
@@ -208,10 +221,14 @@ running part grows one tier at a time through `base`), so the last case carries 
   `method` gives the derivation).
 
 ```sh
-cargo xtask kernel-cases --ladder --cli target/release/solidcraft-cli
-cargo xtask kernel-cases --ladder --cli target/release/solidcraft-cli --gate
-cargo xtask kernel-cases --ladder --cli target/release/solidcraft-cli --record "why"
+cargo xtask kernel-cases --ladder --kernel smlib --cli target/release/solidcraft-cli
+cargo xtask kernel-cases --ladder --kernel smlib --cli target/release/solidcraft-cli --gate
+cargo xtask kernel-cases --ladder --kernel smlib --cli target/release/solidcraft-cli --record "why"
 ```
+
+The golden is the C++ kernel's, so these say `--kernel smlib`. Without it a run is on solidcore and is
+graded against the same golden; today that differs on one case,
+`ladder/09-shells-and-offsets/010-shell-under-rounded-top`.
 
 The ladder needs no known-failing list: the golden is the reference. Its shard in the kernel rig
 gate runs with `--gate`, which fails on any case whose status or counts differ from the golden,

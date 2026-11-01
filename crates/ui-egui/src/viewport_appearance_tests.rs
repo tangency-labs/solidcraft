@@ -202,6 +202,29 @@ fn a_colour_edit_reuses_every_block_vertex() {
 }
 
 #[test]
+fn a_material_colour_edit_its_undo_and_redo_reach_the_viewport() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.ui.ground_shadow = false;
+    app.set_origin_shown(false);
+    app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
+    let name = crate::open_meshing::session_world(&app.session).bodies[0].name.clone();
+    app.run("material.create", json!({"name": "Wood dark", "density_g_cm3": 0.7, "color": "#c8a573"})).unwrap();
+    app.run("material.assign", json!({"bodies": [name], "material": "Wood dark"})).unwrap();
+    let colour = |app: &SolveApp| {
+        let scene = build_scene(app);
+        let block = scene.blocks.iter().find(|b| !b.bytes.vertices.is_empty()).expect("the box has a block");
+        first_vertex(&scene, &block.bytes.vertices).1
+    };
+    assert_eq!(colour(&app), Some([0xc8, 0xa5, 0x73, 255]));
+    app.run("material.edit", json!({"material": "Wood dark", "color": "#ccb799"})).unwrap();
+    assert_eq!(colour(&app), Some([0xcc, 0xb7, 0x99, 255]), "the edited material colour is drawn");
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(colour(&app), Some([0xc8, 0xa5, 0x73, 255]), "undo draws the old colour again");
+    app.run("edit.redo", json!({})).unwrap();
+    assert_eq!(colour(&app), Some([0xcc, 0xb7, 0x99, 255]), "redo draws the edited colour again");
+}
+
+#[test]
 fn an_opacity_class_change_keeps_vertices_and_rewrites_only_the_runs() {
     let mut app = SolveApp::new(Session::default(), Services::default());
     app.ui.ground_shadow = false;
@@ -267,6 +290,41 @@ fn appearance_edits_upload_palette_rows_only() {
     let glass = draw(&app);
     assert_eq!(glass.geometry, 0, "a see-through body's colour edit uploads no geometry: {glass:?}");
     assert!(glass.palette > 0, "it writes the palette: {glass:?}");
+}
+
+/// A body out of the view is left out of its block's draws: two boxes far apart, drawn with
+/// both in view and then with the camera on one of them, draw half the triangles. Skipped
+/// without a GPU adapter.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn bodies_out_of_the_view_are_not_drawn() {
+    const SIZE: u32 = 64;
+    let Some(mut frames) = crate::gpu::OffscreenFrames::new(SIZE, false) else {
+        eprintln!("skipping: no GPU adapter");
+        return;
+    };
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.ui.ground_shadow = false;
+    app.set_origin_shown(false);
+    app.viewport.gpu = frames.target();
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "operation": "new"})).unwrap();
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [1000, 0, 0], "operation": "new"})).unwrap();
+    app.fit_view();
+    let scene = build_scene(&app);
+    let spans: usize = scene.blocks.iter().map(|b| b.bytes.bodies.len()).sum();
+    assert_eq!(spans, 2, "each body's box is kept with its block");
+    let slot: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(Some(scene)));
+    let none: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
+    frames.frame(crate::scale_tests::view_frame(&app, SIZE, (1, &slot), (0, &none)));
+    let both = frames.stats().triangles;
+    assert_eq!(both, 24, "both boxes in view");
+    app.cam.target = solidcraft_engine::geom::Vec3::new(5.0, 5.0, 5.0);
+    app.cam.distance = 40.0;
+    frames.frame(crate::scale_tests::view_frame(&app, SIZE, (1, &slot), (0, &none)));
+    assert_eq!(frames.stats().triangles, 12, "the far box is not drawn");
+    app.fit_view();
+    frames.frame(crate::scale_tests::view_frame(&app, SIZE, (1, &slot), (0, &none)));
+    assert_eq!(frames.stats().triangles, both, "and drawn again once in view");
 }
 
 /// Exercise the live GPU scene slots: a fresh headless render always rebuilds and would hide
@@ -371,4 +429,146 @@ fn inspect_menu_toggles_component_colors_without_a_dialog_and_refreshes_scene() 
     assert!(h.app.session.colored_components.is_none());
     let info = command.info(&h.app.session);
     assert_eq!((info.label, info.icon), ("Enable Component Colors", "colored_components"));
+}
+
+/// Every shape the last frame painted in `colour`: point squares, glyph outlines, dimension
+/// lines and arrows.
+fn painted_in(shapes: &[egui::epaint::ClippedShape], colour: egui::Color32) -> usize {
+    fn walk(shape: &egui::Shape, colour: egui::Color32) -> usize {
+        let solid = |c: &egui::epaint::ColorMode| matches!(c, egui::epaint::ColorMode::Solid(x) if *x == colour);
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().map(|s| walk(s, colour)).sum(),
+            egui::Shape::Rect(r) => usize::from(r.fill == colour || r.stroke.color == colour),
+            egui::Shape::Circle(c) => usize::from(c.fill == colour || c.stroke.color == colour),
+            egui::Shape::LineSegment { stroke, .. } => usize::from(stroke.color == colour),
+            egui::Shape::Path(p) => usize::from(p.fill == colour || solid(&p.stroke.color)),
+            _ => 0,
+        }
+    }
+    shapes.iter().map(|s| walk(&s.shape, colour)).sum()
+}
+
+#[test]
+fn conflicting_curves_points_glyphs_and_dimensions_take_the_conflict_colour_until_the_conflict_is_gone() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    // A conflict colour nothing else in a sketch uses: every line and shape in it is a conflict's.
+    let marker = egui::Color32::from_rgb(0x12, 0xab, 0x34);
+    h.call(
+        "ui.prefs",
+        json!({"theme_import": {"format":"solidcraft-theme/1","name":"Conflict marker","base":"light","colors":{"sketch_conflict":"#12ab34"}}}),
+    );
+    h.frame();
+    assert_eq!(crate::theme::Tokens::get().sketch_conflict, marker);
+    // `w` places a guide line; a second sketch ends a 12 mm line on it. Moving the guide out of
+    // reach makes the second sketch's constraints conflict (#7244).
+    let app = &mut h.app;
+    app.run("parameters.add", json!({"name": "w", "expression": "10 mm"})).unwrap();
+    app.run("sketch.create", json!({"plane": "XY", "name": "Guide"})).unwrap();
+    app.run("sketch.line", json!({"points": [[10, -30], [10, 30]], "ids": ["guide"], "connect": false})).unwrap();
+    app.run("sketch.constraint.horizontal_vertical", json!({"line": "guide", "mode": "vertical"})).unwrap();
+    app.run("sketch.dimension", json!({"entities": ["origin", "guide.start"], "type": "horizontal", "value": "w"})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    let reach = app.run("sketch.create", json!({"plane": "XY", "name": "Reach"})).unwrap()["sketch"].as_u64().unwrap();
+    let projected = app.run("sketch.project", json!({"refs": [{"sketch": "Guide", "curve": "guide"}]})).unwrap()["links"][0]["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let line = app.run("sketch.line", json!({"points": [[0, 0], [10, -(44.0_f64).sqrt()]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    app.run("sketch.dimension", json!({"entities": [line], "value": 12})).unwrap();
+    app.run("sketch.constraint.coincident", json!({"a": format!("{line}.end"), "b": projected})).unwrap();
+    // A second, unrelated line: never part of the conflict.
+    let other = app.run("sketch.line", json!({"points": [[-20, 5], [-5, 5]]})).unwrap()["curves"][0].as_str().unwrap().to_string();
+    app.run("sketch.finish", json!({})).unwrap();
+    let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let conflict_lines = |app: &SolveApp| {
+        let scene = super::build_sketch_scene(app, &super::projection(app, rect));
+        let (lines, _) = scene.overlay.as_chunks::<{ crate::gpu::LINE_SIZE }>();
+        // A line names its colour by palette index (bytes 24..28).
+        lines
+            .iter()
+            .filter_map(|line| line.get(24..28)?.try_into().ok().map(u32::from_le_bytes))
+            .filter(|&i| scene.palette.get(crate::gpu::PaletteIndex(i)) == Some(super::c4(marker)))
+            .count()
+    };
+    for (w, conflicting, preference) in [("10 mm", false, true), ("20 mm", true, true), ("20 mm", true, false), ("10 mm", false, true)] {
+        h.app.preferences.sketch_conflict_colour = preference;
+        if h.app.session.active_sketch.is_some() {
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.app.run("parameters.change", json!({"name": "w", "expression": w})).unwrap();
+        h.app.edit_sketch(reach);
+        h.settle();
+        assert_eq!(h.app.session.active_sketch, Some(reach));
+        let st = crate::open_meshing::session_world(&h.app.session);
+        let ss = st.sketch(reach).unwrap();
+        assert_eq!(!ss.report.ok(), conflicting, "w = {w}: {:?}", ss.report);
+        let conflict = super::Conflict::of(&h.app, &ss.sketch, &ss.report);
+        let failing: Vec<_> = ss.sketch.constraints.iter().filter(|c| ss.report.failing.contains(&c.id)).collect();
+        assert_eq!(failing.is_empty(), !conflicting, "w = {w}: {:?}", ss.report);
+        // With the preference off, nothing is in the conflict colour: the failing glyphs and
+        // dimensions are red (`error`), as before.
+        let failing: Vec<_> = if preference { failing } else { Vec::new() };
+        // Exactly the curves and points the failing constraints hold.
+        for (i, curve) in ss.sketch.curves.iter().enumerate() {
+            let held = failing.iter().any(|c| c.kind.indices().1.contains(&i));
+            assert_eq!(conflict.curve(i), held, "w = {w}: curve {}", curve.id);
+        }
+        for i in 0..ss.sketch.points.len() {
+            assert_eq!(conflict.point(i), failing.iter().any(|c| c.kind.indices().0.contains(&i)), "w = {w}: point {i}");
+        }
+        let other = ss.sketch.curve_index(&other).unwrap();
+        assert!(!conflict.curve(other));
+        // Drawn: the held curves' lines, and the held points, the failing glyphs and dimensions.
+        let (lines, shapes) = (conflict_lines(&h.app), painted_in(&h.shapes, marker));
+        if conflicting && preference {
+            assert!(lines > 0, "the held curves are drawn in the conflict colour");
+            assert!(shapes > 0, "points, glyphs or dimensions in the conflict colour");
+        } else {
+            assert_eq!((lines, shapes), (0, 0), "w = {w}, preference {preference}: nothing in the conflict colour");
+        }
+        if conflicting && !preference {
+            let error = crate::theme::Tokens::get().error;
+            assert!(painted_in(&h.shapes, error) > 0, "the failing glyphs and dimensions stay red");
+        }
+    }
+    h.call("ui.prefs", json!({"theme": "dark"}));
+    h.frame();
+}
+
+/// Vertex markers follow the edges (#7834): a box's eight corners are marked once each in the
+/// edge colour wherever edges are drawn (shaded with edges, wireframe, shaded with hidden
+/// edges), faintly behind the model where hidden edges are, and not at all in plain shaded.
+#[test]
+fn vertex_markers_follow_the_edges_display_mode() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.ui.ground_shadow = false;
+    app.set_origin_shown(false);
+    app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
+    // Off by default: no marker in any style.
+    assert!(!app.preferences.vertex_markers, "vertex markers are off by default");
+    for style in 0..4 {
+        app.ui.visual_style = style;
+        let scene = build_scene(&app).merged();
+        let dots = |bytes: &[u8]| bytes.as_chunks::<{ crate::gpu::LINE_SIZE }>().0.iter().filter(|r| r[..12] == r[12..24]).count();
+        assert_eq!((dots(&scene.lines), dots(&scene.hidden)), (0, 0), "style {style}: no markers by default");
+    }
+    app.preferences.vertex_markers = true;
+    // A marker is a lifted line from a point to itself.
+    let markers = |scene: &crate::gpu::GpuScene, bytes: &[u8]| -> Vec<([u8; 12], [u8; 4])> {
+        let (records, rest) = bytes.as_chunks::<{ crate::gpu::LINE_SIZE }>();
+        assert!(rest.is_empty());
+        records.iter().filter(|r| r[..12] == r[12..24] && r[31] & 0x80 != 0).map(|r| (r[..12].try_into().unwrap(), line_color(scene, r))).collect()
+    };
+    for (style, drawn, hidden) in [(0, true, false), (1, false, false), (2, true, false), (3, true, true)] {
+        app.ui.visual_style = style;
+        let scene = build_scene(&app).merged();
+        let (front, back) = (markers(&scene, &scene.lines), markers(&scene, &scene.hidden));
+        let edge = scene.lines.as_chunks::<{ crate::gpu::LINE_SIZE }>().0.iter().find(|r| r[..12] != r[12..24]).map(|r| line_color(&scene, r));
+        assert_eq!(front.len(), if drawn { 8 } else { 0 }, "style {style}: one marker per corner");
+        assert_eq!(back.len(), if hidden { 8 } else { 0 }, "style {style}: hidden markers only with hidden edges");
+        let corners: std::collections::HashSet<_> = front.iter().map(|(p, _)| *p).collect();
+        assert_eq!(corners.len(), front.len(), "style {style}: each corner once");
+        assert!(front.iter().all(|(_, c)| Some(*c) == edge), "style {style}: markers in the edge colour");
+    }
 }

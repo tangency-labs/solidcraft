@@ -108,7 +108,6 @@ struct Regions {
     touching: bool,
 }
 
-#[cfg(feature = "smlib")]
 mod sheets {
     use solidcraft_geom::Loop2;
     use solidcraft_geom::Vec3;
@@ -289,35 +288,43 @@ mod sheets {
     }
 }
 
-#[cfg(not(feature = "smlib"))]
-mod sheets {
-    use super::*;
-
-    fn refused<T>() -> Result<T> {
-        Err(KernelError::Failed("not supported yet: planar region booleans run on SMLib (build with the feature `smlib`)".into()))
-    }
-
-    /// A sheet stands for nothing without SMLib.
-    pub(super) enum Sheet {}
-
-    pub(super) fn sheet(_: &[Region2], _: f64) -> Result<Sheet> {
-        refused()
-    }
-
-    pub(super) fn combine(a: &Sheet, _: &Sheet, _: BoolOp) -> Result<Option<Sheet>> {
-        match *a {}
-    }
-
-    pub(super) fn regions(sheet: &Sheet, _: f64) -> Result<Regions> {
-        match *sheet {}
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::panic)]
 mod planar_tests {
     use super::*;
     use solidcraft_geom::Loop2;
+    #[test]
+    fn single_prism_intersection_uses_common_height_in_both_orders() {
+        for k in [1.0, 0.05] {
+            for (lo, height, expected) in [
+                (7.5, 10.0, Some((7.5, 17.5))),
+                (15.0, 10.0, Some((15.0, 22.5))),
+                (-5.0, 15.0, Some((5.0, 10.0))),
+                (22.5, 10.0, None),
+                (25.0, 10.0, None),
+            ] {
+                let a = crate::cylinder(solidcraft_geom::Vec3::new(12.5, 5.0, 5.0) * k, solidcraft_geom::Vec3::Z, 2.5 * k, 17.5 * k).unwrap();
+                let b =
+                    crate::box_solid(solidcraft_geom::Vec3::new(10.0, 5.0, lo) * k, solidcraft_geom::Vec3::new(22.5, 10.0, lo + height) * k).unwrap();
+                for (lhs, rhs) in [(&a, &b), (&b, &a)] {
+                    let result = crate::boolean(lhs, rhs, BoolOp::Intersect).unwrap();
+                    if let Some((bottom, top)) = expected {
+                        let body = result.expect("a positive-height half disc is a solid");
+                        assert!(body.validity().is_empty());
+                        assert!(body.history().is_some(), "clipped caps and walls retain their operand history");
+                        let expected = std::f64::consts::PI * (2.5 * k).powi(2) * (top - bottom) * k / 2.0;
+                        let actual = crate::measure(&body).unwrap().volume;
+                        assert!((actual - expected).abs() < expected * 2e-3, "{lo} {height} {k}: {actual} != {expected}");
+                        let bounds = body.mesh(&crate::MeshTolerance::chord(k * 1e-3)).unwrap().bounds();
+                        assert!((bounds.min.z - bottom * k).abs() < k * 1e-7);
+                        assert!((bounds.max.z - top * k).abs() < k * 1e-7);
+                    } else {
+                        assert!(result.is_none(), "touching or separated caps have no intersection volume");
+                    }
+                }
+            }
+        }
+    }
     #[test]
     fn shared_arc_line_endpoint_roundoff_does_not_open_a_union() {
         let a = Region2 { outer: Loop2::polygon(&[Vec2::new(-2., 0.), Vec2::new(2., 0.), Vec2::new(2., 2.), Vec2::new(-2., 2.)]), holes: vec![] };

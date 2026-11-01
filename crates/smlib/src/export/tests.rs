@@ -113,6 +113,16 @@ mod native_tests {
         assert!((half.unwrap() + 0.5f64.atan()).abs() < 1e-12);
     }
 
+    /// A cone whose half angle is within rounding of zero (a52's thread bosses: 1e-13) is exported as
+    /// a cylinder; as a cone the portable record's validation refuses it.
+    #[test]
+    fn a_cone_of_rounding_angle_is_exported_as_a_cylinder() {
+        let near = Brep::make_cone([0.0; 3], 4.0, 4.0 - 1e-12, 10.0).unwrap().to_native().unwrap();
+        assert!(near.faces.iter().any(|f| matches!(f.surface, b::Surface::Cylinder { .. })));
+        assert!(!near.faces.iter().any(|f| matches!(f.surface, b::Surface::Cone { .. })));
+        near.validate().unwrap();
+    }
+
     /// A hole tangent to the block's outline from inside: the material touches itself along the
     /// tangent line, where SMLib's one shell uses the edge four times. The record has two copies
     /// of that edge, each bounding one wedge of material (a face of the side and the half of the

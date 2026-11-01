@@ -17,10 +17,12 @@ name = "solve_profile"
 required-features = ["solver-profiling"]
 
 [dependencies]
+harfrust = "0.12"
 solidcraft-geom = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 ttf-parser = { workspace = true }
+unicode-bidi = "0.3"
 
 [dev-dependencies]
 serde_json = { workspace = true }

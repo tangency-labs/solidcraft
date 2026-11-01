@@ -243,3 +243,24 @@ fn pulling_a_face_down_into_the_body_cuts() {
     h.frames(4);
     assert_eq!(state(&h).1, CUT, "pushed into the box: Cut");
 }
+
+/// The automatic operation probes the bodies' triangles: an open window asks for it once per
+/// change of its inputs or the design, not every frame.
+#[test]
+fn an_open_extrude_asks_for_its_operation_only_when_something_changes() {
+    let mut h = box_with_top_extrude(false);
+    let asked = crate::dialogs::auto_operation_asked();
+    h.frames(20);
+    assert_eq!(crate::dialogs::auto_operation_asked(), asked, "nothing changed: not asked again");
+    drag_to(&mut h, 5.0);
+    assert_eq!(state(&h), (0, CUT, true), "into the box: Cut");
+    let after_drag = crate::dialogs::auto_operation_asked();
+    assert!(after_drag > asked, "a new distance is asked about");
+    h.frames(20);
+    assert_eq!(crate::dialogs::auto_operation_asked(), after_drag, "held still: not asked again");
+    // A change to the design (another body, out of the extrude's way) is asked about again.
+    h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"corner":[50,0,0]})).unwrap();
+    h.frames(2);
+    assert!(crate::dialogs::auto_operation_asked() > after_drag, "a changed design is asked about");
+    assert_eq!(state(&h), (0, CUT, true), "still into the box: Cut");
+}

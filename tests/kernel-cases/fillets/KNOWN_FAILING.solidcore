@@ -1,0 +1,47 @@
+# The fillets cases that fail today on solidcore, one a line: `<case> <why it fails today>`. Sorted.
+# The kernel rig gate fails on a case that fails and is not listed, and on a listed case that passes.
+# Baseline: solidcore pin de85a3e00, tests/kernel-cases run by `cargo xtask kernel-cases`, x86_64 Linux.
+1080-fillet-equal-slope-basin-1-mm-rim-loop-4 [fail] continuity_order: got {'body': 'Slab', 'edges': 'blend', 'order': 'g0',  want >= g1 at every blend seam
+1080-fillet-sloped-basin-1-mm-rim-r4-2-edges [fail] continuity_order: got {'body': 'Slab', 'edges': 'blend', 'order': 'g0',  want >= g1 at every blend seam
+1080-fillet-sloped-basin-1-mm-rim-r4-4-edges [fail] continuity_order: got {'body': 'Slab', 'edges': 'blend', 'order': 'g0',  want >= g1 at every blend seam
+1207-fillet-bar-top-edge-after-boss-arc-round-r0-5 [fail] step 4 (solid.fillet): body `Arm`: the operation failed: SMLib fillet: SMLib's check refuses the result: 5 failed tests: SmBSplineCurve::Test #15 Bad Repeated CPts: BSplineCurve has Internal Coincident ControlPoints (causes
+2708-fillet-curvature-continuous-angled-ends [unsupported] refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); SMLib d01d7b0 builds it
+2893-chamfer-distance-and-angle-past-the-wall-refused [fail] refused, but not because "angle": step 2 (solid.chamfer): SMLib chamfer: operation: SMLib rejected the input (SM_ERR_INVALID_INPUT)
+2893-chamfer-two-distances-elliptical-rim [fail] refused, but not because "not supported yet": step 3 (solid.chamfer): SMLib chamfer: operation: SMLib failed (status 1001) (tangent propagation blended the picked edges' tangent chain with them; with it off, tangent_chain: 
+4782-fillet-bar-edge-wider-than-both-faces [fail] continuity_order: got Box: no null seams want >= g1 at every blend seam
+5158-fillet-round-just-past-a-10mm-face [fail] step 2 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001)
+862-fillet-curvature-continuous-box-edge [unsupported] refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); SMLib d01d7b0 builds it
+9-fillet-corner-curvature-with-reduce-fit [unsupported] solid.fillet builds `corner: g2` with `fit: exact` only
+9-fillet-corner-curvature-with-taper-fit [unsupported] solid.fillet builds `corner: g2` with `fit: exact` only
+cov-fillet-g2-corner-beside-a-cylinder [unsupported] refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); on SMLib its open setback corner is not a closed solid
+cov-fillet-g2-five-edge-apex-corner [fail] step 12 (solid.fillet): invalid input: the setback must be more than 3.5056 mm at the corner (-0.000, 0.000, 30.000): the rounds' contact lines meet 3
+cov-fillet-g2-four-edge-apex-corner [fail] step 11 (solid.fillet): invalid input: the setback must be more than 3.9027 mm at the corner (0.000, 0.000, 30.000): the rounds' contact lines meet 3.
+cov-fillet-g2-mixed-corner [unsupported] refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); SMLib refuses its mixed-convexity setback corner
+cov-fillet-g2-oblique-three-edge-corner [unsupported] refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); SMLib d01d7b0 fails it too (see KNOWN_FAILING)
+cov-fillet-g2-pocket-corner [unsupported] refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); SMLib d01d7b0 fails it too (see KNOWN_FAILING)
+cov-fillet-section-curvature-boss-root-r2 [unsupported] refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); SMLib d01d7b0 builds it
+cov-fillet-section-curvature-box-edge-r3 [unsupported] refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); SMLib d01d7b0 builds it
+cov-fillet-section-curvature-pipe-on-plate-r2 [unsupported] refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); SMLib d01d7b0 builds it
+cov-fillet-turn-swept-boss-base-r1 [fail] as on SMLib: solid.fillet has no `turn`; the corners are mitred (12508.9675, the Mitre case's volume)
+cov-fillet-turn-swept-pocket-sharp-corner-refused-r1 [fail] as on SMLib: solid.fillet has no `turn`, so the sharp concave corners are mitred, not refused
+cov-fillet-variable-box-edge-1-to-5-on-its-cone [unsupported] refused on solidcore: a variable round is the union of its balls (smlib#78 6b346f6, 5db8feb, fb5c060), which solidcore does not build yet (solidcore#2250, port in progress as #2262); SMLib d01d7b0 builds it
+cov-junction-boss-tilt-20-root-round [fail] fillet status 1001 on a cylinder tilted 20 degrees into the plate, as on SMLib
+cov-junction-boss-tilt-40-root-round [fail] fillet status 1001 on a cylinder tilted 40 degrees into the plate, as on SMLib
+cov-junction-tee-equal-round [fail] the result is not a closed solid, as on SMLib: equal pipes' intersection is two plane ellipses crossing, a corner the old corner code cannot join (the corner step)
+cov-junction-y-junction-120-round [unsupported] refused as on SMLib: the faces between the three intersection curves narrow to nothing at the two triple points, so the room check trips (the corner step)
+every-block-cylinder-crease-block-top-edge-r2-curvature [unsupported] refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); SMLib d01d7b0 builds it
+every-box-edge-r3-curvature [unsupported] refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); SMLib d01d7b0 builds it
+every-fillet-after-fillet-curvature-front-then-side-r3 [fail] refused before it reaches the tangent continuation: the first curvature fillet is refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); SMLib d01d7b0 builds it
+every-hole-top-rim-r1-curvature [unsupported] refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); SMLib d01d7b0 builds it
+every-l-bracket-inside-bend-r3-curvature [unsupported] refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); SMLib d01d7b0 builds it
+report-drafted-peg-front-and-concave-rounds-together-r2 [unsupported] step 13 (solid.fillet): invalid input: not supported yet: the fillet meets a corner of this kind, which SMLib's blends do not handle yet (where its ed
+report-fillet-concave-arc-and-front-top-edge-together-r5-solver-residues [fail] bbox.min: got [0.4892940775280783, 0.05636444090890084, 0.0] want [0.4892940775280783, 0.05792545052986289, 0.0]
+report-fillet-concave-arc-and-front-top-edge-together-r7-solver-residues [fail] bbox.min: got [0.4892940775169876, 0.02441657049978923, 0.0] want [0.4892940775280783, 0.05792545052986289, 0.0]
+report-fillet-curvature-three-edges-at-bar-corner [unsupported] refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); SMLib d01d7b0 fails it too (see KNOWN_FAILING)
+report-fillet-curvature-three-edges-at-bar-corner-solver-residues [unsupported] refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); SMLib d01d7b0 fails it too (see KNOWN_FAILING)
+report-fillet-curvature-three-edges-at-bar-corner-solver-residues-outside-setback [unsupported] refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); SMLib d01d7b0 builds it
+report-peg-front-and-concave-chamfers-together-d2 [fail] step 13 (solid.chamfer): SMLib chamfer: operation: SMLib failed (status 1001)
+report-peg-front-and-concave-rounds-together-r2 [fail] continuity_order: got {'body': 'Peg', 'edges': 'blend', 'order': 'g0', ' want >= g1 at every blend seam
+report-peg-front-and-concave-rounds-together-r5 [fail] continuity_order: got {'body': 'Peg', 'edges': 'blend', 'order': 'g0', ' want >= g1 at every blend seam
+report-peg-front-curvature-round-r2 [unsupported] refused on solidcore: the curvature section's equal-area Gn generator (fork 6148773) is not in solidcore yet (solidcore#2250, port in progress as #2260); SMLib d01d7b0 builds it
+report-peg-step-front-and-concave-rounds-together-r2 [fail] continuity_order: got {'body': 'Peg', 'edges': 'blend', 'order': 'g0', ' want >= g1 at every blend seam

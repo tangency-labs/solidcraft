@@ -2,7 +2,12 @@
 //! surfaces rather than a tessellation; the exact box; how far an edge lies from a face's surface;
 //! where a point lies against a body.
 
-use crate::{Brep, Result, error, ffi};
+use crate::{Brep, Result, core, error, ffi, route};
+
+/// Whether the Measure family runs on solidcore ([`route`]).
+fn on_core() -> bool {
+    route::backend() == route::Backend::Solidcore
+}
 
 /// The accuracy [`Brep::mass_properties`] and [`Brep::area`] use unless told otherwise: the
 /// finest SMLib allows. Analytic primitives then come out within 2e-7 of their closed forms.
@@ -50,7 +55,10 @@ impl Brep {
     /// else inside a material region or outside. A body with no material (a sheet, an open shell)
     /// has no inside. A non-finite coordinate is [`Error::Argument`](crate::Error::Argument).
     pub fn classify_point(&self, p: [f64; 3]) -> Result<PointClass> {
-        match ffi::measure::classify_point(&self.0, p).map_err(error)? {
+        if on_core() {
+            return core::classify_point(self.core()?, p);
+        }
+        match ffi::measure::classify_point(self.cpp()?, p).map_err(error)? {
             ffi::measure::POINT_OUTSIDE => Ok(PointClass::Outside),
             ffi::measure::POINT_INSIDE => Ok(PointClass::Inside),
             ffi::measure::POINT_ON_BOUNDARY => Ok(PointClass::OnBoundary),
@@ -64,7 +72,10 @@ impl Brep {
     /// touching along edges or at points, measure too. A body with no material (a sheet, an open
     /// shell) has volume 0 and no inertia, its faces' area and the centroid of that area.
     pub fn mass_properties(&self, relative_accuracy: f64) -> Result<MassProperties> {
-        let m = ffi::measure::mass_properties(&self.0, relative_accuracy).map_err(error)?;
+        if on_core() {
+            return core::mass_properties(self.core()?, relative_accuracy);
+        }
+        let m = ffi::measure::mass_properties(self.cpp()?, relative_accuracy).map_err(error)?;
         let [area, volume, cx, cy, cz, ixx, iyy, izz, iyz, izx, ixy] = m;
         Ok(MassProperties { area, volume, centroid: [cx, cy, cz], moments: [ixx, iyy, izz], products: [iyz, izx, ixy] })
     }
@@ -72,7 +83,10 @@ impl Brep {
     /// The exact axis-aligned box, least corner then greatest: the extrema of every vertex, edge
     /// and face on its exact curve or surface, not grown by tolerances or control hulls.
     pub fn bounds(&self) -> Result<([f64; 3], [f64; 3])> {
-        ffi::measure::bounds(&self.0).map_err(error)
+        if on_core() {
+            return core::bounds(self.core()?);
+        }
+        ffi::measure::bounds(self.cpp()?).map_err(error)
     }
 
     /// How far edge `edge` (its curve over its interval) lies from the surface of face `face`,
@@ -82,13 +96,113 @@ impl Brep {
     /// goes; SMLib keeps such an edge whole when making its UV trim only when its zone tolerance
     /// (half the flat arrays' `EDGE_TOLERANCE`) covers this.
     pub fn edge_face_distance(&self, edge: usize, face: usize) -> Result<f64> {
+        if on_core() {
+            return core::edge_face_distance(self.core()?, edge, face);
+        }
         let (Ok(e), Ok(f)) = (i64::try_from(edge), i64::try_from(face)) else { return Err(error(ffi::ERR_ARG)) };
-        ffi::measure::edge_face_distance(&self.0, e, f).map_err(error)
+        ffi::measure::edge_face_distance(self.cpp()?, e, f).map_err(error)
     }
 
     /// Total area of every face, each counted once, so sheets and open shells too.
     pub fn area(&self, relative_accuracy: f64) -> Result<f64> {
-        ffi::measure::area(&self.0, relative_accuracy).map_err(error)
+        if on_core() {
+            return core::area(self.core()?, relative_accuracy);
+        }
+        ffi::measure::area(self.cpp()?, relative_accuracy).map_err(error)
+    }
+}
+
+/// The closed forms of the primitives' measures, for the tests of both kernels.
+#[cfg(test)]
+pub(crate) mod closed {
+    use std::f64::consts::PI;
+
+    /// Area, volume, centroid, Ixx, Iyy, Izz about it (products are 0 for all), and the exact box.
+    pub(crate) struct Closed {
+        pub area: f64,
+        pub volume: f64,
+        pub centroid: [f64; 3],
+        pub moments: [f64; 3],
+        pub bounds: ([f64; 3], [f64; 3]),
+    }
+
+    /// An axis-aligned box from its lower corner.
+    pub(crate) fn cuboid(o: [f64; 3], size: [f64; 3]) -> Closed {
+        let [a, b, c] = size;
+        let v = a * b * c;
+        Closed {
+            area: 2.0 * (a * b + b * c + c * a),
+            volume: v,
+            centroid: [o[0] + a / 2.0, o[1] + b / 2.0, o[2] + c / 2.0],
+            moments: [v * (b * b + c * c) / 12.0, v * (a * a + c * c) / 12.0, v * (a * a + b * b) / 12.0],
+            bounds: (o, [o[0] + a, o[1] + b, o[2] + c]),
+        }
+    }
+
+    /// A cylinder about +Z on its base centre.
+    pub(crate) fn cylinder(o: [f64; 3], r: f64, h: f64) -> Closed {
+        let v = PI * r * r * h;
+        let ixx = v * (3.0 * r * r + h * h) / 12.0;
+        Closed {
+            area: 2.0 * PI * r * r + 2.0 * PI * r * h,
+            volume: v,
+            centroid: [o[0], o[1], o[2] + h / 2.0],
+            moments: [ixx, ixx, v * r * r / 2.0],
+            bounds: ([o[0] - r, o[1] - r, o[2]], [o[0] + r, o[1] + r, o[2] + h]),
+        }
+    }
+
+    pub(crate) fn sphere(o: [f64; 3], r: f64) -> Closed {
+        let v = 4.0 / 3.0 * PI * r * r * r;
+        let i = 0.4 * v * r * r;
+        Closed {
+            area: 4.0 * PI * r * r,
+            volume: v,
+            centroid: o,
+            moments: [i; 3],
+            bounds: ([o[0] - r, o[1] - r, o[2] - r], [o[0] + r, o[1] + r, o[2] + r]),
+        }
+    }
+
+    /// A frustum (a cone when `rt` is 0) about +Z on its base centre. Its volume integrals are
+    /// polynomials in z of degree at most 4, so three-point Gauss-Legendre gives them exactly.
+    pub(crate) fn cone(o: [f64; 3], rb: f64, rt: f64, h: f64) -> Closed {
+        let (x, w) = ([-(0.6f64).sqrt(), 0.0, (0.6f64).sqrt()], [5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0]);
+        let (mut v, mut mz, mut zz, mut izz) = (0.0, 0.0, 0.0, 0.0);
+        for (xi, wi) in x.iter().zip(w) {
+            let (z, wi) = (h / 2.0 * (1.0 + xi), wi * h / 2.0);
+            let rho = rb + (rt - rb) * z / h;
+            let disc = PI * rho * rho;
+            v += wi * disc;
+            mz += wi * disc * z;
+            zz += wi * disc * z * z;
+            izz += wi * disc * rho * rho / 2.0;
+        }
+        let zc = mz / v;
+        let ixx = izz / 2.0 + zz - v * zc * zc;
+        let s = ((rb - rt).powi(2) + h * h).sqrt();
+        let m = rb.max(rt);
+        Closed {
+            area: PI * (rb * rb + rt * rt + (rb + rt) * s),
+            volume: v,
+            centroid: [o[0], o[1], o[2] + zc],
+            moments: [ixx, ixx, izz],
+            bounds: ([o[0] - m, o[1] - m, o[2]], [o[0] + m, o[1] + m, o[2] + h]),
+        }
+    }
+
+    /// A ring torus about +Z (Pappus for area and volume).
+    pub(crate) fn torus(o: [f64; 3], big: f64, r: f64) -> Closed {
+        let v = 2.0 * PI * PI * big * r * r;
+        let ixx = v * (big * big / 2.0 + 5.0 * r * r / 8.0);
+        let m = big + r;
+        Closed {
+            area: 4.0 * PI * PI * big * r,
+            volume: v,
+            centroid: o,
+            moments: [ixx, ixx, v * (big * big + 0.75 * r * r)],
+            bounds: ([o[0] - m, o[1] - m, o[2] - r], [o[0] + m, o[1] + m, o[2] + r]),
+        }
     }
 }
 
@@ -96,8 +210,6 @@ impl Brep {
 mod tests {
     use super::*;
     use crate::Error;
-    use std::f64::consts::PI;
-
     fn rel(a: f64, b: f64) -> f64 {
         if b == 0.0 { a.abs() } else { (a / b - 1.0).abs() }
     }
@@ -152,7 +264,9 @@ mod tests {
         v
     }
 
-    /// Closed forms: area, volume, centroid and Ixx, Iyy, Izz about it (products are 0 for all).
+    use closed::Closed;
+
+    /// A primitive the C++ kernel made, with its closed forms.
     struct Expected {
         name: &'static str,
         body: Brep,
@@ -163,67 +277,24 @@ mod tests {
     }
 
     #[allow(clippy::unwrap_used)] // test fixture
+    fn expected(name: &'static str, body: Result<Brep>, c: Closed) -> Expected {
+        Expected { name, body: body.unwrap(), area: c.area, volume: c.volume, centroid: c.centroid, moments: c.moments }
+    }
+
     fn cylinder(name: &'static str, o: [f64; 3], r: f64, h: f64) -> Expected {
-        let v = PI * r * r * h;
-        let ixx = v * (3.0 * r * r + h * h) / 12.0;
-        Expected {
-            name,
-            body: Brep::make_cylinder(o, r, h).unwrap(),
-            area: 2.0 * PI * r * r + 2.0 * PI * r * h,
-            volume: v,
-            centroid: [o[0], o[1], o[2] + h / 2.0],
-            moments: [ixx, ixx, v * r * r / 2.0],
-        }
+        expected(name, Brep::make_cylinder(o, r, h), closed::cylinder(o, r, h))
     }
 
-    #[allow(clippy::unwrap_used)] // test fixture
     fn sphere(name: &'static str, o: [f64; 3], r: f64) -> Expected {
-        let v = 4.0 / 3.0 * PI * r * r * r;
-        let i = 0.4 * v * r * r;
-        Expected { name, body: Brep::make_sphere(o, r).unwrap(), area: 4.0 * PI * r * r, volume: v, centroid: o, moments: [i; 3] }
+        expected(name, Brep::make_sphere(o, r), closed::sphere(o, r))
     }
 
-    /// A frustum (a cone when `rt` is 0) about +Z on its base centre. Its volume integrals are
-    /// polynomials in z of degree at most 4, so three-point Gauss-Legendre gives them exactly.
-    #[allow(clippy::unwrap_used)] // test fixture
     fn cone(name: &'static str, o: [f64; 3], rb: f64, rt: f64, h: f64) -> Expected {
-        let (x, w) = ([-(0.6f64).sqrt(), 0.0, (0.6f64).sqrt()], [5.0 / 9.0, 8.0 / 9.0, 5.0 / 9.0]);
-        let (mut v, mut mz, mut zz, mut izz) = (0.0, 0.0, 0.0, 0.0);
-        for i in 0..3 {
-            let (z, wi) = (h / 2.0 * (1.0 + x[i]), w[i] * h / 2.0);
-            let rho = rb + (rt - rb) * z / h;
-            let disc = PI * rho * rho;
-            v += wi * disc;
-            mz += wi * disc * z;
-            zz += wi * disc * z * z;
-            izz += wi * disc * rho * rho / 2.0;
-        }
-        let zc = mz / v;
-        let ixx = izz / 2.0 + zz - v * zc * zc;
-        let s = ((rb - rt).powi(2) + h * h).sqrt();
-        Expected {
-            name,
-            body: Brep::make_cone(o, rb, rt, h).unwrap(),
-            area: PI * (rb * rb + rt * rt + (rb + rt) * s),
-            volume: v,
-            centroid: [o[0], o[1], o[2] + zc],
-            moments: [ixx, ixx, izz],
-        }
+        expected(name, Brep::make_cone(o, rb, rt, h), closed::cone(o, rb, rt, h))
     }
 
-    /// A ring torus about +Z (Pappus for area and volume).
-    #[allow(clippy::unwrap_used)] // test fixture
     fn torus(name: &'static str, o: [f64; 3], big: f64, r: f64) -> Expected {
-        let v = 2.0 * PI * PI * big * r * r;
-        let ixx = v * (big * big / 2.0 + 5.0 * r * r / 8.0);
-        Expected {
-            name,
-            body: Brep::make_torus(o, big, r).unwrap(),
-            area: 4.0 * PI * PI * big * r,
-            volume: v,
-            centroid: o,
-            moments: [ixx, ixx, v * (big * big + 0.75 * r * r)],
-        }
+        expected(name, Brep::make_torus(o, big, r), closed::torus(o, big, r))
     }
 
     /// Every primitive against its closed form, at the origin and 2e5 mm out, to 1e-6 (tests/oracle

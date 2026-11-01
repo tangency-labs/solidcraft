@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Export image — save the finished picture as a PNG file</title>
+  <path d="M9 18L43 18A5 5 0 0 1 48 23L48 49A5 5 0 0 1 43 54L9 54A5 5 0 0 1 4 49L4 23A5 5 0 0 1 9 18Z" fill="#e2e8ef"/>
+  <defs><clipPath id="pic1"><path d="M9 18L43 18A5 5 0 0 1 48 23L48 49A5 5 0 0 1 43 54L9 54A5 5 0 0 1 4 49L4 23A5 5 0 0 1 9 18Z" fill="none"/></clipPath></defs>
+  <g clip-path="url(#pic1)">
+  <path d="M4 46.8L17.2 33.12L29.52 44.64L36.56 38.88L48 48.96L48 54L4 54Z" fill="#8e9faf"/>
+  </g>
+  <path d="M9 18L43 18A5 5 0 0 1 48 23L48 49A5 5 0 0 1 43 54L9 54A5 5 0 0 1 4 49L4 23A5 5 0 0 1 9 18Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M28 36L47.77 17.55" fill="none" stroke="#ffffff" stroke-width="11.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M58 8L53.52 25.18L40.55 11.29Z" fill="#ffffff" stroke="#ffffff" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M28 36L47.77 17.55" fill="none" stroke="#236ead" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M58 8L53.52 25.18L40.55 11.29Z" fill="#236ead" stroke="#236ead" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

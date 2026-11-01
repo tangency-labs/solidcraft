@@ -48,7 +48,7 @@ fn loop_patch(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "`v` and `operation` belong to a curve network: give its curves as `u` and `v`"));
     }
     let sketch = feature_sketch(s, p, cmd)?;
-    let curves = string_list(p, "curves");
+    let curves = string_list(cmd, p, "curves")?;
     if !(2..=4).contains(&curves.len()) {
         return Err(bad(cmd, "`curves` must list 2 to 4 sketch curves in loop order (or give a network as `u` and `v`)"));
     }
@@ -196,7 +196,7 @@ fn network_curves(s: &Session, p: &Value, key: &str, default_sketch: &mut Option
                 curve.body = Some(BodyName::from(body.to_string()));
                 curve.edges = pts;
             } else {
-                curve.curves = string_list(o, "curves");
+                curve.curves = string_list(cmd, o, "curves")?;
                 if o.get("sketch").is_some_and(|v| !v.is_null()) {
                     curve.sketch = Some(SketchId(sketch_id(s, o.get("sketch"), cmd, &format!("{name}.sketch"))?));
                 }

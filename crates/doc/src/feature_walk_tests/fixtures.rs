@@ -56,6 +56,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ),
         ("box", json!({"type": "box", "corner": ["box.x", "box.y", "box.z"], "length": "box.length", "width": "box.width", "height": "box.height"})),
         ("cylinder", json!({"type": "cylinder", "base": ["cyl.x", "cyl.y", "cyl.z"], "radius": "cyl.radius", "height": "cyl.height"})),
+        (
+            "cylinder_references",
+            json!({"type": "cylinder", "base": o, "radius": "cyl.radius", "height": "cyl.height",
+                "references": [{"edge": o, "distance": "cyl.reference1"}, {"edge": o, "distance": "cyl.reference2"}]}),
+        ),
         ("sphere", json!({"type": "sphere", "center": ["sph.x", "sph.y", "sph.z"], "radius": "sph.radius"})),
         ("torus", json!({"type": "torus", "center": ["tor.x", "tor.y", "tor.z"], "major": "tor.major", "minor": "tor.minor"})),
         (
@@ -287,6 +292,9 @@ pub(super) fn with_points(name: &str, mut v: Value) -> Value {
         "surface_revolve" => json!({"axis": line}),
         "hole_simple" => json!({"points": null, "to": p(4.0)}),
         "hole_drilled" | "hole_counterbore" | "hole_countersink" => json!({"to": p(4.0)}),
+        "cylinder_references" => {
+            json!({"references": [{"edge": p(11.0), "distance": "cyl.reference1"}, {"edge": p(12.0), "distance": "cyl.reference2"}]})
+        }
         "hole_references" => {
             json!({"references": [{"edge": p(11.0), "distance": "hole.reference1"}, {"edge": p(12.0), "distance": "hole.reference2"}]})
         }

@@ -48,6 +48,7 @@ fn a_tangent_seam_is_labelled_with_its_curvature_jump() {
 #[test]
 fn the_legend_shows_while_seams_are_shaded() {
     let mut h = crate::scenario::Harness::new();
+    h.app.preferences.viewport_status_details = false;
     h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20})).unwrap();
     h.settle();
     assert!(crate::scenario::rect_of("continuity_legend").is_none());

@@ -1,6 +1,8 @@
 accessibility	false
 activate	false
+agent_chat	false
 align	false
+ambient_occlusion	false
 appearance	false
 arc3	false
 arc_center	false
@@ -68,6 +70,16 @@ configuration_table	false
 conic	false
 constrainer	false
 construction	false
+construction_line	false
+construction_line_angle	false
+construction_line_bisector	false
+construction_line_horizontal	false
+construction_line_parallel	false
+construction_line_perpendicular	false
+construction_line_tangent_at	false
+construction_line_tangent_external	false
+construction_line_tangent_two	false
+construction_line_vertical	false
 contact_all	false
 contact_new	false
 contact_off	false
@@ -83,6 +95,8 @@ decal	false
 delete	false
 delete_face	false
 dimension	false
+display	false
+dots	false
 draft	false
 draft_analysis	false
 drive	false
@@ -91,6 +105,7 @@ edit	false
 ellipse	false
 emboss	false
 environment_map	false
+equation_curve	false
 error	false
 explode	false
 export	false
@@ -99,8 +114,10 @@ extend	false
 extrude	false
 eye	false
 fastener	false
+feature_group	false
 fillet	false
 finish	false
+finish_edit	false
 fit	false
 fit_section	false
 flange	false
@@ -110,7 +127,9 @@ folder	false
 frame_member	false
 gear	false
 graph	false
+grid	false
 ground	false
+ground_shadow	false
 help	false
 hem	false
 hole	false
@@ -136,6 +155,7 @@ loft	false
 lookat	false
 material	false
 measure	false
+mesh_body	false
 mesh_export	false
 min_radius	false
 mirror	false
@@ -161,6 +181,7 @@ pipe	false
 plane	false
 plane_along_path	false
 plane_angle	false
+plane_axis_point	false
 plane_midplane	false
 plane_perpendicular	false
 plane_tangent	false
@@ -181,6 +202,7 @@ polygon	false
 polygon_circumscribed	false
 polygon_edge	false
 presspull	false
+print_face	false
 project	false
 project_surface	false
 rack_pinion	false
@@ -210,6 +232,12 @@ section	false
 select	false
 send	false
 settings	false
+settings_keyboard	false
+settings_monitor	false
+settings_mouse	false
+settings_palette	false
+settings_plug	false
+sheet	false
 sheet_rules	false
 shell	false
 shield	false
@@ -245,8 +273,14 @@ split_face	false
 spun	false
 star	false
 status_error	false
+status_pin	false
 status_recovery	false
 style	false
+style_hidden_edges	false
+style_shaded	false
+style_shaded_edges	false
+style_translucent	false
+style_wireframe	false
 suppress	false
 surface	false
 surface_blend	false
@@ -271,6 +305,8 @@ svg	false
 sweep	false
 text	false
 thread	false
+timeline_play	false
+timeline_stop	false
 torus	false
 trace	false
 trim	false

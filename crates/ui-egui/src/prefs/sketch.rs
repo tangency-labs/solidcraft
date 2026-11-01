@@ -3,28 +3,70 @@ use super::*;
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
-    ui_kit::settings_heading(ui, app.tr("prefs.sketch_selection_heading"), app.tr("prefs.sketch_selection_note"));
+    ui_kit::settings_heading_with_tag(
+        ui,
+        app.tr("prefs.structure.sketch"),
+        app.tr("prefs.sketch_selection_note"),
+        Some(crate::settings_profiles::tag),
+    );
     ui_kit::settings_section(ui, "sketch", app.tr("prefs.sketching"), |ui| {
+        ui_kit::checkbox(ui, app.tr("prefs.sketch_tracking_guides"), &mut app.preferences.sketch_tracking_guides)
+            .on_hover_text(app.tr("prefs.sketch_tracking_guides_note"));
+        ui.add_enabled_ui(app.preferences.sketch_tracking_guides, |ui| {
+            ui_kit::checkbox(ui, app.tr("prefs.sketch_tracking_points"), &mut app.preferences.sketch_tracking_points)
+                .on_hover_text(app.tr("prefs.sketch_tracking_points_note"));
+        });
+        ui_kit::checkbox(ui, app.tr("prefs.sketch_recent_snap"), &mut app.preferences.sketch_recent_snap)
+            .on_hover_text(app.tr("prefs.sketch_recent_snap_note"));
+        ui_kit::checkbox(ui, app.tr("prefs.sketch_align_points"), &mut app.preferences.sketch_align_points)
+            .on_hover_text(app.tr("prefs.sketch_align_points_note"));
         let mut auto = app.session.auto_project;
         if ui_kit::checkbox(ui, crate::i18n::tr_label("Project face edges into new sketches"), &mut auto).changed() {
             let _ = app.run("sketch.auto_project", json!({"value": auto}));
         }
+        let owner = setting::sketch_face_activates_part(app, ui).on_hover_text(app.tr("prefs.sketch_face_activates_part_note"));
+        crate::scenario::publish_target("prefs:sketch_face_activates_part", owner.rect);
+        ui_kit::checkbox(ui, app.tr("prefs.project_options_dialog"), &mut app.preferences.project_options_dialog)
+            .on_hover_text(app.tr("prefs.project_options_dialog_note"));
         ui_kit::checkbox(ui, crate::i18n::tr_label("Pressing a tool's shortcut again switches its mode"), &mut app.preferences.shortcut_cycles_modes)
             .on_hover_text(crate::i18n::tr_label(
                 "Before the first point, pressing a sketch tool's shortcut again steps through its creation modes. Off: it starts the tool again.",
             ));
+        let ends_tool = setting::ribbon_click_ends_tool(app, ui).on_hover_text(app.tr("prefs.ribbon_click_ends_tool_note"));
+        crate::scenario::publish_target("prefs:ribbon_click_ends_tool", ends_tool.rect);
+        // Sketch icons in the colour of their solve state (#7245).
+        let check = setting::sketch_state_icons(app, ui).on_hover_text(app.tr("prefs.sketch_state_icons_note"));
+        crate::scenario::publish_target("prefs:sketch_state_icons", check.rect);
+        let construction = setting::sketch_construction_lines(app, ui);
+        crate::scenario::publish_target("prefs:sketch_construction_lines", construction.rect);
+        let dimension = setting::sketch_auto_dimensions(app, ui);
+        crate::scenario::publish_handle("prefs:sketch_auto_dimensions", dimension.rect.center());
+        ui.add_enabled_ui(app.preferences.sketch_auto_dimensions, |ui| {
+            let locate = setting::sketch_auto_locate(app, ui);
+            crate::scenario::publish_handle("prefs:sketch_auto_locate", locate.rect.center());
+        });
+        ui_kit::checkbox(ui, crate::i18n::tr_label("Center point arc follows the cursor's direction"), &mut app.preferences.center_arc_follows_cursor)
+            .on_hover_text(crate::i18n::tr_label(
+                "A center point arc runs clockwise or counter-clockwise the way the cursor goes round its center. Off: always counter-clockwise from the start.",
+            ));
+        let line_drag = setting::line_drag_draws_one(app, ui).on_hover_text(app.tr("prefs.line_drag_draws_one_note"));
+        crate::scenario::publish_target("prefs:line_drag_draws_one", line_drag.rect);
+        let line_arc = setting::line_hover_tangent_arc(app, ui).on_hover_text(app.tr("prefs.line_hover_tangent_arc_note"));
+        crate::scenario::publish_target("prefs:line_hover_tangent_arc", line_arc.rect);
         ui_kit::settings_block_hint(ui, app.tr("prefs.hold_stop_snapping"), app.tr("prefs.snap_drawing_note"), t.space_24 * 8.0 + t.space_8, |ui| {
             let combo = &mut app.preferences.suppress_sketch_snap;
             ui_kit::settings_control_width(ui, t.space_24 * 7.0 + t.space_12, |ui| {
-                ui_kit::dropdown_menu(ui, "pref_suppress_sketch_snap", &combo.label(), |ui| {
+                ui_kit::dropdown_menu(ui, "pref_suppress_sketch_snap", &combo.shown_label(), |ui| {
                     for choice in ModifierCombo::SNAP_SUPPRESS_CHOICES {
-                        if ui_kit::list_picker(ui, &choice.label(), &choice.label(), *combo == choice).clicked() {
+                        if ui_kit::list_picker(ui, &choice.label(), &choice.shown_label(), *combo == choice).clicked() {
                             *combo = choice;
                         }
                     }
                 });
             });
         });
+        ui_kit::checkbox(ui, app.tr("prefs.sketch_open_look_at"), &mut app.preferences.sketch_open_look_at)
+            .on_hover_text(app.tr("prefs.sketch_open_look_at_note"));
         ui_kit::settings_block_hint(
             ui,
             app.tr("prefs.sketch_exit_view"),
@@ -46,10 +88,18 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::checkbox(ui, app.tr("prefs.alt_frees_manipulators"), &mut app.preferences.manipulator_free_alt).on_hover_text(crate::i18n::tr_label(
             "On: Alt/Option or Ctrl/Cmd on extrude / gizmo arrows disables value snapping. Off: Ctrl/Cmd only.",
         ));
+        // Conflicting curves and points in the conflict colour (#7244).
+        let check = setting::sketch_conflict_colour(app, ui).on_hover_text(app.tr("prefs.sketch_conflict_colour_note"));
+        crate::scenario::publish_target("prefs:sketch_conflict_colour", check.rect);
+        // Constraint glyphs hide when zoomed out (#8980).
+        let check = setting::hide_constraint_glyphs_zoomed_out(app, ui).on_hover_text(app.tr("prefs.hide_constraint_glyphs_zoomed_out_note"));
+        crate::scenario::publish_target("prefs:hide_constraint_glyphs_zoomed_out", check.rect);
     });
     ui_kit::settings_section(ui, "selection", app.tr("prefs.selecting"), |ui| {
         ui_kit::checkbox(ui, crate::i18n::tr_label("Click selects whole bodies"), &mut app.ui.pick_bodies);
         ui_kit::checkbox(ui, app.tr("prefs.prefer_free_sketch_points"), &mut app.preferences.prefer_free_sketch_points);
+        let hidden = setting::select_other_hidden(app, ui).on_hover_text(app.tr("prefs.select_other_hidden_help"));
+        crate::scenario::publish_target("prefs:select_other_hidden", hidden.rect);
         let click = app.tr("prefs.click");
         let shift = app.tr("prefs.shift");
         let ctrl = app.tr("prefs.ctrl_cmd");

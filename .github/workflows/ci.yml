@@ -15,7 +15,9 @@
 # nightly. The reference tests and the doc tests run in the merge queue, on main and nightly, not
 # on pull requests (the fast lane, in Select checks); a break there is fixed forward on main. The
 # Windows jobs (D3D12 shaders and app startup) run nightly, and in the merge queue only for a group
-# that changes what they exercise. Only main saves the build caches; pull requests restore them.
+# that changes what they exercise. The wasm compile check runs in the merge queue for a group that
+# touches the crates below the apps, the web app or the manifests. Dependency advisories run nightly
+# and on any pull request or merge group that changes Cargo.lock or a Cargo.toml. Only main saves the build caches; pull requests restore them.
 # sccache is on a Blacksmith sticky disk that only main commits.
 # A push to main runs only the repository checks when a passing merge-queue run tested that very
 # commit, or when nothing a build reads changed since the last push to main whose run passed.
@@ -92,8 +94,13 @@ env:
 
 jobs:
   dependency-advisories:
+    # Nightly and by hand: advisories, bans and sources for everything. A pull request or merge
+    # group that changes Cargo.lock or a Cargo.toml (Select checks' `deps`) checks the advisories
+    # only, so a dependency with a known vulnerability is caught before it lands, not the next
+    # morning; other pull requests skip it. `ci` requires it whenever `deps` is true.
     name: Dependency advisories
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.deps == 'true') }}
     runs-on: blacksmith-4vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
@@ -102,7 +109,12 @@ jobs:
       - name: Install advisory scanner
         run: cargo install cargo-deny --version 0.20.2 --locked
       - name: Check locked dependencies
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: cargo deny --locked check --warn unmaintained advisories bans sources
+      # deny.toml denies unmaintained crates; like the nightly, they are reported, not fatal.
+      - name: Check advisories for the changed dependencies
+        if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+        run: cargo deny --locked check --warn unmaintained advisories
 
   changes:
     name: Select checks
@@ -112,14 +124,15 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
       contents: read
-      # To ask whether the merge queue already tested a commit pushed to main.
+      # To ask whether the merge queue already tested a commit pushed to main, and which labels the
+      # pull requests of a merge group carry (the render-tests opt-in).
+      pull-requests: read
       actions: read
     outputs:
       native: ${{ steps.paths.outputs.native }}
       kernel: ${{ steps.paths.outputs.kernel }}
       windows: ${{ steps.paths.outputs.windows }}
-      # The GPU path tests run: native, and the whole workspace or solidcraft-gpu selected. The
-      # job's `if` and the `ci` job's check both read this, so they cannot disagree.
+      # The GPU path tests run (see the rule where it is computed). The job's `if` and the `ci` job's check both read this, so they cannot disagree.
       gpu: ${{ steps.paths.outputs.gpu }}
       full: ${{ steps.paths.outputs.full }}
       # Code changed on a pull request that has no approved-for-ci label yet: only Quick compile.
@@ -127,6 +140,10 @@ jobs:
       packages: ${{ steps.paths.outputs.packages }}
       oracle: ${{ steps.paths.outputs.oracle }}
       doctests: ${{ steps.paths.outputs.doctests }}
+      # Cargo.lock or a Cargo.toml changed (pull requests and merge groups): Dependency advisories.
+      deps: ${{ steps.paths.outputs.deps }}
+      # A merge group reaches the wasm build: Compile WebAssembly.
+      wasm: ${{ steps.paths.outputs.wasm }}
       # The passing run a merge of main carries forward (its URL), when this push is only that.
       carried: ${{ steps.paths.outputs.carried }}
     steps:
@@ -144,6 +161,7 @@ jobs:
           GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          RENDER_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'render-tests') }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           REPO: ${{ github.repository }}
           APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'approved-for-ci') }}
@@ -152,6 +170,9 @@ jobs:
           native=false
           kernel=false
           windows=false
+          gpu_paths=false
+          deps=false
+          wasm=false
           full=true
           packages=
           # Whether the NUL-separated paths in $1 reach any code: scripts/ci/affected.py selects
@@ -179,6 +200,44 @@ jobs:
                 | grep -Eq '^[ +-]name = "(wgpu[a-z_-]*|naga|egui[a-z_-]*|eframe|winit|windows[a-z_-]*|d3d12)"'; then
               windows=true
             fi
+          }
+          # Whether the NUL-separated paths in $1 are render code: the render crate, the path
+          # tracer and its shaders in the GPU crate, the render workspace UI, the render assets.
+          # Core, kernel and CI changes do not trigger the path tests (about 56 runner-minutes):
+          # the tracer reads the scene through interfaces the other tests cover, and the nightly
+          # runs them for everything.
+          gpu_paths() {
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                crates/render/*|crates/gpu/src/path/*|crates/ui-egui/src/render_workspace*|assets/render/*) gpu_paths=true ;;
+              esac
+            done < "$1"
+          }
+          # Whether the NUL-separated paths in $1 change the dependencies (Cargo.lock or any
+          # Cargo.toml: deps), and whether they reach what `cargo xtask wasm` compiles (wasm): the
+          # crates below the apps, the web app, the vendored crates, the manifests and lockfile, the
+          # toolchain and cargo config, and this workflow. #8227 put a native-only call in
+          # crates/ui-egui and the merge queue passed it, because nothing built for wasm there.
+          deps_wasm_paths() {
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                Cargo.lock|Cargo.toml|*/Cargo.toml) deps=true ;;
+              esac
+              case "$path" in
+                crates/*|apps/solidcraft-web/*|vendor/*|Cargo.lock|Cargo.toml|rust-toolchain*|.cargo/*|.github/workflows/ci.yml) wasm=true ;;
+              esac
+            done < "$1"
+          }
+          # Opt-in for a big render change: a pull request labelled render-tests, or a merge group
+          # holding one (its pull requests are the (#N) of its squash commits), runs them whatever
+          # the paths say.
+          group_has_render_label() {
+            for pr in $(git log --format=%s "$1" | grep -o '(#[0-9]*)$' | tr -d '(#)'); do
+              if gh api "repos/$REPO/issues/$pr" --jq '.labels[].name' | grep -qx render-tests; then
+                return 0
+              fi
+            done
+            return 1
           }
           if [ "$EVENT_NAME" = push ]; then
             # The queue lands the very commit its merge_group run tested. If that run passed,
@@ -213,14 +272,23 @@ jobs:
             # the nightly runs it whatever changed. A group that can't be compared runs it.
             if git diff --no-renames --name-only -z "$GROUP_BASE_SHA...$GROUP_HEAD_SHA" > "$RUNNER_TEMP/ci-paths"; then
               windows_paths "$RUNNER_TEMP/ci-paths" "$GROUP_BASE_SHA...$GROUP_HEAD_SHA"
+              gpu_paths "$RUNNER_TEMP/ci-paths"
+              deps_wasm_paths "$RUNNER_TEMP/ci-paths"
+              if [ "$gpu_paths" = false ] && group_has_render_label "$GROUP_BASE_SHA..$GROUP_HEAD_SHA"; then
+                gpu_paths=true
+              fi
             else
               windows=true
+              gpu_paths=true
+              deps=true
+              wasm=true
             fi
-            echo "windows=$windows for $GROUP_BASE_SHA...$GROUP_HEAD_SHA"
+            echo "windows=$windows gpu_paths=$gpu_paths deps=$deps wasm=$wasm for $GROUP_BASE_SHA...$GROUP_HEAD_SHA"
           elif [ "$EVENT_NAME" != pull_request ]; then
             # The nightly run and Run workflow: everything, Windows included.
             native=true
             windows=true
+            gpu_paths=true
           else
             # Compare both old and new paths of renames; unknown paths run native checks.
             git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/ci-paths"
@@ -229,6 +297,10 @@ jobs:
             done < "$RUNNER_TEMP/ci-paths"
             # Computed as for a merge group, then turned off below (the fast lane).
             windows_paths "$RUNNER_TEMP/ci-paths" "$BASE_SHA...$HEAD_SHA"
+            # The advisories run on the pull request itself (it builds nothing of ours: about two minutes, most of it installing cargo-deny);
+            # the wasm compile waits for the merge queue.
+            deps_wasm_paths "$RUNNER_TEMP/ci-paths"
+            wasm=false
             # Pull requests build and test the touched packages and their dependents; nothing
             # selected means no code changed.
             select_packages "$RUNNER_TEMP/ci-paths"
@@ -267,12 +339,24 @@ jobs:
               native=false
             fi
           fi
-          # The GPU path tests (their own job) run with the other tests, when solidcraft-gpu is
-          # among the packages they test.
+          # The GPU path tests (their own job, about 56 runner-minutes) are for render changes only:
+          # - on a pull request, when it carries the render-tests label (opt-in for a big render
+          #   change) or touches render code (gpu_paths); no other pull request runs them;
+          # - in the merge queue, when the group's diff touches render code or one of its pull
+          #   requests carries render-tests;
+          # - in the nightly and by hand, always, so anything the above skipped is caught within a day;
+          # - not on a push to main: the queue tested that commit, or the nightly will.
           gpu=false
           if [ "$native" = true ]; then
-            case " $packages " in *" solidcraft-gpu "*) gpu=true ;; esac
-            if [ "$full" = true ]; then gpu=true; fi
+            case "$EVENT_NAME" in
+              pull_request)
+                gpu_paths "$RUNNER_TEMP/ci-paths"
+                gpu=$gpu_paths
+                if [ "$RENDER_LABEL" = true ]; then gpu=true; fi ;;
+              merge_group) gpu=$gpu_paths ;;
+              push) gpu=false ;;
+              *) gpu=true ;;
+            esac
           fi
           {
             echo "native=$native"
@@ -281,6 +365,8 @@ jobs:
             echo "windows=$windows"
             echo "oracle=$oracle"
             echo "doctests=$doctests"
+            echo "deps=$deps"
+            echo "wasm=$wasm"
             echo "carried=$carried"
             echo "full=$full"
             echo "quick=$quick"
@@ -318,6 +404,9 @@ jobs:
           cargo test -p xtask ui_containers --locked
       - name: Sorted lists
         run: cargo xtask lists
+      # New UI text must reach every complete catalog; report it here, before review (#8542).
+      - name: Translations in the complete catalogs
+        run: cargo xtask i18n --check
       - name: Agent router and skills cite real files
         run: |
           cargo xtask skills
@@ -919,7 +1008,7 @@ jobs:
     # commit's real run instead: the merge queue reads `ci` from the newest run of a commit, so a
     # run without a passing `ci` would block a pull request that passed (#1850, #3182, #3252).
     name: ci
-    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-startup]
+    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-startup, dependency-advisories, wasm]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
@@ -973,6 +1062,10 @@ jobs:
           ORACLE: ${{ needs.oracle.result }}
           WINDOWS_FXC: ${{ needs.windows-fxc.result }}
           WINDOWS_STARTUP: ${{ needs.windows-startup.result }}
+          DEPS_RUN: ${{ needs.changes.outputs.deps }}
+          ADVISORIES: ${{ needs.dependency-advisories.result }}
+          WASM_RUN: ${{ needs.changes.outputs.wasm }}
+          WASM: ${{ needs.wasm.result }}
         run: |
           test "$CHANGES" = success
           test "$CHECKS" = success
@@ -1002,6 +1095,14 @@ jobs:
             test "$WINDOWS_FXC" = success
             test "$WINDOWS_STARTUP" = success
           fi
+          # Cargo.lock or a Cargo.toml changed on a pull request or in a merge group.
+          if [ "$DEPS_RUN" = true ]; then
+            test "$ADVISORIES" = success
+          fi
+          # A merge group that reaches the wasm build.
+          if [ "$WASM_RUN" = true ]; then
+            test "$WASM" = success
+          fi
       - name: Note a carried result
         if: needs.changes.outputs.carried != ''
         env:
@@ -1009,9 +1110,13 @@ jobs:
         run: |
           echo "This push only merges main into a change that already passed; the heavy checks were not repeated. Passing run: $CARRIED" >> "$GITHUB_STEP_SUMMARY"
 
+  # Every crate below the apps and the web app must build for the browser (`cargo xtask wasm`, a
+  # cargo check, no tests). In the merge queue for a group that reaches the wasm build (Select
+  # checks' `wasm`), where `ci` requires it; by hand with cross_compile.
   wasm:
-    name: Compile WebAssembly (manual)
-    if: github.event_name == 'workflow_dispatch' && inputs.cross_compile
+    name: Compile WebAssembly
+    needs: changes
+    if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && inputs.cross_compile) || needs.changes.outputs.wasm == 'true') }}
     runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
@@ -1080,3 +1185,49 @@ jobs:
           . "$HOME/.cargo/env"
           export CRAFT_FONTS_DIR="$PWD/craft-fonts"
           cargo check --all-targets --locked --target riscv64gc-unknown-linux-gnu
+
+  # Nobody watches the nightly run, and it failed every day from 2026-10-16 to 2026-10-28 before
+  # anyone noticed. When a nightly fails, open one issue, "Nightly CI is failing" (label `ci`), or
+  # comment on it if it is already open; when a nightly passes, close it. A nightly that neither
+  # failed nor fully passed (cancelled) leaves the issue as it is. The only job that may write issues.
+  nightly-alert:
+    name: Nightly alert
+    needs: [dependency-advisories, changes, checks, ci, build-tests, action-matrix, action-matrix-determinism, property-tests]
+    if: always() && github.event_name == 'schedule'
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open, update or close the nightly issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RESULTS: ${{ toJSON(needs) }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SHA: ${{ github.sha }}
+        run: |
+          title="Nightly CI is failing"
+          failed=$(jq -r 'to_entries[] | select(.value.result == "failure") | .key' <<<"$RESULTS")
+          unfinished=$(jq -r 'to_entries[] | select(.value.result != "success" and .value.result != "failure") | "\(.key) (\(.value.result))"' <<<"$RESULTS")
+          issue=$(gh issue list --state open --label ci --limit 100 --json number,title \
+            --jq "[.[] | select(.title == \"$title\")] | first | .number // empty")
+          if [ -n "$failed" ]; then
+            body="The nightly run on ${SHA:0:9} failed: $RUN_URL
+
+          Failed jobs: $(paste -sd , - <<<"$failed" | sed 's/,/, /g')."
+            if [ -n "$issue" ]; then
+              gh issue comment "$issue" --body "$body"
+            else
+              gh issue create --title "$title" --label ci --body "$body
+
+          This issue is opened and updated by the nightly run (the nightly-alert job in .github/workflows/ci.yml) and closed by the first nightly that passes."
+            fi
+          elif [ -z "$unfinished" ]; then
+            if [ -n "$issue" ]; then
+              gh issue close "$issue" --comment "The nightly run on ${SHA:0:9} passed: $RUN_URL"
+            fi
+            echo "The nightly passed."
+          else
+            echo "Nothing failed, but not every job finished: $unfinished. The issue is left as it is."
+          fi

@@ -1,6 +1,6 @@
 # Design containers, version 1
 
-New designs use `.solidcraft`; `.solvecraft` remains a supported legacy extension. Opening detects the ZIP
+New designs use `.sc`; `.solidcraft` and `.solvecraft` remain supported legacy extensions. Opening detects the ZIP
 local-header signature (`50 4b 03 04`) independently of the name; otherwise it uses
 the existing JSON design reader and migrations. Plain JSON remains a fully supported,
 self-contained input/output format. `io::write_design` keeps its JSON contract;
@@ -118,8 +118,8 @@ Engine Save/Save As write the evaluated model with the design by default
 `cache/bodies.bin`. Plain JSON, recovery/autosave and browser downloads do not
 carry it. Saving never forces placement, evaluation or tessellation: the model is
 the session's own evaluation, and only when it is the evaluation of the document
-being saved (`Model::is_current`). An active sketch, uncaptured moves, feature
-errors or mesh bodies leave the cache out; the design saves as before. A cache
+being saved (`Model::is_current`). An active sketch, uncaptured moves or feature
+errors leave the cache out; the design saves as before. A cache
 over its budgets keeps fewer states (below) and is left out only when not even
 the final state fits.
 
@@ -153,14 +153,35 @@ SHA-256 of their encoding), and a placed copy of a repeated part (an instance fr
 a STEP assembly) records the part and its matrix, so it shows that part's display
 again instead of being meshed on its own.
 
-`cache/model.json` records `solidcraft-model-cache/7`, the producer revision
+A mesh body (an imported STL or 3MF, or a STEP part shown as a mesh of its faces) has no
+B-rep to encode. Its slice starts `SCMESH01`, then the length of a JSON header (u32) and the
+header (its vertex and triangle counts, colour and paint), then each vertex as three f64
+and each triangle as three u32, little-endian: the triangles exactly as the body holds them.
+Before #9170 one mesh body left the cache out for the whole model. As for a B-rep body, a
+mesh body is kept only when its slice reads back as the same vertices, bit for bit, the
+same triangles, colour and paint; the picture shown while opening draws its triangles.
+
+`cache/model.json` records `solidcraft-model-cache/8`, the producer revision
 `solidcraft-truck-adapter/4`, the application version, the build (source commit,
-CPU architecture and OS), the SHA-256 of the exact `document.json` (whose blob
-references pin every STEP, mesh and image payload) and of `cache/bodies.bin`, the
-slices, each kernel body's slice and display share, and the model's records. A
-cache is read back only when every one of these matches: the same source compiled
-for the same platform computes the same numbers, so another build's cache is a
-miss. A build of unknown source (a tarball without git) never reads a cache.
+CPU architecture and OS), the evaluation source (below, with the CPU architecture
+and OS), the geometry kernel that computed it (`solidcore` or `smlib`), the SHA-256 of the exact `document.json` (whose blob references pin every
+STEP, mesh and image payload) and of `cache/bodies.bin`, the slices, each kernel
+body's slice and display share, and the model's records. A cache is read back only
+when the format, the producer, the evaluation source, the platform, the kernel and both
+digests match: the same source compiled for the same platform computes the same
+numbers on the same kernel; a design opened on the other kernel is evaluated on it. The application version and the commit are recorded, not compared.
+
+The evaluation source (`SOLIDCRAFT_EVALUATION_SOURCE`, `crates/io/build.rs`) is a
+digest of the committed source a model is computed from: the `doc` crate and every
+workspace crate it is built from (a test checks the list against their manifests),
+the patched dependencies in `vendor/` (not the interface's renderer), the locked
+versions of every other dependency, the workspace `Cargo.toml` without the
+application's version, `.cargo/config.toml`, and the cache's own reader. An update
+that changed none of it (the interface, the commands, other file formats, a new
+version number) opens designs from the caches the build before it wrote (#7168);
+one that changed any of it (a kernel fix, the codec, a dependency) evaluates them
+again, once, and the next save writes a cache of its own. A build of unknown source
+(a tarball without git) never reads a cache.
 
 The fixed budgets of earlier caches (4,096 bodies, 100,000 faces, 64 MiB) scale
 with the design now: up to 200,000 body records, 100,000 distinct bodies, a 32 MiB
@@ -176,7 +197,10 @@ repeat for longest), each while what it adds still fits: the bodies no state kep
 so far holds (a body is stored once however many states hold it) and the records
 of the state, those bodies, their names and sketches. Sheet bodies, like sketches, are
 written once and named by place in the states (most features leave the sheets as they were); a
-thinned cache keeps all of them. When the rest of the
+thinned cache keeps all of them. So are the states' sketch keys (the evaluation key of each
+sketch before the state): each distinct set is written once, as the keys it sets and drops
+relative to the set written before it, and a state names its set by place; a thinned cache
+keeps all of them too. When the rest of the
 manifest (the bodies' table, the slices) then leaves too little room, the choice
 is made again within that much less, and the final state alone is always tried.
 A feature whose state is left out records none. The cache is left out (and the
@@ -209,9 +233,9 @@ only that.
 
 This replaces the earlier rule that a cache never supplies evaluated session
 state. It is safe because the cache is the result of evaluating exactly this
-document with exactly this build: the hashes tie it to the document (and through
-it to every source blob) and to its own payload, the build key to the code that
-computed it, the fingerprints to every feature's inputs, and the exact encoding
+document with exactly this evaluation source: the hashes tie it to the document (and
+through it to every source blob) and to its own payload, the evaluation key to the
+code that computed it, the fingerprints to every feature's inputs, and the exact encoding
 gives back the bodies number for number. Hashes are not trust: a crafted file can
 carry a cache whose geometry disagrees with its timeline, as a crafted STEP file
 can carry any geometry. Every decoded body passes the same structural and resource

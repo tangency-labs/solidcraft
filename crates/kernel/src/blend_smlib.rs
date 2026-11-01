@@ -140,7 +140,8 @@ mod imp {
         if picks.iter().any(|p| !p.is_finite()) {
             return Err(KernelError::Invalid("edge picks must be finite points".into()));
         }
-        let mesh = body.mesh(&crate::MeshTolerance::chord((body.size() * 2e-3).max(1e-3)))?;
+        let chord = (body.size() * 2e-3).max(1e-3);
+        let mesh = body.mesh(&crate::MeshTolerance::chord(chord))?;
         let seams = crate::topo::seam_flags(body, &mesh);
         let (smooth, _) = crate::smooth_edges::flags(body, &mesh);
         let hidden: Vec<bool> =
@@ -149,11 +150,17 @@ mod imp {
         let tie = (body.size() * 1e-6).max(1e-6);
         let mut out = Picked { edges: Vec::with_capacity(picks.len()), points: Vec::with_capacity(picks.len()), hidden: Vec::new() };
         for p in picks {
+            // A polyline is up to `chord` off its edge, which may be more than the edges are
+            // apart: those that close are measured on their curves.
+            let polyline = |line: &[Vec3]| {
+                line.windows(2).filter_map(|w| if let [a, b] = w { Some(p.dist_to_segment(*a, *b)) } else { None }).fold(f64::INFINITY, f64::min)
+            };
+            let near: Vec<f64> = mesh.edges.iter().map(|line| polyline(line)).collect();
+            let nearest = near.iter().copied().fold(f64::INFINITY, f64::min);
             // The nearest edge, and the nearest that is no seam.
             let (mut any, mut edge): (Option<(f64, usize)>, Option<(f64, usize)>) = (None, None);
-            for (i, line) in mesh.edges.iter().enumerate() {
-                let d =
-                    line.windows(2).filter_map(|w| if let [a, b] = w { Some(p.dist_to_segment(*a, *b)) } else { None }).fold(f64::INFINITY, f64::min);
+            for (i, d) in near.iter().copied().enumerate() {
+                let d = if d <= nearest + 2.0 * chord { exact_distance(body, i, *p).unwrap_or(d) } else { d };
                 let seam = hidden.get(i).copied().unwrap_or(false);
                 for (slot, take) in [(&mut any, true), (&mut edge, !seam)] {
                     if take && slot.is_none_or(|(bd, _)| d < bd) {
@@ -174,6 +181,25 @@ mod imp {
         }
         out.hidden = hidden;
         Ok(out)
+    }
+
+    /// How far `p` is from edge `i` itself, sampled along its curve; `None` for an edge with no
+    /// curve to sample.
+    fn exact_distance(body: &Body, i: usize, p: Vec3) -> Option<f64> {
+        const SAMPLES: usize = 512;
+        let record = body.record();
+        let e = record.edges.get(i)?;
+        let eval = solidcraft_geom::brep::eval::CurveEval::new(e.nurbs.as_ref().unwrap_or(&e.curve)).ok()?;
+        let [t0, t1] = e.interval;
+        let at = |k: usize| eval.point(t0 + (t1 - t0) * k as f64 / SAMPLES as f64);
+        let mut best = f64::INFINITY;
+        let mut last = at(0)?;
+        for k in 1..=SAMPLES {
+            let next = at(k)?;
+            best = best.min(p.dist_to_segment(last, next));
+            last = next;
+        }
+        Some(best)
     }
 
     pub(super) struct Picked {
@@ -419,6 +445,7 @@ mod imp {
                      run on tangentially into each other, or meet in a way no blend corner builds)"
                 )),
                 SmError::NoRoom => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
+                SmError::Unported(why) => KernelError::Invalid(format!("not supported yet: {why}")),
                 e => failed(what, "operation", e),
             })?;
             // Checked here unless the evaluation's validation mode leaves it to the feature's end
@@ -566,6 +593,24 @@ mod tests {
         let b = cube();
         assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(20.0, 20.0, 20.0)], &[1.0]).is_ok());
         assert!(imp::blend(&b, "fillet", Kind::Round, &[Vec3::new(60.0, 60.0, 60.0)], &[1.0]).is_err());
+    }
+
+    /// A ball's rim on a block's back face, tangent to the back face's bottom edge at (2.5, 22.5, 0).
+    /// Near there the two are closer than the mesh's chord, which can't tell them apart.
+    #[test]
+    fn a_pick_on_a_rim_tangent_to_a_straight_edge_takes_the_rim() {
+        let block = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(30.0, 22.5, 17.5)).unwrap();
+        let ball = crate::sphere(Vec3::new(2.5, 22.5, 5.0), 5.0).unwrap();
+        let b = crate::boolean(&block, &ball, crate::BoolOp::Cut).unwrap().unwrap();
+        let on_rim = |[x, y, z]: [f64; 3]| (y - 22.5).abs() < 1e-6 && ((x - 2.5).hypot(z - 5.0) - 5.0).abs() < 1e-3;
+        for degrees in [2.0f64, 5.0, 10.0, 20.0, 45.0] {
+            let a = degrees.to_radians();
+            let pick = Vec3::new(2.5 + 5.0 * a.sin(), 22.5, 5.0 - 5.0 * a.cos());
+            let picked = imp::resolve(&b, &[pick]).unwrap();
+            assert!(on_rim(picked.points[0]), "{degrees} degrees from the tangent point: took the edge through {:?}", picked.points[0]);
+            let beside = imp::resolve(&b, &[Vec3::new(pick.x, 22.5, 0.0)]).unwrap();
+            assert!(beside.points[0][2].abs() < 1e-9, "the straight edge under it: took the edge through {:?}", beside.points[0]);
+        }
     }
 
     #[test]

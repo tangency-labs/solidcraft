@@ -64,6 +64,94 @@ fn diagnostics_profile_reports_commands_features_and_the_kernel() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Tests that set the process-wide kernel choice run one at a time, and put `solidcore` back
+/// however they end (a failed assertion included).
+struct KernelChoice(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
+
+static KERNEL_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+impl KernelChoice {
+    fn take() -> Self {
+        KernelChoice(KERNEL_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+    }
+}
+
+impl Drop for KernelChoice {
+    fn drop(&mut self) {
+        solidcraft_kernel::kernel_route::set_choice(solidcraft_kernel::kernel_route::Backend::Solidcore);
+    }
+}
+
+/// diagnostics.kernel says the kernel in force and whether the environment chose it, and its
+/// `choice` sets it (unless SOLIDCRAFT_KERNEL overrides it).
+///
+/// The choice is process-wide and the other tests in this binary build bodies meanwhile, so only
+/// `solidcore` is set through the command; what `smlib` asks for is read from `kernel_asked`.
+#[test]
+fn diagnostics_kernel_reports_and_sets_the_choice() {
+    use solidcraft_kernel::kernel_route as route;
+    let _choice = KernelChoice::take();
+    let mut s = Session::default();
+    let r = s.execute("diagnostics.kernel", &json!({})).unwrap();
+    let environment = route::overridden();
+    assert_eq!(r, json!({ "choice": route::choice().id(), "environment": environment }));
+    let r = s.execute("diagnostics.kernel", &json!({ "choice": "solidcore" })).unwrap();
+    assert!(environment || r["choice"] == json!("solidcore"), "{r}");
+    assert_eq!(crate::cmd::diagnostics::kernel_asked(&json!("solidcore"), false).unwrap(), route::Backend::Solidcore);
+    assert_eq!(crate::cmd::diagnostics::kernel_asked(&json!("solidcore"), true).unwrap(), route::Backend::Solidcore);
+    assert_eq!(crate::cmd::diagnostics::kernel_asked(&json!("smlib"), true).unwrap(), route::Backend::Smlib);
+}
+
+/// `smlib` on a build without the C++ kernel is refused as not available, whichever kernel is in
+/// force, and leaves the choice alone: never an answer from the other kernel. Built with it, the
+/// command would move the other tests' bodies, so `kernel_asked` alone is asked.
+#[test]
+fn diagnostics_kernel_refuses_smlib_on_a_build_without_it() {
+    let _choice = KernelChoice::take();
+    let refused = crate::cmd::diagnostics::kernel_asked(&json!("smlib"), false).unwrap_err();
+    assert!(matches!(&refused, crate::EngineError::Disabled(cmd, _) if cmd == "diagnostics.kernel"), "{refused}");
+    if !solidcraft_kernel::smlib_built() {
+        let mut s = Session::default();
+        let before = s.execute("diagnostics.kernel", &json!({})).unwrap();
+        assert!(matches!(s.execute("diagnostics.kernel", &json!({"choice": "smlib"})), Err(crate::EngineError::Disabled(..))));
+        assert_eq!(s.execute("diagnostics.kernel", &json!({})).unwrap(), before);
+    }
+}
+
+/// An unknown or mistyped choice is an error that changes nothing; no hostile value panics.
+#[test]
+fn diagnostics_kernel_refuses_unknown_choices() {
+    let _choice = KernelChoice::take();
+    let mut s = Session::default();
+    let before = s.execute("diagnostics.kernel", &json!({})).unwrap()["choice"].clone();
+    let huge = "solidcore".repeat(100_000);
+    for bad in [
+        json!("truck"),
+        json!("SMLIB"),
+        json!(""),
+        json!(huge),
+        json!("routed"),
+        json!("routed\0"),
+        json!(5),
+        json!(true),
+        json!(["smlib"]),
+        json!({"choice": "smlib"}),
+    ] {
+        match s.execute("diagnostics.kernel", &json!({ "choice": bad })) {
+            Err(crate::EngineError::BadParams { .. }) => {}
+            other => panic!("`{}` was not refused: {:?}", bad.as_str().map_or(0, str::len), other.map_err(|e| e.to_string())),
+        }
+    }
+    for v in crate::tests::hostile_values() {
+        for p in [json!({ "choice": v.clone() }), v] {
+            if let Err(crate::EngineError::Internal(_, msg)) = s.execute("diagnostics.kernel", &p) {
+                panic!("diagnostics.kernel {p}: {msg}");
+            }
+        }
+    }
+    assert_eq!(s.execute("diagnostics.kernel", &json!({})).unwrap()["choice"], before);
+}
+
 /// Features are checked once each by default; the command reads and sets the mode, and the mode
 /// is the user's: it stays when another design is started and when everything is computed again.
 #[test]

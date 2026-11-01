@@ -27,7 +27,7 @@ The rules that cannot be broken in a PR. `AGENTS.md` lists them in one line each
 - Before any icon, icon assignment or media edit, read `assets/AGENTS.md`, `assets/icons/ui/AGENTS.md` and `assets/icons/ui/STYLE_GUIDE.md`. Use the canonical bases and named finished references there; never invent a parallel icon style. `cargo xtask icons` validates them.
 
 ## The name
-- SolidCraft everywhere: crates `solidcraft-*`, binaries `solidcraft` and `solidcraft-cli`, `.solidcraft` designs, the `solidcraft/N` format tag, `SOLIDCRAFT_*` environment variables, settings and recovery folders, the MCP server name, docs, CI and packaging.
+- SolidCraft everywhere: crates `solidcraft-*`, binaries `solidcraft` and `solidcraft-cli`, `.sc` designs (`.solidcraft` still opens), the `solidcraft/N` format tag, `SOLIDCRAFT_*` environment variables, settings and recovery folders, the MCP server name, docs, CI and packaging.
 - The old name survives only in the compatibility shims listed in `docs/compatibility.md`. Do not add new uses of it.
 - Public docs, web and Flatpak deployments use project Pages `/solidcraft/`. Do not add permanent old-name Pages aliases.
 - Labels, parameter docs, messages and docs use the terms in the glossary (`docs/book/src/reference/glossary.md`): one term for each idea. A change that adds a new idea adds its term there.

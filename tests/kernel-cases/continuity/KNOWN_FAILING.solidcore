@@ -1,0 +1,3 @@
+# The continuity cases that fail today on solidcore, one a line: `<case> <why it fails today>`. Sorted.
+# The kernel rig gate fails on a case that fails and is not listed, and on a listed case that passes.
+# Baseline: solidcore pin de85a3e00, tests/kernel-cases run by `cargo xtask kernel-cases`, x86_64 Linux.

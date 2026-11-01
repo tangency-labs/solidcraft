@@ -4,6 +4,34 @@
 use solidcraft_engine::CommandSpec;
 use solidcraft_engine::doc::FeatureKind;
 
+pub const RENDER_TABS: &[&str] = &["RENDER"];
+
+pub fn render_tab(tab: &str) -> bool {
+    RENDER_TABS.contains(&tab)
+}
+pub fn tab_label(tab: &str) -> &str {
+    tab.strip_prefix("RENDER ").unwrap_or(tab)
+}
+
+/// A tab's registry name in normal word casing: "SHEET METAL" → "Sheet Metal".
+pub fn word_cased(name: &str) -> String {
+    name.split_whitespace()
+        .map(|word| {
+            let lower = word.to_lowercase();
+            let mut chars = lower.chars();
+            chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A ribbon tab's name as the ribbon shows it, in the current language: "SHEET METAL" reads
+/// "Sheet Metal", or "Blech" in German. A partial catalog may translate only the word-cased name.
+pub fn tab_name(tab: &str) -> String {
+    let cased = word_cased(crate::i18n::tr_label(tab_label(tab)));
+    crate::i18n::tr_label(&cased).to_string()
+}
+
 pub const TABS: &[&str] = &["MODEL", "SURFACE", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW"];
 
 /// Reading order of the compact, three-column constraint gallery. Icons come from each spec.
@@ -53,6 +81,13 @@ pub fn grouped_commands<'a>(tab: &str, panel: &str, commands: &[&'a CommandSpec]
     out
 }
 
+/// The ids of a panel's commands that are in none of its groups: [`grouped_commands`] puts them
+/// last, without a heading.
+pub fn ungrouped(tab: &str, panel: &str, commands: &[&CommandSpec]) -> Vec<&'static str> {
+    let groups = groups(tab, panel);
+    commands.iter().map(|c| c.id).filter(|id| !groups.iter().any(|g| g.ids.contains(id))).collect()
+}
+
 pub struct Section {
     pub tab: &'static str,
     pub panel: &'static str,
@@ -66,15 +101,16 @@ pub struct Section {
 const CONFIGURE: &[&str] = &["parameters.change", "config.table", "config.configure"];
 
 /// Commands that stay for agents, MCP and scripts but are not offered to people: the sketch solves
-/// itself after every edit, so a Solve button (and the search hit for it) only confuses.
-pub const AGENT_ONLY: &[&str] = &["sketch.solve"];
+/// itself after every edit, so a Solve button (and the search hit for it) only confuses; drawn 3D
+/// points are moved with the triad that appears when one is clicked, not a Move button.
+pub const AGENT_ONLY: &[&str] = &["sketch.solve", "sketch.move3d"];
 
 pub const SECTIONS: &[Section] = &[
     Section {
         tab: "MODEL",
         panel: "SKETCH",
         promoted: 1,
-        ids: &["sketch.create", "sketch.edit", "sketch.line3d", "sketch.arc3d", "sketch.spline3d", "sketch.point3d", "sketch.move3d"],
+        ids: &["sketch.create", "sketch.edit", "sketch.line3d", "sketch.arc3d", "sketch.spline3d", "sketch.point3d"],
     },
     Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole"] },
     Section {
@@ -91,6 +127,8 @@ pub const SECTIONS: &[Section] = &[
     },
     Section { tab: "MODEL", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
     Section { tab: "MODEL", panel: "CONSTRUCT", promoted: 1, ids: &["construct.plane.offset"] },
+    // Only while a linked design is edited in place, pinned at the right as FINISH SKETCH is.
+    Section { tab: "MODEL", panel: "FINISH EDITING", promoted: 1, ids: &["component.finish_edit"] },
     // Sketches drive surfaces too: New Sketch leads the tab, as on MODEL and SHEET METAL.
     Section { tab: "SURFACE", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
     Section { tab: "SURFACE", panel: "CREATE", promoted: 4, ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft"] },
@@ -122,8 +160,8 @@ pub const SECTIONS: &[Section] = &[
     Section {
         tab: "ASSEMBLE",
         panel: "POSITION",
-        promoted: 3,
-        ids: &["occurrence.ground", "component.capture_position", "component.revert_position"],
+        promoted: 4,
+        ids: &["occurrence.move", "occurrence.ground", "component.capture_position", "component.revert_position"],
     },
     Section {
         tab: "ASSEMBLE",
@@ -141,7 +179,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "INSERT",
         panel: "FILES",
         promoted: 3,
-        ids: &["file.insert_step", "file.insert_mesh", "component.insert_design", "file.save_mesh", "file.send_to_slicer"],
+        ids: &["file.insert_step", "file.insert_mesh", "pointcloud.insert", "component.insert_design", "file.save_mesh", "file.send_to_slicer"],
     },
     Section { tab: "INSERT", panel: "IMAGES", promoted: 3, ids: &["canvas.insert", "canvas.decal", "canvas.edit"] },
     Section { tab: "INSERT", panel: "2D", promoted: 2, ids: &["sketch.insert_dxf", "sketch.insert_svg"] },
@@ -169,7 +207,7 @@ pub const SECTIONS: &[Section] = &[
             "inspect.continuity",
         ],
     },
-    Section { tab: "INSPECT", panel: "HISTORY", promoted: 2, ids: &["timeline.dependents", "document.inspect"] },
+    Section { tab: "INSPECT", panel: "HISTORY", promoted: 3, ids: &["timeline.play", "timeline.dependents", "document.inspect"] },
     Section {
         tab: "MANAGE",
         panel: "PARAMETERS",
@@ -215,8 +253,15 @@ pub const SECTIONS: &[Section] = &[
     Section {
         tab: "SKETCH",
         panel: "CREATE",
-        promoted: 4,
-        ids: &["sketch.line", "sketch.rectangle.two_point", "sketch.circle.center", "sketch.arc.three_point", "sketch.infinite"],
+        promoted: 5,
+        ids: &[
+            "sketch.line",
+            "sketch.rectangle.two_point",
+            "sketch.circle.center",
+            "sketch.arc.three_point",
+            "sketch.construction_line",
+            "sketch.infinite",
+        ],
     },
     Section {
         tab: "SKETCH",
@@ -260,6 +305,7 @@ pub const SECTIONS: &[Section] = &[
         ],
     },
     // Sketch dimensions are driven by parameters, so they are one click away while sketching.
+    Section { tab: "SKETCH", panel: "INSPECT", promoted: 1, ids: &["sketch.inspect"] },
     Section { tab: "SKETCH", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
     Section { tab: "SKETCH", panel: "FINISH SKETCH", promoted: 2, ids: &["sketch.finish", "sketch.cancel"] },
     // New Sketch leads the tab, as on MODEL: a sheet part starts from a sketch (#3250).
@@ -278,25 +324,12 @@ pub const SECTIONS: &[Section] = &[
     Section { tab: "WELDMENTS", panel: "SKETCH", promoted: 1, ids: &["sketch.create"] },
     Section { tab: "WELDMENTS", panel: "CREATE", promoted: 1, ids: &["frame.member"] },
     Section { tab: "WELDMENTS", panel: "CONFIGURE", promoted: 2, ids: CONFIGURE },
-    // One Render tab with task-ordered groups; only implemented registry commands.
-    // The shared ribbon owns pins, search, section menus and responsive overflow.
+];
+
+// Migration data only: Render commands remain registered, but have no live ribbon sections.
+const LEGACY_RENDER_SECTIONS: &[Section] = &[
     Section {
-        tab: "RENDER",
-        panel: "SCENE",
-        promoted: 2,
-        ids: &[
-            "render.preset.resolve",
-            "render.settings.get",
-            "render.scene",
-            "render.preset.apply",
-            "render.settings.set",
-            "render.shot.duplicate",
-            "render.shot.rename",
-            "render.shot.remove",
-        ],
-    },
-    Section {
-        tab: "RENDER",
+        tab: "RENDER APPEARANCE",
         panel: "APPEARANCE",
         promoted: 3,
         ids: &[
@@ -308,42 +341,54 @@ pub const SECTIONS: &[Section] = &[
             "render.library.physical.prepare",
         ],
     },
-    Section { tab: "RENDER", panel: "LIGHTING", promoted: 2, ids: &["render.library.studio.prepare", "render.library.studio.apply"] },
     Section {
-        tab: "RENDER",
-        panel: "ENVIRONMENT",
-        promoted: 2,
-        ids: &[
-            "render.library.environment.apply",
-            "render.stage.backdrop",
-            "render.stage.ground",
-            "render.stage.clear",
-            "render.hdr.inspect",
-            "render.settings.capture_hdr",
-        ],
-    },
-    Section { tab: "RENDER", panel: "CAMERA", promoted: 2, ids: &["render.camera.get", "render.camera.fit", "render.settings.apply"] },
-    Section {
-        tab: "RENDER",
-        panel: "IMAGE",
+        tab: "RENDER SCENE",
+        panel: "STUDIO",
         promoted: 3,
         ids: &[
-            "render.start",
-            "render.preflight",
-            "render.effects.describe",
-            "render.cancel",
-            "render.export",
-            "render.result.regrade",
-            "render.quality.prepare",
-            "render.status",
-            "render.backends",
+            "render.preset.resolve",
+            "render.library.studio.prepare",
+            "render.library.studio.apply",
+            "render.preset.apply",
+            "render.library.environment.apply",
         ],
     },
+    Section { tab: "RENDER SCENE", panel: "LIGHTS", promoted: 1, ids: &["render.lights.solo"] },
+    Section {
+        tab: "RENDER SCENE",
+        panel: "STAGE",
+        promoted: 2,
+        ids: &["render.stage.ground", "render.stage.backdrop", "render.stage.clear", "render.hdr.inspect", "render.settings.capture_hdr"],
+    },
+    Section {
+        tab: "RENDER CAMERA",
+        panel: "SHOTS",
+        promoted: 3,
+        ids: &["render.settings.get", "render.settings.set", "render.shot.duplicate", "render.shot.rename", "render.shot.remove"],
+    },
+    Section { tab: "RENDER CAMERA", panel: "VIEW", promoted: 2, ids: &["render.settings.apply", "render.scene"] },
+    Section { tab: "RENDER CAMERA", panel: "LENS", promoted: 1, ids: &["render.camera.get", "render.camera.set"] },
+    Section { tab: "RENDER CAMERA", panel: "FRAME", promoted: 1, ids: &["render.camera.fit"] },
+    Section { tab: "RENDER", panel: "IMAGE", promoted: 2, ids: &["render.quality.prepare", "render.effects.describe"] },
+    Section { tab: "RENDER", panel: "RENDER", promoted: 2, ids: &["render.start", "render.preflight", "render.cancel"] },
+    Section {
+        tab: "RENDER",
+        panel: "RESULT",
+        promoted: 2,
+        ids: &["render.export", "render.result.regrade", "render.compare", "render.status", "render.backends"],
+    },
+    Section { tab: "RENDER", panel: "BATCH", promoted: 1, ids: &["render.batch"] },
 ];
 
 /// Compact source labels for painted big buttons only. Menus, search and tooltips
 /// retain the engine label. Route these through `tr_label`, like other UI labels.
 pub const RIBBON_LABELS: &[(&str, &str)] = &[
+    ("render.batch", "All Shots"),
+    ("render.cancel", "Cancel"),
+    ("render.export", "Export Image"),
+    ("render.result.regrade", "Regrade"),
+    ("render.quality.prepare", "Quality"),
+    ("render.settings.set", "Save Shot"),
     ("render.aging.describe", "Aging"),
     ("render.effects.describe", "Effects"),
     ("render.camera.fit", "Frame"),
@@ -356,6 +401,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("render.library.studio.apply", "Edit Lights"),
     ("render.library.environment.apply", "HDR Library"),
     ("render.stage.backdrop", "Backgrounds"),
+    ("render.stage.ground", "Ground"),
     ("render.settings.apply", "Saved Camera"),
     ("render.preflight", "Check"),
     ("appearance.assign", "Appearance"),
@@ -381,6 +427,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("inspect.zebra", "Zebra"),
     ("joint.as_built", "As-Built"),
     ("material.assign", "Material"),
+    ("occurrence.move", "Move"),
     ("parameters.change", "Parameters"),
     ("parameters.graph", "Param. Graph"),
     ("parts.fastener", "Fastener"),
@@ -388,6 +435,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("parts.resize", "Resize Part"),
     ("plastic.assign_rule", "Assign Rule"),
     ("plastic.manage_rules", "Plastic Rules"),
+    ("pointcloud.insert", "Point Clouds"),
     ("render.scene", "Scene"),
     ("sheet.export_bend_table", "Bend Table"),
     ("sheet.export_dxf", "Export DXF"),
@@ -398,9 +446,11 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("sketch.circle.center", "Circle"),
     ("sketch.constraint.coincident", "Coincident"),
     ("sketch.constraint.horizontal_vertical", "Horiz./Vert."),
+    ("sketch.construction_line", "X-Lines"),
     ("sketch.create", "New Sketch"),
     ("sketch.dimension", "Dimension"),
     ("sketch.finish", "Finish Sketch"),
+    ("sketch.inspect", "Sketch Report"),
     ("sketch.pattern.circular", "Circular"),
     ("sketch.pattern.rectangular", "Rectangular"),
     ("sketch.rectangle.two_point", "Rectangle"),
@@ -416,6 +466,11 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
 
 pub fn ribbon_button_label(command: &CommandSpec) -> &str {
     RIBBON_LABELS.iter().find(|(id, _)| *id == command.id).map_or(command.label, |(_, label)| *label)
+}
+
+/// Families keep their full menu title while using the first command's compact ribbon name.
+pub fn ribbon_family_label(family: &crate::sketch_families::Family) -> &'static str {
+    family.commands.first().and_then(|first| RIBBON_LABELS.iter().find(|(id, _)| id == first)).map_or(family.label, |(_, label)| *label)
 }
 
 /// Registry placement → default ribbon destination, after explicit id overrides.
@@ -444,8 +499,8 @@ pub const PLACEMENTS: &[(&str, &str, &str, &str)] = &[
     ("PLASTIC", "CREATE", "MODEL", "CREATE"),
     ("PLASTIC", "SETUP", "MANAGE", "RULES"),
     ("MESH", "MODIFY", "INSERT", "FILES"),
-    ("RENDER", "SCENE", "RENDER", "SCENE"),
-    ("RENDER", "IMAGE", "RENDER", "IMAGE"),
+    ("RENDER", "SCENE", "RENDER CAMERA", "SHOTS"),
+    ("RENDER", "IMAGE", "RENDER", "RENDER"),
 ];
 
 pub fn panels(tab: &str) -> Vec<&'static str> {
@@ -453,6 +508,13 @@ pub fn panels(tab: &str) -> Vec<&'static str> {
 }
 
 pub fn destination(c: &CommandSpec) -> Option<(&'static str, &'static str)> {
+    if c.id.starts_with("render.") || c.tab.starts_with("RENDER") || c.id == "view.shots_strip" {
+        return None;
+    }
+    legacy_render_destination(c).filter(|(tab, _)| !tab.starts_with("RENDER"))
+}
+
+pub(crate) fn legacy_render_destination(c: &CommandSpec) -> Option<(&'static str, &'static str)> {
     // A few shared commands have a canonical home that differs from their first occurrence.
     let primary = match c.id {
         "sheet.manage_rules" => Some(("MANAGE", "RULES")),
@@ -462,7 +524,7 @@ pub fn destination(c: &CommandSpec) -> Option<(&'static str, &'static str)> {
         _ => None,
     };
     primary
-        .or_else(|| SECTIONS.iter().find(|s| s.ids.contains(&c.id)).map(|s| (s.tab, s.panel)))
+        .or_else(|| SECTIONS.iter().chain(LEGACY_RENDER_SECTIONS).find(|s| s.ids.contains(&c.id)).map(|s| (s.tab, s.panel)))
         .or_else(|| PLACEMENTS.iter().find(|(t, p, ..)| *t == c.tab && *p == c.panel).map(|(_, _, t, p)| (*t, *p)))
 }
 
@@ -532,8 +594,11 @@ fn active_body<'a>(app: &'a crate::SolveApp, state: &'a solidcraft_engine::doc::
         Sel::Face { body, .. } | Sel::Edge { body, .. } => Some(body.as_str()),
         _ => None,
     });
+    // The owners in one pass: asked body by body, each one searched the timeline, and the
+    // ribbon asks this several times a frame.
     selected.or_else(|| {
-        state.bodies.iter().rev().find(|b| app.session.doc.model_body_component(b) == app.session.active_component).map(|b| b.name.as_str())
+        let owners = app.session.doc.model_body_components(state);
+        state.bodies.iter().zip(owners).rev().find(|(_, c)| *c == app.session.active_component).map(|(b, _)| b.name.as_str())
     })
 }
 
@@ -553,20 +618,85 @@ pub fn frame_body(app: &crate::SolveApp) -> Option<String> {
     matches!(made_by.kind, FeatureKind::FrameMember { .. }).then(|| body.name.clone())
 }
 
+/// The design tabs following the general-purpose tabs in the ribbon.
+pub struct SpecialtyTab {
+    pub tab: &'static str,
+    pub icon: &'static str,
+}
+
+pub const SPECIALTY_TABS: &[SpecialtyTab] =
+    &[SpecialtyTab { tab: "SHEET METAL", icon: "sheet" }, SpecialtyTab { tab: "WELDMENTS", icon: "frame_member" }];
+
+/// A tab's row in the toolbar menu: the icon of the command that leads the tab (Model › Create ›
+/// Extrude, Inspect › Measure, View › Views and so on).
+pub fn tab_icon(tab: &str) -> &'static str {
+    match tab {
+        "MODEL" => "extrude",
+        "SURFACE" => "surface_extrude",
+        "ASSEMBLE" => "joint",
+        "INSERT" => "import",
+        "INSPECT" => "measure",
+        "MANAGE" => "params",
+        "VIEW" => "camera",
+        _ => SPECIALTY_TABS.iter().find(|o| o.tab == tab).map_or("", |o| o.icon),
+    }
+}
+
+/// Tabs shown by default, in row order. Sketch has its own visibility preference and the Render
+/// workspace owns its controls, so neither is on this list.
+pub fn choosable_tabs() -> impl Iterator<Item = &'static str> {
+    TABS.iter().copied().chain(SPECIALTY_TABS.iter().map(|o| o.tab))
+}
+
+/// The person's choice. Every tab is on until explicitly hidden.
+pub fn tab_turned_on(app: &crate::SolveApp, tab: &str) -> bool {
+    choosable_tabs().any(|t| t == tab) && !app.preferences.hidden_toolbar_tabs.iter().any(|t| t == tab)
+}
+
+/// Show or hide a tab (kept with the preferences); names not on the list are left alone.
+pub fn set_tab_shown(app: &mut crate::SolveApp, tab: &str, shown: bool) {
+    if !choosable_tabs().any(|t| t == tab) {
+        return;
+    }
+    app.preferences.hidden_toolbar_tabs.retain(|t| t != tab);
+    if !shown {
+        app.preferences.hidden_toolbar_tabs.push(tab.to_string());
+    }
+}
+
+/// Every design tab stays hidden until the person chooses to show it again.
 pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
     if crate::render_workspace::active(app) {
-        return vec!["RENDER"];
+        return Vec::new();
     }
-    let mut tabs = TABS.to_vec();
-    if app.session.active_sketch.is_some() {
+    let mut tabs: Vec<_> = TABS.iter().copied().filter(|tab| tab_turned_on(app, tab)).collect();
+    if app.preferences.sketch_tab_always {
+        // Right after MODEL, whether a sketch is open or not (#7904).
+        let at = tabs.iter().position(|t| *t == "MODEL").map_or(0, |i| i + 1);
+        tabs.insert(at, "SKETCH");
+    } else if app.session.active_sketch.is_some() {
         tabs.push("SKETCH");
     }
-    // Always reachable, as before the ribbon redesign: a sheet-metal part starts from an
-    // ordinary sketch or solid, so the tab cannot wait for a sheet body. A frame starts
-    // from a sketch of its lines, so Weldments is always there too.
-    tabs.push("SHEET METAL");
-    tabs.push("WELDMENTS");
+    tabs.extend(SPECIALTY_TABS.iter().map(|o| o.tab).filter(|tab| tab_turned_on(app, tab)));
     tabs
+}
+
+/// Where the ribbon goes when the selected tab is not in the row: Model, or the first tab shown
+/// while Model is hidden; none when every tab is hidden.
+fn home_tab(app: &crate::SolveApp) -> &'static str {
+    let tabs = visible_tabs(app);
+    if tabs.contains(&"MODEL") { "MODEL" } else { tabs.first().copied().unwrap_or_default() }
+}
+
+/// With the SKETCH tab kept shown (#7904) and no sketch open: whether `id` is one of the tools in
+/// its CREATE or REFERENCE sections, which then start a sketch first (Create Sketch, then the
+/// tool). Tools that work on a sketch's geometry (modify, pattern, constrain) wait for one.
+pub fn starts_a_sketch(app: &crate::SolveApp, id: &str) -> bool {
+    app.preferences.sketch_tab_always
+        && app.session.active_sketch.is_none()
+        && solidcraft_engine::find_command(id)
+            .and_then(destination)
+            .is_some_and(|(tab, panel)| tab == "SKETCH" && matches!(panel, "CREATE" | "REFERENCE"))
 }
 
 /// Select contextual tabs on entry (or a different sheet body or frame member), allowing the
@@ -599,37 +729,41 @@ pub fn sync_context(app: &mut crate::SolveApp) {
             "SKETCH"
         } else if let Some(back) = back.as_deref().filter(|t| *t != "SKETCH" && visible_tabs(app).contains(t)) {
             // Finishing a sketch goes back to the tab it came from (#3250).
-            visible_tabs(app).into_iter().find(|t| t == &back).unwrap_or("MODEL")
+            visible_tabs(app).into_iter().find(|t| t == &back).unwrap_or_else(|| home_tab(app))
         } else if context.as_deref().is_some_and(|c| c.starts_with("frame:")) {
             "WELDMENTS"
         } else if context.is_some() {
             "SHEET METAL"
         } else {
-            "MODEL"
+            home_tab(app)
         }
         .into();
         app.ui.ribbon_context = context;
     }
     if !visible_tabs(app).contains(&app.ui.tab.as_str()) {
-        app.ui.tab = "MODEL".into();
+        app.ui.tab = home_tab(app).into();
     }
 }
 
 pub fn select_command_tab(app: &mut crate::SolveApp, id: &str) {
     sync_context(app);
-    let Some(c) = solidcraft_engine::find_command(id) else { return };
+    if let Some(tab) = command_tab(app, id) {
+        app.ui.tab = tab.into();
+    }
+}
+
+/// The tab to switch to so the ribbon shows command `id`, or `None` to stay: the current tab
+/// already lists it, or its home tab can't be shown.
+pub fn command_tab(app: &crate::SolveApp, id: &str) -> Option<&'static str> {
+    let c = solidcraft_engine::find_command(id)?;
     // Keep the tab a toolbar click came from when it already lists this shared command.
     if crate::toolbar_custom::panel_lists(&app.ui.tab).iter().any(|(_, cmds, _)| cmds.iter().any(|c| c.id == id)) {
-        return;
+        return None;
     }
-    if let Some((tab, _)) = destination(c) {
-        if tab == "RENDER" {
-            return;
-        } // The Render workspace owns its entry/exit lifecycle.
-        if visible_tabs(app).contains(&tab) {
-            app.ui.tab = tab.into();
-        }
-    }
+    let (tab, _) = destination(c)?;
+    // The Render workspace owns its entry/exit lifecycle.
+    let render_closed = render_tab(tab) && !crate::render_workspace::active(app);
+    (!render_closed && visible_tabs(app).contains(&tab)).then_some(tab)
 }
 
 /// Defaults from the previous ribbon, used only to carry removals into the new layout.
@@ -734,17 +868,25 @@ mod tests {
         }
         assert_eq!(ribbon_button_label(solidcraft_engine::find_command("sketch.create").unwrap()), "New Sketch");
         assert_eq!(solidcraft_engine::find_command("sketch.create").unwrap().label, "Create Sketch");
+        let construction = crate::sketch_families::family("sketch.construction_line").unwrap();
+        assert_eq!(ribbon_family_label(construction), "X-Lines");
+        assert_eq!(construction.label, "Construction Line");
     }
 
     #[test]
     fn every_placed_command_is_reachable_and_every_layout_id_exists() {
         let specs = solidcraft_engine::command_specs();
         let lists: Vec<_> = SECTIONS.iter().map(|s| (s, layout(s.tab, s.panel, &specs).unwrap())).collect();
-        for c in specs.iter().filter(|c| !c.tab.is_empty()) {
+        for c in specs.iter().filter(|c| !c.tab.is_empty() && !c.tab.starts_with("RENDER")) {
             assert!(lists.iter().any(|(_, (cmds, _))| cmds.iter().any(|x| x.id == c.id)), "lost toolbar command {} ({}/{})", c.id, c.tab, c.panel);
         }
         for (s, (cmds, n)) in lists {
-            assert!(n <= 4 || (s.tab == "SKETCH" && s.panel == "CONSTRAIN" && n == 7), "{}/{} promotes {n} commands", s.tab, s.panel);
+            assert!(
+                n <= 4 || (s.tab == "SKETCH" && ((s.panel == "CONSTRAIN" && n == 7) || (s.panel == "CREATE" && n == 5))),
+                "{}/{} promotes {n} commands",
+                s.tab,
+                s.panel
+            );
             for id in s.ids {
                 assert!(specs.iter().any(|c| c.id == *id), "unknown layout id {id}");
             }
@@ -792,6 +934,29 @@ mod tests {
         assert_eq!(destination(spec), Some(("INSERT", "FILES")));
     }
 
+    /// Without a body picked, the active body is the last one the active component owns, whatever
+    /// the other components hold after it.
+    #[test]
+    fn without_a_selection_the_active_body_is_the_active_components_last() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"body_name":"Top1", "operation":"new", "length":10, "width":10, "height":10})).unwrap();
+        let sub = h.app.run("component.create", json!({"name":"Sub"})).unwrap()["component"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component":sub})).unwrap();
+        h.app.run("solid.box", json!({"body_name":"Sub1", "operation":"new", "length":5, "width":5, "height":5})).unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        h.app.run("solid.box", json!({"body_name":"Top2", "operation":"new", "length":4, "width":4, "height":4})).unwrap();
+        h.app.run("component.activate", json!({"component":sub})).unwrap();
+        h.app.run("solid.box", json!({"body_name":"Sub2", "operation":"new", "length":3, "width":3, "height":3})).unwrap();
+        h.app.run("select.set", json!({"items":[]})).unwrap();
+        let active = |h: &crate::scenario::Harness| active_body(&h.app, &h.app.session.model.state()).map(str::to_owned);
+        assert_eq!(active(&h).as_deref(), Some("Sub2"));
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        h.app.run("select.set", json!({"items":[]})).unwrap();
+        assert_eq!(active(&h).as_deref(), Some("Top2"), "the top level's last body, not a later one in Sub");
+        h.app.run("select.set", json!({"items":[{"type":"body","name":"Sub1"}]})).unwrap();
+        assert_eq!(active(&h).as_deref(), Some("Sub1"), "a picked body wins");
+    }
+
     #[test]
     fn contextual_tabs_follow_the_active_body_and_allow_other_tabs() {
         let mut h = crate::scenario::Harness::new();
@@ -817,7 +982,7 @@ mod tests {
         h.app.run("solid.box", json!({"body_name":"Solid", "operation":"new", "length":10, "width":10, "height":10})).unwrap();
         h.app.run("select.set", json!({"items":[{"type":"body","name":"Solid"}]})).unwrap();
         sync_context(&mut h.app);
-        assert!(visible_tabs(&h.app).contains(&"SHEET METAL"), "the tab stays reachable off a sheet body");
+        assert!(visible_tabs(&h.app).contains(&"SHEET METAL"), "the tab stays reachable off a sheet body by default");
         assert!(sheet_body(&h.app).is_none());
         h.app.run("select.set", json!({"items":[{"type":"body","name":"Sheet"}]})).unwrap();
         sync_context(&mut h.app);
@@ -868,6 +1033,157 @@ mod tests {
         assert_eq!(h.app.ui.tab, "WELDMENTS");
     }
 
+    /// Tabs show until the person hides them, from the same menu and Settings, down
+    /// to no tab at all; the plus stays, so they can come back (#5717).
+    #[test]
+    fn standard_tabs_show_until_hidden_and_every_tab_can_be_hidden() {
+        let mut h = crate::scenario::Harness::new();
+        h.frames(2);
+        assert!(h.app.preferences.hidden_toolbar_tabs.is_empty());
+        assert_eq!(h.app.ui.tab, "MODEL");
+
+        // Hide the selected tab from its own menu: it leaves the row and the next tab is selected.
+        h.step(&json!({"click":{"handle":"tab:MODEL"},"button":"right"})).unwrap();
+        h.call("ui.menuPick", json!({"item":"Model"}));
+        h.frames(2);
+        assert_eq!(h.app.preferences.hidden_toolbar_tabs, ["MODEL"]);
+        assert!(crate::scenario::handle_at("tab:MODEL").is_none());
+        assert_eq!(h.app.ui.tab, "SURFACE", "the first tab still shown is selected");
+
+        // Settings › Layout lists the standard tabs too.
+        h.call("ui.prefs", json!({"open":"Layout"}));
+        crate::prefs::reveal_preference(&mut h, "prefs:toolbar_tab:MODEL");
+        h.step(&json!({"click":{"handle":"prefs:toolbar_tab:MODEL"}})).unwrap();
+        assert!(h.app.preferences.hidden_toolbar_tabs.is_empty());
+        crate::prefs::reveal_preference(&mut h, "prefs:toolbar_tab:VIEW");
+        h.step(&json!({"click":{"handle":"prefs:toolbar_tab:VIEW"}})).unwrap();
+        assert_eq!(h.app.preferences.hidden_toolbar_tabs, ["VIEW"]);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(h.app.preferences.hidden_toolbar_tabs.is_empty(), "the Interface page's defaults show every standard tab");
+        h.call("ui.prefs", json!({"button":"ok"}));
+
+        // The control channel checks the list, and it is kept with the preferences.
+        assert!(h.call("ui.prefs", json!({"hidden_toolbar_tabs": ["SKETCH"]}))["error"].is_string(), "only choosable tabs");
+        assert!(h.call("ui.prefs", json!({"hidden_toolbar_tabs": ["VIEW", "VIEW"]}))["error"].is_string(), "each once");
+        assert!(h.call("ui.prefs", json!({"hidden_toolbar_tabs": choosable_tabs().collect::<Vec<_>>()}))["error"].is_null());
+        let mut other = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        other.load_prefs(&h.app.prefs());
+        assert!(visible_tabs(&other).is_empty());
+
+        // Every tab hidden: only the plus is left in the row, the ribbon says how to bring the
+        // tabs back, and the menu has no tab to customise.
+        h.frames(2);
+        assert!(visible_tabs(&h.app).is_empty());
+        assert_eq!(h.app.ui.tab, "");
+        assert!(choosable_tabs().all(|tab| crate::scenario::handle_at(&format!("tab:{tab}")).is_none()));
+        assert!(crate::scenario::handle_at("ribbon:tabs_hidden").is_some());
+        let items = crate::toolbar_custom::toolbar_items(&h.app);
+        assert!(!items.iter().any(|i| matches!(i.id.as_str(), "ui.toolbarCustomize" | "ui.toolbarReset")));
+        // A sketch still brings its tab, and finishing it leaves the row empty again.
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(2);
+        assert_eq!(visible_tabs(&h.app), ["SKETCH"]);
+        assert_eq!(h.app.ui.tab, "SKETCH");
+        h.app.finish_sketch();
+        h.frames(2);
+        assert_eq!(h.app.ui.tab, "");
+        // The plus brings a tab back.
+        h.step(&json!({"click":{"handle":"ribbon:add_tab"}})).unwrap();
+        h.call("ui.menuPick", json!({"item":"Inspect"}));
+        h.frames(2);
+        assert_eq!(visible_tabs(&h.app), ["INSPECT"]);
+        assert_eq!(h.app.ui.tab, "INSPECT");
+        assert!(crate::scenario::handle_at("ribbon:tabs_hidden").is_none());
+        // A hidden tab's commands are still found by command search, and start from there.
+        let found = crate::shortcut_box::search(&h.app, "Change Parameters");
+        assert_eq!(found.first().map(|row| row.0), Some("parameters.change"), "Parameters is on the hidden Model and Manage tabs");
+        h.step(&json!({"start":"parameters.change"})).unwrap();
+        assert!(h.app.params.is_some());
+        assert_eq!(h.app.ui.tab, "INSPECT", "its tabs stay hidden");
+        h.call("ui.prefs", json!({"hidden_toolbar_tabs": []}));
+    }
+
+    #[test]
+    fn specialty_tabs_show_by_default_and_stay_hidden_for_features() {
+        let mut h = crate::scenario::Harness::new();
+        h.frames(2);
+        assert_eq!(visible_tabs(&h.app), choosable_tabs().collect::<Vec<_>>());
+        h.step(&json!({"click":{"handle":"ribbon:add_tab"}})).unwrap();
+        let rows: Vec<_> = crate::toolbar_custom::toolbar_items(&h.app).into_iter().filter(|i| i.id == "ui.toolbarTab").collect();
+        assert_eq!(
+            rows.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(),
+            ["Model", "Surface", "Assemble", "Insert", "Inspect", "Manage", "View", "Sheet Metal", "Weldments"]
+        );
+        assert!(rows.iter().all(|i| i.shortcut == "current"), "all existing tabs stay on by default");
+        h.step(&json!({"click":{"handle":"ribbon:add_tab"}})).unwrap();
+        assert!(h.app.viewport.context_menu.is_none(), "a second click closes the menu");
+        h.step(&json!({"key":"S"})).unwrap();
+        assert!(h.app.ui.palette_open, "the plus leaves single-key shortcuts available");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.step(&json!({"click":{"handle":"ribbon:add_tab"}})).unwrap();
+        h.call("ui.menuPick", json!({"item":"Sheet Metal"}));
+        h.frames(2);
+        assert_eq!(h.app.preferences.hidden_toolbar_tabs, ["SHEET METAL"]);
+        assert!(crate::scenario::handle_at("tab:SHEET METAL").is_none());
+        assert!(visible_tabs(&h.app).contains(&"WELDMENTS"));
+        let mut other = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        other.load_prefs(&h.app.prefs());
+        assert!(!visible_tabs(&other).contains(&"SHEET METAL"));
+
+        h.app.run("sketch.create", json!({"plane":"XY", "name":"Tab path"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("sheet.flange", json!({"name":"Sheet", "body_name":"Sheet"})).unwrap();
+        sync_context(&mut h.app);
+        h.frames(2);
+        assert_eq!(h.app.ui.tab, "MODEL", "a sheet context cannot select its hidden tab");
+        assert!(!visible_tabs(&h.app).contains(&"SHEET METAL"));
+        assert!(crate::scenario::handle_at("tab:SHEET METAL").is_none());
+        assert_eq!(h.app.preferences.hidden_toolbar_tabs, ["SHEET METAL"], "features do not change the saved choice");
+        let path = h.dir.join("hidden-sheet.solidcraft");
+        h.app.run("file.save", json!({"path":path})).unwrap();
+        other.run("doc.open", json!({"path":path})).unwrap();
+        assert!(!visible_tabs(&other).contains(&"SHEET METAL"), "opening a sheet design respects the saved hiding choice");
+        sync_context(&mut other);
+        assert_eq!(other.ui.tab, "MODEL");
+        h.app.run("edit.undo", json!({})).unwrap();
+        sync_context(&mut h.app);
+        assert!(!visible_tabs(&h.app).contains(&"SHEET METAL"));
+
+        h.call("ui.prefs", json!({"hidden_toolbar_tabs": ["SHEET METAL", "WELDMENTS"]}));
+        h.app.run("frame.member", json!({"sketch":"Tab path", "profile":{"kind":"rect_tube","width":10,"height":10,"wall":1}})).unwrap();
+        sync_context(&mut h.app);
+        h.frames(2);
+        assert_eq!(h.app.ui.tab, "MODEL", "a frame context cannot select its hidden tab");
+        assert!(!visible_tabs(&h.app).contains(&"WELDMENTS"));
+        assert!(crate::scenario::handle_at("tab:WELDMENTS").is_none());
+        h.app.run("file.save", json!({"path":path})).unwrap();
+        set_tab_shown(&mut other, "WELDMENTS", false);
+        other.run("doc.open", json!({"path":path})).unwrap();
+        assert!(!visible_tabs(&other).contains(&"WELDMENTS"), "opening a frame design respects the saved hiding choice");
+        sync_context(&mut other);
+        assert_eq!(other.ui.tab, "MODEL");
+        h.call("ui.prefs", json!({"hidden_toolbar_tabs":choosable_tabs().collect::<Vec<_>>()}));
+        h.frames(2);
+        assert!(visible_tabs(&h.app).is_empty(), "a design with a frame member can still hide every tab");
+        assert_eq!(h.app.ui.tab, "");
+        h.app.run("edit.undo", json!({})).unwrap();
+        sync_context(&mut h.app);
+        assert!(!visible_tabs(&h.app).contains(&"WELDMENTS"));
+
+        // The Sketch visibility setting still works when every other tab is hidden.
+        h.call("ui.prefs", json!({"hidden_toolbar_tabs":choosable_tabs().collect::<Vec<_>>(), "sketch_tab_always":true}));
+        h.frames(2);
+        assert_eq!(visible_tabs(&h.app), ["SKETCH"]);
+        assert_eq!(h.app.ui.tab, "SKETCH");
+
+        h.call("ui.prefs", json!({"open":"Layout"}));
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        h.call("ui.prefs", json!({"button":"ok"}));
+        assert!(h.app.preferences.hidden_toolbar_tabs.is_empty());
+        assert_eq!(visible_tabs(&h.app), choosable_tabs().collect::<Vec<_>>(), "defaults restore Sheet Metal and Weldments too");
+    }
+
     /// Parameters and Configurations are on the design tabs they were on before the redesign, and a
     /// fresh document reaches Sheet Metal (to flange a sketch or convert a solid) by its tab.
     #[test]
@@ -884,6 +1200,7 @@ mod tests {
         }
         let mut h = crate::scenario::Harness::new();
         assert!(sheet_body(&h.app).is_none());
+        h.frames(2);
         h.step(&json!({"click":{"handle":"tab:SHEET METAL"}})).unwrap();
         h.frames(2);
         assert_eq!(h.app.ui.tab, "SHEET METAL");
@@ -1158,5 +1475,15 @@ mod tests {
         h.frames(2);
         assert!(h.app.session.active_sketch.is_some());
         assert_eq!(h.app.ui.tab, "SKETCH");
+    }
+
+    /// Move 3D Point stays for agents, MCP and scripts; people move a drawn 3D point with the
+    /// triad that appears when it is clicked, not a ribbon button.
+    #[test]
+    fn move3d_is_agent_only() {
+        assert!(AGENT_ONLY.contains(&"sketch.move3d"), "sketch.move3d must stay available to agents");
+        for section in SECTIONS.iter().filter(|s| s.panel == "SKETCH") {
+            assert!(!section.ids.contains(&"sketch.move3d"), "{}/{} must not offer sketch.move3d on the ribbon", section.tab, section.panel);
+        }
     }
 }

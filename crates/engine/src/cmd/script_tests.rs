@@ -172,6 +172,25 @@ fn what_the_script_leaves_out_is_listed_and_components_are_refused() {
 }
 
 #[test]
+fn omitted_print_faces_are_reported_without_changing_the_design() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 5, "body_name": "Block"}));
+    assert_eq!(run(&mut s, "timeline.export_script", json!({}))["omitted"], json!([]));
+
+    run(&mut s, "body.print_face", json!({"body": "Block", "point": [10, 5, 0]}));
+    let before = (*s.doc).clone();
+    let r = run(&mut s, "timeline.export_script", json!({}));
+    assert_eq!(r["omitted"], json!(["print-face assignments (body.print_face)"]));
+    assert_eq!(*s.doc, before, "export must keep the saved print-face assignment");
+    let mut t = replay(&r["script"]);
+    assert!(t.doc.print_faces.is_empty(), "the reported omission matches the replay");
+    same(&mut s, &mut t);
+
+    run(&mut s, "body.print_face", json!({"body": "Block"}));
+    assert_eq!(run(&mut s, "timeline.export_script", json!({}))["omitted"], json!([]));
+}
+
+#[test]
 fn a_recorded_feature_that_does_not_fit_is_refused_and_changes_nothing() {
     let mut s = Session::default();
     plate(&mut s);

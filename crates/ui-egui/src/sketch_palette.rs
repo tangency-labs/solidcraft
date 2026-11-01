@@ -106,11 +106,22 @@ pub fn toggle_construction(app: &mut SolveApp) {
 
 /// Curves a drawing command just made take the drawing line type.
 pub fn apply_mode(app: &mut SolveApp, id: &str, result: &Value) {
+    if solidcraft_engine::cmd::construction_line_mode(id).is_some() {
+        return;
+    }
     let m = mode(app);
     if m == 0 || !solidcraft_engine::find_command(id).is_some_and(|c| c.tab == "SKETCH" && c.panel == "CREATE") {
         return;
     }
-    let curves: Vec<String> = result["curves"].as_array().into_iter().flatten().filter_map(|c| c.as_str().map(str::to_string)).collect();
+    // Drawing reports its curves as `curves`; Project and the other link commands report them per
+    // link, `links[].curves` (#9945).
+    let links = result["links"].as_array().into_iter().flatten().map(|l| &l["curves"]);
+    let curves: Vec<String> = std::iter::once(&result["curves"])
+        .chain(links)
+        .filter_map(Value::as_array)
+        .flatten()
+        .filter_map(|c| c.as_str().map(str::to_string))
+        .collect();
     if curves.is_empty() {
         return;
     }
@@ -253,9 +264,10 @@ pub fn fits_beside_a_dialog(app: &SolveApp, ctx: &egui::Context) -> bool {
 }
 
 /// Is the palette on screen? It stays for as long as a sketch is being edited, a command dialog
-/// open or not: the dialog takes the left edge of the viewport and the palette keeps the right.
+/// open or not: the dialog takes the left edge of the viewport (or the left column) and the
+/// palette keeps the right.
 pub fn visible(app: &SolveApp, ctx: &egui::Context) -> bool {
-    editing(app) && ((app.dialog.is_none() && app.tree.redefine.is_none()) || fits_beside_a_dialog(app, ctx))
+    editing(app) && ((app.dialog.is_none() && app.tree.redefine.is_none()) || fits_beside_a_dialog(app, ctx) || crate::dialog_column::holds(app))
 }
 
 /// The creation family of the tool that is running, and the exact variant it is running, when
@@ -658,6 +670,52 @@ mod tests {
         }
     }
 
+    /// Project gives the curves it makes the drawing line type, as drawing does (#9945): its
+    /// reply lists them per link, not as `curves`. A projected line becomes construction,
+    /// centerline or infinite; a projected circle, which cannot be either of the last two, becomes
+    /// construction; normal leaves both as they are. One undo takes the projection away whole.
+    #[test]
+    fn project_gives_its_curves_the_drawing_line_type() {
+        let flags = |c: &solidcraft_engine::sketch::Curve| (c.construction, c.centerline, c.infinite);
+        for (m, line, circle) in [
+            (0, (false, false, false), (false, false, false)),
+            (1, (true, false, false), (true, false, false)),
+            (2, (false, true, false), (true, false, false)),
+            // An infinite line is construction too, as when it is drawn.
+            (3, (true, false, true), (true, false, false)),
+        ] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,10]})).unwrap();
+            h.app.run("sketch.circle.center", json!({"center":[40,0],"radius":5})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            set_mode(&mut h.app, m);
+            let history = h.app.session.undo.len();
+            let r = h.app.run("sketch.project", json!({"refs":[{"sketch":1,"curve":"l1"},{"sketch":1,"curve":"c1"}]})).unwrap();
+            assert_eq!(r["links"].as_array().map(Vec::len), Some(2), "mode {m}: {r}");
+            let state = crate::open_meshing::session_world(&h.app.session);
+            let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+            let kind = |line: bool| {
+                sketch
+                    .curves
+                    .iter()
+                    .find(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Line { .. }) == line)
+                    .map(flags)
+                    .unwrap_or_else(|| panic!("mode {m}: a projected {}", if line { "line" } else { "circle" }))
+            };
+            assert_eq!(kind(true), line, "mode {m}: the line");
+            assert_eq!(kind(false), circle, "mode {m}: the circle");
+            assert_eq!(h.app.session.undo.len(), history + 1, "mode {m}: one undo step");
+            h.app.run("edit.undo", json!({})).unwrap();
+            assert!(
+                crate::open_meshing::session_world(&h.app.session).sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty(),
+                "mode {m}"
+            );
+            set_mode(&mut h.app, 0);
+        }
+    }
+
     #[test]
     fn palette_footer_and_scrolled_lower_option_remain_reachable_at_scale_and_resize() {
         for (scale, height) in [(1.0, 900.0), (2.0, 900.0), (2.0, 720.0)] {
@@ -694,6 +752,33 @@ mod tests {
             h.settle();
             assert!(h.app.session.active_sketch.is_none(), "Finish Sketch must work at scale{scale} height{height}");
             assert_eq!(h.app.session.doc.to_json(), baseline);
+        }
+    }
+
+    /// The pane is placed from the viewport's right edge. At a fractional display scale (Windows
+    /// at 125 %) it hopped a physical pixel back and forth on every repaint the pointer caused,
+    /// most visibly docked against the window's edge (#9457).
+    #[test]
+    fn pane_stays_still_while_the_pointer_moves_at_fractional_scale() {
+        for layout in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+            for (scale, width, height) in [(1.0, 1600.0, 1000.0), (1.25, 1536.0, 921.6), (1.25, 1522.4, 904.8), (1.5, 1280.0, 800.0)] {
+                let mut h = crate::scenario::Harness::new();
+                h.app.ui.layout = layout;
+                h.call("ui.resize", json!({"width":width,"height":height}));
+                h.call("ui.prefs", json!({"ui_scale":scale}));
+                h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+                h.app.run("sketch.line", json!({"points":[[0,0],[30,0],[30,20]],"closed":false})).unwrap();
+                h.app.start("sketch.line");
+                h.settle();
+                let mut seen = Vec::new();
+                for i in 0..8 {
+                    h.app.synthetic.push(egui::Event::PointerMoved(egui::pos2(400.0 + i as f32 * 7.3, 400.0 + i as f32 * 3.1)));
+                    h.frame();
+                    let pane = h.app.viewport.palette_rect.expect("the pane is shown while sketching");
+                    seen.push((pane, crate::scenario::rect_of("sketch_palette:finish")));
+                }
+                assert!(seen.windows(2).all(|w| w[0] == w[1]), "{layout:?} at scale {scale}, {width}x{height}: the pane moved: {seen:?}");
+            }
         }
     }
 

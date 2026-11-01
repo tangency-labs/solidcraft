@@ -152,6 +152,14 @@ pub fn reference_edge_names(st: &ModelState, at: Vec3, edges: &[Vec3]) -> Vec<St
     }
 }
 
+/// The persistent names of a cylinder's reference edges (#6380), on the body it stands on at
+/// `base` (its coordinates are numbers when it has reference edges).
+pub fn cylinder_edge_names(st: &ModelState, base: &crate::PointExpr, references: &[crate::HoleReference]) -> Vec<String> {
+    let [x, y, z] = base.clone().map(|c| c.parse::<f64>().unwrap_or(0.0));
+    let edges: Vec<Vec3> = references.iter().map(|r| r.edge.0).collect();
+    reference_edge_names(st, Vec3::new(x, y, z), &edges)
+}
+
 /// The (non-mesh) body whose surface is nearest `p`.
 fn body_at(st: &ModelState, p: Vec3) -> Option<&ModelBody> {
     st.bodies

@@ -75,12 +75,15 @@ fn designs() -> Vec<(String, Session)> {
             .unwrap()
             .flatten()
             .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|x| x == "solidcraft" || x == "json") && !p.to_string_lossy().ends_with(".expected.json"))
+            .filter(|p| {
+                (solidcraft_engine::io::is_design_container_path(p) || p.extension().is_some_and(|x| x == "json"))
+                    && !p.to_string_lossy().ends_with(".expected.json")
+            })
             .collect();
         files.sort();
         for p in files {
             let name = p.file_stem().unwrap_or_default().to_string_lossy().to_string();
-            let s = if p.extension().is_some_and(|x| x == "solidcraft") {
+            let s = if solidcraft_engine::io::is_design_container_path(&p) {
                 open(&p)
             } else {
                 let mut s = Session::default();
@@ -148,7 +151,7 @@ fn a_parameter_edit_rebuilds_like_a_fresh_build_and_reverts_exactly() {
 #[test]
 fn pi_case_sides_stay_whole_at_both_heights() {
     let dir = scratch_dir("pi");
-    let design: Value = serde_json::from_slice(&std::fs::read(root().join("tests/action_matrix/designs/pi-case.solidcraft")).unwrap()).unwrap();
+    let design: Value = serde_json::from_slice(&std::fs::read(root().join("tests/action_matrix/designs/pi-case.sc")).unwrap()).unwrap();
     let at = |height: &str, file: &str| {
         let mut d = design.clone();
         for p in d["params"].as_array_mut().unwrap() {

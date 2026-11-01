@@ -34,6 +34,8 @@ neg_cmp_op_on_partial_ord = "allow"
 
 [dependencies]
 solidcraft-engine = { workspace = true }
+# The D3D12 shader compiler the window starts with (#6756).
+solidcraft-gpu = { workspace = true }
 solidcraft-ui-egui = { workspace = true }
 solidcraft-space-mouse = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links"] }
@@ -102,6 +104,16 @@ libc = "0.2"
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 winit = { version = "0.30", default-features = false, features = ["x11"] }
+# Bringing the window forward on X11 when a close asks about unsaved designs (src/come_forward.rs):
+# the window's id, and the window manager request winit doesn't send (MIT OR Apache-2.0; both
+# already in the tree through eframe and winit).
+raw-window-handle = "0.6"
+x11rb = { version = "0.13", default-features = false }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The desktop's dark or light preference through the XDG Desktop Portal (src/desktop_theme.rs,
+# #7944); already in the tree through eframe's accessibility support (accesskit_unix).
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
 
 [build-dependencies]
 embed-resource = "3.0.11"

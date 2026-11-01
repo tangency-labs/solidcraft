@@ -56,6 +56,13 @@ pub(super) struct Targets {
     bind: wgpu::BindGroup,
 }
 
+impl Targets {
+    /// The textures only the resolve writes (none at one sample), which a new frame clears first.
+    pub fn resolves(&self) -> impl Iterator<Item = &wgpu::TextureView> {
+        self.accum_resolve.iter().chain(&self.reveal_resolve)
+    }
+}
+
 impl Pipelines {
     /// The pipelines for frames of `format` with `depth` and `samples`, using the viewport's
     /// shader `module` and uniform `layout`; `None` where the device cannot blend into a float
