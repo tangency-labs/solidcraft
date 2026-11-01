@@ -353,6 +353,14 @@ pub struct UpstreamFixes {
     pub bspline_check_min_radius: bool,
     /// `SmEllipse::AdjustSTEPInterval` rejects inverted STEP edits and collapsed or non-finite converted NURBS intervals before mutation, and revolution edits install their domain only after their generator accepts it (WR-211, #428).
     pub ellipse_step_interval_checks: bool,
+    /// `SmEllipse::ConvertTo2D` solves the extremal projected-radius quadratic with
+    /// coefficients in `SolveQuadraticEqn`'s ascending `[C, B, A]` order, evaluates the
+    /// second semi-axis at the orthogonal angle `dThetaYRad` (`theta_x_rad + PI / 2`
+    /// when linear) instead of reusing `dThetaXRad`, and aligns a full-turn STEP domain
+    /// with the projected NURB seam before rebuilding the polar converter (WR-31,
+    /// #2140; `plan/upstream-issues/WR-31--addendum-2026-10-31-convert-to-2d-second-axis.md`).
+    /// Off by default for pinned C++ parity.
+    pub ellipse_convert_to_2d_uses_both_axes: bool,
     /// `SmCircle::CreateSimpleOffset` distinguishes antiparallel offset plane normals
     /// from parallel ones, subtracting offset distance rather than adding it (WR-32,
     /// 2026-10-31 addendum). Off by default for pinned C++ parity.
