@@ -3941,6 +3941,18 @@ fn faces_through(st: &ModelState, p: Vec3, reach: f64) -> Vec<(f64, Vec3, Option
                     ((v - axis * v.dot(axis)).normalized(), None)
                 }
                 Some(kernel::FaceSurface::Sphere { center, .. }) => ((p - center).normalized(), None),
+                // Square to the line through the apex, not the nearest facet's normal (#10698).
+                Some(kernel::FaceSurface::Cone { apex, axis, half_angle }) => {
+                    let v = p - apex;
+                    let out = (v - axis * v.dot(axis)).normalized();
+                    (out.and_then(|u| (u * half_angle.cos() - axis * half_angle.sin()).normalized()), None)
+                }
+                // Away from the nearest point of the ring the tube goes round.
+                Some(kernel::FaceSurface::Torus { center, axis, major, .. }) => {
+                    let v = p - center;
+                    let ring = (v - axis * v.dot(axis)).normalized().map(|u| center + u * major);
+                    (ring.and_then(|q| (p - q).normalized()), None)
+                }
                 _ => (None, None),
             };
             let n = match exact {
