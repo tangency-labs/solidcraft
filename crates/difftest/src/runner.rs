@@ -63,6 +63,18 @@ pub trait UnitDiff {
     fn skipped_platform(&self, _case: &Case) -> Option<String> {
         None
     }
+
+    /// A check of the process state the unit's cases rely on, run once before its cases
+    /// (default: none). `Err` is the unit's harness error; no case runs.
+    fn before_cases(&self) -> Result<(), HarnessError> {
+        Ok(())
+    }
+
+    /// The same check once after the unit's cases (default: none). `Err` is the unit's
+    /// harness error, the case results kept.
+    fn after_cases(&self) -> Result<(), HarnessError> {
+        Ok(())
+    }
 }
 
 /// Fixture cases followed by generated cases (the default [`UnitDiff::cases`]).
@@ -692,6 +704,10 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
         .into_iter()
         .filter(crate::known::KnownMismatch::applies)
         .collect();
+    if let Err(e) = unit.before_cases() {
+        res.harness_error = Some(e.0);
+        return res;
+    }
     for case in cases {
         if let Some(f) = &opts.filter {
             if !case.name.contains(f.as_str()) {
@@ -875,6 +891,9 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
             ));
         }
         res.cases.push(cr);
+    }
+    if let Err(e) = unit.after_cases() {
+        res.harness_error = Some(e.0);
     }
     res
 }

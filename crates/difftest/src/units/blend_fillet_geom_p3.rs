@@ -575,7 +575,12 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
         Err(out) => return Ok(out),
     };
     let input = model_input(i, &tg)?;
-    let result = ffi::eval(op_of(&i.op), &tg.path, &input);
+    // In a fresh child: CalcFilletIntFillet and ReCalcFilletGeom reach
+    // SmFilletSolver::ComputePointValues, whose function-static `sdStaticStep` (ND-3)
+    // would otherwise latch in this process and be inherited by every later fresh child
+    // (blend.fillet_intersector, blend.fillet_solver_p4, blend.fillet_executive_p3).
+    let op = op_of(&i.op);
+    let result = solidcore_ffi::isolate::fresh_process(|| ffi::eval(op, &tg.path, &input));
     if i.expected_rejection {
         // Only a flagged case may be recorded as rejected.
         return match result {

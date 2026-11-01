@@ -14,6 +14,10 @@
 //  * sc_blend_fillet_solver_p4_static_step(step): the value `sdStaticStep` of the library's
 //    ComputePointValues holds, latching it first (with 1e-5) when nothing has latched it.
 //    See probe() below.
+//  * sc_blend_fillet_solver_p4_static_step_after_tangent(step): the same, after one
+//    ComputePointValues at a tangent point (latching it with 1e-3 when nothing has). Run in
+//    a fresh child next to the plain probe, the two read 1e-5 and 1e-3 only when the parent
+//    process had latched nothing (the harness's guard; see latch_tangent()).
 // The calc_geom op lives in blend_fillet_solver_p4_calc.cpp (it needs sc_edgeuse_graph.h).
 #include "sc_shim.h"
 
@@ -472,6 +476,31 @@ int32_t probe(double* step)
         }
     return SC_ERR_EXCEPTION;
 }
+// Runs the library's ComputePointValues once at a tangent point, latching `sdStaticStep` with
+// 1e-3 if nothing latched it yet: both surfaces are the plane y = 0.25 (parallel normals, a
+// tangency within tolerance) and a previous point gives the curve tangent, so the call
+// reaches the finite-difference block as a SM_IP_TANGENT_POINT (SmFilletSolver.cpp:3570-3606).
+// Its status is not used: the static is initialised before the block's first StepSolve.
+void latch_tangent()
+{
+    SmContext ctx;
+    Surfs s;
+    s.a = new (ctx) SmPlane(SmPoint3d(0.0, 0.25, 0.0), SmVector3d(1.0, 0.0, 0.0),
+                            SmVector3d(0.0, 0.0, 1.0), SmVector2d(1.0, 1.0),
+                            SmExtent2d(-1.0, -1.0, 2.0, 2.0), &ctx);
+    s.b = s.a;
+    SmExtent2d d(-1.0, -1.0, 2.0, 2.0);
+    FdFS fs(ctx, 1e-5, 0.1, 0.03, 0.0, 0.0, *s.a, *s.b, TRUE, TRUE);
+    SmTsectPnt pnt;
+    pnt.m_ePointType = SM_IP_CROSSING;
+    SmTsectPnt prev;
+    prev.CrvDeriv() = SmVector3d(1.0, 0.0, 0.0);
+    SmPoint2d uv[2] = {SmPoint2d(0.5, 0.5), SmPoint2d(0.5, 0.5)};
+    (void)fs.ComputePointValues(uv, d, d, 1.0, pnt, &prev);
+    // unlink the points before they go away (they are in no list)
+    pnt.ReSet();
+    prev.ReSet();
+}
 } // namespace
 
 // Program: `surfA surfB` (surfB kind `2` = the same object as A), `dom1[4] dom2[4]`, the
@@ -579,6 +608,23 @@ SC_EXPORT int32_t sc_blend_fillet_solver_p4_static_step(double* step)
         return SC_ERR_ARG;
     try
     {
+        return probe(step);
+    }
+    catch (...)
+    {
+        return SC_ERR_EXCEPTION;
+    }
+}
+
+// latch_tangent(), then the value of the library's `sdStaticStep` (as
+// sc_blend_fillet_solver_p4_static_step): 1e-3 when nothing had latched it before.
+SC_EXPORT int32_t sc_blend_fillet_solver_p4_static_step_after_tangent(double* step)
+{
+    if (step == NULL)
+        return SC_ERR_ARG;
+    try
+    {
+        latch_tangent();
         return probe(step);
     }
     catch (...)

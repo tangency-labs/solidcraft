@@ -1408,6 +1408,18 @@ impl UnitDiff for Runner {
         Ok(v)
     }
 
+    // ND-3: every C++ case runs in a fresh child, which inherits this process's
+    // `sdStaticStep`; it must still be unlatched before the unit's cases and after them.
+    fn before_cases(&self) -> Result<(), HarnessError> {
+        solidcore_ffi::units::blend_fillet_solver_p4::check_parent_static_step("before the cases")
+            .map_err(|e| HarnessError::new(format!("C++: {e}")))
+    }
+
+    fn after_cases(&self) -> Result<(), HarnessError> {
+        solidcore_ffi::units::blend_fillet_solver_p4::check_parent_static_step("after the cases")
+            .map_err(|e| HarnessError::new(format!("C++: {e}")))
+    }
+
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         cpp(&case.parse()?)
     }

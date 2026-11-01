@@ -71,6 +71,7 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
         pub fn sc_blend_fillet_solver_p4_static_step(step: *mut f64) -> i32;
+        pub fn sc_blend_fillet_solver_p4_static_step_after_tangent(step: *mut f64) -> i32;
         pub fn sc_blend_fillet_solver_p4_calc_target(
             input: *const f64,
             n_in: i64,
@@ -442,10 +443,62 @@ pub fn static_step() -> Result<f64, FfiError> {
     Ok(step)
 }
 
+/// [`static_step`] after one `ComputePointValues` at a tangent point (which latches
+/// `sdStaticStep` with `1e-3` when nothing has): `1e-3` when nothing had latched it.
+///
+/// # Errors
+///
+/// As [`static_step`].
+pub fn static_step_after_tangent() -> Result<f64, FfiError> {
+    let mut step = 0.0_f64;
+    // SAFETY: `step` is a valid f64 the shim writes once; nothing is retained.
+    let status = unsafe { sys::sc_blend_fillet_solver_p4_static_step_after_tangent(&raw mut step) };
+    check(status)?;
+    Ok(step)
+}
+
+/// Whether this process's `sdStaticStep` is still unlatched, read without latching it:
+/// [`static_step`] and [`static_step_after_tangent`] each in a fresh child, which inherits
+/// the static as it is here. Unlatched, the first reads `1e-5` and the second `1e-3`; a
+/// latch made in this process (by a C++ call outside [`crate::isolate::fresh_process`])
+/// makes both read the latched value.
+///
+/// # Errors
+///
+/// As [`static_step`], or [`crate::SC_ERR_CHILD_CRASHED`] for a child that did not finish.
+pub fn parent_static_step_unlatched() -> Result<bool, FfiError> {
+    let plain = crate::isolate::fresh_process(|| Ok(vec![static_step()?]))?;
+    let tangent = crate::isolate::fresh_process(|| Ok(vec![static_step_after_tangent()?]))?;
+    Ok(plain == [1.0e-5] && tangent == [1.0e-3])
+}
+
+/// [`parent_static_step_unlatched`] as a check: `Ok` when this process's `sdStaticStep`
+/// is still unlatched. The units whose cases run in [`with_fresh_static_step`] call it once
+/// before their cases and once after (`when` names which), since every fresh child inherits
+/// this process's latch (ND-3): latched before, an earlier unit made a C++ call that reached
+/// `ComputePointValues` outside [`crate::isolate::fresh_process`]; latched after, the unit
+/// made one itself.
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] when the static is latched; those of
+/// [`parent_static_step_unlatched`].
+pub fn check_parent_static_step(when: &str) -> Result<(), FfiError> {
+    if parent_static_step_unlatched()? {
+        Ok(())
+    } else {
+        Err(FfiError::InvalidArgument(format!(
+            "sdStaticStep is latched in the parent process {when} (ND-3): a C++ call reached \
+             ComputePointValues outside isolate::fresh_process"
+        )))
+    }
+}
+
 /// Runs `case` (a case's C++ calls) in a fresh child process, where `sdStaticStep`
-/// starts unlatched as on the process's first call, then reads [`static_step`] in the
-/// same child. Returns the case's record and the step it left latched (`1e-5` when the
-/// case latched nothing: the probe's own latch).
+/// starts unlatched as on the process's first call when this process latched nothing
+/// ([`check_parent_static_step`]), then reads [`static_step`] in the same child. Returns
+/// the case's record and the step it left latched (`1e-5` when the case latched nothing:
+/// the probe's own latch).
 ///
 /// # Errors
 ///
