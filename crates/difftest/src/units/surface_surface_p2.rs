@@ -12,7 +12,8 @@
 //! the flat record documented in the ffi module; the runner reports its first entry as the
 //! `status` (`0` = `SM_SUCCESS`, else the `SmStatus`; `1007` for a Rust `InvalidInput`,
 //! `-1` for a Rust error upstream cannot produce) and the rest as the `out` values. The
-//! Rust side runs the base-class defaults (`base_*`) for `this.base`.
+//! Rust side runs the base-class defaults (`base_*`) for `this.base`. Both sides take
+//! `base` over `rev`, and `rev` over the B-spline surface.
 //!
 //! `this.rev` is a revolution record: a canonical torus or cone that each side builds,
 //! writes with `WriteToDB` to an ASCII record, optionally clears the planar generator flag
@@ -1412,7 +1413,8 @@ fn edit(s: &mut Option<Surface>, f: impl FnOnce(&mut Surface) -> solidcore::Resu
 }
 
 fn rust_surface_op(k: &Kernel, op: &OpIn, t: &This) -> Result<Run, HarnessError> {
-    let mut s = match &t.rev {
+    // `base` first, then `rev`, then the B-spline surface, as `cpp_input` encodes `this`
+    let mut s = match t.rev.as_ref().filter(|_| !t.base) {
         Some(r) => match revolution_surface(k, r)? {
             Ok(s) => Some(s),
             Err(e) => return Ok(Err(e)),
