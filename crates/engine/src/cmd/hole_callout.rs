@@ -27,9 +27,10 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Hole Callout", cr
         "feature: the Hole feature's id; point?: its sketch point id (one of the holes it drills at sketch points; none for a hole placed by \
          position); units?: a length unit (mm, in, yd, …; default the open drawing's fixed unit, else the design's); decimals?: 0…6 (default 2; \
          inches show at least 3); language?: the content language, a BCP 47 tag (default the open drawing's, else en) → hole: {feature, \
-         point?}; status: resolved | suppressed (the feature is) | failed (it did not evaluate, or a later feature removed the hole) | lost \
-         (the feature or the point is gone; never moved to another hole); reason? (failed, lost); callout? {count (holes the feature drills), \
-         diameter (the drilled one), thread?, thread_depth?, extent (this hole's): {type: through} | {type: blind, depth (from the face the \
+         point?}; status: resolved | suppressed (the feature is) | failed (it did not evaluate; a later feature removed the hole, moved it \
+         some way other than solid.move, or changed its diameter or depth; or it is in sheet metal, not supported yet) | lost (the feature or \
+         the point is gone; never moved to another hole); reason? (failed, lost); callout? {count (holes the feature drills), diameter (the \
+         drilled one), thread?, thread_depth? (from the face the hole starts on, past any counterbore or countersink), extent (this hole's): {type: through} | {type: blind, depth (from the face the \
          hole starts on)}, form: {type: simple} | {type: drilled, tip_angle} | {type: counterbore, diameter, depth} | {type: countersink, \
          diameter, angle}, start, start_face, direction (in the model as it is now, after a solid.move of the body, in the hole's own \
          component)} in mm and radians; lines?, text? (the lines joined by newlines). Works with a drawing open or with none. Holes of other \

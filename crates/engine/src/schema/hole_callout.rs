@@ -60,6 +60,7 @@ impl JsonSchema for DecimalsParam {
 #[serde(deny_unknown_fields)]
 #[schemars(deny_unknown_fields)]
 pub struct CalloutParams {
+    /// The Hole feature's id.
     pub feature: HoleFeatureParam,
     /// Its sketch point id, for a hole drilled at sketch points (one of the holes it drills).
     /// Default: none, for a hole placed by position or a Single hole.
@@ -81,7 +82,9 @@ pub struct CalloutParams {
 /// The hole a callout names, by its ids as given.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct HoleResult {
+    /// The Hole feature's id.
     pub feature: u64,
+    /// Its sketch point id, when the call named one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub point: Option<String>,
 }
@@ -100,17 +103,25 @@ pub enum ExtentResult {
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FormResult {
+    /// A plain hole, flat at the bottom when blind.
     Simple,
     /// A drill point at the bottom of a blind hole.
     Drilled {
+        /// The drill point's included angle.
         tip_angle: f64,
     },
+    /// A counterbore at the top.
     Counterbore {
+        /// The counterbore's diameter.
         diameter: f64,
+        /// Its depth from the face the hole starts on.
         depth: f64,
     },
+    /// A countersink at the top.
     Countersink {
+        /// The countersink's diameter at the face the hole starts on.
         diameter: f64,
+        /// Its included angle.
         angle: f64,
     },
 }
@@ -125,11 +136,15 @@ pub struct CalloutValues {
     /// A tapped hole's thread (`M8`, `1/4-20 UNC`, `G 1/4`), shown in place of the diameter.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread: Option<String>,
-    /// The thread's own depth, when the feature gives one; otherwise it runs the hole's length.
+    /// The thread's depth when the feature gives it one, from the face the hole starts on as the
+    /// blind depth is: the feature's own thread depth (which starts below any counterbore or
+    /// countersink) plus that recess. Without one, the thread runs the hole's length.
+    /// Present whenever the feature sets one; the text drops it when it reaches the hole's floor.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread_depth: Option<f64>,
     /// This hole's extent.
     pub extent: ExtentResult,
+    /// The hole's form at its top.
     pub form: FormResult,
     /// Where the hole starts, on the face it is drilled into, in the frame of the model as it is
     /// now (after a later `solid.move` of its body) and of the hole's own component.
@@ -143,14 +158,18 @@ pub struct CalloutValues {
 /// What `drawing.hole_callout` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct CalloutResult {
+    /// The hole the call named.
     pub hole: HoleResult,
-    /// `resolved`, `suppressed` (the feature is), `failed` (it did not evaluate, or a later
-    /// feature removed the hole) or `lost` (the feature or the point is gone; never moved to
-    /// another hole).
+    /// `resolved`, `suppressed` (the feature is), `failed` (it did not evaluate; a later feature
+    /// removed the hole, moved it some way other than `solid.move`, or changed its diameter or
+    /// depth; or it is in sheet metal, not supported yet) or `lost` (the feature or the point is
+    /// gone; never moved to another hole). A string with these values, as the sibling drawing
+    /// replies' statuses are.
     pub status: String,
     /// Why it failed or is lost.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// What it says, when resolved.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub callout: Option<CalloutValues>,
     /// The callout's text, one line each.
@@ -166,24 +185,26 @@ pub struct CalloutResult {
 
 impl From<&doc::HoleCallout> for CalloutValues {
     fn from(c: &doc::HoleCallout) -> Self {
+        // Every field by name, so one added to the callout can't be left out of the reply.
+        let doc::HoleCallout { count, diameter, thread, thread_depth, extent, form, start, start_face, direction } = c;
         CalloutValues {
-            count: c.count,
-            diameter: c.diameter,
-            thread: c.thread.clone(),
-            thread_depth: c.thread_depth,
-            extent: match c.extent {
+            count: *count,
+            diameter: *diameter,
+            thread: thread.clone(),
+            thread_depth: *thread_depth,
+            extent: match *extent {
                 doc::Extent::Through => ExtentResult::Through,
                 doc::Extent::Blind { depth } => ExtentResult::Blind { depth },
             },
-            form: match c.form {
+            form: match *form {
                 doc::Form::Simple => FormResult::Simple,
                 doc::Form::Drilled { tip_angle } => FormResult::Drilled { tip_angle },
                 doc::Form::Counterbore { diameter, depth } => FormResult::Counterbore { diameter, depth },
                 doc::Form::Countersink { diameter, angle } => FormResult::Countersink { diameter, angle },
             },
-            start: c.start,
-            start_face: c.start_face.clone(),
-            direction: c.direction,
+            start: *start,
+            start_face: start_face.clone(),
+            direction: *direction,
         }
     }
 }
