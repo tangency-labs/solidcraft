@@ -1219,6 +1219,30 @@ fn ok_on_a_rolled_back_pattern_editor_says_it_is_not_built() {
     assert!(text.starts_with("Pattern changed, but it is after the history marker"), "{text}");
 }
 
+/// #10852: the editor of a circular pattern whose axis origin is length expressions sends them
+/// back as they are, so applying it unchanged keeps the pattern following its parameters.
+#[test]
+fn editing_a_circular_pattern_keeps_its_origin_expressions() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (id, params) in [
+        ("parameters.add", json!({"name":"cx","expression":"20 mm"})),
+        ("solid.box", json!({"length":40,"width":30,"height":10,"corner":[0,0,0],"body_name":"Plate"})),
+        ("solid.cylinder", json!({"radius":2,"height":20,"base":["cx - 10 mm",15,-5],"operation":"cut","targets":["Plate"],"name":"Cut"})),
+        ("solid.pattern.circular", json!({"features":["Cut"],"axis":{"origin":["cx",15,0],"dir":[0,0,1]},"count":2,"name":"Pattern"})),
+    ] {
+        h.app.run(id, params).unwrap();
+    }
+    let pattern = h.app.session.doc.features.last().unwrap().id;
+    let origin = |h: &Harness| serde_json::to_value(&h.app.session.doc.feature(pattern).unwrap().kind).unwrap()["pattern"]["origin"].clone();
+    assert_eq!(origin(&h), json!(["cx", 15.0, 0.0]));
+    let d = crate::dialogs::for_feature(&h.app, pattern, None).unwrap();
+    for (command, params) in crate::dialogs::apply_commands(&h.app, &d).unwrap() {
+        h.app.run(&command, params).unwrap();
+    }
+    assert_eq!(origin(&h), json!(["cx", 15.0, 0.0]), "the expression is kept, not its value now");
+}
+
 /// The Circular Pattern dialog must show only one field active at a time (#10066): the pick
 /// field's accent ring yields while a text field holds the keyboard, and clicking a pick field
 /// takes the keyboard back.

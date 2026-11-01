@@ -47,6 +47,7 @@ pattern_rectangular
   moves: pattern.dir1[0], pattern.dir1[1], pattern.dir2[1], pattern.dir2[2]
 pattern_circular
   moves: pattern.axis[0], pattern.axis[2], pattern.origin[0], pattern.origin[1], pattern.origin[2]
+  placement: 0, 0, 0
 pattern_path
 mirror
   moves: plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2]

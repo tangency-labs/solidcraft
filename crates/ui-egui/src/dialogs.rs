@@ -6313,11 +6313,15 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     d.extra.insert("reversed".into(), json!(reversed));
                     d.kind = Kind::PatternCirc { count: count.to_string(), angle: angle.to_string() };
                     // The edge or face it turns about, else its construction axis, else an origin
-                    // axis or its line.
+                    // axis or its line. The line's origin goes back as stored: numbers, or the
+                    // length expressions it follows (#10852).
+                    let at_zero = origin.iter().all(|e| e.trim().parse::<f64>().is_ok_and(|v| v.abs() < 1e-9));
+                    let origin: Vec<Value> =
+                        origin.iter().map(|e| e.trim().parse::<f64>().map_or_else(|_| json!(e.to_string()), |v| json!(v))).collect();
                     let pick = match (axis_ref, axis_feature) {
                         (Some(g), _) => model_axis_sel(s, g),
                         (None, Some(name)) => Some(Sel::Axis { name: name.to_string() }),
-                        (None, None) => world_axis(axis.0).filter(|_| origin.len() < 1e-9).map(|name| Sel::Axis { name }),
+                        (None, None) => world_axis(axis.0).filter(|_| at_zero).map(|name| Sel::Axis { name }),
                     };
                     match (pick, axis_ref) {
                         (Some(pick), _) => {
@@ -6330,7 +6334,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                             d.extra.insert("axis".into(), serde_json::to_value(g).unwrap_or(Value::Null));
                         }
                         (None, None) => {
-                            d.extra.insert("axis".into(), json!({"origin": pt3(origin.0), "dir": pt3(axis.0)}));
+                            d.extra.insert("axis".into(), json!({"origin": origin, "dir": pt3(axis.0)}));
                         }
                     }
                     d
