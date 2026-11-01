@@ -303,13 +303,6 @@ pub(crate) fn params(d: &Dialog) -> Vec<Value> {
         .collect()
 }
 
-/// How many decimal places the number in a literal is written with, so a value the user typed as
-/// `10 mm` keeps its text while a measured float noise is rounded to the document's precision.
-fn literal_decimals(text: &str) -> usize {
-    let number = text.split_whitespace().next().unwrap_or("");
-    number.split_once('.').map_or(0, |(_, fraction)| fraction.chars().take_while(char::is_ascii_digit).count())
-}
-
 /// Editing a hole (or a cylinder) with reference edges: the edges picked again where they are
 /// now, their distances, and the place where those distances put it now.
 pub(crate) fn restore(s: &Session, d: &mut Dialog, references: &[HoleReference], names: &[String], decimals: u8) {
@@ -343,10 +336,7 @@ pub(crate) fn restore(s: &Session, d: &mut Dialog, references: &[HoleReference],
             let literal = if solidcraft_engine::doc::expr::is_literal(&exact) { s.doc.eval(&exact, ValueKind::Length).ok() } else { None };
             match literal {
                 Some(value) => {
-                    let (scale, _) = crate::prefs::unit_scale(&s.doc.units);
-                    let places = crate::prefs::length_precision(value * scale, &s.doc.units, decimals);
-                    let shown =
-                        if literal_decimals(&exact) <= places { exact.clone() } else { crate::prefs::format_length(value, &s.doc.units, decimals) };
+                    let shown = crate::prefs::format_length(value, &s.doc.units, decimals);
                     refs.exact[k] = Some(exact);
                     refs.shown[k] = Some(shown.clone());
                     *slot = shown;
