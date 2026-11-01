@@ -37,6 +37,172 @@ const MAX_FLAT_WORK: usize = 500_000_000;
 /// Pieces of flat material sharing less area than this (mm²) only touch.
 const TOUCH_AREA: f64 = 1e-6;
 
+/// How far (mm) a fold's bend zone may stray from the straight ends `torn_zone` gives it: a
+/// corner relief's tear drawn in a CAD program comes as a chain of arcs a few microns off its
+/// line.
+const TORN_ZONE_TOL: f64 = 0.01;
+
+/// A fold's bend zone (`strip`, from `s0` to `s0 + ba` along `n`) as the run of its start line
+/// and the run of its far edge along `d`, when it ends square across or on a straight line from
+/// the one to the other (within `TORN_ZONE_TOL`): such an end turns evenly along the bend as it
+/// folds, as a torn end does (`SheetFlange::tear`). None for any other shape.
+fn torn_zone(strip: &[Vec2], n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<((f64, f64), (f64, f64))> {
+    let run = |s: f64| {
+        strip
+            .iter()
+            .filter(|q| (q.dot(n) - s).abs() < 1e-6)
+            .map(|q| q.dot(d))
+            .fold(None, |r: Option<(f64, f64)>, u| Some(r.map_or((u, u), |(lo, hi)| (lo.min(u), hi.max(u)))))
+    };
+    let (start, far) = (run(s0)?, run(s0 + ba)?);
+    if start.1 - start.0 < 1e-6 || far.1 - far.0 < 1e-6 {
+        return None;
+    }
+    let quad = [n * s0 + d * start.0, n * s0 + d * start.1, n * (s0 + ba) + d * far.1, n * (s0 + ba) + d * far.0];
+    let to_side = |q: Vec2, a: Vec2, b: Vec2| {
+        let ab = b - a;
+        let t = ((q - a).dot(ab) / ab.dot(ab).max(1e-300)).clamp(0.0, 1.0);
+        q.dist(a + ab * t)
+    };
+    let sides = || (0..4).filter_map(|i| Some((*quad.get(i)?, *quad.get((i + 1) % 4)?)));
+    if !strip.iter().all(|&q| sides().any(|(a, b)| to_side(q, a, b) <= TORN_ZONE_TOL)) {
+        return None;
+    }
+    let around: f64 = sides().map(|(a, b)| a.dist(b)).sum();
+    ((signed_area(strip).abs() - signed_area(&quad).abs()).abs() <= TORN_ZONE_TOL * around).then_some((start, far))
+}
+
+/// A fold whose zone is one with the ends of other walls, a corner relief's V meeting the zone's
+/// edge (or stopping a hair short of it, within `TORN_ZONE_TOL`): the zone piece the line's points
+/// span where the line runs (`span` along `d`, at `l` along `n`), torn at its ends (`torn_zone`),
+/// with the material hanging from its far edge, and the panel less both. None when the zone
+/// doesn't fall apart so, `n` pointing to the moving side and the zone from `s0` to `s0 + ba`.
+#[allow(clippy::type_complexity)]
+fn torn_tab(
+    pts: &[Vec2],
+    (n, d): (Vec2, Vec2),
+    (s0, ba): (f64, f64),
+    (l, span): (f64, (f64, f64)),
+) -> Result<Option<(((f64, f64), (f64, f64)), Vec<Vec2>, Vec<Vec2>)>> {
+    const EPS: f64 = 1e-6;
+    let mut work = FlatWork::new();
+    let inner = clip(&clip(pts, n * (s0 + TORN_ZONE_TOL), n), n * (s0 + ba - TORN_ZONE_TOL), n * -1.0);
+    let pieces = merge_loops(&[inner], &mut work)?;
+    let overlap = |a: (f64, f64), b: (f64, f64)| a.1.min(b.1) - a.0.max(b.0);
+    // Where each piece meets the line: a wall's end beside the zone may reach past the line's
+    // first point, but not along the line itself.
+    let level = l.clamp(s0 + 2.0 * TORN_ZONE_TOL, s0 + ba - 2.0 * TORN_ZONE_TOL);
+    let spanned: Vec<&Vec<Vec2>> = pieces.iter().filter(|p| run_at(p, n, d, level).is_some_and(|u| overlap(u, span) > EPS)).collect();
+    let (2.., [piece]) = (pieces.len(), spanned.as_slice()) else { return Ok(None) };
+    let w = ba - 2.0 * TORN_ZONE_TOL;
+    let Some((a, f)) = torn_zone(piece, n, d, s0 + TORN_ZONE_TOL, w) else { return Ok(None) };
+    // Each end runs on straight to the zone's edges.
+    let out = |a: f64, f: f64| (a - (f - a) * TORN_ZONE_TOL / w, f + (f - a) * TORN_ZONE_TOL / w);
+    let ((a0, f0), (a1, f1)) = (out(a.0, f.0), out(a.1, f.1));
+    let hangs = |p: &[Vec2]| {
+        let m = p.len();
+        (0..m).filter_map(|i| Some((*p.get(i)?, *p.get((i + 1) % m)?))).any(|(x, y)| {
+            (x.dot(n) - s0 - ba).abs() < EPS
+                && (y.dot(n) - s0 - ba).abs() < EPS
+                && overlap((x.dot(d).min(y.dot(d)), x.dot(d).max(y.dot(d))), (f0, f1)) > EPS
+        })
+    };
+    let beyond = merge_loops(&[clip(pts, n * (s0 + ba), n)], &mut work)?;
+    let hanging: Vec<&Vec<Vec2>> = beyond.iter().filter(|p| hangs(p)).collect();
+    let [moving] = hanging.as_slice() else { return Ok(None) };
+    // What stays: the panel short of the zone, the zone beyond the torn ends (the other walls'
+    // ends) and the material beyond the zone that hangs from neither.
+    let strip = clip(&clip(pts, n * s0, n), n * (s0 + ba), n * -1.0);
+    let outward = |from: Vec2, to: Vec2, side: Vec2| {
+        let e = to - from;
+        let m = Vec2::new(-e.y, e.x);
+        if m.dot(side) < 0.0 { m * -1.0 } else { m }
+    };
+    let (q0, q1, q2, q3) = (n * s0 + d * a0, n * s0 + d * a1, n * (s0 + ba) + d * f1, n * (s0 + ba) + d * f0);
+    // The other walls' ends, beyond the torn ends by more than the tolerance (the zone's own
+    // slivers beside a straightened end are not kept).
+    let beside = |from: Vec2, to: Vec2, side: Vec2| {
+        let m = outward(from, to, side);
+        let m = m * (1.0 / m.dot(m).sqrt().max(1e-12));
+        clip(&strip, from + m * TORN_ZONE_TOL, m)
+    };
+    let mut keep = vec![clip(pts, n * s0, n * -1.0), beside(q0, q3, d * -1.0), beside(q1, q2, d)];
+    keep.extend(beyond.iter().filter(|p| !hangs(p)).cloned());
+    keep.retain(|p| signed_area(p).abs() > 1e-9);
+    // What is left of the zone as slivers goes.
+    let fixed: Vec<Vec<Vec2>> = merge_loops(&keep, &mut work)?.into_iter().filter(|p| signed_area(p).abs() > TORN_ZONE_TOL * ba).collect();
+    let [fixed] = fixed.as_slice() else { return Ok(None) };
+    Ok(Some((((a0, a1), (f0, f1)), fixed.clone(), moving.to_vec())))
+}
+
+/// `p` without a point on the one before it, nor a last point back on the first, nor a spike: a
+/// point the outline goes out to and straight back from (a clip along an edge of the outline that
+/// ends on the clip line leaves one, which the sheet's faces would carry as a slit of no width).
+fn without_repeats(mut p: Vec<Vec2>) -> Vec<Vec2> {
+    let tidy = |p: &mut Vec<Vec2>| {
+        p.dedup_by(|b, a| a.dist(*b) <= 1e-9);
+        while p.len() > 1 && p.first().zip(p.last()).is_some_and(|(a, b)| a.dist(*b) <= 1e-9) {
+            p.pop();
+        }
+    };
+    tidy(&mut p);
+    // Each pass takes one spike out (a spike's base may be the next one's tip): at most one pass a point.
+    for _ in 0..p.len() {
+        let m = p.len();
+        let spike = (0..m).find(|&i| {
+            let (Some(&a), Some(&b), Some(&c)) = (p.get((i + m - 1) % m), p.get(i), p.get((i + 1) % m)) else { return false };
+            let (u, v) = (b - a, c - b);
+            m > 3 && u.dot(v) < 0.0 && (u.x * v.y - u.y * v.x).abs() <= 1e-9 * u.len().max(v.len()).max(1e-12)
+        });
+        let Some(i) = spike else { break };
+        p.remove(i);
+        tidy(&mut p);
+    }
+    p
+}
+
+/// Whether the edge `a..b` lies on the outline `pts` (its ends and middle on a side): a flange on
+/// it hangs from that piece. Beside a torn zone, material beyond the zone may be another wall's
+/// end, which stays.
+fn edge_on(pts: &[Vec2], a: Vec2, b: Vec2) -> bool {
+    let near = |p: Vec2| {
+        (0..pts.len()).any(|i| {
+            let (Some(&q0), Some(&q1)) = (pts.get(i), pts.get((i + 1) % pts.len())) else { return false };
+            let e = q1 - q0;
+            let t = ((p - q0).dot(e) / e.len2().max(1e-30)).clamp(0.0, 1.0);
+            p.dist(q0 + e * t) < 1e-6
+        })
+    };
+    near(a) && near(b) && near((a + b) * 0.5)
+}
+
+/// How far a flange's bend may reach into a new fold's zone and still stay put: a hair at a torn
+/// end, whose corner is where the corner relief's V meets both zones (within `TORN_ZONE_TOL`).
+fn torn_reach(f: &SheetFlange) -> f64 {
+    if f.tear.0 || f.tear.1 { TORN_ZONE_TOL } else { 1e-9 }
+}
+
+/// Where a flat piece meets the line at `level` along `n`: the span of its crossings along `d`.
+fn run_at(p: &[Vec2], n: Vec2, d: Vec2, level: f64) -> Option<(f64, f64)> {
+    let m = p.len();
+    (0..m)
+        .filter_map(|i| Some((*p.get(i)?, *p.get((i + 1) % m)?)))
+        .filter_map(|(x, y)| {
+            let (sx, sy) = (x.dot(n) - level, y.dot(n) - level);
+            ((sx < 0.0) != (sy < 0.0)).then(|| (x + (y - x) * (sx / (sx - sy))).dot(d))
+        })
+        .fold(None, |r: Option<(f64, f64)>, u| Some(r.map_or((u, u), |(lo, hi)| (lo.min(u), hi.max(u)))))
+}
+
+/// A fold's `ext` and `tear` from its zone's start and far runs (`torn_zone`): an end whose far
+/// edge stops elsewhere than its start line is torn, the panel running on (or cut back) by the
+/// difference.
+fn torn_ends(start: (f64, f64), far: (f64, f64)) -> ((f64, f64), (bool, bool)) {
+    let (e0, e1) = (start.0 - far.0, far.1 - start.1);
+    let (t0, t1) = (e0.abs() > 1e-6, e1.abs() > 1e-6);
+    ((if t0 { e0 } else { 0.0 }, if t1 { e1 } else { 0.0 }), (t0, t1))
+}
+
 /// Starts the warning a fold gives when its `fixed` point touches no material: a recompute keeps
 /// the side the point lies on, and the `sheet.fold` command refuses such a point (#263).
 /// Tabs folded on one line whose material beyond the bend joins again.
@@ -3769,15 +3935,20 @@ impl SheetBody {
         if strips.len() > 1 {
             let span = (a2.dot(d).min(b2.dot(d)), a2.dot(d).max(b2.dot(d)));
             let angle = if flip { -angle } else { angle };
-            return self.fold_tabs(panel, &pts, (n, d), (s0, ba), span, (angle, radius), &strips);
+            return self.fold_tabs(panel, &pts, (n, d), (s0, ba), (l, span), (angle, radius), &strips);
         }
-        // The bend zone must be a rectangle across the panel (a slanted or curved edge would
-        // run across the bend as a helix, which the sheet's faces can't carry yet).
-        let us: Vec<f64> = strip.iter().map(|q| q.dot(d)).collect();
-        let (u0, u1) = (us.iter().cloned().fold(f64::MAX, f64::min), us.iter().cloned().fold(f64::MIN, f64::max));
-        if ((u1 - u0) * ba - signed_area(&strip).abs()).abs() > 1e-6 * (u1 - u0).max(1.0) * ba.max(1.0) {
-            // A corner of the outline inside the zone (e.g. a fold right at a tab's root): name
-            // it and how far the line has to move to clear it.
+        // The bend zone must be a rectangle across the panel, or end on straight lines from its
+        // start line to its far edge (`torn_zone`); a curved edge would run across the bend as a
+        // helix, which the sheet's faces can't carry yet.
+        let span = (a2.dot(d).min(b2.dot(d)), a2.dot(d).max(b2.dot(d)));
+        let torn = match torn_zone(&strip, n, d, s0, ba) {
+            Some(z) => Some((z, fixed_part, moving)),
+            None => torn_tab(&pts, (n, d), (s0, ba), (l, span))?,
+        };
+        let Some((((u0, u1), (f0, f1)), fixed_part, moving)) = torn else {
+            // A corner of the outline inside the zone (e.g. a fold right at a tab's root, or a
+            // corner relief that stops short of the zone's edge): name it and how far the line
+            // has to move to clear it.
             let corners: Vec<(Vec2, f64)> = pts.iter().map(|q| (*q, q.dot(n) - s0)).filter(|(_, s)| *s > 1e-6 && *s < ba - 1e-6).collect();
             if let Some(&(c, _)) = corners.first() {
                 let on = corners.iter().fold(0.0_f64, |m, (_, s)| m.max(*s));
@@ -3785,12 +3956,15 @@ impl SheetBody {
                 let w = apply_point(&self.world(panel), Vec3::new(c.x, c.y, self.t));
                 return Err(DocError::Invalid(format!(
                     "the bend zone ({ba:.3} mm wide) reaches a corner of the sheet's outline at ({:.3}, {:.3}, {:.3}): \
-                     move the fold line at least {on:.3} mm toward the side that folds or {back:.3} mm toward the side that stays",
+                     move the fold line at least {on:.3} mm toward the side that folds or {back:.3} mm toward the side that stays \
+                     (a corner relief must run across the whole zone)",
                     w.x, w.y, w.z
                 )));
             }
             return Err(DocError::Invalid("not supported yet: folds whose bend zone crosses a slanted or curved edge of the sheet".into()));
-        }
+        };
+        // A clip through a corner of the outline leaves it twice.
+        let (fixed_part, moving) = (without_repeats(fixed_part), without_repeats(moving));
         let up = !flip;
         let leg = moving.iter().map(|q| q.dot(n) - s0 - ba).fold(0.0, f64::max);
         let p0 = n * s0 + d * u0;
@@ -3809,6 +3983,8 @@ impl SheetBody {
                 }
             }
         }
+        let (ext, tear) = torn_ends((u0, u1), (f0, f1));
+        let moved = moving.clone();
         self.flanges.push(SheetFlange {
             parent: panel,
             p: snap(p0),
@@ -3818,9 +3994,9 @@ impl SheetBody {
             angle: if up { angle } else { -angle },
             radius,
             leg,
-            ext: (0.0, 0.0),
+            ext,
             slope: (0.0, 0.0),
-            tear: (false, false),
+            tear,
             shape: Some(ccw(moving)),
             exact: None,
             tag: String::new(),
@@ -3833,11 +4009,19 @@ impl SheetBody {
                 continue;
             }
             let (e0, e1) = ((f.p - p0).dot(n), (f.p + f.d * f.len - p0).dot(n));
+            // A flange on a wall's end beside a torn zone (wholly past its ends) stays with it.
+            let (fa, fb) = (f.p.dot(d), (f.p + f.d * f.len).dot(d));
+            let beside = fa.min(fb) > u1.max(f1) + 1e-6 || fa.max(fb) < u0.min(f0) - 1e-6;
             if e0.min(e1) >= ba - 1e-9 {
-                if let Some(f) = self.flanges.get_mut(k) {
+                // Beyond the zone: it moves, unless it lies on material that stays (another wall's
+                // end beyond a torn zone).
+                let (a, b) = (f.p, f.p + f.d * f.len);
+                if !(edge_on(&fixed_part, a, b) && !edge_on(&moved, a, b))
+                    && let Some(f) = self.flanges.get_mut(k)
+                {
                     f.parent = Some(i);
                 }
-            } else if e0.max(e1) > 1e-9 {
+            } else if e0.max(e1) > torn_reach(f) && !beside {
                 return Err(DocError::Invalid("not supported yet: a fold through a flange's bend".into()));
             }
         }
@@ -3856,7 +4040,7 @@ impl SheetBody {
         pts: &[Vec2],
         (n, d): (Vec2, Vec2),
         (s0, ba): (f64, f64),
-        span: (f64, f64),
+        (l, span): (f64, (f64, f64)),
         (angle, radius): (f64, f64),
         strips: &[Vec<Vec2>],
     ) -> Result<usize> {
@@ -3878,7 +4062,11 @@ impl SheetBody {
         let mut hangs: Vec<Vec<usize>> = vec![Vec::new(); strips.len()];
         for (k, part) in beyond.iter().enumerate() {
             let edges = far_edges(part);
-            let on: Vec<usize> = (0..strips.len()).filter(|&i| strip_u.get(i).is_some_and(|&u| edges.iter().any(|&e| overlap(e, u) > EPS))).collect();
+            // A piece hangs from the zone pieces it shares the far edge with (a torn piece's
+            // span along the bend is wider than its far edge).
+            let on: Vec<usize> = (0..strips.len())
+                .filter(|&i| strips.get(i).is_some_and(|z| far_edges(z).iter().any(|&f| edges.iter().any(|&e| overlap(e, f) > EPS))))
+                .collect();
             match on.as_slice() {
                 [i] => {
                     if let Some(h) = hangs.get_mut(*i) {
@@ -3888,7 +4076,11 @@ impl SheetBody {
                 _ => return Err(DocError::Invalid(FOLD_TABS_REJOIN.into())),
             }
         }
-        let chosen: Vec<usize> = (0..strips.len()).filter(|&i| strip_u.get(i).is_some_and(|&u| overlap(u, span) > EPS)).collect();
+        // The pieces where the line runs: a wall's end beside a torn zone may reach past the
+        // line's first point, but not along the line itself.
+        let level = l.clamp(s0 + 2.0 * TORN_ZONE_TOL, s0 + ba - 2.0 * TORN_ZONE_TOL);
+        let chosen: Vec<usize> =
+            (0..strips.len()).filter(|&i| strips.get(i).and_then(|p| run_at(p, n, d, level)).is_some_and(|u| overlap(u, span) > EPS)).collect();
         if chosen.is_empty() {
             return Err(DocError::Invalid("the fold line must cross the sheet with material on both sides of the bend".into()));
         }
@@ -3906,19 +4098,20 @@ impl SheetBody {
             [one] if signed_area(one) > 1e-9 => one.clone(),
             _ => return Err(DocError::Invalid("not supported yet: a fold that splits the part that stays".into())),
         };
+        let fixed = without_repeats(fixed);
         let mut made = Vec::new();
         for &i in &chosen {
             let (Some(strip), Some(&(u0, u1))) = (strips.get(i), strip_u.get(i)) else { continue };
-            // Each piece of the zone must be a rectangle (see `add_fold`).
-            if ((u1 - u0) * ba - signed_area(strip).abs()).abs() > 1e-6 * (u1 - u0).max(1.0) * ba.max(1.0) {
+            // Each piece of the zone must be a rectangle, or torn at its ends (see `add_fold`).
+            let Some((start, far)) = torn_zone(strip, n, d, s0, ba) else {
                 return Err(DocError::Invalid("not supported yet: folds whose bend zone crosses a slanted or curved edge of the sheet".into()));
-            }
+            };
             let moving = match hangs.get(i).map(Vec::as_slice) {
                 Some([k]) => beyond.get(*k).cloned().ok_or_else(|| DocError::Invalid("fold".into()))?,
                 _ => return Err(DocError::Invalid("the fold line must cross the sheet with material on both sides of the bend".into())),
             };
             let leg = moving.iter().map(|q| q.dot(n) - s0 - ba).fold(0.0, f64::max);
-            made.push((u0, u1, n * s0 + d * u0, leg, moving));
+            made.push((start, far, (u0, u1), n * s0 + d * start.0, leg, moving));
         }
         // Flanges already on this panel: those beyond a folding tab move with it.
         let mut moves = Vec::new();
@@ -3929,10 +4122,18 @@ impl SheetBody {
             let (e0, e1) = (f.p.dot(n) - s0, (f.p + f.d * f.len).dot(n) - s0);
             let fu = (f.p.dot(d).min((f.p + f.d * f.len).dot(d)), f.p.dot(d).max((f.p + f.d * f.len).dot(d)));
             let crosses = Err(DocError::Invalid("not supported yet: a fold through a flange's bend".into()));
-            match made.iter().position(|m| fu.0 >= m.0 - 1e-9 && fu.1 <= m.1 + 1e-9) {
-                Some(j) if e0.min(e1) >= ba - 1e-9 => moves.push((k, j)),
-                Some(_) if e0.max(e1) > 1e-9 => return crosses,
-                None if e0.max(e1) > 1e-9 && made.iter().any(|m| overlap((m.0, m.1), fu) > EPS) => return crosses,
+            let (a, b) = (f.p, f.p + f.d * f.len);
+            match made.iter().position(|m| fu.0 >= m.2.0 - 1e-9 && fu.1 <= m.2.1 + 1e-9) {
+                // Beyond the zone: it moves with its tab, unless it lies on material that stays
+                // (another wall's end beside a tab whose tear slants inwards).
+                Some(j) if e0.min(e1) >= ba - 1e-9 => {
+                    let on = made.iter().position(|m| edge_on(&m.5, a, b));
+                    if on.is_some() || !edge_on(&fixed, a, b) {
+                        moves.push((k, on.unwrap_or(j)));
+                    }
+                }
+                Some(_) if e0.max(e1) > torn_reach(f) => return crosses,
+                None if e0.max(e1) > torn_reach(f) && made.iter().any(|m| overlap(m.2, fu) > EPS) => return crosses,
                 _ => {}
             }
         }
@@ -3952,19 +4153,21 @@ impl SheetBody {
             }
         }
         let first = self.flanges.len();
-        for (u0, u1, p0, leg, moving) in made {
+        for (start, far, _, p0, leg, moving) in made {
+            let moving = without_repeats(moving);
+            let (ext, tear) = torn_ends(start, far);
             self.flanges.push(SheetFlange {
                 parent: panel,
                 p: snap(p0),
                 d,
-                len: u1 - u0,
+                len: start.1 - start.0,
                 n,
                 angle,
                 radius,
                 leg,
-                ext: (0.0, 0.0),
+                ext,
                 slope: (0.0, 0.0),
-                tear: (false, false),
+                tear,
                 shape: Some(ccw(moving)),
                 exact: None,
                 tag: String::new(),
