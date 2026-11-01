@@ -14,7 +14,7 @@
 //! linkage, a slider-crank) are met by moving the values of the other joints around the loop;
 //! those that still disagree are reported.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::{Aabb3, Vec3};
@@ -2149,7 +2149,7 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, sol: &mut Soluti
         // Every joint's values are known, suppressed ones too (their motion links still set values).
         Tree { joints: asm.joints.iter().map(|j| (j.id, j)).collect(), frames, fixed: placed.clone(), parent: BTreeMap::new(), order: Vec::new() };
     let mut used: BTreeSet<u64> = BTreeSet::new();
-    let mut queue: VecDeque<u64> = placed.keys().copied().collect();
+
     // An occurrence's degrees of freedom are the distinct values that move it: those of the
     // joints on its path, a value a motion link sets standing for the values its link chain
     // starts from (a driven gear turns with its driving gear's one value). Kept per occurrence as
@@ -2158,19 +2158,23 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, sol: &mut Soluti
     let sources = link_sources(asm);
     let shared: BTreeSet<(u64, usize)> = sources.values().flatten().copied().collect();
     let mut moved_by: BTreeMap<u64, (usize, BTreeSet<(u64, usize)>)> = BTreeMap::new();
-    // The joints at each occurrence, in the joints' order (a large assembly is not walked joint by
-    // joint for every occurrence).
-    let mut at: BTreeMap<u64, Vec<&Joint>> = BTreeMap::new();
-    for j in joints.iter().copied() {
-        at.entry(j.a.occurrence).or_default().push(j);
+
+    // Adjacency list with creation index so established joints take priority over later (closing)
+    // joints when building the spanning tree.
+    let mut at: BTreeMap<u64, Vec<(usize, &Joint)>> = BTreeMap::new();
+    for (idx, j) in joints.iter().copied().enumerate() {
+        at.entry(j.a.occurrence).or_default().push((idx, j));
         if j.b.occurrence != j.a.occurrence {
-            at.entry(j.b.occurrence).or_default().push(j);
+            at.entry(j.b.occurrence).or_default().push((idx, j));
         }
     }
-    while let Some(occ) = queue.pop_front() {
-        let Some(t) = placed.get(&occ).copied() else { continue };
-        for j in at.get(&occ).map(Vec::as_slice).unwrap_or_default() {
-            if used.contains(&j.id) || !tree.frames.contains_key(&j.id) {
+
+    // Spanning tree construction prioritizing the earliest defined joints (which define the
+    // kinematic chain) before newly added joints that connect to ground or datum planes.
+    let mut heap: BinaryHeap<(std::cmp::Reverse<usize>, u64, u64, u64, bool)> = BinaryHeap::new();
+    for &occ in placed.keys() {
+        for &(idx, j) in at.get(&occ).map(Vec::as_slice).unwrap_or_default() {
+            if !tree.frames.contains_key(&j.id) {
                 continue;
             }
             let (other, from_a) = if j.a.occurrence == occ {
@@ -2180,15 +2184,24 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, sol: &mut Soluti
             } else {
                 continue;
             };
-            if placed.contains_key(&other) {
-                continue;
+            if !placed.contains_key(&other) {
+                heap.push((std::cmp::Reverse(idx), j.id, occ, other, from_a));
             }
-            let Some(m) = tree.step(j.id, from_a, &t, vals) else { continue };
-            used.insert(j.id);
-            placed.insert(other, m);
-            tree.parent.insert(other, (occ, j.id, from_a));
-            tree.order.push(other);
-            let (mut own, mut common) = moved_by.get(&occ).cloned().unwrap_or_default();
+        }
+    }
+
+    while let Some((_, j_id, occ, other, from_a)) = heap.pop() {
+        if placed.contains_key(&other) || used.contains(&j_id) {
+            continue;
+        }
+        let Some(t) = placed.get(&occ).copied() else { continue };
+        let Some(m) = tree.step(j_id, from_a, &t, vals) else { continue };
+        used.insert(j_id);
+        placed.insert(other, m);
+        tree.parent.insert(other, (occ, j_id, from_a));
+        tree.order.push(other);
+        let (mut own, mut common) = moved_by.get(&occ).cloned().unwrap_or_default();
+        if let Some(j) = tree.joints.get(&j_id) {
             for v in (0..j.kind.dofs().len()).map(|i| (j.id, i)) {
                 match sources.get(&v) {
                     Some(from) => common.extend(from.iter().copied()),
@@ -2198,11 +2211,26 @@ fn build<'a>(doc: &'a Document, st: &ModelState, vals: &Values, sol: &mut Soluti
                     None => own += 1,
                 }
             }
-            dof.insert(other, own + common.len());
-            moved_by.insert(other, (own, common));
-            queue.push_back(other);
+        }
+        dof.insert(other, own + common.len());
+        moved_by.insert(other, (own, common));
+        for &(idx, next_j) in at.get(&other).map(Vec::as_slice).unwrap_or_default() {
+            if used.contains(&next_j.id) || !tree.frames.contains_key(&next_j.id) {
+                continue;
+            }
+            let (next_other, next_from_a) = if next_j.a.occurrence == other {
+                (next_j.b.occurrence, true)
+            } else if next_j.b.occurrence == other {
+                (next_j.a.occurrence, false)
+            } else {
+                continue;
+            };
+            if !placed.contains_key(&next_other) {
+                heap.push((std::cmp::Reverse(idx), next_j.id, other, next_other, next_from_a));
+            }
         }
     }
+
     // Joints that close loops: the solve moves the loops' values to meet them, then checks they
     // agree.
     let closing: Vec<u64> = joints

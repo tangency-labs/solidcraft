@@ -917,11 +917,33 @@ fn new_joint_name(s: &Session, p: &Value) -> String {
     })
 }
 
+/// If a plane or axis origin was given with no pick point, anchor it where the other
+/// side's origin currently sits in the world, projected onto the plane or axis.
+fn anchor_datum_origin(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, target: &mut JointOrigin, other: &JointOrigin) {
+    if !matches!(&target.snap, Snap::Plane { pick: None, .. } | Snap::Axis { pick: None, .. }) {
+        return;
+    }
+    let Ok(other_frame) = doc.origin_world(st, other) else { return };
+    let other_world_pt = solidcraft_doc::apply_point(&other_frame, Vec3::ZERO);
+    let target_world = if target.occurrence == 0 { solidcraft_doc::IDENTITY } else { joints::occurrence_world(doc, target.occurrence) };
+    let Some(inv) = solidcraft_doc::mat_inverse(&target_world) else { return };
+    let local_pt = solidcraft_doc::apply_point(&inv, other_world_pt);
+    match &mut target.snap {
+        Snap::Plane { pick, .. } | Snap::Axis { pick, .. } => {
+            *pick = Some(local_pt);
+        }
+        _ => {}
+    }
+}
+
 fn joint(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.create";
     let kind = kind_param(p, cmd)?;
-    let a = origin_param(s, p.get("a"), cmd)?;
-    let b = origin_param(s, p.get("b"), cmd)?;
+    let mut a = origin_param(s, p.get("a"), cmd)?;
+    let mut b = origin_param(s, p.get("b"), cmd)?;
+    let st = s.model.state();
+    anchor_datum_origin(&s.doc, &st, &mut a, &b);
+    anchor_datum_origin(&s.doc, &st, &mut b, &a);
     let id = s.doc_mut().allocate_id()?;
     let name = new_joint_name(s, p);
     let offset = match p.get("offset") {
