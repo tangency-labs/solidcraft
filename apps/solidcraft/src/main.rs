@@ -962,15 +962,6 @@ fn main() -> eframe::Result {
         safe_mode = true;
         notes.push(format!("The last {failed_starts} launches stopped before the window opened, so this one is in safe mode."));
     }
-    // Safe mode reads no settings, but a stored "Let AI agents connect" off holds there too:
-    // otherwise the switch's default, on, opened the control channel the user had closed (#10217).
-    let safe_mode_agent_control = if safe_mode {
-        settings.as_deref().and_then(|dir| {
-            startup::stored_agent_control(dir, &[solidcraft_ui_egui::prefs::STORAGE_KEY, solidcraft_ui_egui::prefs::LEGACY_STORAGE_KEY])
-        })
-    } else {
-        None
-    };
     let cpu_renderer = safe_mode || startup::cpu_renderer_env(std::env::var(startup::RENDERER_ENV).ok().as_deref());
     // The launch before this one closed because its graphics device was lost (`App::watch_device`).
     let after_loss = device_lost::recent(std::env::var(device_lost::LOST_ENV).ok().as_deref(), device_lost::now_secs());
@@ -982,7 +973,10 @@ fn main() -> eframe::Result {
         notes.push(device_lost::note(cpu_renderer, reason.as_deref()));
     }
     if safe_mode {
-        notes.push("Safe mode: default settings (yours are kept for the next normal start), no recovery offer, software rendering.".into());
+        notes.push(
+            "Safe mode: default settings (yours are kept for the next normal start), no recovery offer, software rendering, no AI agent connections."
+                .into(),
+        );
     }
     let fallback_note = std::env::var(startup::FALLBACK_NOTE_ENV).ok().map(|s| s.chars().take(4096).collect::<String>());
     if let Some(note) = &fallback_note {
@@ -1109,8 +1103,10 @@ fn main() -> eframe::Result {
             if let Some(p) = cc.storage.and_then(|s| solidcraft_ui_egui::prefs::stored(|k| s.get_string(k))).filter(|_| !safe_mode) {
                 app.load_prefs(&p);
             }
-            if let Some(on) = safe_mode_agent_control {
-                app.preferences.agent_control = on;
+            // Safe mode opens no control channel (`startup::control_plan`, #10217); Preferences ›
+            // Assistant shows the switch off there rather than its default.
+            if safe_mode {
+                app.preferences.agent_control = false;
             }
             if let Some(path) = &theme_file
                 && let Err(e) = solidcraft_ui_egui::prefs::follow_theme_file_for_run(&mut app, path)
@@ -1168,8 +1164,8 @@ fn main() -> eframe::Result {
             }
             mark("viewport pipelines");
             // `--control`/the environment name a port; otherwise the preference (on by default)
-            // opens the default one (docs/control-protocol.md).
-            if let Some(listen_on) = solidcraft_engine::control_auth::plan(control_port, app.preferences.agent_control) {
+            // opens the default one (docs/control-protocol.md). Safe mode opens none.
+            if let Some(listen_on) = startup::control_plan(safe_mode, control_port, app.preferences.agent_control) {
                 let rx = control_server::start(listen_on, cc.egui_ctx.clone());
                 app = app.with_control(rx);
             }
