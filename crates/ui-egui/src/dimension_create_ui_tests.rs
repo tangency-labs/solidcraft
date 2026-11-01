@@ -1425,3 +1425,37 @@ fn the_status_after_a_dimension_is_in_the_interface_language() {
     }
     crate::dim_view::cancel();
 }
+
+/// Three points picked with the Dimension tool give the angle at the middle one (the vertex)
+/// between the lines running from it to the outer two (#10137): the third pick joins the
+/// open draft, and the typed value drives the angle.
+#[test]
+fn three_point_picks_dimension_the_angle_at_the_middle_point() {
+    crate::dim_view::cancel();
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0, 0], [20, 0]], "infer": false})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0, 0], [0, 20]], "infer": false})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.app.cam.distance = 80.0;
+    h.app.cam.target = solidcraft_engine::geom::Vec3::new(5.0, 5.0, 0.0);
+    h.settle();
+    h.step(&json!({"start": "sketch.dimension"})).unwrap();
+    // Outer arm, vertex, outer arm: the second pick opens the distance draft, the third
+    // turns it into the angle at the vertex.
+    h.step(&json!({"click": {"world": [20, 0, 0]}})).unwrap();
+    h.step(&json!({"click": {"world": [0, 0, 0]}})).unwrap();
+    h.step(&json!({"click": {"world": [0, 20, 0]}})).unwrap();
+    assert!(crate::dim_view::live().is_some_and(|typed| !typed), "the three picks determine an angle draft");
+    type_value(&mut h, "60 deg");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(!crate::dim_view::editing(), "{}", h.call("ui.inspect", json!({})));
+    let state = h.app.session.world_state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let pt = |r: &str| sk.point(sk.resolve_point(r).unwrap()).unwrap();
+    let (a, v, b) = (pt("l1.end"), pt("l1.start"), pt("l2.end"));
+    let ang = (a - v).cross(b - v).atan2((a - v).dot(b - v)).abs().to_degrees();
+    assert!((ang - 60.0).abs() < 1e-3, "{a:?} {v:?} {b:?}");
+    h.app.tool = None;
+    crate::dim_view::cancel();
+}
