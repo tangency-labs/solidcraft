@@ -907,6 +907,22 @@ def assemblies_drag(d):
     d.wait(1.5)
 
 
+@shot("assemblies/drive", "clip", setup=joined)
+def assemblies_drive(d):
+    """Drive Joints: the slider turns the hinge through its angle, OK keeps it there."""
+    d.caption("Drive Joints: drag the slider, or type the angle")
+    d.tool("joint.drive")
+    s = d.at(handle="drive_slider:0")
+    d.drag(s, (s[0] - 80, s[1]), steps=60)
+    d.wait(0.6)
+    d.drag(d.pos, (d.pos[0] + 45, d.pos[1]), steps=40)
+    d.wait(0.6)
+    d.click(d.at(handle="dialog:ok"), dur=0.6, settle=1.0)
+    d.caption("")
+    d.glide((SIZE[0] * 0.55, SIZE[1] * 0.85), 0.6)
+    d.wait(1.5)
+
+
 # -- main ---------------------------------------------------------------------------------------
 
 
