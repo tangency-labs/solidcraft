@@ -454,6 +454,15 @@ pub struct UpstreamFixes {
     /// across shifted domains; upstream computes `sOriginMax` but only references it under
     /// `SM_DEBUG_CODE` (WR-41). Off by default for pinned C++ parity.
     pub plane_reparameterize_moves_origin: bool,
+    /// `SmCrvInVolume::GenerateMults` reads the cached continuity at the matched break index
+    /// `bi` (`m_sConts[bi]`) instead of the query knot index `ii` (`m_sConts[ii]`), so cached
+    /// `GetKnots` sub-interval queries and `GenerateMults` subsets or non-break query points
+    /// return each matched break's own effective multiplicity (WR-33, #2143; see
+    /// `plan/upstream-issues/WR-33--addendum-2026-10-31-mults-break-index.md`). Break matching
+    /// (`SM_EFF_ZERO`) and the `SmContinuityType`-to-multiplicity table (including `3` for
+    /// `SM_CT_DISCONTINUOUS` vs `4` at clamped ends on the uncached path) are unchanged. Off
+    /// by default for pinned C++ parity.
+    pub crv_in_volume_mults_by_break_index: bool,
     /// `SweepProfilesAlongPath` asks for caps only when the profile closes (WR-400, #837).
     pub planar_path_uncapped_open_profiles: bool,
     /// `PositionProfileCurves` returns the first failing status of its two
