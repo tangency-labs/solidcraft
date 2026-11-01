@@ -24,7 +24,7 @@
 //! | [`line_coplanar_ellipse_intersect`]      | `smgu_LineCoPlanarEllipseIntersect`        |
 //! | [`sphere_circle_sphere_circle_intersect`]| `smgu_SphereCircleSphereCircleIntersect`   |
 //! | [`intersect_two_planes`]                 | `smgu_IntersectTwoPlanes`                  |
-//! | [`best_fit_plane_to_points`]             | `smgu_BestFitPlaneToPoints`                |
+//! | [`best_fit_plane_to_points`], [`best_fit_plane_to_points_opt_in`], [`best_fit_plane_to_points_with_kernel`] | `smgu_BestFitPlaneToPoints` |
 //! | [`mult_4x4`]                             | `smgu_4x4Mult`                             |
 //! | [`inverse_4x4`]                          | `smgu_4x4Inverse`                          |
 //! | [`frenet_from_derivatives`]              | `smgu_FrenetFromDerivatives`               |
@@ -59,6 +59,13 @@
 //!   adapters where the output shapes differ (`sm_AddClosestPoint` on a
 //!   [`SegmentHits`], `smgu_LineIntersectSphere` as a count and array,
 //!   `smgu_BestFitLineToPoints` with its matrix, `smgu_3x3Determinate` on a 3x3 array).
+//! - [`best_fit_plane_to_points_opt_in`] (and [`best_fit_plane_to_points_with_kernel`],
+//!   reading
+//!   [`crate::kernel::UpstreamFixes::best_fit_line_largest_scatter_eigenvector`])
+//!   forwards `use_scatter_eigenvector` (`WR-10`) to [`p1::best_fit_line_to_points_opt_in`]
+//!   so collinear point sets return [`PointSetType::Linear`] with the least-squares line
+//!   tangent instead of falling through to [`PointSetType::Planar`];
+//!   [`best_fit_plane_to_points`] keeps pinned C++ parity.
 
 use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::geom_utility::p1::{
@@ -70,6 +77,7 @@ use crate::geom::geom_utility::p1::{
 use crate::geom::matrix::Matrix;
 use crate::geom::tol::{in_tol, is_zero, tol3d, ZONE_TOL_3D};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
+use crate::kernel::Kernel;
 use crate::math::{max2, max3, rad_to_deg, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 
 // Upstream `SM_ERR` (generic error status).
@@ -275,8 +283,12 @@ struct BestFitLine {
 }
 
 /// `smgu_BestFitLineToPoints` with `pOptM`.
-fn best_fit_line_to_points(points: &[Point3], tol: f64) -> Result<BestFitLine> {
-    let r = p1::best_fit_line_to_points(points, tol)?;
+fn best_fit_line_to_points(
+    points: &[Point3],
+    tol: f64,
+    use_scatter_eigenvector: bool,
+) -> Result<BestFitLine> {
+    let r = p1::best_fit_line_to_points_opt_in(points, tol, use_scatter_eigenvector)?;
     Ok(BestFitLine {
         set_type: r.set_type,
         point: r.line_pt,
@@ -964,8 +976,42 @@ pub fn intersect_two_planes(
 ///
 /// Only propagates errors of its callees.
 pub fn best_fit_plane_to_points(points: &[Point3], tol3d: f64) -> Result<BestFitPlane> {
+    best_fit_plane_to_points_opt_in(points, tol3d, false)
+}
+
+/// [`best_fit_plane_to_points`] reading
+/// [`Kernel::fixes.best_fit_line_largest_scatter_eigenvector`](crate::kernel::UpstreamFixes::best_fit_line_largest_scatter_eigenvector)
+/// (`smgu_BestFitPlaneToPoints`, `WR-10`).
+///
+/// # Errors
+///
+/// Only propagates errors of its callees.
+pub fn best_fit_plane_to_points_with_kernel(
+    k: &Kernel,
+    points: &[Point3],
+    tol3d: f64,
+) -> Result<BestFitPlane> {
+    best_fit_plane_to_points_opt_in(
+        points,
+        tol3d,
+        k.fixes.best_fit_line_largest_scatter_eigenvector,
+    )
+}
+
+/// [`best_fit_plane_to_points`] with an explicit opt-in (`use_scatter_eigenvector`) for
+/// `WR-10`, forwarding `use_scatter_eigenvector` to
+/// [`p1::best_fit_line_to_points_opt_in`].
+///
+/// # Errors
+///
+/// Only propagates errors of its callees.
+pub fn best_fit_plane_to_points_opt_in(
+    points: &[Point3],
+    tol3d: f64,
+    use_scatter_eigenvector: bool,
+) -> Result<BestFitPlane> {
     // upstream ignores this status
-    let line = best_fit_line_to_points(points, tol3d)?;
+    let line = best_fit_line_to_points(points, tol3d, use_scatter_eigenvector)?;
     let mut fit = BestFitPlane {
         set_type: line.set_type,
         point: line.point,
@@ -1531,5 +1577,64 @@ mod tests {
 
         // the same curve: G2 either way
         assert_eq!(c(&up, &up, &on), c(&up, &up, &off));
+    }
+
+    #[test]
+    fn wr10_plane_fit_collinear_planar_and_scattered() {
+        let k_def = Kernel::default();
+        let mut k_opt = Kernel::default();
+        k_opt.fixes.best_fit_line_largest_scatter_eigenvector = true;
+
+        // Oblique collinear set along (3, -2, 1).
+        let dir = v(3.0, -2.0, 1.0);
+        let unit_dir = dir.unitize().unwrap();
+        let col = [-3.0, -1.0, 0.5, 3.5].map(|t| v(-1.0, 2.0, 0.5) + t * dir);
+
+        let def_col = best_fit_plane_to_points(&col, 1e-6).unwrap();
+        assert_eq!(
+            best_fit_plane_to_points_with_kernel(&k_def, &col, 1e-6).unwrap(),
+            def_col
+        );
+        assert_eq!(def_col.set_type, PointSetType::Planar);
+
+        let opt_col = best_fit_plane_to_points_with_kernel(&k_opt, &col, 1e-6).unwrap();
+        assert_eq!(
+            best_fit_plane_to_points_opt_in(&col, 1e-6, true).unwrap(),
+            opt_col
+        );
+        assert_eq!(opt_col.set_type, PointSetType::Linear);
+        assert!(opt_col.normal.dot(unit_dir).abs() > 1.0 - 1e-12);
+        assert!(opt_col.max_plane_gap < 1e-14);
+
+        // Tilted planar set on 2x - y + 2z = 6.
+        let n_unit = v(2.0 / 3.0, -1.0 / 3.0, 2.0 / 3.0);
+        let u1 = v(2.0 / 3.0, 2.0 / 3.0, -1.0 / 3.0);
+        let u2 = n_unit.cross(u1);
+        let c0 = v(1.0, 0.0, 2.0);
+        let planar = [
+            c0 - 3.0 * u1 - 1.0 * u2,
+            c0 + 3.0 * u1 - 1.0 * u2,
+            c0 + 3.0 * u1 + 1.0 * u2,
+            c0 - 3.0 * u1 + 1.0 * u2,
+        ];
+        let p_def = best_fit_plane_to_points(&planar, 1e-6).unwrap();
+        let p_opt = best_fit_plane_to_points_with_kernel(&k_opt, &planar, 1e-6).unwrap();
+        assert_eq!(p_def.set_type, PointSetType::Planar);
+        assert_eq!(p_opt.set_type, PointSetType::Planar);
+        assert!(p_opt.normal.dot(n_unit).abs() > 1.0 - 1e-12);
+        assert!(p_opt.max_plane_gap < 1e-13);
+
+        // Non-coplanar 3D tetrahedron stays Scattered in both modes.
+        let tetra = [
+            v(0.0, 0.0, 0.0),
+            v(4.0, 0.0, 0.0),
+            v(0.0, 3.0, 0.0),
+            v(0.0, 0.0, 2.0),
+        ];
+        let s_def = best_fit_plane_to_points(&tetra, 1e-6).unwrap();
+        let s_opt = best_fit_plane_to_points_with_kernel(&k_opt, &tetra, 1e-6).unwrap();
+        assert_eq!(s_def.set_type, PointSetType::Scattered);
+        assert_eq!(s_opt.set_type, PointSetType::Scattered);
+        assert!(s_opt.max_plane_gap > 0.1);
     }
 }

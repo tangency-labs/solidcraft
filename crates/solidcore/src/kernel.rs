@@ -346,6 +346,18 @@ pub struct UpstreamFixes {
     pub keep_operand_uv_trims: bool,
     /// `smgu_EvaluateCurveContinuity`'s G2 test compares the two sides' Frenet curvatures and normals (WR-380, #933/#838).
     pub geometric_g2_continuity: bool,
+    /// `smgu_BestFitLineToPoints` takes the unit eigenvector of the largest eigenvalue of
+    /// the symmetric scatter matrix `M = sum_i Y_i Y_i^T` (`vectors[2]` of
+    /// `Compute3x3EigenVectors`, maximising `v^T M v` and minimising the sum of squared
+    /// orthogonal distances `tr(M) - v^T M v`), leaving `M` unmodified for
+    /// `smgu_BestFitPlaneToPoints`, and `SmPointSet3d::SetUpAxes` forwards the setting
+    /// when built with a kernel. Pinned v1.0.1 builds `C` with `tr(M) - M[i][i]` on the
+    /// diagonal and un-negated `+M[i][j]` off the diagonal and takes `C`'s largest
+    /// eigenvector (`aEigenVectors[2]`), returning a perpendicular or corrupted direction
+    /// and misclassifying collinear point sets as `Scattered` / `Planar` (WR-10, #2154;
+    /// `plan/upstream-issues/WR-10--addendum-2026-10-31-best-fit-line-eigenvector.md`).
+    /// Off by default for pinned C++ parity.
+    pub best_fit_line_largest_scatter_eigenvector: bool,
     /// `smgu_CircleFindSilhouettePoints` in perspective rotates the unit direction from the
     /// circle centre toward the projected eye point (`proj_eye - center`) as a pure vector
     /// about the circle normal by `±acos(radius / dist)` and offsets the scaled radius

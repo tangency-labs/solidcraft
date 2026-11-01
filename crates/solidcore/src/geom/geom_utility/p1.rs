@@ -38,7 +38,7 @@
 //! | [`vec_lin_comb_two_vectors`]          | `smgu_VecLinCombTwoVectors`                      |
 //! | [`PointSetType`]                      | `SmPointSetType`                                 |
 //! | [`best_fit_point_to_points`], [`BestFitPoint`] | `smgu_BestFitPointToPoints`             |
-//! | [`best_fit_line_to_points`], [`BestFitLine`]   | `smgu_BestFitLineToPoints`              |
+//! | [`best_fit_line_to_points`], [`best_fit_line_to_points_opt_in`], [`best_fit_line_to_points_with_kernel`], [`BestFitLine`] | `smgu_BestFitLineToPoints` |
 //! | [`vec_triple_product`]                | `smgu_VecTripleProduct`                          |
 //! | [`copy_3x3`]                          | `smgu_3x3Copy`                                   |
 //! | [`determinate_3x3`]                   | `smgu_3x3Determinate` (nine coefficients)        |
@@ -86,6 +86,12 @@
 //!   vector about `circle_normal` and adds `circle_center`, returning `None` when
 //!   `circle_normal` is degenerate; [`circle_find_silhouette_points`] keeps pinned C++
 //!   parity.
+//! - [`best_fit_line_to_points_opt_in`] (and [`best_fit_line_to_points_with_kernel`],
+//!   reading
+//!   [`crate::kernel::UpstreamFixes::best_fit_line_largest_scatter_eigenvector`]) adds an
+//!   opt-in least-squares line direction fix (`WR-10`) that takes the largest-eigenvalue
+//!   eigenvector of a clone of the symmetric scatter matrix `M` while preserving
+//!   [`BestFitLine::m`]; [`best_fit_line_to_points`] keeps pinned C++ parity.
 //! - `SM_ASSERT*` and `SM_DEBUG_CODE` blocks are not compiled upstream (release build)
 //!   and are not ported.
 
@@ -1409,10 +1415,46 @@ pub struct BestFitLine {
 /// [`Matrix::compute_3x3_eigen_vectors`], classified against `tol_3d`
 /// (`smgu_BestFitLineToPoints`). As upstream, that vector is not always the
 /// least-squares direction (for axis-aligned collinear points it is perpendicular to
-/// them); see `plan/findings.md`.
+/// them); see `plan/findings.md` and [`best_fit_line_to_points_with_kernel`] (`WR-10`).
 ///
 /// Errors: from the matrix helpers (not for finite input).
 pub fn best_fit_line_to_points(points: &[Point3], tol_3d: f64) -> Result<BestFitLine> {
+    best_fit_line_to_points_opt_in(points, tol_3d, false)
+}
+
+/// [`best_fit_line_to_points`] reading
+/// [`Kernel::fixes.best_fit_line_largest_scatter_eigenvector`](crate::kernel::UpstreamFixes::best_fit_line_largest_scatter_eigenvector)
+/// (`smgu_BestFitLineToPoints`, `WR-10`).
+///
+/// Errors: from the matrix helpers (not for finite input).
+pub fn best_fit_line_to_points_with_kernel(
+    k: &Kernel,
+    points: &[Point3],
+    tol_3d: f64,
+) -> Result<BestFitLine> {
+    best_fit_line_to_points_opt_in(
+        points,
+        tol_3d,
+        k.fixes.best_fit_line_largest_scatter_eigenvector,
+    )
+}
+
+/// [`best_fit_line_to_points`] with an explicit opt-in (`use_scatter_eigenvector`) for
+/// `WR-10`.
+///
+/// When `use_scatter_eigenvector` is `true`, takes the eigenvector of the largest
+/// eigenvalue (`vectors[2]`) of a clone of the symmetric scatter matrix
+/// `M = sum_i Y_i Y_i^T` (leaving [`BestFitLine::m`] unmodified for
+/// [`crate::geom::geom_utility::p2::best_fit_plane_to_points_opt_in`]), maximising
+/// `v^T M v` and minimising the squared orthogonal residuals `del - v^T M v`. When
+/// `false`, matches pinned C++ parity.
+///
+/// Errors: from the matrix helpers (not for finite input).
+pub fn best_fit_line_to_points_opt_in(
+    points: &[Point3],
+    tol_3d: f64,
+    use_scatter_eigenvector: bool,
+) -> Result<BestFitLine> {
     let fit = best_fit_point_to_points(points, tol_3d);
     let line_pt = fit.center;
 
@@ -1429,7 +1471,6 @@ pub fn best_fit_line_to_points(points: &[Point3], tol_3d: f64) -> Result<BestFit
 
     let mut del = 0.0;
     let mut m = Matrix::new(3, 3);
-    let mut c = Matrix::new(3, 3);
 
     for p in points {
         let yx = p.x - line_pt.x;
@@ -1451,20 +1492,30 @@ pub fn best_fit_line_to_points(points: &[Point3], tol_3d: f64) -> Result<BestFit
     m.set_at(2, 0, m.at(0, 2)?)?;
     m.set_at(2, 1, m.at(1, 2)?)?;
 
-    c.set_at(0, 0, del - m.at(0, 0)?)?;
-    c.set_at(0, 1, m.at(0, 1)?)?;
-    c.set_at(0, 2, m.at(0, 2)?)?;
+    let largest = if use_scatter_eigenvector {
+        // Clone M so Compute3x3EigenVectors does not mutate BestFitLine::m in place.
+        let mut m_eig = m.clone();
+        let (_, [_, _, largest]) = m_eig.compute_3x3_eigen_vectors()?;
+        largest
+    } else {
+        let mut c = Matrix::new(3, 3);
 
-    c.set_at(1, 0, m.at(1, 0)?)?;
-    c.set_at(1, 1, del - m.at(1, 1)?)?;
-    c.set_at(1, 2, m.at(1, 2)?)?;
+        c.set_at(0, 0, del - m.at(0, 0)?)?;
+        c.set_at(0, 1, m.at(0, 1)?)?;
+        c.set_at(0, 2, m.at(0, 2)?)?;
 
-    c.set_at(2, 0, m.at(2, 0)?)?;
-    c.set_at(2, 1, m.at(2, 1)?)?;
-    c.set_at(2, 2, del - m.at(2, 2)?)?;
+        c.set_at(1, 0, m.at(1, 0)?)?;
+        c.set_at(1, 1, del - m.at(1, 1)?)?;
+        c.set_at(1, 2, m.at(1, 2)?)?;
 
-    // Get Eigenvalues and EigenVectors of C(LinePt)
-    let (_, [_, _, largest]) = c.compute_3x3_eigen_vectors()?;
+        c.set_at(2, 0, m.at(2, 0)?)?;
+        c.set_at(2, 1, m.at(2, 1)?)?;
+        c.set_at(2, 2, del - m.at(2, 2)?)?;
+
+        // Get Eigenvalues and EigenVectors of C(LinePt)
+        let (_, [_, _, largest]) = c.compute_3x3_eigen_vectors()?;
+        largest
+    };
 
     // LineVec = unitized(aEigenVectors[2]) -- largest Eigenvalue.
     let line_vec = largest.unitize_or_z();
@@ -2358,5 +2409,164 @@ mod tests {
         let k1_res = circle_find_silhouette_points_with_kernel(&k1, c, n, r, true, far_eye);
         assert_eq!(k1_res, opt_res);
         assert!(k1_res.unwrap().is_some());
+    }
+
+    #[test]
+    fn wr10_axis_aligned_collinear_points() {
+        use crate::geom::geom_utility::p2::{
+            best_fit_plane_to_points, best_fit_plane_to_points_opt_in,
+            best_fit_plane_to_points_with_kernel,
+        };
+
+        let tol = 1e-6;
+        let k_def = Kernel::default();
+        let mut k_opt = Kernel::default();
+        k_opt.fixes.best_fit_line_largest_scatter_eigenvector = true;
+
+        for (axis, perp_def) in [(Vec3::X, Vec3::Z), (Vec3::Y, Vec3::Z), (Vec3::Z, Vec3::X)] {
+            let pts = [-3.0 * axis, Vec3::ZERO, 3.0 * axis];
+
+            let def = best_fit_line_to_points(&pts, tol).unwrap();
+            assert_eq!(
+                best_fit_line_to_points_opt_in(&pts, tol, false).unwrap(),
+                def
+            );
+            assert_eq!(
+                best_fit_line_to_points_with_kernel(&k_def, &pts, tol).unwrap(),
+                def
+            );
+            assert_eq!(def.set_type, PointSetType::Scattered);
+            assert_eq!(def.line_vec, perp_def);
+            assert!((def.max_line_gap - 3.0).abs() < 1e-12);
+
+            let plane_def = best_fit_plane_to_points(&pts, tol).unwrap();
+            assert_eq!(plane_def.set_type, PointSetType::Planar);
+
+            let opt = best_fit_line_to_points_with_kernel(&k_opt, &pts, tol).unwrap();
+            assert_eq!(
+                best_fit_line_to_points_opt_in(&pts, tol, true).unwrap(),
+                opt
+            );
+            assert_eq!(opt.set_type, PointSetType::Linear);
+            assert!(opt.line_vec.dot(axis).abs() > 1.0 - 1e-12);
+            assert!(opt.max_line_gap <= 1e-15);
+            assert_eq!(opt.m, def.m);
+
+            let plane_opt = best_fit_plane_to_points_with_kernel(&k_opt, &pts, tol).unwrap();
+            assert_eq!(
+                best_fit_plane_to_points_opt_in(&pts, tol, true).unwrap(),
+                plane_opt
+            );
+            assert_eq!(plane_opt.set_type, PointSetType::Linear);
+            assert!(plane_opt.normal.dot(axis).abs() > 1.0 - 1e-12);
+            assert!(plane_opt.max_plane_gap <= 1e-15);
+        }
+
+        // Asymmetric translated X-axis collinear set.
+        let shift = v(5.0, -4.0, 2.0);
+        let asym = [shift - 2.0 * Vec3::X, shift, shift + 3.0 * Vec3::X];
+        let asym_def = best_fit_line_to_points(&asym, tol).unwrap();
+        assert_eq!(asym_def.set_type, PointSetType::Scattered);
+        assert_eq!(asym_def.line_vec, Vec3::Z);
+        assert!((asym_def.max_line_gap - 8.0 / 3.0).abs() < 1e-12);
+
+        let asym_opt = best_fit_line_to_points_with_kernel(&k_opt, &asym, tol).unwrap();
+        assert_eq!(asym_opt.set_type, PointSetType::Linear);
+        assert!(asym_opt.line_vec.dot(Vec3::X).abs() > 1.0 - 1e-12);
+        assert!(asym_opt.max_line_gap <= 1e-15);
+
+        // Void and PointSized early exits match default bit-for-bit.
+        assert_eq!(
+            best_fit_line_to_points_with_kernel(&k_opt, &[], tol).unwrap(),
+            best_fit_line_to_points(&[], tol).unwrap()
+        );
+        let tiny = [v(1.0, 2.0, 3.0), v(1.0 + 1e-8, 2.0, 3.0)];
+        let tiny_opt = best_fit_line_to_points_with_kernel(&k_opt, &tiny, tol).unwrap();
+        assert_eq!(tiny_opt, best_fit_line_to_points(&tiny, tol).unwrap());
+        assert_eq!(tiny_opt.set_type, PointSetType::PointSized);
+        assert_eq!(tiny_opt.line_vec, Vec3::ZERO);
+        assert!(tiny_opt.m.is_none());
+    }
+
+    #[test]
+    fn wr10_general_oblique_collinear_and_noisy_line() {
+        use crate::geom::geom_utility::p2::{
+            best_fit_plane_to_points, best_fit_plane_to_points_with_kernel,
+        };
+
+        let mut k_opt = Kernel::default();
+        k_opt.fixes.best_fit_line_largest_scatter_eigenvector = true;
+
+        // Oblique collinear line where all off-diagonal entries of M are non-zero.
+        let dir = v(2.0, 1.0, -3.0);
+        let unit_dir = dir.unitize().unwrap();
+        let origin = v(4.0, -1.5, 2.0);
+        let pts = [-2.0, -0.5, 1.0, 3.5].map(|t| origin + t * dir);
+
+        let def = best_fit_line_to_points(&pts, 1e-6).unwrap();
+        let m_def = def.m.as_ref().unwrap();
+        assert!(m_def.at(0, 1).unwrap().abs() > 1.0);
+        assert!(m_def.at(0, 2).unwrap().abs() > 1.0);
+        assert!(m_def.at(1, 2).unwrap().abs() > 1.0);
+        assert_eq!(def.set_type, PointSetType::Scattered);
+        assert!(def.line_vec.dot(unit_dir).abs() < 0.95);
+        assert!(def.max_line_gap > 1.0);
+        assert_eq!(
+            best_fit_plane_to_points(&pts, 1e-6).unwrap().set_type,
+            PointSetType::Planar
+        );
+
+        let opt = best_fit_line_to_points_with_kernel(&k_opt, &pts, 1e-6).unwrap();
+        assert_eq!(opt.set_type, PointSetType::Linear);
+        assert!(opt.line_vec.dot(unit_dir).abs() > 1.0 - 1e-12);
+        assert!(opt.max_line_gap < 1e-14);
+        assert_eq!(opt.m, def.m);
+
+        let plane_opt = best_fit_plane_to_points_with_kernel(&k_opt, &pts, 1e-6).unwrap();
+        assert_eq!(plane_opt.set_type, PointSetType::Linear);
+        assert!(plane_opt.normal.dot(unit_dir).abs() > 1.0 - 1e-12);
+        assert!(plane_opt.max_plane_gap < 1e-14);
+
+        // Noisy near-collinear points with orthogonal perturbation eps = 1e-4.
+        let perp = dir.cross(Vec3::Y).unitize().unwrap();
+        let eps = 1e-4;
+        let noisy = [
+            origin - 10.0 * unit_dir + eps * perp,
+            origin - 5.0 * unit_dir - eps * perp,
+            origin + 5.0 * unit_dir - eps * perp,
+            origin + 10.0 * unit_dir + eps * perp,
+        ];
+        let noisy_tight = best_fit_line_to_points_with_kernel(&k_opt, &noisy, 1e-5).unwrap();
+        assert_eq!(noisy_tight.set_type, PointSetType::Scattered);
+        assert!(noisy_tight.line_vec.dot(unit_dir).abs() > 1.0 - 1e-12);
+        assert!((noisy_tight.max_line_gap - eps).abs() < 1e-13);
+
+        let noisy_loose = best_fit_line_to_points_with_kernel(&k_opt, &noisy, 2e-4).unwrap();
+        assert_eq!(noisy_loose.set_type, PointSetType::Linear);
+        assert!(noisy_loose.line_vec.dot(unit_dir).abs() > 1.0 - 1e-12);
+        assert!((noisy_loose.max_line_gap - eps).abs() < 1e-13);
+
+        // Tilted planar rectangle on x + 2y - z = 4: BestFitLine.m stays unmodified
+        // so best_fit_plane_to_points_with_kernel recovers the exact plane normal.
+        let n_unit = v(1.0, 2.0, -1.0).unitize().unwrap();
+        let u1 = v(2.0, -1.0, 0.0).unitize().unwrap();
+        let u2 = n_unit.cross(u1);
+        let center = v(1.0, 1.0, -1.0);
+        let rect = [
+            center - 4.0 * u1 - 1.5 * u2,
+            center + 4.0 * u1 - 1.5 * u2,
+            center + 4.0 * u1 + 1.5 * u2,
+            center - 4.0 * u1 + 1.5 * u2,
+        ];
+        let rect_line_def = best_fit_line_to_points(&rect, 1e-6).unwrap();
+        let rect_line_opt = best_fit_line_to_points_with_kernel(&k_opt, &rect, 1e-6).unwrap();
+        assert_eq!(rect_line_opt.set_type, PointSetType::Scattered);
+        assert!(rect_line_opt.line_vec.dot(u1).abs() > 1.0 - 1e-12);
+        assert_eq!(rect_line_opt.m, rect_line_def.m);
+
+        let rect_plane = best_fit_plane_to_points_with_kernel(&k_opt, &rect, 1e-6).unwrap();
+        assert_eq!(rect_plane.set_type, PointSetType::Planar);
+        assert!(rect_plane.normal.dot(n_unit).abs() > 1.0 - 1e-12);
+        assert!(rect_plane.max_plane_gap < 1e-13);
     }
 }

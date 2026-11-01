@@ -8,6 +8,8 @@
 //! |----------------------------------------|--------------------------------------------------|
 //! | [`PointSet3d`]                         | `SmPointSet3d`                                   |
 //! | [`PointSet3d::new`]                    | `SmPointSet3d(SmTArray<SmPoint3d>&, dTol3d, bPlanar, pOptNormal, bCopyData)` |
+//! | [`PointSet3d::new_with_kernel`]        | `SmPointSet3d(..)` (WR-10 kernel flag)           |
+//! | [`PointSet3d::set_best_fit_line_fix`]  | not upstream: WR-10 opt-in toggle                |
 //! | [`PointSet3d::clear_cache`]            | `SmPointSet3d::ClearCache`                       |
 //! | [`PointSet3d::points`]                 | `SmPointSet3d::GetPoints`                        |
 //! | [`PointSet3d::centroid`]               | `SmPointSet3d::GetCentroid`                      |
@@ -23,6 +25,7 @@
 //! | [`DataRequest`]                        | `SmPointSetDataType` (the two box requests)      |
 //! | [`PointSequence`]                      | `SmPointSequence`                                |
 //! | [`PointSequence::new`]                 | `SmPointSequence(SmTArray<SmPoint3d>&, dTol3d, bClosed, bPlanar, pOptNormal, bCopyData)` |
+//! | [`PointSequence::new_with_kernel`]     | `SmPointSequence(..)` (WR-10 kernel flag)        |
 //! | [`PointSequence::area`]                | `SmPointSequence::GetArea`                       |
 //! | `set_up_area` (private)                | `SmPointSequence::SetUpArea`                     |
 //! | `calc_quad_num` (private)              | `SmPointSequence::CalcQuadNum`                   |
@@ -56,6 +59,13 @@
 //!   [`PointSet3d::centroid_opt_in`] / [`PointSet3d::centroid_with_kernel`]
 //!   ([`Kernel::fixes.point_set_centroid_all_blocks`](crate::kernel::UpstreamFixes::point_set_centroid_all_blocks))
 //!   sums every full 50-point block and marks `Cache::CENTROID`.
+//! - `SetUpAxes` calls `smgu_BestFitPlaneToPoints`, whose best-fit line step
+//!   misclassifies collinear sets as `Scattered` / `Planar` (WR-10): [`PointSet3d::new`]
+//!   and [`PointSequence::new`] keep pinned C++ parity;
+//!   [`PointSet3d::new_with_kernel`], [`PointSequence::new_with_kernel`] and
+//!   [`PointSet3d::set_best_fit_line_fix`] forward
+//!   [`Kernel::fixes.best_fit_line_largest_scatter_eigenvector`](crate::kernel::UpstreamFixes::best_fit_line_largest_scatter_eigenvector)
+//!   to [`best_fit_plane_to_points_opt_in`].
 //! - `SetUpTightPseudoBox` calls the const `ProjectPointToPlane` on its boundary and
 //!   neighbour points and discards the results, so the angles are measured between
 //!   the unprojected points; kept (see `plan/findings.md`).
@@ -69,7 +79,7 @@ use crate::error::Result;
 use crate::geom::extent1d::ExtentPointType;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{polygon_area, PointSetType};
-use crate::geom::geom_utility::p2::{best_fit_plane_to_points, is_point_on_segment};
+use crate::geom::geom_utility::p2::{best_fit_plane_to_points_opt_in, is_point_on_segment};
 use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::tol::{is_zero, tol3d as to_tol3d};
 use crate::geom::vector3d::{Point3, Vec3};
@@ -119,6 +129,8 @@ pub struct PointSet3d {
     dist_tol3d: f64,
     /// Which cached values are valid (`m_b*Set` flags, bits [`Cache`]).
     cache: Cache,
+    /// Whether `set_up_axes` enables the `WR-10` largest scatter eigenvector fix.
+    use_scatter_eigenvector: bool,
     point_set_type: PointSetType,
     centroid: Point3,
     x_axis: Vec3,
@@ -193,6 +205,7 @@ impl PointSet3d {
             // the member is an `SmTol3d`, whose constructor takes `fabs`
             dist_tol3d: to_tol3d(tol3d),
             cache: Cache::default(),
+            use_scatter_eigenvector: false,
             point_set_type: PointSetType::Unknown,
             // `SmVector3d` members default to SM_UNDEF_DOUBLE components
             centroid: Vec3::UNDEF,
@@ -218,6 +231,33 @@ impl PointSet3d {
             }
         }
         s
+    }
+
+    /// [`PointSet3d::new`] reading
+    /// [`Kernel::fixes.best_fit_line_largest_scatter_eigenvector`](crate::kernel::UpstreamFixes::best_fit_line_largest_scatter_eigenvector)
+    /// for `SetUpAxes` (`WR-10`).
+    #[must_use]
+    pub fn new_with_kernel(
+        k: &Kernel,
+        points: Vec<Point3>,
+        tol3d: f64,
+        normal: Option<&mut Vec3>,
+    ) -> Self {
+        let mut s = Self::new(points, tol3d, normal);
+        s.use_scatter_eigenvector = k.fixes.best_fit_line_largest_scatter_eigenvector;
+        s
+    }
+
+    /// Enables or disables the `WR-10` best-fit line eigenvector fix used when
+    /// `SetUpAxes` classifies the point set, clearing any cached best-fit axes/boxes
+    /// if the setting changes.
+    pub fn set_best_fit_line_fix(&mut self, enabled: bool) {
+        if self.use_scatter_eigenvector != enabled {
+            self.use_scatter_eigenvector = enabled;
+            if self.cache.has(Cache::MAX_DEV) {
+                self.clear_cache();
+            }
+        }
     }
 
     /// Forgets every cached property (`ClearCache`), e.g. after the points changed.
@@ -331,7 +371,11 @@ impl PointSet3d {
         }
 
         // compute Point Normal from best fit plane to points
-        let fit = best_fit_plane_to_points(&self.points, self.dist_tol3d)?;
+        let fit = best_fit_plane_to_points_opt_in(
+            &self.points,
+            self.dist_tol3d,
+            self.use_scatter_eigenvector,
+        )?;
         self.point_set_type = fit.set_type;
         self.centroid = fit.point;
         self.normal = fit.normal;
@@ -689,6 +733,25 @@ impl PointSequence {
     pub fn new(points: Vec<Point3>, tol3d: f64, closed: bool, normal: Option<&mut Vec3>) -> Self {
         Self {
             set: PointSet3d::new(points, tol3d, normal),
+            closed,
+            area_set: false,
+            area: 0.0,
+        }
+    }
+
+    /// [`PointSequence::new`] reading
+    /// [`Kernel::fixes.best_fit_line_largest_scatter_eigenvector`](crate::kernel::UpstreamFixes::best_fit_line_largest_scatter_eigenvector)
+    /// for `SetUpAxes` (`WR-10`).
+    #[must_use]
+    pub fn new_with_kernel(
+        k: &Kernel,
+        points: Vec<Point3>,
+        tol3d: f64,
+        closed: bool,
+        normal: Option<&mut Vec3>,
+    ) -> Self {
+        Self {
+            set: PointSet3d::new_with_kernel(k, points, tol3d, normal),
             closed,
             area_set: false,
             area: 0.0,
@@ -1099,5 +1162,92 @@ mod tests {
         assert_eq!(c100_before, center);
         assert_eq!(c100_after, center);
         assert_eq!(c100_n_first, center);
+    }
+
+    #[test]
+    fn wr10_point_set_axes_and_flag_lookup() {
+        let k_def = Kernel::default();
+        assert!(!k_def.fixes.best_fit_line_largest_scatter_eigenvector);
+        assert!(crate::kernel::UpstreamFixes::NAMES
+            .contains(&"best_fit_line_largest_scatter_eigenvector"));
+
+        let mut k_opt = Kernel::default();
+        *k_opt
+            .fixes
+            .flag_mut("best_fit_line_largest_scatter_eigenvector")
+            .unwrap() = true;
+        assert!(k_opt.fixes.best_fit_line_largest_scatter_eigenvector);
+        assert!(k_opt
+            .fixes
+            .flags()
+            .any(|(name, on)| name == "best_fit_line_largest_scatter_eigenvector" && on));
+
+        let mut fixes_roundtrip = k_opt.fixes;
+        *fixes_roundtrip
+            .flag_mut("best_fit_line_largest_scatter_eigenvector")
+            .unwrap() = false;
+        assert!(!fixes_roundtrip.best_fit_line_largest_scatter_eigenvector);
+
+        let pts_x = vec![
+            Vec3::new(-3.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(3.0, 0.0, 0.0),
+        ];
+
+        // Default classifies axis-aligned collinear points as Planar.
+        let mut set_def = PointSet3d::new(pts_x.clone(), 1e-6, None);
+        let mut set_kdef = PointSet3d::new_with_kernel(&k_def, pts_x.clone(), 1e-6, None);
+        assert_eq!(set_def, set_kdef);
+        let n_def = set_def.normal().unwrap();
+        assert_eq!(set_def.point_set_type, PointSetType::Planar);
+        assert_eq!(n_def, set_kdef.normal().unwrap());
+
+        // Opt-in classifies collinear points as Linear: x_axis along the line tangent,
+        // y_axis and normal orthonormal and perpendicular to the line tangent.
+        let mut set_opt = PointSet3d::new_with_kernel(&k_opt, pts_x.clone(), 1e-6, None);
+        let n_opt = set_opt.normal().unwrap();
+        assert_eq!(set_opt.point_set_type, PointSetType::Linear);
+        assert!(set_opt.x_axis.dot(Vec3::X).abs() > 1.0 - 1e-12);
+        assert!(set_opt.y_axis.dot(Vec3::X).abs() < 1e-12);
+        assert!(n_opt.dot(Vec3::X).abs() < 1e-12);
+        assert!((set_opt.x_axis.cross(set_opt.y_axis) - n_opt).length() < 1e-12);
+        assert!(set_opt.max_dev <= 1e-15);
+
+        let bb = set_opt.bbox(None).unwrap();
+        assert_eq!(bb.min_at(0), -3.0);
+        assert_eq!(bb.max_at(0), 3.0);
+        assert_eq!(bb.min_at(1), 0.0);
+        assert_eq!(bb.max_at(1), 0.0);
+        assert_eq!(bb.min_at(2), 0.0);
+        assert_eq!(bb.max_at(2), 0.0);
+
+        let pb = set_opt.tight_pbox(None).unwrap();
+        assert!(pb.xy_area() <= 1e-24);
+
+        // Toggling set_best_fit_line_fix invalidates cached best-fit axes, while
+        // preserving a user-given normal.
+        set_def.set_best_fit_line_fix(true);
+        let _ = set_def.normal().unwrap();
+        assert_eq!(set_def.point_set_type, PointSetType::Linear);
+        assert!(set_def.x_axis.dot(Vec3::X).abs() > 1.0 - 1e-12);
+
+        let mut user_n = Vec3::new(0.0, 0.0, 4.0);
+        let mut set_given = PointSet3d::new(pts_x.clone(), 1e-6, Some(&mut user_n));
+        set_given.set_best_fit_line_fix(true);
+        assert_eq!(set_given.normal().unwrap(), Vec3::Z);
+        assert_eq!(set_given.point_set_type, PointSetType::Planar);
+
+        // PointSequence::new_with_kernel inherits the WR-10 opt-in.
+        let mut seq_opt = PointSequence::new_with_kernel(&k_opt, pts_x, 1e-6, true, None);
+        assert!(seq_opt.area().unwrap().abs() <= 1e-15);
+        assert_eq!(seq_opt.point_set_type, PointSetType::Linear);
+        assert_eq!(
+            seq_opt.point_containment(Vec3::new(1.0, 0.0, 0.0)).unwrap(),
+            PointContainment::OnBoundary
+        );
+        assert_eq!(
+            seq_opt.point_containment(Vec3::new(1.0, 1.0, 0.0)).unwrap(),
+            PointContainment::Outside
+        );
     }
 }
