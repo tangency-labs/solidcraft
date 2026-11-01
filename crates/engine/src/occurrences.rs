@@ -971,13 +971,13 @@ impl Session {
         self.selection = selection.into_iter().filter(|s| !matches!(s, Sel::Occurrence {path} if self.occurrence_placement(path).is_err())).collect();
         // A selected body that is gone cannot be deleted, measured or shown: drop it, so a
         // later body taking its name is never deleted in its place (#9737).
-        if self.selection.iter().any(|s| s.body_name().is_some()) {
-            if let Ok(world) = self.world_state() {
-                self.selection.retain(|s| match s.body_name() {
-                    Some(name) => world.body(name).is_some(),
-                    None => true,
-                });
-            }
+        if self.selection.iter().any(|s| s.body_name().is_some())
+            && let Ok(world) = self.world_state()
+        {
+            self.selection.retain(|s| match s.body_name() {
+                Some(name) => world.body(name).is_some(),
+                None => true,
+            });
         }
         let hidden = std::mem::take(&mut self.visibility.hidden_occurrences);
         self.visibility.hidden_occurrences = hidden.into_iter().filter(|p| self.occurrence_placement(p).is_ok()).collect();

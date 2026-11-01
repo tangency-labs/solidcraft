@@ -76,7 +76,8 @@ fn a_cut_cylinders_rims_are_drawn_on_their_own_arc() {
     near(under(flats()), chord, "far chord");
     // From the flat side, along x, the rims are level lines as wide as the chord.
     let (lines, record) = draw(&body, Vec3::new(1., 0., 0.), Vec3::new(0., 0., 1.));
-    let wide: Vec<Vec2> = lines.iter().filter(|l| is_circle(l, &record, true)).flat_map(|l| &l.pieces).flat_map(|p| &p.geometry).flat_map(points).collect();
+    let wide: Vec<Vec2> =
+        lines.iter().filter(|l| is_circle(l, &record, true)).flat_map(|l| &l.pieces).flat_map(|p| &p.geometry).flat_map(points).collect();
     let reach = wide.iter().map(|p| p.x.abs()).fold(0., f64::max);
     near(reach, chord / 2., "rims from the flat side");
 }

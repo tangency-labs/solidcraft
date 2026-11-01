@@ -249,6 +249,12 @@ pub(crate) fn shows_pressed(app: &SolveApp, id: &str) -> bool {
     running_command(app).as_deref() == Some(id) || app.session.active_analysis() == Some(id)
 }
 
+/// [`shows_pressed`] for a ribbon button: a command with a persistent effect is pressed only while
+/// its tool runs, since `persistent_ribbon_pressed` alone decides how its effect is shown.
+fn ribbon_shows_pressed(app: &SolveApp, id: &str) -> bool {
+    if persistent_available(app, id) { running_command(app).as_deref() == Some(id) } else { shows_pressed(app, id) }
+}
+
 /// The Report a bug button: labelled when the layout asks for it and there is room for its text
 /// (`label_width`, measured in the current language), otherwise just the icon. An icon-only
 /// layout gives it a square the size of Settings and Help. `version_width` is the measured version.
@@ -1789,7 +1795,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let family_open = family.is_some_and(|f| egui::Popup::is_id_open(ui.ctx(), ui.id().with(("family", f.label)).with("popup")));
                 let neutral = if !finish
                     && (resp.is_pointer_button_down_on()
-                        || (shows_pressed(app, selected.id) && !(persistent && app.preferences.persistent_ribbon_pressed))
+                        || (ribbon_shows_pressed(app, selected.id) && !(persistent && app.preferences.persistent_ribbon_pressed))
                         || family_open
                         || (selected.id == "view.shots_strip" && app.preferences.render_shots_strip))
                 {
@@ -1907,7 +1913,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     );
                     let info = crate::render_workspace::interactive_command_info(app, c);
                     let resp = ui.interact(cell, ui.id().with(("cmd", c.id)), Sense::click_and_drag());
-                    let active = shows_pressed(app, c.id);
+                    let active = ribbon_shows_pressed(app, c.id);
                     let accent = crate::theme::TabAccent::for_tab(&t, &tab);
                     painter.rect(
                         cell,

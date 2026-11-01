@@ -51,7 +51,8 @@ fn on_both_surfaces(c: &C3, surfaces: &[Box<crate::brep::Surface>; 2], tolerance
     const MAX_SAMPLES: usize = 512;
     let [Ok(a), Ok(b)] = [SurfaceEval::new(&surfaces[0]), SurfaceEval::new(&surfaces[1])] else { return false };
     let breaks = c.breaks();
-    let samples: Vec<f64> = breaks.windows(2).flat_map(|w| (0..4).map(move |i| w[0] + (w[1] - w[0]) * f64::from(i) / 4.0)).chain(breaks.last().copied()).collect();
+    let samples: Vec<f64> =
+        breaks.windows(2).flat_map(|w| (0..4).map(move |i| w[0] + (w[1] - w[0]) * f64::from(i) / 4.0)).chain(breaks.last().copied()).collect();
     let stride = (samples.len() / MAX_SAMPLES).max(1);
     samples.iter().step_by(stride).all(|t| {
         let p = c.at(*t);

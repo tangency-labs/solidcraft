@@ -97,7 +97,7 @@ pub struct ThreadSize {
 }
 
 /// ISO 261/262 coarse pitches: (nominal diameter, pitch).
-pub(crate) const ISO_COARSE: [(f64, f64); 22] = [
+pub(crate) const ISO_COARSE: &[(f64, f64)] = &[
     (1.6, 0.35),
     (2.0, 0.4),
     (2.5, 0.45),
@@ -124,7 +124,7 @@ pub(crate) const ISO_COARSE: [(f64, f64); 22] = [
 
 /// The ISO 2902 diameter-pitch series' middle pitch per diameter, which ISO 2904 (trapezoidal)
 /// and DIN 513-2 (buttress, from 10 mm) share: (nominal diameter, pitch).
-const ISO_2902_MEDIUM: [(f64, f64); 41] = [
+const ISO_2902_MEDIUM: &[(f64, f64)] = &[
     (8.0, 1.5),
     (9.0, 2.0),
     (10.0, 2.0),
@@ -169,7 +169,7 @@ const ISO_2902_MEDIUM: [(f64, f64); 41] = [
 ];
 
 /// ASME B1.5 general purpose Acme: (nominal diameter, threads per inch), in inches.
-const ACME_SIZES: [(&str, f64, f64); 23] = [
+const ACME_SIZES: &[(&str, f64, f64)] = &[
     ("1/4", 0.25, 16.0),
     ("5/16", 0.3125, 14.0),
     ("3/8", 0.375, 12.0),

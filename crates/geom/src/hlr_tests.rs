@@ -2690,7 +2690,10 @@ fn an_edge_is_cut_to_its_interval_on_its_unbounded_curve() {
         leader: Box::new(leader),
         tolerance: 1e-4,
     };
-    let flat = brep::Curve::Spline { knots: vec![0., 0., 0., 0., 0.5, 1., 1., 1., 1.], points: vec![[0., 0., 0.], [1., 3., 0.], [2., -3., 0.], [3., 3., 0.], [4., 0., 0.]] };
+    let flat = brep::Curve::Spline {
+        knots: vec![0., 0., 0., 0., 0.5, 1., 1., 1., 1.],
+        points: vec![[0., 0., 0.], [1., 3., 0.], [2., -3., 0.], [3., 3., 0.], [4., 0., 0.]],
+    };
     let (whole, _) = C3::of_edge(&bounded_edge(flat.clone(), None, [0., 1.])).unwrap();
     let (c, acc) = C3::of_edge(&bounded_edge(traced(flat), None, [0.25, 0.75])).unwrap();
     assert_eq!(acc, CurveAccuracy::Bounded { max_deviation_mm: 1e-4 });
@@ -2792,7 +2795,21 @@ fn a_traced_rim_is_drawn_on_the_true_intersection_or_refused() {
     let tolerance = 5e-3;
     let k = 10. * 4. / 3. * (std::f64::consts::FRAC_PI_8).tan();
     let knots = vec![0., 0., 0., 0., 1., 1., 1., 2., 2., 2., 3., 3., 3., 4., 4., 4., 4.];
-    let quarter = [[10., 0.], [10., k], [k, 10.], [0., 10.], [-k, 10.], [-10., k], [-10., 0.], [-10., -k], [-k, -10.], [0., -10.], [k, -10.], [10., -k], [10., 0.]];
+    let quarter = [
+        [10., 0.],
+        [10., k],
+        [k, 10.],
+        [0., 10.],
+        [-k, 10.],
+        [-10., k],
+        [-10., 0.],
+        [-10., -k],
+        [-k, -10.],
+        [0., -10.],
+        [k, -10.],
+        [10., -k],
+        [10., 0.],
+    ];
     let traced = |z: f64| {
         let mut body = cylinder(10., 10.);
         let side = Box::new(body.shells[0].faces[0].surface.clone());
@@ -2806,7 +2823,13 @@ fn a_traced_rim_is_drawn_on_the_true_intersection_or_refused() {
     let def = prepare(&traced(10.), &o).unwrap();
     let rim_points = |view: &View| -> Vec<[f64; 2]> {
         let d = hidden_lines(std::slice::from_ref(&def), &[identity(0, [0.; 3])], view, &o, &never).unwrap();
-        let rim: Vec<_> = d.lines.iter().filter(|l| matches!(l.source, Source::Edge { edge: 1, .. })).flat_map(|l| &l.pieces).flat_map(|p| p.points.iter().copied()).collect();
+        let rim: Vec<_> = d
+            .lines
+            .iter()
+            .filter(|l| matches!(l.source, Source::Edge { edge: 1, .. }))
+            .flat_map(|l| &l.pieces)
+            .flat_map(|p| p.points.iter().copied())
+            .collect();
         assert!(rim.len() > 16, "{rim:?}");
         rim
     };
@@ -2816,8 +2839,22 @@ fn a_traced_rim_is_drawn_on_the_true_intersection_or_refused() {
     assert!(spread(0) > 19.9 && spread(1) > 19.9, "the whole circle");
     let side = rim_points(&View::new(Vec3::new(0., 1., 0.), Vec3::new(0., 0., 1.)).unwrap());
     let height = side.first().map_or(f64::NAN, |p| p[1]);
-    let lowest = hidden_lines(std::slice::from_ref(&def), &[identity(0, [0.; 3])], &View::new(Vec3::new(0., 1., 0.), Vec3::new(0., 0., 1.)).unwrap(), &o, &never).unwrap();
-    let bottom = lowest.lines.iter().filter(|l| matches!(l.source, Source::Edge { edge: 0, .. })).flat_map(|l| &l.pieces).flat_map(|p| p.points.iter()).next().map_or(f64::NAN, |p| p[1]);
+    let lowest = hidden_lines(
+        std::slice::from_ref(&def),
+        &[identity(0, [0.; 3])],
+        &View::new(Vec3::new(0., 1., 0.), Vec3::new(0., 0., 1.)).unwrap(),
+        &o,
+        &never,
+    )
+    .unwrap();
+    let bottom = lowest
+        .lines
+        .iter()
+        .filter(|l| matches!(l.source, Source::Edge { edge: 0, .. }))
+        .flat_map(|l| &l.pieces)
+        .flat_map(|p| p.points.iter())
+        .next()
+        .map_or(f64::NAN, |p| p[1]);
     assert!(side.iter().all(|p| (p[1] - height).abs() <= tolerance) && ((height - bottom) - 10.).abs() <= tolerance, "{side:?} over {bottom}");
     let off = prepare(&traced(11.), &o).err();
     assert!(matches!(off, Some(HlrError::Unsupported("surface intersection curve"))), "{off:?}");
