@@ -587,9 +587,37 @@ pub struct Applying {
     pub(crate) cmds: Vec<(String, Value)>,
     pub(crate) progress: std::sync::Arc<solidcraft_engine::doc::progress::Progress>,
     pub(crate) quality: solidcraft_engine::doc::display_quality::DisplayQuality,
+    /// The design state it was computed from; a job is only taken up again for the same one.
+    pub(crate) design: Design,
+}
+
+/// What identifies the design a job was computed from: the document itself (not a copy of equal
+/// content), its revision and the selection the commands read.
+#[derive(Clone)]
+pub(crate) struct Design {
+    doc: std::sync::Arc<solidcraft_engine::doc::Document>,
+    revision: u64,
+    selection: Vec<Sel>,
+}
+
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+impl Design {
+    pub(crate) fn of(session: &Session) -> Self {
+        Design { doc: session.doc.clone(), revision: session.revision, selection: session.selection.clone() }
+    }
+
+    fn is(&self, session: &Session) -> bool {
+        std::sync::Arc::ptr_eq(&self.doc, &session.doc) && self.revision == session.revision && self.selection == session.selection
+    }
 }
 
 impl Applying {
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    /// This job computes `cmds` from the design `session` now holds.
+    fn matches(&self, cmds: &[(String, Value)], session: &Session) -> bool {
+        self.cmds == cmds && self.design.is(session)
+    }
+
     fn finished(&mut self) -> Option<Result<solidcraft_engine::ComputedCommands, String>> {
         if !self.seen {
             self.seen = true;
@@ -603,11 +631,45 @@ impl Applying {
     }
 }
 
+impl Applying {
+    /// Its result is in (or its worker ended): nothing is left to take up.
+    fn pending_is_done(&mut self) -> bool {
+        if self.ready.is_some() {
+            return true;
+        }
+        match self.done.try_recv() {
+            Ok(result) => {
+                self.ready = Some(result);
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => false,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => true,
+        }
+    }
+}
+
 impl Drop for Applying {
     fn drop(&mut self) {
         self.progress.cancel();
     }
 }
+
+/// Leave OK's evaluation to run on to its end (Cancel while computing): OK pressed again on the
+/// same commands and design takes it up ([`begin_applying`]). A feature editor's job is dropped.
+fn abandon(app: &mut SolveApp) {
+    app.abandoned.retain_mut(|job| !job.pending_is_done());
+    let editing = app.dialog.as_ref().is_some_and(|d| d.editing.is_some());
+    if let Some(mut job) = app.applying.take()
+        && !editing
+        && app.abandoned.len() < MAX_ABANDONED
+        && !job.pending_is_done()
+    {
+        app.abandoned.push(job);
+    }
+}
+
+/// Jobs a Cancel left computing that OK can still take up.
+const MAX_ABANDONED: usize = 8;
 
 /// How long OK waits before displaying its computing state.
 pub const APPLY_AT_ONCE: std::time::Duration = std::time::Duration::from_millis(150);
@@ -619,7 +681,7 @@ fn display_quality(app: &SolveApp) -> solidcraft_engine::doc::display_quality::D
 /// Desktop feature dialogs evaluate the entire command and its dependent suffix once.
 /// Results wait until a later frame before adoption, keeping the computing state visible.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn begin_applying(app: &SolveApp, d: &Dialog) -> Option<Applying> {
+pub(crate) fn begin_applying(app: &mut SolveApp, d: &Dialog) -> Option<Applying> {
     let wait = app.apply_off_thread?;
     if !d.previews() {
         return None;
@@ -628,7 +690,15 @@ pub(crate) fn begin_applying(app: &SolveApp, d: &Dialog) -> Option<Applying> {
     let cmds = computation.cmds.clone();
     #[cfg(test)]
     let gate = app.apply_gate.clone();
-    Some(start_applying(cmds, display_quality(app), crate::now_ms(), wait, move || {
+    if let Some(i) = app.abandoned.iter().position(|job| job.matches(&cmds, &app.session)) {
+        // The same commands on the same design, still computing since a Cancel: take that job up
+        // rather than run a long Boolean a second time beside it.
+        let mut job = app.abandoned.remove(i);
+        job.seen = false;
+        return Some(job);
+    }
+    let design = Design::of(&app.session);
+    Some(start_applying(cmds, design, display_quality(app), crate::now_ms(), wait, move || {
         let result = computation.compute();
         #[cfg(test)]
         if let Some(gate) = gate {
@@ -641,6 +711,7 @@ pub(crate) fn begin_applying(app: &SolveApp, d: &Dialog) -> Option<Applying> {
 #[cfg(not(target_arch = "wasm32"))]
 fn start_applying(
     cmds: Vec<(String, Value)>,
+    design: Design,
     quality: solidcraft_engine::doc::display_quality::DisplayQuality,
     started: f64,
     wait: std::time::Duration,
@@ -671,12 +742,12 @@ fn start_applying(
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Some(Err("feature computation ended without a result".into())),
         },
     };
-    Applying { done: rx, ready, seen: false, started, cmds, progress, quality }
+    Applying { done: rx, ready, seen: false, started, cmds, progress, quality, design }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn warm_applying(app: &SolveApp, prepared: solidcraft_engine::ComputedCommands, cmds: Vec<(String, Value)>, started: f64) -> Option<Applying> {
-    Some(start_applying(cmds, display_quality(app), started, std::time::Duration::ZERO, move || Ok(prepared)))
+    Some(start_applying(cmds, Design::of(&app.session), display_quality(app), started, std::time::Duration::ZERO, move || Ok(prepared)))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -685,7 +756,7 @@ fn warm_applying(_app: &SolveApp, _prepared: solidcraft_engine::ComputedCommands
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn begin_applying(_app: &SolveApp, _d: &Dialog) -> Option<Applying> {
+pub(crate) fn begin_applying(_app: &mut SolveApp, _d: &Dialog) -> Option<Applying> {
     None
 }
 
@@ -3653,7 +3724,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // Cancel while computing: the result goes (its worker runs on to its end).
     if cancel && !applied {
-        app.applying = None;
+        abandon(app);
     }
     if !keep || cancel {
         app.session.feature_edit_sketch = None;
@@ -3690,13 +3761,21 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// Close the dialog and stop its computing OK for good: another command or document takes over,
+/// so nothing is left for OK to take up again.
+pub fn discard(app: &mut SolveApp) {
+    app.applying = None;
+    app.abandoned.clear();
+    cancel(app);
+}
+
 /// Close the dialog without applying it (Esc, Cancel). An edit puts the timeline marker back.
 pub fn cancel(app: &mut SolveApp) {
     app.session.feature_edit_sketch = None;
     if let Some(pending) = &mut app.pending_feature_edit {
         pending.cancel();
     }
-    app.applying = None;
+    abandon(app);
     if let Some(mut d) = app.dialog.take() {
         crate::dialogs_motion::closed(app, &mut d, false);
         if let Kind::Text(k) = &mut d.kind {

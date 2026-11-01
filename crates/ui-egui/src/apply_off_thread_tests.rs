@@ -57,6 +57,7 @@ fn hold_result(h: &mut Harness, different_commands: bool) -> std::sync::mpsc::Se
         cmds: if different_commands { Vec::new() } else { cmds },
         progress: Default::default(),
         quality: Default::default(),
+        design: crate::dialogs::Design::of(&h.app.session),
     });
     finish
 }
@@ -97,8 +98,9 @@ fn cancel_while_computing_applies_nothing() {
     let progress = h.app.applying.as_ref().unwrap().progress.clone();
     h.step(&json!({"key": "Escape"})).unwrap();
     assert!(h.app.applying.is_none() && h.app.dialog.is_none());
-    assert!(progress.is_cancelled());
-    assert!(finish.send(prepared).is_err());
+    // Cancel leaves the evaluation running for OK to take up again (#3962), and applies nothing.
+    assert!(!progress.is_cancelled() && h.app.abandoned.len() == 1);
+    finish.send(prepared).ok().unwrap();
     h.frames(5);
     assert_eq!(h.app.session.doc.features.len(), features);
 }
@@ -458,7 +460,7 @@ fn a_worker_error_then_cancel_preserves_original_world_history_redo_and_selectio
     solidcraft_engine::doc::progress::watch(window.clone(), || {
         // Exercise the production worker directly: a preview may disable the OK widget
         // for this deliberately invalid expression before a synthetic click reaches it.
-        h.app.applying = crate::dialogs::begin_applying(&h.app, &dialog);
+        h.app.applying = crate::dialogs::begin_applying(&mut h.app, &dialog);
         assert!(h.app.applying.is_some(), "the real apply worker was started");
         until_applied(&mut h);
         assert!(h.app.dialog.as_ref().and_then(|d| d.error.as_ref()).is_some_and(|error| error.contains("missing_extent")), "{:?}", h.app.dialog);
@@ -499,4 +501,65 @@ fn a_changed_display_quality_warms_the_result_without_replaying_commands() {
     assert_eq!(progress.features(), (0, 0), "changing display quality does not replay the geometry commands");
     assert!(h.app.dialog.is_none());
     h.step(&json!({"expect":{"bodies":1,"volume":13000}})).unwrap();
+}
+
+/// #3962: OK pressed again after a Cancel left its evaluation computing takes that job up: the
+/// evaluation runs once. The worker is held until it is let go once; a second worker started
+/// beside the first would wait for a second release that never comes, and nothing would apply.
+#[test]
+fn ok_again_after_cancel_takes_up_the_evaluation_still_computing() {
+    let mut h = square_on_a_block();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    let (finish, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    let features = h.app.session.doc.features.len();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.applying.is_some(), "computing");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    assert!(h.app.applying.is_none() && h.app.dialog.is_none());
+    assert_eq!(h.app.abandoned.len(), 1, "left computing");
+    h.app.start("solid.extrude");
+    h.frames(2);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.applying.is_some() && h.app.abandoned.is_empty(), "the same evaluation taken up");
+    finish.send(()).unwrap();
+    until_applied(&mut h);
+    assert!(h.app.applying.is_none(), "applied once its one evaluation is in");
+    assert_eq!(h.app.session.doc.features.len(), features + 1);
+}
+
+/// #3962: an abandoned job computed for a different design is never taken up, even when the
+/// dialog's commands are identical.
+#[test]
+fn ok_again_does_not_take_up_a_job_computed_for_a_different_design() {
+    let mut h = square_on_a_block();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    let (_finish, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.step(&json!({"key": "Escape"})).unwrap();
+    assert_eq!(h.app.abandoned.len(), 1, "left computing");
+    h.app.run("solid.box", json!({"corner": [100, 0, 0], "length": 2, "width": 2, "height": 2})).unwrap();
+    h.app.start("solid.extrude");
+    h.frames(2);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert!(h.app.applying.is_some(), "a new evaluation for the changed design");
+    assert_eq!(h.app.abandoned.len(), 1, "the other design's job was left alone");
+}
+
+/// #3962: quitting does not wait for an evaluation a Cancel left computing.
+#[test]
+fn quitting_does_not_wait_for_an_evaluation_left_computing() {
+    let mut h = square_on_a_block();
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    // Held for the whole test: the evaluation never finishes.
+    let (_finish, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.step(&json!({"key": "Escape"})).unwrap();
+    assert_eq!(h.app.abandoned.len(), 1);
+    h.app.session.mark_saved();
+    crate::documents::request_quit(&mut h.app);
+    h.frames(2);
+    assert!(h.app.quit_requested, "the window closes with the evaluation still running");
 }
