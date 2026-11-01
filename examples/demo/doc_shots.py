@@ -266,7 +266,8 @@ def composite(work, raw, start, crop, out):
         ["ffmpeg", "-loglevel", "error", "-y", "-i", str(raw), "-loop", "1", "-i", str(work / "cursor.png"), "-loop", "1", "-i", str(work / "ripple.png"), "-filter_complex", graph, "-map", "[v]", "-c:v", "libx264", "-crf", "14", "-pix_fmt", "yuv420p", str(full)],
         check=True,
     )
-    subprocess.run([sys.executable, str(HERE / "trim_idle.py"), str(full), str(out), "--crf", "26"], check=True)
+    # Idle stretches shortened, not removed: a reader needs a moment on each result.
+    subprocess.run([sys.executable, str(HERE / "trim_idle.py"), str(full), str(out), "--crf", "26", "--hold", "0.8"], check=True)
 
 
 def labels(work, marks, start, w, h):
