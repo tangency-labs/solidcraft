@@ -19,7 +19,10 @@ versions. Two preferences opt into holding the model:
 While editing a sketch, the cap pans and zooms without changing the sketch's initial view. After you
 adjust the view with the navigation cube, the cap can rotate it too. Turn on **Turn sketches with
 the 3D mouse** (`space_mouse_sketch_orbit: true`) to let the cap rotate a sketch seen square on as
-well, as the mouse can. The Navigation
+well, as the mouse can. Turn on **Keep the horizon level with the 3D mouse**
+(`space_mouse_horizon_lock: true`) and the view never rolls: Tilt turns it up and down, Roll and
+Spin turn it about the world's up axis, and a view that is already rolled is eased level. With
+**Free orbit** on as well, the tilt goes on over the poles and the horizon stays level. The Navigation
 page in Preferences has an on/off switch, a speed control and, for each of the cap's six axes, an
 invert switch and a speed for the 3D mouse. The cap's zoom direction comes from its own invert
 switch; **Reverse zoom direction** under Wheel and trackpad reverses the wheel only (#8993). The web app reads

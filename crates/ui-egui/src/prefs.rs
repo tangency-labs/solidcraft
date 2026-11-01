@@ -1037,6 +1037,11 @@ preference_settings! {
     /// (#2227), as the mouse can. Off (the default): the cap pans and zooms a square-on sketch and
     /// turns it only after the view is tilted away from it.
     space_mouse_sketch_orbit: bool = false, PAGE_MOUSE3D => check_id("ui.3d_mouse_sketch_orbit");
+    /// 3D mouse orbit keeps the horizon level: tilt turns the view up and down, and twist and
+    /// roll turn it about the world's up axis, so the view never rolls and a tilted view is eased
+    /// level; with free orbit on too, the tilt goes on over the poles, the horizon still level.
+    /// Off (the default): the cap rolls the view with its twist, as it did before.
+    space_mouse_horizon_lock: bool = false, PAGE_MOUSE3D => check_id("ui.3d_mouse_horizon_lock");
     /// Speed multiplier for 3D mouse navigation.
     space_mouse_speed: f32 = 1.0, PAGE_MOUSE3D;
     /// Per physical axis of the cap (push X, Y, Z, then tilt X, Y, Z), whether it moves the view
@@ -2805,6 +2810,7 @@ fn space_mouse_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
             setting::space_mouse_in_view(app, ui).on_hover_text(crate::i18n::tr("ui.3d_mouse_show_in_view_tip"));
             ui.add_enabled_ui(app.preferences.space_mouse_enabled, |ui| {
                 setting::space_mouse_sketch_orbit(app, ui).on_hover_text(crate::i18n::tr("ui.3d_mouse_sketch_orbit_tip"));
+                setting::space_mouse_horizon_lock(app, ui).on_hover_text(crate::i18n::tr("ui.3d_mouse_horizon_lock_tip"));
             });
         });
     });
@@ -3158,6 +3164,7 @@ pub fn restore_space_mouse_defaults(app: &mut SolveApp) {
     p.space_mouse_in_view = d.space_mouse_in_view;
     p.space_mouse_model_pivot = d.space_mouse_model_pivot;
     p.space_mouse_sketch_orbit = d.space_mouse_sketch_orbit;
+    p.space_mouse_horizon_lock = d.space_mouse_horizon_lock;
 }
 
 /// The device's picture with the coordinate circles under it, and a box with a small model that
@@ -4971,6 +4978,7 @@ mod tests {
         p.space_mouse_in_view = true;
         p.space_mouse_model_pivot = true;
         p.space_mouse_sketch_orbit = true;
+        p.space_mouse_horizon_lock = true;
         let before = h.app.preferences.clone();
         let camera = h.app.cam;
         restore_space_mouse_defaults(&mut h.app);
@@ -4983,6 +4991,7 @@ mod tests {
         assert_eq!((p.space_mouse_axis_speed, p.space_mouse_axis_source), (d.space_mouse_axis_speed, d.space_mouse_axis_source));
         assert_eq!((p.space_mouse_ghost_position, p.space_mouse_in_view), (d.space_mouse_ghost_position, d.space_mouse_in_view));
         assert_eq!((p.space_mouse_model_pivot, p.space_mouse_sketch_orbit), (d.space_mouse_model_pivot, d.space_mouse_sketch_orbit));
+        assert_eq!(p.space_mouse_horizon_lock, d.space_mouse_horizon_lock);
         // Kept: the calibration (dead zone too), the buttons, the offered set, never, enabled, the rest of the page.
         assert_eq!(p.space_mouse_calibrations, before.space_mouse_calibrations);
         assert_eq!(p.space_mouse_buttons, before.space_mouse_buttons);
