@@ -510,6 +510,91 @@ pub fn grid_ext(half_height: f64, major: f64, slant: f64) -> f64 {
     (ext / slant.abs().max(0.25) / major).ceil() * major
 }
 
+/// One grid segment in world coordinates.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GridSegment {
+    pub a: Vec3,
+    pub b: Vec3,
+    /// The fade to draw it at (0..1); includes the line's cross-fade weight.
+    pub alpha: f32,
+    /// How much of the segment is the major look (0..1), for the caller's two colours.
+    pub major: f32,
+}
+
+/// A grid's placement on a plane: the centre, its axes, the plane origin the line offsets are
+/// measured from, and the fade.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GridFrame {
+    pub centre: Vec3,
+    pub u: Vec3,
+    pub v: Vec3,
+    pub origin: Vec3,
+    pub fade: GridFade,
+}
+
+/// The grid on a frame as world segments.
+pub fn grid_segments_on(cam: &Camera, frame: &GridFrame, cap: i64) -> Vec<GridSegment> {
+    let at_u = (frame.centre - frame.origin).dot(frame.u);
+    let at_v = (frame.centre - frame.origin).dot(frame.v);
+    let mut out = Vec::new();
+    // Two lines through the point `frame.centre + frame.u * t`: one along v, one along u.
+    for (along, across, at) in [(frame.v, frame.u, at_u), (frame.u, frame.v, at_v)] {
+        for line in grid_lines(cam.half_height(), at, frame.fade.end, cap) {
+            for (s0, s1, alpha) in frame.fade.pieces(line.offset) {
+                out.push(GridSegment {
+                    a: frame.centre + across * line.offset + along * s0,
+                    b: frame.centre + across * line.offset + along * s1,
+                    alpha: alpha * line.weight,
+                    major: line.major,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// The default viewport grid: the ground, or the upright plane when it is seen edge-on. `far` is
+/// the picture's far distance (for the fade); `follows_view` is the preference; `last` is the
+/// plane the previous frame drew, which makes the edge-on switch hysteretic.
+pub fn grid_segments(cam: &Camera, far: f64, follows_view: bool, last: &mut GridPlane) -> Vec<GridSegment> {
+    let tf = cam.to_frame(cam.target);
+    let back = cam.to_frame(cam.back());
+    let plane = if follows_view {
+        *last = grid_plane(back, *last);
+        *last
+    } else {
+        GridPlane::Ground
+    };
+    let (u, v) = plane.axes();
+    let n = u.cross(v);
+    let slant = back.dot(n);
+    let major = grid_step(cam.half_height()).1;
+    let ext = grid_ext(cam.half_height(), major, slant);
+    let centre = grid_centre(tf, back, n, ext);
+    let snap = |a: Vec3| a * ((centre.dot(a) / major).round() * major);
+    let c = snap(u) + snap(v);
+    let far_reach = grid_far_reach(cam, far, cam.from_frame(c), cam.from_frame(n));
+    let fade = GridFade::new(cam.half_height(), slant, ext, far_reach);
+    let frame = GridFrame { centre: cam.from_frame(c), u: cam.from_frame(u), v: cam.from_frame(v), origin: Vec3::ZERO, fade };
+    grid_segments_on(cam, &frame, 300)
+}
+
+/// Where the ground grid is centred: where the view's axis (`back`, through the camera's target
+/// `tf`) meets the plane through the origin with normal `n`, so the middle of the view has grid
+/// (#3087). At a grazing slant, return smoothly toward the point under the target: the actual
+/// intersection runs beyond the visible grid and jumps to the other side at the horizon.
+pub fn grid_centre(tf: Vec3, back: Vec3, n: Vec3, ext: f64) -> Vec3 {
+    let height = tf.dot(n);
+    let under = tf - n * height;
+    let slant = back.dot(n);
+    // Use the same minimum slant as grid_ext and GridFade. Above it, this is the view-axis
+    // intersection; below it, the offset tends continuously to zero instead of infinity.
+    let reach_slant = slant.abs().max(0.25);
+    let along = (back - n * slant) * (-height * slant / (reach_slant * reach_slant));
+    let len = along.len();
+    if len > ext && len > 0.0 { under + along * (ext / len) } else { under + along }
+}
+
 /// Sketch curves as world polylines with their colour.
 pub fn sketch_lines(sk: &Sketch, plane: &Plane, active: bool, determined: &[bool]) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     sketch_lines_with_sampler(sk, plane, active, determined, world_curve_parts)
@@ -783,50 +868,41 @@ fn build_scene(
         let major = grid_step(cam.half_height()).1;
         // Headless pictures keep the grid on the ground, the viewport's default; an open sketch
         // has its own plane's grid (world coordinates, no camera frame).
-        let (c, u, v, slant, w): (Vec3, Vec3, Vec3, f64, Box<dyn Fn(Vec3) -> Vec3>) = if let Some(pl) = open_sketch_plane(s) {
+        let sketch_plane = open_sketch_plane(s);
+        let frame = if let Some(pl) = sketch_plane {
             let (c, u, v) = sketch_grid_frame(&pl, cam.target, major);
             let n = u.cross(v);
-            (c, u, v, cam.back().dot(n), Box::new(|p| p))
+            let slant = cam.back().dot(n);
+            // The grid reaches as far on the ground as the view is wide (the ground stretches as
+            // it is seen at a slant) and fades out with the distance, so that it dissolves into the
+            // distance instead of ending in a cut (#4214).
+            let ext = grid_ext(cam.half_height(), major, slant);
+            let far_reach = grid_far_reach(cam, cam.clip(sc.radius).1, c, n);
+            let fade = GridFade::new(cam.half_height(), slant, ext, far_reach);
+            GridFrame { centre: c, u, v, origin: pl.origin, fade }
         } else {
             let tf = cam.to_frame(cam.target);
             let (u, v) = (Vec3::X, Vec3::Y);
             let back = cam.to_frame(cam.back());
             let n = u.cross(v);
             let snap = |a: Vec3| a * ((tf.dot(a) / major).round() * major);
-            (snap(u) + snap(v), u, v, back.dot(n), Box::new(|p| cam.from_frame(p)))
+            let c = snap(u) + snap(v);
+            let slant = back.dot(n);
+            let ext = grid_ext(cam.half_height(), major, slant);
+            let far_reach = grid_far_reach(cam, cam.clip(sc.radius).1, cam.from_frame(c), cam.from_frame(n));
+            let fade = GridFade::new(cam.half_height(), slant, ext, far_reach);
+            GridFrame { centre: cam.from_frame(c), u: cam.from_frame(u), v: cam.from_frame(v), origin: Vec3::ZERO, fade }
         };
-        // The grid reaches as far on the ground as the view is wide (the ground stretches as it
-        // is seen at a slant) and fades out with the distance, so that it dissolves into the
-        // distance instead of ending in a cut (#4214).
-        let ext = grid_ext(cam.half_height(), major, slant);
-        let far_reach = grid_far_reach(cam, cam.clip(sc.radius).1, w(c), w(u.cross(v)));
-        let fade = GridFade::new(cam.half_height(), slant, ext, far_reach);
-        // The grid's centre on each axis, from the plane's origin (the world's, or the sketch
-        // plane's): a level fading in near a switch of the spacing lies on its own places (#9570).
-        let origin = open_sketch_plane(s).map_or(Vec3::ZERO, |pl| pl.origin);
-        let (at_u, at_v) = ((c - origin).dot(u), (c - origin).dot(v));
-        // Two lines through the point `c + u * t`: one along v, one along u.
-        for (along, across, at) in [(v, u, at_u), (u, v, at_v)] {
-            for line in grid_lines(cam.half_height(), at, fade.end, 400) {
-                let t = line.offset;
-                // The viewport's widths (pixels). The headless picture keeps the palette's two
-                // grid colours: a line two levels share with different kinds is drawn as both,
-                // each as strong as its share.
-                let width = 0.7 + 0.3 * f64::from(line.major);
-                for (col, share) in [(p.grid_major, line.major), (p.grid, 1.0 - line.major)] {
-                    if share <= 0.0 {
-                        continue;
-                    }
-                    for (s0, s1, alpha) in fade.pieces(t) {
-                        sc.grid.push(SceneLine {
-                            points: vec![w(c + across * t + along * s0), w(c + across * t + along * s1)],
-                            color: col,
-                            alpha: alpha * line.weight * share,
-                            width,
-                            on_top: false,
-                        });
-                    }
+        // The viewport's widths (pixels). The headless picture keeps the palette's two grid
+        // colours: a line two levels share with different kinds is drawn as both, each as strong
+        // as its share.
+        for seg in grid_segments_on(cam, &frame, 400) {
+            let width = 0.7 + 0.3 * f64::from(seg.major);
+            for (col, share) in [(p.grid_major, seg.major), (p.grid, 1.0 - seg.major)] {
+                if share <= 0.0 {
+                    continue;
                 }
+                sc.grid.push(SceneLine { points: vec![seg.a, seg.b], color: col, alpha: seg.alpha * share, width, on_top: false });
             }
         }
     }

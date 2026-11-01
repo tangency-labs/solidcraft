@@ -8,7 +8,9 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::geom::{Plane, Vec2, Vec3};
 use solidcraft_engine::render::{Camera, Mat4, Rgb};
 use solidcraft_engine::sketch::CurveKind;
-use solidcraft_engine::view::{GridFade, GridPlane, colors, grid_ext, grid_lines, grid_plane, grid_step, sketch_lines_with_sampler};
+use solidcraft_engine::view::{
+    GridFade, GridFrame, GridPlane, colors, grid_ext, grid_segments, grid_segments_on, grid_step, sketch_lines_with_sampler,
+};
 use std::hash::{Hash, Hasher};
 
 use crate::gpu::{Frame, GpuScene, GpuTarget, SceneSlot, ViewportCallback};
@@ -1699,7 +1701,7 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         // would take; otherwise the ground plane: XY with Z up, XZ with Y up (laid out in the
         // camera's Z-up frame), or the upright origin plane facing the view when the ground is
         // seen edge-on.
-        let (c, u, v, slant, ext, far_reach, w3): (Vec3, Vec3, Vec3, f64, f64, f64, Box<dyn Fn(Vec3) -> [f32; 3]>) = if let Some(pl) = &sketch_plane {
+        let segments = if let Some(pl) = &sketch_plane {
             let (c, u, v) = solidcraft_engine::view::sketch_grid_frame(pl, app.cam.target, major);
             // How steeply the sketch's plane is seen: the grid reaches as far on it as the view
             // is wide, so the fade with the distance does too (#4214). The sketch's plane is in
@@ -1708,60 +1710,28 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
             let slant = app.cam.back().dot(n);
             let ext = grid_ext(app.cam.half_height(), major, slant);
             let far_reach = solidcraft_engine::view::grid_far_reach(&proj.cam, picture_far(app, &proj.cam), c, n);
-            (c, u, v, slant, ext, far_reach, Box::new(|p| p.to_f32()))
+            // The grid fades out with the distance from the middle of the view (#4214): it used to
+            // stop at a fixed distance, so its edge showed as a cut across the picture. Each line
+            // is now drawn in pieces, each as faint as the fade makes it there, and the grid is
+            // gone before its own edge, which is therefore never seen.
+            let fade = GridFade::new(app.cam.half_height(), slant, ext, far_reach);
+            let frame = GridFrame { centre: c, u, v, origin: pl.origin, fade };
+            grid_segments_on(&app.cam, &frame, 300)
         } else {
-            let tf = app.cam.to_frame(app.cam.target);
-            // On the ground (XY) unless the Grid follows the view preference is on (#1470); then on
-            // the plane the last frame drew, so the choice is hysteretic near the thresholds (#1993).
-            let (u, v) = if app.preferences.grid_follows_view {
-                app.viewport.grid_plane.lock().map_or((Vec3::X, Vec3::Y), |mut last| {
-                    *last = grid_plane(app.cam.to_frame(app.cam.back()), *last);
-                    last.axes()
-                })
-            } else {
-                (Vec3::X, Vec3::Y)
-            };
-            // Centred where the view's axis meets the ground, the part of the ground in the middle
-            // of the view (#3087): the camera's target may lie off the ground (above a part, or
-            // below the ground after an orbit), and zoomed in, a grid round the point under the
-            // target was off screen. Seen at a slant the ground stretches across the view, so the
-            // grid reaches further.
-            let back = app.cam.to_frame(app.cam.back());
-            let n = u.cross(v);
-            let slant = back.dot(n);
-            let ext = grid_ext(app.cam.half_height(), major, slant);
-            let centre = grid_centre(tf, back, n, ext);
-            let snap = |a: Vec3| a * ((centre.dot(a) / major).round() * major);
-            let c = snap(u) + snap(v);
-            // The far plane cuts the ground, and the grid's plane is the camera's frame's.
-            let far_reach =
-                solidcraft_engine::view::grid_far_reach(&proj.cam, picture_far(app, &proj.cam), app.cam.from_frame(c), app.cam.from_frame(n));
-            (c, u, v, slant, ext, far_reach, Box::new(|p| app.cam.from_frame(p).to_f32()))
+            // On the ground (XY) unless the Grid follows the view preference is on (#1470); then
+            // on the plane the last frame drew, so the choice is hysteretic near the thresholds
+            // (#1993).
+            let mut last = app.viewport.grid_plane.lock().unwrap_or_else(|e| e.into_inner());
+            grid_segments(&app.cam, picture_far(app, &proj.cam), app.preferences.grid_follows_view, &mut last)
         };
-        // The grid fades out with the distance from the middle of the view (#4214): it used to
-        // stop at a fixed distance, so its edge showed as a cut across the picture. Each line is
-        // now drawn in pieces, each as faint as the fade makes it there, and the grid is gone
-        // before its own edge, which is therefore never seen.
-        let fade = GridFade::new(app.cam.half_height(), slant, ext, far_reach);
         let (grid, grid_major) = (c4(tk.grid), c4(tk.grid_major));
-        // Near a switch of the spacing the outgoing and incoming levels cross-fade (#9570), each
-        // line on its own place on the plane: the grid's centre on each axis, from the plane's
-        // origin (the sketch plane's, or the camera frame's).
-        let origin = sketch_plane.as_ref().map_or(Vec3::ZERO, |pl| pl.origin);
-        let (at_u, at_v) = ((c - origin).dot(u), (c - origin).dot(v));
-        // Two lines through the point `c + u * t`: one along v, one along u.
-        for (along, across, at) in [(v, u, at_u), (u, v, at_v)] {
-            for line in grid_lines(app.cam.half_height(), at, fade.end, 300) {
-                let t = line.offset;
-                // A line two levels share with different kinds blends between the minor and
-                // the major look.
-                let col = grid_blend(grid, grid_major, line.major);
-                let wd = 0.7 + 0.3 * line.major;
-                for (s0, s1, alpha) in fade.pieces(t) {
-                    let col = sc.color(grid_colour(col, alpha * line.weight));
-                    sc.under_line(w3(c + across * t + along * s0), w3(c + across * t + along * s1), col, wd);
-                }
-            }
+        for seg in segments {
+            // A line two levels share with different kinds blends between the minor and the
+            // major look.
+            let col = grid_blend(grid, grid_major, seg.major);
+            let wd = 0.7 + 0.3 * seg.major;
+            let col = sc.color(grid_colour(col, seg.alpha));
+            sc.under_line(seg.a.to_f32(), seg.b.to_f32(), col, wd);
         }
     }
     for sid in visible_sketches(app) {
@@ -6193,22 +6163,6 @@ fn grid_blend(minor: [u8; 4], major: [u8; 4], share: f32) -> [u8; 4] {
 
 fn grid_colour(c: [u8; 4], alpha: f32) -> [u8; 4] {
     [c[0], c[1], c[2], (f64::from(c[3]) * f64::from(alpha)).round().clamp(0.0, 255.0) as u8]
-}
-
-/// Where the ground grid is centred: where the view's axis (`back`, through the camera's target
-/// `tf`) meets the plane through the origin with normal `n`, so the middle of the view has grid
-/// (#3087). At a grazing slant, return smoothly toward the point under the target: the actual
-/// intersection runs beyond the visible grid and jumps to the other side at the horizon.
-fn grid_centre(tf: Vec3, back: Vec3, n: Vec3, ext: f64) -> Vec3 {
-    let height = tf.dot(n);
-    let under = tf - n * height;
-    let slant = back.dot(n);
-    // Use the same minimum slant as grid_ext and GridFade. Above it, this is the view-axis
-    // intersection; below it, the offset tends continuously to zero instead of infinity.
-    let reach_slant = slant.abs().max(0.25);
-    let along = (back - n * slant) * (-height * slant / (reach_slant * reach_slant));
-    let len = along.len();
-    if len > ext && len > 0.0 { under + along * (ext / len) } else { under + along }
 }
 
 /// Hover feedback for the active sketch's points and curves (drawn on top of everything).
@@ -11881,6 +11835,7 @@ mod view_home_tests;
 mod grid_plane_tests {
     use super::*;
     use solidcraft_engine::render::{StandardView, UpAxis};
+    use solidcraft_engine::view::{grid_centre, grid_plane};
 
     fn plane(view: StandardView, up: UpAxis) -> (Vec3, Vec3) {
         let (yaw, pitch) = view.angles();
