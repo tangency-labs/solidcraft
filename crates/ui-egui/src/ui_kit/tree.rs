@@ -99,8 +99,13 @@ impl Status {
 #[derive(Default)]
 pub(crate) struct RowResp {
     pub(crate) rect: Option<Rect>,
+    /// Where the name is drawn, for editing it in place.
+    pub(crate) label_rect: Option<Rect>,
+    pub(crate) row_id: Option<egui::Id>,
     pub(crate) clicked: bool,
     pub(crate) double: bool,
+    /// A slower second click on the row's name: rename it.
+    pub(crate) slow_rename: bool,
     pub(crate) secondary: Option<Pos2>,
     pub(crate) fold: bool,
     /// The eye was clicked, or a drag over the eyes sets it (#9680, see [`eye_drag_id`]).
@@ -118,8 +123,6 @@ pub(crate) struct RowResp {
     pub(crate) fold_at: Option<Pos2>,
     pub(crate) eye_at: Option<Pos2>,
     pub(crate) radio_at: Option<Pos2>,
-    /// Where the label starts.
-    pub(crate) label_left: Option<f32>,
     pub(crate) actions: Vec<egui::Response>,
 }
 
@@ -154,7 +157,7 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     // While something is dragged (an appearance swatch, drawn under the pointer) `hovered` is
     // off; the row under the pointer still counts, so a drop lands on it.
     let dragged_over = egui::DragAndDrop::has_any_payload(ui.ctx()) && ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| r.contains(p));
-    let mut out = RowResp { rect: Some(r), hovered: resp.hovered() || dragged_over, ..Default::default() };
+    let mut out = RowResp { rect: Some(r), row_id: Some(id), hovered: resp.hovered() || dragged_over, ..Default::default() };
     if row.selected {
         ui.painter().rect_filled(r, if row.compact { 0 } else { t.radius_sm.saturating_sub(1) }, crate::theme::TabAccent::current(ui.ctx()).soft);
     } else if resp.hovered() || row.mark == Mark::Here {
@@ -359,6 +362,7 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         ui.painter().with_clip_rect(ui.clip_rect().intersect(r)).galley(pos2(x, r.top() + ROW_H), galley, t.text_dim);
     }
     let room = (right - name_action_width - x).max(0.0);
+    out.label_rect = Some(Rect::from_min_max(pos2(x, r.top() + 1.0), pos2(x + room, cy + row_height / 2.0 - 1.0)));
     let mut job = egui::text::LayoutJob::simple(label_display.to_string(), font, col, room);
     job.wrap.max_rows = 1;
     job.wrap.break_anywhere = true;
@@ -373,7 +377,6 @@ pub(crate) fn tree_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         let corners = [inside.left_top(), inside.right_top(), inside.right_bottom(), inside.left_bottom(), inside.left_top()];
         ui.painter().add(egui::Shape::dashed_line(&corners, Stroke::new(1.2, t.text_dim), 4.0, 3.0));
     }
-    out.label_left = Some(x);
     let mut bx = (x + lw + 6.0 + name_action_width).min(if eye_end && row.eye.is_some() { end } else { r.right() } - 16.0);
     for b in row.badges {
         let br = Rect::from_center_size(pos2(bx + 6.0, cy), vec2(t.space_12, t.space_12));

@@ -280,8 +280,9 @@ pub struct Rename {
     pub text: String,
     pub at: Pos2,
     pub(crate) focused: bool,
-    /// Edited in the browser row itself (a double-click on a body), not in the floating box.
+    /// Edited in the browser row itself, not in the floating box.
     pub(crate) inline: bool,
+    pub(crate) inline_id: Option<egui::Id>,
 }
 
 /// Radial slots, clockwise from the top.
@@ -2020,11 +2021,99 @@ pub fn start_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2) {
         RenameWhat::View(v) => v.clone(),
         RenameWhat::Joint(j) => doc.assembly.joints.iter().find(|x| x.id == *j).map(|x| x.name.clone()).unwrap_or_default(),
     };
-    app.menu.rename = Some(Rename { what, text, at, focused: false, inline: false });
+    app.menu.rename = Some(Rename { what, text, at, focused: false, inline: false, inline_id: None });
+}
+
+pub(crate) fn start_inline_rename(app: &mut SolveApp, what: RenameWhat, at: Pos2, row_id: egui::Id) {
+    start_rename(app, what, at);
+    if let Some(rename) = app.menu.rename.as_mut() {
+        rename.inline = true;
+        rename.inline_id = Some(row_id);
+    }
+}
+
+fn unique_rename_name(app: &SolveApp, what: &RenameWhat, name: &str) -> String {
+    use solidcraft_engine::doc::FeatureKind;
+
+    let occupied: Vec<String> = match what {
+        RenameWhat::Body(old) => {
+            let mut names: Vec<_> = app.session.model.state().bodies.iter().map(|body| body.name.clone()).collect();
+            names.extend(
+                app.session
+                    .doc
+                    .features
+                    .iter()
+                    .filter_map(|feature| match &feature.kind {
+                        FeatureKind::Remove { bodies } => Some(bodies.iter().map(ToString::to_string).collect::<Vec<_>>()),
+                        _ => None,
+                    })
+                    .flatten(),
+            );
+            names.retain(|existing| existing != old);
+            names
+        }
+        RenameWhat::Feature(id) => app.session.doc.features.iter().filter(|feature| feature.id != *id).map(|feature| feature.name.clone()).collect(),
+        RenameWhat::Component(id) => {
+            app.session.doc.components.iter().filter(|component| component.id != *id).map(|component| component.name.clone()).collect()
+        }
+        RenameWhat::Group(id) => app.session.doc.browser_groups.iter().find(|group| group.id == *id).map_or_else(Vec::new, |target| {
+            app.session
+                .doc
+                .browser_groups
+                .iter()
+                .filter(|group| group.id != *id && group.component == target.component && group.folder == target.folder)
+                .map(|group| group.name.clone())
+                .collect()
+        }),
+        RenameWhat::TimelineGroup(id) => app.session.doc.timeline_groups.iter().find(|group| group.id == *id).map_or_else(Vec::new, |target| {
+            app.session
+                .doc
+                .timeline_groups
+                .iter()
+                .filter(|group| group.id != *id && group.parent == target.parent)
+                .map(|group| group.name.clone())
+                .collect()
+        }),
+        RenameWhat::Canvas(id) => app.session.doc.canvases.iter().filter(|canvas| canvas.id != *id).map(|canvas| canvas.name.clone()).collect(),
+        RenameWhat::View(old) => app.session.doc.named_views.iter().filter(|view| view.name != *old).map(|view| view.name.clone()).collect(),
+        RenameWhat::Joint(id) => app.session.doc.assembly.joints.iter().filter(|joint| joint.id != *id).map(|joint| joint.name.clone()).collect(),
+    };
+    let reserved_plane = matches!(what, RenameWhat::Feature(id) if app.session.doc.feature(*id).is_some_and(|feature| matches!(feature.kind, FeatureKind::ConstructionPlane { .. })));
+    let name_is_taken = |candidate: &str| {
+        occupied.iter().any(|existing| existing == candidate) || (reserved_plane && solidcraft_engine::geom::Plane::named(candidate).is_some())
+    };
+    if !name_is_taken(name) {
+        return name.to_string();
+    }
+
+    let base = name
+        .rsplit_once(" (")
+        .and_then(|(base, suffix)| {
+            suffix.strip_suffix(')').filter(|digits| !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())).map(|_| base)
+        })
+        .unwrap_or(name);
+    let attempts = occupied.len().saturating_add(1);
+    for number in 1..=attempts {
+        let suffix = format!(" ({number})");
+        let max_base_len = 128usize.saturating_sub(suffix.len());
+        let mut base_end = 0;
+        for (index, character) in base.char_indices() {
+            let end = index + character.len_utf8();
+            if end > max_base_len {
+                break;
+            }
+            base_end = end;
+        }
+        let candidate = format!("{}{suffix}", &base[..base_end]);
+        if !name_is_taken(&candidate) {
+            return candidate;
+        }
+    }
+    name.to_string()
 }
 
 pub(crate) fn commit_rename(app: &mut SolveApp, r: &Rename) {
-    let name = r.text.trim().to_string();
+    let name = unique_rename_name(app, &r.what, r.text.trim());
     if name.is_empty() {
         return;
     }

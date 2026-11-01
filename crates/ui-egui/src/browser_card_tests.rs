@@ -239,6 +239,82 @@ fn browser_body_clicks_respect_the_active_dialog_input() {
 }
 
 #[test]
+fn browser_name_rows_rename_on_a_delayed_second_click() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"One"})).unwrap();
+    h.app.tree.expanded.insert("c0/features".into());
+    h.settle();
+
+    h.step(&json!({"click":{"handle":"row:One"}})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the first click only selects the body");
+    h.frames(30);
+    h.step(&json!({"click":{"handle":"row:One"}})).unwrap();
+    assert!(matches!(
+        h.app.menu.rename.as_ref(),
+        Some(crate::context_menu::Rename { what: crate::context_menu::RenameWhat::Body(name), inline: true, .. }) if name == "One"
+    ));
+
+    h.step(&json!({"key":"Escape"})).unwrap();
+    let feature = h.app.session.doc.features.first().map(|feature| feature.id).unwrap();
+    let feature_row = format!("row:browser-feature:c0:{feature}");
+    h.step(&json!({"click":{"handle":feature_row}})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the first click only selects the feature");
+    h.frames(30);
+    h.step(&json!({"click":{"handle":feature_row}})).unwrap();
+    assert!(matches!(
+        h.app.menu.rename.as_ref(),
+        Some(crate::context_menu::Rename { what: crate::context_menu::RenameWhat::Feature(id), inline: true, .. }) if *id == feature
+    ));
+    let feature_name = h.app.session.doc.feature(feature).map(|feature| feature.name.clone()).unwrap_or_default();
+    assert!(crate::scenario::handle_at(&format!("rename:{feature_name}")).is_some(), "the feature name is edited in its row");
+    h.step(&json!({"text":"Renamed feature"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.feature(feature).map(|feature| feature.name.as_str()), Some("Renamed feature"));
+}
+
+#[test]
+fn browser_sketch_rename_stays_inline() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Profile"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.tree.expanded.insert("c0/sketches".into());
+    h.settle();
+
+    h.step(&json!({"click":{"handle":"row:Profile"}})).unwrap();
+    assert!(h.app.menu.rename.is_none(), "the first click only selects the sketch");
+    h.frames(30);
+    h.step(&json!({"click":{"handle":"row:Profile"}})).unwrap();
+    assert!(matches!(
+        h.app.menu.rename.as_ref(),
+        Some(crate::context_menu::Rename { what: crate::context_menu::RenameWhat::Feature(_), inline: true, .. })
+    ));
+    assert!(crate::scenario::handle_at("rename:Profile").is_some(), "the sketch name is edited in its row");
+    h.step(&json!({"text":"Profile renamed"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.features.first().map(|feature| feature.name.as_str()), Some("Profile renamed"));
+}
+
+#[test]
+fn browser_rename_adds_a_numbered_suffix_when_a_name_is_taken() {
+    let mut h = Harness::new();
+    for (name, x) in [("Part", 0), ("Part (1)", 20), ("Other", 40)] {
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name})).unwrap();
+    }
+    crate::context_menu::start_rename(&mut h.app, crate::context_menu::RenameWhat::Body("Other".into()), egui::Pos2::ZERO);
+    assert!(crate::context_menu::finish_rename(&mut h.app, Some("Part"), true));
+    assert!(h.app.session.model.state().body("Part (2)").is_some());
+
+    let features: Vec<_> = h.app.session.doc.features.iter().map(|feature| (feature.id, feature.name.clone())).collect();
+    let (Some((id, _)), Some((_, existing))) = (features.first(), features.get(1)) else {
+        panic!("the two boxes create two feature rows");
+    };
+    crate::context_menu::start_rename(&mut h.app, crate::context_menu::RenameWhat::Feature(*id), egui::Pos2::ZERO);
+    assert!(crate::context_menu::finish_rename(&mut h.app, Some(existing), true));
+    let expected = format!("{existing} (1)");
+    assert_eq!(h.app.session.doc.feature(*id).map(|feature| feature.name.as_str()), Some(expected.as_str()));
+}
+
+#[test]
 fn browser_card_shrinks_and_scrolls_without_covering_history() {
     let mut h = Harness::new();
     h.call("ui.resize", json!({"width":1400,"height":900}));
