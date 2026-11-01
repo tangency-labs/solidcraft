@@ -1,13 +1,17 @@
-//! Send to Slicer's network folders (#2304): the window that adds or edits one (a name, a folder
-//! and a Test button), the copy a send to one goes on with in the background, and their rows in
-//! Preferences › General. The commands do the work (`file.slicers.add_remote` and
-//! `file.slicers.remove_remote`, kept in the preferences by `SolveApp::run`). The Test button and
-//! the copy run off the window thread: a share whose server has gone can keep a file call waiting.
+//! Send to Slicer's network folders (#2304): the window that adds or edits one (its type, a name,
+//! the folder, on this computer or on an SFTP server, and a Test button), the copy a send to one
+//! goes on with in the background, and their rows in Preferences › General. The commands do the
+//! work (`file.slicers.add_remote` and `file.slicers.remove_remote`, kept in the preferences by
+//! `SolveApp::run`). The Test button and the copy run off the window thread: a share whose server
+//! has gone, or an SFTP server that does not answer, can keep a call waiting.
+//!
+//! An SFTP server's key is never trusted silently: Test shows the fingerprint of a server
+//! `~/.ssh/known_hosts` doesn't list, and only the Trust button that follows trusts it.
 //!
 //! The browser has no folder dialog, and offers no network folder.
 
 use serde_json::{Value, json};
-use solidcraft_engine::remote_slicers;
+use solidcraft_engine::remote_slicers::{self, Dest, RemoteTarget, SftpAddress, Tested};
 
 use crate::SolveApp;
 use crate::dialogs::Kind;
@@ -27,10 +31,24 @@ pub struct State {
     sending: Option<(u64, String, String)>,
 }
 
+/// The Type row: a folder on this computer, or one on an SFTP server.
+const FOLDER: usize = 0;
+const SFTP: usize = 1;
+
 /// The values of the window.
 struct Form {
+    /// [`FOLDER`] or [`SFTP`].
+    kind: usize,
     name: String,
     folder: String,
+    /// The SFTP server, `user@host[:port]`.
+    server: String,
+    /// The folder on the SFTP server.
+    remote_folder: String,
+    /// The private key file; empty for the keys of ssh-agent.
+    key: String,
+    /// The fingerprint of the SFTP server's key the user trusted (Test, then Trust).
+    host_key: Option<String>,
     /// The name of the network folder being edited; none for a new one.
     editing: Option<String>,
     /// Opened from Send to Slicer: the network folder it adds becomes the dialog's choice.
@@ -44,8 +62,56 @@ struct Form {
 enum Test {
     #[default]
     NotRun,
-    Running(std::sync::mpsc::Receiver<Result<(), String>>),
-    Done(Result<(), String>),
+    Running(std::sync::mpsc::Receiver<Tested>),
+    Done(Tested),
+}
+
+impl Form {
+    fn new(from_dialog: bool) -> Form {
+        Form {
+            kind: FOLDER,
+            name: String::new(),
+            folder: String::new(),
+            server: String::new(),
+            remote_folder: String::new(),
+            key: String::new(),
+            host_key: None,
+            editing: None,
+            from_dialog,
+            test: Test::NotRun,
+            error: None,
+        }
+    }
+
+    /// The key file as given, when one is.
+    fn key_file(&self) -> Option<&str> {
+        Some(self.key.trim()).filter(|k| !k.is_empty())
+    }
+
+    /// The network folder the window describes, named `name`, or why it describes none yet.
+    fn target(&self, name: &str) -> Result<RemoteTarget, String> {
+        if self.kind == FOLDER {
+            return remote_slicers::check_folder(&self.folder).map(|folder| RemoteTarget::folder_target(name, folder));
+        }
+        let address = SftpAddress::parse(&self.server)?;
+        let folder = remote_slicers::check_remote_folder(&self.remote_folder)?;
+        let key = self.key_file().map(remote_slicers::check_key_file).transpose()?;
+        Ok(RemoteTarget::sftp_target(name, &address, folder, key, self.host_key.as_deref()))
+    }
+
+    /// What is wrong with an SFTP field filled in so far.
+    fn field_problem(&self) -> Option<String> {
+        if self.kind != SFTP {
+            return None;
+        }
+        let server = Some(self.server.trim()).filter(|s| !s.is_empty()).and_then(|s| SftpAddress::parse(s).err());
+        server.or_else(|| self.key_file().and_then(|k| remote_slicers::check_key_file(k).err()))
+    }
+
+    /// The fields that, changed, make a test answer stale.
+    fn fields(&self) -> (usize, String, String, String, String) {
+        (self.kind, self.folder.clone(), self.server.clone(), self.remote_folder.clone(), self.key.clone())
+    }
 }
 
 /// Network folders can be offered: the host can ask for a folder (not the browser).
@@ -56,20 +122,25 @@ pub fn available(app: &SolveApp) -> bool {
 /// The window for a new network folder.
 pub fn open_new(app: &mut SolveApp, from_dialog: bool) {
     app.network_folder.picked = None;
-    app.network_folder.form = Some(Form { name: String::new(), folder: String::new(), editing: None, from_dialog, test: Test::NotRun, error: None });
+    app.network_folder.form = Some(Form::new(from_dialog));
 }
 
 /// The window for the network folder named `name`.
 pub fn open_edit(app: &mut SolveApp, name: &str) {
     let Some(t) = app.preferences.network_folders.iter().find(|t| t.name == name) else { return };
-    let form = Form {
-        name: t.name.clone(),
-        folder: t.folder().to_string(),
-        editing: Some(t.name.clone()),
-        from_dialog: false,
-        test: Test::NotRun,
-        error: None,
-    };
+    let mut form = Form::new(false);
+    form.name = t.name.clone();
+    form.editing = Some(t.name.clone());
+    match &t.dest {
+        Dest::Folder { folder } => form.folder = folder.clone(),
+        Dest::Sftp { folder, key, host_key, .. } => {
+            form.kind = SFTP;
+            form.server = t.address().map(|a| a.to_string()).unwrap_or_default();
+            form.remote_folder = folder.clone();
+            form.key = key.clone().unwrap_or_default();
+            form.host_key = host_key.clone();
+        }
+    }
     app.network_folder.picked = None;
     app.network_folder.form = Some(form);
 }
@@ -101,7 +172,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         match rx.try_recv() {
             Ok(answer) => form.test = Test::Done(answer),
             Err(TryRecvError::Empty) => ctx.request_repaint_after(std::time::Duration::from_millis(200)),
-            Err(TryRecvError::Disconnected) => form.test = Test::Done(Err(crate::i18n::tr("ui.network_folder_test_stopped").to_string())),
+            Err(TryRecvError::Disconnected) => {
+                let stopped = crate::i18n::tr("ui.network_folder_test_stopped").to_string();
+                form.test = Test::Done(Tested { ok: false, error: Some(stopped), host_key: None });
+            }
         }
     }
     let taken = app
@@ -111,9 +185,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         .any(|t| same_name(&t.name, &form.name) && form.editing.as_deref().is_none_or(|old| !same_name(old, &t.name)));
     let problem = remote_slicers::check_name(&form.name).err().filter(|_| !form.name.trim().is_empty());
     let problem = problem.or_else(|| taken.then(|| crate::i18n::tr("ui.network_folder_name_taken").to_string()));
+    let problem = problem.or_else(|| form.field_problem());
     let valid = problem.is_none()
         && remote_slicers::check_name(&form.name).is_ok()
-        && remote_slicers::check_folder(&form.folder).is_ok()
+        && form.target(&form.name).is_ok()
         && !matches!(form.test, Test::Running(_));
     let tr = |id: &str| crate::i18n::tr(id).to_string();
     let title = tr(if form.editing.is_some() { "ui.network_folder_edit_title" } else { "ui.network_folder_title" });
@@ -122,47 +197,68 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let (name_label, name_hint) = (tr("ui.network_folder_name"), tr("ui.network_folder_name_hint"));
     let (folder_label, folder_hint, browse_label) =
         (tr("ui.network_folder_folder"), tr("ui.network_folder_folder_hint"), tr("ui.network_folder_browse"));
-    let before = (form.name.clone(), form.folder.clone());
+    let (type_label, folder_kind, sftp_kind, sftp_note) =
+        (tr("ui.network_folder_type"), tr("ui.network_folder_type_folder"), tr("ui.network_folder_type_sftp"), tr("ui.network_folder_sftp_note"));
+    let (server_label, server_hint, remote_hint) =
+        (tr("ui.network_folder_server"), tr("ui.network_folder_server_hint"), tr("ui.network_folder_remote_hint"));
+    let (key_label, key_hint, trust_label) = (tr("ui.network_folder_key"), tr("ui.network_folder_key_hint"), tr("ui.network_folder_trust"));
+    let (before_name, before) = (form.name.clone(), form.fields());
     let mut browse = false;
+    let mut trust: Option<String> = None;
     let picking = app.file_picker_busy();
     let (closed, action) = ui_kit::Confirm::new(egui::Id::new("sc_network_folder"), "network_folder", &title)
         .actions(&ok, "Cancel", Some(&test))
         .secondary_left()
         .show(ctx, valid, |ui| {
-            ui_kit::text(ui, &note, ui_kit::Text::Note("network_folder_note"));
-            ui_kit::text_row(ui, &name_label, &mut form.name, &name_hint);
-            ui_kit::text_row(ui, &folder_label, &mut form.folder, &folder_hint);
-            crate::dialogs::form_row(ui, "", |ui| {
-                ui.add_enabled_ui(!picking, |ui| {
-                    let r = ui_kit::button(ui, &browse_label, ui_kit::Button::Small);
-                    crate::scenario::publish_handle("dialog:NetworkFolder:Browse", r.rect.center());
-                    browse = r.clicked();
-                });
+            ui_kit::text(ui, if form.kind == SFTP { &sftp_note } else { &note }, ui_kit::Text::Note("network_folder_note"));
+            crate::dialogs::form_row(ui, &type_label, |ui| {
+                let targets = ["dialog:NetworkFolder:Folder", "dialog:NetworkFolder:SFTP"];
+                let segments = ui_kit::Segments { targets: &targets, intrinsic: true, ..Default::default() };
+                ui_kit::segmented(ui, &mut form.kind, &[folder_kind.as_str(), sftp_kind.as_str()], segments);
             });
+            ui_kit::text_row(ui, &name_label, &mut form.name, &name_hint);
+            if form.kind == SFTP {
+                ui_kit::text_row(ui, &server_label, &mut form.server, &server_hint);
+                ui_kit::text_row(ui, &folder_label, &mut form.remote_folder, &remote_hint);
+                ui_kit::text_row(ui, &key_label, &mut form.key, &key_hint);
+            } else {
+                ui_kit::text_row(ui, &folder_label, &mut form.folder, &folder_hint);
+                crate::dialogs::form_row(ui, "", |ui| {
+                    ui.add_enabled_ui(!picking, |ui| {
+                        let r = ui_kit::button(ui, &browse_label, ui_kit::Button::Small);
+                        crate::scenario::publish_handle("dialog:NetworkFolder:Browse", r.rect.center());
+                        browse = r.clicked();
+                    });
+                });
+            }
             match &form.test {
                 Test::NotRun => {}
                 Test::Running(_) => {
                     ui_kit::text(ui, crate::i18n::tr("ui.network_folder_testing"), ui_kit::Text::Hint("network_folder_test"));
                 }
-                Test::Done(Ok(())) => {
-                    ui_kit::text(ui, crate::i18n::tr("ui.network_folder_test_ok"), ui_kit::Text::Report("network_folder_test", false));
-                }
-                Test::Done(Err(e)) => {
-                    ui_kit::text(ui, e, ui_kit::Text::Error("network_folder_test"));
-                }
+                Test::Done(tested) => trust = show_tested(ui, tested, &trust_label),
             }
             if let Some(e) = problem.as_ref().or(form.error.as_ref()) {
                 ui_kit::text(ui, e, ui_kit::Text::Error("network_folder_error"));
             }
         });
-    if (form.name.as_str(), form.folder.as_str()) != (before.0.as_str(), before.1.as_str()) {
+    let now = form.fields();
+    if form.name != before_name || now != before {
         form.error = None;
-        if form.folder != before.1 {
-            form.test = Test::NotRun;
+    }
+    if now != before {
+        // Another server: the key trusted was that one's.
+        if form.server.trim() != before.2.trim() {
+            form.host_key = None;
         }
+        form.test = Test::NotRun;
     }
     if browse {
         app.pick_folder(|app, path| app.network_folder.picked = path);
+    }
+    if let Some(fingerprint) = trust {
+        form.host_key = Some(fingerprint);
+        start_test(&mut form);
     }
     match action {
         ui_kit::Action::Apply => start_test(&mut form),
@@ -179,32 +275,77 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     app.network_folder.form = Some(form);
 }
 
+/// What a test found; the fingerprint the user chose to trust, when they did.
+fn show_tested(ui: &mut egui::Ui, tested: &Tested, trust_label: &str) -> Option<String> {
+    if tested.ok {
+        ui_kit::text(ui, crate::i18n::tr("ui.network_folder_test_ok"), ui_kit::Text::Report("network_folder_test", false));
+    }
+    let Some(key) = &tested.host_key else {
+        if let Some(e) = &tested.error {
+            ui_kit::text(ui, e, ui_kit::Text::Error("network_folder_test"));
+        }
+        return None;
+    };
+    let fingerprint = [("fingerprint", key.fingerprint.as_str()), ("algorithm", key.algorithm.as_str())];
+    // A server known_hosts lists with another key can't be trusted here: the error says what to do.
+    if key.trusted || key.known_hosts {
+        if tested.ok {
+            ui_kit::text(ui, &crate::i18n::format("ui.network_folder_host_trusted", &fingerprint), ui_kit::Text::Hint("network_folder_host"));
+        } else if let Some(e) = &tested.error {
+            ui_kit::text(ui, e, ui_kit::Text::Error("network_folder_test"));
+        }
+        return None;
+    }
+    let line = crate::i18n::format(if key.changed { "ui.network_folder_host_changed" } else { "ui.network_folder_host_unknown" }, &fingerprint);
+    ui_kit::text(ui, &line, if key.changed { ui_kit::Text::Error("network_folder_host") } else { ui_kit::Text::Note("network_folder_host") });
+    let mut trusted = None;
+    crate::dialogs::form_row(ui, "", |ui| {
+        let r = ui_kit::button(ui, trust_label, ui_kit::Button::Small);
+        crate::scenario::publish_handle("dialog:NetworkFolder:Trust", r.rect.center());
+        if r.clicked() {
+            trusted = Some(key.fingerprint.clone());
+        }
+    });
+    trusted
+}
+
 /// Write and delete a small file in the folder, off the window thread.
 fn start_test(form: &mut Form) {
     if matches!(form.test, Test::Running(_)) {
         return;
     }
-    let folder = match remote_slicers::check_folder(&form.folder) {
-        Ok(folder) => folder.to_string(),
+    let target = match form.target("Test") {
+        Ok(target) => target,
         Err(e) => {
-            form.test = Test::Done(Err(e));
+            form.test = Test::Done(Tested { ok: false, error: Some(e), host_key: None });
             return;
         }
     };
     let (tx, rx) = std::sync::mpsc::channel();
     let started = std::thread::Builder::new().name("network-folder-test".into()).spawn(move || {
-        let _ = tx.send(remote_slicers::probe(&folder));
+        let _ = tx.send(remote_slicers::test_target(&target, None));
     });
     form.test = match started {
         Ok(_) => Test::Running(rx),
-        Err(e) => Test::Done(Err(e.to_string())),
+        Err(e) => Test::Done(Tested { ok: false, error: Some(e.to_string()), host_key: None }),
     };
 }
 
 /// Add (or change) the network folder; true when it was.
 fn save(app: &mut SolveApp, form: &mut Form) -> bool {
-    let (name, folder) = (form.name.trim().to_string(), form.folder.trim().to_string());
-    let added = match app.run("file.slicers.add_remote", json!({ "name": name, "folder": folder })) {
+    let name = form.name.trim().to_string();
+    let mut params = json!({ "name": name, "folder": form.folder.trim() });
+    if form.kind == SFTP {
+        params = json!({ "name": name, "folder": form.remote_folder.trim(), "sftp": form.server.trim() });
+        if let Some(key) = form.key_file() {
+            params["key"] = json!(key);
+        }
+        if let Some(host_key) = &form.host_key {
+            params["host_key"] = json!(host_key);
+        }
+    }
+    let folder = form.target(&name).map(|t| t.shown()).unwrap_or_default();
+    let added = match app.run("file.slicers.add_remote", params) {
         Ok(v) => v,
         Err(e) => {
             form.error = Some(e);
@@ -292,7 +433,7 @@ pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
                     edit = Some(t.name.clone());
                 }
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui_kit::text(ui, &format!("{} — {}", t.name, t.folder()), ui_kit::Text::Inline);
+                    ui_kit::text(ui, &format!("{} — {}", t.name, t.shown()), ui_kit::Text::Inline);
                 });
             });
         });

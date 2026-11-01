@@ -501,7 +501,7 @@ fn slicer_combo(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
             let text = fitted(ui, &t.name, rect.width() - (ICON + 9.0) - 6.0, Tokens::get().text);
             ui.painter().galley(rect.left_center() + vec2(ICON + 9.0, -text.size().y / 2.0), text, Tokens::get().text);
             crate::scenario::publish_handle(&format!("dialog:Slicer:{}", t.name), rect.center());
-            let hint = crate::i18n::format("ui.network_folder_delete_tip", &[("folder", t.folder())]);
+            let hint = crate::i18n::format("ui.network_folder_delete_tip", &[("folder", &t.shown())]);
             resp.clone().on_hover_text(format!("{}\n{hint}", t.name));
             if resp.hovered() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
                 delete_remote = Some(t.name.clone());
@@ -1200,6 +1200,94 @@ mod tests {
         // Delete over its row takes it out (the files sent there stay).
         crate::network_folder_ui::remove(&mut h.app, "Orca on homelab");
         assert!(h.app.preferences.network_folders.is_empty() && sent.exists());
+    }
+
+    /// Frames, up to about 20 s, until `done` holds.
+    fn until(h: &mut crate::scenario::Harness, what: &str, done: impl Fn(&crate::scenario::Harness) -> bool) {
+        for _ in 0..2000 {
+            h.frame();
+            if done(h) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("never: {what}; status {:?}", h.app.status);
+    }
+
+    #[test]
+    fn an_sftp_server_is_added_in_its_window_once_its_key_is_shown_and_trusted() {
+        use solidcraft_engine::remote_sftp::{self, test_server};
+        let share = Share::new("sftp");
+        let prints = share.0.join("prints");
+        std::fs::create_dir_all(&prints).unwrap();
+        let key = share.0.join("id_ed25519");
+        std::fs::write(&key, test_server::key(7).to_openssh(Default::default()).unwrap().as_bytes()).unwrap();
+        let authorized = vec![test_server::key(7).public_key().clone()];
+        let running = test_server::start(1, test_server::Options { authorized, ..Default::default() }, &share.0).unwrap();
+        let fingerprint = running.host_key.public_key().fingerprint(Default::default()).to_string();
+        // Not the user's own ~/.ssh: a server only this test knows.
+        *remote_sftp::TEST_SETUP.lock().unwrap() =
+            Some(remote_sftp::Setup { known_hosts: None, agent: None, confirmed: None, limit: std::time::Duration::from_secs(10) });
+
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Part"})).unwrap();
+        h.app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        h.app.services.pick_folder = Some(Box::new(|| Box::pin(async { None })));
+        h.app.start("file.send_to_slicer");
+        h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Body { name: "Part".into() }];
+        h.settle();
+        h.step(&json!({"widget": "Slicer", "near": "Slicer"})).unwrap();
+        h.settle();
+        h.step(&json!({"click": {"handle": "dialog:Slicer:NetworkFolder"}})).unwrap();
+        h.settle();
+        h.step(&json!({"click": {"handle": "dialog:NetworkFolder:SFTP"}})).unwrap();
+        h.settle();
+        assert!(h.widget("Key file").is_some() && h.widget("Browse…").is_none(), "the SFTP rows replace the folder's");
+        let server = format!("maker@127.0.0.1:{}", running.port);
+        // Name, then Tab from field to field, as a person fills it in.
+        h.step(&json!({"widget": "Name", "near": "Name"})).unwrap();
+        for (i, text) in ["Orca box".to_string(), server.clone(), prints.to_string_lossy().into_owned(), key.to_string_lossy().into_owned()]
+            .into_iter()
+            .enumerate()
+        {
+            if i > 0 {
+                h.step(&json!({"key": "Tab"})).unwrap();
+            }
+            h.step(&json!({"text": text})).unwrap();
+            h.settle();
+        }
+        // Test: the server is new, so nothing is written; its key is shown to check, with Trust.
+        h.step(&json!({"widget": "Test"})).unwrap();
+        until(&mut h, "the key is shown", |h| h.widget("Trust this key").is_some());
+        let words = [("fingerprint", fingerprint.as_str()), ("algorithm", "ssh-ed25519")];
+        let shown = crate::i18n::format("ui.network_folder_host_unknown", &words);
+        assert!(shown.contains(&fingerprint) && h.widget(&shown).is_some(), "the fingerprint is shown: {shown}");
+        assert_eq!(std::fs::read_dir(&prints).unwrap().count(), 0);
+        // The window grows to the answer first; the button is clicked where it then is.
+        h.settle();
+        h.step(&json!({"click": {"handle": "dialog:NetworkFolder:Trust"}})).unwrap();
+        until(&mut h, "the test passes", |h| h.widget("A file can be written there.").is_some());
+        assert!(h.widget(&crate::i18n::format("ui.network_folder_host_trusted", &words)).is_some(), "the key trusted is shown");
+        assert_eq!(std::fs::read_dir(&prints).unwrap().count(), 0, "the test file is deleted");
+        h.step(&json!({"widget": "Add"})).unwrap();
+        h.settle();
+
+        let saved = h.app.preferences.network_folders.first().cloned().unwrap();
+        let address = saved.address().unwrap();
+        assert_eq!((saved.name.as_str(), address.to_string(), saved.folder()), ("Orca box", server.clone(), prints.to_string_lossy().as_ref()));
+        let stored = serde_json::to_string(&h.app.preferences.network_folders).unwrap();
+        assert!(stored.contains(&fingerprint) && !stored.to_lowercase().contains("password"), "{stored}");
+        let Some(Kind::SaveMesh(k)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("Send to Slicer closed") };
+        assert_eq!(k.slicer, "remote:Orca box");
+        let inputs = h.app.dialog.as_ref().unwrap().inputs.clone();
+        run(&mut h.app, &k, &inputs).unwrap();
+        until(&mut h, "sent", |h| h.app.status.as_ref().is_some_and(|(line, _, _)| line.starts_with("Sent to Orca box")));
+        let line = h.app.status.clone().unwrap().0;
+        assert!(line.contains(&format!("sftp://{server}")), "{line}");
+        assert_eq!(std::fs::read_dir(&prints).unwrap().count(), 1);
+        // Its row in the preferences shows where the files go.
+        assert!(saved.shown().starts_with(&format!("sftp://{server}/")));
+        *remote_sftp::TEST_SETUP.lock().unwrap() = None;
     }
 
     #[test]
