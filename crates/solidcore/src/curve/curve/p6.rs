@@ -76,7 +76,9 @@
 //!   `Kernel::fixes.simple_coincidence_crossing_is_point`,
 //!   [`Curve::simple_coincidence_checker`] returns a range whose separation changes
 //!   sides between its ends as the crossing inside it (WR-647; the fork's
-//!   tangency-labs/smlib@c2e3d9d). Off, it is upstream's.
+//!   tangency-labs/smlib@c2e3d9d), and one whose separation keeps one side without
+//!   vanishing as the point where the curves come nearest (the fork's 04b42b4). Off, it
+//!   is upstream's.
 //! - **Statuses passed on (WR-663).** With the opt-in
 //!   `Kernel::fixes.query_statuses_pass_on` the statuses SMLib drops are passed on, as the
 //!   fork (tangency-labs/smlib 8311f8e): `CalculateBoundingBox`'s samples, interval and
@@ -1310,12 +1312,17 @@ impl Curve {
     /// point (one drop or a tiny parameter range: the better end), two points (the
     /// first and last drops when the curves separate by more than `tol` between them,
     /// or either range is degenerate), or one coincident range. `objects` name this
-    /// curve and `other` in the solutions.
+    /// curve and `other` in the solutions. With
+    /// `Kernel::fixes.simple_coincidence_crossing_is_point` (WR-647) a range whose
+    /// separation changes sides is the one crossing inside it, and one whose separation
+    /// keeps one side without vanishing is the one point where the curves come nearest.
     ///
     /// # Errors
     ///
     /// Those of the evaluations, [`Curve::local_point_solve`] and
-    /// [`Curve::curve_max_distance_between`].
+    /// [`Curve::curve_max_distance_between`]; with the WR-647 opt-in, those of
+    /// [`local_curve_intersect`] and [`Curve::local_curve_solve`], and `SM_ERR` when
+    /// either finds no point.
     pub fn simple_coincidence_checker<O: Copy>(
         &self,
         k: &Kernel,
@@ -1470,6 +1477,8 @@ impl Curve {
         let mut ivl_t2 = Extent1d::from_value(first.1);
         ivl_t2.add_value(last.1);
         let max_degree = self.degree()?.max(other.degree()?);
+        // `dDistanceBetween`: set below whenever the coincidence test is reached
+        let mut distance_between = 0.0;
 
         // degenerate intervals are never coincidentIntervals
         if are_same(ivl_t1.max(), ivl_t1.min()) || are_same(ivl_t2.max(), ivl_t2.min()) {
@@ -1485,6 +1494,7 @@ impl Curve {
                 max_degree as u64 + 3,
                 Some(tol),
             )?;
+            distance_between = gap.distance;
 
             // when maxDistance is greater than tolerance
             if gap.distance > tol {
@@ -1543,6 +1553,37 @@ impl Curve {
                     (cross.my_param, cross.other_param, cross.deviation),
                     None,
                 )]);
+            }
+
+            // The separation keeps one side but does not vanish: the curves don't coincide,
+            // they approach each other (a tangency, or two curves running close without
+            // touching). The contact is where they come nearest, a point; only curves whose
+            // separation vanishes coincide over a range (fork 04b42b4, case 3e).
+            if distance_between > scaled_zero {
+                let (found, mut nearest) = self.local_curve_solve(
+                    k,
+                    &ivl_t1,
+                    other,
+                    &ivl_t2,
+                    SolverOperation::Minimize,
+                    tol,
+                    None,
+                    None,
+                    [ivl_t1.evaluate(0.5), ivl_t2.evaluate(0.5)],
+                    objects,
+                )?;
+                if !found {
+                    // curves within tolerance but no nearest point found
+                    return Err(SolidError::sm_err(
+                        "curve::simple_coincidence_checker (nearest)",
+                    ));
+                }
+                nearest.num_variables = 2;
+                nearest.num_objects = 2;
+                nearest.solution_type = SolutionType::SingleValue;
+                nearest.objects[0] = objects[0];
+                nearest.objects[1] = objects[1];
+                return Ok(vec![nearest]);
             }
         }
 

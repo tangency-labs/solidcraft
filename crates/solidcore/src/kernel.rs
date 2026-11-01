@@ -1290,7 +1290,11 @@ pub struct UpstreamFixes {
     /// a little apart graze within tolerance over a stretch set by the subdivision, and the
     /// range becomes a tiny edge, so a ring unioned with a half-annulus prism whose r 5 walls
     /// are 1e-4 apart is non-manifold and at 1e-3 not a solid (WR-647, #1979; the fork's
-    /// tangency-labs/smlib@c2e3d9d).
+    /// tangency-labs/smlib@c2e3d9d). A range whose separation keeps one side without
+    /// vanishing (two curves running close within tolerance without touching, or a
+    /// tangency) is the one point where the curves come nearest (`LocalCurveSolve`
+    /// minimum from the range's middle); only curves whose separation vanishes coincide
+    /// over a range (the fork's 04b42b4).
     pub simple_coincidence_crossing_is_point: bool,
     /// `SmFace::GetPointsInFace` samples a rectangularly trimmed face from its UV domain's
     /// minimum: each column starts at the domain's minimum u plus the column increment and
