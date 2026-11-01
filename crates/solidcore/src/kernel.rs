@@ -704,6 +704,17 @@ pub struct UpstreamFixes {
     /// `plan/upstream-issues/WR-30--addendum-2026-10-31-uv-iso-line-both-params.md`).
     /// Off by default for pinned C++ parity.
     pub iso_curve_uv_line_both_params: bool,
+    /// `SmCurvePropertyGS` fixes three branch-bound and vector-wiring defects in
+    /// `SmCurve.cpp` (`WR-35`, #2144;
+    /// `plan/upstream-issues/WR-35--addendum-2026-10-31-branch-bounds.md`):
+    /// `BranchMayContainAnswers` evaluates all eight bounding-box corners (`dZV = 1.0 * k`
+    /// instead of `1.0 * j`) for `SM_CP_MINIMIZE_ANGLE_TO_PLANE`,
+    /// `SM_CP_MINIMIZE_DIRECTED_ANGLE` and `SM_CP_MINIMIZE_CCW_ANGLE`; converts
+    /// `m_dMaxTurningAngleDeg` to radians (`SM_DEG2RAD`) before testing `dAngle +/- turn`
+    /// against `SM_PI / 2` for `SM_CP_PERPENDICULAR_TO_VECTOR` and `SM_CP_MAXIMA_TO_PLANE`;
+    /// and populates the base `SmGlobalSolver::m_cpOptVectors` (`base.opt_vectors`) instead
+    /// of leaving it shadowed and empty. Off by default for pinned C++ parity.
+    pub curve_property_gs_branch_bounds: bool,
     /// `GetUVCornerBoundaries`, `GetStartPointUVLoopGap` and `sm_CalcDistAndDev` answer only from what they computed instead of reading unwritten or earlier outputs (WR-262, WR-263, WR-264, #521), as the fork does (changed by #2009 group D to tangency-labs/smlib 7a35f33 and 666242b): in the corner walk an edge use whose trim curve cannot be made has its 3D ends dropped and one whose ends cannot be evaluated adds no boundary (failed drops stay ignored, as upstream); a loop gap that cannot be measured (a failed evaluation or drop) is `SM_BIG_DOUBLE`; a distance without the surface's derivatives or normal is none (`-1`).
     pub topology_failed_evaluations_propagate: bool,
     /// `SetProps_Stage3` returns a failed `ClassifyLoops` status before reading its outputs, and a failed stage drops its in-progress marker so a retry reruns it (WR-268, WR-266, #521).
