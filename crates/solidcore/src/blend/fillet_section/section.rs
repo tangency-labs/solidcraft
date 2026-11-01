@@ -15,7 +15,7 @@ use super::series::Trunc;
 use super::station::{gn_solve_station, smax, surface_partials, vec3, GnStation, Nurbs};
 use crate::error::{Result, SolidError};
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE};
+use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, PI};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_surface::p1::CanonicalSurfaceData;
 use crate::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm};
@@ -26,9 +26,14 @@ const OP: &str = "blend::fillet_section::GnSectionFsg";
 
 /// `SM_GN_MAX_ORDER`: the highest order of a G^n section.
 pub const GN_MAX_ORDER: usize = 4;
-/// `SM_GN_DEFAULT_THUMBWEIGHT`: 0, the G^n section with no thumbweight
-/// (`p1(t) = p2(t) = t`).
-pub const GN_DEFAULT_THUMBWEIGHT: f64 = 0.0;
+/// `SM_GN_THUMBWEIGHT_EQUAL_AREA` (the fork's 6148773 = d01d7b0's 1947a45): a value outside
+/// the thumbweights' range that a generator resolves per blend to the w at which its
+/// section, on the same rails, takes off the area the ball's circle does
+/// ([`GnSectionFsg::equal_area_thumbweight`]).
+pub const GN_THUMBWEIGHT_EQUAL_AREA: f64 = -2.0;
+/// `SM_GN_DEFAULT_THUMBWEIGHT`: the equal area one, [`GN_THUMBWEIGHT_EQUAL_AREA`] (0, the
+/// section with no thumbweight, before 6148773).
+pub const GN_DEFAULT_THUMBWEIGHT: f64 = GN_THUMBWEIGHT_EQUAL_AREA;
 
 /// `SmGnSectionFSG`: a blend's cross-section of contact order n with its faces along the
 /// rails, `n = 2..=GN_MAX_ORDER`, with thumbweight w. It needs a ball of one radius
@@ -37,8 +42,14 @@ pub const GN_DEFAULT_THUMBWEIGHT: f64 = 0.0;
 pub struct GnSectionFsg {
     /// `m_lOrder`: n.
     pub order: usize,
-    /// `m_dThumbweight`: w, `0 <= w < 1`.
+    /// `m_dThumbweight`: w, `-1 < w < 1`, or [`GN_THUMBWEIGHT_EQUAL_AREA`] until it is
+    /// resolved (by `build` and [`GnSectionFsg::contact_order_at`], which write it here as
+    /// the fork's `mutable` member is written).
     pub thumbweight: f64,
+    /// The session generator this one is a solver's copy of (`None` for a generator of
+    /// its own): the fork's solvers share one generator, so a thumbweight one resolves
+    /// is every sharer's (the session copies it back; not a fork field).
+    pub shared: Option<u32>,
     /// `m_dCertifiedBound`: the last surface built: its certified distance from the blend
     /// (-1: none yet).
     pub certified_bound: f64,
@@ -87,6 +98,46 @@ fn param(st: &GnStation, q: usize, i: usize, e: usize) -> f64 {
     st.x.get(q).map_or(f64::NAN, |x| x.at(i, e))
 }
 
+/// `sm_GnSectionAreaIntegral`: the integral of `a b' - a' b` over [0, 1] for the order-n
+/// section between two planes, where `S(t) = a(t) e1 + b(t) e2` with `e1`, `e2` the rails'
+/// points from the edge: `a = f (1 - p1)`, `b = (1 - f) p2`. Twice the area the section
+/// takes off, over `|e1 x e2|`; it does not depend on the planes' angle. Composite Simpson
+/// on 2048 intervals.
+fn gn_section_area_integral(n: usize, w: f64) -> f64 {
+    const N: i32 = 2048;
+    let n1 = (n + 1) as f64;
+    let ab = |t: f64| -> (f64, f64, f64, f64) {
+        let (a_, b_) = ((1.0 - t).powf(n1), t.powf(n1));
+        let f = a_ / (a_ + b_);
+        let dfa = -n1 * (1.0 - t).powf(n1 - 1.0);
+        let dfb = n1 * t.powf(n1 - 1.0);
+        let df = (dfa * b_ - a_ * dfb) / ((a_ + b_) * (a_ + b_));
+        let (d1, d2) = (1.0 - w + w * t, 1.0 - w * t);
+        let (p1, dp1) = (t / d1, (1.0 - w) / (d1 * d1));
+        let (p2, dp2) = (t * (1.0 - w) / d2, (1.0 - w) / (d2 * d2));
+        let a = f * (1.0 - p1);
+        let da = df * (1.0 - p1) - f * dp1;
+        let b = (1.0 - f) * p2;
+        let db = -df * p2 + (1.0 - f) * dp2;
+        (a, b, da, db)
+    };
+    let mut sum = 0.0;
+    for i in 0..=N {
+        let t = f64::from(i) / f64::from(N);
+        let (a, b, da, db) = ab(t);
+        let g = a * db - da * b;
+        let c = if i == 0 || i == N {
+            1.0
+        } else if i % 2 != 0 {
+            4.0
+        } else {
+            2.0
+        };
+        sum += c * g;
+    }
+    sum / (3.0 * f64::from(N))
+}
+
 impl GnSectionFsg {
     /// `SmGnSectionFSG(lOrder, dThumbweight)`.
     #[must_use]
@@ -94,16 +145,103 @@ impl GnSectionFsg {
         Self {
             order,
             thumbweight,
+            shared: None,
             certified_bound: -1.0,
             certified_spans: 0,
         }
     }
 
     /// `IsValid`: whether an order and a thumbweight make a G^n section:
-    /// `2 <= n <= GN_MAX_ORDER`, `0 <= w < 1`.
+    /// `2 <= n <= GN_MAX_ORDER`, and `-1 < w < 1` (the section's weights `1 - w + w t` and
+    /// `1 - w t` stay positive and its reparametrizations monotone) or the equal area
+    /// default.
     #[must_use]
     pub fn is_valid(order: usize, thumbweight: f64) -> bool {
-        (2..=GN_MAX_ORDER).contains(&order) && (0.0..1.0).contains(&thumbweight)
+        (2..=GN_MAX_ORDER).contains(&order)
+            && (thumbweight == GN_THUMBWEIGHT_EQUAL_AREA
+                || (thumbweight > -1.0 && thumbweight < 1.0))
+    }
+
+    /// `EqualAreaThumbweight`: the w at which the order-n section between two planes
+    /// meeting at the angle `alpha` (radians, the angle of the wedge the ball sits in,
+    /// `0 < alpha < pi`) takes off, on the same rails, the area the ball's circle does:
+    /// `r^2 (cot(alpha/2) - (pi - alpha)/2)`.
+    ///
+    /// With `e1`, `e2` the rails' points from the edge (`|e_i| = d = r cot(alpha/2)`), the
+    /// section takes off `(1/2) d^2 sin(alpha) I(w)`, `I` the integral of `a b' - a' b`
+    /// (`sm_GnSectionAreaIntegral`), so `I(w) = (cot(alpha/2) - (pi - alpha)/2) /
+    /// (cot(alpha/2) cos^2(alpha/2))`. `I` falls as w rises, so the root is bisected on
+    /// (-1, 1).
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_INVALID_INPUT` for an order past 2..=4, an angle outside (0, pi), or a
+    /// target past what the range reaches.
+    pub fn equal_area_thumbweight(order: usize, alpha: f64) -> Result<f64> {
+        const OP_EA: &str = "blend::fillet_section::GnSectionFsg::equal_area_thumbweight";
+        if !((2..=GN_MAX_ORDER).contains(&order) && alpha > 0.0 && alpha < PI) {
+            return Err(SolidError::invalid_input(OP_EA, "order or wedge angle"));
+        }
+        let half = 0.5 * alpha;
+        let cot = half.cos() / half.sin();
+        let target = (cot - 0.5 * (PI - alpha)) / (cot * half.cos() * half.cos());
+        let mut lo = -1.0 + 1.0e-9;
+        let mut hi = 1.0 - 1.0e-9;
+        let i_lo = gn_section_area_integral(order, lo);
+        let i_hi = gn_section_area_integral(order, hi);
+        if !(target <= i_lo && target >= i_hi) {
+            return Err(SolidError::invalid_input(
+                OP_EA,
+                "no thumbweight gives this wedge's section the ball's circle's area",
+            ));
+        }
+        let mut it = 0;
+        while it < 200 && hi - lo > 1.0e-15 {
+            let mid = 0.5 * (lo + hi);
+            if gn_section_area_integral(order, mid) > target {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+            it += 1;
+        }
+        Ok(0.5 * (lo + hi))
+    }
+
+    /// `ResolveThumbweight`: the thumbweight used, the equal area one resolved once from
+    /// the wedge at one station: the ball's centre `centre` and its contacts `rail1`,
+    /// `rail2` give the wedge's angle `alpha = pi - (the angle between the radii)`. Exact
+    /// for two planes; elsewhere the default of the station it is resolved at. A
+    /// thumbweight given (or resolved before) is kept.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_INVALID_INPUT` for a radius of length 0; those of
+    /// [`GnSectionFsg::equal_area_thumbweight`].
+    pub fn resolve_thumbweight(
+        &mut self,
+        centre: Point3,
+        rail1: Point3,
+        rail2: Point3,
+    ) -> Result<()> {
+        if self.thumbweight != GN_THUMBWEIGHT_EQUAL_AREA {
+            return Ok(());
+        }
+        let a = rail1 - centre;
+        let b = rail2 - centre;
+        let (la, lb) = (a.length(), b.length());
+        if !(la > 0.0 && lb > 0.0) {
+            return Err(SolidError::invalid_input(
+                OP,
+                "ResolveThumbweight: a radius of length 0",
+            ));
+        }
+        let mut cos = a.dot(b) / (la * lb);
+        cos = smax(-1.0, if 1.0 < cos { 1.0 } else { cos }); // smos_Max(-1, smos_Min(1, cos))
+        let alpha = PI - cos.acos();
+        let w = Self::equal_area_thumbweight(self.order, alpha)?;
+        self.thumbweight = w;
+        Ok(())
     }
 
     /// `CreateSurface`: the blend surface between the solver's rails. The solver's faces
@@ -176,12 +314,20 @@ impl GnSectionFsg {
         if !Self::is_valid(n, self.thumbweight) {
             return Err(SolidError::invalid_input(
                 OP,
-                "the order must be 2 to 4 and the thumbweight in [0, 1)",
+                "the order must be 2 to 4 and the thumbweight in (-1, 1)",
             ));
         }
         let [rail1, rail2] = rails;
         let (c_min, c_max) = interval(center);
         let scale = smax(1.0, c_max - c_min);
+        {
+            // the default thumbweight resolved from the wedge at the middle station
+            let mid_s = 0.5 * (c_min + c_max);
+            let c = center.evaluate_point(mid_s)?;
+            let r1 = rail1.evaluate_point(mid_s)?;
+            let r2 = rail2.evaluate_point(mid_s)?;
+            self.resolve_thumbweight(c, r1, r2)?;
+        }
 
         // the stations: the unique knots of the rails and the centre line
         let mut ss: Vec<f64> = Vec::new();
@@ -563,7 +709,7 @@ impl GnSectionFsg {
     /// station solve and the evaluations.
     #[allow(clippy::too_many_arguments)]
     pub fn contact_order_at(
-        &self,
+        &mut self,
         k: &Kernel,
         faces: [&Surface; 2],
         center: &BSplineCurve,
@@ -577,6 +723,8 @@ impl GnSectionFsg {
         }
         let n = self.order;
         let m = center.evaluate_point(s)?;
+        let [rail_a, rail_b] = rail_points;
+        self.resolve_thumbweight(m, rail_a, rail_b)?;
         let mut r = [0.0_f64; 2];
         let mut side = [0.0_f64; 2];
         let rows = r
@@ -646,6 +794,75 @@ mod tests {
         ))
     }
 
+    /// `EqualAreaThumbweight` for orders 2 to 4 over wedges from 0.3 to 3 radians: the
+    /// values fork d01d7b0 gives (built locally, `-ffp-contract=off`), bit for bit; the
+    /// wedges too shut for any thumbweight are refused, as there. At a square corner the
+    /// section takes off what the circle does, `(1 - pi/4) r^2` (closed form).
+    #[test]
+    fn equal_area_thumbweights_are_the_fork_s() {
+        let fork: [(usize, f64, Option<f64>); 18] = [
+            (2, 0.3, None),
+            (2, 1.0, None),
+            (2, core::f64::consts::FRAC_PI_2, Some(-0.52521240458756147)),
+            (2, 2.0, Some(-0.29072725674815358)),
+            (2, 2.5, Some(-0.15058804304328927)),
+            (2, 3.0, Some(-0.0971637269709128)),
+            (3, 0.3, None),
+            (3, 1.0, None),
+            (3, core::f64::consts::FRAC_PI_2, Some(-0.58094928730219753)),
+            (3, 2.0, Some(-0.33852472453244753)),
+            (3, 2.5, Some(-0.19361792885821855)),
+            (3, 3.0, Some(-0.13837023281917249)),
+            (4, 0.3, None),
+            (4, 1.0, None),
+            (4, core::f64::consts::FRAC_PI_2, Some(-0.62397886337619379)),
+            (4, 2.0, Some(-0.37522338561877744)),
+            (4, 2.5, Some(-0.22652960634299901)),
+            (4, 3.0, Some(-0.16983693311599979)),
+        ];
+        for (n, alpha, want) in fork {
+            let got = GnSectionFsg::equal_area_thumbweight(n, alpha);
+            match want {
+                Some(w) => assert_eq!(got.unwrap().to_bits(), w.to_bits(), "n {n} alpha {alpha}"),
+                None => assert!(got.is_err(), "n {n} alpha {alpha}"),
+            }
+        }
+        assert!(GnSectionFsg::equal_area_thumbweight(1, 1.0).is_err());
+        assert!(GnSectionFsg::equal_area_thumbweight(2, 0.0).is_err());
+        assert!(GnSectionFsg::equal_area_thumbweight(2, PI).is_err());
+
+        // a square corner: half the integral is the area over r^2, 1 - pi/4
+        for n in 2..=GN_MAX_ORDER {
+            let w = GnSectionFsg::equal_area_thumbweight(n, core::f64::consts::FRAC_PI_2).unwrap();
+            let area = 0.5 * gn_section_area_integral(n, w);
+            assert!((area - (1.0 - PI / 4.0)).abs() < 1e-12, "n {n}: {area}");
+        }
+
+        // resolving: the wedge from a ball's centre and contacts, kept once resolved; a
+        // thumbweight given is kept
+        let mut g = GnSectionFsg::new(2, GN_DEFAULT_THUMBWEIGHT);
+        let c = Point3::new(3.0, 0.0, 3.0);
+        g.resolve_thumbweight(c, Point3::new(3.0, 0.0, 0.0), Point3::new(0.0, 0.0, 3.0))
+            .unwrap();
+        assert_eq!(
+            g.thumbweight.to_bits(),
+            (-0.52521240458756147_f64).to_bits()
+        );
+        g.resolve_thumbweight(c, Point3::new(3.0, 0.0, 0.0), Point3::new(1.0, 0.0, 1.0))
+            .unwrap();
+        assert_eq!(
+            g.thumbweight.to_bits(),
+            (-0.52521240458756147_f64).to_bits()
+        );
+        let mut g = GnSectionFsg::new(2, 0.3);
+        g.resolve_thumbweight(c, c, c).unwrap();
+        assert_eq!(g.thumbweight, 0.3);
+        let mut g = GnSectionFsg::new(2, GN_THUMBWEIGHT_EQUAL_AREA);
+        assert!(g
+            .resolve_thumbweight(c, c, Point3::new(0.0, 0.0, 3.0))
+            .is_err());
+    }
+
     #[test]
     fn valid_orders_and_thumbweights() {
         assert!(GnSectionFsg::is_valid(2, 0.0));
@@ -653,7 +870,12 @@ mod tests {
         assert!(!GnSectionFsg::is_valid(1, 0.0));
         assert!(!GnSectionFsg::is_valid(5, 0.0));
         assert!(!GnSectionFsg::is_valid(2, 1.0));
-        assert!(!GnSectionFsg::is_valid(2, -0.1));
+        // the fork's 6148773 (= 1947a45): (-1, 1) and the equal area default
+        assert!(GnSectionFsg::is_valid(2, -0.1));
+        assert!(GnSectionFsg::is_valid(2, -0.999));
+        assert!(GnSectionFsg::is_valid(2, GN_THUMBWEIGHT_EQUAL_AREA));
+        assert!(!GnSectionFsg::is_valid(2, -1.0));
+        assert!(!GnSectionFsg::is_valid(2, -1.5));
         assert!(!GnSectionFsg::is_valid(2, f64::NAN));
         let g = GnSectionFsg::new(3, 0.25);
         assert_eq!(g.certified_bound, -1.0);
@@ -695,7 +917,7 @@ mod tests {
             let seed = [rho1.x, rho1.y, m.y, t2];
             for n in 2..=GN_MAX_ORDER {
                 for w in [0.0, 0.3] {
-                    let g = GnSectionFsg::new(n, w);
+                    let mut g = GnSectionFsg::new(n, w);
                     for rail in 0..2 {
                         let order = g
                             .contact_order_at(&k, [&f1, &f2], &leader, s, seed, [rho1, rho2], rail)

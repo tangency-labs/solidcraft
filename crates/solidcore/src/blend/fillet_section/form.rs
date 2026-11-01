@@ -175,10 +175,10 @@ mod tests {
     #[test]
     fn form_is_the_section_of_its_definition() {
         for n in 2..=4_usize {
-            for w in [0.0, 0.0342934, 0.5] {
+            for w in [-0.9, -0.5252124, 0.0, 0.0342934, 0.5] {
                 let form = gn_form(n, w);
                 assert_eq!(form.w.len(), 3 * n + 2);
-                // the weights are positive (thumbweights in [0, 1))
+                // the weights are positive (thumbweights in (-1, 1))
                 assert!(form.w.iter().all(|&x| x > 0.0));
                 for t in [0.1_f64, 0.4, 0.5, 0.9] {
                     let a = (1.0 - t).powi(n as i32 + 1);

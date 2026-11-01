@@ -3643,7 +3643,9 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         let FilletObject::Solver(id) = solver else {
             return Err(invalid("object is not a solver"));
         };
-        self.calc_solver_geometry(k, id, executive)
+        let result = self.calc_solver_geometry(k, id, executive);
+        let shared = self.share_gn_thumbweight(id);
+        result.and(shared)
     }
     fn geometry_edge(&self, solver: FilletObject) -> Result<FilletObject> {
         let FilletObject::Solver(id) = solver else {
@@ -4196,6 +4198,11 @@ impl SessionObjects<'_> {
     fn allocate_generator(&mut self, generator: FilletSurfaceGenerator) -> Result<FilletObject> {
         let id =
             u32::try_from(self.generators.len()).map_err(|_| invalid("too many generators"))?;
+        let mut generator = generator;
+        if let FilletSurfaceGenerator::GnSection(g) = &mut generator {
+            // the solvers' copies of it share what it resolves (`share_gn_thumbweight`)
+            g.shared = Some(id);
+        }
         self.generators.push(generator);
         Ok(FilletObject::Generator(id))
     }
@@ -4320,6 +4327,41 @@ impl SessionObjects<'_> {
             Some(SolverObject::VariableRadius(Box::new(solver)));
         Ok(id)
     }
+    /// The fork's solvers share one `SmGnSectionFSG`, whose equal area thumbweight the first
+    /// blend built resolves for all of them (`ResolveThumbweight` writes its `mutable`
+    /// member): the thumbweight solver `id`'s copy resolved goes to the session's generator
+    /// and to every solver's copy of it not resolved yet. Run after each solver's
+    /// `CalcFilletGeom`, the first `Build` of each (WR-685, the fork's 6148773 = d01d7b0's
+    /// 1947a45).
+    fn share_gn_thumbweight(&mut self, id: FilletSolverId) -> Result<()> {
+        use crate::blend::fillet_section::section::GN_THUMBWEIGHT_EQUAL_AREA;
+        let Some(FilletSurfaceGenerator::GnSection(g)) = self.solver(id)?.base().fsg else {
+            return Ok(());
+        };
+        let (Some(slot), w) = (g.shared, g.thumbweight) else {
+            return Ok(());
+        };
+        if w == GN_THUMBWEIGHT_EQUAL_AREA {
+            return Ok(());
+        }
+        let unresolved = |fsg: &mut FilletSurfaceGenerator| {
+            if let FilletSurfaceGenerator::GnSection(c) = fsg {
+                if c.shared == Some(slot) && c.thumbweight == GN_THUMBWEIGHT_EQUAL_AREA {
+                    c.thumbweight = w;
+                }
+            }
+        };
+        if let Some(generator) = self.generators.get_mut(slot as usize) {
+            unresolved(generator);
+        }
+        for solver in self.solvers.iter_mut().flatten() {
+            if let Some(fsg) = solver.base_mut().fsg.as_mut() {
+                unresolved(fsg);
+            }
+        }
+        Ok(())
+    }
+
     fn assign_generator(&mut self, solver: FilletSolverId, generator: FilletObject) -> Result<()> {
         let FilletObject::Generator(id) = generator else {
             return Err(invalid("object is not a generator"));

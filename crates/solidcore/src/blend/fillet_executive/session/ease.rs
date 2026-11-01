@@ -30,7 +30,7 @@
 
 use super::{live_solver_ops, SessionObjects};
 use crate::blend::fillet_geom::p1::{FilletGeomId, FilletVertexType, SurfaceHandle};
-use crate::blend::fillet_section::section::{GnFaces, GnSectionFsg, GN_DEFAULT_THUMBWEIGHT};
+use crate::blend::fillet_section::section::{GnFaces, GnSectionFsg};
 use crate::blend::fillet_solver::p1::{
     FilletSolverOps, FilletSolverType, FilletSurfaceGeneratorType,
 };
@@ -874,12 +874,14 @@ impl SessionObjects<'_> {
                 return Err(sm_err());
             };
             let g2 = if k.fixes.fillet_gn_section_generator {
-                // the fork's order-2 G^n section at the default thumbweight (WR-685,
-                // tangency-labs/smlib@11ea2d9): the faces' curvature across the rails
+                // the fork's order-2 G^n section (WR-685, tangency-labs/smlib@11ea2d9):
+                // the faces' curvature across the rails. Its thumbweight stays 0, not the
+                // equal area default: it is the corner's transition, not the blend's own
+                // section (the fork's 22d258a = d01d7b0's adb9854)
                 let (Some(uv0), Some(uv1)) = (uvs.first(), uvs.get(1)) else {
                     return Err(null());
                 };
-                GnSectionFsg::new(2, GN_DEFAULT_THUMBWEIGHT).create_surface_from_curves(
+                GnSectionFsg::new(2, 0.0).create_surface_from_curves(
                     k,
                     &c0,
                     [&mut c1, &mut c2],

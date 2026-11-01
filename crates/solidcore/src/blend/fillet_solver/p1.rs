@@ -414,7 +414,8 @@ impl FilletSurfaceGenerator {
             ),
             Self::GnSection(g) => {
                 // the uv curves rebuilt on the stations are dropped: a caller that owns
-                // them uses `create_surface_replacing_uv`
+                // them uses `create_surface_replacing_uv` (which also keeps the equal area
+                // thumbweight the build resolves; this copy does not)
                 let none = || SolidError::null_pointer(OP);
                 let s1 = side1.surface.ok_or_else(none)?;
                 let s2 = side2.surface.ok_or_else(none)?;
@@ -442,9 +443,12 @@ impl FilletSurfaceGenerator {
     ///
     /// Those of [`FilletSurfaceGenerator::create_surface`] and
     /// [`GnSectionFsg::create_surface`].
+    ///
+    /// The G^n section generator keeps what its build resolves (the equal area
+    /// thumbweight, the certificate), as the fork's generator object does.
     #[allow(clippy::too_many_arguments)]
     pub fn create_surface_replacing_uv(
-        &self,
+        &mut self,
         k: &Kernel,
         approx_tol_3d: f64,
         solver_type: FilletSolverType,
@@ -459,7 +463,6 @@ impl FilletSurfaceGenerator {
         if let Self::GnSection(g) = self {
             let center =
                 center_line.ok_or_else(|| SolidError::invalid_input(OP, "NULL centre line"))?;
-            let mut g = *g;
             return g.create_surface(k, approx_tol_3d, center, [rail1, rail2], surfaces, uv);
         }
         let [s1, s2] = surfaces;
@@ -795,6 +798,12 @@ impl FilletSolver {
     #[must_use]
     pub const fn fillet_surface_generator(&self) -> Option<&FilletSurfaceGenerator> {
         self.fsg.as_ref()
+    }
+
+    /// `GetFilletSurfaceGenerator`, for a caller that changes it (the G^n section
+    /// generator resolving its equal area thumbweight).
+    pub fn fillet_surface_generator_mut(&mut self) -> Option<&mut FilletSurfaceGenerator> {
+        self.fsg.as_mut()
     }
 
     /// `SetFilletSurfaceGenerator`.

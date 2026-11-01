@@ -598,14 +598,14 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         // the base class); it reads the solver's tolerance and GetSolverType()
         // (SM_FS_CONST_RADIUS_ASSISTED); pSur[i] = GetSurface(i), passed as copies
         let approx_tol_3d = self.solver.this_approx_tol_3d();
-        let generator = self
-            .solver
-            .fillet_surface_generator()
-            .ok_or(SolidError::null_pointer(
-                "blend::fillet_intersector::create_fillet_surface",
-            ))?;
         let sur0 = Surface::from(self.surface(0)?.surface.clone());
         let sur1 = Surface::from(self.surface(1)?.surface.clone());
+        let generator =
+            self.solver
+                .fillet_surface_generator_mut()
+                .ok_or(SolidError::null_pointer(
+                    "blend::fillet_intersector::create_fillet_surface",
+                ))?;
         generator
             .create_surface_replacing_uv(
                 k,

@@ -38,12 +38,20 @@
 //! | [`station::as_b_spline`], [`station::surface_partials`] | `IsKindOf(SmBSplineSurface_TYPE)` and the cast, `sm_SurfacePartials` |
 //! | [`station::GnSystem`], [`station::gn_evaluate`], [`station::gn_jacobian`], [`station::solve4`] | `sm_GnSystem`, `sm_GnEvaluate`, `sm_GnJacobian`, `sm_Solve4` |
 //! | [`station::GnStation`], [`station::leader_series`], [`station::gn_solve_station`] | `sm_GnStation`, `sm_LeaderSeries`, `sm_GnSolveStation` |
-//! | [`section::GN_MAX_ORDER`], [`section::GN_DEFAULT_THUMBWEIGHT`] | `SM_GN_MAX_ORDER`, `SM_GN_DEFAULT_THUMBWEIGHT` |
+//! | [`section::GN_MAX_ORDER`], [`section::GN_DEFAULT_THUMBWEIGHT`], [`section::GN_THUMBWEIGHT_EQUAL_AREA`] | `SM_GN_MAX_ORDER`, `SM_GN_DEFAULT_THUMBWEIGHT`, `SM_GN_THUMBWEIGHT_EQUAL_AREA` (6148773 = 1947a45) |
+//! | [`section::GnSectionFsg::equal_area_thumbweight`], [`section::GnSectionFsg::resolve_thumbweight`], `gn_section_area_integral` (private) | `EqualAreaThumbweight`, `ResolveThumbweight`, `sm_GnSectionAreaIntegral` (6148773 = 1947a45) |
 //! | [`section::GnSectionFsg`], [`section::GnSectionFsg::new`], [`section::GnSectionFsg::is_valid`] | `SmGnSectionFSG`, its constructor, `IsValid` (and `GetOrder`, `GetThumbweight`, `GetCertifiedBound`, `GetCertifiedSpans` as fields) |
 //! | [`section::GnSectionFsg::create_surface`], [`section::GnSectionFsg::create_surface_from_curves`], `build` and `certify` (private) | `CreateSurface`, `CreateSurfaceFromCurves`, `Build` (its certificate block in `certify`) |
 //! | [`section::GnSectionFsg::contact_order_at`] | `ContactOrderAt` |
 //!
 //! Deviations:
+//! - **The shared thumbweight.** The fork's solvers share one generator object, whose
+//!   `mutable` thumbweight the first blend built resolves for all of them. The port's
+//!   solvers hold copies: a copy keeps what its own builds resolve, and the session hands
+//!   a resolved thumbweight to the generator it was copied from and to every other copy
+//!   after each solver's `CalcFilletGeom` (its first build). `ContactOrderAt`, through
+//!   the solver's generator borrowed immutably, resolves on a copy it does not keep; its
+//!   generator is resolved by then (the blend is built before its side faces' ribs).
 //! - **Bounds.** `sm_Trunc`'s orders are checked against the series' fixed size
 //!   (`SM_GN_MAXS`, `SM_GN_MAXE`) when a [`series::Trunc`] is made; the fork leaves them
 //!   to its callers. An empty Bernstein polynomial (which the fork never forms) multiplies

@@ -127,6 +127,10 @@ pub fn gn_section_contact_order(
     let w1 = uv1.evaluate_point(k, s)?;
     let seed = [w0.x, w0.y, w1.x, w1.y];
     let points = [r0.evaluate_point(k, s)?, r1.evaluate_point(k, s)?];
+    // a copy: the solver's generator was resolved by its blend's build, which comes
+    // before its side faces' ribs; one still at the equal area default resolves here at
+    // this station and is not kept (the fork's const ContactOrderAt keeps it)
+    let mut g = *g;
     let order = g.contact_order_at(k, faces, center, s, seed, points, rail)?;
     u32::try_from(order).map_err(|_| SolidError::sm_err(OP_ORDER))
 }
