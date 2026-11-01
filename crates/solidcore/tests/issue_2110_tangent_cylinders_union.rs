@@ -63,8 +63,14 @@ fn cylinder(k: &mut Kernel, radius: f64, seam: f64, axis: Vec3, angle: f64, to: 
 /// A's seam `seam_a` degrees round from its bottom line (180 is its top, through the
 /// origin), B's `seam_b` round from its +x side (270 is its top).
 fn union(split: bool, seam_a: f64, seam_b: f64) -> (Kernel, Result<Brep>) {
+    union_with(split, false, seam_a, seam_b)
+}
+
+/// [`union`], with `UpstreamFixes::bspline_trim_preserves_uv_spans` set to `uv_spans`.
+fn union_with(split: bool, uv_spans: bool, seam_a: f64, seam_b: f64) -> (Kernel, Result<Brep>) {
     let mut k = Kernel::default();
     k.fixes.ssi_split_curves_at_singular_points = split;
+    k.fixes.bspline_trim_preserves_uv_spans = uv_spans;
     let y = Vec3::new(0.0, 1.0, 0.0);
     let x = Vec3::new(1.0, 0.0, 0.0);
     let a = cylinder(&mut k, 10.0, seam_a, y, 90.0, Vec3::new(-20.0, 0.0, -10.0));
@@ -78,7 +84,11 @@ fn check_lines(k: &mut Kernel, b: &mut Brep) -> Vec<String> {
 }
 
 fn assert_sound(seam_a: f64, seam_b: f64) {
-    let (mut k, u) = union(true, seam_a, seam_b);
+    assert_sound_with(false, seam_a, seam_b);
+}
+
+fn assert_sound_with(uv_spans: bool, seam_a: f64, seam_b: f64) {
+    let (mut k, u) = union_with(true, uv_spans, seam_a, seam_b);
     let mut u = u.unwrap_or_else(|e| panic!("seams {seam_a} {seam_b}: {e:?}"));
     assert!(brep_is_manifold_solid(&u).unwrap());
     let lines = check_lines(&mut k, &mut u);
@@ -116,6 +126,19 @@ fn split_side_seams() {
 #[test]
 fn split_seams_through_the_node() {
     assert_sound(180.0, 270.0);
+}
+
+/// #2129: with `bspline_trim_preserves_uv_spans` also on, A's seam at 270 with B's at
+/// 135 or 225 left a UV trim a head span 8e-8 long whose four control points lie within
+/// check test #15's pole tolerance (`SmBSplineCurve` #15, "Bad Repeated `CPts`"); that trim
+/// is now cleaned as upstream cleans it, and every placement checks clean.
+#[test]
+fn split_with_uv_spans_kept_checks_clean_at_every_seam() {
+    for ia in 0..8 {
+        for ib in 0..8 {
+            assert_sound_with(true, 45.0 * f64::from(ia), 45.0 * f64::from(ib));
+        }
+    }
 }
 
 #[test]

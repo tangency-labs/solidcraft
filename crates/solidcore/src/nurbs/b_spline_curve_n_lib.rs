@@ -95,7 +95,9 @@
 //!   [`crate::kernel::UpstreamFixes::bspline_trim_preserves_uv_spans`], degenerate
 //!   end-span removal applies only to dimension-3 model curves. UV spans are in
 //!   surface parameter units and must not be removed using a 3D zone tolerance.
-//!   The default retains pinned SMLib behavior.
+//!   A short UV end span that collapses to a pole (its control points within check
+//!   test #15's tolerance `SM_ZONE_TOL_3D / 10`) is still removed as upstream does
+//!   (#2129). The default retains pinned SMLib behavior.
 //! - **Opt-in rational end spans (WR-575, #1529).** With
 //!   [`crate::kernel::UpstreamFixes::bspline_trim_keeps_rational_end_spans`], a
 //!   rational trimmed curve (a conic's NURB) keeps its short end spans: their removal
@@ -2225,7 +2227,7 @@ impl BSplineCurve {
     /// zone tolerance mapped to parameter space) are removed. With
     /// [`crate::kernel::UpstreamFixes::bspline_trim_preserves_uv_spans`] enabled,
     /// that removal applies only to dimension-3 model curves, preserving UV spans
-    /// exactly. With
+    /// exactly, except a short UV end span that collapses to a pole (#2129). With
     /// [`TrimMode::IntervalOnly`] only the interval is computed.
     ///
     /// # Errors
@@ -2401,7 +2403,18 @@ impl BSplineCurve {
                     }
                 }
             }
-            if (!k.fixes.bspline_trim_preserves_uv_spans || self.dim == 3)
+            // `fixes.bspline_trim_preserves_uv_spans` (WR-441): a UV curve keeps its
+            // short end spans, unless one collapses to a pole that check test #15 would
+            // report (`SM_ZONE_TOL_3D / 10`); that curve is cleaned as upstream (#2129)
+            let cleans_spans = !k.fixes.bspline_trim_preserves_uv_spans
+                || self.dim == 3
+                || short_end_span_is_pole(
+                    cur1.cpts(),
+                    degree,
+                    knots.len() > 2 && head < zone_tol_1d_min,
+                    knots.len() > 2 && tail < zone_tol_1d_max,
+                );
+            if cleans_spans
                 && !keeps_rational
                 && ((head < zone_tol_1d_min && knots.len() > 2)
                     || (tail < zone_tol_1d_max && knots.len() > 2))
@@ -2434,6 +2447,18 @@ impl BSplineCurve {
             .unwrap_or(Vec3::UNDEF);
         map_to_1d(tol, deriv, &self.natural_interval())
     }
+}
+
+/// Whether the short head span (`head`) or short tail span (`tail`) of a trimmed curve
+/// collapses to a pole as check test #15 measures one ([`end_span_is_pole`] with its
+/// tolerance `SM_ZONE_TOL_3D / 10`). Not upstream (#2129).
+fn short_end_span_is_pole(cpts: &[CPoint], degree: usize, head: bool, tail: bool) -> bool {
+    let pole_tol = ZONE_TOL_3D / 10.0;
+    let n_cpts = cpts.len();
+    (head && end_span_is_pole(cpts, 0, degree, pole_tol))
+        || (tail
+            && n_cpts > degree
+            && end_span_is_pole(cpts, n_cpts - 1 - degree, degree, pole_tol))
 }
 
 /// Whether the `degree + 1` control points of the span starting at control point
