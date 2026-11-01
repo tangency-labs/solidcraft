@@ -412,8 +412,13 @@ impl ThinSide {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AxisRef {
-    /// A line of the profile's sketch.
-    SketchLine { curve: String },
+    /// A line of a sketch. `sketch` names the sketch that owns the line (#6548); without it
+    /// the line is a line of the profile's sketch, the form saved before #6548.
+    SketchLine {
+        curve: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sketch: Option<u64>,
+    },
     /// Sketch x or y axis through the sketch origin (`x` / `y`).
     SketchAxis { axis: String },
     /// World X / Y / Z axis through the origin.

@@ -4425,15 +4425,17 @@ fn blend_body(
 
 /// The revolve axis in the sketch's plane coordinates (a point and a direction). `st` is the model
 /// an axis on an edge or face of it is found in; `construct` gives a construction axis, by name, in
-/// the sketch's 3D frame.
+/// the sketch's 3D frame; `sketch_line` gives a line of another sketch, by owning sketch feature
+/// and curve id, in the same frame as `ss` (#6548).
 pub(crate) fn revolve_axis(
     ss: &SolvedSketch,
     axis: &AxisRef,
     st: &ModelState,
     construct: &dyn Fn(&str) -> Result<(Vec3, Vec3)>,
+    sketch_line: &dyn Fn(u64, &str) -> Result<(Vec3, Vec3)>,
 ) -> Result<(Vec2, Vec2)> {
     match axis {
-        AxisRef::SketchLine { curve } => {
+        AxisRef::SketchLine { curve, sketch: None } => {
             let ci = ss.sketch.curve_index(curve).ok_or_else(|| DocError::Unknown(format!("sketch line `{curve}`")))?;
             match ss.sketch.curves.get(ci).map(|c| &c.kind) {
                 Some(CurveKind::Line { a, b }) => {
@@ -4442,6 +4444,10 @@ pub(crate) fn revolve_axis(
                 }
                 _ => Err(DocError::Invalid(format!("`{curve}` is not a line"))),
             }
+        }
+        AxisRef::SketchLine { curve, sketch: Some(owner) } => {
+            let (o, d) = sketch_line(*owner, curve)?;
+            line_in_sketch_plane(ss, o, d)
         }
         AxisRef::SketchAxis { axis } => match axis.to_ascii_lowercase().as_str() {
             "x" => Ok((Vec2::ZERO, Vec2::X)),
@@ -4470,6 +4476,19 @@ pub(crate) fn revolve_axis(
             let (o, d) = construct(name)?;
             line_in_sketch_plane(ss, o, d)
         }
+    }
+}
+
+/// The line `curve` of a solved sketch, as a world-space point and direction in the sketch's
+/// plane frame. Used to carry a revolve axis picked in another sketch (#6548).
+pub(crate) fn sketch_line_world(ss: &SolvedSketch, curve: &str) -> Result<(Vec3, Vec3)> {
+    let ci = ss.sketch.curve_index(curve).ok_or_else(|| DocError::Unknown(format!("sketch line `{curve}`")))?;
+    match ss.sketch.curves.get(ci).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) => {
+            let (pa, pb) = (ss.sketch.point(*a).unwrap_or_default(), ss.sketch.point(*b).unwrap_or_default());
+            Ok((ss.plane.to_world(pa), ss.plane.dir_to_world(pb - pa)))
+        }
+        _ => Err(DocError::Invalid(format!("`{curve}` is not a line"))),
     }
 }
 
@@ -5666,8 +5685,17 @@ fn feature_tools_with_constructor(
                 f.component,
             )?;
             let regions = solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
-            let (o, d) =
-                revolve_axis(&ss, axis, &axis_state(doc, st, f.component, axis), &|name| construction_axis_in(Some(doc), st, name, f.component))?;
+            let (o, d) = revolve_axis(
+                &ss,
+                axis,
+                &axis_state(doc, st, f.component, axis),
+                &|name| construction_axis_in(Some(doc), st, name, f.component),
+                &|owner, curve| {
+                    let solved =
+                        st.sketch(owner).ok_or_else(|| DocError::Unknown(format!("sketch {owner} (it must come earlier in the timeline)")))?;
+                    sketch_line_world(&sketch_in_feature_frame(doc, solved, f.component)?, curve)
+                },
+            )?;
             // To Object is in this feature's component frame: the model as seen from there.
             let tst = if to.is_some() { state_in_frame(doc, st, f.component) } else { std::borrow::Cow::Borrowed(st) };
             // Where the tool meets its targets is measured where they are shown (#3383).
