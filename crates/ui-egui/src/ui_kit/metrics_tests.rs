@@ -1,6 +1,7 @@
 use crate::ui_kit::metrics::dimension;
 use crate::ui_kit::test_support::*;
 use crate::ui_kit::*;
+use crate::theme::Tokens;
 
 use crate::scenario;
 
@@ -47,7 +48,7 @@ fn a_growing_form_widens_past_the_cap_and_publishes_the_card_extra() {
         label = scenario::rect_of(&format!("dialog:label:{long}"));
     }
     let label = label.unwrap();
-    let measured = ctx.fonts(|f| f.layout_no_wrap(long.to_owned(), egui::FontId::proportional(t.font_label), t.dialog_label)).size().x;
+    let measured = ctx.fonts_mut(|f| f.layout_no_wrap(long.to_owned(), egui::FontId::proportional(t.font_label), t.dialog_label)).size().x;
     assert!(label.width() > t.form_label_width * 1.6, "past the ordinary cap: {label:?}");
     assert!(label.width() >= measured, "the label fits its column: {label:?} vs {measured}");
     let extra = ctx.data(|d| d.get_temp::<f32>(key)).unwrap();

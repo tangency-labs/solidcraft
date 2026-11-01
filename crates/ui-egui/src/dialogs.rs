@@ -3419,7 +3419,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             if cell_enter && collapsed {
                 ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
             }
-            let body = |ui: &mut egui::Ui| {
+            let mut body = |ui: &mut egui::Ui| {
                 d.sync_fillet_chain(&app.session);
                 crate::hole_presets::rows(ui, &mut d, &mut app.preferences.hole_presets, &app.session.doc, reset_scroll);
                 crate::personal_sheet_rules::rows(ui, &mut d, &mut app.preferences.personal_sheet_rules, &app.session.doc, reset_scroll);

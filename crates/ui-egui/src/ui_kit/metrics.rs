@@ -108,7 +108,7 @@ pub(super) fn label_column(ui: &Ui, text: &str, row_width: f32) -> f32 {
         None => natural,
     };
     let needed = widest + t.space_4;
-    if let Some(key) = ui.stack().iter().find_map(|node| node.tags().get_downcast::<egui::Id>(super::layout::GROW_LABEL)) {
+    if let Some(&key) = ui.stack().iter().find_map(|node| node.tags().get_downcast::<egui::Id>(super::layout::GROW_LABEL)) {
         // A growing card (#10620): the column takes the width the widest label needs, past the
         // 1.6x cap, and the extra the card must gain over its design width is published under
         // `key` so the card widens by the same amount and the control column keeps its room.
