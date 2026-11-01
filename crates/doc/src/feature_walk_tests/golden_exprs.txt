@@ -1,3 +1,11 @@
+frame_end_cap
+  inputs:
+    Angle = cap1.angle (Angle)
+    Offset = cap1.offset (Length)
+    Thickness = cap.thickness (Length)
+    Inset Ratio = cap.ratio (Unitless)
+    Corner Chamfer = cap.chamfer (Length)
+  expressions: cap1.angle, cap1.offset, cap.thickness, cap.ratio, cap.chamfer
 body_transfer
 sketch
   inputs:

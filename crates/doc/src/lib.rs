@@ -25,6 +25,7 @@ pub mod display_quality;
 pub mod display_units;
 mod document;
 pub mod drawing;
+pub mod end_cap;
 mod eval;
 pub mod expr;
 pub mod face_anchor;

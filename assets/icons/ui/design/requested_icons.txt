@@ -104,6 +104,9 @@ dxf	false
 edit	false
 ellipse	false
 emboss	false
+end_cap	false
+end_cap_inward	false
+end_cap_outward	false
 environment_map	false
 equation_curve	false
 error	false
