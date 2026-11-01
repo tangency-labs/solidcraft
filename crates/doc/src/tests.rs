@@ -703,6 +703,62 @@ fn empty_boolean_targets_without_overlap_keep_plain_message() {
     }
 }
 
+/// A line from the centre of a fixed circle to it, held parallel to a line of length 40 between
+/// two linked points. The end point turned about the start (100° to 170°: a rotation, not the
+/// source's swap) keeps the 40 at both ends of the move but not on the way, so the walk cannot get
+/// there; the one solve turns the parallel line's sense. A turned sense only asks for the walk:
+/// when the walk fails, the document keeps that solve and reports nothing failing or folded.
+#[test]
+fn a_turned_sense_the_walk_cannot_reach_is_kept_and_never_refused() {
+    use solidcraft_sketch::{CurveKind, LinkGeom, LinkKind, LinkSource};
+    let mut sk = Sketch::new();
+    let ends = [("start", Vec2::new(-20.0, 0.0)), ("end", Vec2::new(-20.0, 40.0))]
+        .map(|(name, at)| sk.add_link(LinkKind::Project, LinkSource::SketchPoint { sketch: 1, point: name.into() }, &[LinkGeom::Point(at)]).unwrap());
+    let [p, q] = [0, 1].map(|i| sk.link_points(&ends[i])[0]);
+    let g = sk.add_line(Vec2::new(-20.0, 0.0), Vec2::new(-20.0, 40.0), None, None, None).unwrap();
+    let (g0, g1) = sk.curves[g].kind.ends().unwrap();
+    sk.add_constraint(ConstraintKind::Coincident { p: g0, q: p }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Coincident { p: g1, q }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Length { l: g, value: 40.0 }, None).unwrap();
+    let m = sk.add_point(Vec2::new(12.0, 0.0), None).unwrap();
+    sk.add_constraint(ConstraintKind::Fix { p: m }, None).unwrap();
+    let e = sk.add_curve(CurveKind::Ellipse { c: 0, m, r: 10.0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Radius { c: e, value: 10.0 }, None).unwrap();
+    let l = sk.add_line(Vec2::new(0.0, 0.0), Vec2::new(0.0, 10.0), Some(0), None, None).unwrap();
+    let (_, l1) = sk.curves[l].kind.ends().unwrap();
+    sk.add_constraint(ConstraintKind::PointOnCurve { p: l1, c: e }, None).unwrap();
+    let parallel = sk.add_constraint(ConstraintKind::Parallel { a: l, b: g }, None).unwrap();
+    assert!(solidcraft_sketch::solve(&mut sk).ok());
+    let stored = sk;
+    let doc = Document::new("sense");
+    for degrees in [100.0_f64, 150.0, 170.0] {
+        let turn = (90.0 + degrees).to_radians();
+        let at = Vec2::new(-20.0 + 40.0 * turn.cos(), 40.0 * turn.sin());
+        let mut sk = stored.clone();
+        assert!(!sk.update_link(&ends[1], &[LinkGeom::Point(at)]).unwrap());
+        // the walk cannot get there, and the one solve turns the sense of the parallel alone
+        let mut walked = sk.clone();
+        assert!(
+            solidcraft_sketch::solve_after_link_move(&mut walked, &stored, &stored.driving_values(), solidcraft_sketch::Analysis::Full).is_none(),
+            "{degrees}"
+        );
+        let mut jump = sk.clone();
+        let before = jump.positions_in(&stored);
+        assert!(solidcraft_sketch::solve_after_edit(&mut jump, &stored.driving_values(), before.as_deref()).ok());
+        assert_eq!(solidcraft_sketch::flips_from_stored(&jump, &stored), vec![parallel.clone()], "{degrees}");
+        let report = doc.solve_sketch(&Default::default(), &mut sk, &stored.driving_values(), Some(&stored)).unwrap();
+        assert!(
+            report.keeps_orientation() && report.failing.is_empty() && report.folded.is_empty(),
+            "{degrees}: {:?} {:?} {:?}",
+            report.status,
+            report.failing,
+            report.folded
+        );
+        let sense = (sk.points[q].pos - sk.points[p].pos).dot(sk.points[l1].pos - sk.points[0].pos);
+        assert!(sk.points[q].pos.dist(at) < 1e-9 && sense < 0.0, "{degrees}: {:?}", sk.points[l1].pos);
+    }
+}
+
 #[test]
 fn timeline_group_legacy_json_omits_empty_joint_membership() {
     let old = serde_json::json!({"id":100, "name":"Folder", "parent":null, "features":[]});
