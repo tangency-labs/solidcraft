@@ -25,6 +25,7 @@
 //! | [`TYPE`], [`TYPE_STRING`], [`CLASS_STRING`], [`CurveBoundedSurface::type_code`], [`CurveBoundedSurface::type_string`], [`CurveBoundedSurface::class_string`] | `GetType`, `GetTypeString`, `GetClassString` (`SM_COMMON`) |
 //! | [`is_kind_of`], [`CurveBoundedSurface::is_kind_of`]   | `IsKindOf`                                     |
 //! | [`CurveBoundedSurface::read_from_db`]                 | `ReadFromDB`                                   |
+//! | [`CurveBoundedSurface::write_to_db`]                  | `WriteToDB`                                    |
 //!
 //! Deviations:
 //! - **Nesting.** `new` returns `InvalidInput` when the basis or a boundary curve would nest
@@ -50,13 +51,19 @@
 //!   the comparison with the elements compared so far.
 //! - **`SetContext`** has nothing to set: the kernel is passed to the calls that need
 //!   it.
-//! - **`ReadFromDB`** keeps upstream's bugs: the UV boundaries are read with the type
-//!   of the last 3D boundary (`0`, not a curve type, when there is none), and the
-//!   implicit-outer flag read from the stream is dropped (the surface gets `FALSE`).
-//!   A failed ASCII extraction of a count or the flag stores `0` (C++11 `operator>>`).
-//!   Not upstream: the read is bounded by [`DatabaseReader::enter_nested`] (a basis
-//!   surface can be another curve bounded surface) and each boundary count by the
-//!   bytes left in the stream ([`DatabaseReader::ensure_available`]).
+//! - **`ReadFromDB`** keeps upstream's bugs by default (`WR-43`): the UV boundaries are
+//!   read with the type of the last 3D boundary (`0`, not a curve type, when there is
+//!   none), and the implicit-outer flag read from the stream is dropped (the surface
+//!   gets `FALSE`). With
+//!   [`UpstreamFixes::curve_bounded_surface_read_uv_type_and_implicit_outer`](crate::kernel::UpstreamFixes::curve_bounded_surface_read_uv_type_and_implicit_outer),
+//!   each UV boundary is read with its own `lUVType` header and `bImplicitOuter` is
+//!   forwarded to [`CurveBoundedSurface::new`]. A failed ASCII extraction of a count or
+//!   the flag stores `0` (C++11 `operator>>`). Not upstream: the read is bounded by
+//!   [`DatabaseReader::enter_nested`] (a basis surface can be another curve bounded
+//!   surface) and each boundary count by the bytes left in the stream
+//!   ([`DatabaseReader::ensure_available`]); [`CurveBoundedSurface::write_to_db`] bounds
+//!   nested basis and boundary writes by
+//!   [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING).
 
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
@@ -71,10 +78,12 @@ use crate::surface::surface::p2::{
     self as surface_p2, check_geometry_nesting, GeometricProperties, NestedGeometry, Surface,
     SurfaceKind,
 };
-use crate::topology::database_io::{DatabaseReader, FileType};
+use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
+use crate::topology::geometry_write::{write_curve_at, write_surface_at};
 
 const OP_NEW: &str = "surface::curve_bounded_surface::CurveBoundedSurface::new";
 const OP_READ: &str = "surface::curve_bounded_surface::CurveBoundedSurface::read_from_db";
+const OP_WRITE: &str = "surface::curve_bounded_surface::CurveBoundedSurface::write_to_db";
 
 /// `SmCurveBoundedSurface_TYPE`.
 pub const TYPE: i64 = surface_p2::CURVE_BOUNDED_SURFACE_TYPE;
@@ -482,10 +491,17 @@ impl CurveBoundedSurface {
 
     // ---- database -------------------------------------------------------------------
 
-    /// Reads a curve bounded surface written by `WriteToDB` (`ReadFromDB`): the
-    /// boundary counts and implicit-outer flag, the basis surface (type header and
+    /// Reads a curve bounded surface written by [`Self::write_to_db`] (`ReadFromDB`):
+    /// the boundary counts and implicit-outer flag, the basis surface (type header and
     /// record), then every 3D and every UV boundary curve (type and dimension header
     /// and record).
+    ///
+    /// By default (pinned SMLib parity, `WR-43`), UV boundary curves are dispatched with
+    /// the last 3D boundary's type (`0` when there are no 3D boundaries, failing with
+    /// `SM_ERR`) and the stream's `bImplicitOuter` flag is ignored (`false`). Enable
+    /// [`UpstreamFixes::curve_bounded_surface_read_uv_type_and_implicit_outer`](crate::kernel::UpstreamFixes::curve_bounded_surface_read_uv_type_and_implicit_outer)
+    /// on `k.fixes` to dispatch each UV boundary on its own header type and preserve
+    /// `implicit_outer`.
     ///
     /// # Errors
     ///
@@ -498,6 +514,70 @@ impl CurveBoundedSurface {
         let result = read_body(k, db, version);
         db.leave_nested();
         result
+    }
+
+    /// Writes the surface in `SmCurveBoundedSurface::WriteToDB` format (`WriteToDB`):
+    /// the 3D and UV boundary counts and implicit-outer flag, the basis surface (type
+    /// header and record), then every 3D and every UV boundary curve (type and dimension
+    /// header and record).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when nested deeper than
+    /// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING); those
+    /// of [`write_surface_at`] and [`write_curve_at`].
+    pub fn write_to_db(&self, db: &mut DatabaseWriter, version: u64) -> Result<()> {
+        self.write_to_db_at(db, version, 0)
+    }
+
+    /// [`Self::write_to_db`] for a surface nested `depth` levels deep.
+    fn write_to_db_at(&self, db: &mut DatabaseWriter, version: u64, depth: usize) -> Result<()> {
+        if depth > surface_p2::MAX_GEOMETRY_NESTING {
+            return Err(SolidError::invalid_input(
+                OP_WRITE,
+                "geometry nested too deeply",
+            ));
+        }
+        let ascii = db.file_type() == FileType::Ascii;
+        let implicit_outer = i32::from(self.implicit_outer);
+        if ascii {
+            db.out_u64(self.boundaries_3d.len() as u64);
+            db.out_str(" SmCurveBoundedSurface Number of 3D Boundaries \n");
+            db.out_u64(self.boundaries_uv.len() as u64);
+            db.out_str(" SmCurveBoundedSurface Number of UV Boundaries \n");
+            db.out_i64(implicit_outer.into());
+            db.out_str(" SmCurveBoundedSurface Implicit Outer Flag \n");
+        } else {
+            db.write_long(self.boundaries_3d.len() as i64);
+            db.write_long(self.boundaries_uv.len() as i64);
+            db.write_boolean(implicit_outer);
+        }
+
+        // basis surface
+        if ascii {
+            db.out_str(" SmCurveBoundedSurface->BasisSurface \n");
+        }
+        db.write_type(self.basis.type_code(), None);
+        if let SurfaceKind::CurveBounded(inner) = self.basis.kind() {
+            inner.write_to_db_at(db, version, depth + 1)?;
+        } else {
+            write_surface_at(&self.basis, db, version, depth + 1)?;
+        }
+
+        // every 3DBoundary curve
+        for c in &self.boundaries_3d {
+            db.write_type(c.type_code(), Some(c.dim()));
+            write_curve_at(c, db, version, depth + 1)?;
+        }
+
+        // every UVBoundary curve
+        for c in &self.boundaries_uv {
+            db.write_type(c.type_code(), Some(c.dim()));
+            write_curve_at(c, db, version, depth + 1)?;
+        }
+
+        // all done
+        Ok(())
     }
 }
 
@@ -516,7 +596,7 @@ fn surface_eq(k: &Kernel, a: &Surface, b: &Surface) -> Result<bool> {
 fn ascii_ulong(db: &mut DatabaseReader) -> u64 {
     let v = db
         .in_stream_mut()
-        .and_then(crate::topology::database_io::InputStream::extract_ulong)
+        .and_then(InputStream::extract_ulong)
         .unwrap_or(0);
     db.go_to_next_line();
     v
@@ -547,22 +627,25 @@ fn read_curve_type(db: &mut DatabaseReader) -> Result<(i64, u64)> {
 fn read_body(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<CurveBoundedSurface> {
     // file type
     let ascii = db.file_type() == FileType::Ascii;
+    let fix = k
+        .fixes
+        .curve_bounded_surface_read_uv_type_and_implicit_outer;
 
     // locals
-    let (l3d_boundaries_size, luv_boundaries_size) = if ascii {
+    let (l3d_boundaries_size, luv_boundaries_size, implicit_outer) = if ascii {
         let a = ascii_ulong(db);
         let b = ascii_ulong(db);
-        let _implicit_outer = db
+        let implicit_outer = db
             .in_stream_mut()
-            .and_then(crate::topology::database_io::InputStream::extract_int)
+            .and_then(InputStream::extract_int)
             .unwrap_or(0);
         db.go_to_next_line();
-        (a, b)
+        (a, b, implicit_outer != 0)
     } else {
         let a = db.read_ulong()?;
         let b = db.read_ulong()?;
-        let _implicit_outer = db.read_boolean()?;
-        (a, b)
+        let implicit_outer = db.read_boolean()?;
+        (a, b, implicit_outer != 0)
     };
 
     // surface locals
@@ -588,23 +671,34 @@ fn read_body(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<CurveB
         s3d_curves.push(Curve::read_from_db(k, l3d_type, db, l3d_dim, version)?);
     }
 
-    // for every UV curve (read with the type of the last 3D curve, as upstream)
+    // for every UV curve (read with the type of the last 3D curve unless WR-43 fix is enabled)
     let nuv = boundary_count(db, luv_boundaries_size)?;
     for _ in 0..nuv {
-        let (_luv_type, luv_dim) = read_curve_type(db)?;
-        suv_curves.push(Curve::read_from_db(k, l3d_type, db, luv_dim, version)?);
+        let (luv_type, luv_dim) = read_curve_type(db)?;
+        let uv_type = if fix { luv_type } else { l3d_type };
+        suv_curves.push(Curve::read_from_db(k, uv_type, db, luv_dim, version)?);
     }
 
-    // all done (the implicit-outer flag read above is not passed on)
-    CurveBoundedSurface::new(basis_surface, s3d_curves, suv_curves, false)
+    // all done (the implicit-outer flag read above is dropped unless WR-43 fix is enabled)
+    CurveBoundedSurface::new(
+        basis_surface,
+        s3d_curves,
+        suv_curves,
+        if fix { implicit_outer } else { false },
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
+    use crate::curve::curve::CurveKind;
+    use crate::curve::line::Line;
+    use crate::kernel::UpstreamFixes;
     use crate::nurbs::b_spline_curve::BSplineCurve;
     use crate::nurbs::b_spline_surface::BSplineSurface;
+    use crate::nurbs::crv_basic::Curve as NurbCurve;
+    use crate::nurbs::math::{CPoint, NOW, NOZ};
 
     fn patch() -> BSplineSurface {
         BSplineSurface::create_bilinear_surface(
@@ -768,5 +862,291 @@ mod tests {
 
         let deep = format!("0\n0\n0\n\nObject Type {TYPE}\n").repeat(200);
         assert!(CurveBoundedSurface::read_from_db(&k, &mut reader(&deep), 30).is_err());
+    }
+
+    fn kernel_with_wr43() -> Kernel {
+        let mut k = Kernel::default();
+        k.fixes
+            .curve_bounded_surface_read_uv_type_and_implicit_outer = true;
+        k
+    }
+
+    fn analytic_line_2d(a: Point3, b: Point3) -> Curve {
+        Curve::from(Line::create_line_segment(2, a, b, None).unwrap())
+    }
+
+    fn analytic_line_3d(a: Point3, b: Point3) -> Curve {
+        Curve::from(Line::create_line_segment(3, a, b, None).unwrap())
+    }
+
+    fn quadratic_bspline_2d() -> Curve {
+        let nurb = NurbCurve::new(
+            vec![
+                CPoint::new(0.125, 0.25, NOZ, NOW),
+                CPoint::new(0.5, 0.75, NOZ, NOW),
+                CPoint::new(0.875, 0.25, NOZ, NOW),
+            ],
+            2,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        Curve::from(BSplineCurve::from_nurb(nurb, 2, false))
+    }
+
+    fn write_cbs_bytes(cbs: &CurveBoundedSurface, file_type: FileType, version: u64) -> Vec<u8> {
+        let mut db = DatabaseWriter::open_for_write(file_type);
+        cbs.write_to_db(&mut db, version).unwrap();
+        db.into_bytes()
+    }
+
+    fn write_polymorphic_surface_bytes(
+        cbs: &CurveBoundedSurface,
+        file_type: FileType,
+        version: u64,
+    ) -> Vec<u8> {
+        let mut db = DatabaseWriter::open_for_write(file_type);
+        db.write_type(cbs.type_code(), None);
+        cbs.write_to_db(&mut db, version).unwrap();
+        db.into_bytes()
+    }
+
+    fn reader_bytes(bytes: &[u8], file_type: FileType) -> DatabaseReader {
+        let mut db = DatabaseReader::new();
+        db.open_for_read(bytes.to_vec(), file_type);
+        db
+    }
+
+    fn assert_curves_match_points(k: &Kernel, got: &Curve, want: &Curve) {
+        assert_eq!(got.type_code(), want.type_code());
+        assert_eq!(got.dim(), want.dim());
+        for t in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let p_got = got.evaluate_point(k, t).unwrap();
+            let p_want = want.evaluate_point(k, t).unwrap();
+            assert!(
+                (p_got - p_want).length() < 1.0e-12,
+                "t={t}: got {p_got:?}, want {p_want:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn wr43_uv_only_and_implicit_outer_round_trip_ascii_and_binary() {
+        let k_def = Kernel::default();
+        let k_opt = kernel_with_wr43();
+        let uv_line = analytic_line_2d(Point3::new(0.25, 0.5, 0.0), Point3::new(0.75, 0.5, 0.0));
+        let uv_bspline = quadratic_bspline_2d();
+
+        for (is_line, uv_curve) in [(true, uv_line), (false, uv_bspline)] {
+            let orig = CurveBoundedSurface::new(
+                Surface::from(patch()),
+                Vec::new(),
+                vec![uv_curve.clone()],
+                true,
+            )
+            .unwrap();
+
+            for version in [30_u64, 42_u64] {
+                for file_type in [FileType::Ascii, FileType::Binary] {
+                    let raw = write_cbs_bytes(&orig, file_type, version);
+                    let poly = write_polymorphic_surface_bytes(&orig, file_type, version);
+
+                    // Pinned C++ behaviour: 0 3D curves leaves `l3d_type == 0`, so UV
+                    // dispatch fails (`SM_ERR`).
+                    let err = CurveBoundedSurface::read_from_db(
+                        &k_def,
+                        &mut reader_bytes(&raw, file_type),
+                        version,
+                    )
+                    .unwrap_err();
+                    assert!(!err.is_unported());
+
+                    let mut poly_def_db = reader_bytes(&poly, file_type);
+                    let ty_def = poly_def_db.read_type(false).unwrap().type_code.unwrap();
+                    assert_eq!(ty_def, TYPE);
+                    assert!(
+                        Surface::read_from_db(&k_def, ty_def, &mut poly_def_db, version).is_err()
+                    );
+
+                    // Opt-in WR-43 fix: dispatches UV curve on `luv_type` and preserves
+                    // `implicit_outer == true`.
+                    let got = CurveBoundedSurface::read_from_db(
+                        &k_opt,
+                        &mut reader_bytes(&raw, file_type),
+                        version,
+                    )
+                    .unwrap();
+                    assert!(got.boundaries_3d().is_empty());
+                    assert_eq!(got.boundaries_uv().len(), 1);
+                    assert!(got.implicit_outer());
+                    assert_eq!(got.basis().type_code(), BSplineSurface::TYPE);
+                    assert_eq!(got.boundaries_uv()[0].dim(), 2);
+                    if is_line {
+                        assert!(matches!(got.boundaries_uv()[0].kind(), CurveKind::Line(_)));
+                    } else {
+                        assert!(matches!(
+                            got.boundaries_uv()[0].kind(),
+                            CurveKind::BSpline(_)
+                        ));
+                    }
+                    assert_curves_match_points(&k_opt, &got.boundaries_uv()[0], &uv_curve);
+
+                    // Polymorphic `Surface::read_from_db` forwards `k: &Kernel`.
+                    let mut poly_opt_db = reader_bytes(&poly, file_type);
+                    let ty_opt = poly_opt_db.read_type(false).unwrap().type_code.unwrap();
+                    assert_eq!(ty_opt, TYPE);
+                    let got_surface =
+                        Surface::read_from_db(&k_opt, ty_opt, &mut poly_opt_db, version).unwrap();
+                    let SurfaceKind::CurveBounded(inner) = got_surface.kind() else {
+                        panic!("expected CurveBounded");
+                    };
+                    assert!(inner.boundaries_3d().is_empty());
+                    assert_eq!(inner.boundaries_uv().len(), 1);
+                    assert!(inner.implicit_outer());
+                    assert_curves_match_points(&k_opt, &inner.boundaries_uv()[0], &uv_curve);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wr43_mismatched_3d_and_uv_curve_types_and_implicit_false() {
+        let mut fixes = UpstreamFixes::default();
+        assert!(!fixes.curve_bounded_surface_read_uv_type_and_implicit_outer);
+        *fixes
+            .flag_mut("curve_bounded_surface_read_uv_type_and_implicit_outer")
+            .unwrap() = true;
+        assert!(fixes.curve_bounded_surface_read_uv_type_and_implicit_outer);
+        assert_eq!(
+            fixes.flags().find(|&(name, _)| {
+                name == "curve_bounded_surface_read_uv_type_and_implicit_outer"
+            }),
+            Some((
+                "curve_bounded_surface_read_uv_type_and_implicit_outer",
+                true
+            ))
+        );
+
+        let k_def = Kernel::default();
+        let k_opt = kernel_with_wr43();
+
+        // Case 1: 3D BSplineCurve + 2D Line UV boundary.
+        let bspline_3d = line_curve(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 0.0, 0.0));
+        let line_2d = analytic_line_2d(Point3::new(0.25, 0.5, 0.0), Point3::new(0.75, 0.5, 0.0));
+        for implicit_outer in [true, false] {
+            let orig = CurveBoundedSurface::new(
+                Surface::from(patch()),
+                vec![bspline_3d.clone()],
+                vec![line_2d.clone()],
+                implicit_outer,
+            )
+            .unwrap();
+            for file_type in [FileType::Ascii, FileType::Binary] {
+                let raw = write_cbs_bytes(&orig, file_type, 30);
+                let poly = write_polymorphic_surface_bytes(&orig, file_type, 30);
+
+                // Default reads the 2D `Line` record as `BSPLINE_CURVE_TYPE` and fails.
+                assert!(CurveBoundedSurface::read_from_db(
+                    &k_def,
+                    &mut reader_bytes(&raw, file_type),
+                    30,
+                )
+                .is_err());
+
+                let got = CurveBoundedSurface::read_from_db(
+                    &k_opt,
+                    &mut reader_bytes(&raw, file_type),
+                    30,
+                )
+                .unwrap();
+                assert_eq!(got.boundaries_3d().len(), 1);
+                assert_eq!(got.boundaries_uv().len(), 1);
+                assert!(matches!(
+                    got.boundaries_3d()[0].kind(),
+                    CurveKind::BSpline(_)
+                ));
+                assert!(matches!(got.boundaries_uv()[0].kind(), CurveKind::Line(_)));
+                assert_curves_match_points(&k_opt, &got.boundaries_3d()[0], &bspline_3d);
+                assert_curves_match_points(&k_opt, &got.boundaries_uv()[0], &line_2d);
+                assert_eq!(got.implicit_outer(), implicit_outer);
+
+                let mut poly_db = reader_bytes(&poly, file_type);
+                let ty = poly_db.read_type(false).unwrap().type_code.unwrap();
+                let got_poly = Surface::read_from_db(&k_opt, ty, &mut poly_db, 30).unwrap();
+                let SurfaceKind::CurveBounded(inner) = got_poly.kind() else {
+                    panic!("expected CurveBounded");
+                };
+                assert!(matches!(
+                    inner.boundaries_uv()[0].kind(),
+                    CurveKind::Line(_)
+                ));
+                assert_eq!(inner.implicit_outer(), implicit_outer);
+            }
+        }
+
+        // Case 2: 3D Line + 2D quadratic BSplineCurve UV boundary.
+        let line_3d = analytic_line_3d(Point3::new(0.0, 0.0, 0.0), Point3::new(2.0, 0.0, 0.0));
+        let bspline_2d = quadratic_bspline_2d();
+        for implicit_outer in [true, false] {
+            let orig = CurveBoundedSurface::new(
+                Surface::from(patch()),
+                vec![line_3d.clone()],
+                vec![bspline_2d.clone()],
+                implicit_outer,
+            )
+            .unwrap();
+            for file_type in [FileType::Ascii, FileType::Binary] {
+                let raw = write_cbs_bytes(&orig, file_type, 30);
+                let poly = write_polymorphic_surface_bytes(&orig, file_type, 30);
+
+                // Default misreads the 2D `BSplineCurve` record as `Line::TYPE` (leaving
+                // its failed base 3D) and drops `implicit_outer` (`false`).
+                let misread = CurveBoundedSurface::read_from_db(
+                    &k_def,
+                    &mut reader_bytes(&raw, file_type),
+                    30,
+                )
+                .unwrap();
+                assert_eq!(misread.boundaries_uv()[0].type_code(), Line::TYPE);
+                assert_eq!(misread.boundaries_uv()[0].dim(), 3);
+                assert!(!misread.implicit_outer());
+
+                let got = CurveBoundedSurface::read_from_db(
+                    &k_opt,
+                    &mut reader_bytes(&raw, file_type),
+                    30,
+                )
+                .unwrap();
+                assert_eq!(got.boundaries_3d().len(), 1);
+                assert_eq!(got.boundaries_uv().len(), 1);
+                assert!(matches!(got.boundaries_3d()[0].kind(), CurveKind::Line(_)));
+                assert!(matches!(
+                    got.boundaries_uv()[0].kind(),
+                    CurveKind::BSpline(_)
+                ));
+                assert_eq!(got.boundaries_uv()[0].type_code(), BSPLINE_CURVE_TYPE);
+                assert_eq!(got.boundaries_uv()[0].dim(), 2);
+                assert_curves_match_points(&k_opt, &got.boundaries_3d()[0], &line_3d);
+                assert_curves_match_points(&k_opt, &got.boundaries_uv()[0], &bspline_2d);
+                assert!(
+                    (got.boundaries_uv()[0].evaluate_point(&k_opt, 0.5).unwrap()
+                        - Point3::new(0.5, 0.5, 0.0))
+                    .length()
+                        < 1.0e-12
+                );
+                assert_eq!(got.implicit_outer(), implicit_outer);
+
+                let mut poly_db = reader_bytes(&poly, file_type);
+                let ty = poly_db.read_type(false).unwrap().type_code.unwrap();
+                let got_poly = Surface::read_from_db(&k_opt, ty, &mut poly_db, 30).unwrap();
+                let SurfaceKind::CurveBounded(inner) = got_poly.kind() else {
+                    panic!("expected CurveBounded");
+                };
+                assert!(matches!(
+                    inner.boundaries_uv()[0].kind(),
+                    CurveKind::BSpline(_)
+                ));
+                assert_eq!(inner.implicit_outer(), implicit_outer);
+            }
+        }
     }
 }
