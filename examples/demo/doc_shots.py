@@ -814,6 +814,99 @@ def features_edit(d):
     d.wait(2.0)
 
 
+# assemblies.md: two loose hinge leaves made into components, joined by a revolute joint on
+# their barrels, then swung by a drag. Leaf B starts lifted and set back, so the joint visibly
+# brings it into place.
+B_LIFT = (25, 20)  # mm along Y and Z
+
+
+def hinge_view(d):
+    d.ui("ui.camera", {"target": [26, 40, 8], "yaw": -0.7854, "pitch": 0.6155, "distance": 150})
+    d.settle_camera()
+
+
+def loose_leaves(d):
+    """Leaf A (its barrel on the far side) and Leaf B (its barrel on the near side), as bodies."""
+    dy, dz = B_LIFT
+    d.execute("solid.box", {"length": 40, "width": 30, "height": 3, "corner": [0, 0, 0], "body_name": "Leaf A"})
+    d.execute("solid.cylinder", {"base": [0, 33, 4], "axis": [1, 0, 0], "radius": 4, "height": 40, "operation": "join", "targets": ["Leaf A"]})
+    d.execute("solid.box", {"length": 40, "width": 30, "height": 3, "corner": [0, 36 + dy, dz], "body_name": "Leaf B"})
+    d.execute("solid.cylinder", {"base": [0, 33 + dy, 4 + dz], "axis": [1, 0, 0], "radius": 4, "height": 40, "operation": "join", "targets": ["Leaf B"]})
+    hinge_view(d)
+
+
+def components(d, label=lambda text: None):
+    label("Right-click Bodies: Create Components from Bodies")
+    b = d.at(handle="row:Bodies")
+    d.glide(b, 0.8)
+    d.ui("ui.click", {"x": b[0], "y": b[1], "button": "right"})
+    d.mark(cursor=list(b), click=True)
+    d.wait(0.8)
+    d.click(d.at(handle="menu:component.from_bodies"), dur=0.6, settle=1.0)
+    rows = {h["name"] for h in d.ui("ui.handles") if h["name"].startswith("row:")}
+    if not {"row:Leaf A:1", "row:Leaf B:1"} <= rows:
+        raise RuntimeError(f"no components: {sorted(rows)}")
+
+
+def leaves(d):
+    loose_leaves(d)
+    components(d)
+
+
+def joint(d, label=lambda text: None):
+    label("Joint: click Leaf B's barrel end, then Leaf A's")
+    d.click(d.at(handle="tab:ASSEMBLE"), dur=0.6, settle=0.5)
+    d.tool("joint.create")
+    dy, dz = B_LIFT
+    d.click(d.at(world=[40, 33 + dy, 8 + dz]), dur=0.6, settle=0.8)
+    d.click(d.at(world=[40, 33, 8]), dur=0.6, settle=1.0)
+    label("Type: Revolute. Flip turns Leaf B the right way round")
+    d.click(d.at(handle="dialog:Type"), dur=0.5, settle=0.6)
+    d.click(d.at(handle="dialog:Type:Revolute"), dur=0.4, settle=0.8)
+    d.click(d.at(handle="dialog:Flip"), dur=0.6, settle=1.2)
+    d.click(d.at(handle="dialog:ok"), dur=0.6, settle=1.5)
+    if "row:Joint1" not in {h["name"] for h in d.ui("ui.handles")}:
+        raise RuntimeError("no Joint1 in the browser")
+
+
+def joined(d):
+    leaves(d)
+    joint(d)
+
+
+@shot("assemblies/components", "clip", setup=loose_leaves)
+def assemblies_components(d):
+    """Two bodies become two components; the first is grounded (the pin)."""
+    components(d, d.caption)
+    d.caption("Each body is a component now; the first is grounded (the pin)")
+    d.glide(d.at(handle="row:Leaf A:1"), 0.8)
+    d.wait(2.0)
+
+
+@shot("assemblies/joint", "clip", setup=leaves)
+def assemblies_joint(d):
+    """A revolute joint on the two barrels: Leaf B drops into place beside Leaf A."""
+    joint(d, d.caption)
+    d.caption("")
+    d.glide((SIZE[0] * 0.55, SIZE[1] * 0.8), 0.6)
+    d.wait(1.5)
+
+
+@shot("assemblies/drag", "clip", setup=joined)
+def assemblies_drag(d):
+    """Drag Leaf B: it turns about the joint, and grounded Leaf A stays put."""
+    d.caption("Drag Leaf B: it can only turn about the hinge")
+    p = d.at(world=[30, 55, 3])
+    d.drag(p, (p[0] + 10, p[1] - 170), steps=70)
+    d.wait(0.8)
+    d.drag(d.pos, (d.pos[0] - 5, d.pos[1] + 90), steps=50)
+    d.wait(0.8)
+    d.caption("Leaf A is grounded: it stays where it is")
+    p = d.at(world=[20, 10, 3])
+    d.drag(p, (p[0] - 80, p[1] + 40), steps=40)
+    d.wait(1.5)
+
+
 # -- main ---------------------------------------------------------------------------------------
 
 
