@@ -729,6 +729,25 @@ pub fn designs_to_reopen(app: &SolveApp) -> Vec<String> {
     app.preferences.open_designs.iter().filter(|p| std::path::Path::new(p.as_str()).is_file()).take(MAX_OPEN).cloned().collect()
 }
 
+/// What this launch reopens (#5542), with the crash guard applied (#5064): when the recovery
+/// folder still holds the marker of a session that died mid-reopen, nothing is reopened this
+/// time and the designs it died on come back as the reason, so the app starts usable instead
+/// of hanging on the same design every launch. The marker is written here and cleared as each
+/// design finishes opening (`file_load`), so a healthy session leaves nothing behind.
+pub fn reopen_plan(app: &SolveApp, dir: Option<&std::path::Path>) -> (Vec<String>, Vec<String>) {
+    let Some(dir) = dir else {
+        return (designs_to_reopen(app), Vec::new());
+    };
+    let stuck = solidcraft_engine::recovery::stuck_reopen(dir);
+    if !stuck.is_empty() {
+        solidcraft_engine::recovery::clear_reopen(dir);
+        return (Vec::new(), stuck);
+    }
+    let reopen = designs_to_reopen(app);
+    solidcraft_engine::recovery::begin_reopen(dir, &reopen);
+    (reopen, Vec::new())
+}
+
 /// The control channel's `ui.documents`: list, `new`, `switch`, `close` (by index; `force`
 /// closes without asking), `close_others` (all but `index`), `close_all`, `move` (`from`, `to`)
 /// or `quit`; `answer`: save | dont_save | cancel answers "save changes?"; `open_elsewhere`:
@@ -1701,6 +1720,35 @@ mod tests {
         a.preferences.reopen_designs = true;
         let _ = std::fs::remove_file(&file);
         assert!(designs_to_reopen(&a).is_empty(), "a file that is gone is skipped");
+    }
+
+    /// #5064: a design that kills the app while it is being reopened is skipped once, with the
+    /// reason said, and the launch after that reopens normally again.
+    #[test]
+    fn reopen_plan_skips_what_killed_the_last_session() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-reopen-plan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("part.solidcraft");
+        std::fs::write(&file, []).unwrap();
+        let path = file.to_string_lossy().to_string();
+        let mut a = app();
+        a.preferences.open_designs = vec![path.clone()];
+
+        // A normal launch: it reopens the design and marks that it is doing so.
+        assert_eq!(reopen_plan(&a, Some(&dir)), (vec![path.clone()], Vec::new()));
+        // The session dies while opening it: the marker survives, so the next launch skips it
+        // and says what it skipped.
+        assert_eq!(
+            reopen_plan(&a, Some(&dir)),
+            (Vec::new(), vec![path.clone()]),
+            "the design that killed the last session is skipped, with the reason"
+        );
+        // The skip cleared the marker: the launch after it works normally again.
+        assert_eq!(reopen_plan(&a, Some(&dir)), (vec![path.clone()], Vec::new()));
+        // No recovery folder on this system: the guard is off, the plain list is used.
+        assert_eq!(reopen_plan(&a, None).0, vec![path]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Cancel, Esc's answer, or a Save that saves nothing (a never-saved design whose Save As

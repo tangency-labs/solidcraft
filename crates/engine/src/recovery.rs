@@ -180,6 +180,54 @@ pub fn remove(dir: &Path, id: &str) -> Result<()> {
     Ok(())
 }
 
+/// #5064: marker file in the recovery folder listing the designs a launch is reopening.
+const REOPEN_MARKER: &str = "reopening.json";
+
+/// A launch that reopens designs marks them here. The marker is removed as each design
+/// finishes opening; one still there at the next launch means the last session died (crashed,
+/// hung, or was force-quit) while opening those designs — blindly reopening them would brick
+/// the app the same way, so the next launch skips them instead (#5064).
+pub fn begin_reopen(dir: &Path, paths: &[String]) {
+    if paths.is_empty() || fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    if let Ok(bytes) = serde_json::to_vec(paths) {
+        let _ = fs::write(dir.join(REOPEN_MARKER), bytes);
+    }
+}
+
+/// The designs the previous session was reopening when it died (empty: nothing is stuck).
+pub fn stuck_reopen(dir: &Path) -> Vec<String> {
+    read_reopen_marker(dir).unwrap_or_default()
+}
+
+/// The skip has been said: forget the marker so the launch after the skip reopens normally.
+pub fn clear_reopen(dir: &Path) {
+    let _ = fs::remove_file(dir.join(REOPEN_MARKER));
+}
+
+/// One reopened design finished (opened or failed to): take it off the marker. When the last
+/// one is gone the marker goes with it, so a healthy session leaves nothing behind.
+pub fn reopen_finished(dir: &Path, path: &str) {
+    let Some(mut left) = read_reopen_marker(dir) else { return };
+    left.retain(|p| p != path);
+    if left.is_empty() {
+        clear_reopen(dir);
+    } else if let Ok(bytes) = serde_json::to_vec(&left) {
+        let _ = fs::write(dir.join(REOPEN_MARKER), bytes);
+    }
+}
+
+/// The marker's paths, bounded like every other file read from the folder.
+fn read_reopen_marker(dir: &Path) -> Option<Vec<String>> {
+    let path = dir.join(REOPEN_MARKER);
+    let meta = fs::metadata(&path).ok()?;
+    if !meta.is_file() || meta.len() > MAX_ENTRY_BYTES as u64 {
+        return None;
+    }
+    serde_json::from_slice(&fs::read(&path).ok()?).ok()
+}
+
 /// One open design's autosaver. Keep it with that design when switching tabs.
 pub struct Autosaver {
     pub dir: PathBuf,
@@ -653,6 +701,37 @@ mod tests {
         assert!(orphans(&d).is_empty());
         assert!(load(&d, "device").is_err());
         assert!(remove(&d, "device").is_err());
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// #5064: a design that kills the app while it is being reopened must not be blindly
+    /// reopened every launch. The marker survives the death, the next launch sees what the
+    /// last one died on, and a healthy session clears it by itself.
+    #[test]
+    fn reopen_guard_survives_a_session_that_died_mid_reopen() {
+        let d = dir("reopen-guard");
+        assert!(stuck_reopen(&d).is_empty(), "no marker: nothing is stuck");
+        begin_reopen(&d, &[]);
+        assert!(!d.join(REOPEN_MARKER).exists(), "nothing to reopen writes no marker");
+
+        let paths = vec!["/d/one.solidcraft".to_string(), "/d/two.solidcraft".to_string()];
+        begin_reopen(&d, &paths);
+        assert_eq!(stuck_reopen(&d), paths);
+        // The first design opens; the session dies on the second.
+        reopen_finished(&d, "/d/one.solidcraft");
+        assert_eq!(stuck_reopen(&d), vec!["/d/two.solidcraft".to_string()]);
+        // The skip clears the marker so the launch after it reopens normally.
+        clear_reopen(&d);
+        assert!(stuck_reopen(&d).is_empty());
+        // A healthy session: every design finishes and the marker goes with the last one.
+        begin_reopen(&d, &paths);
+        reopen_finished(&d, "/d/one.solidcraft");
+        reopen_finished(&d, "/d/two.solidcraft");
+        assert!(stuck_reopen(&d).is_empty() && !d.join(REOPEN_MARKER).exists());
+        // A damaged marker is ignored, not fatal.
+        fs::write(d.join(REOPEN_MARKER), b"not json").unwrap();
+        assert!(stuck_reopen(&d).is_empty());
+        reopen_finished(&d, "/d/one.solidcraft");
         fs::remove_dir_all(&d).unwrap();
     }
 }

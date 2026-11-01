@@ -1116,6 +1116,13 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
         }
+        // #5064: opened or not, this design is no longer a reopen the session could die on;
+        // it comes off the marker the launch wrote before reopening anything.
+        if request.kind == Kind::Open
+            && let Some(dir) = &app.reopen_guard_dir
+        {
+            solidcraft_engine::recovery::reopen_finished(dir, &request.path);
+        }
     }
     #[cfg(not(target_arch = "wasm32"))]
     start(app);
