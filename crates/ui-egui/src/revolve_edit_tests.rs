@@ -283,3 +283,61 @@ fn only_the_active_selection_field_looks_active() {
     assert_eq!(border(&h, "Profile"), filled, "filled inactive");
     assert_ne!(filled, t.control_border, "filled inactive differs from empty inactive");
 }
+
+/// A solid (or surface) revolve named `Turn` about `axis`, made in a new component `Owner` that is
+/// turned and moved afterwards when `moved`, with parameter `W` = 40 mm.
+fn expression_axis_design(surface: bool, moved: bool) -> Harness {
+    let mut h = Harness::new();
+    h.app.run("parameters.add", json!({"name":"W","expression":"40 mm"})).unwrap();
+    let owner = h.app.run("component.create", json!({"name":"Owner","grounded":false})).unwrap();
+    let axis = json!({"origin":["W / 2", "5 mm", 0],"dir":[0,1,0]});
+    let mut h = if surface {
+        h.app.run("sketch.create", json!({"plane":"XY","name":"Profile"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[10,0],"p1":[15,5]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("surface.revolve", json!({"sketch":"Profile","axis":axis,"angle":"90 deg","name":"Turn"})).unwrap();
+        h
+    } else {
+        make(h, axis)
+    };
+    if moved {
+        h.app.run("occurrence.move", json!({"occurrence":owner["occurrence"],"translate":[100,0,20],"axis":[0,0,1],"angle":"17 deg"})).unwrap();
+        h.app.run("component.create", json!({"name":"Other","parent":0})).unwrap();
+    }
+    h
+}
+
+fn saved_axis(h: &Harness) -> Value {
+    match &h.app.session.doc.find_feature("Turn").unwrap().kind {
+        FeatureKind::Revolve { axis, .. } | FeatureKind::SurfaceRevolve { axis, .. } => serde_json::to_value(axis).unwrap(),
+        other => panic!("not a revolve: {other:?}"),
+    }
+}
+
+#[test]
+fn untouched_edit_keeps_an_explicit_axis_origin_expression_for_solid_and_surface_revolves() {
+    for (surface, moved) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut h = expression_axis_design(surface, moved);
+        let original = saved_axis(&h);
+        assert_eq!(original["origin"][0], json!("W / 2"));
+        open(&mut h);
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert_eq!(saved_axis(&h), original, "surface: {surface}, moved: {moved}");
+    }
+}
+
+#[test]
+fn an_axis_origin_that_cannot_be_evaluated_is_kept_by_an_untouched_edit() {
+    for (surface, moved) in [(false, false), (true, false), (false, true), (true, true)] {
+        let mut h = expression_axis_design(surface, moved);
+        let original = saved_axis(&h);
+        // W is no longer a length: the revolve fails and its origin cannot be shown as numbers.
+        // (`parameters.change` refuses that, so the parameter is set directly.)
+        let mut doc = (*h.app.session.doc).clone();
+        doc.params.iter_mut().filter(|p| p.name == "W").for_each(|p| p.expr = "5 deg".into());
+        h.app.session.doc = std::sync::Arc::new(doc);
+        open(&mut h);
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert_eq!(saved_axis(&h), original, "surface: {surface}, moved: {moved}");
+    }
+}

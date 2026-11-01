@@ -742,7 +742,7 @@ pub(crate) fn face_centres(b: &ModelBody) -> Vec<Vec3> {
     samples(&b.mesh(), face_count(b)).into_iter().map(|ps| ps.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / ps.len().max(1) as f64)).collect()
 }
 
-/// The name of a face new to `f`.
+/// The name of a face new to `f` (a feature that went through `eval::naming_feature`).
 fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usize, fid: u64, curves: &std::cell::OnceCell<Curves>) -> String {
     let c = ps.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / ps.len().max(1) as f64);
     match &f.kind {
@@ -765,7 +765,10 @@ fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usi
         }
         FeatureKind::Revolve { sketch, axis, .. } => {
             let Some(ss) = before.sketch(sketch.0) else { return format!("F{fid}:face:{fi}") };
-            let Ok((o2, d2)) = crate::eval::revolve_axis(ss, axis, before, &|name| crate::eval::construction_axis_in(None, before, name, 0)) else {
+            // The origin was written as its values when the feature was evaluated (`naming_feature`).
+            let Ok((o2, d2)) =
+                crate::eval::revolve_axis(&Default::default(), ss, axis, before, &|name| crate::eval::construction_axis_in(None, before, name, 0))
+            else {
                 return format!("F{fid}:face:{fi}");
             };
             let (o, d) = (ss.plane.to_world(o2), (ss.plane.to_world(o2 + d2) - ss.plane.to_world(o2)).normalized().unwrap_or(Vec3::Z));

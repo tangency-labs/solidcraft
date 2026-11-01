@@ -287,6 +287,48 @@ fn editing_a_primitive_in_a_turned_component_keeps_its_placement() {
     assert!((size.x - before.x).abs() < 1e-6 && (size.y - 12.0).abs() < 0.05 && (size.z - 12.0).abs() < 0.05, "{size:?}");
 }
 
+/// Edit Feature shows an explicit revolve axis with its origin evaluated; sending that back
+/// untouched keeps the saved expressions, for a solid and a surface revolve alike.
+#[test]
+fn an_untouched_revolve_axis_keeps_its_origin_expressions_through_redefine() {
+    for (command, name) in [("solid.revolve", "Turn"), ("surface.revolve", "Shell")] {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+        run(&mut s, "sketch.create", json!({"name": "Profile", "plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 0], "p1": [10, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let axis = json!({"origin": ["W / 2", 0, 0], "dir": [0, 1, 0]});
+        let mut made = json!({"sketch": "Profile", "axis": axis, "angle": "90 deg", "name": name});
+        if command == "solid.revolve" {
+            made["operation"] = json!("new");
+        }
+        run(&mut s, command, made);
+        // The origin's coordinates as text (a saved 0 may read back as 0 or 0.0).
+        let saved = |s: &mut Session| -> Vec<String> {
+            let axis = run(s, "timeline.inspect", json!({"feature": name}))["definition"]["axis"].clone();
+            axis["origin"].as_array().unwrap().iter().map(|c| c.as_f64().map_or_else(|| c.as_str().unwrap().to_string(), |x| x.to_string())).collect()
+        };
+        let original = saved(&mut s);
+        assert_eq!(original, ["W / 2", "0", "0"]);
+        // What the dialog sends back untouched: the origin as numbers.
+        let mut params = json!({"sketch": "Profile", "axis": {"origin": [20.0, 0.0, 0.0], "dir": [0.0, 1.0, 0.0]}, "angle": "45 deg"});
+        if command == "solid.revolve" {
+            params["operation"] = json!("new");
+        }
+        run(&mut s, "timeline.redefine", json!({"feature": name, "command": command, "params": params}));
+        assert_eq!(saved(&mut s), original, "{command}");
+        // Only the direction changed: the origin keeps its expressions.
+        let mut turned = params.clone();
+        turned["axis"]["dir"] = json!([0.0, -1.0, 0.0]);
+        run(&mut s, "timeline.redefine", json!({"feature": name, "command": command, "params": turned}));
+        assert_eq!(saved(&mut s), original, "{command}");
+        // A changed origin is taken as given.
+        params["axis"]["origin"] = json!([21.0, 0.0, 0.0]);
+        run(&mut s, "timeline.redefine", json!({"feature": name, "command": command, "params": params}));
+        assert_eq!(saved(&mut s), ["21", "0", "0"], "{command}");
+    }
+}
+
 /// A new placement given to `timeline.redefine` is still a world point.
 #[test]
 fn a_new_primitive_placement_is_still_mapped_from_the_world() {

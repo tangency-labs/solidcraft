@@ -2678,6 +2678,17 @@ fn stored_input_reference_key(d: &Dialog, index: usize) -> Option<&'static str> 
     }
 }
 
+/// An explicit revolve axis as its dialog holds it, in the world: the origin evaluated with the
+/// parameters (an untouched axis is restored as saved, expressions included:
+/// `solidcraft_engine::frames::to_local`). An origin that cannot be evaluated is kept as saved.
+pub(crate) fn line_axis_value(s: &Session, frame: &solidcraft_engine::doc::Mat, origin: &solidcraft_engine::doc::PointExpr, dir: Vec3) -> Value {
+    let dir_world = pt(solidcraft_engine::doc::apply_vector(frame, dir));
+    match s.doc.eval_point(origin) {
+        Ok(at) => json!({"origin": pt(solidcraft_engine::doc::apply_point(frame, at)), "dir": dir_world}),
+        Err(_) => json!({"origin": origin, "dir": dir_world}),
+    }
+}
+
 fn stored_revolve_axis(kind: &Kind) -> Option<&Value> {
     match kind {
         Kind::Revolve { axis, .. } | Kind::Surface(crate::dialogs_surface::Surf::Revolve { axis, .. }) => axis.as_ref(),
@@ -5808,10 +5819,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let mut d = start("solid.revolve")?;
             let frame = feature_frame(s, f.component);
             let stored_axis = match axis {
-                AxisRef::Line { origin, dir } => Some(json!({
-                    "origin": pt(solidcraft_engine::doc::apply_point(&frame, origin.0)),
-                    "dir": pt(solidcraft_engine::doc::apply_vector(&frame, dir.0))
-                })),
+                AxisRef::Line { origin, dir } => Some(line_axis_value(s, &frame, origin, dir.0)),
                 // An edge or face that is gone stays the reference until another is picked.
                 AxisRef::Model { geo } if model_axis_sel(s, geo).is_none() => serde_json::to_value(geo).ok(),
                 _ => None,

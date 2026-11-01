@@ -12,6 +12,7 @@ revolve
   moves: axis.dir[0], axis.dir[1], axis.dir[2], axis.origin[0], axis.origin[1], axis.origin[2], to[0], to[1], to[2]
   face points: [3, 3.5, 3.25]
   profiles: 1 all
+  placement: 9, 9.5, 9.25
 fillet_constant
   moves: edges[0][0], edges[0][1], edges[0][2]
 fillet_chord
@@ -164,6 +165,7 @@ surface_extrude
   face points: [1, 1.5, 1.25], [2, 2.5, 2.25]
 surface_revolve
   moves: axis.dir[0], axis.dir[1], axis.dir[2], axis.origin[0], axis.origin[1], axis.origin[2]
+  placement: 9, 9.5, 9.25
 surface_sweep
 surface_sweep_options
 surface_loft

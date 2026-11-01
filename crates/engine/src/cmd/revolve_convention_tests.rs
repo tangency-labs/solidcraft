@@ -414,3 +414,74 @@ fn invalid_world_axis_objects_are_rejected_atomically() {
         assert!(s.model.state().bodies.is_empty());
     }
 }
+
+#[test]
+fn explicit_axis_origin_takes_expressions_and_follows_parameters() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+    profile(&mut s, false);
+    let volume = |s: &Session| solidcraft_kernel::measure(&s.model.state().bodies[0].body).unwrap().volume;
+    let axis = json!({"origin": ["W / 2 - 20", 0, 0], "dir": [0, 1, 0]});
+    run(&mut s, "solid.revolve", json!({"sketch": "Profile", "axis": axis, "name": "Turn", "operation": "new"}));
+    // W / 2 - 20 is 0 mm: radii 2 to 4 about x = 0.
+    assert!((volume(&s) - 120.0 * PI).abs() < 0.2, "{}", volume(&s));
+    let FeatureKind::Revolve { axis: solidcraft_doc::AxisRef::Line { origin, .. }, .. } = &s.doc.find_feature("Turn").unwrap().kind else {
+        panic!("not a line axis");
+    };
+    assert_eq!(origin[0].as_str(), "W / 2 - 20");
+    let reopened = Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(reopened.find_feature("Turn").unwrap().kind, s.doc.find_feature("Turn").unwrap().kind);
+    // Moving the axis follows W: the origin is at x = 1, so the radii are 1 to 3.
+    run(&mut s, "parameters.change", json!({"name": "W", "expression": "42 mm"}));
+    assert!((volume(&s) - 80.0 * PI).abs() < 0.2, "{}", volume(&s));
+}
+
+#[test]
+fn explicit_axis_refuses_an_origin_or_dir_it_cannot_read() {
+    let mut s = Session::default();
+    profile(&mut s, false);
+    let before = s.doc.to_json();
+    for axis in [
+        json!({"origin": ["no_such_parameter", 0, 0], "dir": [0, 1, 0]}),
+        json!({"origin": ["1 +", 0, 0], "dir": [0, 1, 0]}),
+        json!({"origin": [0, 0], "dir": [0, 1, 0]}),
+        json!({"origin": [null, 0, 0], "dir": [0, 1, 0]}),
+        json!({"origin": [0, 0, 0], "dir": ["W", 1, 0]}),
+    ] {
+        let error = s.execute("solid.revolve", &json!({"sketch": "Profile", "axis": axis, "operation": "new"})).unwrap_err();
+        assert!(matches!(error, crate::EngineError::BadParams { .. }), "{axis}: {error}");
+        assert!(!error.to_string().contains("sketch plane"), "{axis}: {error}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
+
+#[test]
+fn surface_revolve_axis_origin_follows_a_parameter() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+    profile(&mut s, false);
+    let axis = json!({"origin": ["W / 2 - 20", 0, 0], "dir": [0, 1, 0]});
+    run(&mut s, "surface.revolve", json!({"sketch": "Profile", "axis": axis, "name": "Wall"}));
+    let min_x = |s: &Session| s.model.state().bodies[0].body.tessellate(1e-3).unwrap().bounds().min.x;
+    // W / 2 - 20 is 0 mm: the profile (x from 2 to 4) sweeps out to x = -4.
+    assert!((min_x(&s) + 4.0).abs() < 0.05, "{}", min_x(&s));
+    run(&mut s, "parameters.change", json!({"name": "W", "expression": "42 mm"}));
+    // The axis is at x = 1: the farthest point is 3 from it.
+    assert!((min_x(&s) + 2.0).abs() < 0.05, "{}", min_x(&s));
+    let reopened = Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(reopened.find_feature("Wall").unwrap().kind, s.doc.find_feature("Wall").unwrap().kind);
+}
+
+#[test]
+fn a_parameter_driven_axis_origin_names_revolve_faces_as_the_numeric_origin_does() {
+    let names = |origin: Value| {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+        profile(&mut s, false);
+        run(&mut s, "solid.revolve", json!({"sketch": "Profile", "axis": {"origin": origin, "dir": [0, 1, 0]}, "operation": "new"}));
+        solidcraft_doc::naming::face_names(&s.model.state().bodies[0]).to_vec()
+    };
+    let numeric = names(json!([20, 0, 0]));
+    assert!(numeric.iter().all(|n| !n.contains(":face:")), "index names: {numeric:?}");
+    assert_eq!(names(json!(["W / 2", 0, 0])), numeric);
+}
