@@ -265,7 +265,7 @@ pub(crate) fn survives(what: &str, inputs: &[Vec<u8>], cap: usize, mut read: imp
         }
         slowest = slowest.max((took, i));
     }
-    eprintln!("{what}: {} mutations, {read_ok} read, slowest case {} in {:?}", inputs.len(), slowest.1, slowest.0);
+    solidcraft_geom::note!("{what}: {} mutations, {read_ok} read, slowest case {} in {:?}", inputs.len(), slowest.1, slowest.0);
 }
 
 #[cfg(test)]

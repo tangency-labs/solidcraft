@@ -33,8 +33,8 @@ pub fn one(args: &[String]) -> Result<(), String> {
     std::panic::set_hook(Box::new(|_| {
         PANICS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }));
-    eprintln!("design {seed}");
-    let run = fuzz::run_with(seed, steps, &mut |st| eprintln!("step {}", serde_json::to_string(st).unwrap_or_default()));
+    solidcraft_engine::note!("design {seed}");
+    let run = fuzz::run_with(seed, steps, &mut |st| solidcraft_engine::note!("step {}", serde_json::to_string(st).unwrap_or_default()));
     let mut design = json!({
         "outcome": run.outcome,
         "steps": run.steps.iter().map(|s| s.kind).collect::<Vec<_>>(),
@@ -47,13 +47,13 @@ pub fn one(args: &[String]) -> Result<(), String> {
     if run.outcome.is_bug() {
         design["script"] = run.script();
         if minimise {
-            eprintln!("minimise");
+            solidcraft_engine::note!("minimise");
             let m = fuzz::minimise(&run);
             design["minimal"] = json!({"outcome": m.outcome, "steps": m.steps.iter().map(|s| s.kind).collect::<Vec<_>>(), "script": m.script()});
         }
     }
     let (a, b) = solidcraft_engine::fuzz::boolean_shapes(seed);
-    eprintln!("boolean {seed} {} {}", serde_json::to_string(&a).unwrap_or_default(), serde_json::to_string(&b).unwrap_or_default());
+    solidcraft_engine::note!("boolean {seed} {} {}", serde_json::to_string(&a).unwrap_or_default(), serde_json::to_string(&b).unwrap_or_default());
     let b = boolean_case(seed);
     let bp = PANICS.swap(0, std::sync::atomic::Ordering::SeqCst);
     println!("{}", json!({"seed": seed, "design": design, "boolean": b, "boolean_panics": bp}));
@@ -164,11 +164,14 @@ fn record(v: &Value, out_dir: Option<&str>) {
     let d = &v["design"];
     let bug = matches!(d["outcome"]["kind"].as_str(), Some("failed" | "panic" | "invalid" | "volume"));
     if bug || v.get("timeout").is_some() || v.get("crash").is_some() {
-        eprintln!("seed {seed}: {}", if bug { format!("{} {}", d["outcome"]["kind"], d["outcome"]["detail"]) } else { format!("{v}") });
+        solidcraft_engine::note!(
+            "seed {seed}: {}",
+            if bug { format!("{} {}", d["outcome"]["kind"], d["outcome"]["detail"]) } else { format!("{v}") }
+        );
     }
     let bk = v["boolean"]["outcome"].as_str().unwrap_or("ok");
     if bk != "ok" {
-        eprintln!("seed {seed}: boolean {bk} {}", v["boolean"]["detail"]);
+        solidcraft_engine::note!("seed {seed}: boolean {bk} {}", v["boolean"]["detail"]);
     }
     if let Some(dir) = out_dir {
         use std::io::Write;

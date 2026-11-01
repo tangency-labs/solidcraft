@@ -475,12 +475,12 @@ fn hook(info: &std::panic::PanicHookInfo<'_>) -> bool {
                 q.push(p);
             }
         });
-        eprintln!("SolidCraft: internal error caught in a command; a crash report will be written");
+        solidcraft_geom::note!("SolidCraft: internal error caught in a command; a crash report will be written");
     } else {
         // Outside any command: what the journal knows has to do.
         let kind = if recovered { "kernel_panic_recovered" } else { "panic" };
         if let Some(id) = write_from_journal(state, kind, Some(&p)) {
-            eprintln!("SolidCraft: internal error; crash report {}", state.dir.join(&id).display());
+            solidcraft_geom::note!("SolidCraft: internal error; crash report {}", state.dir.join(&id).display());
             if !recovered && let Ok(mut j) = state.journal.try_lock() {
                 j.record(&json!({ "reported": id }));
             }
