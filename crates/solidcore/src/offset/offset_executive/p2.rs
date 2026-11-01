@@ -522,7 +522,7 @@ impl OffsetExecutive {
         }
         let original = required(original, OP_SOLID)?;
         with_doing_boolean(kernel, |kernel| {
-            self.allocate_offset_brep(notifications)?;
+            self.allocate_offset_brep(kernel, notifications)?;
             // `sLoopPoints` keeps the last copied shell face's vertex-loop points
             // (CreateCurvesFromFace resets it); the vertex caps reuse it below.
             let mut loop_points = Vec::new();
@@ -673,7 +673,7 @@ impl OffsetExecutive {
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<Brep> {
         let original = required(original, OP_EXTENDED)?;
-        self.allocate_offset_brep(notifications)?;
+        self.allocate_offset_brep(kernel, notifications)?;
         let faces = bp1::faces(original, None)?;
         for id in faces {
             if self.shell_faces().contains(&id) {
@@ -1119,7 +1119,11 @@ impl OffsetExecutive {
         Ok(true)
     }
 
-    fn allocate_offset_brep(&mut self, notifications: &mut OffsetNotifications<'_>) -> Result<()> {
+    fn allocate_offset_brep(
+        &mut self,
+        kernel: &Kernel,
+        notifications: &mut OffsetNotifications<'_>,
+    ) -> Result<()> {
         let mut temporary = Brep::new_with_infinite_region()?;
         temporary.set_key(notifications.result_brep.key);
         let region = required(temporary.infinite_region(), OP_SOLID)?;
@@ -1128,7 +1132,15 @@ impl OffsetExecutive {
         notifications
             .records
             .or_default((notifications.result_key_of)(EntityRef::Region(region)).key);
-        temporary.set_tolerance(self.approximation_tol_3d().abs());
+        // `SetTolerance(GetThisApproxTol3d())`: the `SmZoneTol3d` argument takes fabs, and
+        // a zero then becomes `SM_ZONE_TOL_3D` times the empty B-rep's box size (1)
+        crate::topology::brep::p2::set_tolerance(
+            kernel,
+            &mut temporary,
+            self.approximation_tol_3d().abs(),
+            true,
+            true,
+        )?;
         // SmOffsetExecutive.cpp:437 / 1073, after constructing the temporary.
         temporary.set_editing_enabled(true);
         self.set_offset_brep(temporary);
@@ -2577,7 +2589,7 @@ mod tests {
     ) -> Result<()> {
         let mut kernel = Kernel::default();
         let mut notifications = NotificationFixture::new(brep);
-        exec.allocate_offset_brep(&mut notifications.context())?;
+        exec.allocate_offset_brep(&kernel, &mut notifications.context())?;
         exec.offset_face_prefix(
             &mut kernel,
             brep,
@@ -2787,7 +2799,7 @@ mod tests {
         let mut kernel = Kernel::default();
         let mut exec = executive();
         let mut notifications = NotificationFixture::new(&source_brep());
-        exec.allocate_offset_brep(&mut notifications.context())
+        exec.allocate_offset_brep(&kernel, &mut notifications.context())
             .unwrap();
         let mut temporary = exec.take_offset_brep().unwrap();
         let region = temporary.infinite_region();
@@ -3169,7 +3181,7 @@ mod tests {
         let mut fixture = NotificationFixture::new(&original);
         let mut executive = executive();
         executive
-            .allocate_offset_brep(&mut fixture.context())
+            .allocate_offset_brep(&Kernel::default(), &mut fixture.context())
             .unwrap();
         let original_before = format!("{original:?}");
         let result_before = format!("{:?}", executive.offset_brep());
