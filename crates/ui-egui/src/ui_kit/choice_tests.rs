@@ -5,6 +5,26 @@ use crate::scenario;
 use egui::Ui;
 
 #[test]
+fn selected_line_type_icon_uses_readable_ink_on_navy() {
+    let t = crate::theme_files::resolve(crate::theme_files::find("solidcraft-95", &[]).unwrap());
+    let _theme = crate::theme::scoped_tokens(t);
+    let ctx = crate::fonts::test_context();
+    let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+        ui.set_width(200.0);
+        segmented_icons(ui, &mut 0, &[IconSegment { key: "Normal", icon: "normal", tip: "Normal".into() }], &[]);
+    });
+    let mut opaque_pixels = 0;
+    for delta in output.textures_delta.set.values().flatten() {
+        let egui::ImageData::Color(image) = &delta.image;
+        for pixel in image.pixels.iter().filter(|pixel| pixel.a() == 255) {
+            opaque_pixels += 1;
+            assert!(crate::theme::contrast_ratio(*pixel, t.selected_bg) >= 3.0, "selected icon pixel {pixel:?}");
+        }
+    }
+    assert!(opaque_pixels > 0);
+}
+
+#[test]
 fn segmented_allocates_only_its_reserved_row() {
     for layout in [egui::Layout::top_down(egui::Align::Min), egui::Layout::left_to_right(egui::Align::Center)] {
         for width in [160.0, 320.0, 640.0] {

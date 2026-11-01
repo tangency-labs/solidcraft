@@ -2241,6 +2241,17 @@ mod tests {
         }
     }
 
+    #[test]
+    fn solidcraft_95_panel_text_and_sketch_geometry_have_readable_contrast() {
+        let t = resolve(find("solidcraft-95", &[]).unwrap());
+        for ink in [t.text_dim, t.error] {
+            assert!(crate::theme::contrast_ratio(ink, t.panel) >= 4.5, "panel ink {ink:?}");
+        }
+        for ink in [t.sketch_locked, t.sketch_construction, t.sketch_centerline, t.sketch_projected] {
+            assert!(crate::theme::contrast_ratio(ink, t.viewport_top) >= 3.0, "sketch ink {ink:?}");
+        }
+    }
+
     /// `paper` is the theme's page (panels, viewport, bodies, hover); `ink` its text, and its selection.
     fn one_bit_has_full_contrast(t: &Tokens, id: &str, paper: Color32, ink: Color32) {
         assert_eq!((t.text, t.panel), (ink, paper), "{id}");

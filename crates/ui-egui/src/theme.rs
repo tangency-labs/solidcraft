@@ -1222,6 +1222,21 @@ pub struct Tokens {
 }
 
 impl Tokens {
+    /// Keep the requested ink when it reads on this surface, otherwise use a readable theme ink.
+    pub(crate) fn readable_ink(&self, preferred: Color32, background: Color32) -> Color32 {
+        for ink in [preferred, self.on_accent, self.text, self.tab_on_fill_dark] {
+            if contrast_ratio(ink, background) >= 4.5 {
+                return ink;
+            }
+        }
+        if contrast_ratio(Color32::BLACK, background) >= contrast_ratio(Color32::WHITE, background) { Color32::BLACK } else { Color32::WHITE }
+    }
+
+    /// Text and monochrome glyphs on the selected-row fill, including imported themes.
+    pub(crate) fn selection_ink(&self) -> Color32 {
+        self.readable_ink(self.selected_ink, self.selected_bg)
+    }
+
     /// An expanded outline follows its fill, including a theme's deliberately square corners.
     pub(crate) fn outset_radius(radius: f32, outset: f32) -> f32 {
         if radius > 0.0 { radius + outset } else { 0.0 }

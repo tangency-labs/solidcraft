@@ -159,6 +159,17 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
             ui.painter().vline(segment.left(), segment.y_range(), t.control_border_stroke(t.control_border));
         }
         let font = if on { crate::fonts::semibold(font_size) } else { egui::FontId::proportional(font_size) };
+        let ink = if on && primary {
+            t.readable_ink(t.on_accent, t.form_primary)
+        } else if on && workspace_accent {
+            accent.ink
+        } else if on {
+            t.selection_ink()
+        } else if !segment_enabled {
+            t.form_dim
+        } else {
+            t.form_ink
+        };
         let galley = ui.painter().layout_no_wrap((*text).to_string(), font.clone(), t.form_ink);
         let icon_width = if icons.get(index).is_some() { t.space_14 + t.space_6 } else { 0.0 };
         let text_rect = egui::Rect::from_min_size(
@@ -170,27 +181,10 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
                 egui::pos2(text_rect.left() - t.space_6 - t.space_14 / 2.0, segment.center().y),
                 vec2(t.space_14, t.space_14),
             );
-            crate::icons::paint_ink(ui.painter(), icon_rect, icon, if on && workspace_accent { accent.ink } else { t.form_ink });
+            crate::icons::paint_ink(ui.painter(), icon_rect, icon, ink);
         }
         let text_rect = if compact { text_rect.intersect(segment.shrink2(vec2(t.space_4, 0.0))) } else { text_rect };
-        paint_text(
-            ui,
-            text_rect,
-            text,
-            font,
-            if !segment_enabled {
-                t.form_dim
-            } else if on && primary {
-                t.on_accent
-            } else if on && workspace_accent {
-                accent.ink
-            } else if on {
-                t.selected_ink
-            } else {
-                t.form_ink
-            },
-            false,
-        );
+        paint_text(ui, text_rect, text, font, ink, false);
         t.button_bevel_with_radius(ui, &response, on, rounding);
         response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, segment_enabled, on, *text));
         scenario::publish_target(&format!("dialog:{}:{option}", label(ui)), segment);
@@ -214,8 +208,8 @@ pub(crate) fn segmented(ui: &mut Ui, selected: &mut usize, options: &[&str], con
 }
 
 /// One segment of [`segmented_icons`]: a stable key (also the accessible fallback text), the icon
-/// master to draw and the hover text. The icon's colours come from the palette (its roles and the
-/// accent assigned to its id in `palette.toml`), not from the caller.
+/// master to draw and the hover text. Unselected icons use the palette (their roles and the
+/// accent assigned in `palette.toml`); selected icons use readable ink on the selection fill.
 pub(crate) struct IconSegment {
     pub key: &'static str,
     pub icon: &'static str,
@@ -268,6 +262,8 @@ pub(crate) fn segmented_icons(ui: &mut Ui, selected: &mut usize, options: &[Icon
         if catalog {
             let icon_rect = egui::Rect::from_center_size(segment.center(), vec2(t.space_14, t.space_14));
             crate::icons::paint_ink(ui.painter(), icon_rect, option.icon, if on { accent.ink } else { t.form_dim });
+        } else if on {
+            crate::icons::paint_ink(ui.painter(), icon_rect, option.icon, t.selection_ink());
         } else {
             crate::icons::paint_icon(ui.painter(), icon_rect, option.icon, f32::from(t.icon.a()) / 255.0);
         }
