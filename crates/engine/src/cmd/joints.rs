@@ -24,11 +24,11 @@ mod inspect;
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("joint.origin", "Joint Origin", joint_origin).at("SOLID", "CREATE").icon("joint_origin").params(
-        "name?, occurrence?: id|name (default: from the pick, or the named face's component), face: [x,y,z] | \"<name>\" (centre of a planar face) | circle: [x,y,z] | \"<name>\" (centre of a round end: a point on its wall or rim, the end's centre, or the round face's name as model.faces lists it) | edge: [x,y,z] (a point on an edge of a planar face: the edge's middle, z out of the face, y into it; on?: [x,y,z] a point on the face (default: the larger planar face beside the edge); corner?: [x,y,z] near one end: the corner there, x and y along its two edges into the face; found again by name, so it follows the face as it changes size; z?: [x,y,z] the frame's z instead of the face's normal, along the edge when it runs that way, x chosen from z: an edge or corner picked as it is, kept as a point where it can't be found by name) | point: [x,y,z], z?: [x,y,z]; a circle's z?: [x,y,z] (a round edge's centre with the way out of it: its end by name when that is the frame it shows, else a point there); body?: the named face's body; end?: \"<name>\" (a circle's end: the face across its rim there; default the end nearer the pick); x?: [x,y,z] (a direction, world) | \"<face name>\" | {face: [x,y,z]} (the frame's x: a direction, a plane's normal, or the way to another hole's axis; keeps a round origin's turn; a point's x is a direction, laid square to its z, default: chosen from z alone). Faces are kept by name: the origin follows its face, and a circle its end, when the design changes",
+        "name?, occurrence?: id|name (default: from the pick, or the named face's component), face: [x,y,z] | \"<name>\" (centre of a planar face) | circle: [x,y,z] | \"<name>\" (centre of a round end: a point on its wall or rim, the end's centre, or the round face's name as model.faces lists it) | edge: [x,y,z] (a point on an edge of a planar face: the edge's middle, z out of the face, y into it; on?: [x,y,z] a point on the face (default: the larger planar face beside the edge); corner?: [x,y,z] near one end: the corner there, x and y along its two edges into the face; found again by name, so it follows the face as it changes size; z?: [x,y,z] the frame's z instead of the face's normal, along the edge when it runs that way, x chosen from z: an edge or corner picked as it is, kept as a point where it can't be found by name) | point: [x,y,z], z?: [x,y,z] | plane: \"XY\"|\"XZ\"|\"YZ\"|\"<name>\" | axis: \"X\"|\"Y\"|\"Z\"|\"<name>\"; a circle's z?: [x,y,z] (a round edge's centre with the way out of it: its end by name when that is the frame it shows, else a point there); body?: the named face's body; end?: \"<name>\" (a circle's end: the face across its rim there; default the end nearer the pick); x?: [x,y,z] (a direction, world) | \"<face name>\" | {face: [x,y,z]} (the frame's x: a direction, a plane's normal, or the way to another hole's axis; keeps a round origin's turn; a point's x is a direction, laid square to its z, default: chosen from z alone). Faces are kept by name: the origin follows its face, and a circle its end, when the design changes",
     ),
     CommandSpec::new("joint.create", "Joint", joint).at("SOLID", "ASSEMBLE").icon("joint").key("J").params(
         "type: rigid|revolute|slider|cylindrical|pin_slot|planar|ball, or a relation: parallel|perpendicular|angle|point_on_plane|point_on_line|line_on_plane \
-         (ties only some directions or points, made where the parts are; several between two parts add up); a, b: joint origins ({occurrence, face|circle|edge|point: [x,y,z] in world, or face|circle: \"<face name>\"; z? for a point, end?, x? as joint.origin} | origin name); \
+         (ties only some directions or points, made where the parts are; several between two parts add up); a, b: joint origins ({occurrence, face|circle|edge|point: [x,y,z] in world, or face|circle: \"<face name>\", plane: \"XY\"|\"<name>\", axis: \"Z\"|\"<name>\"; z? for a point, end?, x? as joint.origin} | origin name); \
          values?: [angles in deg or expressions, distances]; limits?: [[min, max] | null…]; flip?: bool (default false: the origins are mated, \
          b's z against a's as two faces meet; true: b's z along a's, so two origins given at one point with the same z and x stay as they are; \
          a point origin without x takes its x from z, so give x on both, or use joint.as_built, to keep a turned part where it is); \
@@ -353,18 +353,166 @@ pub(crate) fn occurrence_at(s: &Session, p: Vec3) -> Option<u64> {
     best.map(|(_, o)| o)
 }
 
+/// Resolve an origin from a name: a named joint origin, an origin plane ("XY", "XZ", "YZ"),
+/// an origin axis ("X", "Y", "Z"), or a construction plane/axis from `st.construct`.
+fn origin_from_name(s: &Session, name: &str, occurrence: Option<u64>, cmd: &str) -> Result<Option<JointOrigin>> {
+    let name_trim = name.trim();
+    let upper = name_trim.to_ascii_uppercase();
+    let st = s.model.state();
+    let occ = occurrence.unwrap_or(0);
+    if matches!(upper.as_str(), "XY" | "XZ" | "YZ") {
+        let snap = Snap::Plane { plane: Box::new(solidcraft_doc::PlaneRef::Origin { name: upper }), pick: None, x: None };
+        return settle(s, JointOrigin { occurrence: occ, snap }, &json!({}), cmd).map(Some);
+    }
+    if matches!(upper.as_str(), "X" | "Y" | "Z") {
+        let snap = Snap::Axis { axis: Box::new(solidcraft_doc::joints::AxisRef::origin(upper)), pick: None, x: None };
+        return settle(s, JointOrigin { occurrence: occ, snap }, &json!({}), cmd).map(Some);
+    }
+    if let Some(c) = st.construct.iter().find(|c| c.name == name_trim) {
+        let occ = occurrence.unwrap_or_else(|| {
+            let comp = s.doc.feature(c.feature).map(|f| f.component).unwrap_or(0);
+            if comp == 0 { 0 } else { s.doc.occurrence_of(comp).map(|o| o.id).unwrap_or(0) }
+        });
+        let snap = match &c.geom {
+            solidcraft_doc::construct::ConstructGeom::Plane(_) => {
+                Snap::Plane { plane: Box::new(solidcraft_doc::PlaneRef::Origin { name: name_trim.to_string() }), pick: None, x: None }
+            }
+            solidcraft_doc::construct::ConstructGeom::Axis { .. } => {
+                Snap::Axis { axis: Box::new(solidcraft_doc::joints::AxisRef::construction(name_trim.to_string())), pick: None, x: None }
+            }
+            _ => return Ok(None),
+        };
+        return settle(s, JointOrigin { occurrence: occ, snap }, &json!({}), cmd).map(Some);
+    }
+    Ok(None)
+}
+
+/// A joint origin on a plane: origin plane ("XY", "XZ", "YZ"), construction plane by name, or a
+/// plane definition object. Optional `pick: [x,y,z]` sets the origin along the plane; `x` sets the turn.
+fn plane_origin(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
+    let p_val = v.get("plane").ok_or_else(|| bad(cmd, "`plane` parameter required"))?;
+    let world_pick = ["pick", "at", "point"].iter().find_map(|k| v.get(*k).and_then(vec3));
+    let occurrence = match v.get("occurrence") {
+        Some(o) => occurrence_id(s, Some(o), cmd)?,
+        None => match p_val.as_str() {
+            Some(name) => {
+                let upper = name.trim().to_ascii_uppercase();
+                if matches!(upper.as_str(), "XY" | "XZ" | "YZ") {
+                    0
+                } else {
+                    let st = s.model.state();
+                    st.construct
+                        .iter()
+                        .find(|c| c.name == name.trim())
+                        .and_then(|c| {
+                            let comp = s.doc.feature(c.feature).map(|f| f.component).unwrap_or(0);
+                            if comp == 0 { Some(0) } else { s.doc.occurrence_of(comp).map(|o| o.id) }
+                        })
+                        .unwrap_or(0)
+                }
+            }
+            None => match world_pick {
+                Some(w) => occurrence_at(s, w).unwrap_or(0),
+                None => 0,
+            },
+        },
+    };
+    let t = if occurrence == 0 { solidcraft_doc::IDENTITY } else { joints::occurrence_world(&s.doc, occurrence) };
+    let inv = solidcraft_doc::mat_inverse(&t).ok_or_else(|| bad(cmd, "occurrence transform"))?;
+    let local = |p: Vec3| solidcraft_doc::apply_point(&inv, p);
+    let component = component_of(s, occurrence);
+
+    let plane_ref = match p_val {
+        Value::String(name) => {
+            let upper = name.trim().to_ascii_uppercase();
+            if matches!(upper.as_str(), "XY" | "XZ" | "YZ") {
+                solidcraft_doc::PlaneRef::Origin { name: upper }
+            } else {
+                solidcraft_doc::PlaneRef::Origin { name: name.trim().to_string() }
+            }
+        }
+        Value::Object(_) => serde_json::from_value(p_val.clone()).map_err(|e| bad(cmd, format!("invalid plane definition: {e}")))?,
+        _ => return Err(bad(cmd, "`plane` must be a plane name (e.g. \"XY\", \"Plane1\") or a plane definition object")),
+    };
+
+    let pick = world_pick.map(local);
+    let x = x_param(s, v, component, &inv, cmd)?;
+    let snap = Snap::Plane { plane: Box::new(plane_ref), pick, x };
+    settle(s, JointOrigin { occurrence, snap }, v, cmd)
+}
+
+/// A joint origin on an axis: origin axis ("X", "Y", "Z"), construction axis by name, or an axis
+/// definition object. Optional `pick: [x,y,z]` sets the origin along the line; `x` sets the turn.
+fn axis_origin(s: &Session, v: &Value, cmd: &str) -> Result<JointOrigin> {
+    let a_val = v.get("axis").ok_or_else(|| bad(cmd, "`axis` parameter required"))?;
+    let world_pick = ["pick", "at", "point"].iter().find_map(|k| v.get(*k).and_then(vec3));
+    let occurrence = match v.get("occurrence") {
+        Some(o) => occurrence_id(s, Some(o), cmd)?,
+        None => match a_val.as_str() {
+            Some(name) => {
+                let upper = name.trim().to_ascii_uppercase();
+                if matches!(upper.as_str(), "X" | "Y" | "Z") {
+                    0
+                } else {
+                    let st = s.model.state();
+                    st.construct
+                        .iter()
+                        .find(|c| c.name == name.trim())
+                        .and_then(|c| {
+                            let comp = s.doc.feature(c.feature).map(|f| f.component).unwrap_or(0);
+                            if comp == 0 { Some(0) } else { s.doc.occurrence_of(comp).map(|o| o.id) }
+                        })
+                        .unwrap_or(0)
+                }
+            }
+            None => match world_pick {
+                Some(w) => occurrence_at(s, w).unwrap_or(0),
+                None => 0,
+            },
+        },
+    };
+    let t = if occurrence == 0 { solidcraft_doc::IDENTITY } else { joints::occurrence_world(&s.doc, occurrence) };
+    let inv = solidcraft_doc::mat_inverse(&t).ok_or_else(|| bad(cmd, "occurrence transform"))?;
+    let local = |p: Vec3| solidcraft_doc::apply_point(&inv, p);
+    let component = component_of(s, occurrence);
+
+    let axis_ref = match a_val {
+        Value::String(name) => {
+            let upper = name.trim().to_ascii_uppercase();
+            if matches!(upper.as_str(), "X" | "Y" | "Z") {
+                solidcraft_doc::joints::AxisRef::origin(upper)
+            } else {
+                solidcraft_doc::joints::AxisRef::construction(name.trim().to_string())
+            }
+        }
+        Value::Object(_) => serde_json::from_value(a_val.clone()).map_err(|e| bad(cmd, format!("invalid axis definition: {e}")))?,
+        _ => return Err(bad(cmd, "`axis` must be an axis name (e.g. \"Z\", \"Axis1\") or an axis definition object")),
+    };
+
+    let pick = world_pick.map(local);
+    let x = x_param(s, v, component, &inv, cmd)?;
+    let snap = Snap::Axis { axis: Box::new(axis_ref), pick, x };
+    settle(s, JointOrigin { occurrence, snap }, v, cmd)
+}
+
 /// A joint origin from parameters: a named origin, or a snap given in world coordinates.
 pub(crate) fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<JointOrigin> {
     let v = v.ok_or_else(|| bad(cmd, "joint origins `a` and `b` are required"))?;
     if let Value::String(name) = v {
-        return s
-            .doc
-            .assembly
-            .origins
-            .iter()
-            .find(|o| &o.name == name)
-            .map(|o| o.origin.clone())
-            .ok_or_else(|| bad(cmd, format!("no joint origin `{name}`")));
+        if let Some(o) = s.doc.assembly.origins.iter().find(|o| &o.name == name) {
+            return Ok(o.origin.clone());
+        }
+        if let Some(o) = origin_from_name(s, name, None, cmd)? {
+            return Ok(o);
+        }
+        return Err(bad(cmd, format!("no joint origin `{name}`")));
+    }
+    // A plane or axis origin given in object form.
+    if v.get("plane").is_some() {
+        return plane_origin(s, v, cmd);
+    }
+    if v.get("axis").is_some() && v.get("edge").is_none() && v.get("point").is_none() {
+        return axis_origin(s, v, cmd);
     }
     // A face given by its name, as `model.faces` lists it.
     if let Some((what, name)) = ["face", "circle"].iter().find_map(|k| v.get(*k).and_then(Value::as_str).map(|n| (*k, n))) {
@@ -374,7 +522,7 @@ pub(crate) fn origin_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<
     let (what, world) = match (pick, v.get("frame")) {
         (Some(x), _) => x,
         (None, Some(f)) => ("frame", f.get("origin").and_then(vec3).ok_or_else(|| bad(cmd, "`frame` needs origin and z"))?),
-        _ => return Err(bad(cmd, "a joint origin needs face, circle, edge, point or frame [x, y, z], or a face's name")),
+        _ => return Err(bad(cmd, "a joint origin needs face, circle, edge, point, plane, axis or frame [x, y, z], or a face's name")),
     };
     let occurrence = match v.get("occurrence") {
         Some(o) => occurrence_id(s, Some(o), cmd)?,
@@ -769,11 +917,33 @@ fn new_joint_name(s: &Session, p: &Value) -> String {
     })
 }
 
+/// If a plane or axis origin was given with no pick point, anchor it where the other
+/// side's origin currently sits in the world, projected onto the plane or axis.
+fn anchor_datum_origin(doc: &solidcraft_doc::Document, st: &solidcraft_doc::ModelState, target: &mut JointOrigin, other: &JointOrigin) {
+    if !matches!(&target.snap, Snap::Plane { pick: None, .. } | Snap::Axis { pick: None, .. }) {
+        return;
+    }
+    let Ok(other_frame) = doc.origin_world(st, other) else { return };
+    let other_world_pt = solidcraft_doc::apply_point(&other_frame, Vec3::ZERO);
+    let target_world = if target.occurrence == 0 { solidcraft_doc::IDENTITY } else { joints::occurrence_world(doc, target.occurrence) };
+    let Some(inv) = solidcraft_doc::mat_inverse(&target_world) else { return };
+    let local_pt = solidcraft_doc::apply_point(&inv, other_world_pt);
+    match &mut target.snap {
+        Snap::Plane { pick, .. } | Snap::Axis { pick, .. } => {
+            *pick = Some(local_pt);
+        }
+        _ => {}
+    }
+}
+
 fn joint(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.create";
     let kind = kind_param(p, cmd)?;
-    let a = origin_param(s, p.get("a"), cmd)?;
-    let b = origin_param(s, p.get("b"), cmd)?;
+    let mut a = origin_param(s, p.get("a"), cmd)?;
+    let mut b = origin_param(s, p.get("b"), cmd)?;
+    let st = s.model.state();
+    anchor_datum_origin(&s.doc, &st, &mut a, &b);
+    anchor_datum_origin(&s.doc, &st, &mut b, &a);
     let id = s.doc_mut().allocate_id()?;
     let name = new_joint_name(s, p);
     let offset = match p.get("offset") {
