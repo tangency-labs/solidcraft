@@ -1,8 +1,8 @@
 //! Rib, Web, Emboss, Replace Face, Align and Remove.
 
 use serde_json::Value;
-use solidcraft_doc::FeatureKind;
 use solidcraft_doc::expr::Kind;
+use solidcraft_doc::{AlignFrame, FeatureKind};
 use solidcraft_doc::{BodyName, SketchId};
 use solidcraft_doc::{Dir, FacePick, Position};
 use solidcraft_geom::Vec3;
@@ -43,7 +43,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.align", "Align", align)
         .at("SOLID", "MODIFY")
         .icon("align")
-        .params("bodies: [names]; from: [x,y,z] | \"origin\" | {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]} | from_face: [x,y,z] | from_plane: XY|XZ|YZ|construction or offset plane name or id|{origin, normal}; to: (the same) | to_face: [x,y,z] | to_plane: (a plane as from_plane; the point or face goes onto it along its normal, and the plane may move later: the bodies follow); faces and planes also turn to meet; flip?: bool; axes?: [x, y, z] (point-to-point only: which world axes the offset moves along; default all three, at least one true)"),
+        .params("bodies: [names]; from: [x,y,z] | \"origin\" | {snap: vertex|edge_mid|face_center|circle_center, at: [x,y,z]} | from_face: [x,y,z] | from_plane: XY|XZ|YZ|construction or offset plane name or id|{origin, normal}; to: (the same) | to_face: [x,y,z] | to_plane: (a plane as from_plane; the point or face goes onto it along its normal, and the plane may move later: the bodies follow); from_frame / to_frame: a frame found again whenever the design changes, so the bodies follow it, in place of that side's point, face or plane: a joint origin as joint.create takes one ({face|circle|edge|point: [x,y,z]}, a face's name, a named joint origin) or {sketch, point|curve} (a sketch point, or a circle's, arc's or ellipse's centre, z along the sketch's normal), on the bodies' own component; faces, planes and frames also turn to meet; flip?: bool; axes?: [x, y, z] (point-to-point only: which world axes the offset moves along; default all three, at least one true); angle?: expr (a turn about the target's direction after the move)"),
     CommandSpec::new("solid.remove", "Remove", remove).at("SOLID", "MODIFY").icon("delete").params("bodies: [names] (removed from here on in the timeline)"),
 ];
 
@@ -443,12 +443,26 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
         p.get(key).map(|_| super::features::plane_param(s, p.get(key), cmd)).transpose()
     };
     let (from_plane, to_plane) = (plane(s, "from_plane")?, plane(s, "to_plane")?);
-    let world_pick = |s: &Session, pk: &str, fk: &str, plane: &Option<solidcraft_doc::PlaneRef>| -> Result<(Vec3, Option<Vec3>)> {
-        if plane.is_some() {
+    // Or a frame (#6257), found again when the feature is evaluated.
+    let (from_frame, to_frame) = (align_frame(s, p, "from", &bodies)?, align_frame(s, p, "to", &bodies)?);
+    // A target on the bodies that move would move away with them: it must be found the same
+    // without them.
+    if let Some(fr @ AlignFrame::Origin { .. }) = &to_frame {
+        let st = s.model.state();
+        let mut rest = (*st).clone();
+        rest.bodies.retain(|b| !bodies.contains(&b.name));
+        let same = |(a, n): (Vec3, Vec3), (b, m): (Vec3, Vec3)| a.dist(b) <= 1e-9 * (1.0 + a.len()) && n.dot(m) > 1.0 - 1e-12;
+        if !matches!((fr.resolve(&s.doc, &st), fr.resolve(&s.doc, &rest)), (Ok(a), Ok(b)) if same(a, b)) {
+            return Err(bad(cmd, "`to_frame` is on a body that moves: pick the target on another body or on a sketch"));
+        }
+    }
+    // Worked out from the plane or the frame when the feature is evaluated.
+    let held = |plane: &Option<solidcraft_doc::PlaneRef>, frame: &Option<AlignFrame>| plane.is_some() || frame.is_some();
+    let world_pick = |s: &Session, pk: &str, fk: &str, held: bool| -> Result<(Vec3, Option<Vec3>)> {
+        if held {
             if p.get(pk).is_some() || p.get(fk).is_some() {
                 return Err(bad(cmd, format!("give `{pk}_plane` or `{pk}`/`{fk}`, not both")));
             }
-            // Worked out from the plane when the feature is evaluated.
             return Ok((Vec3::ZERO, None));
         }
         if let Some(fp) = p.get(fk).and_then(vec3) {
@@ -470,24 +484,36 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|v| (v, None))
             .ok_or_else(|| bad(cmd, format!("give `{pk}`, `{fk}` or `{pk}_plane` ([x, y, z], \"origin\", or a plane)")))
     };
-    let pick = |s: &Session, pk: &str, fk: &str, plane: &Option<solidcraft_doc::PlaneRef>| -> Result<(Vec3, Option<Vec3>)> {
-        let (at, n) = world_pick(s, pk, fk, plane)?;
-        if plane.is_some() {
+    let pick = |s: &Session, pk: &str, fk: &str, held: bool| -> Result<(Vec3, Option<Vec3>)> {
+        let (at, n) = world_pick(s, pk, fk, held)?;
+        if held {
             return Ok((at, n));
         }
         Ok((solidcraft_doc::apply_point(&inverse, at), n.and_then(|n| solidcraft_doc::apply_vector(&inverse, n).normalized())))
     };
-    let (from, from_normal) = pick(s, "from", "from_face", &from_plane)?;
-    let (to, to_normal) = pick(s, "to", "to_face", &to_plane)?;
-    // Faces turn only to meet another face or a plane; a plane's normal is read when evaluated.
+    let (from, from_normal) = pick(s, "from", "from_face", held(&from_plane, &from_frame))?;
+    let (to, to_normal) = pick(s, "to", "to_face", held(&to_plane, &to_frame))?;
+    // A turn about the target's direction after the move.
+    let angle = expr(p, "angle");
+    if let Some(a) = &angle {
+        check_expr(s, a, Kind::Angle, cmd, "angle")?;
+        if to_normal.is_none() && !held(&to_plane, &to_frame) {
+            return Err(bad(cmd, "`angle` turns about the target's direction: give `to_frame`, `to_face` or `to_plane`"));
+        }
+    }
+    // Faces turn only to meet another face, a plane or a frame; a plane's normal and a frame's z
+    // are read when evaluated. A target face's normal is also the axis of an `angle`.
     let (from_normal, to_normal) = match (from_normal, to_normal) {
         (Some(a), Some(b)) => (Some(a), Some(b)),
-        (a, b) if from_plane.is_some() || to_plane.is_some() => (a, b),
+        (a, b) if held(&from_plane, &from_frame) || held(&to_plane, &to_frame) || angle.is_some() => (a, b),
         _ => (None, None),
     };
     let axes = axes_param(p, cmd)?;
-    if axes.is_some() && (from_plane.is_some() || to_plane.is_some() || from_normal.is_some() || to_normal.is_some()) {
-        return Err(bad(cmd, "`axes` applies to point-to-point alignment: leave out `from_face`, `to_face`, `from_plane` and `to_plane`"));
+    if axes.is_some() && (held(&from_plane, &from_frame) || held(&to_plane, &to_frame) || from_normal.is_some() || to_normal.is_some()) {
+        return Err(bad(
+            cmd,
+            "`axes` applies to point-to-point alignment: leave out `from_face`, `to_face`, `from_plane`, `to_plane`, `from_frame` and `to_frame`",
+        ));
     }
     // The directions are stored in the same frame as `from`/`to` (the first moved body's frame).
     let axes = axes.map(|mask| {
@@ -511,8 +537,55 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
             from_plane,
             to_plane,
             axes,
+            from_frame,
+            to_frame,
+            angle,
         },
     )
+}
+
+/// The longest sketch point or curve id an Align frame takes.
+const MAX_SKETCH_ID: usize = 256;
+
+/// An Align side's frame (#6257), `<key>_frame`: a joint origin as `joint.create` takes one, or a
+/// sketch point or the centre of a sketch circle, arc or ellipse (`{sketch, point|curve}`), on the
+/// moved bodies' component (all of them on one, placed once). It takes the place of `<key>`,
+/// `<key>_face` and `<key>_plane`, and is checked to resolve now.
+fn align_frame(s: &Session, p: &Value, key: &str, bodies: &[String]) -> Result<Option<AlignFrame>> {
+    let cmd = "solid.align";
+    let fk = format!("{key}_frame");
+    let Some(v) = p.get(&fk).filter(|v| !v.is_null()) else { return Ok(None) };
+    if let Some(other) = [key.to_string(), format!("{key}_face"), format!("{key}_plane")].into_iter().find(|k| p.get(k).is_some()) {
+        return Err(bad(cmd, format!("give `{fk}` or `{other}`, not both")));
+    }
+    let st = s.model.state();
+    let (frame, on) = match v.get("sketch") {
+        Some(sk) => {
+            let sketch = super::features::sketch_id(s, Some(sk), cmd, &fk)?;
+            let id = |k: &str| str_(v, k).filter(|n| !n.is_empty() && n.chars().count() <= MAX_SKETCH_ID).map(str::to_string);
+            let frame = match (id("point"), id("curve")) {
+                (Some(point), None) => AlignFrame::SketchPoint { sketch: SketchId(sketch), point },
+                (None, Some(curve)) => AlignFrame::SketchCurve { sketch: SketchId(sketch), curve },
+                _ => return Err(bad(cmd, format!("`{fk}`: a sketch frame takes `point` or `curve` (an id of 1 to {MAX_SKETCH_ID} characters)"))),
+            };
+            (frame, s.doc.feature(sketch).map_or(0, |f| f.component))
+        }
+        None => {
+            let origin = super::joints::origin_param(s, Some(v), cmd)?;
+            let on = super::joints::component_of(s, origin.occurrence);
+            (AlignFrame::Origin { origin: Box::new(origin) }, on)
+        }
+    };
+    // The move is worked out in that component's coordinates: every body must be in it, and a
+    // component placed twice would not say which placement the picks were made in.
+    if bodies.iter().any(|b| st.body(b).map_or(0, |b| s.doc.model_body_component(b)) != on) {
+        return Err(bad(cmd, format!("not supported yet: `{fk}` on another component than the bodies")));
+    }
+    if on != 0 && s.doc.occurrences.iter().filter(|o| o.component == on).count() != 1 {
+        return Err(bad(cmd, format!("not supported yet: `{fk}` on a component placed more than once")));
+    }
+    frame.resolve(&s.doc, &st).map_err(|e| bad(cmd, format!("`{fk}`: {e}")))?;
+    Ok(Some(frame))
 }
 
 fn remove(s: &mut Session, p: &Value) -> Result<Value> {
