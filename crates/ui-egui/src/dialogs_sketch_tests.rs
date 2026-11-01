@@ -377,6 +377,14 @@ fn picked_list_removes_one_item_and_field_still_activates_input() {
     d.inputs[0].items.push(Sel::SketchCurve { id: second.clone(), sketch: None });
     h.app.dialog = Some(d);
     h.frames(4);
+    assert!(crate::scenario::handle_at("dialog:list:Entities:0:remove").is_none(), "the list starts folded, as in every dialog");
+    h.step(&json!({"click":{"handle":"dialog:list_toggle:Entities"}})).unwrap();
+    h.frames(2);
+    // Hovering a row lights its curve in the sketch.
+    let row = crate::scenario::handle_at("dialog:list:Entities:1:remove").unwrap();
+    h.call("ui.move", json!({"x": row.x, "y": row.y}));
+    h.frames(2);
+    assert!(matches!(&h.app.viewport.hover, Some(crate::viewport::Hit::SketchCurve { id, .. }) if *id == second), "{:?}", h.app.viewport.hover);
     h.step(&json!({"click":{"handle":"dialog:list:Entities:0:remove"}})).unwrap();
     assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![Sel::SketchCurve { id: second, sketch: None }]);
     h.step(&json!({"click":{"handle":"dialog:Base point"}})).unwrap();
