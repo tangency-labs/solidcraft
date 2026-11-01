@@ -609,7 +609,7 @@ fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
     vec![
         act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists),
         act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some()),
-        act("ui.rename", "Rename", "rename").with(json!({"feature":id})).on(exists),
+        act("ui.rename", "Rename", "rename").key("F2").with(json!({"feature":id})).on(exists),
         act("timeline.suppress", if suppressed { "Unsuppress" } else { "Suppress" }, "suppress")
             .with(json!({"feature":id, "suppressed": !suppressed}))
             .on(exists),
@@ -788,7 +788,7 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste(app)),
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": items })).on(!locked),
         cmd(app, "solid.remove", "Remove").with(json!({ "bodies": names })).on(!locked),
-        act("ui.rename", "Rename", "rename").with(json!({ "body": bodies.first() })).on(one),
+        act("ui.rename", "Rename", "rename").key("F2").with(json!({ "body": bodies.first() })).on(one),
         Item::sep(),
         act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })),
         act("ui.lock", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "bodies": names })),
@@ -846,7 +846,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.copy", "Copy", "copy").key("Ctrl+C").on(crate::edit_clipboard::something_to_copy(app)),
         act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste(app)),
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": [{"type": "feature", "id": id}] })),
-        act("ui.rename", "Rename", "rename").with(json!({ "feature": id })),
+        act("ui.rename", "Rename", "rename").key("F2").with(json!({ "feature": id })),
         crate::browser::sketches_to_parts_item(sketches).on(parts && !editing),
         Item::sep(),
         act("ui.lookAt", "Look At", "lookat").with(json!({ "sketch": id })),
@@ -873,7 +873,7 @@ fn plane_items(app: &SolveApp, id: u64) -> Vec<Item> {
     items.push(Item::sep());
     items.extend([
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": [{"type": "feature", "id": id}] })),
-        act("ui.rename", "Rename", "rename").with(json!({ "feature": id })),
+        act("ui.rename", "Rename", "rename").key("F2").with(json!({ "feature": id })),
         Item::sep(),
         act("ui.originPart", "Show/Hide", "eye").key("V").with(json!({ "keys": [f.name], "show": !visible })),
         Item::sep(),
@@ -1088,7 +1088,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     if id != 0 {
         v.push(act("ui.delete", "Delete", "delete").key("Del").with(json!({ "occurrences": [occ.map(|o| o.id)] })).on(occ.is_some()));
     }
-    v.push(act("ui.rename", "Rename", "rename").with(json!({ "component": id })));
+    v.push(act("ui.rename", "Rename", "rename").key("F2").with(json!({ "component": id })));
     v.push(Item::sep());
     v.push(act(if hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })).on(!bodies.is_empty()));
     v.push(act("ui.showAll", "Show All Bodies", "eye"));
@@ -1124,7 +1124,10 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     let st = crate::open_meshing::session_world(&app.session);
     let Some(ss) = st.sketch(sid) else { return Vec::new() };
     if app.session.selection.iter().any(|sel| matches!(sel, Sel::SketchMidpoint { .. })) {
-        return alignment_items(&app.session.selection);
+        // A midpoint with a point or curve can also be made coincident with it (#10311).
+        let coincident = crate::selection::coincident_operands(&app.session.selection)
+            .map(|operands| cmd(app, "sketch.constraint.coincident", "Coincident").with(operands));
+        return coincident.into_iter().chain(alignment_items(&app.session.selection)).collect();
     }
     let mut lines = Vec::new();
     let mut rounds = Vec::new();

@@ -47,8 +47,8 @@ use solidcraft_geom::Vec3;
 
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
 pub use cmd::{
-    Addition, CommandInfo, CommandSpec, addition, auto_operation, command_specs, dimension_roles, extrude_reach, find_command, resolve_design_links,
-    shown_scope, standard_view,
+    Addition, CommandInfo, CommandSpec, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach, find_command,
+    resolve_design_links, shown_scope, standard_view,
 };
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
@@ -746,19 +746,24 @@ impl Session {
         let visibility = std::mem::take(&mut doc.visibility);
         let doc = Arc::new(doc);
         // A model saved under another check mode holds that mode's results: evaluated again.
-        let adopted = saved
+        let model = Self::saved_model(&doc, saved).filter(|model| model.validation() == validation).unwrap_or_else(|| {
+            let mut model = Model::new();
+            model.set_validation(validation);
+            model.evaluate_shared(&doc);
+            model
+        });
+        Self::with_model(doc, visibility, model)
+    }
+
+    /// The model `doc`'s file kept, when it is `doc`'s evaluation and the cache is not turned off.
+    pub(crate) fn saved_model(doc: &Arc<Document>, saved: Option<&solidcraft_doc::SavedModel>) -> Option<Model> {
+        saved
             .filter(|_| solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none())
-            .and_then(|saved| Model::adopt(&doc, saved).map_err(|e| log::info!("the saved model is not used: {e}")).ok())
-            .filter(|model| model.validation() == validation);
-        let model = match adopted {
-            Some(model) => model,
-            None => {
-                let mut model = Model::new();
-                model.set_validation(validation);
-                model.evaluate_shared(&doc);
-                model
-            }
-        };
+            .and_then(|saved| Model::adopt(doc, saved).map_err(|e| log::info!("the saved model is not used: {e}")).ok())
+    }
+
+    /// A session on `doc` evaluated as `model`, with what it hides.
+    pub(crate) fn with_model(doc: Arc<Document>, visibility: Visibility, model: Model) -> Self {
         Session {
             saved: doc.clone(),
             doc,

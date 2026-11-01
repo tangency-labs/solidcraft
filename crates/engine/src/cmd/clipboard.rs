@@ -150,6 +150,10 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
             if !internal {
                 notices.push(format!("pasted sketch retains external exact face attachment to {}", anchor.target.body));
             }
+            if internal {
+                let source = solidcraft_doc::mat_mul(&shift, frame_change.get(&anchor.component).unwrap_or(&solidcraft_doc::IDENTITY));
+                anchor.reframe_placement(&m, &source)?;
+            }
             anchor.remap_target(&sketches, &bodies)?;
             if internal {
                 anchor.component = comp;

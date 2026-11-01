@@ -739,14 +739,7 @@ pub(crate) fn constraint_preselection(
             point_line_alignment(sketch?, &json!(id), line)
         }
         ("sketch.constraint.horizontal_vertical", _) => crate::selection::alignment_points(selection).map(|points| json!({"points": points})),
-        ("sketch.constraint.coincident", [a, b]) => {
-            let entity = |s: &solidcraft_engine::Sel| match s {
-                SketchPoint { id } | SketchCurve { id, .. } => Some(id.clone()),
-                _ => None,
-            };
-            let (a, b) = (entity(a)?, entity(b)?);
-            (a != b).then(|| json!({"a":a,"b":b}))
-        }
+        ("sketch.constraint.coincident", [_, _]) => crate::selection::coincident_operands(selection),
         (
             "sketch.constraint.midpoint",
             [SketchPoint { id: point }, SketchCurve { id: line, .. }] | [SketchCurve { id: line, .. }, SketchPoint { id: point }],

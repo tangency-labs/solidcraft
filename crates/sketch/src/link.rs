@@ -1160,6 +1160,59 @@ impl Sketch {
         self.points.iter().zip(&was).any(|(p, w)| p.pos != *w).then_some(was)
     }
 
+    /// `stored` as this sketch has its entities, when they differ only by texts built anew
+    /// since (other words, from an expression, are other outlines with new points and curves):
+    /// those texts' entities as this sketch has them, every other point where `stored` has it,
+    /// every other circle and ellipse with its stored radius, arcs with their stored turn and
+    /// constraints with their stored values. Paired so entity by entity, a solve after the links
+    /// moved can walk from the stored state as it does when no text changed. `None` when the
+    /// two are the same entities or differ in anything else.
+    pub fn stored_with_rebuilt_texts(&self, stored: &Sketch) -> Option<Sketch> {
+        let texts: Vec<&str> = self.links.iter().filter(|l| matches!(l.source, LinkSource::Text { .. })).map(|l| l.id.as_str()).collect();
+        let in_text = |link: &Option<String>| link.as_deref().is_some_and(|l| texts.contains(&l));
+        let same = self.points.len() == stored.points.len()
+            && self.curves.len() == stored.curves.len()
+            && self.points.iter().zip(&stored.points).all(|(p, q)| p.id == q.id)
+            && self.curves.iter().zip(&stored.curves).all(|(c, d)| c.id == d.id);
+        let ids = |sk: &Sketch| sk.links.iter().map(|l| l.id.clone()).collect::<Vec<_>>();
+        if same
+            || texts.is_empty()
+            || ids(self) != ids(stored)
+            || !self.points.iter().filter(|p| !in_text(&p.link)).map(|p| &p.id).eq(stored.points.iter().filter(|p| !in_text(&p.link)).map(|p| &p.id))
+            || !self.curves.iter().filter(|c| !in_text(&c.link)).map(|c| &c.id).eq(stored.curves.iter().filter(|c| !in_text(&c.link)).map(|c| &c.id))
+            || !self.constraints.iter().map(|c| &c.id).eq(stored.constraints.iter().map(|c| &c.id))
+        {
+            return None;
+        }
+        let mut out = self.clone();
+        let points: std::collections::BTreeMap<&str, Vec2> =
+            stored.points.iter().filter(|p| !in_text(&p.link)).map(|p| (p.id.as_str(), p.pos)).collect();
+        for p in out.points.iter_mut().filter(|p| !in_text(&p.link)) {
+            if let Some(pos) = points.get(p.id.as_str()) {
+                p.pos = *pos;
+            }
+        }
+        let curves: std::collections::BTreeMap<&str, &Curve> =
+            stored.curves.iter().filter(|c| !in_text(&c.link)).map(|c| (c.id.as_str(), c)).collect();
+        for c in out.curves.iter_mut().filter(|c| !in_text(&c.link)) {
+            let Some(d) = curves.get(c.id.as_str()) else { continue };
+            match (&mut c.kind, &d.kind) {
+                (CurveKind::Circle { r, .. }, CurveKind::Circle { r: s, .. }) | (CurveKind::Ellipse { r, .. }, CurveKind::Ellipse { r: s, .. }) => {
+                    *r = *s
+                }
+                (CurveKind::Conic { rho, .. }, CurveKind::Conic { rho: s, .. }) => *rho = *s,
+                _ => {}
+            }
+            c.reversed = d.reversed;
+        }
+        for (c, d) in out.constraints.iter_mut().zip(&stored.constraints) {
+            if let Some(v) = d.kind.value() {
+                c.kind.set_value(v);
+            }
+        }
+        Some(out)
+    }
+
     fn drop_link_entities(&mut self, id: &str) {
         let curves = self.link_curves(id);
         let keep = self.links.clone();

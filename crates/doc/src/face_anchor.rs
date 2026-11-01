@@ -13,12 +13,30 @@ pub struct FaceAnchor {
     pub component: u64,
     pub path: Vec<u64>,
     pub author_path: Vec<u64>,
+    /// Source component to author component at capture, for an independently placed part.
+    /// Body offsets and source geometry remain live; later assembly moves do not reshape it.
+    /// Older attachments without this field retain their live placement relationship.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<crate::Mat>,
     /// Origin and x direction in the exact canonical face plane's coordinates.
     pub coordinates: [f64; 2],
     pub x_axis: [f64; 2],
 }
 
 impl FaceAnchor {
+    /// Re-express a captured context when definitions (not their occurrences) change frames.
+    pub fn reframe_placement(&mut self, author: &crate::Mat, source: &crate::Mat) -> Result<()> {
+        if let Some(placement) = self.placement {
+            let inverse = crate::mat_inverse(source).ok_or_else(|| DocError::Invalid("attached source frame is invalid".into()))?;
+            let placement = crate::mat_mul(&crate::mat_mul(author, &placement), &inverse);
+            if !crate::valid_transfer_matrix(&placement) {
+                return Err(DocError::Invalid("invalid captured face placement".into()));
+            }
+            self.placement = Some(placement);
+        }
+        Ok(())
+    }
+
     pub fn remap_target(
         &mut self,
         features: &std::collections::BTreeMap<u64, u64>,
@@ -47,6 +65,7 @@ impl FaceAnchor {
             || self.path.iter().chain(&self.author_path).any(|id| *id == 0)
             || (self.component == 0 && !self.path.is_empty())
             || (self.component != 0 && self.path.is_empty())
+            || self.placement.as_ref().is_some_and(|m| !crate::valid_transfer_matrix(m))
             || self.coordinates.iter().any(|value| !value.is_finite() || value.abs() > 1e9)
             || self.x_axis.iter().any(|value| !value.is_finite())
             || (self.x_axis[0].hypot(self.x_axis[1]) - 1.).abs() > 1e-6
@@ -70,13 +89,11 @@ impl FaceAnchor {
         }
         let inverse = crate::mat_inverse(&self.author_frame(doc, author)?)
             .ok_or_else(|| DocError::Invalid("attached sketch author frame is invalid".into()))?;
-        let source = EmbossFace {
-            body: self.target.body.clone().into(),
-            at: crate::FacePick(self.target.point),
-            path: self.path.clone(),
-            author_path: self.author_path.clone(),
-        };
-        Ok(crate::mat_mul(&inverse, &source.body_frame(doc, body)?))
+        // Resolve both paths even with a captured placement: a missing or reparented source
+        // must still fail explicitly rather than silently reusing an unrelated definition.
+        let source = EmbossFace::component_frame(doc, self.component, &self.path)?;
+        let relative = self.placement.unwrap_or_else(|| crate::mat_mul(&inverse, &source));
+        Ok(doc.model_body_offset(body).map_or(relative, |offset| crate::mat_mul(&relative, offset)))
     }
 }
 
@@ -181,6 +198,7 @@ impl Document {
             component: self.model_body_component(body),
             path: target_path.to_vec(),
             author_path: author_path.to_vec(),
+            placement: None,
             coordinates: [0., 0.],
             x_axis: [1., 0.],
         };
@@ -191,6 +209,15 @@ impl Document {
         let delta = picked.origin - canonical.origin;
         anchor.coordinates = [delta.dot(canonical.x), delta.dot(canonical.y)];
         anchor.x_axis = [picked.x.dot(canonical.x), picked.x.dot(canonical.y)];
+        // A part built against another component uses that assembly context to define its
+        // own shape. Moving either occurrence later must not move the sketch inside the part.
+        // Root sketches and references inside the same component keep their live placements.
+        if author != 0 && author != anchor.component {
+            let inverse = crate::mat_inverse(&anchor.author_frame(self, author)?)
+                .ok_or_else(|| DocError::Invalid("attached sketch author frame is invalid".into()))?;
+            let source = EmbossFace::component_frame(self, anchor.component, &anchor.path)?;
+            anchor.placement = Some(crate::mat_mul(&inverse, &source));
+        }
         anchor.validate()?;
         Ok(anchor)
     }
@@ -384,7 +411,8 @@ impl Document {
 
 pub fn validate_face_anchor_json(value: &Value) -> Result<()> {
     let fields = value.as_object().ok_or_else(|| DocError::Invalid("face anchor must be an object".into()))?;
-    if fields.len() != 6 || fields.keys().any(|key| !["target", "component", "path", "author_path", "coordinates", "x_axis"].contains(&key.as_str()))
+    if !(6..=7).contains(&fields.len())
+        || fields.keys().any(|key| !["target", "component", "path", "author_path", "placement", "coordinates", "x_axis"].contains(&key.as_str()))
     {
         return Err(DocError::Invalid("unknown or missing face anchor fields".into()));
     }
@@ -416,6 +444,15 @@ pub fn validate_face_anchor_json(value: &Value) -> Result<()> {
         }
         if key == "x_axis" && (values[0].as_f64().unwrap_or(0.).hypot(values[1].as_f64().unwrap_or(0.)) - 1.).abs() > 1e-6 {
             return Err(DocError::Invalid("face anchor basis must be normalized".into()));
+        }
+    }
+    if let Some(placement) = fields.get("placement").filter(|v| !v.is_null()) {
+        if placement.as_array().is_none_or(|rows| rows.len() != 4 || rows.iter().any(|row| row.as_array().is_none_or(|row| row.len() != 4))) {
+            return Err(DocError::Invalid("face anchor placement requires a 4x4 matrix".into()));
+        }
+        let matrix: crate::Mat = serde_json::from_value(placement.clone()).map_err(|_| DocError::Invalid("invalid face anchor placement".into()))?;
+        if !crate::valid_transfer_matrix(&matrix) {
+            return Err(DocError::Invalid("face anchor placement must be a finite rigid transform".into()));
         }
     }
     Ok(())
@@ -526,6 +563,44 @@ mod tests {
             .unwrap();
         assert!(doc.resolve_face_anchor(&anchor, 0, &state).is_err(), "reused name cannot replace the producer");
     }
+    #[test]
+    fn captured_component_placement_is_rigid_and_legacy_anchors_stay_live() {
+        let (mut doc, body, index, picked) = fixture();
+        let author = doc.add_component(Some("Part"), 0).unwrap();
+        let path = doc.first_path(author);
+        let anchor = doc.capture_face_anchor(&body, index, &picked, &[], author, &path).unwrap();
+        assert_eq!(anchor.placement, Some(crate::IDENTITY));
+        let raw = serde_json::to_value(&anchor).unwrap();
+        assert!(validate_face_anchor_json(&raw).is_ok());
+        let restored: FaceAnchor = serde_json::from_value(raw.clone()).unwrap();
+        assert_eq!(restored, anchor);
+        for placement in [
+            serde_json::json!([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]]),
+            serde_json::json!([[2, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]),
+            serde_json::json!([[-1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]),
+            serde_json::json!([[1, 0, 0, 1], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]),
+            serde_json::json!([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [1e10, 0, 0, 1]]),
+        ] {
+            let mut invalid = raw.clone();
+            invalid["placement"] = placement;
+            assert!(validate_face_anchor_json(&invalid).is_err(), "{invalid}");
+            if let Ok(invalid) = serde_json::from_value::<FaceAnchor>(invalid) {
+                assert!(invalid.validate().is_err());
+            }
+        }
+        let mut legacy = raw;
+        legacy.as_object_mut().unwrap().remove("placement");
+        assert!(validate_face_anchor_json(&legacy).is_ok());
+        let legacy: FaceAnchor = serde_json::from_value(legacy).unwrap();
+        doc.occurrences.iter_mut().find(|o| o.component == author).unwrap().transform[3][0] = 40.;
+        let mut state = ModelState::default();
+        state.bodies.push(body);
+        assert!(doc.resolve_face_anchor(&anchor, author, &state).unwrap().origin.dist(picked.origin) < 1e-9);
+        assert!(doc.resolve_face_anchor(&legacy, author, &state).unwrap().origin.dist(picked.origin - Vec3::X * 40.) < 1e-9);
+        doc.occurrences.clear();
+        assert!(doc.resolve_face_anchor(&anchor, author, &state).is_err(), "a captured context still validates its paths");
+    }
+
     #[test]
     fn nested_anchor_offset_tracks_source_and_raw_budgets_precede_decode() {
         let (doc, body, index, picked) = fixture();

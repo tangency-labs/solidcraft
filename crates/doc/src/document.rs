@@ -4297,6 +4297,11 @@ impl Document {
         analysis: solidcraft_sketch::Analysis,
     ) -> Result<solidcraft_sketch::SolveReport> {
         self.apply_dimension_values(vals, sk)?;
+        // A text built anew since it was stored (an expression gave it other words) has other
+        // outline entities: the stored sketch is taken with this sketch's, so the points still
+        // pair up for the side checks and the walk below.
+        let paired = moved_from.and_then(|from| sk.stored_with_rebuilt_texts(from));
+        let moved_from = paired.as_ref().or(moved_from);
         let was = |sk: &Sketch| moved_from.and_then(|from| sk.positions_in(from));
         let offsets = !sk.offsets.is_empty() || !sk.freeform_offsets.is_empty();
         // Offsets always require another solve after refresh. Only that last report is

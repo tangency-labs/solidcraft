@@ -2968,3 +2968,34 @@ fn extrude_takes_every_profile_of_a_sketch_clicked_in_the_browser() {
         "both rectangles of the clicked sketch, not the last sketch's circle"
     );
 }
+
+/// #10311: a selected line midpoint and another line, either way round, go to Coincident from the
+/// toolbar and from the context menu: the line's middle lands on the other line.
+#[test]
+fn coincident_takes_a_selected_line_midpoint() {
+    use crate::context_menu::{self, Target};
+    let middle_y = |h: &crate::scenario::Harness| {
+        let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let line = sk.curve_index("l1").unwrap();
+        crate::selection::line_midpoint(sk, line).unwrap().y
+    };
+    for menu in [false, true] {
+        for reverse in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+            h.app.run("sketch.line", json!({"points": [[10, 10], [30, 20]], "infer": false, "connect": false})).unwrap();
+            h.app.run("sketch.line", json!({"points": [[0, 40], [60, 40]], "infer": false, "connect": false})).unwrap();
+            h.app.run("sketch.constraint.fix", json!({"entities": ["l2"]})).unwrap();
+            let (middle, line) = (Sel::SketchMidpoint { id: "l1".into() }, Sel::SketchCurve { id: "l2".into(), sketch: None });
+            h.app.session.selection = if reverse { vec![line, middle] } else { vec![middle, line] };
+            if menu {
+                let items = context_menu::items(&h.app, &Target::Viewport);
+                let item = items.iter().find(|i| i.label == "Coincident").expect("the menu offers Coincident");
+                context_menu::run_item(&mut h.app, item, egui::Pos2::ZERO);
+            } else {
+                h.app.start("sketch.constraint.coincident");
+            }
+            assert!((middle_y(&h) - 40.0).abs() < 1e-6, "menu {menu}, reverse {reverse}: middle at y {} ({:?})", middle_y(&h), h.app.status);
+        }
+    }
+}

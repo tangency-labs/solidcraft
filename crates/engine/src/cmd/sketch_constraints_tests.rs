@@ -803,6 +803,61 @@ fn midpoint_alignment_rejects_invalid_or_conflicting_references_atomically() {
     }
 }
 
+/// #10311: Coincident takes a line's middle as `{midpoint: line}`, first or second. With another
+/// line the middle lies on it, with a point it lands on the point; a point tied to the middle by
+/// a Midpoint constraint stands for it, in one undo step.
+#[test]
+fn coincident_takes_a_line_midpoint_either_way_round() {
+    for other in ["l2", "target"] {
+        for reverse in [false, true] {
+            let mut s = new_sketch();
+            run(&mut s, "sketch.line", json!({"points":[[10,10],[30,20]],"infer":false,"connect":false}));
+            run(&mut s, "sketch.line", json!({"points":[[0,40],[60,40]],"infer":false,"connect":false}));
+            run(&mut s, "sketch.point", json!({"point":[24,50],"id":"target"}));
+            run(&mut s, "sketch.constraint.fix", json!({"entities":["l2","target"]}));
+            let before = s.doc.to_json();
+            let undo = s.undo.len();
+            let middle = json!({"midpoint":"l1"});
+            let (a, b) = if reverse { (json!(other), middle) } else { (middle, json!(other)) };
+            let result = run(&mut s, "sketch.constraint.coincident", json!({"a":a,"b":b}));
+            assert_eq!(result["created"]["points"].as_array().unwrap().len(), 1, "{other} {reverse}: {result}");
+            assert_eq!(s.undo.len(), undo + 1);
+            let sk = sketch(&s);
+            let mid = line_midpoint(&sk, "l1");
+            if other == "l2" {
+                assert!((mid.y - 40.0).abs() < 1e-6, "{other} {reverse}: middle at {mid:?}");
+            } else {
+                assert!(mid.dist(Vec2::new(24.0, 50.0)) < 1e-6, "{other} {reverse}: middle at {mid:?}");
+            }
+            assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Midpoint { .. })));
+            run(&mut s, "edit.undo", json!({}));
+            assert_eq!(s.doc.to_json(), before);
+        }
+    }
+}
+
+/// A middle Coincident can't take (not a line, an unknown curve, the same middle twice, or the
+/// point already tied there) is refused and leaves the sketch as it was.
+#[test]
+fn coincident_refuses_a_midpoint_it_cannot_take_atomically() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points":[[10,10],[30,20]],"infer":false,"connect":false}));
+    run(&mut s, "sketch.circle.center", json!({"center":[40,50],"radius":3}));
+    let tied = run(&mut s, "sketch.point", json!({"point":"mid:l1"}))["point"].as_str().unwrap().to_owned();
+    for (a, b) in [
+        (json!({"midpoint":"c1"}), json!("origin")),
+        (json!({"midpoint":"missing"}), json!("origin")),
+        (json!({"midpoint":"l1"}), json!({"midpoint":"l1"})),
+        (json!({"midpoint":"l1"}), json!(tied)),
+    ] {
+        let before = s.doc.to_json();
+        let undo = s.undo.len();
+        assert!(s.execute("sketch.constraint.coincident", &json!({"a":a,"b":b})).is_err(), "{a} {b}");
+        assert_eq!(s.doc.to_json(), before, "{a} {b}");
+        assert_eq!(s.undo.len(), undo);
+    }
+}
+
 fn line_midpoint(sk: &solidcraft_sketch::Sketch, id: &str) -> Vec2 {
     // Read the curve's current endpoints: after a corner cut an original endpoint
     // id can still name the retained construction side's corner.

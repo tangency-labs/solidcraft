@@ -460,6 +460,37 @@ fn a_control_import_passes_its_matrix_and_name_on() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// #10198: the web build cannot start the meshing thread. An opened design is still drawn whole
+/// and its "Loading parts" note goes, instead of an empty view with "Loading parts n/n" for good.
+#[test]
+fn an_opened_design_is_drawn_whole_when_meshing_has_no_thread() {
+    let dir = scratch("progressive-no-thread");
+    let path = large_design(&dir, 6);
+    let mut w = Win::new();
+    let (tx, rx) = std::sync::mpsc::channel();
+    w.app.control_rx = Some(rx);
+    let (open, open_rx) = crate::control::ControlRequest::new("engine.execute", json!({"command": "doc.open", "params": {"path": path}}));
+    tx.send(open).unwrap();
+    crate::open_meshing::without_threads(|| {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        while open_rx.try_recv().is_err() {
+            w.frame(vec![]);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+            assert!(std::time::Instant::now() < deadline, "the open answers");
+        }
+        for _ in 0..100 {
+            if !crate::open_meshing::active(&w.app) {
+                break;
+            }
+            w.frame(vec![]);
+        }
+    });
+    assert!(!crate::open_meshing::active(&w.app), "the parts are in: {:?}", crate::open_meshing::progress(&w.app));
+    let world = w.app.session.world_state().unwrap();
+    assert!(!world.bodies.is_empty());
+    assert_eq!(crate::open_meshing::shown_world(&w.app).bodies.len(), world.bodies.len(), "the whole design is drawn");
+}
+
 /// An opened design is in the window before its bodies are meshed: the view draws the bodies
 /// meshed so far (never meshing one itself), framed from their outlines, until all are.
 #[test]

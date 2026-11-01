@@ -15,6 +15,9 @@ type Reply = Result<(String, Vec<u8>), String>;
 pub struct Download {
     reply: Rc<RefCell<Option<Reply>>>,
     pending: Option<(String, Vec<u8>)>,
+    /// The downloaded design being opened (a few features a frame, #10198): the answer to come,
+    /// the name it takes and the file it was read from.
+    opening: Option<(std::sync::mpsc::Receiver<serde_json::Value>, String, String)>,
 }
 
 impl Download {
@@ -33,13 +36,14 @@ impl Download {
     }
 
     pub fn tick(&mut self, app: &mut SolveApp, ctx: &egui::Context) {
+        self.opened(app);
         if let Some(reply) = self.reply.borrow_mut().take() {
             match reply {
                 Ok(file) => self.pending = Some(file),
                 Err(error) => app.set_status(format!("Could not open design link: {error}"), true),
             }
         }
-        if self.pending.is_none() || app.file_picker_busy() {
+        if self.pending.is_none() || self.opening.is_some() || app.file_picker_busy() {
             return;
         }
         if solidcraft_ui_egui::documents::any_dirty(app) {
@@ -71,18 +75,33 @@ impl Download {
             }
         }
         let Some((name, bytes)) = self.pending.take() else { return };
-        // The extension selects the design loader even when the URL has no extension.
-        let path = &format!("/linked/design.{}", solidcraft_engine::io::DESIGN_EXT);
-        vfs::insert(path, bytes);
-        app.open_path(path);
-        if app.session.path.as_deref() == Some(path.as_str()) {
+        // The extension selects the design loader even when the URL has no extension. Named
+        // after the link, as the progress card shows the file's name.
+        let file: String = name.chars().map(|c| if matches!(c, '/' | '\\') { '_' } else { c }).collect();
+        let path = format!("/linked/{}.{}", if file.is_empty() { "design" } else { &file }, solidcraft_engine::io::DESIGN_EXT);
+        vfs::insert(&path, bytes);
+        // Opened as any design is, with its progress and Cancel; finished in `opened`.
+        self.opening = Some((app.open_path_answered(&path), name, path));
+        self.opened(app);
+    }
+
+    /// The downloaded design is in: it is an unsaved copy under the link's name.
+    fn opened(&mut self, app: &mut SolveApp) {
+        let Some((rx, _, _)) = &self.opening else { return };
+        let (ok, cancelled) = match rx.try_recv() {
+            Ok(reply) => (reply["ok"].as_bool() == Some(true), reply["error"].as_str().is_some_and(|e| e.contains("cancelled"))),
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => (false, false),
+        };
+        let Some((_, name, path)) = self.opening.take() else { return };
+        if ok && app.session.path.as_deref() == Some(path.as_str()) {
             app.session.path = None;
             app.session.doc_mut().name = name;
             app.session.mark_unsaved();
-        } else {
+        } else if !ok && !cancelled {
             app.set_status("Could not open design link: the downloaded file is not a valid SolidCraft design", true);
         }
-        let _ = vfs::remove(path);
+        let _ = vfs::remove(&path);
     }
 }
 

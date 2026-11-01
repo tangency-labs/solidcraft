@@ -9,6 +9,9 @@ mod easyprint;
 #[path = "file_import.rs"]
 pub(crate) mod import;
 
+#[path = "file_open_steps.rs"]
+pub(crate) mod open_steps;
+
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "file_send.rs"]
 mod send;
@@ -354,11 +357,30 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let read_only = bool_(p, "read_only").unwrap_or(false);
     // Stamped before it is read: a write while it is being read is a change too.
     let disk = solidcraft_io::design_lock::stamp(path);
+    let (doc, saved) = read_design(s, path)?;
+    let opened = Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation());
+    opened_design(s, opened, path, read_only, disk)
+}
+
+/// Read the design file at `path` for `doc.open`, under its file's name if it has none of its own.
+fn read_design(s: &mut Session, path: &str) -> Result<(Document, Option<solidcraft_doc::SavedModel>)> {
     let (mut doc, saved) = solidcraft_io::read_design_file(path, s.open_preview.take()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     if let Some(stem) = default_name_for(&doc.name, path) {
         doc.name = stem;
     }
-    s.replace_design(Session::opened_at_validating(doc, saved.as_ref(), Some(path), s.validation()));
+    Ok((doc, saved))
+}
+
+/// `doc.open` of a design: `opened`, the design read from `path` and evaluated, takes `s`'s
+/// place, and the reply says what it is.
+fn opened_design(
+    s: &mut Session,
+    opened: Session,
+    path: &str,
+    read_only: bool,
+    disk: Option<solidcraft_io::design_lock::FileStamp>,
+) -> Result<Value> {
+    s.replace_design(opened);
     s.disk = disk;
     s.read_only = read_only;
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
@@ -500,7 +522,12 @@ impl Session {
         validation: solidcraft_kernel::Validation,
     ) -> Self {
         super::component_link::resolve_design_links(&mut doc, path);
-        let mut session = Self::opened_validating(doc, saved, validation);
+        Self::opened_validating(doc, saved, validation).located(path)
+    }
+
+    /// This session, just opened, as the design in the file at `path`.
+    pub(crate) fn located(self, path: Option<&str>) -> Self {
+        let mut session = self;
         session.path = path.map(str::to_owned);
         // A design saved before body names were pinned (#6403) is pinned now, as its first
         // command would pin it: that command pinned them as part of itself, so undoing it went
@@ -1883,6 +1910,68 @@ mod tests {
         watch(progress, || stopped.execute("doc.open", &json!({"path":path}))).unwrap();
         assert!(stopped.model.results.iter().all(|r| r.skipped), "no feature was rebuilt after Cancel");
         assert!(stopped.world_state().unwrap().bodies.is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// #10198: a design opened a feature at a time ([`OpenSteps`]) is the design `doc.open`
+    /// opens: the same features, results, bodies and history marker, with its file and name. Its
+    /// import is offered before the step that evaluates it, and other files are left to `doc.open`.
+    #[test]
+    fn a_design_opened_a_feature_at_a_time_is_the_one_doc_open_opens() {
+        use super::open_steps::OpenSteps;
+        let dir = std::env::temp_dir().join(format!("solidcraft-open-steps-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("steps.sc").to_string_lossy().to_string();
+        let step = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/step-conformance/cylinder_seam.step");
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+        s.execute("file.insert_step", &json!({"path": step})).unwrap();
+        s.execute("component.activate", &json!({"component": "root"})).unwrap();
+        s.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[40,0,0]})).unwrap();
+        s.execute("solid.box", &json!({"length":5,"width":5,"height":5,"corner":[60,0,0]})).unwrap();
+        let features = s.doc.features.len();
+        s.execute("timeline.rollback", &json!({"position": features - 1})).unwrap();
+        s.execute("file.save", &json!({"path": path, "cache": false})).unwrap();
+
+        let mut whole = Session::default();
+        let opened = whole.execute("doc.open", &json!({"path": path, "read_only": true})).unwrap();
+
+        let mut steps = OpenSteps::start(&json!({"path": path, "read_only": true})).unwrap().expect("a design is opened in steps");
+        assert_eq!(steps.path(), path);
+        assert_eq!(steps.progress(), (0, features - 1), "the saved marker is where evaluation stops");
+        let mut imports = 0;
+        let mut n = 0;
+        while !steps.done() {
+            if let Some(text) = steps.next_import() {
+                assert!(text.contains("ISO-10303-21"));
+                imports += 1;
+            }
+            steps.step();
+            n += 1;
+            assert_eq!(steps.progress().0, n);
+        }
+        assert_eq!((imports, n), (1, features - 1));
+        assert!(!steps.step(), "nothing is left to evaluate");
+        let mut stepped = Session::default();
+        let reply = steps.finish(&mut stepped).unwrap();
+
+        assert_eq!(reply, opened);
+        assert_eq!(stepped.doc, whole.doc);
+        assert_eq!(stepped.doc.marker, Some(features - 1));
+        assert_eq!((stepped.path.as_deref(), stepped.read_only), (Some(path.as_str()), true));
+        let summary = |s: &Session| -> Vec<(u64, bool, bool)> { s.model.results.iter().map(|r| (r.id, r.skipped, r.error.is_some())).collect() };
+        assert_eq!(summary(&stepped), summary(&whole));
+        let bodies =
+            |s: &Session| -> Vec<(String, usize)> { s.world_state().unwrap().bodies.iter().map(|b| (b.name.clone(), b.mesh().triangles.len())).collect() };
+        assert_eq!(bodies(&stepped), bodies(&whole));
+        assert_eq!(stepped.world_state().unwrap().bodies.len(), 3, "the box, the cylinder and the box before the marker");
+        assert!(stepped.model.is_current(&stepped.doc));
+
+        // Other files, and STEP-only options, are opened by `doc.open`.
+        for p in [json!({"path": step}), json!({"path": "part.stl"}), json!({"path": path, "up": "y"}), json!({})] {
+            assert!(OpenSteps::start(&p).unwrap().is_none(), "{p}");
+        }
+        assert!(OpenSteps::start(&json!({"path": dir.join("missing.sc").to_string_lossy()})).is_err());
         std::fs::remove_dir_all(dir).unwrap();
     }
 

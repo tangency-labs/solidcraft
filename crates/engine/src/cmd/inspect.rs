@@ -27,7 +27,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("measure")
         .key("I")
         .noundo()
-        .params("bodies?: [names] (default all) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, point; index optional) → length/area/volume; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
+        .params("bodies?: [names] (default all); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, point; index optional) → length/area/volume; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
     CommandSpec::new("document.inspect", "Inspect Design", inspect).icon("inspect").noundo().params("measure?: bool (include body measurements)"),
     CommandSpec::new("document.revision", "Design Revision", revision).icon("inspect").noundo().params(
         "→ document_id (this open design's id: kept while it stays open, another for each design started or opened), \
@@ -125,6 +125,13 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
     let want = string_list(cmd, p, "bodies")?;
     let st = s.world_state()?;
     let selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
+    if !want.is_empty() && selected.len() != want.len() {
+        return Err(bad(cmd, "unknown body name"));
+    }
+    if bool_(p, "names_only").unwrap_or(false) {
+        let bodies: Vec<_> = selected.iter().map(|b| json!({"name": b.name, "definition": b.definition_name()})).collect();
+        return Ok(json!({"body_count": bodies.len(), "bodies": bodies}));
+    }
     // Each body is measured on its own: on all cores, in body order.
     let mut bodies: Vec<Value> = solidcraft_kernel::map_on_threads(&selected, 16, |b| measure_json(b))
         .into_iter()
@@ -141,9 +148,6 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
             b["density_g_cm3"] = json!(rho);
             b["mass_g"] = json!(v * rho / 1000.0);
         }
-    }
-    if !want.is_empty() && bodies.len() != want.len() {
-        return Err(bad(cmd, "unknown body name"));
     }
     // Sheet metal keeps the edges where bends meet flat faces (so bends stay visible): count its
     // B-rep faces as they are, without merging coplanar neighbours.

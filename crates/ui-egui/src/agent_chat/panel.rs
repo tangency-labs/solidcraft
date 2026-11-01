@@ -106,24 +106,22 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.agent_chat.dock_space = Some(Rect::from_x_y_ranges(screen.x_range(), available.y_range()));
     let t = Tokens::get();
     let left = app.preferences.agent_chat_side == "left";
-    let side = |id: Id| Container::new(ui.ctx(), Surface::Panel).edge(id, if left { Edge::Left } else { Edge::Right });
+    let host = Container::new(ui.ctx(), Surface::Panel);
+    let side = |id: Id| host.edge(id, if left { Edge::Left } else { Edge::Right });
     if app.preferences.agent_chat_minimized {
-        let r = side(Id::new("sc_agent_chat_strip"))
-            .exact_size(STRIP)
-            .resizable(false)
-            .frame(Container::new(ui.ctx(), Surface::Panel).edge_frame(t.panel))
-            .show(ui, |ui| strip(app, ui));
+        let r = host
+            .show_edge(ui, side(Id::new("sc_agent_chat_strip")).exact_size(STRIP).resizable(false), host.edge_frame(t.panel), |ui| strip(app, ui));
         app.agent_chat.drop_rect = Some(r.response.rect);
         show_drop_hint(app, &ctx);
         return;
     }
     let width = app.preferences.agent_chat_width.clamp(MIN_WIDTH, MAX_WIDTH);
-    let r = side(panel_id(left))
-        .default_size(width)
-        .size_range(MIN_WIDTH..=MAX_WIDTH)
-        .resizable(true)
-        .frame(Container::new(ui.ctx(), Surface::Panel).edge_frame(t.dialog_body))
-        .show(ui, |ui| ui_kit::scope(ui, |ui| body(app, ui, left)));
+    let r = host.show_edge(
+        ui,
+        side(panel_id(left)).default_size(width).size_range(MIN_WIDTH..=MAX_WIDTH).resizable(true),
+        host.edge_frame(t.dialog_body),
+        |ui| ui_kit::scope(ui, |ui| body(app, ui, left)),
+    );
     crate::scenario::publish_rect("agent_chat:panel", r.response.rect);
     app.agent_chat.panel_rect = Some(r.response.rect);
     #[cfg(not(target_arch = "wasm32"))]
