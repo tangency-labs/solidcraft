@@ -35,8 +35,9 @@ const MAX_THEMES: usize = 4;
 const MAX_ID: usize = 200;
 
 /// The 93 stored keys from the pre-split Interface, Navigation and Sketch pages, plus
-/// language, excluding space_mouse_* and orbit_cursor. Page moves and title tags must never
-/// change profile contents (including the bridge, origin names and direct interaction).
+/// language, excluding space_mouse_* and orbit_cursor; then `ribbon_tabs_only`, added later on
+/// the Layout page (#10112). Page moves and title tags must never change profile contents
+/// (including the bridge, origin names and direct interaction).
 const PROFILE_KEYS: &[&str] = &[
     "browser_bodies_folders",
     "browser_collapsed",
@@ -87,6 +88,7 @@ const PROFILE_KEYS: &[&str] = &[
     "ribbon_labels",
     "ribbon_menus_skip_pinned",
     "ribbon_reveal",
+    "ribbon_tabs_only",
     "right_drag_orbits",
     "select_other_hidden",
     "selection_shift_add_only",

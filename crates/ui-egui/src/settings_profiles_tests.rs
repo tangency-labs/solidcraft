@@ -400,6 +400,7 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
         "ribbon_labels",
         "ribbon_menus_skip_pinned",
         "ribbon_reveal",
+        "ribbon_tabs_only",
         "right_drag_orbits",
         "select_other_hidden",
         "selection_shift_add_only",
@@ -447,7 +448,7 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 93);
+    assert_eq!(expected.len(), 94);
     assert_eq!(actual, expected);
 }
 

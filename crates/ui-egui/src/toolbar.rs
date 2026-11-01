@@ -1181,7 +1181,8 @@ fn ribbon_tab_style(t: &Tokens, tab: &str, contextual: bool, active: bool, hover
     RibbonTabStyle { fill, ink, outline }
 }
 
-fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
+/// Returns `Some(already shown)` when a tab was clicked.
+fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) -> Option<bool> {
     let t = Tokens::get();
     let tabs = crate::workspace::visible_tabs(app);
     let widths: Vec<_> = tabs
@@ -1243,6 +1244,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
         changed
     });
     let span = Rect::from_min_max(row.left_top() + vec2(inset, 0.0), pos2((search.left() - 6.0).max(row.left() + inset), row.bottom()));
+    let mut clicked = None;
     ui.scope_builder(egui::UiBuilder::new().max_rect(span), |ui| {
         ui.set_clip_rect(span);
         egui::ScrollArea::horizontal()
@@ -1282,6 +1284,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
                         }
                     }
                     if response.clicked() {
+                        clicked = Some(active);
                         app.ui.tab = tab.to_string();
                         // Floating ribbons draw after the viewport. An instant surface switch
                         // needs one more pass too; settled tabs never schedule their own frames.
@@ -1327,6 +1330,7 @@ fn ribbon_tabs(app: &mut SolveApp, ui: &mut egui::Ui, row: Rect) {
             t.toolbar.lerp_to_gamma(t.border, 0.5),
         );
     }
+    clicked
 }
 
 /// The dropdown chevron every ribbon menu shares.
@@ -1342,8 +1346,31 @@ pub(crate) fn shell_cards(app: &SolveApp, available: Rect) -> crate::shell::Card
     if crate::render_workspace::active(app) {
         crate::ui_kit::StageBar::cards(available)
     } else {
-        crate::shell::Cards::new(available, shell_layout(app), ribbon_height(app.preferences.ribbon_labels))
+        crate::shell::Cards::new(available, shell_layout(app), reserved_height(app))
     }
+}
+
+/// The ribbon is folded to its tab row (`ribbon_tabs_only`, #10112). The Render workspace keeps
+/// its own stage bar whole.
+pub(crate) fn tabs_only(app: &SolveApp) -> bool {
+    app.preferences.ribbon_tabs_only && !crate::render_workspace::active(app)
+}
+
+/// The height the ribbon keeps from the view: the tab row alone while it is folded, whose panels
+/// then open over the view.
+pub(crate) fn reserved_height(app: &SolveApp) -> f32 {
+    if tabs_only(app) { TAB_ROW_HEIGHT + 1.0 } else { ribbon_height(app.preferences.ribbon_labels) }
+}
+
+/// Where one pass of the ribbon draws: the folded tab row, the whole ribbon, or the whole ribbon
+/// opened over the view from the folded row.
+#[derive(Clone, Copy)]
+struct RibbonShape {
+    floating: bool,
+    cards: crate::shell::Cards,
+    r: Rect,
+    ws: Rect,
+    folded: bool,
 }
 
 pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -1351,20 +1378,94 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::workspace::sync_context(app);
     let layout = shell_layout(app);
     let floating = Container::for_layout(layout, Surface::Panel).floating();
-    let labels = app.preferences.ribbon_labels;
-    let button_height = if labels { BUTTON_HEIGHT } else { ICON_BUTTON_HEIGHT };
-    let group_height = if labels { GROUP_HEIGHT } else { ICON_GROUP_HEIGHT };
-    let ribbon_height = ribbon_height(labels);
-    let gallery_width = if labels { CONSTRAINT_GRID_WIDTH } else { 6.0 * 27.0 };
-    let cards = shell_cards(app, ui.available_rect_before_wrap());
-    let height = if floating { cards.bottom - ui.available_rect_before_wrap().top() } else { ribbon_height };
+    let folded = tabs_only(app);
+    if !folded {
+        app.ui.ribbon_open = false;
+    }
+    let available = ui.available_rect_before_wrap();
+    let cards = shell_cards(app, available);
+    let height = if floating { cards.bottom - available.top() } else { reserved_height(app) };
     let fill = if floating { Color32::TRANSPARENT } else { t.toolbar };
     let host = Container::for_layout(layout, Surface::Chrome);
     let ribbon = host.edge("sc_toolbar", Edge::Top);
     let frame = host.edge_frame(fill);
+    let mut tab_click = None;
     let chrome = host.show_edge(ui, ribbon.exact_size(height).show_separator_line(false), frame, |ui| {
         let r = if floating { Rect::from_min_max(cards.workspace.min, cards.ribbon.max) } else { frame.outer_rect(ui.max_rect()) };
-        let ws = if floating { cards.workspace } else { Rect::from_min_size(r.left_top(), vec2(WORKSPACE_WIDTH, ribbon_height - 1.0)) };
+        let ws = if floating { cards.workspace } else { Rect::from_min_size(r.left_top(), vec2(WORKSPACE_WIDTH, height - 1.0)) };
+        tab_click = ribbon_contents(app, ui, RibbonShape { floating, cards, r, ws, folded });
+    });
+    if floating {
+        let frame = host.frame(ui.ctx(), t.toolbar, crate::frame::Side::Left);
+        for card in [cards.workspace, cards.ribbon] {
+            Container::paint_inset(ui.painter(), frame.widget_rect(card), frame);
+        }
+    } else {
+        Container::paint_inset(ui.painter(), chrome.response.rect - frame.outer_margin, frame);
+    }
+    if folded && (app.ui.ribbon_open || tab_click.is_some()) {
+        app.ui.ribbon_open = true;
+        open_ribbon(app, ui, available, chrome.response.rect);
+    }
+}
+
+/// The folded ribbon's tab, clicked: its panels open over the view, as the whole ribbon would
+/// show them, until a command starts (`SolveApp::start` closes it), the pointer leaves them,
+/// Escape is pressed or the open tab is clicked again (#10112).
+fn open_ribbon(app: &mut SolveApp, ui: &mut egui::Ui, available: Rect, folded: Rect) {
+    let t = Tokens::get();
+    let layout = shell_layout(app);
+    let floating = Container::for_layout(layout, Surface::Panel).floating();
+    let full = ribbon_height(app.preferences.ribbon_labels);
+    let cards = crate::shell::Cards::new(available, layout, full);
+    let r = if floating {
+        Rect::from_min_max(cards.workspace.min, cards.ribbon.max)
+    } else {
+        Rect::from_min_size(folded.min, vec2(folded.width(), full))
+    };
+    let ws = if floating { cards.workspace } else { Rect::from_min_size(r.left_top(), vec2(WORKSPACE_WIDTH, full - 1.0)) };
+    let host = Container::for_layout(layout, Surface::Chrome);
+    let mut tab_click = None;
+    host.area(egui::Id::new("sc_ribbon_open")).fixed_pos(r.min).show(ui.ctx(), |ui| {
+        ui.set_min_size(r.size());
+        if !floating {
+            let frame = host.frame(ui.ctx(), t.toolbar, crate::frame::Side::Left);
+            Container::paint_frame(ui.painter(), frame, r);
+        }
+        tab_click = ribbon_contents(app, ui, RibbonShape { floating, cards, r, ws, folded: false });
+        if floating {
+            let frame = host.frame(ui.ctx(), t.toolbar, crate::frame::Side::Left);
+            for card in [cards.workspace, cards.ribbon] {
+                Container::paint_inset(ui.painter(), frame.widget_rect(card), frame);
+            }
+        }
+    });
+    crate::scenario::publish_rect("ribbon:open", r);
+    let ctx = ui.ctx().clone();
+    // A panel's drop-down, a menu or a dragged button keep the panels open while the pointer is
+    // on them, away from the panels.
+    let busy = ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new("sc_panel_open")).is_some())
+        || app.viewport.context_menu.is_some()
+        || egui::DragAndDrop::payload::<ToolbarDrag>(&ctx).is_some();
+    let left = ctx.input(|i| i.pointer.latest_pos()).is_none_or(|p| !r.expand(t.space_4).contains(p));
+    let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+    if tab_click == Some(true) || (!busy && (left || escape)) {
+        app.ui.ribbon_open = false;
+        ctx.request_repaint();
+    }
+}
+
+/// One pass of the ribbon in `shape`. Returns `Some(already shown)` when a tab was clicked.
+fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) -> Option<bool> {
+    let t = Tokens::get();
+    let layout = shell_layout(app);
+    let host = Container::for_layout(layout, Surface::Chrome);
+    let labels = app.preferences.ribbon_labels;
+    let button_height = if labels { BUTTON_HEIGHT } else { ICON_BUTTON_HEIGHT };
+    let group_height = if labels { GROUP_HEIGHT } else { ICON_GROUP_HEIGHT };
+    let gallery_width = if labels { CONSTRAINT_GRID_WIDTH } else { 6.0 * 27.0 };
+    let RibbonShape { floating, cards, r, ws, folded } = shape;
+    {
         let ribbon_left = if floating { cards.ribbon.left() } else { ws.right() };
         if floating {
             for card in [ws, cards.ribbon] {
@@ -1412,6 +1513,17 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         let render = crate::render_workspace::active(app);
         if render {
             crate::ui_kit::StageBar::workspace(ui, ws, "ws_render", app.tr("ui.render"), app.tr("ui.ribbon_workspace"));
+        } else if folded {
+            // Folded to the tab row: the workspace's name and its arrow, on one line.
+            let galley = egui::WidgetText::from(egui::RichText::new(app.tr("ui.design")).size(t.font_button).color(t.text)).into_galley(
+                ui,
+                Some(egui::TextWrapMode::Truncate),
+                (ws.width() - 2.0 * t.space_8 - t.space_12).max(0.0),
+                egui::TextStyle::Button,
+            );
+            let label_width = galley.size().x;
+            ribbon_galley(ui, pos2(ws.center().x - 6.0, ws.center().y + 1.0), galley, t.text);
+            dropdown_arrow(&painter, pos2(ws.center().x - 6.0 + label_width / 2.0 + 7.0, ws.center().y + 1.5), t.text_dim);
         } else {
             let workspace_icon = if render { "ws_render" } else { "ws_design" };
             icons::paint_icon(
@@ -1448,9 +1560,13 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::scenario::publish_target("ribbon:workspace", ws);
         if render {
             crate::render_ui::stage_bar(app, ui, cards.ribbon);
-            return;
+            return None;
         }
-        ribbon_tabs(app, ui, Rect::from_min_max(pos2(ribbon_left, r.top()), pos2(r.right(), r.top() + TAB_ROW_HEIGHT)));
+        let tab_click = ribbon_tabs(app, ui, Rect::from_min_max(pos2(ribbon_left, r.top()), pos2(r.right(), r.top() + TAB_ROW_HEIGHT)));
+        if folded {
+            crate::scenario::publish_rect("ribbon:folded", r);
+            return tab_click;
+        }
         // Panels.
         let tab = app.ui.tab.clone();
         // The command whose tool or dialog is open right now, shown pressed in the toolbar.
@@ -2093,14 +2209,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sc_panel_open")));
             crate::context_menu::open_for(app, at, crate::context_menu::Target::ToolbarCommand { id: id.to_string() });
         }
-    });
-    if floating {
-        let frame = host.frame(ui.ctx(), t.toolbar, crate::frame::Side::Left);
-        for card in [cards.workspace, cards.ribbon] {
-            Container::paint_inset(ui.painter(), frame.widget_rect(card), frame);
-        }
-    } else {
-        Container::paint_inset(ui.painter(), chrome.response.rect - frame.outer_margin, frame);
+        tab_click
     }
 }
 
@@ -4763,6 +4872,74 @@ mod dropdown_toggle_tests {
         h.frames(30);
         h.step(&json!({"click": {"handle": "button:sketch.line"}})).unwrap();
         assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.line"));
+    }
+
+    /// Ribbon Tabs Only folds the ribbon to its tab row (#10112) in both layouts: a tab's click
+    /// opens its panels over the view, a command starting or the pointer leaving closes them, and
+    /// the command again keeps the whole ribbon shown.
+    #[test]
+    fn ribbon_tabs_only_folds_to_the_tab_row_and_a_tab_opens_over_the_view() {
+        for layout in ["compact", "floating"] {
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            h.app.run("view.layout", json!({ "mode": layout })).unwrap();
+            h.frames(3);
+            assert!(!h.app.preferences.ribbon_tabs_only, "off by default");
+            let whole = rect_of("toolbar").unwrap();
+            let whole_view = h.app.viewport.rect.unwrap();
+            assert!(rect_of("ribbon:folded").is_none());
+
+            h.app.start("view.ribbon_tabs_only");
+            h.frames(3);
+            assert!(h.app.preferences.ribbon_tabs_only, "{layout}: the command folds the ribbon");
+            let folded = rect_of("ribbon:folded").unwrap();
+            assert!(folded.height() <= super::TAB_ROW_HEIGHT + 1.0, "{layout}: only the tab row is left: {folded:?}");
+            assert!(rect_of("panel:MODEL:CREATE").is_none(), "{layout}: no panels while folded");
+            if layout == "compact" {
+                assert!(h.app.viewport.rect.unwrap().top() < whole_view.top() - 50.0, "{layout}: the view takes the panels' room");
+            }
+
+            // A tab's click opens its panels over the view, as tall as the whole ribbon.
+            let tab = rect_of("toolbar_tab:SURFACE").unwrap().center();
+            h.step(&json!({"click": [tab.x, tab.y]})).unwrap();
+            h.frames(2);
+            assert_eq!(h.app.ui.tab, "SURFACE");
+            assert!(h.app.ui.ribbon_open, "{layout}: the tab's panels open");
+            let open = rect_of("ribbon:open").unwrap();
+            assert!((open.height() - whole.height()).abs() <= 2.0 * crate::shell::SHELL_GAP + 1.0, "{layout}: {open:?} vs {whole:?}");
+            assert!(rect_of("panel:SURFACE:CREATE").is_some(), "{layout}: the panels are drawn");
+            if layout == "compact" {
+                let top = h.app.viewport.rect.unwrap().top();
+                assert!((top - folded.bottom()).abs() <= 2.0, "{layout}: over the view, not pushing it down: {top} {folded:?}");
+            }
+
+            // The pointer leaving the panels closes them.
+            let away = h.app.viewport.rect.unwrap().center() + egui::vec2(0.0, 150.0);
+            h.step(&json!({"move": [away.x, away.y]})).unwrap();
+            h.frames(2);
+            assert!(!h.app.ui.ribbon_open, "{layout}: leaving closes the panels");
+            assert!(rect_of("ribbon:open").is_none());
+
+            // A command started from them closes them too.
+            h.step(&json!({"click": [tab.x, tab.y]})).unwrap();
+            h.frames(2);
+            assert!(h.app.ui.ribbon_open);
+            h.app.start("view.grid");
+            h.frames(2);
+            assert!(!h.app.ui.ribbon_open, "{layout}: a command closes the panels");
+
+            // The command again keeps the whole ribbon shown.
+            h.app.ui.tab = "SURFACE".into();
+            h.app.start("view.ribbon_tabs_only");
+            h.frames(3);
+            assert!(!h.app.preferences.ribbon_tabs_only);
+            assert_eq!(h.app.ui.tab, "SURFACE", "{layout}: the ribbon keeps its tab");
+            assert!(rect_of("ribbon:folded").is_none());
+            assert_eq!(rect_of("toolbar").unwrap().height(), whole.height(), "{layout}");
+            assert!(h.app.run("view.ribbon_tabs_only", json!({"on": true})).is_ok());
+            assert!(h.app.preferences.ribbon_tabs_only, "{layout}: `on` sets it");
+            assert!(h.app.session.undo.is_empty(), "{layout}: a window setting, not a design change");
+        }
     }
 
     /// A drop-down row's help tooltip names the key the command runs from now, not its default.

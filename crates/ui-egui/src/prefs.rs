@@ -1216,6 +1216,10 @@ preference_settings! {
     /// blinks there, and a running command that sits in a drop-down marks its section label. Off
     /// by default: the ribbon stays as it was.
     ribbon_reveal: bool = false, PAGE_LAYOUT => check_id("prefs.ribbon_reveal");
+    /// Fold the ribbon to its tab row, so the view has the room its panels took (#10112). A tab's
+    /// click shows its panels over the view until a command starts or the pointer leaves them.
+    /// Off by default: the whole ribbon shows. `view.ribbon_tabs_only` switches it.
+    ribbon_tabs_only: bool = false, PAGE_LAYOUT => check_id("prefs.ribbon_tabs_only");
     /// Where a dialog's OK and Cancel sit: under its inputs (the default) or in its title row (#6708).
     dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_LAYOUT;
     /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom

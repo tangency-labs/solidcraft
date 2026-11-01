@@ -247,6 +247,7 @@ pub const SECTIONS: &[Section] = &[
             "view.grid",
             "view.ground_shadow",
             "view.navigation_bar",
+            "view.ribbon_tabs_only",
         ],
     },
     Section { tab: "VIEW", panel: "SELECT", promoted: 0, ids: &[] },

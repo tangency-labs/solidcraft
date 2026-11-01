@@ -1,0 +1,38 @@
+{
+  "en": {
+    "cmd.view_ribbon_tabs_only": "Ribbon Tabs Only",
+    "help.view.ribbon_tabs_only": "Folds the ribbon to its tab row, so the view gets the room its panels took. Click a tab to show its panels over the view; choose this again to keep the whole ribbon shown.",
+    "prefs.ribbon_tabs_only": "Show only the ribbon's tabs",
+    "prefs.ribbon_tabs_only_note": "The ribbon folds to its tab row. Clicking a tab shows its panels over the view until a command starts or the pointer leaves them. Ribbon Tabs Only in the View tab, or its shortcut, switches this."
+  },
+  "ar": {
+    "cmd.view_ribbon_tabs_only": "علامات تبويب الشريط فقط",
+    "help.view.ribbon_tabs_only": "يطوي الشريط إلى صف علامات التبويب، فتحصل منطقة العرض على المساحة التي كانت تشغلها لوحاته. انقر علامة تبويب لإظهار لوحاتها فوق منطقة العرض؛ واختر هذا الأمر مرة أخرى لإبقاء الشريط كاملًا ظاهرًا.",
+    "prefs.ribbon_tabs_only": "إظهار علامات تبويب الشريط فقط",
+    "prefs.ribbon_tabs_only_note": "يُطوى الشريط إلى صف علامات التبويب. يؤدي النقر على علامة تبويب إلى إظهار لوحاتها فوق منطقة العرض حتى يبدأ أمر أو يغادرها المؤشر. يبدّل الأمر «علامات تبويب الشريط فقط» في تبويب العرض، أو اختصاره، هذا الخيار."
+  },
+  "he": {
+    "cmd.view_ribbon_tabs_only": "רק לשוניות הסרט",
+    "help.view.ribbon_tabs_only": "מקפל את הסרט לשורת הלשוניות שלו, כך שחלון התצוגה מקבל את המקום שתפסו הלוחות. לחיצה על לשונית מציגה את הלוחות שלה מעל התצוגה; בחירה חוזרת בפקודה משאירה את הסרט כולו מוצג.",
+    "prefs.ribbon_tabs_only": "הצגת לשוניות הסרט בלבד",
+    "prefs.ribbon_tabs_only_note": "הסרט מתקפל לשורת הלשוניות שלו. לחיצה על לשונית מציגה את הלוחות שלה מעל התצוגה עד שפקודה מתחילה או שהמצביע עוזב אותם. הפקודה ״רק לשוניות הסרט״ בלשונית תצוגה, או קיצור המקשים שלה, מחליפה הגדרה זו."
+  },
+  "ja": {
+    "cmd.view_ribbon_tabs_only": "リボンのタブのみ",
+    "help.view.ribbon_tabs_only": "リボンをタブの行だけに折りたたみ、パネルが使っていた場所をビューに充てます。タブをクリックするとそのパネルがビューの上に表示されます。もう一度選ぶとリボン全体を表示したままにします。",
+    "prefs.ribbon_tabs_only": "リボンのタブだけを表示",
+    "prefs.ribbon_tabs_only_note": "リボンをタブの行だけに折りたたみます。タブをクリックすると、コマンドが始まるかポインターが離れるまで、そのパネルがビューの上に表示されます。表示タブの「リボンのタブのみ」またはそのショートカットで切り替えます。"
+  },
+  "vi": {
+    "cmd.view_ribbon_tabs_only": "Chỉ các thẻ ribbon",
+    "help.view.ribbon_tabs_only": "Thu gọn ribbon chỉ còn hàng thẻ, để khung nhìn có thêm chỗ mà các bảng từng chiếm. Bấm một thẻ để hiện các bảng của nó đè lên khung nhìn; chọn lại lệnh này để luôn hiện toàn bộ ribbon.",
+    "prefs.ribbon_tabs_only": "Chỉ hiện các thẻ của ribbon",
+    "prefs.ribbon_tabs_only_note": "Ribbon thu gọn chỉ còn hàng thẻ. Bấm một thẻ sẽ hiện các bảng của nó đè lên khung nhìn cho đến khi một lệnh bắt đầu hoặc con trỏ rời khỏi chúng. Lệnh Chỉ các thẻ ribbon trong thẻ Xem, hoặc phím tắt của nó, bật tắt tùy chọn này."
+  },
+  "zh": {
+    "cmd.view_ribbon_tabs_only": "仅功能区选项卡",
+    "help.view.ribbon_tabs_only": "将功能区折叠为选项卡行，让视图得到面板原先占用的空间。单击选项卡可在视图上方显示其面板；再次选择此命令则始终显示完整的功能区。",
+    "prefs.ribbon_tabs_only": "仅显示功能区的选项卡",
+    "prefs.ribbon_tabs_only_note": "功能区折叠为选项卡行。单击选项卡会在视图上方显示其面板，直到命令开始或指针离开面板。“视图”选项卡中的“仅功能区选项卡”或其快捷键可切换此项。"
+  }
+}
