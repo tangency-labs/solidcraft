@@ -767,9 +767,7 @@ impl Drawing {
         })?;
         solidcraft_sketch::check_family(&self.font).map_err(|e| DocError::Invalid(format!("the drawing's font: {e}")))?;
         if let Units::Fixed { unit } = &self.units {
-            // A length unit of the expression unit table, written as the table writes it.
-            let length = unit.trim() == unit.as_str() && expr::unit_info(unit).is_some_and(|(kind, _)| kind == expr::Kind::Length);
-            require(length, || "the drawing's unit is not a length unit (such as `mm` or `in`)".into())?;
+            require(is_length_unit(unit), || "the drawing's unit is not a length unit (such as `mm` or `in`)".into())?;
         }
         let sheets: BTreeSet<_> = self.sheets.iter().map(|sheet| sheet.id).collect();
         for record in &self.sketches {
@@ -940,6 +938,12 @@ fn check_name(name: &str, whose: &str) -> Result<()> {
     require(!name.trim().is_empty() && name.len() <= MAX_NAME_BYTES && !name.chars().any(char::is_control), || {
         format!("{whose} name is 1 to {MAX_NAME_BYTES} bytes, not only spaces, without control characters")
     })
+}
+
+/// Whether `unit` is a length unit of the expression unit table, written as the table writes it:
+/// what a drawing may fix its unit to, and what a hole callout's text takes.
+pub(crate) fn is_length_unit(unit: &str) -> bool {
+    unit.trim() == unit && expr::unit_info(unit).is_some_and(|(kind, _)| kind == expr::Kind::Length)
 }
 
 /// A well-formed language tag, as far as a drawing needs (RFC 5646 §2.1): 2 to
