@@ -844,6 +844,14 @@ fn new_faces(m: &Mesh, nf: usize, old: &Mesh) -> Vec<bool> {
         .collect()
 }
 
+#[cfg(test)]
+thread_local! {
+    /// The triangles [`SurfaceIndex::contains`] measured a point against, on this thread: the
+    /// work classifying each face against every triangle made quadratic, counted for the test that
+    /// checks it stays near linear, whatever else the machine is doing (#9901).
+    static TRIANGLES_MEASURED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The triangles of a mesh in a uniform grid, to ask whether a point lies on the surface (within
 /// its tessellation tolerance) by looking only at the triangles near it.
 struct SurfaceIndex {
@@ -920,7 +928,11 @@ impl SurfaceIndex {
     fn contains(&self, p: Vec3) -> bool {
         let (x, y, z) = (self.cell_of(p.x, 0), self.cell_of(p.y, 1), self.cell_of(p.z, 2));
         let Some(cell) = self.cells.get((x * self.res + y) * self.res + z) else { return false };
-        cell.iter().filter_map(|i| self.tris.get(*i as usize)).any(|[a, b, c]| point_triangle_dist(p, *a, *b, *c) < self.tol)
+        cell.iter().filter_map(|i| self.tris.get(*i as usize)).any(|[a, b, c]| {
+            #[cfg(test)]
+            TRIANGLES_MEASURED.with(|n| n.set(n.get() + 1));
+            point_triangle_dist(p, *a, *b, *c) < self.tol
+        })
     }
 }
 
@@ -1355,75 +1367,31 @@ mod tests {
         assert!(SurfaceIndex::new(&Mesh::default()).is_none());
     }
 
-    /// How long the faces of a sheet of `n × n` squares take to classify against an old sheet of
-    /// the same size. The meshes are built before the clock starts and the faces are collected
-    /// before it stops: only the classification, the work that used to freeze the app, is measured.
-    fn classify_sheet(n: usize) -> std::time::Duration {
+    /// How many triangles classifying the faces of a sheet of `n × n` squares, against an old
+    /// sheet of the same size, measured points against ([`TRIANGLES_MEASURED`]): the work that
+    /// used to freeze the app.
+    fn classify_sheet(n: usize) -> usize {
         let (old, same, lifted) = (sheet(n, 0.0), sheet(n, 0.0), sheet(n, 5.0));
         let nf = n * n;
-        let started = std::time::Instant::now();
+        let before = TRIANGLES_MEASURED.with(std::cell::Cell::get);
         let on = new_faces(&same, nf, &old);
         let off = new_faces(&lifted, nf, &old);
-        let took = started.elapsed();
+        let measured = TRIANGLES_MEASURED.with(std::cell::Cell::get) - before;
         assert!(on.iter().all(|new| !new), "faces on the old surface are not new");
         assert!(off.iter().all(|new| *new), "faces off the old surface are new");
-        took
-    }
-
-    /// Whether a job four times the size took at most about twice linear: `pair` times the small job,
-    /// then the big one. Linear is 4x, the quadratic that the bug cost 16x or more, so eight times the
-    /// small time is the limit. The load of the other test binaries can rise between the two runs, so a
-    /// pair that misses is measured again, up to three times. Load only ever slows a run, so each size
-    /// keeps its fastest time and the ratio is taken of those: a retry cannot pass a regression on a
-    /// small run that a spike happened to slow, once an earlier small run was fast.
-    ///
-    /// `slack` is the room the noise of a busy machine gets, on top of the ratio.
-    fn scales_linearly(mut pair: impl FnMut() -> (std::time::Duration, std::time::Duration), slack: std::time::Duration) -> Result<(), String> {
-        let limit = |small: f64| 8.0 * small + slack.as_secs_f64();
-        let (mut small, mut big) = (f64::INFINITY, f64::INFINITY);
-        let mut runs = Vec::new();
-        for _ in 0..3 {
-            let (s, b) = pair();
-            small = small.min(s.as_secs_f64());
-            big = big.min(b.as_secs_f64());
-            runs.push(format!("{s:?} then {b:?}"));
-            if big < limit(small) {
-                return Ok(());
-            }
-        }
-        Err(format!("{}; fastest {small:.3} s and {big:.3} s, limit {:.3} s", runs.join(", "), limit(small)))
-    }
-
-    #[test]
-    fn scales_linearly_keeps_each_sizes_fastest_run() {
-        let pairs = |p: Vec<(u64, u64)>| {
-            let mut p = p.into_iter().map(|(s, b)| (std::time::Duration::from_millis(s), std::time::Duration::from_millis(b)));
-            move || p.next().unwrap_or((std::time::Duration::from_secs(1), std::time::Duration::from_secs(1)))
-        };
-        let slack = std::time::Duration::from_millis(0);
-        // Linear: four times the work, four times the time.
-        assert!(scales_linearly(pairs(vec![(5, 20)]), slack).is_ok());
-        // A big run slowed by load, then a quiet pair.
-        assert!(scales_linearly(pairs(vec![(5, 80), (5, 20)]), slack).is_ok());
-        // A quadratic cost (16x) whose later small runs a spike slowed: the fast first one still counts.
-        let r = scales_linearly(pairs(vec![(5, 80), (15, 80), (15, 80)]), slack);
-        assert!(r.as_ref().is_err_and(|e| e.contains("fastest 0.005 s and 0.080 s, limit 0.040 s")), "{r:?}");
+        measured
     }
 
     /// Thousands of faces (a modeled thread's) are classified at once, not face by face against
     /// every triangle: filleting beside a thread froze the app for minutes.
     ///
-    /// A ratio and not a limit: a test must not depend on wall-clock timing (CONTRIBUTING.md), the
-    /// machine is busy. 900 faces are classified, then 3 600, four times as many: linear is 4x, the
-    /// face-against-triangle cost 16x or more.
+    /// The triangles measured are counted, not the time taken, so a busy machine can't fail it
+    /// (#9901). 900 faces are classified, then 3 600, four times as many: linear is 4x, the
+    /// face-against-triangle cost 16x or more; at most eight.
     #[test]
     fn many_faces_are_classified_quickly() {
-        /// The room the noise of a run on a busy machine gets, on top of the ratio: the 900 faces
-        /// take a fraction of a second, so this is the noise of one run and not a change of scale.
-        const SLACK: std::time::Duration = std::time::Duration::from_millis(20);
-        if let Err(missed) = scales_linearly(|| (classify_sheet(30), classify_sheet(60)), SLACK) {
-            panic!("the faces do not scale linearly: {missed}");
-        }
+        let (small, big) = (classify_sheet(30), classify_sheet(60));
+        assert!(small > 0 && big <= 8 * small, "900 faces measured {small} triangles, 3 600 measured {big}");
     }
 
     /// A fillet preview stands in for the body: the round face is new, the rest is kept, and the
