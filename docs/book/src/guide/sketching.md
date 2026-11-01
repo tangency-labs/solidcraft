@@ -40,6 +40,18 @@ that Extrude can use ([Solid features](features.md)).
 **1** Sketch tools · **2** A constraint (this side is vertical) · **3** A dimension ·
 **4** The sketch's state · **5** Finish Sketch
 
+**Two more tools.** **Offset** (O) draws a copy of curves at a distance: click one side of the
+rectangle and the whole outline comes along (**Chain**), type 4 and press Enter for a wall 4 mm
+inside it. The distance is a dimension like any other.
+
+<video src="../media/sketching/offset.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Offsetting the rectangle's outline 4 mm inward with one click on its bottom side"></video>
+
+**Trim** (T) removes the piece of a curve between the curves that cross it. With a circle drawn
+on the top side, click the piece of the side inside the circle, then the half of the circle
+outside the rectangle: what's left is a notch.
+
+<video src="../media/sketching/trim.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Trimming a notch: removing the piece of the top side inside a circle, then the circle's upper half"></video>
+
 ## Working in a sketch
 
 Opening a sketch turns the view to face it; to keep the view as it is and face the sketch only with **Look At**, turn off Preferences › Sketch › **Turn to face a sketch when it opens**. When the sketch ends, the view stays where it is by default. Preferences › Sketch › **When a sketch ends** changes that: **Return to the previous view** goes back to the view from before the sketch, and **Return unless rotated** goes back only when you panned or zoomed the sketch view but didn't turn it.

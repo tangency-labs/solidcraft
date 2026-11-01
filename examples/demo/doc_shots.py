@@ -516,6 +516,68 @@ def sketching_dimension(d):
     d.wait(2.0)
 
 
+NOTCH = (45, RECT[1], 14)  # a circle centred on the top side, for Trim
+
+
+def offset_outline(d, label=lambda text: None):
+    label("Offset: click the outline, type 4, Enter")
+    d.tool("sketch.offset")
+    d.click(d.at(sketch=[RECT[0] / 2, 0]), dur=0.6, settle=0.8)
+    d.wait(0.4)
+    d.ui("ui.key", {"key": "A", "cmd": True})
+    d.type("4")
+    d.key("Escape")
+    if len(d.execute("sketch.inspect")["curves"]) != 9:
+        raise RuntimeError("the offset did not add four curves")
+
+
+def notch_circle(d):
+    d.tool("sketch.circle.center")
+    d.click(d.at(sketch=[NOTCH[0], NOTCH[1]]), dur=0.2, settle=0.3)
+    d.glide(d.at(sketch=[NOTCH[0] + 7, NOTCH[1] - 4]), 0.3)
+    d.type(str(NOTCH[2]), enter=False)
+    d.click(d.pos, dur=0.1, settle=0.4)
+    d.key("Escape")
+
+
+def offset_and_notch(d):
+    drawn(d)
+    dimension_hole(d)
+    offset_outline(d)
+    notch_circle(d)
+    time.sleep(6)  # the "Dimension applied" notice fades
+
+
+def dimensioned(d):
+    drawn(d)
+    dimension_hole(d)
+    time.sleep(6)
+
+
+@shot("sketching/offset", "clip", setup=dimensioned)
+def sketching_offset(d):
+    """Offset the rectangle's outline 4 mm inward: one click picks the whole chain."""
+    offset_outline(d, d.caption)
+    d.wait(1.5)
+
+
+@shot("sketching/trim", "clip", setup=offset_and_notch)
+def sketching_trim(d):
+    """Trim a notch: click the piece of the top side inside the circle, then the arc above it."""
+    d.caption("Trim: click each piece to remove")
+    d.tool("sketch.trim")
+    r = NOTCH[2] / 2
+    before = len(d.execute("sketch.inspect")["curves"])
+    d.click(d.at(sketch=[NOTCH[0] - r / 2, NOTCH[1]]), dur=0.6, settle=0.8)
+    d.click(d.at(sketch=[NOTCH[0], NOTCH[1] + r]), dur=0.6, settle=0.8)
+    d.key("Escape")
+    if len(d.execute("sketch.inspect")["curves"]) == before:
+        raise RuntimeError("Trim removed nothing")
+    d.caption("")
+    d.glide((SIZE[0] * 0.55, SIZE[1] * 0.85), 0.6)
+    d.wait(1.5)
+
+
 @shot("sketching/parts", "still", setup=drawn)
 def sketching_parts(d):
     """The finished sketch, numbered: 1 the Sketch tab's tools, 2 a constraint, 3 a dimension,
