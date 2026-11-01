@@ -243,24 +243,31 @@ fn convert(ents: &[Ent], k: f64, blocks: &HashMap<String, (Vec2, Vec<Ent>)>, dep
                     let major = c + Vec2::new(mx, my) * k;
                     let a = Vec2::new(mx, my).len() * k;
                     let (t0, t1) = (e.get(41).unwrap_or(0.0), e.get(42).unwrap_or(std::f64::consts::TAU));
-                    if (t1 - t0 - std::f64::consts::TAU).abs() < 1e-9 || (t1 - t0).abs() < 1e-12 {
+                    // The arc runs counter-clockwise from t0 to t1, a turn at most; whole turns
+                    // more or less make no difference.
+                    let sweep = (t1 - t0).rem_euclid(std::f64::consts::TAU);
+                    if sweep < 1e-9 || std::f64::consts::TAU - sweep < 1e-9 {
                         out.push(Geom2::Ellipse { c, major, minor: a * ratio });
                     } else {
-                        // Partial ellipse: a fit spline through samples.
+                        // Partial ellipse (an elliptical arc, as Fusion and SolidCraft's own DXF
+                        // export write one): exact conic pieces of at most a quarter turn each, not
+                        // a spline fitted through samples, which strays from the ellipse between
+                        // them (#8155). A piece from s to e is the rational quadratic with its apex
+                        // where the end tangents meet and the middle weight cos((e - s) / 2), the
+                        // ellipse's image of a circle's arc; its rho is weight / (1 + weight).
                         let u = (major - c) / a.max(1e-12);
                         let v = u.perp() * (a * ratio);
-                        let mut sweep = t1 - t0;
-                        while sweep <= 0.0 {
-                            sweep += std::f64::consts::TAU;
+                        let at = |t: f64| c + u * (a * t.cos()) + v * t.sin();
+                        // (A quarter turn written out is a hair over or under one; it stays one piece.)
+                        let pieces = (sweep / std::f64::consts::FRAC_PI_2 - 1e-9).ceil().clamp(1.0, 4.0) as usize;
+                        let step = sweep / pieces as f64;
+                        let w = (step / 2.0).cos();
+                        for j in 0..pieces {
+                            let (from, to) = (t0 + step * j as f64, t0 + step * (j + 1) as f64);
+                            let mid = (from + to) / 2.0;
+                            let apex = c + (u * (a * mid.cos()) + v * mid.sin()) / w;
+                            out.push(Geom2::Conic { a: at(from), apex, b: at(to), rho: w / (1.0 + w) });
                         }
-                        let n = 16;
-                        let pts = (0..=n)
-                            .map(|j| {
-                                let t = t0 + sweep * j as f64 / n as f64;
-                                c + u * (a * t.cos()) + v * t.sin()
-                            })
-                            .collect();
-                        out.push(Geom2::Spline { pts, control: false, degree: 3 });
                     }
                 }
             }
@@ -481,6 +488,10 @@ mod tests {
             format!("0\nSECTION\n2\nBLOCKS\n{}0\nENDSEC\n0\nEOF\n", "0\nBLOCK\n2\nb\n0\nENDBLK\n".repeat(300)),
             "0\nSECTION\n2\nBLOCKS\n0\nBLOCK\n2\na\n1\nINSERT\n2\na\n0\nENDBLK\n0\nENDSEC\n0\nEOF\n".into(),
             format!("0\nSECTION\n2\nENTITIES\n{}0\nENDSEC\n0\nEOF\n", "0\nLINE\n10\n0\n20\n0\n11\n1\n21\n1\n".repeat(5000)),
+            // An ELLIPSE arc ending far before it starts (once counted up a turn at a time) and
+            // one with no length to its axes.
+            "0\nSECTION\n2\nENTITIES\n0\nELLIPSE\n10\n0\n20\n0\n11\n5\n21\n0\n40\n0.5\n41\n99999999999\n42\n0\n0\nENDSEC\n0\nEOF\n".into(),
+            "0\nSECTION\n2\nENTITIES\n0\nELLIPSE\n10\n0\n20\n0\n11\n0\n21\n0\n40\n0\n41\n1\n42\n2\n0\nENDSEC\n0\nEOF\n".into(),
         ];
         for cut in (0..good.len()).step_by(11) {
             cases.push(good.get(..cut).unwrap_or("").to_string());
@@ -492,6 +503,58 @@ mod tests {
             let r = std::panic::catch_unwind(|| read_dxf(c));
             assert!(r.is_ok(), "panicked on {:?}", c.get(..c.len().min(200)));
         }
+    }
+
+    /// #8155: an ELLIPSE arc (as Fusion writes one) reads as conic pieces of at most a quarter turn,
+    /// end to end from the arc's start to its end, that lie on the ellipse all along, not as a
+    /// spline fitted through samples. A whole turn stays one ellipse, and whole turns more or less
+    /// make no difference.
+    #[test]
+    fn an_elliptical_arc_reads_as_exact_conic_pieces() {
+        use std::f64::consts::TAU;
+        // Centre (5, 2), major radius 10 along 30°, minor radius 4 (ratio 0.4).
+        let (c, u) = (Vec2::new(5.0, 2.0), Vec2::new(30f64.to_radians().cos(), 30f64.to_radians().sin()));
+        let ellipse = |t0: f64, t1: f64| {
+            format!(
+                "0\nSECTION\n2\nENTITIES\n0\nELLIPSE\n10\n5\n20\n2\n11\n{}\n21\n{}\n40\n0.4\n41\n{t0}\n42\n{t1}\n0\nENDSEC\n0\nEOF\n",
+                10.0 * u.x,
+                10.0 * u.y
+            )
+        };
+        let at = |t: f64| c + u * (10.0 * t.cos()) + u.perp() * (4.0 * t.sin());
+        // How far off the ellipse a point is, in its own equation.
+        let off = |p: Vec2| {
+            let q = p - c;
+            ((q.dot(u) / 10.0).powi(2) + (q.dot(u.perp()) / 4.0).powi(2) - 1.0).abs()
+        };
+        // A point of the rational quadratic a sketch conic is, at t in 0..1.
+        let point = |a: Vec2, apex: Vec2, b: Vec2, rho: f64, t: f64| {
+            let w = rho / (1.0 - rho);
+            let (k0, k1, k2) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t) * w, t * t);
+            (a * k0 + apex * k1 + b * k2) / (k0 + k1 + k2)
+        };
+        for (t0, t1, pieces) in [(20f64, 250f64, 3), (0.0, 90.0, 1), (300.0, 40.0, 2), (10.0, 359.0, 4)] {
+            let (t0, t1) = (t0.to_radians(), t1.to_radians());
+            let back = read_dxf(&ellipse(t0, t1)).unwrap();
+            assert_eq!(back.len(), pieces, "{back:?}");
+            let mut worst = 0f64;
+            let mut from = at(t0);
+            for g in &back {
+                let Geom2::Conic { a, apex, b, rho } = g else { panic!("not a conic: {g:?}") };
+                assert!(a.dist(from) < 1e-9 && *rho > 0.0 && *rho < 0.5, "{g:?}");
+                for k in 0..=50 {
+                    worst = worst.max(off(point(*a, *apex, *b, *rho, f64::from(k) / 50.0)));
+                }
+                from = *b;
+            }
+            assert!(from.dist(at(t1)) < 1e-9 && worst < 1e-9, "{worst}: {back:?}");
+        }
+        for (t0, t1) in [(0.0, TAU), (1.0, 1.0), (1.0, 1.0 + 2.0 * TAU)] {
+            let back = read_dxf(&ellipse(t0, t1)).unwrap();
+            assert!(matches!(&back[..], [Geom2::Ellipse { minor, .. }] if (minor - 4.0).abs() < 1e-9), "{t0}..{t1}: {back:?}");
+        }
+        let (once, again) = (read_dxf(&ellipse(1.0, 2.0)).unwrap(), read_dxf(&ellipse(1.0, 2.0 + 3.0 * TAU)).unwrap());
+        assert_eq!(once.len(), again.len());
     }
 
     /// A SPLINE keeps its degree up to the 9 a sketch spline (a G4 blend) has (solidcraft#5269); a

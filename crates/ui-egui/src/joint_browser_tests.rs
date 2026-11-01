@@ -109,6 +109,66 @@ fn the_menu_and_the_v_key_hide_and_show_picked_joints() {
     assert!(h.app.session.joint_visible(hinge) && h.app.session.joint_visible(glue));
 }
 
+/// Each placement has a Joints folder listing the joints that attach it, beside the placement
+/// each joins it to (#9130). Its rows are the root folder's joints: a click picks, the eye
+/// hides, a double-click edits and the menu acts on the same joint.
+#[test]
+fn each_placement_lists_the_joints_that_attach_it() {
+    let mut h = harness();
+    let hinge = id(&h, "Hinge");
+    let occ = |h: &Harness, name: &str| h.app.session.doc.occurrences.iter().find(|o| o.name == name).unwrap().id;
+    let (a, b, c) = (occ(&h, "A:1"), occ(&h, "B:1"), occ(&h, "C:1"));
+    let listed = |h: &Harness, o: u64| -> Vec<(String, String)> {
+        crate::dialogs_assembly::placement_joints(&h.app.session.doc, &[o]).into_iter().map(|j| (j.name, j.other)).collect()
+    };
+    let pair = |n: &str, o: &str| (n.to_string(), o.to_string());
+    assert_eq!(listed(&h, a), [pair("Hinge", "B:1"), pair("Glue", "C:1")]);
+    assert_eq!(listed(&h, b), [pair("Hinge", "A:1")]);
+    assert_eq!(listed(&h, c), [pair("Glue", "A:1")]);
+
+    // The folders start closed: only the root's lists rows.
+    let rows = |label: &str| crate::browser::drawn_rows().into_iter().filter(|r| r.0 == label).map(|r| r.1.center().y).collect::<Vec<_>>();
+    assert_eq!(rows("Joints").len(), 4, "the root's Joints folder and one per placement");
+    assert_eq!(rows("Hinge").len(), 1);
+
+    // Opened, B's folder lists Hinge a second time, below the root's.
+    h.app.tree.expanded.insert(format!("o:{b}/joints"));
+    h.frames(3);
+    let hinges = rows("Hinge");
+    assert_eq!(hinges.len(), 2);
+    assert_eq!(rows("Glue").len(), 1, "Glue doesn't attach B");
+    let at = crate::scenario::handle_at("row:Hinge").unwrap();
+    assert_eq!(at.y, hinges[1], "the row clicked below is B's");
+
+    h.step(&json!({"click": {"handle": "row:Hinge"}, "double": true})).unwrap();
+    h.frames(3);
+    let editing = match h.app.dialog.as_ref().map(|d| &d.kind) {
+        Some(crate::dialogs::Kind::Assembly(crate::dialogs_assembly::Asm::Joint(f))) => f.editing,
+        _ => None,
+    };
+    assert_eq!(editing, Some(hinge), "a double click edits the joint");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(3);
+    assert!(h.app.dialog.is_none());
+
+    h.app.tree.picked_joints.clear();
+    click(&mut h, "row:Hinge");
+    assert_eq!(h.app.tree.picked_joints, [hinge]);
+    click(&mut h, "eye:Hinge");
+    assert!(!h.app.session.joint_visible(hinge), "B's eye hides the joint itself");
+    click(&mut h, "eye:Hinge");
+    assert!(h.app.session.joint_visible(hinge));
+
+    // Its menu is the joint's: Delete removes Hinge, and B, which nothing joins now, has no folder.
+    h.step(&json!({"click": {"handle": "row:Hinge"}, "button": "right"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"widget": "Delete"})).unwrap();
+    h.frames(3);
+    assert!(h.app.session.doc.assembly.joints.iter().all(|j| j.id != hinge));
+    assert!(listed(&h, b).is_empty());
+    assert_eq!(rows("Joints").len(), 3, "the root's, A's and C's");
+}
+
 mod delete {
     //! Joint history and Browser selection must be the target of the Delete key.
     use serde_json::{Value, json};
@@ -268,7 +328,7 @@ mod delete {
         crate::dialogs_assembly::pick_joint(&mut h.app, hinge, false);
         assert!(h.app.dialog.is_some());
         assert_eq!(h.app.tree.picked_joints, [hinge], "the dialog guard must protect an actual joint selection");
-        click(&mut h, "dialog:length");
+        click(&mut h, "dialog:ui.length");
         h.step(&json!({"key": "Delete"})).unwrap();
         assert_eq!(h.app.session.doc.assembly.joints.len(), 2, "Delete belongs to the focused field");
         assert_eq!(h.app.tree.picked_joints, [hinge]);

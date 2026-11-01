@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Appearance — a body wearing the look sphere</title>
+  <path d="M17.33 24.8L38.98 37.3L38.98 62.3L17.33 49.8Z" fill="#328bd3"/>
+  <path d="M60.63 24.8L38.98 37.3L38.98 62.3L60.63 49.8Z" fill="#236ead"/>
+  <path d="M38.98 12.3L60.63 24.8L38.98 37.3L17.33 24.8Z" fill="#b9ddf8"/>
+  <path d="M38.98 12.3L60.63 24.8L60.63 49.8L38.98 62.3L17.33 49.8L17.33 24.8Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M17.33 24.8L38.98 37.3L60.63 24.8" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M38.98 37.3L38.98 62.3" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="18.98" cy="17.3" r="16.88" fill="#ffffff"/>
+  <circle cx="18.98" cy="17.3" r="14" fill="#328bd3"/>
+  <path d="M32.14 12.51A14 14 0 0 1 14.19 30.46A18.31 18.31 0 0 0 32.14 12.51Z" fill="#236ead"/>
+  <circle cx="14.22" cy="12.54" r="3.78" fill="#b9ddf8"/>
+  <circle cx="18.98" cy="17.3" r="14" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

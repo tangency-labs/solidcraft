@@ -4,6 +4,8 @@ use solidcraft_ui_egui::scenario::Harness;
 
 fn setup() -> (Harness, u64) {
     let mut h = Harness::new();
+    // These cover the direct pick workflow; the options dialog is covered in dialogs_sketch_tests.
+    h.app.preferences.project_options_dialog = false;
     let source = h.app.run("sketch.create", json!({"plane":"XY","offset":10})).unwrap()["sketch"].as_u64().unwrap();
     h.app.run("sketch.line", json!({"points":[[10,10],[30,10]],"infer":false})).unwrap();
     h.app.run("sketch.point", json!({"point":[20,20],"id":"p"})).unwrap();

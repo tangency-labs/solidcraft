@@ -26,7 +26,7 @@ pub(super) fn paint_box(ui: &Ui, square: Rect, response: &Response, on: bool, mi
     let fill = if t.borders.bevel.is_some() {
         t.input_fill()
     } else if selected {
-        t.form_primary
+        t.form_primary_fill
     } else if response.hovered() {
         t.hover
     } else {
@@ -58,6 +58,10 @@ pub(crate) fn checkbox(ui: &mut Ui, label: &str, value: &mut bool) -> Response {
 /// Mixed values become checked when activated; the caller owns whether selection is mixed.
 /// Tokens: space_14/3/2/6, radius_sm, control_fill/border, form_primary/ink, hover, on_accent.
 pub(crate) fn checkbox_indeterminate(ui: &mut Ui, label: &str, value: &mut bool, mixed: bool) -> Response {
+    crate::prefs_search::note_unlabelled(ui, &[label]);
+    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[label]) {
+        return crate::prefs_search::hidden_response(ui);
+    }
     let t = Tokens::get();
     let font = egui::FontId::proportional(t.font_label);
     let galley = ui.painter().layout_no_wrap(label.to_owned(), font.clone(), t.form_ink);
@@ -65,6 +69,8 @@ pub(crate) fn checkbox_indeterminate(ui: &mut Ui, label: &str, value: &mut bool,
     let width = (t.space_14 + gap + galley.size().x).max(ui.spacing().interact_size.y).min(super::metrics::dimension(ui.available_width()));
     let height = ui.spacing().interact_size.y.max(t.space_14).max(galley.size().y);
     let (rect, mut response) = ui.allocate_exact_size(vec2(width, height), egui::Sense::click());
+    crate::prefs_search::remember(ui, label, rect);
+    crate::prefs_search::follow(ui, label, rect);
     if response.clicked() {
         *value = mixed || !*value;
         response.mark_changed();

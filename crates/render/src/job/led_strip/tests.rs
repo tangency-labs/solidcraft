@@ -192,6 +192,7 @@ mod consumer {
         let mut camera = Camera { distance: 50.0, ..Default::default() };
         camera.set_view(StandardView::Top);
         ImageRequest {
+            studio_weights: None,
             environment: None,
             textures: None,
             integrator: Integrator::Raytrace,

@@ -173,6 +173,13 @@ pub(crate) fn begin(total: usize) -> Evaluation {
 }
 
 impl Evaluation {
+    /// Whether the watcher asked to stop. A feature cut short then (a STEP import that stopped
+    /// part way) failed only because of it: its result must not be kept for the same inputs, as
+    /// the evaluation cache is shared with the model a preview was copied from (#7167).
+    pub(crate) fn cancelled(&self) -> bool {
+        CURRENT.with(|c| c.borrow().as_ref().is_some_and(|cur| cur.progress.is_cancelled()))
+    }
+
     /// Feature `index` is next. True when the watcher asked to stop: skip it.
     pub(crate) fn step(&self, index: usize) -> bool {
         CURRENT.with(|c| {

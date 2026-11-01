@@ -14,7 +14,7 @@ use solidcraft_geom::{Aabb3, Vec3};
 
 use super::contact_sweep::{ContactGeometry, Member};
 use super::{drive_with_contact, joint_id, keyed, occurrences, path_world, study_index, traced_point, values_at};
-use crate::params::{bad, bool_};
+use crate::params::{bad, bool_, num};
 use crate::{EngineError, Result, Session};
 
 pub const PLOT_DOC: &str = "study: id|name; joints?: [id|name] (default: every joint that moves); occurrence? and point? (a point \
@@ -30,10 +30,12 @@ pub const PLOT_DOC: &str = "study: id|name; joints?: [id|name] (default: every j
 pub const INTERFERENCE_DOC: &str = "study: id|name; occurrences?: [ids or names] (two or more, checked against each other; \
      default every occurrence), with against?: [ids or names] (then each of `occurrences` is checked only against these, such \
      as an arm against the parts it must miss), or contact_sets?: true (the pairs of the design's contact sets); samples? \
-     (2…1000, default the study's steps + 1) → collisions: [{a, b, first_step, last_step, steps: [[from, to]…] (the step ranges where they overlap), \
+     (2…1000, default the study's steps + 1); budget_s?: seconds (above 0, at most 86400; default a fixed work budget): the \
+     time the check may take instead, looked at between samples, for a mechanism such as a gear train that needs longer → collisions: [{a, b, first_step, last_step, steps: [[from, to]…] (the step ranges where they overlap), \
      depth_mm (how far into each other, the most at deepest_step), volume_mm3 (their overlap there; null when it was not \
-     cheap to work out)}], clear, \
-     pairs (checked), samples (taken), truncated (the work budget ran out; checked_to: the last step checked), stopped_at, \
+     cheap to work out)}], clear (every sample checked and none collide; never while truncated), \
+     pairs (checked), samples (taken), truncated (the work budget, or budget_s, ran out; checked_to: the last step checked), budget_s \
+     (when given), stopped_at, \
      stopped_by_loop. The study plays as motion.play plays it but contact sets do not stop it, on a copy (the design is not \
      changed). Parts are tested at the samples only: one that passes wholly through another between two samples is missed";
 
@@ -43,6 +45,8 @@ const MAX_SAMPLES: usize = 1000;
 const MAX_SERIES: usize = 256;
 /// Most collision work over a whole study (see `ContactGeometry::hits`).
 const MAX_WORK: usize = 500_000_000;
+/// Longest time an interference check may be given (`budget_s`): a day, as `inspect.interference`.
+const MAX_BUDGET_S: f64 = 86_400.0;
 /// Most colliding pairs whose overlap volume is worked out, and most body booleans that takes.
 const MAX_VOLUMES: usize = 16;
 const MAX_BOOLEANS: usize = 64;
@@ -359,21 +363,42 @@ pub(super) fn checked_pairs(s: &Session, p: &Value, cmd: &str) -> Result<Contact
 
 pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "motion.interference";
+    let seconds = match p.get("budget_s") {
+        None | Some(Value::Null) => None,
+        Some(_) => match num(p, "budget_s") {
+            Some(v) if v > 0.0 && v <= MAX_BUDGET_S => Some(v),
+            _ => return Err(bad(cmd, format!("`budget_s` must be a number of seconds above 0, at most {MAX_BUDGET_S}"))),
+        },
+    };
+    interference_within(s, p, MAX_WORK, seconds)
+}
+
+/// `motion.interference` with at most `budget` collision work (see `ContactGeometry::hits`), or,
+/// given `seconds`, with that time instead: the work is then not counted against a budget, and
+/// the time is looked at before each sample, so the last one may run past it (#7855).
+fn interference_within(s: &mut Session, p: &Value, budget: usize, seconds: Option<f64>) -> Result<Value> {
+    let cmd = "motion.interference";
+    let deadline = seconds.and_then(|v| std::time::Duration::try_from_secs_f64(v).ok()).and_then(|d| web_time::Instant::now().checked_add(d));
+    let budget = if deadline.is_some() { usize::MAX } else { budget };
     let m = s.doc.assembly.studies.get(study_index(s, p, cmd)?).cloned().ok_or_else(|| bad(cmd, "study"))?;
     let n = samples(p, &m, 2, cmd)?;
     let geometry = checked_pairs(s, p, cmd)?;
     let mut found: BTreeMap<(u64, u64), Collision> = BTreeMap::new();
     let (mut work, mut checked, mut truncated) = (0usize, 0usize, false);
     let stop = play(s, &m, n, false, |t, k| {
-        // Placing the meshes is work too, also where nothing comes near.
-        work = work.saturating_add(geometry.vertex_count());
-        if work > MAX_WORK {
+        if deadline.is_some_and(|d| web_time::Instant::now() >= d) {
             truncated = true;
             return Ok(false);
         }
-        let hits: Vec<(Member, Member, f64)> = match geometry.hits(t, &mut work, MAX_WORK, true) {
+        // Placing the meshes is work too, also where nothing comes near.
+        work = work.saturating_add(geometry.vertex_count());
+        if work > budget {
+            truncated = true;
+            return Ok(false);
+        }
+        let hits: Vec<(Member, Member, f64)> = match geometry.hits(t, &mut work, budget, true) {
             Ok(h) => h,
-            Err(_) if work > MAX_WORK => {
+            Err(_) if work > budget => {
                 truncated = true;
                 return Ok(false);
             }
@@ -401,7 +426,13 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
     })?;
     // Nothing checked is not clear.
     if truncated && checked == 0 {
-        return Err(bad(cmd, "the check ran out of its work budget before its first step: check fewer parts (occurrences, against)"));
+        return Err(bad(
+            cmd,
+            match seconds {
+                Some(_) => "the check ran out of its budget_s before its first step: give it more time or check fewer parts (occurrences, against)",
+                None => "the check ran out of its work budget before its first step: check fewer parts (occurrences, against) or give it a budget_s",
+            },
+        ));
     }
     let mut list: Vec<(&(u64, u64), &Collision)> = found.iter().collect();
     list.sort_by_key(|(_, c)| c.samples.first().copied().unwrap_or(usize::MAX));
@@ -417,10 +448,15 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
                 "depth_mm": c.depth, "deepest_step": step_of(&m, c.deepest, n), "volume_mm3": volume})
         })
         .collect();
-    let mut out = json!({"study": m.name, "steps": m.steps, "clear": collisions.is_empty(), "collisions": collisions,
+    // A check cut short says nothing about the steps it did not reach, so it is not clear (#7855).
+    let clear = collisions.is_empty() && !truncated;
+    let mut out = json!({"study": m.name, "steps": m.steps, "clear": clear, "collisions": collisions,
         "pairs": geometry.pair_count(), "samples": checked, "truncated": truncated});
     if truncated {
         out["checked_to"] = json!(checked.checked_sub(1).map(|k| step_of(&m, k, n)));
+    }
+    if let Some(v) = seconds {
+        out["budget_s"] = json!(v);
     }
     out["stopped_at"] = stop["stopped_at"].clone();
     out["stopped_by_loop"] = stop["stopped_by_loop"].clone();
@@ -430,6 +466,56 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn run(s: &mut Session, id: &str, p: Value) -> Value {
+        s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"))
+    }
+
+    /// Cube B (x 20…30) slides from 10 mm away until it touches A (x 0…10) over the 15 steps of
+    /// study "Push": nothing ever overlaps.
+    fn touching() -> Session {
+        let mut s = Session::default();
+        for (name, x) in [("A", 0), ("B", 20)] {
+            run(&mut s, "component.activate", json!({"component": "root"}));
+            run(&mut s, "component.create", json!({"name": name}));
+            run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+        }
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let a = s.doc.find_component("A").and_then(|c| s.doc.occurrence_of(c)).map(|o| o.id).unwrap_or(0);
+        run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+        run(&mut s, "joint.create", json!({"type": "slider", "a": {"face": [10, 5, 5]}, "b": {"face": [20, 5, 5]}, "name": "Rail"}));
+        run(&mut s, "joint.drive", json!({"joint": "Rail", "value": 10}));
+        run(&mut s, "motion.study", json!({"name": "Push", "steps": 15, "keys": [{"joint": "Rail", "points": [[0, 10], [15, 0]]}]}));
+        s
+    }
+
+    /// #7855: a check its work budget cuts short is not clear, though nothing collided in the
+    /// steps it reached.
+    #[test]
+    fn a_check_cut_short_is_not_clear() {
+        let mut s = touching();
+        let p = json!({"study": "Push"});
+        let full = run(&mut s, "motion.interference", p.clone());
+        assert!(full["clear"] == true && full["truncated"] == false && full["samples"] == 16, "{full}");
+        assert!(full.get("budget_s").is_none(), "{full}");
+        // The least work that checks a first step stops long before the last.
+        let cut = (0..31).find_map(|i| interference_within(&mut s, &p, 1usize << i, None).ok()).unwrap_or_default();
+        assert!(cut["truncated"] == true && cut["samples"].as_u64().is_some_and(|n| (1..16).contains(&n)), "{cut}");
+        assert!(cut["collisions"] == json!([]) && cut["clear"] == false, "{cut}");
+    }
+
+    /// #7855: given `budget_s`, the time is the budget, not the work: the smallest work budget,
+    /// which stops a check before its first step, no longer stops it.
+    #[test]
+    fn a_time_budget_takes_the_place_of_the_work_budget() {
+        let mut s = touching();
+        let p = json!({"study": "Push"});
+        assert!(interference_within(&mut s, &p, 1, None).is_err(), "one unit of work checks no step");
+        let timed = interference_within(&mut s, &p, 1, Some(600.0)).unwrap_or_default();
+        assert!(timed["clear"] == true && timed["truncated"] == false && timed["samples"] == 16, "{timed}");
+        let r = run(&mut s, "motion.interference", json!({"study": "Push", "budget_s": 600}));
+        assert!(r["clear"] == true && r["samples"] == 16 && r["budget_s"] == 600.0, "{r}");
+    }
 
     /// The differences are exact for a quadratic: its velocity and acceleration everywhere,
     /// the ends too.

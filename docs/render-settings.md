@@ -28,6 +28,88 @@ or rename command in this slice.
 Named `get` returns `{name, setup}` or an error for a missing name. Without a name,
 it returns `{setups, defaults}`. Reads do not evaluate the model or change history.
 
+`render.lights.list {setup: "Studio"}` returns a uniform `{lights: [...]}` read
+model without applying or saving anything. An unsaved client draft can instead
+pass `{settings: <complete RenderSetup>}`; `{}` inspects the default setup.
+Neither form selects a UI shot. Unknown parameters, null selectors, both selectors,
+missing setup names and invalid settings refuse without mutation or evaluation.
+CPU directional/point/spot/rectangle sources and GPU sun/rectangle sources expose
+`id`, `kind`, `name`, `name_key`, `number`, `implicit`, `intensity`, `colour` and
+their world-space geometry. Background and environment illumination are separate
+from this source list. Implicit fixed studios and CPU presets are expanded;
+explicit empty lists remain empty. GPU sky/HDR suppresses its implicit studio.
+
+Light IDs use the kind and zero-based source slot (`directional:0`, `point:0`,
+`spot:1`, `area:0`); point and spot share indices in the punctual list. IDs survive
+numerical edits and repeated reads, but changing kind, reordering/removing lights
+or replacing a rig can change them. These are setup-local addresses, not durable
+document identities. Unnamed lights display Key, Fill, Rim, then Light 4, etc.;
+clients translate `name_key`, substituting `number` for later lights. Names are
+not persisted by this command.
+
+Colour is linear RGB. CPU colour/intensity retain their saved values. GPU RGB
+radiance is factored into its largest channel as intensity and normalized colour
+(black uses intensity zero and white colour). Their product recovers radiance;
+no photometric equivalence between methods is implied. All rectangle edges are
+full side vectors in millimetres, including GPU half-edges multiplied by two.
+Directional vectors point towards a source; spot axes point from it. The optional
+directional `angular_radius_rad` identifies a finite GPU sun.
+
+`render.lights.add`, `.set`, `.duplicate` and `.remove` edit a named setup in one
+undo step. They accept `name`, `id` except for add, optional complete `settings`
+as an unsaved starting point, and optional `expected_revision`. Add/set accept
+`set` with `kind`, `intensity_ev`, `temperature_k`, `softness`, `azimuth_deg`,
+`elevation_deg`, `distance_mm`, `size_mm`, `aim_at`, `width_mm`, `height_mm`,
+`position_mm`, `direction`, `edge_u_mm`, `edge_v_mm`, `radiance`, `colour`,
+`reference_distance_mm` and `minimum_distance_mm`. These lower into the existing
+light fields; there is no new saved light metadata. Temperature is an original
+three-band, 6500 K white-balanced Planck tint approximation stored as linear RGB.
+Area softness changes emitter size; GPU Sun softness changes angular radius.
+Hard CPU directional and point/spot sources refuse unsupported emitter softness.
+CPU admits 8 directional, 8 point/spot and 4 areas; GPU admits one Sun and four
+areas. GPU Point/Spot controls and the legacy three-directional GPU studio editor
+remain unavailable with reasons, rather than silently losing light sources.
+
+`render.lights.solo {id?, solo}` and `render.lights.mute {id, mute}` validate and
+echo view requests. Enabling solo requires an id; disabling solo clears it.
+The UI also verifies that the address exists in its current lighting draft.
+`SolveApp::run` applies these replies to per-document `ViewState.lights`, never
+to a design or undo history. Shot changes clear this transient scope. Saving,
+undoing and reopening settings retain the unfiltered numerical setup.
+
+`render_workspace_light::filter_request` filters copied settings at both
+`image_request` and `SolveApp::run`'s Check/Render boundary. Explicit sources keep
+their geometry and have zero intensity/radiance while off. Raster and the legacy
+GPU studio carry three optional `studio_weights` in the captured `ImageRequest`;
+they are finite 0..1 runtime values, never fields of `RenderSetup`. CPU raster
+uses them in `studio::shade_weighted`; the GPU path uses its captured uniform.
+CPU ray tracing and explicit GPU rigs refuse these fixed-studio weights.
+
+The selectable Lights group runs `view.render_select {kind: "lighting"}` and opens
+Lighting: Light source, Shadows and sampling, then Budget. Its + still adds a
+light. CPU presets require review and consent before replacing directional lights;
+Custom materialises their existing values. GPU budgets show one Sun and four
+Areas; CPU eight directional and eight point/spot plus four Areas. Counts are
+read-only sliders. Unsupported controls stay faded with a reason. No rig identity
+is saved, so there is no Rig row.
+
+Browser eyes and solo actions run the same view commands. A selected light mounts
+`render_workspace_light::editor` in the Inspector's Lighting page. Without a
+selected light, that page calls the same group editor. Light has a name/type
+header, Area/Point/Sun segments, intensity, temperature and softness; Position;
+Shape for areas; Falloff for points; and Behaviour (Solo, Mute, Duplicate, Delete).
+Distances displayed as subject-size multiples lower to millimetres. Width U and
+Height V are full side lengths (GPU storage uses half-edges). Independent vector
+edits preserve the other side. Radiance and temperature lower to existing linear
+RGB fields. Sun directions remain world vectors. Every edit is bounded and finite,
+with the renderer validating the complete candidate. Opening an editor
+does not apply or save anything. Edits run the four light commands; Place by
+highlight stays disabled with its viewport-picking reason. The live product view
+receives bounded analytic light samples in `Frame.product_lights`; both PBR and
+non-PBR/transparent batches use them. This is an unshadowed preview, with area
+emitters sampled at their centre and constant ambient illumination. HDR transport
+and full emitter sampling remain the image renderer's responsibility.
+
 | Field | Default | Saved contract |
 |---|---|---|
 | `backend` | `builtin` | Valid R1 backend ID, at most 64 ASCII bytes; unavailable IDs survive reopen |
@@ -138,7 +220,8 @@ The engine resolves the typed job **before** choosing CPU or GPU dispatch. A sav
 progressive sampling cannot replace it. A missing or unsupported host blocks
 Check/Start while leaving the saved intent intact.
 
-For a complete job, the only additional request field is `replace`. Parallel
+For a complete job, additional request fields are `replace` and optional transient
+`studio_weights` for a fixed studio. Parallel
 runtime controls such as `progressive`, `integrator`, `raytrace`, `lens`,
 `environment` or `transparent_background` fail, including explicit null/false
 values. They cannot silently override a setup. For legacy `job` absent/null, the

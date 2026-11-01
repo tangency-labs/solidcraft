@@ -76,7 +76,7 @@ The CLI still supports arbitrary PNG/ICO exports with `solidcraft-cli icon`.
 | macOS | Composer master and paired exports; bundle installs `Assets.car` and `SolidCraft.icns` |
 | Windows executable | `solidcraft-executable.ico`: original DIB/mask representations at 16/24/32/48/64/128/256 px |
 | Windows installer | `solidcraft.ico`: PNG representations at 16/20/24/32/40/48/64/128/256 px; `SOLIDCRAFT_ICONS` override retained |
-| Linux, Nix, deb/rpm, tar, Flatpak, Snap | Copy canonical hicolor images; icon name stays `ai.storyteller.solidcraft` |
+| Linux, Nix, deb/rpm, tar, Flatpak, Snap | Copy canonical hicolor images; icon name stays `io.tangencylabs.solidcraft` |
 | AppImage | Uses the Linux 256 px image and `.DirIcon` alias |
 | FreeBSD | Shares Linux hicolor images and freedesktop metadata |
 | Web | HTML/Trunk and `manifest.webmanifest` stay in `apps/solidcraft-web/`; copies Japanese font/licence to `fonts/`, uses the collected CSS, and copies the Linux 32/256/512 px images to `icons/` for the favicon and installed app |

@@ -1,5 +1,5 @@
 //! Straight edges stay one edge after many cuts (#1049). The owner's design
-//! (`tests/action_matrix/designs/crazy-geom-cuts.solidcraft`, saved by 0.10.0): five extrudes,
+//! (`tests/action_matrix/designs/crazy-geom-cuts.sc`, saved by 0.10.0): five extrudes,
 //! joins and cuts, over four sketches, three of them on faces of the body with the faces'
 //! edges projected. Cuts used to leave the straight edges of the walls they sliced split at
 //! vertices nothing else used, so an edge that is one straight line was drawn (and lit on hover)
@@ -14,7 +14,7 @@ use solidcraft_engine::doc::kernel::{FaceSurface, face_surface};
 use solidcraft_engine::geom::Vec3;
 
 fn design() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/action_matrix/designs/crazy-geom-cuts.solidcraft")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/action_matrix/designs/crazy-geom-cuts.sc")
 }
 
 fn open(path: &Path) -> Session {

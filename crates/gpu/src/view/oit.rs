@@ -8,7 +8,7 @@
 //! sorted, on the CPU or the GPU, however many see-through triangles there are. The targets share
 //! the frame's depth (tested, not written), so the opaque model hides what lies behind it.
 
-use super::{TriSource, depth_compare, instance_layout, shared_layout, tri_layout};
+use super::{TriSource, color_layout, depth_compare, instance_layout, planned_layout, shared_layout, tri_layout};
 
 /// The accumulated colour (premultiplied, weighted) and alpha.
 const ACCUM: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -38,6 +38,8 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
 pub(super) struct Pipelines {
     /// Built triangles ([`tri_layout`]), and instanced meshes smooth and flat.
     pub built: wgpu::RenderPipeline,
+    /// Faded and see-through bodies drawn from their plans' evaluated vertices.
+    pub planned: wgpu::RenderPipeline,
     pub instanced: wgpu::RenderPipeline,
     pub instanced_flat: wgpu::RenderPipeline,
     composite: wgpu::RenderPipeline,
@@ -52,6 +54,13 @@ pub(super) struct Targets {
     reveal: wgpu::TextureView,
     reveal_resolve: Option<wgpu::TextureView>,
     bind: wgpu::BindGroup,
+}
+
+impl Targets {
+    /// The textures only the resolve writes (none at one sample), which a new frame clears first.
+    pub fn resolves(&self) -> impl Iterator<Item = &wgpu::TextureView> {
+        self.accum_resolve.iter().chain(&self.reveal_resolve)
+    }
 }
 
 impl Pipelines {
@@ -90,6 +99,7 @@ impl Pipelines {
             }),
         ];
         let built_buffers = [Some(tri_layout())];
+        let evaluated = [Some(planned_layout()), Some(color_layout())];
         let placed = [Some(shared_layout()), Some(instance_layout())];
         let pipeline = |label: &str, source: TriSource| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -98,7 +108,11 @@ impl Pipelines {
                 vertex: wgpu::VertexState {
                     module,
                     entry_point: Some(source.entry()),
-                    buffers: if source == TriSource::Built { &built_buffers[..] } else { &placed[..] },
+                    buffers: match source {
+                        TriSource::Built => &built_buffers[..],
+                        TriSource::Planned => &evaluated[..],
+                        TriSource::Instanced | TriSource::InstancedFlat => &placed[..],
+                    },
                     compilation_options: Default::default(),
                 },
                 primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
@@ -121,6 +135,7 @@ impl Pipelines {
             })
         };
         let built = pipeline("sc_oit", TriSource::Built);
+        let planned = pipeline("sc_oit_planned", TriSource::Planned);
         let instanced = pipeline("sc_oit_instanced", TriSource::Instanced);
         let instanced_flat = pipeline("sc_oit_instanced_flat", TriSource::InstancedFlat);
         let texture = |binding| wgpu::BindGroupLayoutEntry {
@@ -183,7 +198,7 @@ impl Pipelines {
             log::info!("see-through surfaces are sorted (no order-independent transparency here: {e})");
             return None;
         }
-        Some(Pipelines { built, instanced, instanced_flat, composite, bgl })
+        Some(Pipelines { built, planned, instanced, instanced_flat, composite, bgl })
     }
 
     /// The targets for a frame of `size` pixels at `samples` per pixel.

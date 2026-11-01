@@ -8,7 +8,8 @@
 //!   text (with `near`: the one in that label's row)
 //! - `{"click": AT, "double"?, "shift"?, "ctrl"?, "button"?}`, `{"move": AT, "shift"?, "alt"?, "ctrl"?, "cmd"?}`,
 //!   `{"hold": AT, "frames"?}` (press and hold still: Select Other),
-//!   `{"drag": [AT, AT], "shift"?, "ctrl"?, "steps"?}` where AT is `[x, y]` (screen), `{"world": [x,y,z]}`
+//!   `{"drag": [AT, AT, ...], "shift"?, "ctrl"?, "steps"?}` (through any points between, `steps` moves
+//!   each) where AT is `[x, y]` (screen), `{"world": [x,y,z]}`
 //!   or `{"sketch": [x,y]}` (the sketch being edited)
 //! - `{"queued": "engine.execute", "params": {…}, "min_frames"?: n, "max_frames"?: n}`: a request sent the way an
 //!   agent's arrive (through the app's request queue, answered between frames, so the agent
@@ -286,9 +287,10 @@ impl Harness {
             }
             self.frame();
         }
-        // A file opening, recovering or saving in the background: wait for it (as a person would).
+        // A file opening, recovering or saving in the background, or a window checking what its
+        // material does: wait for it (as a person would).
         let began = std::time::Instant::now();
-        while (!self.app.file_load.idle() || self.app.saving.is_some() || crate::open_meshing::active(&self.app))
+        while (!self.app.file_load.idle() || self.app.saving.is_some() || crate::open_meshing::active(&self.app) || self.app.op_check.busy())
             && began.elapsed() < std::time::Duration::from_secs(120)
         {
             self.frame();
@@ -352,6 +354,34 @@ impl Harness {
             let d = |p: &[f64; 2]| (p[1] - ly).abs() * 4.0 + (p[0] - lx).abs();
             d(a).total_cmp(&d(b))
         })
+    }
+
+    /// Accessibility bounds include scrolled-out page content. Reveal that content with
+    /// wheel input before using its coordinates; window actions and navigation stay put.
+    fn reveal_widget(&mut self, text: &str, near: Option<&str>) -> Result<[f64; 2], String> {
+        let find = |h: &Self| match near {
+            Some(label) => h.widget_near(text, label),
+            None => h.widget(text),
+        };
+        for _ in 0..32 {
+            let point = find(self).ok_or_else(|| format!("no widget `{text}` on screen"))?;
+            let at = egui::pos2(point[0] as f32, point[1] as f32);
+            let page = self.app.prefs_window.open.then(|| rect_of("prefs:page_body")).flatten();
+            let chrome = ["prefs:ok", "prefs:apply", "prefs:cancel", "prefs:search"].iter().any(|key| handle_at(key) == Some(at));
+            let Some(page) = page.filter(|page| !chrome && page.x_range().contains(at.x)) else { return Ok(point) };
+            if page.contains(at) {
+                return Ok(point);
+            }
+            self.call("ui.scroll", json!({"x":page.center().x,"y":page.center().y,"delta":if at.y < page.top() {100} else {-100}}));
+            // Follow the wheel's actual smoothing, rather than clicking its moving content.
+            for _ in 0..120 {
+                if self.ctx.input(|input| !input.is_scrolling()) {
+                    break;
+                }
+                self.frame();
+            }
+        }
+        Err(format!("widget `{text}` could not be revealed in its page"))
     }
 
     /// Centres of the visible widgets whose label or value is `text`, last drawn first.
@@ -420,6 +450,19 @@ impl Harness {
         Err(format!("view_anim {v}: still animating after 240 frames"))
     }
 
+    /// A drag step's first and last points, and the screen points it passes through between them
+    /// (a lasso's loop, #4376).
+    fn drag_points(&mut self, d: &Value) -> Result<([f64; 2], [f64; 2], Vec<Value>), String> {
+        let pts = d.as_array().map(Vec::as_slice).unwrap_or_default();
+        let start = self.at(pts.first().unwrap_or(&Value::Null))?;
+        let end = self.at(pts.get(pts.len().saturating_sub(1).max(1)).unwrap_or(&Value::Null))?;
+        let mut via = Vec::new();
+        for q in pts.iter().skip(1).take(pts.len().saturating_sub(2)) {
+            via.push(json!(self.at(q)?));
+        }
+        Ok((start, end, via))
+    }
+
     /// Run one step.
     pub fn step(&mut self, s: &Value) -> Result<(), String> {
         let flag = |k: &str| s.get(k).and_then(Value::as_bool).unwrap_or(false);
@@ -456,12 +499,10 @@ impl Harness {
                 self.call("ui.click", p)
             } else if let Some(text) = s.get("widget").and_then(Value::as_str) {
                 // A dialog field, choice or button, found by its text.
-                let found = match s.get("near").and_then(Value::as_str) {
-                    Some(near) => self.widget_near(text, near),
-                    None => self.widget(text),
-                };
-                let [x, y] = found.ok_or_else(|| format!("no widget `{text}` on screen"))?;
+                let near = s.get("near").and_then(Value::as_str);
+                let [x, y] = self.reveal_widget(text, near)?;
                 self.call("ui.move", json!({"x": x, "y": y}));
+                let [x, y] = self.reveal_widget(text, near)?;
                 self.call("ui.click", json!({"x": x, "y": y}))
             } else if let Some(at) = s.get("hold") {
                 // Press and hold still (Select Other): `frames` with the button down (default 40,
@@ -477,13 +518,12 @@ impl Harness {
                 let [x, y] = self.at(at)?;
                 self.call("ui.move", json!({"x": x, "y": y,"shift":flag("shift"),"alt":flag("alt"),"ctrl":flag("ctrl"),"cmd":flag("cmd")}))
             } else if let Some(d) = s.get("drag") {
-                let [x0, y0] = self.at(d.get(0).unwrap_or(&Value::Null))?;
-                let [x1, y1] = self.at(d.get(1).unwrap_or(&Value::Null))?;
+                let ([x0, y0], [x1, y1], via) = self.drag_points(d)?;
                 let steps = s.get("steps").cloned().unwrap_or(json!(8));
-                self.call(
-                    "ui.drag",
-                    json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift"), "ctrl": flag("ctrl"), "alt": flag("alt")}),
-                )
+                let mut p =
+                    json!({"x0": x0, "y0": y0, "x1": x1, "y1": y1, "steps": steps, "shift": flag("shift"), "ctrl": flag("ctrl"), "alt": flag("alt")});
+                p["via"] = Value::Array(via);
+                self.call("ui.drag", p)
             } else if let Some(m) = s.get("queued").and_then(Value::as_str) {
                 let (v, frames) = self.call_queued(m, s.get("params").cloned().unwrap_or(json!({})));
                 let min = s.get("min_frames").and_then(Value::as_u64).unwrap_or(0);
@@ -845,7 +885,12 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                         .filter_map(|l| m.area_rect(l.id).map(|r| (l.id, r)))
                         .collect()
                 });
+                // Workspace panels (docks and strips) are laid out against the viewport, not sized like dialogs.
+                let panels: Vec<egui::Rect> = h.app.shell.workspace_panels.values().map(|(rect, _)| *rect).collect();
                 for (id, r) in rects {
+                    if panels.iter().any(|p| (p.min - r.min).abs().max_elem() < 1.0 && (p.max - r.max).abs().max_elem() < 1.0) {
+                        continue;
+                    }
                     if r.width() > max_w || !screen.expand(1.0).contains_rect(r) {
                         return Err(format!("window {id:?} at {r:?} (width {:.0}) does not fit {screen:?} at ≤{max_w}", r.width()));
                     }
@@ -1063,6 +1108,16 @@ pub fn check(h: &mut Harness, e: &Value) -> Result<(), String> {
                 for (pk, pv) in v.as_object().into_iter().flatten() {
                     if got[pk.as_str()] != *pv {
                         return Err(format!("preference {pk}: got {}, want {pv}", got[pk.as_str()]));
+                    }
+                }
+            }
+            "theme_colors" => {
+                // Read the applied tokens after the scenario frame, not the source theme file.
+                let tokens = crate::theme::Tokens::get();
+                let resolved = crate::theme_files::export("Scenario", crate::theme_files::Base::Dark, &tokens);
+                for (key, want) in v.as_object().into_iter().flatten() {
+                    if resolved["colors"][key] != *want {
+                        return Err(format!("theme colour {key}: got {}, want {want}", resolved["colors"][key]));
                     }
                 }
             }

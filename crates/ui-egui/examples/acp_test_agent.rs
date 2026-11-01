@@ -157,7 +157,7 @@ fn main() {
                 };
                 // "save": only the save (the design is there already).
                 if text.contains("save") {
-                    let path = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default().join("Documents/block.solidcraft");
+                    let path = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default().join("Documents/block.sc");
                     let title = format!("save {}", path.display());
                     say(session, "I'll save the design to your Documents folder.");
                     tool(session, "t4", &title, "edit", "in_progress", None);

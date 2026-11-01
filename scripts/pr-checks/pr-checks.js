@@ -132,10 +132,16 @@ async function syncDefaultLabel({ github, context, core }) {
   const { status } = parseDefaults(pull.body);
   const has = hasLabel(pull, DEFAULT_LABEL);
   const args = { ...context.repo, issue_number: pull.number };
-  if (status === 'yes' && !has) {
-    await github.rest.issues.addLabels({ ...args, labels: [DEFAULT_LABEL] });
-  } else if (status !== 'yes' && has) {
-    await github.rest.issues.removeLabel({ ...args, name: DEFAULT_LABEL });
+  try {
+    if (status === 'yes' && !has) {
+      await github.rest.issues.addLabels({ ...args, labels: [DEFAULT_LABEL] });
+    } else if (status !== 'yes' && has) {
+      await github.rest.issues.removeLabel({ ...args, name: DEFAULT_LABEL });
+    }
+  } catch (e) {
+    // A fork PR's token is read-only: say so instead of failing the check.
+    if (e.status !== 403) throw e;
+    core.notice(`Could not ${status === 'yes' ? 'add' : 'remove'} the ${DEFAULT_LABEL} label (read-only token); a maintainer sets it.`);
   }
   core.info(`Defaults line: ${status}`);
 }

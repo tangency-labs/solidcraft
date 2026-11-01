@@ -4,26 +4,77 @@ use crate::viewport::NavMode;
 use serde_json::json;
 use solidcraft_engine::render::StandardView;
 
+fn bar_rect(canvas: Rect) -> Rect {
+    crate::navigation_bar_view::measure(canvas, &Default::default(), crate::navigation::NavCaps::MODEL, |_| 0.0).rect
+}
+
+#[test]
+fn render_compass_avoids_the_navigation_bar_on_either_inspector_side() {
+    let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(400.0, 140.0));
+    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+        for inspector_left in [false, true] {
+            for bar_left in [false, true] {
+                let navigation = Rect::from_min_size(pos2(if bar_left { 8.0 } else { 312.0 }, 100.0), vec2(80.0, 32.0));
+                let make = if inspector_left { Layout::product_left } else { Layout::product };
+                let layout = make(viewport, viewport, &[], 1.0, style, egui::Vec2::ZERO, navigation);
+                assert!(!layout.axis_view.intersect(navigation).is_positive());
+                if inspector_left != bar_left {
+                    assert!(layout.axis_view.is_positive(), "a bar on the opposite side must leave the compass visible");
+                }
+                if layout.axis_view.is_positive() {
+                    let edge = if inspector_left { layout.axis_view.left() - viewport.left() } else { viewport.right() - layout.axis_view.right() };
+                    assert!(edge.abs() < 0.1, "a compact compass must stay on the Inspector's side");
+                }
+            }
+        }
+    }
+}
+
+fn layout(viewport: Rect, docks: &[Rect], scale: f32, style: crate::prefs::NavigatorStyle, visible: bool) -> Layout {
+    let navigation = if visible {
+        crate::navigation_bar_view::measure(viewport, &Default::default(), crate::navigation::NavCaps::MODEL, |_| 0.0).rect
+    } else {
+        Rect::NOTHING
+    };
+    Layout::with_content(viewport, viewport, docks, scale, style, egui::Vec2::ZERO, navigation)
+}
+
+#[test]
+fn render_focus_compass_keeps_clear_of_an_exit_chip_on_either_side() {
+    let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 900.0));
+    let content = Rect::from_min_max(pos2(0.0, 104.0), viewport.max);
+    let navigation = crate::navigation_bar_view::measure(content, &Default::default(), crate::navigation::NavCaps::RENDER, |_| 0.0).rect;
+    for x in [8.0, 1250.0] {
+        let chip = Rect::from_min_size(pos2(x, content.top()), vec2(142.0, 40.0));
+        let layout = Layout::product(viewport, content, &[chip], 1.0, crate::prefs::NavigatorStyle::Axes, egui::Vec2::ZERO, navigation);
+        assert!(layout.axis_view.is_positive() && layout.navigation.is_positive());
+        assert!(!layout.axis_view.intersect(chip).is_positive());
+        assert!(content.contains_rect(layout.axis_view));
+        assert!(content.contains_rect(layout.navigation));
+    }
+}
+
 #[test]
 fn thin_rotated_bounds_fit_using_the_original_full_projection() {
     for (width, height, scale) in [(1400.0, 900.0, 1.0), (700.0, 450.0, 2.0), (700.0, 360.0, 2.0), (900.0, 720.0, 1.0)] {
         let vp = Rect::from_min_max(pos2(250.0, crate::toolbar::APP_BAR_HEIGHT + crate::toolbar::RIBBON_HEIGHT), pos2(width, height - 30.0));
         let dock = Rect::from_min_max(pos2(width - 205.0, vp.top()), vp.max);
-        let layout = Layout::new(vp, &[dock], scale, crate::prefs::NavigatorStyle::Axes, true);
+        let layout = layout(vp, &[dock], scale, crate::prefs::NavigatorStyle::Axes, true);
         assert!(layout.drawable.width() >= 80.0 && layout.drawable.height() >= 30.0, "{layout:?}");
         assert!(layout.axis_view.is_positive() && layout.navigation.is_positive(), "{layout:?}");
         assert!(!layout.drawable.intersect(dock).is_positive());
         assert!(!layout.axis_view.intersect(layout.navigation).is_positive());
-        for perspective in [false, true] {
+        // Parallel, the default angle, and the ends of the Field of view preference (#5364).
+        for fov in [0.0, 0.6, 15f64.to_radians(), 90f64.to_radians()] {
             for view in [StandardView::Top, StandardView::Iso, StandardView::Right] {
                 let mut cam = Camera::default();
                 cam.set_view(view);
                 let bounds = Aabb3 { min: Vec3::new(-30.0, -1.0, -2.0), max: Vec3::new(70.0, 2.0, 3.0) };
-                let fit = fit_bounds(cam, &bounds, &layout, perspective).unwrap();
+                let fit = fit_bounds(cam, &bounds, &layout, fov).unwrap();
                 assert_eq!((cam.yaw, cam.pitch, cam.up), (fit.yaw, fit.pitch, fit.up));
-                assert_eq!(fit_bounds(fit, &bounds, &layout, perspective).unwrap(), fit);
+                assert_eq!(fit_bounds(fit, &bounds, &layout, fov).unwrap(), fit);
                 let mut effective = fit;
-                effective.fov = if perspective { 0.6 } else { 0.0 };
+                effective.fov = fov;
                 let radius = (bounds.diagonal() * 0.5 + bounds.center().dist(fit.target)).max(effective.half_height() * 2.0).max(10.0);
                 for x in [bounds.min.x, bounds.max.x] {
                     for y in [bounds.min.y, bounds.max.y] {
@@ -97,12 +148,12 @@ fn measured_palette_fit_exposes_endpoints_and_layout_changes_preserve_manual_vie
 #[test]
 fn hostile_or_empty_fit_keeps_the_existing_camera_valid() {
     let cam = Camera::default();
-    let layout = Layout::new(Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0)), &[], 1.0, crate::prefs::NavigatorStyle::Axes, true);
-    assert!(fit_bounds(cam, &Aabb3::EMPTY, &layout, false).is_none());
+    let measured = layout(Rect::from_min_size(pos2(0.0, 0.0), vec2(800.0, 600.0)), &[], 1.0, crate::prefs::NavigatorStyle::Axes, true);
+    assert!(fit_bounds(cam, &Aabb3::EMPTY, &measured, 0.0).is_none());
     let bad = Aabb3 { min: Vec3::new(f64::NAN, 0.0, 0.0), max: Vec3::new(1.0, 1.0, 1.0) };
-    assert!(fit_bounds(cam, &bad, &layout, true).is_none());
+    assert!(fit_bounds(cam, &bad, &measured, 0.6).is_none());
     let mut app = crate::SolveApp::new(Default::default(), Default::default());
-    let tiny = Layout::new(Rect::from_min_size(pos2(0.0, 0.0), vec2(5.0, 5.0)), &[], 1.0, crate::prefs::NavigatorStyle::Axes, true);
+    let tiny = layout(Rect::from_min_size(pos2(0.0, 0.0), vec2(5.0, 5.0)), &[], 1.0, crate::prefs::NavigatorStyle::Axes, true);
     app.viewport.layout = Some(tiny);
     let bounds = Aabb3 { min: Vec3::ZERO, max: Vec3::new(20.0, 1.0, 1.0) };
     assert_eq!(app.fitted_bounds(cam, &bounds), cam);
@@ -253,7 +304,7 @@ fn immediate_standard_view_cancels_fit_before_the_measured_frame() {
 fn navigation_anchors_ignore_positioned_resized_and_covering_dialogs() {
     for (width, height, scale) in [(1400.0, 900.0, 1.0), (700.0, 450.0, 2.0), (700.0, 360.0, 2.0)] {
         let vp = Rect::from_min_max(pos2(250.0, crate::toolbar::APP_BAR_HEIGHT + crate::toolbar::RIBBON_HEIGHT), pos2(width, height - 30.0));
-        let baseline = Layout::new(vp, &[], scale, crate::prefs::NavigatorStyle::Axes, true);
+        let baseline = layout(vp, &[], scale, crate::prefs::NavigatorStyle::Axes, true);
         assert!(baseline.axis_view.is_positive() && baseline.navigation.is_positive());
         assert_eq!(baseline.axis_view.right_top(), vp.right_top());
         assert_eq!(baseline.navigation.center().x, vp.center().x);
@@ -265,7 +316,7 @@ fn navigation_anchors_ignore_positioned_resized_and_covering_dialogs() {
             vec![vp],
         ];
         for docks in cases {
-            let measured = Layout::new(vp, &docks, scale, crate::prefs::NavigatorStyle::Axes, true);
+            let measured = layout(vp, &docks, scale, crate::prefs::NavigatorStyle::Axes, true);
             assert_eq!(measured.axis_view, baseline.axis_view, "{docks:?}");
             assert_eq!(measured.navigation, baseline.navigation, "{docks:?}");
             assert!(vp.contains_rect(measured.axis_view));
@@ -294,7 +345,7 @@ fn opening_different_command_dialogs_keeps_published_navigation_positions() {
             assert_eq!(crate::scenario::rect_of("axis_view:outer").unwrap(), axis, "{command}");
             assert_eq!(crate::scenario::rect_of("nav:outer").unwrap(), nav, "{command}");
             assert_eq!(h.app.cam, camera);
-            let pan = pos2(nav.left() + 5.0 + 2.0 * 30.0 + 13.0, nav.top() + 15.0);
+            let pan = crate::scenario::handle_at("nav:slot:pan").unwrap();
             assert!(!h.app.viewport.dialog_rect.unwrap().contains(pan));
             h.app.viewport.nav = None;
             h.call("ui.click", json!({"x":pan.x,"y":pan.y}));
@@ -319,8 +370,9 @@ fn the_corner_pair_takes_the_top_right_and_the_view_navigator_moves_below_it() {
         for (width, height) in [(1400.0, 900.0), (700.0, 450.0), (310.0, 240.0), (160.0, 160.0), (90.0, 50.0)] {
             let vp = Rect::from_min_size(pos2(20.0, 30.0), vec2(width, height));
             let content = Rect::from_min_max(pos2(vp.left() + width * 0.25, vp.top()), vp.max);
-            let plain = Layout::with_content(vp, content, &[], 1.0, style, egui::Vec2::ZERO, true);
-            let held = Layout::with_content(vp, content, &[], 1.0, style, corner, true);
+            let bar = bar_rect(content);
+            let plain = Layout::with_content(vp, content, &[], 1.0, style, egui::Vec2::ZERO, bar);
+            let held = Layout::with_content(vp, content, &[], 1.0, style, corner, bar);
             assert!(!plain.confirm.is_positive(), "{plain:?}");
             assert_eq!(held.navigation, plain.navigation, "the navigation bar never moves");
             assert!(!held.axis_view.intersect(held.navigation).is_positive(), "{held:?}");
@@ -346,7 +398,7 @@ fn the_corner_pair_takes_the_top_right_and_the_view_navigator_moves_below_it() {
         1.0,
         crate::prefs::NavigatorStyle::Axes,
         corner,
-        true,
+        bar_rect(Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 900.0))),
     );
     assert!(roomy.confirm.is_positive() && roomy.axis_view.is_positive(), "{roomy:?}");
 }
@@ -390,8 +442,8 @@ fn tiny_viewports_never_overlap_navigation_and_axis_view() {
     for width in [39.0, 40.0, 90.0, 120.0, 160.0, 310.0] {
         for height in [30.0, 80.0, 130.0, 160.0, 240.0] {
             let vp = Rect::from_min_size(pos2(20.0, 30.0), vec2(width, height));
-            let clear = Layout::new(vp, &[], 1.0, crate::prefs::NavigatorStyle::Axes, true);
-            let covered = Layout::new(vp, &[vp], 1.0, crate::prefs::NavigatorStyle::Axes, true);
+            let clear = layout(vp, &[], 1.0, crate::prefs::NavigatorStyle::Axes, true);
+            let covered = layout(vp, &[vp], 1.0, crate::prefs::NavigatorStyle::Axes, true);
             assert_eq!(clear.axis_view, covered.axis_view);
             assert_eq!(clear.navigation, covered.navigation);
             assert!(!clear.axis_view.intersect(clear.navigation).is_positive());
@@ -431,13 +483,12 @@ fn floating_fit_uses_the_measured_browser_and_history_cards_at_each_size() {
 }
 
 fn click_nav_mode(h: &mut Harness, mode: NavMode) {
-    let nav = crate::scenario::rect_of("nav:outer").unwrap();
-    let column = match mode {
-        NavMode::Orbit => 0,
-        NavMode::Pan => 2,
-        NavMode::Zoom => 3,
+    let slot = match mode {
+        NavMode::Orbit => "orbit",
+        NavMode::Pan => "pan",
+        NavMode::Zoom => "zoom",
     };
-    let p = pos2(nav.left() + 5.0 + column as f32 * 30.0 + 13.0, nav.top() + 15.0);
+    let p = crate::scenario::handle_at(&format!("nav:slot:{slot}")).unwrap();
     h.call("ui.click", json!({"x":p.x,"y":p.y}));
 }
 
@@ -503,4 +554,48 @@ fn escape_ends_navigation_before_sketch_tools_and_does_not_count_as_a_finish_pre
     assert_eq!(h.app.session.active_sketch, sketch);
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(h.app.session.active_sketch.is_none(), "two ordinary quick Escapes still finish the sketch");
+}
+
+/// Home and Fit put the model in the middle of the view. The floating controls take room out of
+/// it, so the model is drawn smaller and kept clear of them, but the room they leave over moves it
+/// towards the middle of the view rather than the middle of the gap between them; a panel moves
+/// the middle itself (#9195).
+#[test]
+fn a_fit_centres_the_model_in_the_view_and_is_moved_only_by_panels() {
+    let viewport = Rect::from_min_size(pos2(0.0, 0.0), vec2(1600.0, 1000.0));
+    let bounds = Aabb3 { min: Vec3::new(-50.0, -50.0, -50.0), max: Vec3::new(50.0, 50.0, 50.0) };
+    let centre = bounds.center();
+    let on_screen = |cam: Camera, p: Vec3| {
+        let radius = (bounds.diagonal() * 0.5 + centre.dist(cam.target)).max(cam.half_height() * 2.0).max(10.0);
+        let (x, y, _) = cam.to_screen(p, f64::from(viewport.width()), f64::from(viewport.height()), radius).unwrap();
+        pos2(viewport.left() + x as f32, viewport.top() + y as f32)
+    };
+    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+        // The compass and the navigation bar, and nothing else.
+        let bare = layout(viewport, &[], 1.0, style, true);
+        let cam = fit_bounds(Camera::default(), &bounds, &bare, 0.0).expect("framed");
+        for x in [bounds.min.x, bounds.max.x] {
+            for y in [bounds.min.y, bounds.max.y] {
+                for z in [bounds.min.z, bounds.max.z] {
+                    let p = on_screen(cam, Vec3::new(x, y, z));
+                    assert!(bare.drawable.contains(p), "{style:?}: the model is clear of the controls: {p:?} {bare:?}");
+                }
+            }
+        }
+        let middle = bare.middle.center();
+        let gap = bare.drawable.center().distance(middle);
+        let off = on_screen(cam, centre).distance(middle);
+        assert!(off + 1.0 < gap, "{style:?}: nearer the middle of the view than the middle of the gap: {off} vs {gap}");
+        // A panel down the left takes that part of the view away, so the middle moves right: the
+        // camera's target moves the other way, against its right vector.
+        let panel = Rect::from_min_size(pos2(0.0, 0.0), vec2(320.0, 1000.0));
+        let docked = layout(viewport, &[panel], 1.0, style, true);
+        let moved = fit_bounds(Camera::default(), &bounds, &docked, 0.0).expect("framed");
+        let right = moved.basis().0;
+        assert!((moved.target - centre).dot(right) < -1.0, "{style:?}: a panel must move the model clear of it: {:?}", moved.target);
+        // It is drawn smaller with the controls shown than with the whole view to itself.
+        let empty = Layout::with_content(viewport, viewport, &[], 1.0, style, egui::Vec2::ZERO, Rect::NOTHING);
+        let roomy = fit_bounds(Camera::default(), &bounds, &empty, 0.0).expect("framed");
+        assert!(roomy.distance <= cam.distance + 1e-9, "{style:?}: controls must not make the model larger");
+    }
 }

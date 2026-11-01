@@ -24,7 +24,7 @@ and a plastic-enclosure subset work; surfaces, drawings, CAM and simulation are 
 the [feature list](dev/features.md) lists every command by area, and the
 [reference tests](dev/oracle.md) check modelling results against analytic and FreeCAD values.
 
-Existing `.solidcraft` designs and `solidcraft-cli` commands keep their names and behavior.
+New designs are saved as `.sc`. Existing `.solidcraft` designs still open, and Save keeps their name; `solidcraft-cli` commands keep their names and behavior.
 
 This book has two halves: the **user guide** for people modelling with SolidCraft, and the
 **developer guide** for people working on it. The [command reference](reference/commands.md) is

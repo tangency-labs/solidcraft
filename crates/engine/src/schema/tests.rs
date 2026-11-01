@@ -27,6 +27,7 @@ fn expressions_accept_what_params_expr_accepts() {
     for v in [json!(5), json!(-2.5), json!("w / 2"), json!("  30 mm  "), json!(999_999_999.0)] {
         let want = crate::params::expr(&json!({ "v": v.clone() }), "v");
         assert_eq!(parse::<LengthExpr>(v.clone()).map(|e| e.0), want, "{v}");
+        assert_eq!(parse::<NumberExpr>(v.clone()).map(|e| e.0), want, "{v}");
         assert!(want.is_some(), "{v}");
     }
     let long = "x".repeat(4097);
@@ -37,6 +38,43 @@ fn expressions_accept_what_params_expr_accepts() {
         assert!(crate::params::expr(&json!({ "v": v.clone() }), "v").is_none(), "{v}");
         assert!(parse::<LengthExpr>(v.clone()).is_none(), "{v}");
         assert!(parse::<AngleExpr>(v.clone()).is_none(), "{v}");
+        assert!(parse::<NumberExpr>(v.clone()).is_none(), "{v}");
+    }
+}
+
+/// `AxisDir` accepts what `features::axis_dir_param` reads (X, Y or Z trimmed of what Rust's
+/// `trim` removes, in any case, or a non-zero vector), and its schema agrees: its string pattern
+/// allows exactly that whitespace (`conforms` doesn't read patterns), and a schema can't refuse
+/// the zero vector. `ScaleFactors` takes exactly three numbers or expressions.
+#[test]
+fn axes_and_scale_factors_match_their_readers() {
+    let root = schemars::schema_for!(AxisDir);
+    let root = root.as_value();
+    for v in [json!("X"), json!(" y "), json!("z"), json!("\u{85}Z\u{3000}"), json!([0, 0, 1]), json!([1, 2, 3]), json!({"x": 0, "y": 1, "z": 0})] {
+        assert!(crate::cmd::axis_dir_form(&v).is_ok(), "{v}");
+        assert!(parse::<AxisDir>(v.clone()).is_some(), "{v}");
+        assert!(conforms(root, root, &v), "{v}");
+    }
+    for v in [json!("W"), json!("XY"), json!(""), json!("x\u{feff}"), json!([1, 2]), json!(null), json!(true), json!([0, 0, 0])] {
+        assert!(crate::cmd::axis_dir_form(&v).is_err(), "{v}");
+        assert!(parse::<AxisDir>(v.clone()).is_none(), "{v}");
+        if !v.is_string() {
+            assert_eq!(conforms(root, root, &v), v == json!([0, 0, 0]), "{v}");
+        }
+    }
+    // The same class as the expression schema's, whose text `the_blank_pattern_matches_trim` pins.
+    let ws = super::types::not_blank_pattern().trim_start_matches("[^").trim_end_matches(']').to_string();
+    let pattern = root.pointer("/anyOf/0/pattern").and_then(Value::as_str);
+    assert_eq!(pattern, Some(format!("^[{ws}]*[XYZxyz][{ws}]*$").as_str()));
+    let root = schemars::schema_for!(ScaleFactors);
+    let root = root.as_value();
+    for v in [json!([1, 2, 3]), json!([1, "k / 2", 2.5])] {
+        assert!(parse::<ScaleFactors>(v.clone()).is_some(), "{v}");
+        assert!(conforms(root, root, &v), "{v}");
+    }
+    for v in [json!([1, 2]), json!([1, 2, 3, 4]), json!([1, true, 2]), json!([1, "", 2]), json!("2"), json!({})] {
+        assert!(parse::<ScaleFactors>(v.clone()).is_none(), "{v}");
+        assert!(!conforms(root, root, &v), "{v}");
     }
 }
 
@@ -126,6 +164,63 @@ fn profiles_match_features_profiles() {
     assert_eq!(issue(json!([])), vec!["`profiles` is empty"]);
     assert_eq!(issue(json!(1.5)), vec!["`profiles` must be \"all\", an index or a list"]);
     assert_eq!(issue(json!(vec![0; 10_001])), vec!["`profiles` must have at most 10000 items"]);
+}
+
+#[test]
+fn unsupported_profile_objects_offer_valid_public_examples() {
+    let contract = TypedContract::<ExtrudeParams>::new();
+    for profiles in [
+        json!({"type": "curves", "loops": [["c1"], ["c2"]]}),
+        json!({"type": "curves", "loops": [["c1"]]}),
+        json!({"type": "index", "index": 0}),
+        json!({"type": "indices", "indices": [0]}),
+        json!({"curves": ["c1"]}),
+        json!({}),
+    ] {
+        let issues = contract.check(&json!({"distance": 5, "profiles": profiles}));
+        assert_eq!(issues.len(), 1, "{profiles}: {issues:?}");
+        let issue = issues.first().unwrap();
+        assert_eq!(issue.path, "profiles");
+        assert!(!issue.message.contains("offset_boundaries"), "{profiles}: {}", issue.message);
+        // The diagnostic is useful to scripts only if its public examples actually parse.
+        let examples: Vec<Value> = issue.message.split('`').skip(1).step_by(2).filter_map(|text| serde_json::from_str(text).ok()).collect();
+        assert_eq!(examples.len(), 5, "{}", issue.message);
+        for example in examples {
+            let issues = contract.check(&json!({"distance": 5, "profiles": example}));
+            assert!(issues.is_empty(), "example {example}: {issues:?}");
+        }
+    }
+    for profiles in [
+        json!({"offset_boundaries": ["a"]}),
+        json!({"type": "offset_boundaries", "associations": ["a"]}),
+        json!({"type": "curves", "offset_boundaries": ["a"]}),
+    ] {
+        assert!(contract.check(&json!({"distance": 5, "profiles": profiles})).is_empty());
+    }
+}
+
+#[test]
+fn unsupported_profile_objects_keep_the_design_in_every_check_mode() {
+    let mut session = Session::default();
+    session.execute("sketch.create", &json!({"plane": "xy", "name": "Ring"})).unwrap();
+    session.execute("sketch.circle.center", &json!({"center": [0, 0], "radius": 10})).unwrap();
+    session.execute("sketch.circle.center", &json!({"center": [0, 0], "radius": 6})).unwrap();
+    session.execute("sketch.finish", &json!({})).unwrap();
+    let design = session.doc.to_json();
+    let undo = session.undo.len();
+    for mode in [ParamCheck::Off, ParamCheck::Warn, ParamCheck::Strict] {
+        session.param_check = mode;
+        for profiles in [json!({"type": "curves", "loops": [["c1"], ["c2"]]}), json!({"type": "index", "index": 0})] {
+            let error = session
+                .execute("solid.extrude", &json!({"sketch": "Ring", "distance": 3, "operation": "new", "profiles": profiles}))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("\"all\"") && error.contains("curves"), "{mode:?}: {error}");
+            assert!(!error.contains("offset_boundaries"), "{mode:?}: {error}");
+            assert_eq!(session.doc.to_json(), design);
+            assert_eq!(session.undo.len(), undo);
+        }
+    }
 }
 
 #[test]
@@ -264,6 +359,110 @@ fn the_level_survives_a_new_design() {
     s.execute("file.new", &json!({})).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(s.param_check, ParamCheck::Strict);
     assert_eq!(s.scratch().param_check, ParamCheck::Strict);
+}
+
+#[test]
+fn issues_are_read_from_the_commands_own_contract() {
+    let issues = super::issues("solid.box", &json!({"length": 1, "width": 1, "height": 1, "operaton": "cut"}));
+    assert_eq!(messages(&issues), ["unknown key `operaton`; did you mean `operation`?"]);
+    assert_eq!(issues, box_contract().check(&json!({"length": 1, "width": 1, "height": 1, "operaton": "cut"})));
+    // No contract, or no such command: nothing to say.
+    assert!(super::issues("solid.fillet", &json!({"nonsense": 1})).is_empty());
+    assert!(super::issues("no.such", &json!({"nonsense": 1})).is_empty());
+}
+
+#[test]
+fn a_level_is_read_back_from_its_name() {
+    for level in ParamCheck::ALL {
+        assert_eq!(ParamCheck::parse(level.name()), Some(level));
+    }
+}
+
+#[test]
+fn ui_prefs_theme_options_input_schema_covers_updates_and_resets() {
+    use super::ui_prefs::PrefsParams;
+    let schema = input_schema_for::<PrefsParams>();
+    let schema = schema.as_value();
+    assert!(schema["properties"]["theme_options"].is_object());
+    for value in [
+        json!({}),
+        json!({"theme_options":{}}),
+        json!({"theme_options":{"a":{}}}),
+        json!({"theme_options":{"a":{"enabled":true,"amount":3.5,"style":"cool","reset":null}},"theme":"a"}),
+    ] {
+        assert!(serde_json::from_value::<PrefsParams>(value.clone()).is_ok(), "{value}");
+        assert!(conforms(schema, schema, &value), "{value}");
+    }
+    for value in [
+        json!({"theme_options":null}),
+        json!({"theme_options":[]}),
+        json!({"theme_options":{"a":true}}),
+        json!({"theme_options":{"a":{"enabled":{}}}}),
+        json!({"theme_options":{"a":{"amount":[]}}}),
+    ] {
+        assert!(serde_json::from_value::<PrefsParams>(value.clone()).is_err(), "{value}");
+    }
+}
+
+#[test]
+fn ui_prefs_theme_options_output_schema_matches_serialized_reply() {
+    use super::ui_prefs::*;
+    let options = ThemeOptionsReply {
+        theme_option_defs: vec![
+            ThemeOptionDef {
+                id: "enabled".into(),
+                kind: ThemeOptionKind::Bool { default: false },
+                label: "Enabled".into(),
+                help: String::new(),
+                parent: None,
+                advanced: false,
+                section: None,
+                standard: false,
+                available: true,
+                reason: None,
+            },
+            ThemeOptionDef {
+                id: "blur".into(),
+                kind: ThemeOptionKind::Range { default: 0.0, min: 0.0, max: 100.0, step: 1.0, unit: Some("px".into()) },
+                label: "blur".into(),
+                help: String::new(),
+                parent: None,
+                advanced: false,
+                section: None,
+                standard: true,
+                available: false,
+                reason: Some("not implemented".into()),
+            },
+            ThemeOptionDef {
+                id: "style".into(),
+                kind: ThemeOptionKind::Choice { default: "warm".into(), values: vec![ThemeChoice { id: "warm".into(), label: "Warm".into() }] },
+                label: "Style".into(),
+                help: String::new(),
+                parent: Some("enabled".into()),
+                advanced: true,
+                section: Some("Details".into()),
+                standard: false,
+                available: true,
+                reason: None,
+            },
+        ],
+        theme_option_values: [
+            ("enabled".into(), ThemeOptionValue::Bool(true)),
+            ("blur".into(), ThemeOptionValue::Num(0.0)),
+            ("style".into(), ThemeOptionValue::Choice("warm".into())),
+        ]
+        .into(),
+        theme_option_notices: vec![ThemeOptionNotice { id: "removed".into(), kind: ThemeOptionNoticeKind::UnknownOption }],
+    };
+    let reply = PrefsReply { options, settings: [("theme".into(), json!("a")), ("theme_options".into(), json!({"a":{"enabled":true}}))].into() };
+    let value = serde_json::to_value(&reply).unwrap();
+    let schema = output_schema_for::<PrefsReply>();
+    let schema = schema.as_value();
+    for field in ["theme_option_defs", "theme_option_values", "theme_option_notices"] {
+        assert!(schema["properties"][field].is_object(), "{schema}");
+    }
+    assert!(conforms(schema, schema, &value), "{schema}\n{value}");
+    assert_eq!(serde_json::to_value(serde_json::from_value::<PrefsReply>(value.clone()).unwrap()).unwrap(), value);
 }
 
 /// Whether `v` conforms to `node` of the schema `root`, for the keywords these schemas use
@@ -461,10 +660,19 @@ pub(super) fn assert_keys(schema: Schema, fields: &[&str]) {
     assert_eq!(v.get("$schema").and_then(Value::as_str), Some("https://json-schema.org/draft/2020-12/schema"));
 }
 
-/// A call that already fails gets the same error in strict as with the check off, apart from
-/// the missing-key, missing-instead-of-wrong-type, non-object, profile-index, 10,000-item and
-/// over-4-KB messages the report lists, and a list of picks where one finds nothing in the
-/// design and a later one is malformed (the handler fails on the first, strict on the second).
+/// A call with one problem that already fails gets the same error in strict as with the check
+/// off, apart from messages that differ on purpose. Chiefly: a missing key; a value the handler
+/// reads as missing where its message for a missing key says something else (a wrong type, a
+/// list none of whose items is text, blank text, a number 1e9 or more in size or text over 4 KB
+/// for an optional expression, an `extent` other than through_all); a non-object, a profile
+/// index, a list over 10,000 items, a message quoting nearly 4 KB of the caller's text or more
+/// (strict caps it); and a scale `factors` item that is blank, 1e9 or more in size, over 4 KB,
+/// or not a number or an expression (see `ScaleFactors`). A call with more than one problem can
+/// get another one named: strict and the handler look at the keys in different orders
+/// (strict's comes from `TypedContract::check` and serde), and the handler may stop first at
+/// one the contract can't see (against the design: a pick that finds nothing, a missing sketch,
+/// an expression that doesn't evaluate; one of two keys, such as `radius` or `diameter`; an
+/// empty list).
 /// Each module's `strict_keeps_todays_errors` calls this with its commands' cases; each runs
 /// after `sketch_rectangle`.
 pub(super) fn assert_strict_keeps_todays_errors(cases: &[(&str, Value)]) {
@@ -747,4 +955,178 @@ fn picks_are_still_looked_up_one_at_a_time() {
     assert_eq!(error(&mut s, "solid.extrude", json!({"distance": 5, "sketch": "Nope"})), "invalid parameters for `solid.extrude`: no sketch `Nope`");
     let r = s.execute("solid.fillet", &fillet(json!([{"body": "Body1", "index": 0}]))).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(r["changed_bodies"], json!(["Body1"]), "{r}");
+}
+
+/// A reference is accepted as `construct::geo` reads it before it looks anything up, and its
+/// schema says the same, the first form that fits deciding, apart from what a schema can't say
+/// (below).
+#[test]
+fn references_match_the_reference_reader() {
+    let schema = input_schema_for::<GeoRefParam>();
+    let schema = schema.as_value();
+    for (v, accepted) in [
+        (json!({"face": [1, 2, 3]}), true),
+        (json!({"edge": {"x": 1, "y": 2, "z": 3}}), true),
+        (json!({"vertex": [1, 2, 3], "body": "Body1"}), true),
+        (json!({"face": "F1", "edge": [1, 2, 3]}), true),
+        (json!({"face": [1e9, 0, 0]}), false),
+        (json!({"type": "point", "p": [1, 2, 3]}), true),
+        (json!({"type": "origin"}), true),
+        (json!({"type": "bogus"}), false),
+        (json!({"type": null, "face": [1, 2, 3]}), false),
+        (json!({"sketch": 3, "point": "p1"}), true),
+        (json!({"sketch": "Guide", "curve": "l1"}), true),
+        (json!({"sketch": 2.5, "point": [1, 2], "curve": "l1"}), true),
+        (json!({"sketch": true, "point": "p1"}), false),
+        (json!({"sketch": 3}), false),
+        (json!({"sketch": null, "point": [1, 2, 3]}), false),
+        (json!({"point": [1, 2, 3]}), true),
+        (json!({"point": "p1"}), false),
+        (json!({"plane": "XY"}), true),
+        (json!({"plane": 4}), true),
+        (json!({"plane": -4}), false),
+        (json!({"plane": {"normal": [0, 0, 1]}}), true),
+        (json!({"plane": {"origin": ["w", 0, 0], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}}), true),
+        (json!({"plane": {"x_dir": [1, 0, 0]}}), false),
+        (json!({"plane": {"origin": [0, 0], "normal": [0, 0, 1]}}), false),
+        (json!({"plane": 2.5, "axis": "X"}), false),
+        (json!({"point": [1, 2, 3], "plane": 2.5}), true),
+        (json!({"axis": "X"}), true),
+        (json!({"axis": 1, "construct_point": "P"}), true),
+        (json!({"construct_point": "P"}), true),
+        (json!({"construct_point": 1}), false),
+        (json!("Shelf"), true),
+        (json!(""), true),
+        (json!(5), false),
+        (json!(null), false),
+        (json!([1, 2, 3]), false),
+        (json!({}), false),
+    ] {
+        let form = match crate::cmd::geo_form(&v) {
+            Ok(crate::cmd::GeoForm::Sketch { sketch, part }) => crate::cmd::sketch_key(Some(sketch)).is_some() && part.is_some(),
+            Ok(crate::cmd::GeoForm::Plane(plane)) => parse::<PlaneParam>(plane.clone()).is_some(),
+            form => form.is_ok(),
+        };
+        assert_eq!(form, accepted, "reader {v}");
+        assert_eq!(parse::<GeoRefParam>(v.clone()).is_some(), accepted, "{v}");
+        assert_eq!(conforms(schema, schema, &v), accepted, "schema {v}");
+    }
+    // Where the schema can't follow the reader: a saved reference is read whole by serde, and an
+    // explicit plane's directions must make a plane.
+    for v in [json!({"type": "face", "at": "x"}), json!({"plane": {"normal": [0, 0, 0]}})] {
+        assert!(parse::<GeoRefParam>(v.clone()).is_none() && conforms(schema, schema, &v), "{v}");
+    }
+}
+
+/// A plane is accepted as `features::plane_param` reads it before it looks anything up, and
+/// so is a plane or face `base` (a face as `sketch::face::capture` reads it); their schemas say
+/// the same, apart from directions that don't make a plane.
+#[test]
+fn planes_match_the_plane_readers() {
+    let plane = input_schema_for::<PlaneParam>();
+    let plane = plane.as_value();
+    let base = input_schema_for::<PlaneOrFace>();
+    let base = base.as_value();
+    let face = |extra: Value| {
+        let mut v = json!({"face": [1, 2, 3]});
+        if let (Some(v), Some(extra)) = (v.as_object_mut(), extra.as_object()) {
+            v.extend(extra.clone());
+        }
+        v
+    };
+    for (v, as_plane, as_base) in [
+        (json!("XY"), true, true),
+        (json!("anything"), true, true),
+        (json!(7), true, true),
+        (json!(u64::MAX), true, true),
+        (json!(-7), false, false),
+        (json!(7.5), false, false),
+        (json!(true), false, false),
+        (json!(null), false, false),
+        (json!([0, 0, 1]), false, false),
+        (json!({}), false, false),
+        (json!({"origin": [0, 0, "h"], "normal": [0, 0, 1]}), true, true),
+        (json!({"origin": {"x": 0, "y": 0, "z": 1}, "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}), true, true),
+        (json!({"x_dir": [1, 0, 0], "y_dir": "y", "normal": [0, 0, 1]}), true, true),
+        (json!({"x_dir": [1, 0, 0]}), false, false),
+        (json!({"origin": {"x": 0, "y": 0}, "normal": [0, 0, 1]}), false, false),
+        (json!({"origin": null, "normal": [0, 0, 1]}), false, false),
+        (face(json!({})), false, true),
+        (face(json!({"normal": [0, 0, 1]})), true, true),
+        (face(json!({"body": "Body1", "index": 0, "path": [1, 2], "fixed": true})), false, true),
+        (face(json!({"body": "Body1"})), false, false),
+        (face(json!({"index": 0})), false, false),
+        (face(json!({"body": "", "index": 0})), false, false),
+        (face(json!({"body": "Body1", "index": -1})), false, false),
+        (face(json!({"body": "Body1", "index": 1.0})), false, false),
+        (face(json!({"path": [0]})), false, false),
+        (face(json!({"path": vec![1; 64]})), false, true),
+        (face(json!({"path": vec![1; 65]})), false, false),
+        (face(json!({"fixed": "yes"})), false, false),
+        (json!({"face": "x", "normal": [0, 0, 1]}), true, false),
+        (json!({"face": null}), false, false),
+    ] {
+        assert_eq!(parse::<PlaneParam>(v.clone()).is_some(), as_plane, "{v}");
+        assert_eq!(conforms(plane, plane, &v), as_plane, "plane schema {v}");
+        let reader = match v.get("face") {
+            Some(_) => crate::cmd::face_pick_form(&v).is_ok(),
+            None => as_plane,
+        };
+        assert_eq!(reader, as_base, "reader {v}");
+        assert_eq!(parse::<PlaneOrFace>(v.clone()).is_some(), as_base, "{v}");
+        assert_eq!(conforms(base, base, &v), as_base, "base schema {v}");
+    }
+    for v in [json!({"normal": [0, 0, 0]}), json!({"x_dir": [1, 0, 0], "y_dir": [2, 0, 0], "normal": [0, 0, 1]})] {
+        assert!(parse::<PlaneParam>(v.clone()).is_none() && conforms(plane, plane, &v), "{v}");
+    }
+    // An id, an index or a path id written with a fraction (`7.0`) is refused by the readers but
+    // is an integer to JSON Schema (`conforms` reads integers as serde does, so it agrees with
+    // the readers above; a standard validator would not).
+    assert!(parse::<PlaneParam>(json!(7.0)).is_none() && parse::<PlaneOrFace>(face(json!({"path": [1.0]}))).is_none());
+}
+
+/// A plane at an angle's `axis` is accepted as `features::axis_line` reads it before it looks
+/// anything up, and its schema says the same, apart from what a schema can't say (below).
+#[test]
+fn axis_lines_match_the_axis_reader() {
+    let schema = input_schema_for::<AxisLine>();
+    let schema = schema.as_value();
+    for (v, accepted) in [
+        (json!("X"), true),
+        (json!("Bore"), true),
+        (json!({"dir": [0, 0, 1]}), true),
+        (json!({"origin": [1, 2, 3], "dir": {"x": 0, "y": 1, "z": 0}}), true),
+        (json!({"origin": ["1 mm", 0, 0], "dir": [0, 0, 1]}), false),
+        (json!({"dir": [0, 0, 1], "type": "world", "axis": "X"}), true),
+        (json!({"edge": [1, 2, 3]}), true),
+        (json!({"face": [1, 2, 3], "dir": [0, 0, 1]}), true),
+        (json!({"face": "x", "dir": [0, 0, 1]}), false),
+        (json!({"type": "edge", "at": [1, 2, 3]}), true),
+        (json!({"type": "vertex", "at": [1, 2, 3]}), false),
+        (json!({"face": "x", "vertex": [1, 2, 3]}), false),
+        (json!({"edge": "x", "sketch": 1, "curve": "l1"}), false),
+        (json!({}), false),
+        (json!(5), false),
+        (json!(null), false),
+        (json!([0, 0, 1]), false),
+    ] {
+        assert_eq!(parse::<AxisLine>(v.clone()).is_some(), accepted, "{v}");
+        assert_eq!(conforms(schema, schema, &v), accepted, "schema {v}");
+    }
+    // Where the schema can't follow the reader: a saved edge is read whole by serde, and `dir`
+    // must not be zero.
+    for v in [json!({"type": "edge", "at": "x"}), json!({"dir": [0, 0, 0]})] {
+        assert!(parse::<AxisLine>(v.clone()).is_none() && conforms(schema, schema, &v), "{v}");
+    }
+}
+
+/// A construction plane's name is refused when `features::check_plane_name` refuses it. (The
+/// schema can't say which names: see `PlaneName`.)
+#[test]
+fn plane_names_match_check_plane_name() {
+    for name in ["Shelf", "XY", " top ", "Front\u{a0}", "RIGHT", "XYZ", "", "前"] {
+        let refused = crate::cmd::plane_name_problem(name);
+        assert_eq!(parse::<PlaneName>(json!(name)).is_none(), refused.is_some(), "{name:?}");
+    }
+    assert!(parse::<PlaneName>(json!(5)).is_none());
 }

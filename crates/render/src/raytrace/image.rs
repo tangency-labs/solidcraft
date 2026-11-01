@@ -13,7 +13,7 @@ use crate::{
     film::primary::PrimaryFilm,
     surface::{OpaqueSurface, srgb8_to_linear},
 };
-use solidcraft_geom::Vec3;
+use solidcraft_geom::{Vec3, srgb::encode8};
 
 #[cfg(test)]
 #[path = "environment_image_tests.rs"]
@@ -758,7 +758,7 @@ impl ImageTask {
         self.pending.clear();
         if self.sample == self.sample_count() {
             let display = map_to_display(self.pixel_radiance / self.sample as f64, self.options.exposure_ev).map_err(error)?;
-            self.pixels.extend_from_slice(&[encode(display.x), encode(display.y), encode(display.z), 255]);
+            self.pixels.extend_from_slice(&[encode8(display.x), encode8(display.y), encode8(display.z), 255]);
             self.pixel += 1;
             self.sample = 0;
             self.pixel_radiance = Vec3::ZERO;
@@ -1641,7 +1641,7 @@ fn composite_spatial(premultiplied: Vec3, covered: u16, attempts: u16, backgroun
         let bg = Vec3::new(srgb8_to_linear(background[0]), srgb8_to_linear(background[1]), srgb8_to_linear(background[2]));
         geometry * coverage + bg * (1.0 - coverage)
     };
-    Ok([encode(display.x), encode(display.y), encode(display.z), 255])
+    Ok([encode8(display.x), encode8(display.y), encode8(display.z), 255])
 }
 
 /// One sample preparation, one traversal operation OR one visible-sum operation.
@@ -1734,11 +1734,6 @@ fn add_punctual_radiance(pending: &mut PendingPixel, contribution: Vec3, diagnos
 fn multiply(a: Vec3, b: Vec3) -> Vec3 {
     Vec3::new(a.x * b.x, a.y * b.y, a.z * b.z)
 }
-fn encode(c: f64) -> u8 {
-    let s = if c <= 0.0031308 { 12.92 * c } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
-    (s.clamp(0.0, 1.0) * 255.0).round() as u8
-}
-
 #[cfg(test)]
 fn shadow_ray(ray: Ray, hit: super::Hit, light: Vec3, vertices: [Vec3; 3]) -> super::Result<Ray> {
     let mut n = hit.geometry.geometric_normal;

@@ -848,7 +848,10 @@ fn parsed_frame_violations(ast: &syn::File) -> Vec<String> {
         fn visit_expr_path(&mut self, expr: &'ast syn::ExprPath) {
             let names: Vec<_> = expr.path.segments.iter().map(|s| s.ident.to_string()).collect();
             if !names.iter().any(|s| s == "ui_kit")
-                && names.iter().any(|s| matches!(s.as_str(), "Frame" | "Window" | "Modal" | "shell_card" | "dock_frame") || self.aliases.contains(s))
+                && names.iter().enumerate().any(|(index, s)| {
+                    matches!(s.as_str(), "shell_card" | "dock_frame")
+                        || (index + 1 < names.len() && (matches!(s.as_str(), "Frame" | "Window" | "Modal") || self.aliases.contains(s)))
+                })
             {
                 self.found.push(names.join("::"));
             }
@@ -901,6 +904,7 @@ fn window_guard_rejects_frames_aliases_and_native_windows_but_accepts_kit_compos
         r#"
         use egui::{Frame as Card, Window as Popup, Modal as Alert};
         fn raw(ui: &mut Ui) {
+            let _stage = super::Stage::Frame;
             Card::NONE.show(ui, |_| {});
             egui::Frame::group(ui.style());
             Popup::new("Title"); Alert::new(id);

@@ -27,9 +27,37 @@ pub struct Editor {
     pub(crate) draft: Option<Draft>,
     error: Option<String>,
     note: Option<String>,
+    chosen_material: Option<String>,
+    observed_index: Option<usize>,
+    mixed_materials: bool,
 }
 
 impl Editor {
+    /// Follow the targets until the user deliberately chooses a material. Keep a
+    /// choice by name: inserting, renaming or deleting a library row must not
+    /// silently turn it into another material at the same ordinal.
+    pub(crate) fn sync_selection(&mut self, doc: &Document, bodies: &[String], index: &mut usize) {
+        if self.editing() {
+            return;
+        }
+        let names = doc.material_names();
+        if self.observed_index.is_some_and(|previous| previous != *index) {
+            self.chosen_material = names.get(*index).cloned();
+        }
+        let materials: Vec<_> = bodies
+            .iter()
+            .map(|body| {
+                let assigned = doc.materials.get(body).map(String::as_str).unwrap_or(solidcraft_engine::doc::DEFAULT_MATERIAL);
+                doc.material_name(assigned).filter(|name| doc.material_density(name).is_some())
+            })
+            .collect();
+        self.mixed_materials = materials.first().is_some_and(|first| materials.iter().any(|material| material != first));
+        let common = materials.first().and_then(Option::as_ref).filter(|first| materials.iter().all(|material| material.as_ref() == Some(*first)));
+        let selected = self.chosen_material.as_ref().or(common);
+        *index = selected.and_then(|name| names.iter().position(|candidate| candidate == name)).unwrap_or(usize::MAX);
+        self.observed_index = Some(*index);
+    }
+
     pub fn editing(&self) -> bool {
         self.draft.is_some()
     }
@@ -47,6 +75,8 @@ impl Editor {
             app.run(command, params)?;
         }
         *index = app.session.doc.material_names().iter().position(|n| n == &name).unwrap_or(*index);
+        self.chosen_material = Some(name);
+        self.observed_index = Some(*index);
         self.draft = None;
         self.error = None;
         self.note = Some(tr("material.editor.saved").to_string());
@@ -406,8 +436,22 @@ fn card_rows(ui: &mut egui::Ui, card: &mut CardDraft) {
 pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, index: &mut usize, editor: &mut Editor) {
     let names = app.session.doc.material_names();
     if editor.draft.is_none() {
-        let refs: Vec<_> = names.iter().map(String::as_str).collect();
-        ui_kit::choice_row(ui, "Material", "mat", index, &refs);
+        let placeholder = if editor.mixed_materials { "material.selection.mixed" } else { "material.selection.choose" };
+        let current = names.get(*index).map(String::as_str).unwrap_or_else(|| tr(placeholder));
+        ui_kit::row(ui, "Material", |ui| {
+            ui_kit::dropdown_menu(ui, "mat", current, |ui| {
+                for (i, name) in names.iter().enumerate() {
+                    let option = ui_kit::list_picker(ui, &format!("physical_material_{i}"), name, *index == i);
+                    crate::scenario::publish_handle(&format!("dialog:Material:{name}"), option.rect.center());
+                    if option.clicked() {
+                        *index = i;
+                        editor.chosen_material = Some(name.clone());
+                        editor.observed_index = Some(i);
+                        ui.close();
+                    }
+                }
+            });
+        });
         let selected = names.get(*index).map(String::as_str);
         ui.horizontal_wrapped(|ui| {
             let new = ui_kit::button(ui, tr("New"), ui_kit::Button::Normal);

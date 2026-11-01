@@ -172,3 +172,58 @@ fn a_line_tangent_to_a_linked_circle_keeps_its_side_when_the_circle_moves_far() 
     let mut sk = stored.clone();
     assert!(solve_after_link_move(&mut sk, &stored, &stored.driving_values(), Analysis::Full).is_none());
 }
+
+/// A point held on a linked rail 3 mm from another point on it (a distance between the two):
+/// the same distance back past the other point solves every constraint too, and only the side
+/// it was drawn on tells them apart. The other point is held on the rail itself, or lies on it
+/// as the mirror image of a point on it across a line square to it. The mirror image counts as
+/// a flip, and the rail walked far (steeper, higher, the other way up) keeps the point on its side.
+#[test]
+fn a_point_a_distance_along_a_linked_line_keeps_its_side() {
+    let slant = |y0: f64, y1: f64| vec![LinkGeom::Line(Vec2::new(0.0, y0), Vec2::new(80.0, y1))];
+    for mirrored_on in [false, true] {
+        let mut sk = Sketch::new();
+        let link = sk.add_link(LinkKind::Project, source(), &slant(10.0, 50.0)).unwrap();
+        let rail = sk.link_curves(&link)[0];
+        let a = sk.add_point(Vec2::new(20.0, 20.0), None).unwrap();
+        let h = sk.add_point(Vec2::new(23.0, 21.5), None).unwrap();
+        if mirrored_on {
+            // `a` mirrors `b` (on the rail, x 0..) across a line square to the rail at x 10.
+            let b = sk.add_point(Vec2::new(0.5, 10.0), None).unwrap();
+            let mh = sk.add_line(Vec2::new(10.0, 15.0), Vec2::new(5.5, 24.0), None, None, None).unwrap();
+            let (m, _) = sk.curves[mh].kind.ends().unwrap();
+            sk.add_constraint(ConstraintKind::PointOnCurve { p: b, c: rail }, None).unwrap();
+            sk.add_constraint(ConstraintKind::PointOnCurve { p: m, c: rail }, None).unwrap();
+            sk.add_constraint(ConstraintKind::Perpendicular { a: mh, b: rail }, None).unwrap();
+            sk.add_constraint(ConstraintKind::Length { l: mh, value: 10.0 }, None).unwrap();
+            sk.add_constraint(ConstraintKind::DistanceX { p: 0, q: m, value: 10.0 }, None).unwrap();
+            sk.add_constraint(ConstraintKind::DistanceX { p: 0, q: b, value: 0.5 }, None).unwrap();
+            sk.add_constraint(ConstraintKind::Symmetric { p: b, q: a, l: mh }, None).unwrap();
+        } else {
+            sk.add_constraint(ConstraintKind::PointOnCurve { p: a, c: rail }, None).unwrap();
+            sk.add_constraint(ConstraintKind::DistanceX { p: 0, q: a, value: 20.0 }, None).unwrap();
+        }
+        sk.add_constraint(ConstraintKind::PointOnCurve { p: h, c: rail }, None).unwrap();
+        let span = sk.add_constraint(ConstraintKind::Distance { p: a, q: h, value: 3.0 }, None).unwrap();
+        assert!(solve(&mut sk).ok(), "{mirrored_on}");
+        let ahead = |sk: &Sketch| match sk.curves[rail].kind {
+            CurveKind::Line { a: s, b: e } => (sk.points[e].pos - sk.points[s].pos).dot(sk.points[h].pos - sk.points[a].pos),
+            _ => f64::NAN,
+        };
+        assert!(ahead(&sk) > 0.0 && (sk.points[h].pos.dist(sk.points[a].pos) - 3.0).abs() < 1e-9, "{mirrored_on}");
+        let stored = sk.clone();
+        // The same 3 mm back past `a`: solved as it is, and told apart only by the side.
+        let mut back = stored.clone();
+        back.points[h].pos = back.points[a].pos * 2.0 - back.points[h].pos;
+        assert!(solve(&mut back).ok() && ahead(&back) < 0.0, "{mirrored_on}");
+        assert!(flips_from_stored(&back, &stored).contains(&span), "{mirrored_on}: {:?}", flips_from_stored(&back, &stored));
+        // Walked there, `h` stays ahead of `a` along the rail.
+        for (y0, y1) in [(300.0, 260.0), (-40.0, 400.0), (2000.0, 1990.0)] {
+            let mut sk = stored.clone();
+            sk.update_link(&link, &slant(y0, y1)).unwrap();
+            let report = solve_after_link_move(&mut sk, &stored, &stored.driving_values(), Analysis::Full);
+            assert!(report.is_some_and(|r| r.keeps_orientation()), "{mirrored_on} {y0} {y1}");
+            assert!(ahead(&sk) > 0.0 && flips_from_stored(&sk, &stored).is_empty(), "{mirrored_on} {y0} {y1}: {}", ahead(&sk));
+        }
+    }
+}

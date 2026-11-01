@@ -389,11 +389,55 @@ fn a_texts_words_follow_its_text_parameters_and_so_does_its_cut() {
     run(&mut s, "sketch.finish", json!({}));
     assert_eq!((words(&s, &link).as_str(), word_expr(&s, &link)), ("OK", Value::Null));
 
-    // An expression naming no text parameter, or a number parameter, is refused.
-    run(&mut s, "parameters.add", json!({"name": "W", "expression": "10 mm"}));
+    // An expression naming an unknown parameter, or a text parameter in number(), is refused.
     run(&mut s, "sketch.edit", json!({"sketch": "S"}));
-    for (bad, says) in [("Nope + 'x'", "Nope"), ("W", "W"), ("Tag +", "")] {
+    for (bad, says) in [("Nope + 'x'", "Nope"), ("number(Tag)", "Tag"), ("Tag +", "")] {
         let e = s.execute("sketch.edit_text", &json!({"link": link, "text_expression": bad})).unwrap_err().to_string();
         assert!(e.contains(says), "{bad}: {e}");
     }
+}
+
+/// #9281: a number parameter in a text's words shows its value in the design's units
+/// (`number()` without the unit, with chosen decimals); a parameter edit rewrites the words
+/// and the cut follows in the same rebuild, also after a save; a rename reaches the words and
+/// deleting the parameter is refused while the text shows it.
+#[test]
+fn a_texts_words_show_a_number_parameter_and_follow_it() {
+    let typed = |words: &str| {
+        let mut s = Session::default();
+        block_with_text(&mut s, json!({"text": words}));
+        no_trouble(&s);
+        volume(&mut s)
+    };
+    let same = |a: f64, b: f64, what: &str| assert!((a - b).abs() < 1e-6, "{what}: {a} against {b} typed");
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Width", "expression": "85 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "Tilt", "expression": "30 deg"}));
+    let r = block_with_text(&mut s, json!({"text_expression": "'W' + number(Width)"}));
+    let link = r["link"].as_str().unwrap().to_string();
+    no_trouble(&s);
+    assert_eq!(words(&s, &link), "W85");
+    same(volume(&mut s), typed("W85"), "W85");
+
+    run(&mut s, "parameters.change", json!({"name": "Width", "expression": "90 mm"}));
+    no_trouble(&s);
+    assert_eq!(words(&s, &link), "W90");
+    let wide = typed("W90");
+    same(volume(&mut s), wide, "W90");
+    let mut again = reopened(&s);
+    no_trouble(&again);
+    same(volume(&mut again), wide, "W90 reopened");
+
+    run(&mut s, "sketch.edit", json!({"sketch": "S"}));
+    run(&mut s, "sketch.edit_text", json!({"link": link, "text_expression": "number(Width, 1) + ' / ' + Tilt"}));
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+    assert_eq!(words(&s, &link), "90.0 / 30°");
+
+    run(&mut s, "parameters.rename", json!({"name": "Width", "new_name": "Span"}));
+    assert_eq!(word_expr(&s, &link), json!("number(Span, 1) + ' / ' + Tilt"));
+    let e = s.execute("parameters.delete", &json!({"name": "Span"})).unwrap_err().to_string();
+    assert!(e.contains("Text"), "{e}");
+    no_trouble(&s);
+    assert_eq!(words(&s, &link), "90.0 / 30°");
 }

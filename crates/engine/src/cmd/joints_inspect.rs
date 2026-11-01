@@ -184,6 +184,7 @@ fn face_ref(doc: &Document, name: &str) -> Value {
     // A side swept from a sketch curve (a later profile's too, `side:s<k>.<curve>`).
     if let Base::Made { role: Role::Side { curve, .. }, .. } = &face.base {
         let found = f.kind.input_sketches().into_iter().find_map(|id| {
+            // design-only: a joint names a curve of one of the design's sketches.
             let sk = doc.sketch(id).ok()?;
             let c = sk.curves.iter().find(|c| c.id == *curve)?;
             let curve_type = serde_json::to_value(&c.kind).ok().and_then(|k| k.get("type").cloned()).unwrap_or(Value::Null);

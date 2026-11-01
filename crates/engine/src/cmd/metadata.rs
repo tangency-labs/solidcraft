@@ -6,7 +6,7 @@
 //! nothing: properties are no geometry.
 
 use serde_json::{Map, Value, json};
-use solidcraft_doc::metadata::{self, MAX_KEYS, Owner};
+use solidcraft_doc::metadata::{self, BOM_TYPE, MAX_KEYS, Owner};
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
@@ -49,6 +49,9 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let mut next = s.doc.metadata.clone();
     let mut changed = Vec::new();
     for (key, value) in entries {
+        if key == BOM_TYPE {
+            return Err(bad(cmd, "`bom_type` is a component's part property: set it with component.metadata.set"));
+        }
         if next.set(Owner::Design, key, value.clone()).map_err(|e| bad(cmd, e.to_string()))? {
             changed.push(key.to_string());
         }

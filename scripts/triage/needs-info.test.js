@@ -54,6 +54,7 @@ test('missing: empty app reports are asked to paste the copied report', () => {
 
 test('missing: reproducible, long, app-filed and non-bug issues are left alone', () => {
   assert.deepEqual(info.missing('Loft fails', '## Reproduction\n1. sketch two circles\n2. loft them'), []);
+  assert.deepEqual(info.missing('Loft fails', 'see design.sc attached'), []);
   assert.deepEqual(info.missing('Loft fails', 'see design.solidcraft attached'), []);
   assert.deepEqual(info.missing('Loft fails', 'runs `solid.loft` and fails'), []);
   assert.deepEqual(info.missing('Loft fails', long), []);

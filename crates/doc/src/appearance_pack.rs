@@ -154,10 +154,7 @@ impl VisualPreset {
         match self.recipe {
             Recipe::Opaque(r) => r.color,
             // A UI swatch of the transmission values, not rendered glass or absorption.
-            Recipe::Glass(r) => r.transmission_linear_rgb.map(|v| {
-                let encoded = if v <= 0.0031308 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 };
-                (encoded.clamp(0.0, 1.0) * 255.0).round() as u8
-            }),
+            Recipe::Glass(r) => r.transmission_linear_rgb.map(solidcraft_geom::srgb::encode8),
         }
     }
 

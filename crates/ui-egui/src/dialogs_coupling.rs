@@ -4,7 +4,7 @@
 //! face also picks the joint it turns on. Play turns the driving joint so the coupling shows its
 //! motion before OK.
 
-use crate::ui_kit::{choice_row, expr_row};
+use crate::ui_kit::{StatusTone, choice_row, expr_row, status_line};
 use egui::RichText;
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
@@ -46,7 +46,7 @@ fn joints_that(s: &Session, turn: bool) -> Vec<(u64, String)> {
         .joints
         .iter()
         .filter(|j| (0..j.kind.dofs().len()).any(|i| j.kind.is_angle(i) == turn))
-        .map(|j| (j.id, format!("{} ({:?})", j.name, j.kind)))
+        .map(|j| (j.id, crate::dialogs_assembly::joint_choice(&j.name, j.kind)))
         .collect()
 }
 
@@ -133,10 +133,8 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut CouplingForm, inputs:
     let ([role_a, role_b], turn_b) = roles(f.command);
     let (la, lb) = (joints_that(s, true), joints_that(s, turn_b));
     if la.is_empty() || lb.is_empty() {
-        form_row(ui, "", |ui| {
-            let need = if turn_b { "needs two joints that turn" } else { "needs a joint that turns and one that slides" };
-            ui.label(RichText::new(crate::i18n::tr_label(need)).color(t.text_dim));
-        });
+        let need = if turn_b { "needs two joints that turn" } else { "needs a joint that turns and one that slides" };
+        status_line(ui, need, StatusTone::Dim);
         return false;
     }
     // A face picked on a part chooses the joint that part turns on, once.
@@ -206,7 +204,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut CouplingForm, inputs:
         ui.label(RichText::new(shown.unwrap_or_else(|| "-".into())).color(t.text_dim));
     });
     form_row(ui, "Animate", |ui| {
-        let label = if f.animate { "■ Stop" } else { "▶ Play" };
+        let label = crate::i18n::tr(if f.animate { "ui.joint_stop" } else { "ui.joint_play" });
         let r = crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)
             .on_hover_text(crate::i18n::tr_label("Play the joint's motion in the view"));
         crate::scenario::publish_handle("dialog:Animate", r.rect.center());

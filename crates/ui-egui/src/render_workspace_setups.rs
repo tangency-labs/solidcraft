@@ -234,6 +234,7 @@ pub(super) fn load(app: &mut SolveApp) {
     app.render_workspace.revision = app.session.revision;
     // Keep the existing explicit Restore Saved Camera action: loading options does not navigate.
     app.render_workspace.view.clean_setup = draft(app).ok();
+    super::light::loaded(app);
 }
 
 pub(super) fn refresh_dirty(app: &mut SolveApp) {

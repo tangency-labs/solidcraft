@@ -45,13 +45,6 @@ impl Boundary {
             Self::Closed => "closed_mesh",
         }
     }
-    fn label(self) -> &'static str {
-        match self {
-            Self::Thin => "render.material_thin",
-            Self::Box => "render.material_box",
-            Self::Closed => "render.material_closed",
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -71,8 +64,8 @@ impl Default for Glass {
 }
 impl Glass {
     pub(super) fn recipe(id: &str) -> Result<Self, String> {
-        let preset = appearance_pack::find(id).ok_or_else(|| "unknown glass recipe".to_string())?;
-        let Recipe::Glass(recipe) = preset.recipe else { return Err("the selected recipe is not physical glass".into()) };
+        let preset = appearance_pack::find(id).ok_or_else(|| crate::i18n::tr("render.error_glass_recipe").to_string())?;
+        let Recipe::Glass(recipe) = preset.recipe else { return Err(crate::i18n::tr("render.error_physical_glass").into()) };
         recipe.validate().map_err(|e| e.to_string())?;
         let (boundary, thickness) = match recipe.boundary {
             GlassBoundary::Thin { thickness_mm } => (Boundary::Thin, thickness_mm),
@@ -176,13 +169,22 @@ pub(super) struct View {
     selected: Option<usize>,
     target_revision: Option<u64>,
     target_document: Option<Weak<Document>>,
+    pending_remove: Option<PendingRemoval>,
+}
+
+#[derive(Clone, Debug)]
+struct PendingRemoval {
+    name: String,
+    target: solidcraft_engine::doc::render_surface::RenderBodyTarget,
+    revision: u64,
+    document: Weak<Document>,
 }
 
 pub(super) fn read_targets(app: &mut SolveApp) -> Result<Vec<Target>, String> {
     let reply = app.run("render.scene", json!({}))?;
-    let values = reply.get("bodies").and_then(Value::as_array).ok_or_else(|| "missing render scene bodies".to_string())?;
+    let values = reply.get("bodies").and_then(Value::as_array).ok_or_else(|| crate::i18n::tr("render.error_scene_bodies").to_string())?;
     if values.len() > solidcraft_engine::render::job::MAX_GPU_PATH_BODIES {
-        return Err("render scene exceeds its body limit".into());
+        return Err(crate::i18n::tr("render.error_scene_body_limit").into());
     }
     let targets: Vec<Target> = serde_json::from_value(Value::Array(values.clone())).map_err(|e| e.to_string())?;
     if targets.iter().any(|t| {
@@ -191,7 +193,7 @@ pub(super) fn read_targets(app: &mut SolveApp) -> Result<Vec<Target>, String> {
             || t.name.len() > 1024
             || t.name.chars().any(char::is_control)
     }) {
-        return Err("invalid render scene identity".into());
+        return Err(crate::i18n::tr("render.error_scene_identity").into());
     }
     Ok(targets)
 }
@@ -310,18 +312,10 @@ pub(super) fn params(app: &SolveApp, params: &mut Value) -> Result<(), String> {
 }
 
 fn vector(app: &SolveApp, ui: &mut egui::Ui, key: &str, values: &mut [f64; 3], range: std::ops::RangeInclusive<f64>, suffix: &str) -> bool {
-    ui.label(app.tr(key));
-    let mut changed = false;
-    ui.horizontal(|ui| {
-        for value in values {
-            changed |= ui_kit::number_field(ui, value, range.clone(), 0.01, suffix).changed();
-        }
-    });
-    changed
+    ui_kit::row(ui, app.tr(key), |ui| ui_kit::vector3_field(ui, values, range, suffix))
 }
 
 pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
-    saved_optics_controls(app, ui);
     let title = app.tr("render.material_title").to_string();
     ui_kit::section(ui, "render_materials", &title, false, |ui| {
         let mut view = std::mem::take(&mut app.render_workspace.view.materials);
@@ -412,25 +406,7 @@ pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
                     app.set_status(e, true);
                 }
             }
-            glass_controls(app, ui, binding);
-            coat_controls(app, ui, binding);
-            map_controls(app, ui, binding);
-            ui_kit::checkbox(ui, app.tr("render.optics_replace"), &mut binding.replace_saved_optics);
-            let save = ui_kit::button(
-                ui,
-                app.tr("render.optics_save"),
-                ui_kit::Button::Enabled(binding.glass_enabled && binding.current(app) && !binding.maps_enabled && !binding.coat_enabled),
-            );
-            crate::scenario::publish_target("render:optics-save", save.rect);
-            if save.clicked() {
-                // The transient editor is taken out of app above. snapshot saves
-                // only the numerical draft; other local bindings remain visible
-                // and stale for explicit revalidation after this one mutation.
-                match save_optics(app, binding) {
-                    Ok(()) => remove = true,
-                    Err(error) => app.set_status(error, true),
-                }
-            }
+            remove |= editor_sections(app, ui, Some(binding));
             remove |= ui_kit::button(ui, app.tr("render.material_remove"), ui_kit::Button::Normal).clicked();
         }
         if remove && let Some(index) = view.selected.filter(|i| *i < view.bindings.len()) {
@@ -438,110 +414,115 @@ pub(super) fn controls(app: &mut SolveApp, ui: &mut egui::Ui) {
             view.selected = None;
         }
         ui.small(app.tr("render.material_limits"));
+        view.pending_remove = app.render_workspace.view.materials.pending_remove.take().or(view.pending_remove.take());
         app.render_workspace.view.materials = view;
     });
 }
 
 fn glass_controls(app: &mut SolveApp, ui: &mut egui::Ui, binding: &mut Binding) {
-    let title = app.tr("render.material_glass").to_string();
-    ui_kit::section(ui, ("render_glass", binding.target.ordinal), &title, false, |ui| {
-        if ui_kit::checkbox(ui, app.tr("render.material_glass_enable"), &mut binding.glass_enabled).changed() && binding.glass_enabled {
-            binding.coat_enabled = false;
-            binding.maps_enabled = false;
-        }
-        ui.small(app.tr("render.material_glass_help"));
-        let recipes: Vec<_> = appearance_pack::STARTER_PACK.iter().filter(|p| matches!(p.recipe, Recipe::Glass(_))).collect();
-        ui_kit::swatch_grid(ui, &recipes, |ui, preset| {
-            let [r, g, b] = preset.preview_color();
-            let response = ui_kit::color_swatch(
-                ui,
-                egui::Id::new(("render_glass_recipe", binding.target.ordinal, preset.id)),
-                egui::Color32::from_rgb(r, g, b),
-                binding.glass.recipe == Some(preset.id),
-                preset.name,
-                preset.id,
-            );
-            crate::scenario::publish_handle(&format!("render:glass:{}", preset.id), response.rect.center());
-            if response.clicked() {
-                match Glass::recipe(preset.id) {
-                    Ok(glass) => {
-                        binding.glass = glass;
-                        binding.glass_enabled = true;
-                        binding.coat_enabled = false;
-                        binding.maps_enabled = false;
+    if ui_kit::checkbox(ui, app.tr("render.appearance_editor.glass_enable"), &mut binding.glass_enabled).changed() && binding.glass_enabled {
+        binding.coat_enabled = false;
+        binding.maps_enabled = false;
+    }
+    let recipes: Vec<_> = appearance_pack::STARTER_PACK.iter().filter(|p| matches!(p.recipe, Recipe::Glass(_))).collect();
+    let name =
+        binding.glass.recipe.and_then(appearance_pack::find).map_or_else(|| app.tr("render.material_custom").to_owned(), |p| p.name.to_owned());
+    let recipe_label = app.tr("render.appearance_editor.recipe").to_owned();
+    ui_kit::row(ui, &recipe_label, |ui| {
+        ui_kit::dropdown_menu(ui, "render_glass_recipe", &name, |ui| {
+            for preset in recipes {
+                let response = ui_kit::list_picker(ui, preset.id, preset.name, binding.glass.recipe == Some(preset.id));
+                crate::scenario::publish_target(&format!("render:glass:{}", preset.id), response.rect);
+                if response.clicked() {
+                    match Glass::recipe(preset.id) {
+                        Ok(glass) => {
+                            binding.glass = glass;
+                            binding.glass_enabled = true;
+                            binding.coat_enabled = false;
+                            binding.maps_enabled = false;
+                        }
+                        Err(error) => app.set_status(error, true),
                     }
-                    Err(e) => app.set_status(e, true),
-                }
-            }
-        });
-        let name =
-            binding.glass.recipe.and_then(appearance_pack::find).map_or_else(|| app.tr("render.material_custom").to_string(), |p| p.name.to_string());
-        ui.label(name);
-        if !binding.glass_enabled {
-            return;
-        }
-        let glass = &mut binding.glass;
-        let label = app.tr(glass.boundary.label()).to_string();
-        let mut changed = false;
-        ui_kit::dropdown_menu(ui, "render_glass_boundary", &label, |ui| {
-            for value in [Boundary::Closed, Boundary::Thin, Boundary::Box] {
-                if ui_kit::list_picker(ui, value.wire(), app.tr(value.label()), glass.boundary == value).clicked() {
-                    glass.boundary = value;
-                    glass.shadows = value == Boundary::Thin;
-                    changed = true;
                     ui.close();
                 }
             }
         });
-        ui.label(app.tr("render.material_ior"));
-        changed |= ui_kit::number_field(ui, &mut glass.ior, 1.0..=3.0, 0.01, "").changed();
-        changed |= vector(app, ui, "render.material_absorption", &mut glass.absorption, 0.0..=100.0, " /mm");
-        if glass.boundary == Boundary::Thin {
-            ui.label(app.tr("render.material_thickness"));
-            changed |= ui_kit::number_field(ui, &mut glass.thickness, 0.0..=10000.0, 0.1, " mm").changed();
-        }
-        changed |= ui_kit::checkbox(ui, app.tr("render.material_shadow"), &mut glass.shadows).changed();
-        let mut scatter = glass.subsurface.is_some();
-        if ui_kit::checkbox(ui, app.tr("render.subsurface_enable"), &mut scatter).changed() {
-            glass.subsurface =
-                scatter.then_some(solidcraft_engine::render::transmission::subsurface::Subsurface { scattering_per_mm: 0.1, anisotropy: 0.0 });
-            changed = true;
-        }
-        if let Some(subsurface) = &mut glass.subsurface {
-            changed |= ui_kit::row(ui, app.tr("render.subsurface_rate"), |ui| {
-                ui_kit::number_field(ui, &mut subsurface.scattering_per_mm, 0.0..=100.0, 0.001, " /mm")
-            })
-            .changed();
-            changed |= ui_kit::row(ui, app.tr("render.volume_anisotropy"), |ui| {
-                ui_kit::number_field(ui, &mut subsurface.anisotropy, -0.95..=0.95, 0.01, "")
-            })
-            .changed();
-            ui_kit::text(ui, app.tr("render.subsurface_help"), ui_kit::Text::Note("render.subsurface_help"));
-        }
-        if changed {
-            glass.recipe = None;
-        }
-        ui.small(app.tr("render.material_certification"));
     });
+    let glass = &mut binding.glass;
+    let mut changed = false;
+    ui.add_enabled_ui(binding.glass_enabled, |ui| {
+        let mut boundary = match glass.boundary {
+            Boundary::Closed => 0,
+            Boundary::Thin => 1,
+            Boundary::Box => 2,
+        };
+        ui_kit::row(ui, app.tr("render.appearance_editor.boundary"), |ui| {
+            let labels = ["render.appearance_editor.closed", "render.appearance_editor.thin", "render.appearance_editor.box"].map(|key| app.tr(key));
+            if ui_kit::segmented(ui, &mut boundary, &labels, ui_kit::Segments { compact: true, small: true, ..Default::default() }) {
+                glass.boundary = match boundary {
+                    1 => Boundary::Thin,
+                    2 => Boundary::Box,
+                    _ => Boundary::Closed,
+                };
+                glass.shadows = glass.boundary == Boundary::Thin;
+                if glass.boundary == Boundary::Thin {
+                    glass.subsurface = None;
+                }
+                changed = true;
+            }
+        });
+        changed |=
+            ui_kit::row(ui, app.tr("render.appearance_editor.ior"), |ui| ui_kit::number_field(ui, &mut glass.ior, 1.0..=3.0, 0.01, "")).changed();
+        ui.add_enabled_ui(glass.boundary == Boundary::Thin, |ui| {
+            changed |= ui_kit::row(ui, app.tr("render.appearance_editor.thickness"), |ui| {
+                ui_kit::number_field(ui, &mut glass.thickness, 0.001..=10000.0, 0.1, " mm")
+            })
+            .changed();
+        });
+        changed |= vector(app, ui, "render.appearance_editor.absorption", &mut glass.absorption, 0.0..=100.0, " /mm");
+        changed |= ui_kit::checkbox(ui, app.tr("render.material_shadow"), &mut glass.shadows).changed();
+        ui.add_enabled_ui(glass.boundary != Boundary::Thin, |ui| {
+            let mut scatter = glass.subsurface.is_some();
+            if ui_kit::checkbox(ui, app.tr("render.subsurface_enable"), &mut scatter).changed() {
+                glass.subsurface =
+                    scatter.then_some(solidcraft_engine::render::transmission::subsurface::Subsurface { scattering_per_mm: 0.1, anisotropy: 0.0 });
+                changed = true;
+            }
+            if let Some(subsurface) = &mut glass.subsurface {
+                changed |= ui_kit::row(ui, app.tr("render.subsurface_rate"), |ui| {
+                    ui_kit::number_field(ui, &mut subsurface.scattering_per_mm, 0.0..=100.0, 0.001, " /mm")
+                })
+                .changed();
+                changed |= ui_kit::row(ui, app.tr("render.volume_anisotropy"), |ui| {
+                    ui_kit::number_field(ui, &mut subsurface.anisotropy, -0.95..=0.95, 0.01, "")
+                })
+                .changed();
+            }
+        });
+        if glass.boundary != Boundary::Thin {
+            note(app, ui, "render.appearance_editor.thickness_reason");
+        }
+        if glass.boundary == Boundary::Thin {
+            note(app, ui, "render.appearance_editor.scatter_reason");
+        }
+    });
+    if changed {
+        glass.recipe = None;
+    }
+    note(app, ui, "render.appearance_editor.glass_note");
+    note(app, ui, "render.material_certification");
 }
 
 fn coat_controls(app: &SolveApp, ui: &mut egui::Ui, binding: &mut Binding) {
-    let title = app.tr("render.material_coat").to_string();
-    ui_kit::section(ui, ("render_coat", binding.target.ordinal), &title, false, |ui| {
-        ui.add_enabled_ui(!binding.glass_enabled, |ui| {
-            ui_kit::checkbox(ui, app.tr("render.material_coat_enable"), &mut binding.coat_enabled);
-            if binding.coat_enabled {
-                for (key, value, range) in [
-                    ("render.material_weight", &mut binding.coat.weight, 0.0..=1.0),
-                    ("render.material_roughness", &mut binding.coat.roughness, 0.045..=1.0),
-                    ("render.material_ior", &mut binding.coat.ior, 1.0..=3.0),
-                ] {
-                    ui.label(app.tr(key));
-                    ui_kit::number_field(ui, value, range, 0.01, "");
-                }
-            }
-        });
-        ui.small(app.tr("render.material_coat_help"));
+    ui_kit::checkbox(ui, app.tr("render.material_coat_enable"), &mut binding.coat_enabled);
+    ui.add_enabled_ui(binding.coat_enabled, |ui| {
+        for (key, value, range) in [
+            ("render.appearance_editor.weight", &mut binding.coat.weight, 0.0..=1.0),
+            ("appearance.roughness", &mut binding.coat.roughness, 0.045..=1.0),
+        ] {
+            ui_kit::row(ui, app.tr(key), |ui| ui_kit::mixed_slider(ui, value, range, None));
+        }
+        ui_kit::row(ui, app.tr("render.appearance_editor.ior"), |ui| ui_kit::number_field(ui, &mut binding.coat.ior, 1.0..=3.0, 0.01, ""));
     });
 }
 
@@ -555,10 +536,10 @@ enum MapSlot {
 impl MapSlot {
     fn key(self) -> &'static str {
         match self {
-            Self::Color => "render.material_color_map",
-            Self::Normal => "render.material_normal_map",
-            Self::Roughness => "render.material_roughness_map",
-            Self::Metallic => "render.material_metallic_map",
+            Self::Color => "render.appearance_editor.base_colour",
+            Self::Normal => "render.appearance_editor.normal",
+            Self::Roughness => "appearance.roughness",
+            Self::Metallic => "appearance.metallic",
         }
     }
     fn field(self, maps: &mut Maps) -> &mut String {
@@ -600,7 +581,8 @@ pub(super) fn install_library_surface(app: &mut SolveApp, id: &str, target: Targ
     }
     let existing = app.render_workspace.view.materials.bindings.iter().position(|b| b.target == target);
     if let Some(index) = existing {
-        let binding = app.render_workspace.view.materials.bindings.get(index).ok_or_else(|| "missing material binding".to_string())?;
+        let binding =
+            app.render_workspace.view.materials.bindings.get(index).ok_or_else(|| crate::i18n::tr("render.error_material_binding").to_string())?;
         if !binding.current(app) {
             return Err(app.tr("render.material_revalidate_needed").into());
         }
@@ -614,7 +596,7 @@ pub(super) fn install_library_surface(app: &mut SolveApp, id: &str, target: Targ
         app.run("render.library.surface.prepare", json!({"id":id,"body_index":target.ordinal,"body_name":target.name,"plane":plane,"scale":scale}))?;
     let texture = &reply["texture"];
     let frame: PlanarFrame = serde_json::from_value(texture["frame"].clone()).map_err(|e| e.to_string())?;
-    let path = |key: &str| texture[key].as_str().map(str::to_string).ok_or_else(|| "invalid authored surface reply".to_string());
+    let path = |key: &str| texture[key].as_str().map(str::to_string).ok_or_else(|| crate::i18n::tr("render.error_surface_reply").to_string());
     let maps = Maps {
         color: path("base_color_srgb")?,
         normal: path("normal_opengl")?,
@@ -626,7 +608,13 @@ pub(super) fn install_library_surface(app: &mut SolveApp, id: &str, target: Targ
         flip_v: true,
     };
     let mut binding = if let Some(index) = existing {
-        app.render_workspace.view.materials.bindings.get(index).cloned().ok_or_else(|| "missing material binding".to_string())?
+        app.render_workspace
+            .view
+            .materials
+            .bindings
+            .get(index)
+            .cloned()
+            .ok_or_else(|| crate::i18n::tr("render.error_material_binding").to_string())?
     } else {
         Binding::new(target, app)
     };
@@ -635,10 +623,10 @@ pub(super) fn install_library_surface(app: &mut SolveApp, id: &str, target: Targ
     binding.enabled = true;
     let view = &mut app.render_workspace.view.materials;
     if let Some(index) = existing {
-        *view.bindings.get_mut(index).ok_or_else(|| "missing material binding".to_string())? = binding;
+        *view.bindings.get_mut(index).ok_or_else(|| crate::i18n::tr("render.error_material_binding").to_string())? = binding;
         view.selected = Some(index);
     } else {
-        view.bindings.try_reserve(1).map_err(|_| "could not reserve material binding".to_string())?;
+        view.bindings.try_reserve(1).map_err(|_| crate::i18n::tr("render.error_binding_allocation").to_string())?;
         view.bindings.push(binding);
         view.selected = Some(view.bindings.len() - 1);
     }
@@ -648,37 +636,32 @@ pub(super) fn install_library_surface(app: &mut SolveApp, id: &str, target: Targ
 }
 
 fn map_controls(app: &mut SolveApp, ui: &mut egui::Ui, binding: &mut Binding) {
-    let title = app.tr("render.material_maps").to_string();
-    ui_kit::section(ui, ("render_maps", binding.target.ordinal), &title, false, |ui| {
-        ui.add_enabled_ui(!binding.glass_enabled, |ui| {
-            ui_kit::checkbox(ui, app.tr("render.material_maps_enable"), &mut binding.maps_enabled);
-            if !binding.maps_enabled {
-                return;
-            }
-            for slot in [MapSlot::Color, MapSlot::Normal, MapSlot::Roughness, MapSlot::Metallic] {
-                let key = slot.key();
-                ui.label(app.tr(key));
+    ui_kit::checkbox(ui, app.tr("render.material_maps_enable"), &mut binding.maps_enabled);
+    ui.add_enabled_ui(binding.maps_enabled, |ui| {
+        for slot in [MapSlot::Color, MapSlot::Normal, MapSlot::Metallic, MapSlot::Roughness] {
+            let label = app.tr(slot.key()).to_owned();
+            ui_kit::row(ui, &label, |ui| {
                 let path = slot.field(&mut binding.maps);
-                ui_kit::bounded_cell_editor(ui, ui.id().with(key), path, "", false, 4096);
-                let label = app.tr("render.material_browse").to_string();
-                if ui_kit::button(ui, label, ui_kit::Button::Enabled(binding.current(app))).clicked() {
+                let label = if path.is_empty() {
+                    app.tr("render.appearance_editor.choose_image").to_owned()
+                } else {
+                    std::path::Path::new(path).file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
+                };
+                if ui_kit::button(ui, &label, ui_kit::Button::Enabled(binding.current(app))).clicked() {
                     choose_map(app, binding, slot);
                 }
-            }
-            let mut absolute = binding.maps.base_color_mode == BaseColorMode::Replace;
-            if ui_kit::checkbox(ui, app.tr("render.material_color_replace"), &mut absolute).changed() {
-                binding.maps.base_color_mode = if absolute { BaseColorMode::Replace } else { BaseColorMode::Modulate };
-            }
-            ui_kit::checkbox(ui, app.tr("render.material_v_up"), &mut binding.maps.flip_v);
-            ui.label(app.tr("render.material_normal_strength"));
-            ui_kit::number_field(ui, &mut binding.maps.strength, 0.0..=1.0, 0.01, "");
-            vector(app, ui, "render.material_origin", &mut binding.maps.frame.origin, -1e6..=1e6, " mm");
-            vector(app, ui, "render.material_repeat_u", &mut binding.maps.frame.u, -1e6..=1e6, " mm");
-            vector(app, ui, "render.material_repeat_v", &mut binding.maps.frame.v, -1e6..=1e6, " mm");
+            });
+        }
+        vector(app, ui, "render.appearance_editor.origin", &mut binding.maps.frame.origin, -1e6..=1e6, " mm");
+        vector(app, ui, "render.appearance_editor.u_repeat", &mut binding.maps.frame.u, -1e6..=1e6, " mm");
+        vector(app, ui, "render.appearance_editor.v_repeat", &mut binding.maps.frame.v, -1e6..=1e6, " mm");
+        ui_kit::row(ui, app.tr("render.appearance_editor.normal_strength"), |ui| {
+            ui_kit::mixed_slider(ui, &mut binding.maps.strength, 0.0..=1.0, None)
         });
-        ui.small(app.tr("render.material_maps_help"));
-        if binding.glass_enabled {
-            ui.small(app.tr("render.material_glass_exclusive"));
+        ui_kit::checkbox(ui, app.tr("render.appearance_editor.v_up"), &mut binding.maps.flip_v);
+        let mut absolute = binding.maps.base_color_mode == BaseColorMode::Replace;
+        if ui_kit::checkbox(ui, app.tr("render.material_color_replace"), &mut absolute).changed() {
+            binding.maps.base_color_mode = if absolute { BaseColorMode::Replace } else { BaseColorMode::Modulate };
         }
     });
 }
@@ -687,7 +670,12 @@ fn save_optics(app: &mut SolveApp, binding: &Binding) -> Result<(), String> {
     if !binding.current(app) {
         return Err(app.tr("render.material_revalidate_needed").into());
     }
-    let setup = super::setups::snapshot(app)?;
+    // A saved shot owns numerical intent, not the tab's local map/coat bindings.
+    // Keep those bindings intact while taking the portable shot snapshot.
+    let local = std::mem::take(&mut app.render_workspace.view.materials);
+    let setup = super::setups::snapshot(app);
+    app.render_workspace.view.materials = local;
+    let setup = setup?;
     let value = &binding.glass;
     let name = app.render_workspace.view.name.clone();
     let optics = json!({"ior":value.ior,"absorption_per_mm":value.absorption,"boundary":value.boundary.wire(),
@@ -697,30 +685,245 @@ fn save_optics(app: &mut SolveApp, binding: &Binding) -> Result<(), String> {
         json!({"name":name,"set":setup,"body_index":binding.target.ordinal,"body_name":binding.target.name,
         "optics":optics,"replace":binding.replace_saved_optics,"expected_revision":app.session.revision}),
     )?;
+    let local = std::mem::take(&mut app.render_workspace.view.materials);
     super::setups::load(app);
+    app.render_workspace.view.materials = local;
     Ok(())
 }
-fn saved_optics_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let bindings = app.render_workspace.view.draft.optics.clone();
-    if bindings.is_empty() {
-        return;
+fn note(app: &SolveApp, ui: &mut egui::Ui, key: &'static str) {
+    ui_kit::text(ui, app.tr(key), ui_kit::Text::Note(key));
+}
+
+/// The same body editor is used by the selection inspector and explicit-target page.
+/// An unsupported selection gets an inert draft so every design control is inspectable.
+fn editor_sections(app: &mut SolveApp, ui: &mut egui::Ui, binding: Option<&mut Binding>) -> bool {
+    let supported = binding.is_some();
+    let mut placeholder = Binding::new(Target { stable_target: None, ordinal: 0, name: String::new() }, app);
+    let binding = binding.unwrap_or(&mut placeholder);
+    let reason = if !supported {
+        Some(app.tr("render.appearance_editor.body_reason").to_owned())
+    } else if app.render_workspace.view.method != super::ImageMethod::GpuRaytrace {
+        Some(app.tr("render.appearance_editor.gpu_reason").to_owned())
+    } else {
+        None
+    };
+    let title = app.tr("render.appearance_editor.glass").to_owned();
+    ui_kit::method_section(ui, "render:appearance:glass", &title, "GPU", reason.as_deref(), |ui| glass_controls(app, ui, binding));
+    let opaque_reason = reason.clone().or_else(|| binding.glass_enabled.then(|| app.tr("render.material_glass_exclusive").to_owned()));
+    let title = app.tr("render.appearance_editor.coat").to_owned();
+    ui_kit::method_section(ui, "render:appearance:coat", &title, "GPU", opaque_reason.as_deref(), |ui| coat_controls(app, ui, binding));
+    let title = app.tr("render.appearance_editor.maps").to_owned();
+    ui_kit::method_section(ui, "render:appearance:maps", &title, "GPU", opaque_reason.as_deref(), |ui| map_controls(app, ui, binding));
+    let title = app.tr("render.appearance_editor.saved").to_owned();
+    let removed = ui_kit::editor_section(ui, "render:appearance:saved", &title, false, |ui| {
+        ui.add_enabled_ui(supported, |ui| saved_controls(app, ui, binding)).inner
+    })
+    .unwrap_or(false);
+    reflection_section(app, ui, supported.then_some(binding.target.name.as_str()));
+    removed
+}
+
+/// Resolve one selected whole body against the authoritative captured scene. Never
+/// broaden a face/component selection into a whole-body optics assignment.
+pub(super) fn selection_controls(app: &mut SolveApp, ui: &mut egui::Ui, body: Option<&str>) {
+    let mut binding = body.and_then(|name| app.render_workspace.view.materials.bindings.iter().find(|b| b.target.name == name).cloned());
+    if binding.is_none()
+        && let Some(name) = body
+    {
+        let current = app.render_workspace.view.materials.target_revision == Some(app.session.revision)
+            && app.render_workspace.view.materials.target_document.as_ref().is_some_and(|d| Weak::ptr_eq(d, &Arc::downgrade(&app.session.doc)));
+        if !current {
+            match read_targets(app) {
+                Ok(targets) => {
+                    let view = &mut app.render_workspace.view.materials;
+                    view.targets = targets;
+                    view.target_revision = Some(app.session.revision);
+                    view.target_document = Some(Arc::downgrade(&app.session.doc));
+                }
+                Err(error) => app.set_status(error, true),
+            }
+        }
+        let mut targets = app.render_workspace.view.materials.targets.iter().filter(|t| t.name == name);
+        if let Some(target) = targets.next()
+            && targets.next().is_none()
+        {
+            binding = Some(Binding::new(target.clone(), app));
+        }
     }
-    let title = app.tr("render.optics_saved").to_string();
-    ui_kit::section(ui, "render_saved_optics", &title, false, |ui| {
-        ui_kit::text(ui, app.tr("render.optics_saved_help"), ui_kit::Text::Note("render.optics_saved_help"));
-        for (index, binding) in bindings.iter().enumerate() {
-            ui.label(format!("{} #{} · n={:.4}", binding.target.definition, binding.target.feature, binding.optics.ior));
-            let remove = ui_kit::button(ui, app.tr("render.optics_remove"), ui_kit::Button::Enabled(!app.render_workspace.view.dirty));
-            crate::scenario::publish_target(&format!("render:optics-remove:{index}"), remove.rect);
-            if remove.clicked() {
-                match app.run(
-                    "render.optics.unbind",
-                    json!({"name":app.render_workspace.view.name,"target":binding.target,"expected_revision":app.session.revision}),
-                ) {
-                    Ok(_) => super::setups::load(app),
-                    Err(error) => app.set_status(error, true),
+    let before = app.session.revision;
+    let removed = editor_sections(app, ui, binding.as_mut());
+    if let Some(binding) = binding {
+        let view = &mut app.render_workspace.view.materials;
+        let existing = view.bindings.iter().position(|b| b.target == binding.target);
+        if removed {
+            if let Some(index) = existing {
+                view.bindings.remove(index);
+            }
+        } else if app.session.revision == before {
+            // Opening the editor alone never allocates an inactive assignment.
+            if binding.glass_enabled || binding.coat_enabled || binding.maps_enabled || existing.is_some() {
+                if existing.is_none() {
+                    view.enabled = true;
+                }
+                if let Some(index) = existing {
+                    if let Some(slot) = view.bindings.get_mut(index) {
+                        *slot = binding;
+                    }
+                } else if view.bindings.len() < MAX_BINDINGS {
+                    view.bindings.push(binding);
+                } else {
+                    app.set_status(app.tr("render.material_limits").to_owned(), true);
                 }
             }
         }
+    }
+}
+
+fn saved_controls(app: &mut SolveApp, ui: &mut egui::Ui, binding: &mut Binding) -> bool {
+    let saved = app
+        .render_workspace
+        .view
+        .draft
+        .optics
+        .iter()
+        .enumerate()
+        .find(|(_, saved)| binding.target.stable_target.as_ref() == Some(&saved.target))
+        .map(|(index, saved)| (index, saved.target.clone()));
+    ui_kit::banner(ui, ui_kit::AssistantTone::Working, |ui| {
+        note(
+            app,
+            ui,
+            if saved.is_some() && !binding.active() { "render.appearance_editor.saved_state" } else { "render.appearance_editor.temporary" },
+        );
     });
+    let can_save = binding.glass_enabled
+        && binding.current(app)
+        && !binding.maps_enabled
+        && !binding.coat_enabled
+        && app.render_workspace.view.method == super::ImageMethod::GpuRaytrace;
+    let mut removed = false;
+    ui.horizontal(|ui| {
+        let save = ui_kit::button(ui, app.tr("render.appearance_editor.save"), ui_kit::Button::Enabled(can_save));
+        crate::scenario::publish_target("render:optics-save", save.rect);
+        if save.clicked() {
+            match save_optics(app, binding) {
+                Ok(()) => removed = true,
+                Err(error) => app.set_status(error, true),
+            }
+        }
+        let remove = ui_kit::button(ui, app.tr("render.appearance_editor.remove"), ui_kit::Button::Enabled(saved.is_some()));
+        crate::scenario::publish_target("render:optics-remove", remove.rect);
+        if remove.clicked()
+            && let Some((index, target)) = saved
+        {
+            crate::scenario::publish_target(&format!("render:optics-remove:{index}"), remove.rect);
+            app.render_workspace.view.materials.pending_remove = Some(PendingRemoval {
+                name: app.render_workspace.view.name.clone(),
+                target,
+                revision: app.session.revision,
+                document: Arc::downgrade(&app.session.doc),
+            });
+        }
+    });
+    ui_kit::checkbox(ui, app.tr("render.appearance_editor.replace"), &mut binding.replace_saved_optics);
+    if !can_save {
+        note(app, ui, "render.appearance_editor.save_reason");
+    }
+    if !binding.current(app) {
+        note(app, ui, "render.material_revalidate_needed");
+    }
+    if ui_kit::button(ui, app.tr("render.appearance_editor.revalidate"), ui_kit::Button::Normal).clicked()
+        && let Err(error) = revalidate(app, binding)
+    {
+        app.set_status(error, true);
+    }
+    super::library::saved_surface_target_controls(app, ui, binding.target.stable_target.as_ref());
+    removed
+}
+
+fn reflection_section(app: &mut SolveApp, ui: &mut egui::Ui, body: Option<&str>) {
+    let reason = if body.is_none() {
+        Some(app.tr("render.appearance_editor.body_reason").to_owned())
+    } else if app.render_workspace.view.method != super::ImageMethod::CpuRaytrace {
+        Some(app.tr("render.appearance_editor.cpu_reason").to_owned())
+    } else {
+        None
+    };
+    let title = app.tr("render.appearance_editor.reflections").to_owned();
+    ui_kit::method_section(ui, "render:appearance:reflections", &title, "CPU", reason.as_deref(), |ui| {
+        use solidcraft_engine::render::job::ReflectionMode;
+        let name = body.unwrap_or_default();
+        let mut mode = app
+            .render_workspace
+            .view
+            .raytrace
+            .reflections
+            .as_ref()
+            .and_then(|r| r.bodies.iter().find(|b| b.body == name))
+            .map_or(0, |b| if b.mode == ReflectionMode::Mirror { 1 } else { 2 });
+        let labels = ["render.cpu_reflection_off", "render.cpu_reflection_mirror", "render.cpu_reflection_rough"].map(|key| app.tr(key).to_owned());
+        let body_label = app.tr("render.inspector_this_body").to_owned();
+        ui_kit::row(ui, &body_label, |ui| {
+            if ui_kit::segmented(
+                ui,
+                &mut mode,
+                &labels.each_ref().map(String::as_str),
+                ui_kit::Segments { compact: true, small: true, ..Default::default() },
+            ) {
+                let value = match mode {
+                    1 => Some(ReflectionMode::Mirror),
+                    2 => Some(ReflectionMode::RoughSpecular),
+                    _ => None,
+                };
+                if let Err(error) = super::cpu::set_reflection(app, name, value) {
+                    app.set_status(error, true);
+                }
+            }
+        });
+        if ui_kit::button(ui, app.tr("render.cpu_binding_confirm"), ui_kit::Button::Enabled(mode != 0)).clicked()
+            && let Err(error) = super::cpu::revalidate(app, name)
+        {
+            app.set_status(error, true);
+        }
+        let title = app.tr("render.appearance_editor.reflection_sampling").to_owned();
+        ui_kit::editor_section(ui, "render:appearance:reflection-sampling", &title, false, |ui| super::cpu::reflection_sampling_controls(app, ui));
+    });
+}
+
+pub(super) fn confirmation_open(app: &SolveApp) -> bool {
+    app.render_workspace.view.materials.pending_remove.is_some()
+}
+
+pub(super) fn confirmation(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some(pending) = app.render_workspace.view.materials.pending_remove.clone() else { return };
+    if pending.revision != app.session.revision
+        || pending.name != app.render_workspace.view.name
+        || !Weak::ptr_eq(&pending.document, &Arc::downgrade(&app.session.doc))
+    {
+        app.render_workspace.view.materials.pending_remove = None;
+        app.set_status(app.tr("render.review_stale").to_owned(), true);
+        return;
+    }
+    let title = app.tr("render.appearance_editor.remove_title").to_owned();
+    let (closed, action) = ui_kit::Confirm::new(egui::Id::new("render_remove_optics"), "delete", &title)
+        .tone(ui_kit::Tone::Danger)
+        .actions(app.tr("render.appearance_editor.remove"), app.tr("render.keep_editing"), None)
+        .selected(ui_kit::Action::Cancel)
+        .show(ctx, true, |ui| {
+            note(app, ui, "render.appearance_editor.remove_note");
+        });
+    if closed || action == ui_kit::Action::Cancel {
+        app.render_workspace.view.materials.pending_remove = None;
+    }
+    if action == ui_kit::Action::Ok {
+        app.render_workspace.view.materials.pending_remove = None;
+        match app.run("render.optics.unbind", json!({"name":pending.name,"target":&pending.target,"expected_revision":pending.revision})) {
+            Ok(_) => {
+                // Removing one saved binding must preserve unsaved shot settings
+                // and unrelated temporary overrides on this tab.
+                app.render_workspace.view.draft.optics.remove(&pending.target);
+            }
+            Err(error) => app.set_status(error, true),
+        }
+    }
 }

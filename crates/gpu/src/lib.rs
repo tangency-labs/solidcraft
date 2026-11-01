@@ -20,6 +20,7 @@ use solidcraft_geom::tess::{EvalCurve, EvalSurface, TessPlan};
 use wgpu::util::DeviceExt;
 
 pub mod capture;
+pub mod concurrent;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod path;
 mod pbr;
@@ -58,6 +59,65 @@ fn popped(f: impl std::future::Future<Output = Option<wgpu::Error>>) -> Option<w
         std::task::Poll::Ready(e) => e,
         std::task::Poll::Pending => None,
     }
+}
+
+/// Error scopes catching what GPU work may raise (popped by [`caught`]).
+fn error_scopes(device: &wgpu::Device) -> [wgpu::ErrorScopeGuard; 3] {
+    [wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal, wgpu::ErrorFilter::Validation].map(|f| device.push_error_scope(f))
+}
+
+/// The first error the scopes caught.
+fn caught(scopes: [wgpu::ErrorScopeGuard; 3]) -> Option<String> {
+    let mut failed = None;
+    for scope in scopes.into_iter().rev() {
+        if let Some(e) = popped(scope.pop()) {
+            failed.get_or_insert(e.to_string());
+        }
+    }
+    failed
+}
+
+/// The D3D12 shader compiler every wgpu instance starts with (#6756). `WGPU_DX12_COMPILER` names
+/// one as wgpu reads it; unset, `auto` or a value wgpu does not know leave the choice to
+/// SolidCraft: DXC from the `dxcompiler.dll` beside the program, by its full path, else FXC.
+/// wgpu's own `auto` loads `dxcompiler.dll` by name, so Windows takes the first one on `PATH`,
+/// whichever program put it there, and DXC 1.8.2505 from such folders (Obsidian's, NVIDIA SDK
+/// Manager's) crashed every start. `WGPU_DX12_COMPILER=dxc` still loads it that way. Looked up
+/// once: neither the variable nor the program's folder changes while the app runs.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn dx12_compiler() -> wgpu::Dx12Compiler {
+    static CHOSEN: std::sync::OnceLock<wgpu::Dx12Compiler> = std::sync::OnceLock::new();
+    CHOSEN.get_or_init(|| dx12_compiler_for(std::env::var("WGPU_DX12_COMPILER").ok().as_deref(), dxc_beside_program())).clone()
+}
+
+/// [`dx12_compiler`] for the variable's value `setting` and the `dxcompiler.dll` beside the
+/// program, if there is one.
+#[cfg(not(target_arch = "wasm32"))]
+fn dx12_compiler_for(setting: Option<&str>, beside_program: Option<std::path::PathBuf>) -> wgpu::Dx12Compiler {
+    match setting.map(str::parse::<wgpu::Dx12Compiler>) {
+        Some(Ok(wgpu::Dx12Compiler::Auto) | Err(_)) | None => match beside_program.as_deref().and_then(std::path::Path::to_str) {
+            Some(dxc_path) => wgpu::Dx12Compiler::DynamicDxc { dxc_path: dxc_path.to_string() },
+            None => wgpu::Dx12Compiler::Fxc,
+        },
+        Some(Ok(named)) => named,
+    }
+}
+
+/// The `dxcompiler.dll` in the program's own folder, if there is one.
+#[cfg(not(target_arch = "wasm32"))]
+fn dxc_beside_program() -> Option<std::path::PathBuf> {
+    let program = std::env::current_exe().ok()?;
+    let dll = program.parent()?.join("dxcompiler.dll");
+    dll.is_file().then_some(dll)
+}
+
+/// wgpu's instance settings from the environment, with SolidCraft's D3D12 shader compiler
+/// ([`dx12_compiler`]).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn instance_descriptor_from_env() -> wgpu::InstanceDescriptor {
+    let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+    desc.backend_options.dx12.shader_compiler = dx12_compiler();
+    desc
 }
 
 /// An adapter and device without a window (native only): the adapter [`select::pick`] chooses
@@ -141,6 +201,7 @@ pub struct Part {
 }
 
 /// The compute pipeline, ready to evaluate plans on one device.
+#[derive(Clone)]
 pub struct TessGpu {
     adapter: String,
     device: wgpu::Device,

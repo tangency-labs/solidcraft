@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Frame guides — rule of thirds over the picture</title>
+  <path d="M10 14L54 14A4 4 0 0 1 58 18L58 46A4 4 0 0 1 54 50L10 50A4 4 0 0 1 6 46L6 18A4 4 0 0 1 10 14Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M23.33 15.3L23.33 48.7M7.3 26L56.7 26M40.67 15.3L40.67 48.7M7.3 38L56.7 38" fill="none" stroke="#6f879c" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="23.33" cy="26" r="3.6" fill="#236ead"/>
+  <circle cx="23.33" cy="38" r="3.6" fill="#236ead"/>
+  <circle cx="40.67" cy="26" r="3.6" fill="#236ead"/>
+  <circle cx="40.67" cy="38" r="3.6" fill="#236ead"/>
+</svg>

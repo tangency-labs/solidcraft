@@ -1,6 +1,7 @@
 //! The offer to calibrate a 3D mouse that has no calibration yet: people don't know calibration
 //! exists, and it is what fixes swapped or reversed axes. It shows once per device, as one of the
-//! shared toasts (`viewport::transient_messages`), until the user calibrates or closes it.
+//! shared toasts (`viewport::transient_messages`), until the user calibrates or closes it with the
+//! toast's close (×), whose countdown ring shows the time it has left (#7971).
 
 use std::collections::BTreeSet;
 
@@ -26,7 +27,7 @@ pub fn swap_offered(device: &str, drivers: Option<crate::space_mouse::DriversPre
 
 /// How long the notice stays when nobody is pointing at it: long enough to read it, find the
 /// mouse and decide, which 15 seconds was too short for.
-const SHOW_SECONDS: f64 = 30.0;
+pub(crate) const SHOW_SECONDS: f64 = 30.0;
 
 /// A longer gap than this between two looks at the offer means it was not on screen meanwhile.
 const AWAY_SECONDS: f64 = 2.0;
@@ -36,12 +37,12 @@ pub fn expired(since: f64, now: f64) -> bool {
     now - since >= SHOW_SECONDS
 }
 
-/// What the offer's toast can do when clicked.
+/// What the offer's toast can do when clicked: its buttons, and `Close`, its close (×).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Action {
     /// Opens Preferences at Navigation and starts the calibration window.
     Calibrate,
-    /// Records this device as offered.
+    /// Records this device as offered: the toast's close (×), never a button (#7971).
     Close,
     /// Records that no offer is wanted any more.
     Never,
@@ -66,7 +67,15 @@ impl Action {
             Self::Calibrate => "ui.3d_mouse_calibrate",
             Self::Close => "ui.close",
             Self::Never => "ui.3d_mouse_offer_never",
-            Self::Swap => "ui.3d_mouse_offer_swap",
+            Self::Swap => "ui.3d_mouse_use_direct",
+        }
+    }
+
+    /// The button's hover text, as a message id: what a short label leaves out.
+    pub fn tip(self) -> Option<&'static str> {
+        match self {
+            Self::Swap => Some("ui.3d_mouse_use_direct_tip"),
+            Self::Calibrate | Self::Close | Self::Never => None,
         }
     }
 }
@@ -94,8 +103,8 @@ pub struct Offer {
 ///   `file_picker_busy`, `file_load.busy`, `prefs_window.open`, `space_mouse.calibrating`,
 ///   `issue_report::cad_input_blocked`.
 /// - Writes, only its own: `space_mouse.offer_since`, `space_mouse.offer_hidden`;
-///   `space_mouse_offered` and `space_mouse_offer_never` (preferences) when the user clicks Close,
-///   Calibrate or Never.
+///   `space_mouse_offered` and `space_mouse_offer_never` (preferences) when the user closes it (×),
+///   or clicks Calibrate or Never.
 /// - Calibrate opens Preferences at Navigation and starts the calibration window
 ///   (`prefs::open_at`, `space_mouse_calibration::start`), exactly as Preferences does. Swap (offered only
 ///   when the user chose spacenavd and a device is there) sets `space_mouse_driver` to Direct, the same
@@ -132,8 +141,16 @@ pub fn due(app: &mut SolveApp, ctx: &egui::Context) -> Option<Offer> {
     if swap_offered(&device, app.space_mouse.drivers, app.preferences.space_mouse_driver) {
         actions.push(Action::Swap);
     }
-    actions.extend([Action::Close, Action::Never]);
+    // Close is the toast's close (×), not a button, so the buttons fit one row (#7971).
+    actions.push(Action::Never);
     Some(Offer { device, actions })
+}
+
+/// The share of the offer's time left now, 1 to 0, for the countdown ring around its close (×).
+/// Pointing at it (`keep`) starts its time again, so the ring is full while it is pointed at.
+pub(crate) fn left(app: &SolveApp, ctx: &egui::Context) -> f32 {
+    let now = ctx.input(|i| i.time);
+    app.space_mouse.offer_since.as_ref().map_or(1.0, |(_, since)| crate::viewport::countdown_left(*since, now, SHOW_SECONDS))
 }
 
 /// The toast was drawn at `rect`: a pointer on it keeps it from expiring.
@@ -205,7 +222,7 @@ pub fn act(app: &mut SolveApp, ctx: &egui::Context, offer: &Offer, action: Actio
             app.preferences.space_mouse_offered.insert(offer.device.clone());
             if action == Action::Calibrate {
                 // The calibration window lives with Preferences, at Navigation.
-                crate::prefs::open_at(app, crate::prefs::PAGE_NAVIGATION);
+                crate::prefs::open_at(app, crate::prefs::PAGE_MOUSE3D);
                 crate::space_mouse_calibration::start(app);
             }
         }
@@ -297,7 +314,10 @@ mod tests {
     fn closing_the_offer_records_the_device_so_it_does_not_come_back() {
         let mut h = offered();
         assert!(crate::scenario::rect_of("toast:space_mouse_offer").is_some(), "the notice is drawn");
-        press(&mut h, "Close");
+        // Its close (×), as the Close button it replaces (#7971).
+        h.frames(3);
+        h.step(&serde_json::json!({"click": {"handle": "toast:space_mouse_offer:close"}})).unwrap();
+        h.frames(2);
         assert!(h.app.preferences.space_mouse_offered.contains("hid 046d:c62b"));
         assert!(h.app.space_mouse.calibrating.is_none());
         h.frames(3);
@@ -371,7 +391,7 @@ mod preferences_tests {
             h.app.space_mouse.device = Some("hid 046d:c62b".into());
             h.frames(3);
             if open_first {
-                crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_NAVIGATION);
+                crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
             }
             for _ in 0..frames_before {
                 h.frame();
@@ -476,7 +496,7 @@ mod preferences_tests {
             assert!(h.app.space_mouse.offer_since.is_some(), "{how}: the offer is up");
             assert_eq!(state(&h), before, "{how}: showing it changes nothing else");
             if how == "close" {
-                h.step(&serde_json::json!({"widget": "Close"})).unwrap();
+                h.step(&serde_json::json!({"click": {"handle": "toast:space_mouse_offer:close"}})).unwrap();
             } else if let Some((device, _)) = h.app.space_mouse.offer_since.take() {
                 h.app.space_mouse.offer_since = Some((device, -1000.0));
             }
@@ -501,7 +521,7 @@ mod preferences_tests {
     fn swapping_to_the_direct_driver_sets_it_and_leaves_the_offered_set_alone() {
         let mut h = spacenavd_harness();
         assert!(h.app.space_mouse.offer_since.is_some(), "the card is up");
-        h.step(&serde_json::json!({"widget": "Swap to Hidraw (Direct Driver)"})).unwrap();
+        h.step(&serde_json::json!({"widget": "Use Direct Driver"})).unwrap();
         h.frames(3);
         assert_eq!(h.app.preferences.space_mouse_driver, crate::prefs::SpaceMouseDriver::Direct);
         assert!(h.app.preferences.space_mouse_offered.is_empty(), "the new source may still be offered");
@@ -510,7 +530,47 @@ mod preferences_tests {
         let mut h = spacenavd_harness();
         h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd: true, direct: false, denied: false });
         h.frames(3);
-        assert!(h.step(&serde_json::json!({"widget": "Swap to Hidraw (Direct Driver)"})).is_err());
+        assert!(h.step(&serde_json::json!({"widget": "Use Direct Driver"})).is_err());
+    }
+
+    /// The card has no Close button (#7971): its × closes it as the button did, its three buttons
+    /// fit one row, and the ring around the × follows the share of its 30 seconds left.
+    #[test]
+    fn the_offer_closes_with_its_x_its_three_buttons_fit_one_row_and_its_ring_follows_its_time() {
+        let mut h = spacenavd_harness();
+        run(&mut h, 1.0);
+        assert!(card_up(&h));
+        let spots: Vec<[f64; 2]> = ["Calibrate…", "Use Direct Driver", "Never show again"]
+            .iter()
+            .map(|label| h.widget(label).unwrap_or_else(|| panic!("{label} is on the card")))
+            .collect();
+        let card = crate::scenario::rect_of("toast:space_mouse_offer").unwrap();
+        assert!(spots.iter().all(|p| (p[1] - spots[0][1]).abs() < 1.0), "one row: {spots:?} in {card:?}");
+        // Laid out with the buttons' drawn widths: the main action is flush with the row's right
+        // edge (the card's, less its 12-point margin), and the buttons sit a gap apart.
+        let button = |i: usize| crate::scenario::rect_of(&format!("toast:space_mouse_offer:button:{i}")).unwrap();
+        let (calibrate, direct, never) = (button(0), button(1), button(2));
+        assert!((calibrate.right() - (card.right() - 12.0)).abs() < 0.5, "flush right: {calibrate:?} in {card:?}");
+        let gap = crate::theme::Tokens::get().space_8;
+        assert!((calibrate.left() - direct.right() - gap).abs() < 0.5, "{direct:?} then {calibrate:?}");
+        assert!((direct.left() - never.right() - gap).abs() < 0.5, "{never:?} then {direct:?}");
+        assert!(never.left() >= card.left() + 28.0 - 0.5, "inside the row: {never:?} in {card:?}");
+        // The only control named Close is the ×, in the card's top-right corner.
+        let close = h.at(&serde_json::json!({"handle": "toast:space_mouse_offer:close"})).unwrap();
+        let near = |p: [f64; 2]| (p[0] - close[0]).abs() < 1.0 && (p[1] - close[1]).abs() < 1.0;
+        assert!(h.widget("Close").is_some_and(near), "the × is the Close: {:?} at {close:?}", h.widget("Close"));
+        assert!(close[0] as f32 > card.center().x && (close[1] as f32) < spots[0][1] as f32, "top right: {close:?} in {card:?}");
+        // The ring: about 1 of 30 seconds gone, then 11.
+        let left = |h: &crate::scenario::Harness| super::left(&h.app, &h.ctx);
+        assert!((left(&h) - (1.0 - 1.0 / 30.0)).abs() < 0.03, "{}", left(&h));
+        run(&mut h, 10.0);
+        assert!((left(&h) - (1.0 - 11.0 / 30.0)).abs() < 0.03, "{}", left(&h));
+        // Closing records the device, as Close did.
+        h.step(&serde_json::json!({"click": {"handle": "toast:space_mouse_offer:close"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.preferences.space_mouse_offered.contains("spacenavd"));
+        assert!(!card_up(&h));
+        assert_eq!(h.app.preferences.space_mouse_driver, crate::prefs::SpaceMouseDriver::Spacenavd, "nothing else");
     }
 
     #[test]
@@ -652,7 +712,7 @@ mod preferences_tests {
     /// card's four buttons does anything.
     #[test]
     fn a_click_after_a_guard_became_active_does_nothing_behind_it() {
-        for widget in ["Calibrate…", "Close", "Never show again", "Swap to Hidraw (Direct Driver)"] {
+        for widget in ["Calibrate…", "Close", "Never show again", "Use Direct Driver"] {
             let mut h = spacenavd_harness();
             run(&mut h, 2.0);
             assert!(card_up(&h), "{widget}");
@@ -681,7 +741,8 @@ mod preferences_tests {
                 let mut h = spacenavd_harness();
                 run(&mut h, 2.0);
                 let offer = due(&mut h.app, &h.ctx).expect("due");
-                assert!(offer.actions.contains(&action), "{action:?} is on the card");
+                // Close is the card's × rather than one of its buttons (#7971).
+                assert!(action == Action::Close || offer.actions.contains(&action), "{action:?} is on the card");
                 (h, offer)
             };
             // Control.
@@ -777,7 +838,7 @@ mod preferences_tests {
         h.app.space_mouse.device = Some("spacenavd".into());
         run(&mut h, 2.0);
         assert!(card_up(&h), "the first record shows the offer");
-        assert!(h.widget("Swap to Hidraw (Direct Driver)").is_some(), "with a direct device there, Swap shows");
+        assert!(h.widget("Use Direct Driver").is_some(), "with a direct device there, Swap shows");
         // Hidden for the run (a status toast), it stays hidden when the device is seen again.
         h.app.status = Some(("Done".into(), crate::now_ms(), false));
         run(&mut h, 1.0);
@@ -794,14 +855,14 @@ mod preferences_tests {
         h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd: true, direct: true, denied: false });
         h.app.space_mouse.device = Some("spacenavd".into());
         run(&mut h, 2.0);
-        assert!(card_up(&h) && h.widget("Swap to Hidraw (Direct Driver)").is_none(), "no Swap under Automatic");
+        assert!(card_up(&h) && h.widget("Use Direct Driver").is_none(), "no Swap under Automatic");
         // Without a direct device there is no Swap.
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.space_mouse.drivers = Some(crate::space_mouse::DriversPresent { spacenavd: true, direct: false, denied: false });
         h.app.space_mouse.device = Some("spacenavd".into());
         run(&mut h, 2.0);
-        assert!(card_up(&h) && h.widget("Swap to Hidraw (Direct Driver)").is_none());
+        assert!(card_up(&h) && h.widget("Use Direct Driver").is_none());
     }
 
     /// The same device, plugged back in, gets what it had: its saved calibration applies, Preferences
@@ -818,7 +879,7 @@ mod preferences_tests {
             h.app.preferences.space_mouse_calibrations.insert("hid 046d:c62b".into(), calibration);
             h.app.space_mouse.device = Some("hid 046d:c62b".into());
             if prefs_open {
-                crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_NAVIGATION);
+                crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
             }
             run(&mut h, 2.0);
             assert_eq!(crate::space_mouse::calibration(&h.app), Some(calibration));
@@ -857,7 +918,7 @@ mod preferences_tests {
         let mut h = spacenavd_harness();
         run(&mut h, 2.0);
         assert!(card_up(&h));
-        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_NAVIGATION);
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_MOUSE3D);
         run(&mut h, 3.0);
         assert!(!card_up(&h), "no card over Preferences");
         h.app.prefs_window.open = false;

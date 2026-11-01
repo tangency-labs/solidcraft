@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Lighting presets — a stack of ready-made light set-ups</title>
+  <path d="M24 5L54 5A5 5 0 0 1 59 10L59 40A5 5 0 0 1 54 45L24 45A5 5 0 0 1 19 40L19 10A5 5 0 0 1 24 5Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M10 17L42 17A5 5 0 0 1 47 22L47 54A5 5 0 0 1 42 59L10 59A5 5 0 0 1 5 54L5 22A5 5 0 0 1 10 17Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18.3 41.55A11.5 11.5 0 1 1 33.7 41.55L33.2 45.55L18.8 45.55Z" fill="#b9ddf8" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M21.3 45.55L30.7 45.55A2.5 2.5 0 0 1 33.2 48.05L33.2 50.05A2.5 2.5 0 0 1 30.7 52.55L21.3 52.55A2.5 2.5 0 0 1 18.8 50.05L18.8 48.05A2.5 2.5 0 0 1 21.3 45.55Z" fill="#8e9faf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

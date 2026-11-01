@@ -269,9 +269,11 @@ pub fn panel(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                 });
                 ui.horizontal_wrapped(|ui| {
-                    for plane in ["XY", "XZ", "YZ"] {
-                        if ui_kit::button(ui, crate::i18n::format("sketch_panel.use_plane", &[("plane", plane)]), ui_kit::Button::Normal).clicked() {
-                            draft.choose(json!(plane), plane.into());
+                    // The command takes the plane's id; the button and the choice show its name.
+                    for plane in crate::prefs::OriginPlaneNames::PLANES {
+                        let label = app.preferences.origin_plane_names.label(plane);
+                        if ui_kit::button(ui, crate::i18n::format("sketch_panel.use_plane", &[("plane", label)]), ui_kit::Button::Normal).clicked() {
+                            draft.choose(json!(plane), label.into());
                         }
                     }
                 });

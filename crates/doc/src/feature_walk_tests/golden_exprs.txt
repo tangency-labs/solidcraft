@@ -73,6 +73,13 @@ cylinder
     Radius = cyl.radius (Length)
     Height = cyl.height (Length)
   expressions: cyl.radius, cyl.height, cyl.x, cyl.y, cyl.z
+cylinder_references
+  inputs:
+    Radius = cyl.radius (Length)
+    Height = cyl.height (Length)
+    Reference distance = cyl.reference1 (Length)
+    Reference distance = cyl.reference2 (Length)
+  expressions: cyl.radius, cyl.height, cyl.reference1, cyl.reference2, 0, 0, 0
 sphere
   inputs:
     Radius = sph.radius (Length)

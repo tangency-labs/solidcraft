@@ -1,12 +1,17 @@
 //! The Edit Canvas / Calibrate card the Browser opens for a reference image: position, size,
 //! angle, opacity and flip (live, one undo step per opening), or two points on the image and
-//! their true distance.
+//! their true distance. Calibrate accepts clicks in the viewport on the image (#9108).
 
+use egui::{Pos2, Stroke, vec2};
 use serde_json::{Value, json};
+use solidcraft_engine::doc::canvas::Canvas;
+use solidcraft_engine::geom::Vec2;
 
 use crate::SolveApp;
 use crate::browser::panel_pos;
+use crate::theme::Tokens;
 use crate::ui_kit;
+use crate::viewport::Proj;
 
 pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
     let Some(mut m) = app.tree.canvas_panel.clone() else { return };
@@ -26,6 +31,11 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         .actions(ok, cancel, None)
         .show(ctx, true, |ui| {
             if calibrate {
+                ui_kit::text(
+                    ui,
+                    crate::i18n::tr(if m.next == 0 { "browser.calibrate_click_a" } else { "browser.calibrate_click_b" }),
+                    ui_kit::Text::Note("calibrate_hint"),
+                );
                 for (label, p) in [("Point A", &mut m.a), ("Point B", &mut m.b)] {
                     ui_kit::row(ui, crate::i18n::tr_label(label), |ui| {
                         let [x, y] = p;
@@ -72,6 +82,89 @@ pub(crate) fn panel(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     app.tree.canvas_panel = if closed || action == ui_kit::Action::Cancel { None } else { Some(m) };
+}
+
+/// A viewport click while Calibrate is open: set Point A or B on the image (#9108).
+pub(crate) fn click(app: &mut SolveApp, proj: &Proj, screen: Pos2) -> bool {
+    let Some(mut panel) = app.tree.canvas_panel.clone() else {
+        return false;
+    };
+    if !panel.calibrate {
+        return false;
+    }
+    let doc = &app.session.doc;
+    let Some(c) = doc.canvases.iter().find(|c| c.id == panel.canvas).cloned() else {
+        return false;
+    };
+    let (vals, _) = doc.param_values();
+    let Ok(plane) = doc.canvas_plane(&vals, &c) else {
+        return false;
+    };
+    let (origin, direction) = proj.ray(screen);
+    let Some(world) = plane.intersect_ray(origin, direction) else {
+        return false;
+    };
+    let local = plane.to_local(world);
+    if !on_image(&c, local) {
+        return false;
+    }
+    let point = [local.x, local.y];
+    if panel.next == 0 {
+        panel.a = point;
+        panel.next = 1;
+        app.set_status(crate::i18n::tr("browser.calibrate_click_b"), false);
+    } else {
+        panel.b = point;
+        panel.next = 0;
+        app.set_status(crate::i18n::tr("browser.calibrate_click_a"), false);
+    }
+    app.tree.canvas_panel = Some(panel);
+    true
+}
+
+/// Markers for the two calibration points on the image.
+pub(crate) fn paint_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    let Some(panel) = app.tree.canvas_panel.as_ref().filter(|p| p.calibrate) else {
+        return;
+    };
+    let doc = &app.session.doc;
+    let Some(c) = doc.canvases.iter().find(|c| c.id == panel.canvas) else {
+        return;
+    };
+    let (vals, _) = doc.param_values();
+    let Ok(plane) = doc.canvas_plane(&vals, c) else {
+        return;
+    };
+    let t = Tokens::get();
+    for (i, point) in [panel.a, panel.b].into_iter().enumerate() {
+        let Some(screen) = proj.to_screen(plane.to_world(Vec2::new(point[0], point[1]))) else {
+            continue;
+        };
+        let active = panel.next as usize == i;
+        let stroke = Stroke::new(if active { 2.0 } else { 1.5 }, if active { t.accent } else { t.sel_edge });
+        painter.circle_stroke(screen, 7.0, stroke);
+        painter.circle_filled(screen, 2.5, if active { t.accent } else { t.sel_vertex });
+        let label = if i == 0 { "A" } else { "B" };
+        painter.text(
+            screen + vec2(10.0, -10.0),
+            egui::Align2::LEFT_BOTTOM,
+            label,
+            egui::FontId::proportional(t.font_body),
+            if active { t.accent } else { t.text },
+        );
+    }
+}
+
+fn on_image(c: &Canvas, p: Vec2) -> bool {
+    let [bl, br, _, tl] = c.corners();
+    let (u, v) = (br - bl, tl - bl);
+    let (uu, vv) = (u.dot(u), v.dot(v));
+    if !(uu > 1e-18 && vv > 1e-18) {
+        return true;
+    }
+    let w = p - bl;
+    let (s, t) = (w.dot(u) / uu, w.dot(v) / vv);
+    (-0.05..=1.05).contains(&s) && (-0.05..=1.05).contains(&t)
 }
 
 #[cfg(test)]
@@ -125,5 +218,38 @@ mod tests {
         h.frames(2);
         assert!(h.app.tree.canvas_panel.is_none());
         assert!((width(&h) - 40.0).abs() < 1e-6, "calibrating to half the distance halves the image: {}", width(&h));
+    }
+
+    /// Viewport clicks on the image fill Point A then Point B (#9108).
+    #[test]
+    fn calibrate_picks_two_points_from_viewport_clicks() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let id = canvas(&mut h);
+        h.app.tree.canvas_panel = Some(crate::browser::CanvasPanel::new(&h.app, id, true));
+        h.frames(6);
+        let rect = h.app.viewport.rect.expect("viewport");
+        let proj = crate::viewport::projection(&h.app, rect);
+        let c = h.app.session.doc.canvases[0].clone();
+        let (vals, _) = h.app.session.doc.param_values();
+        let plane = h.app.session.doc.canvas_plane(&vals, &c).unwrap();
+        let ax = c.center.x - 20.0;
+        let bx = c.center.x + 20.0;
+        let sa = proj.to_screen(plane.to_world(solidcraft_engine::geom::Vec2::new(ax, c.center.y))).expect("point A on screen");
+        let sb = proj.to_screen(plane.to_world(solidcraft_engine::geom::Vec2::new(bx, c.center.y))).expect("point B on screen");
+        assert!(super::click(&mut h.app, &proj, sa), "first click sets A");
+        let panel = h.app.tree.canvas_panel.as_ref().unwrap();
+        assert_eq!(panel.next, 1);
+        assert!((panel.a[0] - ax).abs() < 0.5, "{:?}", panel.a);
+        assert!(super::click(&mut h.app, &proj, sb), "second click sets B");
+        let panel = h.app.tree.canvas_panel.as_ref().unwrap();
+        assert_eq!(panel.next, 0);
+        assert!((panel.b[0] - bx).abs() < 0.5, "{:?}", panel.b);
+        let before = panel.a;
+        let miss = plane.to_world(solidcraft_engine::geom::Vec2::new(c.center.x + 500.0, c.center.y));
+        if let Some(sm) = proj.to_screen(miss) {
+            assert!(!super::click(&mut h.app, &proj, sm));
+            assert_eq!(h.app.tree.canvas_panel.as_ref().unwrap().a, before);
+        }
     }
 }

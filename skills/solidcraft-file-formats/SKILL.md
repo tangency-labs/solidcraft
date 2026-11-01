@@ -14,6 +14,8 @@ A design says which format it is in (`"format": "solidcraft/N"`). A change that 
 
 Two PRs that each add a change merge without a conflict. `crates/doc/src/format/pending/README.md` has an example. At release time the maintainer runs `scripts/fold-format-pending.sh`, which moves pending files into `v<N>/` for good; `scripts/test-format-pending.sh` runs in CI. Never add a file to a `v<N>/` folder afterwards. See `docs/releasing.md`.
 
+Drawings follow the same rules with their own numbers, from 1: a drawing-format change is ONE new file in `crates/doc/src/drawing/format/pending/` (see its `README.md`), and the same fold script moves them into `crates/doc/src/drawing/format/v<N>/`.
+
 ## Import
 - Every import (STEP, IGES, 3MF, STL, OBJ; inserted, dropped, opened, or run as `file.insert_step`, `file.insert_mesh` or `doc.open`) becomes a new component named after the file, with the Import feature inside it. Bodies never land loose.
 - Imported files are untrusted: sizes, entity counts and nesting are capped, and every kernel call is guarded (`skills/solidcraft-crash-safety/SKILL.md`). What cannot be read becomes a warning on the feature.

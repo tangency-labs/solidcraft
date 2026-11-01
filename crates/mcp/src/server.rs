@@ -25,22 +25,65 @@ const RESOURCE_NOT_FOUND: i64 = -32002;
 /// Most messages in one JSON-RPC batch.
 const MAX_BATCH: usize = 1000;
 
+/// What every MCP client is told at `initialize`: how to plan, build and verify a part. It stays
+/// version-neutral (no workaround for a quirk of the current kernel or solver: those belong in
+/// `skills/solidcraft-modeling/reference.md`, which `skill_reference` serves per release), and
+/// `tests::instructions_name_only_real_tools` checks every tool and command id it names.
 const INSTRUCTIONS: &str = "SolidCraft is an independent parametric 3D CAD app, and these tools drive it: when its window is \
-open the user watches the model appear, otherwise a headless session builds it. When asked to design or build a part \
-(a bracket, an enclosure, a gear) do it with these tools straight away; nothing needs explaining first. Units are millimetres \
-and degrees in expressions (internally radians), Z is up. Model like this: `sketch.create {plane: XY}`, draw \
-(`sketch.rectangle.two_point {p0, p1}`, `sketch.circle.center {center, radius}`, `sketch.line {points, closed}`), constrain \
-and dimension (`sketch.dimension {entities, value}`; values may name parameters), `sketch.finish`, then features \
-(`solid.extrude {distance, operation?: new|join|cut|intersect}`, `solid.revolve`, `solid.fillet {edges: [[x,y,z] point on \
-edge], radius}`, `solid.chamfer`, patterns, mirror, primitives). Use `batch` for several steps at once, \
-`list_commands` for ids and parameter docs, `describe_command` for a command's schemas, `inspect_design` / `measure` to verify, \
-`body_topology` to find edge points, `set_parameter` to drive the design and `screenshot` to look at it. A call whose error \
-starts `still running:` was not cancelled: don't send it again; `pending` waits for its result.";
+open the user watches the model appear, otherwise a headless session builds it. When asked to design or build a part, do it \
+with these tools straight away. Units are millimetres and degrees in expressions, Z is up.\n\n\
+Start: for anything beyond one primitive, call `skill_reference {\"skill\":\"solidcraft-modeling\"}` first (command shapes, \
+ids, plane axes, worked examples and the known traps of this version; `file: \"SKILL.md\"` has the workflow). Then \
+`inspect_design {\"measure\":false,\"sketches\":false}` to see what is already there.\n\n\
+Plan: work the numbers out first (the parameters, the expected volume and bounding box after each stage, the world point you \
+will use for each edge or face pick). Then build in a few `batch` calls (all-or-nothing; the reply names the failing step; \
+`save`, `measure` and `set_parameter` can be steps). Use `verbose: false`. Name every feature. `list_commands {\"filter\": word}` \
+gives ids and one-line parameter docs (never unfiltered); `describe_command` gives one command's docs and schemas.\n\n\
+Routes: a plate, block, boss, standoff or hole is cheapest as a primitive with expression fields (`solid.box`, `solid.cylinder`, \
+`solid.hole`, `solid.fillet`, `solid.shell`, patterns and mirror), no sketch. Sketch when the profile is not a box or a circle. \
+Fillet outside edges before shelling, build inside features after the shell, then the holes and cuts through walls. Give a blind \
+hole or a hole through one wall of a hollow part its depth.\n\n\
+Parametric: a size or position that must follow a parameter is an expression in a feature field (`\"L/2 - 10\"`), a sketch \
+dimension to `\"origin\"` or an edge, or a pattern spacing; a plain number never follows a parameter. Every sketch must end at \
+dof 0 (`sketch.solve` reports it). A pick (`edges: [[x,y,z]]`, `faces: [[x,y,z]]`) is a number that snaps to the nearest edge \
+or face and follows it when parameters change.\n\n\
+Verify: `measure {}` after each stage and compare volume and bbox with your numbers; `ok: true` alone proves nothing: a cut \
+that leaves the volume unchanged has missed, a join that adds a body did not touch. Positions of holes and bosses come from \
+`body_topology` (cylinder origin, axis and radius), not from the volume or the centre of mass of a symmetric part. To check \
+that the design follows its parameters, `check_parameters {\"set\": {name: value}}` tries the values and puts the design \
+back (volume, errors, cylinder axes), or change them in one `batch` with `coalesce_parameters: true` (one rebuild), `measure`, \
+then set them back the same way before saving.\n\n\
+Fix, don't rebuild: a wrong number in a feature is changed with `timeline.edit` or `parameters.change` on its input \
+(`parameters.list {\"filter\":\"feature\"}` names them); `edit.checkpoint` and `edit.restore_checkpoint` go back exactly.\n\n\
+A call whose error starts `still running:` was not cancelled: don't send it again; `pending` waits for its result.";
 
 pub struct Server {
     backend: Box<dyn Backend>,
     initialized: bool,
     scope: Option<PathScope>,
+}
+
+/// The design files a call opens or saves (#7181): `open` and `save`, and the commands they run
+/// (`doc.open`, `file.save`, `file.save_as`) through `execute` or as `batch` steps. Each reads or
+/// writes the file it names through the agent's scope.
+fn design_files(name: &str, args: &Value) -> Vec<String> {
+    let step = |command: &str, params: &Value| {
+        let params = match command {
+            "open" | "save" | "doc.open" | "file.save" | "file.save_as" => params,
+            "execute" if matches!(params["command"].as_str(), Some("doc.open" | "file.save" | "file.save_as")) => &params["params"],
+            _ => return None,
+        };
+        params["path"].as_str().map(str::to_owned)
+    };
+    match name {
+        "batch" => args["commands"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|s| step(s["command"].as_str().or_else(|| s["id"].as_str())?, &s["params"]))
+            .collect(),
+        _ => step(name, args).into_iter().collect(),
+    }
 }
 
 fn response(id: Value, result: Value) -> Value {
@@ -185,10 +228,21 @@ impl Server {
                     Some(a) => a.clone(),
                 };
                 check_arguments(name, &args).map_err(|e| (INVALID_PARAMS, e))?;
-                // The open design's folder counts as it is now (a save-as or open moves it).
-                let scope = self.scope.clone().map(|s| s.with_design(self.backend.design_path().as_deref()));
+                // The open design's folder counts, and goes on counting for the rest of this run
+                // when a save-as or open moves the design elsewhere (#7181).
+                let open = self.backend.design_path();
+                self.scope = self.scope.take().map(|s| s.with_design(open.as_deref()));
+                let scope = self.scope.clone();
                 let backend = self.backend.as_mut();
                 let mut result = vfs::scoped(scope, || call_tool(backend, name, &args));
+                // So does the folder of each design file the call opened or saved: the call reached
+                // it, so it was one of the agent's folders already. Only paths given in full: a
+                // running app resolves a relative one against its own working folder.
+                if result["isError"] != true {
+                    for file in design_files(name, &args).iter().filter(|f| std::path::Path::new(f).is_absolute()) {
+                        self.scope = self.scope.take().map(|s| s.with_design_file(file));
+                    }
+                }
                 if let Some(note) = backend.notice()
                     && let Some(content) = result.get_mut("content").and_then(Value::as_array_mut)
                 {

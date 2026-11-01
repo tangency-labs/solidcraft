@@ -419,7 +419,7 @@ fn wait_for_turn(control: &mut Control, mut chat: Value, began: Instant, end: In
         let idle = !matches!(state, "busy" | "starting") && !turn && !queued;
         // A turn can start and end between two polls: then the conversation has its answer.
         let answered = chat["items"].as_array().into_iter().flatten().any(|i| i.get("user").is_none());
-        if idle && (seen_busy || answered || matches!(state, "exited" | "auth" | "off") || began.elapsed() >= START_GRACE) {
+        if idle && (seen_busy || answered || matches!(state, "exited" | "failed" | "auth" | "off") || began.elapsed() >= START_GRACE) {
             return Ok((chat, false));
         }
         let Some(left) = end.checked_duration_since(Instant::now()).filter(|d| !d.is_zero()) else { return Ok((chat, true)) };

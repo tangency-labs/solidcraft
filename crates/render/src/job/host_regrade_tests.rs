@@ -47,6 +47,7 @@ fn fixture(raw: bool) -> (ImageHost, JobHandle, Arc<AtomicUsize>, Presentation) 
     let begins = Arc::new(AtomicUsize::new(0));
     let host = ImageHost::cooperative_with(Arc::new(FixtureExecutor(begins.clone())));
     let request = ImageRequest {
+        studio_weights: None,
         width: 16,
         height: 16,
         background: [40, 80, 120],
@@ -81,6 +82,14 @@ fn finish(host: &ImageHost, handle: &JobHandle) {
     }
     let status = handle.status().unwrap();
     assert_eq!(status.progress.phase, Phase::Completed, "{:?}", status.error);
+}
+
+#[test]
+fn an_empty_pixel_shows_the_background_code_unchanged() {
+    let display = Presentation { background: [40, 80, 120], ..Default::default() }.display(1, 1).unwrap();
+    let mut rgba = [0; 4];
+    display.encode(&[[0.0; 4]], &mut rgba, &CancelToken::default()).unwrap();
+    assert_eq!(rgba, [40, 80, 120, 255]);
 }
 
 #[test]

@@ -7,7 +7,118 @@
 //! reaches the design through SolidCraft's MCP server instead), and terminal login, so an agent
 //! that needs one describes a command for the user to run rather than asking for a key.
 
+use serde::Serialize;
 use serde_json::{Value, json};
+
+/// One advertised value, with an optional human-readable group label.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigChoice {
+    pub value: String,
+    pub name: String,
+    pub description: String,
+    pub group: Option<String>,
+}
+/// A supported ACP select option; identifiers and categories belong to the agent.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigOption {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub category: String,
+    pub current_value: String,
+    pub options: Vec<ConfigChoice>,
+}
+
+/// Parse ACP select options as a bounded authoritative snapshot.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ConfigParse {
+    Absent,
+    Invalid,
+    Snapshot(Vec<ConfigOption>),
+}
+pub fn config_options(v: &Value) -> ConfigParse {
+    let Some(raw_list) = v.get("configOptions") else {
+        return ConfigParse::Absent;
+    };
+    let Some(list) = raw_list.as_array() else {
+        return ConfigParse::Invalid;
+    };
+    let mut out = Vec::new();
+    let mut ids = std::collections::HashSet::new();
+    for x in list.iter().take(64) {
+        match x.get("type").and_then(Value::as_str) {
+            Some("select") => {}
+            Some(_) => continue,
+            None => return ConfigParse::Invalid,
+        }
+        let Some(id) = x.get("id").and_then(Value::as_str).filter(|s| !s.is_empty() && s.len() <= 256) else {
+            return ConfigParse::Invalid;
+        };
+        let Some(current_value) = x.get("currentValue").and_then(Value::as_str).filter(|s| s.len() <= 256) else {
+            return ConfigParse::Invalid;
+        };
+        let Some(raw) = x.get("options").and_then(Value::as_array) else {
+            return ConfigParse::Invalid;
+        };
+        if !ids.insert(id.to_string()) {
+            continue;
+        }
+        let mut choices = Vec::new();
+        let mut values = std::collections::HashSet::new();
+        'items: for item in raw.iter().take(128) {
+            if choices.len() >= 128 {
+                break;
+            }
+            let group =
+                item.get("name").and_then(Value::as_str).or_else(|| item.get("group").and_then(Value::as_str)).map(|s| s.chars().take(256).collect());
+            if let Some(cs) = item.get("options").and_then(Value::as_array) {
+                for c in cs.iter().take(128) {
+                    if choices.len() >= 128 {
+                        break 'items;
+                    }
+                    let Some(value) = c.get("value").and_then(Value::as_str).filter(|s| !s.is_empty() && s.len() <= 256) else {
+                        continue;
+                    };
+                    if !values.insert(value.to_string()) {
+                        continue;
+                    }
+                    choices.push(ConfigChoice {
+                        value: value.into(),
+                        name: c.get("name").and_then(Value::as_str).unwrap_or(value).chars().take(256).collect(),
+                        description: c.get("description").and_then(Value::as_str).unwrap_or("").chars().take(1024).collect(),
+                        group: group.clone(),
+                    });
+                }
+            } else {
+                let Some(value) = item.get("value").and_then(Value::as_str).filter(|s| !s.is_empty() && s.len() <= 256) else {
+                    continue;
+                };
+                if values.insert(value.to_string()) {
+                    choices.push(ConfigChoice {
+                        value: value.into(),
+                        name: item.get("name").and_then(Value::as_str).unwrap_or(value).chars().take(256).collect(),
+                        description: item.get("description").and_then(Value::as_str).unwrap_or("").chars().take(1024).collect(),
+                        group: None,
+                    });
+                }
+            }
+        }
+        if choices.is_empty() {
+            return ConfigParse::Invalid;
+        }
+        out.push(ConfigOption {
+            id: id.into(),
+            name: x.get("name").and_then(Value::as_str).unwrap_or(id).chars().take(256).collect(),
+            description: x.get("description").and_then(Value::as_str).unwrap_or("").chars().take(1024).collect(),
+            category: x.get("category").and_then(Value::as_str).unwrap_or("").chars().take(128).collect(),
+            current_value: current_value.into(),
+            options: choices,
+        });
+    }
+    ConfigParse::Snapshot(out)
+}
 
 /// The protocol version we speak.
 pub const PROTOCOL_VERSION: u64 = 1;
@@ -100,11 +211,14 @@ pub fn wsl_path(path: &std::path::Path) -> std::path::PathBuf {
     }
 }
 
-/// What every session is told about where it is. Agents that don't read `_meta` ignore it.
+/// What every session is told about where it is. An agent with no route for it in
+/// [`session_new_params`] doesn't get it.
 pub const SYSTEM_NOTE: &str = "You are running inside SolidCraft, a parametric 3D CAD application, as the user's assistant. \
 The open design is reachable through the `solidcraft-app` MCP server: use its tools (list_commands, batch, execute, inspect_design, \
-measure, screenshot, set_parameter, undo) to read and change the design the user is looking at, and verify with measure or \
-inspect_design. Prefer one `batch` over many small calls. Saving, opening or exporting files waits for the user's approval in \
+measure, screenshot, set_parameter, undo, skill_reference) to read and change the design the user is looking at, and verify with \
+measure or inspect_design. Before building anything beyond one primitive, read `skill_reference` for `solidcraft-modeling` (its \
+SKILL.md has the workflow, its reference.md the command shapes and this version's traps), work the numbers out first, and after \
+each stage compare `measure` with them. Prefer one `batch` over many small calls. Saving, opening or exporting files waits for the user's approval in \
 the chat, and each message allows a limited number of changes. Don't use shell or file tools: work through the SolidCraft tools. \
 Keep answers short.";
 
@@ -113,19 +227,44 @@ Keep answers short.";
 pub const CLAUDE_DISALLOWED_TOOLS: &[&str] =
     &["Bash", "BashOutput", "KillShell", "Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep", "WebFetch", "WebSearch", "Task"];
 
-pub fn session_new_params(cwd: &std::path::Path, bridge: Option<&McpBridge>) -> Value {
+/// The `session/new` parameters. `init` is the agent's `initialize` reply: agents read the system
+/// note from different places (#9811), and the standard field may only go to an agent offering it.
+pub fn session_new_params(cwd: &std::path::Path, bridge: Option<&McpBridge>, init: &Value) -> Value {
     let servers: Vec<Value> = bridge.map(McpBridge::to_json).into_iter().collect();
-    json!({
+    let mut meta = json!({
+        // The Claude adapter's own key, for its versions without the standard field.
+        "systemPrompt": {"append": SYSTEM_NOTE},
+        // Hosts may opt a session out of "bypass permissions" (the Claude adapter reads it):
+        // every tool call the agent asks about reaches the panel.
+        // Its own shell and file tools are off: the agent works through SolidCraft's tools.
+        "claudeCode": {"options": {"allowDangerouslySkipPermissions": false, "disallowedTools": CLAUDE_DISALLOWED_TOOLS}},
+    });
+    if takes_antigravity_note(init)
+        && let Some(meta) = meta.as_object_mut()
+    {
+        meta.insert("antigravity".into(), json!({"systemPrompt": {"append": SYSTEM_NOTE}}));
+    }
+    let mut params = json!({
         "cwd": cwd.to_string_lossy(),
         "mcpServers": servers,
-        "_meta": {
-            "systemPrompt": {"append": SYSTEM_NOTE},
-            // Hosts may opt a session out of "bypass permissions" (the Claude adapter reads it):
-            // every tool call the agent asks about reaches the panel.
-            // Its own shell and file tools are off: the agent works through SolidCraft's tools.
-            "claudeCode": {"options": {"allowDangerouslySkipPermissions": false, "disallowedTools": CLAUDE_DISALLOWED_TOOLS}},
-        },
-    })
+        "_meta": meta,
+    });
+    if takes_standard_note(init)
+        && let Some(params) = params.as_object_mut()
+    {
+        params.insert("systemPrompt".into(), json!({"mode": "append", "content": [{"type": "text", "text": SYSTEM_NOTE}]}));
+    }
+    params
+}
+
+/// The agent offers ACP's `systemPrompt` field on its sessions.
+fn takes_standard_note(init: &Value) -> bool {
+    init.pointer("/agentCapabilities/sessionCapabilities/systemPrompt").is_some_and(|offer| !offer.is_null())
+}
+
+/// Antigravity offers its own key under `_meta` and doesn't read the Claude adapter's.
+fn takes_antigravity_note(init: &Value) -> bool {
+    init.pointer("/agentCapabilities/_meta/antigravity/systemPrompt/append").and_then(Value::as_bool).unwrap_or(false)
 }
 
 pub fn prompt_params(session: &str, parts: &[super::backend::PromptPart]) -> Value {
@@ -182,6 +321,9 @@ pub fn models(session: &Value) -> Option<(String, Vec<ModelInfo>)> {
 /// `session/set_model` parameters.
 pub fn set_model_params(session: &str, model: &str) -> Value {
     json!({"sessionId": session, "modelId": model})
+}
+pub fn set_config_option_params(session: &str, id: &str, value: &str) -> Value {
+    json!({"sessionId": session, "configId": id, "value": value})
 }
 
 /// Whether the agent takes embedded documents in a message
@@ -307,23 +449,47 @@ pub struct PermissionOption {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Incoming {
     /// The reply to one of our requests.
-    Reply { id: u64, result: Result<Value, (i64, String)> },
+    Reply {
+        id: u64,
+        result: Result<Value, (i64, String)>,
+    },
     /// Text the agent streams (`thought`: its reasoning, shown dimmed).
-    Text { thought: bool, text: String },
+    Text {
+        thought: bool,
+        text: String,
+    },
     /// A new tool call, or news about one (`title`/`status` when they changed).
-    Tool { id: String, title: Option<String>, kind: Option<String>, status: Option<ToolStatus>, input: Option<Value>, output: Option<String> },
+    Tool {
+        id: String,
+        title: Option<String>,
+        kind: Option<String>,
+        status: Option<ToolStatus>,
+        input: Option<Value>,
+        output: Option<String>,
+    },
     /// The agent's plan: each entry with its status.
     Plan(Vec<(String, String)>),
     /// The agent asks before running a tool call; answered with [`permission_reply`].
-    Permission { rpc: Value, title: String, options: Vec<PermissionOption> },
+    Permission {
+        rpc: Value,
+        title: String,
+        options: Vec<PermissionOption>,
+    },
     /// The agent says whether it is logged in (an extension both adapters send).
     AuthStatus(String),
     /// The agent switched to another of its modes.
     ModeChanged(String),
     /// The agent switched to another model.
     ModelChanged(String),
+    ConfigOptions {
+        session: String,
+        options: Vec<ConfigOption>,
+    },
     /// A request we don't serve (file system, terminal, …): answer "method not found".
-    Unsupported { rpc: Value, method: String },
+    Unsupported {
+        rpc: Value,
+        method: String,
+    },
     /// Anything else (mode and command lists, usage): nothing to show.
     Ignored,
 }
@@ -399,7 +565,7 @@ pub fn parse(line: &str) -> Option<Incoming> {
             Some(Incoming::Permission { rpc: id.clone(), title, options })
         }
         (Some(m), Some(id)) => Some(Incoming::Unsupported { rpc: id.clone(), method: m.to_string() }),
-        (Some("session/update"), None) => Some(update(params.get("update")?)),
+        (Some("session/update"), None) => Some(update(params.get("update")?, params.get("sessionId").and_then(Value::as_str).unwrap_or(""))),
         (Some("_auth/status_update"), None) => {
             params.get("authStatus").and_then(|s| s.get("label")).and_then(Value::as_str).map(|l| Incoming::AuthStatus(l.to_string()))
         }
@@ -407,7 +573,7 @@ pub fn parse(line: &str) -> Option<Incoming> {
     }
 }
 
-fn update(u: &Value) -> Incoming {
+fn update(u: &Value, session: &str) -> Incoming {
     let s = |k: &str| u.get(k).and_then(Value::as_str).map(str::to_string);
     match u.get("sessionUpdate").and_then(Value::as_str) {
         Some(kind @ ("agent_message_chunk" | "agent_thought_chunk")) => match u.get("content").and_then(content_text) {
@@ -433,6 +599,10 @@ fn update(u: &Value) -> Incoming {
         Some("current_model_update") => match s("currentModelId").or_else(|| s("modelId")) {
             Some(m) => Incoming::ModelChanged(m),
             None => Incoming::Ignored,
+        },
+        Some("config_option_update") => match config_options(u) {
+            ConfigParse::Snapshot(options) if !session.is_empty() => Incoming::ConfigOptions { session: session.into(), options },
+            _ => Incoming::Ignored,
         },
         Some("plan") => Incoming::Plan(
             u.get("entries")
@@ -535,14 +705,47 @@ mod tests {
     #[test]
     fn the_session_gets_the_bridged_mcp_server_without_a_token_or_any_path() {
         let b = McpBridge { cli: "/opt/solidcraft/solidcraft-cli".into(), port: 41234 };
-        let p = session_new_params(std::path::Path::new("/home/u/designs"), Some(&b));
+        let p = session_new_params(std::path::Path::new("/home/u/designs"), Some(&b), &json!({}));
         let s = &p["mcpServers"][0];
         assert_eq!(s["name"], BRIDGE_NAME);
         assert_eq!(s["args"], json!(["mcp", "--connect", "127.0.0.1:41234"]));
         let text = p.to_string();
         assert!(!text.contains("allow-any-path") && !text.contains("TOKEN") && !text.contains("token"), "{text}");
         assert!(p["_meta"]["claudeCode"]["options"]["disallowedTools"].as_array().is_some_and(|t| t.iter().any(|x| x == "Bash")));
-        assert_eq!(session_new_params(std::path::Path::new("/tmp"), None)["mcpServers"], json!([]));
+        assert_eq!(session_new_params(std::path::Path::new("/tmp"), None, &json!({}))["mcpServers"], json!([]));
+    }
+
+    /// #9811: the note goes by the routes an agent's `initialize` reply offers, and the standard
+    /// field never goes to an agent that doesn't offer it, as the protocol asks.
+    #[test]
+    fn the_system_note_takes_every_route_the_agent_offers() {
+        let params = |init: Value| session_new_params(std::path::Path::new("/tmp"), None, &init);
+        let standard = json!({"mode": "append", "content": [{"type": "text", "text": SYSTEM_NOTE}]});
+
+        let offers_standard = params(json!({"agentCapabilities": {"sessionCapabilities": {"systemPrompt": {}}}}));
+        assert_eq!(offers_standard["systemPrompt"], standard);
+        assert!(offers_standard["_meta"].get("antigravity").is_none());
+
+        let offers_antigravity = params(json!({"agentCapabilities": {"_meta": {"antigravity": {"systemPrompt": {"append": true}}}}}));
+        assert_eq!(offers_antigravity["_meta"]["antigravity"]["systemPrompt"]["append"], SYSTEM_NOTE);
+        assert!(offers_antigravity.get("systemPrompt").is_none());
+
+        for none in [
+            json!({}),
+            json!({"agentCapabilities": {"sessionCapabilities": {"systemPrompt": null}}}),
+            json!({"agentCapabilities": {"_meta": {"antigravity": {"systemPrompt": {"append": false}}}}}),
+        ] {
+            let p = params(none);
+            assert!(p.get("systemPrompt").is_none(), "{p}");
+            assert!(p["_meta"].get("antigravity").is_none(), "{p}");
+        }
+
+        // Every session keeps the key older Claude adapters read, and the tools they turn off.
+        for init in [json!({}), json!({"agentCapabilities": {"sessionCapabilities": {"systemPrompt": {}}}})] {
+            let p = params(init);
+            assert_eq!(p["_meta"]["systemPrompt"]["append"], SYSTEM_NOTE);
+            assert!(p["_meta"]["claudeCode"]["options"]["disallowedTools"].is_array());
+        }
     }
 
     /// #5546: an agent started through `wsl.exe` gets the session's paths as WSL shows them.
@@ -565,7 +768,7 @@ mod tests {
         assert_eq!(wsl(r"\\server\share\x"), r"\\server\share\x");
 
         let b = McpBridge { cli: r"C:\Program Files\SolidCraft\solidcraft-cli.exe".into(), port: 41234 };
-        let p = session_new_params(&wsl_path(std::path::Path::new(r"C:\Users\u\work")), Some(&b.in_wsl()));
+        let p = session_new_params(&wsl_path(std::path::Path::new(r"C:\Users\u\work")), Some(&b.in_wsl()), &json!({}));
         assert_eq!(p["cwd"], "/mnt/c/Users/u/work");
         assert_eq!(p["mcpServers"][0]["command"], "/mnt/c/Program Files/SolidCraft/solidcraft-cli.exe");
         assert_eq!(p["mcpServers"][0]["args"], json!(["mcp", "--connect", "127.0.0.1:41234"]));
@@ -629,7 +832,7 @@ mod tests {
     fn long_tool_output_is_cut_on_a_character_boundary() {
         let long = "é".repeat(3000);
         let u = json!({"sessionUpdate": "tool_call", "toolCallId": "t", "content": [{"type": "content", "content": {"type": "text", "text": long}}]});
-        let Incoming::Tool { output: Some(o), .. } = update(&u) else { panic!() };
+        let Incoming::Tool { output: Some(o), .. } = update(&u, "s") else { panic!() };
         assert!(o.len() <= MAX_OUTPUT + 3 && o.ends_with('…'));
     }
 
@@ -650,5 +853,42 @@ mod tests {
         let changed = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"current_model_update","currentModelId":"haiku"}}}"#;
         assert_eq!(parse(changed), Some(Incoming::ModelChanged("haiku".into())));
         assert_eq!(set_model_params("s", "opus"), json!({"sessionId": "s", "modelId": "opus"}));
+        assert_eq!(set_config_option_params("s1", "vendor.model", "smart"), json!({"sessionId":"s1","configId":"vendor.model","value":"smart"}));
+    }
+
+    #[test]
+    fn config_options_parse_flat_and_grouped_selects_and_ignore_unsupported() {
+        let v = json!({"configOptions":[
+            {"id":"arbitrary","name":"Model","category":"model","type":"select","currentValue":"a","options":[{"value":"a","name":"A"}]},
+            {"id":"effort","category":"thought_level","type":"select","currentValue":"high","options":[{"group":"Reasoning","options":[{"value":"high","name":"High"}]}]},
+            {"id":"bad","type":"boolean"}]});
+        let ConfigParse::Snapshot(options) = config_options(&v) else { panic!() };
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0].id, "arbitrary");
+        assert_eq!(options[1].options[0].group.as_deref(), Some("Reasoning"));
+        assert!(matches!(
+            config_options(&json!({"configOptions":[{"type":"select","id":"broken","currentValue":"x","options":[]}]})),
+            ConfigParse::Invalid
+        ));
+        assert_eq!(config_options(&json!({"configOptions":[]})), ConfigParse::Snapshot(vec![]));
+        let notification = json!({"sessionUpdate":"config_option_update","configOptions":[]});
+        assert_eq!(update(&notification, "s"), Incoming::ConfigOptions { session: "s".into(), options: vec![] });
+    }
+
+    #[test]
+    fn config_snapshots_bound_choices_and_preserve_unknown_categories() {
+        let choices: Vec<_> = (0..300).map(|n| json!({"value":n.to_string(),"name":"Choice"})).collect();
+        let option = json!({"id":"custom","name":"Custom","type":"select","currentValue":"0","options":[
+            {"group":"internal-id","name":"Readable group","options":choices},
+            {"value":"extra","name":"Extra"}
+        ]});
+        let ConfigParse::Snapshot(options) = config_options(&json!({"configOptions":[option.clone(),option]})) else { panic!() };
+        assert_eq!(options.len(), 1, "duplicate IDs do not produce duplicate controls");
+        assert_eq!(options[0].options.len(), 128, "the choice cap spans groups and flat entries");
+        assert_eq!(options[0].options[0].group.as_deref(), Some("Readable group"));
+        assert_eq!(options[0].category, "", "categories are optional metadata");
+        assert_eq!(config_options(&json!({})), ConfigParse::Absent);
+        assert_eq!(config_options(&json!({"configOptions":null})), ConfigParse::Invalid);
+        assert_eq!(config_options(&json!({"configOptions":[{"type":"select","id":"broken"}]})), ConfigParse::Invalid);
     }
 }

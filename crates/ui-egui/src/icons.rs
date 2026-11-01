@@ -32,6 +32,14 @@ enum Finish {
 #[derive(Clone, Default)]
 struct Cache(Arc<Mutex<CacheEntries>>);
 
+/// Drop rasterised icon textures so the next paint uploads them again (wake from sleep, #8749).
+pub(crate) fn clear_texture_cache(ctx: &egui::Context) {
+    let cache = ctx.data_mut(|d| d.get_temp_mut_or_insert_with(egui::Id::new("sc_icon_cache"), Cache::default).clone());
+    if let Ok(mut entries) = cache.0.lock() {
+        entries.textures.clear();
+    }
+}
+
 #[derive(Default)]
 struct CacheEntries {
     palette: Option<icon_svg::Palette>,

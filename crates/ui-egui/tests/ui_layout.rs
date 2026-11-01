@@ -1,6 +1,6 @@
 //! Layout checks over every toolbar command, headless (see `solidcraft_ui_egui::scenario`):
-//! each command's dialog opens docked at the viewport's right within its width limits, and
-//! every window it opens fits on screen.
+//! each command's dialog opens docked at the viewport's right within its width limits (or in
+//! the left column, when the preferences put it there), and every window it opens fits on screen.
 
 use serde_json::{Value, json};
 use solidcraft_ui_egui::scenario::{Harness, check, rect_of};
@@ -52,6 +52,44 @@ fn every_dialog_opens_docked_within_its_width_limits() {
         }
     }
     assert!(seen > 20, "only {seen} commands opened a dialog");
+    assert!(bad.is_empty(), "{} problems:\n{}", bad.len(), bad.join("\n"));
+}
+
+/// Dialogs › In the left column (#6707): every command's dialog opens in the browser's place, at
+/// least as wide as the browser and its own card, and fits on screen.
+#[test]
+fn every_dialog_opens_in_the_left_column_when_asked() {
+    let mut bad = Vec::new();
+    let mut seen = 0;
+    for spec in solidcraft_engine::command_specs() {
+        if spec.tab.is_empty() || spec.tab == "SKETCH" {
+            continue;
+        }
+        let mut h = harness();
+        h.call("ui.prefs", json!({"dialog_place": "left_column"}));
+        h.frames(2);
+        let Some(browser) = rect_of("browser:card") else {
+            bad.push(format!("{}: no browser before the dialog", spec.id));
+            continue;
+        };
+        h.call("ui.start", json!({"command": spec.id}));
+        h.frames(4);
+        let (Some(dialog), Some(column)) = (rect_of("dialog:outer").filter(|_| h.app.dialog.is_some()), rect_of("dialog:column")) else {
+            continue;
+        };
+        seen += 1;
+        let screen = h.ctx.content_rect();
+        if (dialog.left() - browser.left()).abs() > 1.0 || (dialog.top() - browser.top()).abs() > 1.0 {
+            bad.push(format!("{}: dialog {dialog:?} is not in the browser's place {browser:?}", spec.id));
+        }
+        if dialog.width() < browser.width().max(260.0) - 2.5 || (dialog.width() - column.width()).abs() > 2.5 {
+            bad.push(format!("{}: dialog width {:.0}, column {:.0}, browser {:.0}", spec.id, dialog.width(), column.width(), browser.width()));
+        }
+        if !screen.expand(1.0).contains_rect(dialog) || rect_of("browser:card").is_some() {
+            bad.push(format!("{}: dialog {dialog:?} off screen or beside a browser", spec.id));
+        }
+    }
+    assert!(seen > 20, "only {seen} commands opened a dialog in the column");
     assert!(bad.is_empty(), "{} problems:\n{}", bad.len(), bad.join("\n"));
 }
 

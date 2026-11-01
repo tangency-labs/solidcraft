@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Faces and edges</title>
+  <path d="M32 6 L55 19 L32 32 L9 19Z" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 6 L55 19 L55 45 L32 58 L9 45 L9 19Z" fill="none" stroke="currentColor" stroke-width="4.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 32L9 19M32 32L55 19M32 32L32 58" fill="none" stroke="currentColor" stroke-width="3.6" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

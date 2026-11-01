@@ -15,6 +15,9 @@ type Reply = Result<(String, Vec<u8>), String>;
 pub struct Download {
     reply: Rc<RefCell<Option<Reply>>>,
     pending: Option<(String, Vec<u8>)>,
+    /// The downloaded design being opened (a few features a frame, #10198): the answer to come,
+    /// the name it takes and the file it was read from.
+    opening: Option<(std::sync::mpsc::Receiver<serde_json::Value>, String, String)>,
 }
 
 impl Download {
@@ -33,13 +36,14 @@ impl Download {
     }
 
     pub fn tick(&mut self, app: &mut SolveApp, ctx: &egui::Context) {
+        self.opened(app);
         if let Some(reply) = self.reply.borrow_mut().take() {
             match reply {
                 Ok(file) => self.pending = Some(file),
                 Err(error) => app.set_status(format!("Could not open design link: {error}"), true),
             }
         }
-        if self.pending.is_none() || app.file_picker_busy() {
+        if self.pending.is_none() || self.opening.is_some() || app.file_picker_busy() {
             return;
         }
         if solidcraft_ui_egui::documents::any_dirty(app) {
@@ -71,18 +75,33 @@ impl Download {
             }
         }
         let Some((name, bytes)) = self.pending.take() else { return };
-        // The extension selects the design loader even when the URL has no extension.
-        let path = "/linked/design.solidcraft";
-        vfs::insert(path, bytes);
-        app.open_path(path);
-        if app.session.path.as_deref() == Some(path) {
+        // The extension selects the design loader even when the URL has no extension. Named
+        // after the link, as the progress card shows the file's name.
+        let file: String = name.chars().map(|c| if matches!(c, '/' | '\\') { '_' } else { c }).collect();
+        let path = format!("/linked/{}.{}", if file.is_empty() { "design" } else { &file }, solidcraft_engine::io::DESIGN_EXT);
+        vfs::insert(&path, bytes);
+        // Opened as any design is, with its progress and Cancel; finished in `opened`.
+        self.opening = Some((app.open_path_answered(&path), name, path));
+        self.opened(app);
+    }
+
+    /// The downloaded design is in: it is an unsaved copy under the link's name.
+    fn opened(&mut self, app: &mut SolveApp) {
+        let Some((rx, _, _)) = &self.opening else { return };
+        let (ok, cancelled) = match rx.try_recv() {
+            Ok(reply) => (reply["ok"].as_bool() == Some(true), reply["error"].as_str().is_some_and(|e| e.contains("cancelled"))),
+            Err(std::sync::mpsc::TryRecvError::Empty) => return,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => (false, false),
+        };
+        let Some((_, name, path)) = self.opening.take() else { return };
+        if ok && app.session.path.as_deref() == Some(path.as_str()) {
             app.session.path = None;
             app.session.doc_mut().name = name;
             app.session.mark_unsaved();
-        } else {
+        } else if !ok && !cancelled {
             app.set_status("Could not open design link: the downloaded file is not a valid SolidCraft design", true);
         }
-        let _ = vfs::remove(path);
+        let _ = vfs::remove(&path);
     }
 }
 
@@ -90,9 +109,14 @@ async fn fetch(value: &str) -> Reply {
     let window = web_sys::window().ok_or("No browser window")?;
     let page_origin = window.location().origin().map_err(|_| "Cannot read page origin")?;
     let url = design_url(value, &page_origin)?;
-    let name = url.path_segments().and_then(|mut segments| segments.next_back()).filter(|name| !name.is_empty()).unwrap_or("Design.solidcraft");
+    let name = url.path_segments().and_then(|mut segments| segments.next_back()).filter(|name| !name.is_empty()).unwrap_or("Design");
     let decoded = js_sys::decode_uri_component(name).ok().and_then(|name| name.as_string()).unwrap_or_else(|| name.to_owned());
-    let name: String = decoded.strip_suffix(".solidcraft").unwrap_or(&decoded).chars().take(255).collect();
+    // `arm.sc` (or a legacy `arm.solidcraft`) is named `arm`.
+    let stem = match decoded.rsplit_once('.') {
+        Some((stem, ext)) if !stem.is_empty() && solidcraft_engine::io::is_design_ext(ext) => stem,
+        _ => decoded.as_str(),
+    };
+    let name: String = stem.chars().take(255).collect();
     let response = JsFuture::from(window.fetch_with_str(url.as_str())).await.map_err(|_| "Network request failed or the host refused CORS access")?;
     let response: web_sys::Response = response.dyn_into().map_err(|_| "Invalid download response")?;
     design_url(&response.url(), &page_origin).map_err(|_| "Design redirected to a URL that does not use HTTPS or the page's own origin")?;

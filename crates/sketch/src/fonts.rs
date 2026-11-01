@@ -38,6 +38,8 @@ pub fn set_font_file_check(check: fn(&Path) -> std::result::Result<(), String>) 
 pub struct FontData {
     bytes: FontBytes,
     pub index: u32,
+    /// The weight a variable face is set to (its `wght` axis), when not its default.
+    pub weight: Option<f32>,
 }
 
 #[derive(Clone)]
@@ -61,7 +63,7 @@ impl FontData {
 pub fn font_data(name: Option<&str>) -> Result<FontData> {
     let name = name.map(str::trim).unwrap_or("");
     if name.is_empty() || normalize(name) == normalize(DEFAULT_FONT_FAMILY) {
-        return Ok(FontData { bytes: FontBytes::Builtin, index: 0 });
+        return Ok(FontData { bytes: FontBytes::Builtin, index: 0, weight: None });
     }
     if name.len() > MAX_FONT_NAME {
         return Err(SketchError::Invalid("the font name is too long".into()));
@@ -76,7 +78,7 @@ pub fn font_data(name: Option<&str>) -> Result<FontData> {
         let index = 0;
         ttf_parser::Face::parse(&bytes, index)
             .map_err(|e| SketchError::Invalid(format!("font file `{name}` is not a TrueType/OpenType font: {e}")))?;
-        return Ok(FontData { bytes: FontBytes::File(bytes), index });
+        return Ok(FontData { bytes: FontBytes::File(bytes), index, weight: None });
     }
     find_family_in(&font_dirs(), name)?
         .ok_or_else(|| SketchError::Invalid(format!("unknown font `{name}`: not an installed font family, and not a .ttf/.otf file path")))
@@ -84,16 +86,21 @@ pub fn font_data(name: Option<&str>) -> Result<FontData> {
 
 /// The face of a font for a style: the bold and/or italic face of an installed family (or the
 /// file or built-in font itself). True with it: the font has no italic face, so the text is to
-/// be slanted instead. A bold style the font does not have is an error (bold is not made up).
+/// be slanted instead. A variable face without a bold face of its own is set to Bold on its
+/// weight axis. A bold style the font does not have is an error (bold is not made up).
 pub fn font_data_styled(name: Option<&str>, bold: bool, italic: bool) -> Result<(FontData, bool)> {
     let trimmed = name.map(str::trim).unwrap_or("");
     let installed = !(trimmed.is_empty() || normalize(trimmed) == normalize(DEFAULT_FONT_FAMILY) || is_path(trimmed));
     if !installed || !(bold || italic) {
-        let data = font_data(name)?;
+        let mut data = font_data(name)?;
         let (face_bold, face_italic) = ttf_parser::Face::parse(data.bytes(), data.index)
             .map(|face| (face.is_bold(), face.is_italic() || face.is_oblique()))
             .map_err(|e| SketchError::Invalid(format!("font: {e}")))?;
         if bold && !face_bold {
+            if let Some(weight) = variable_bold(&data) {
+                data.weight = Some(weight);
+                return Ok((data, italic && !face_italic));
+            }
             let which = if trimmed.is_empty() || normalize(trimmed) == normalize(DEFAULT_FONT_FAMILY) {
                 "the built-in font".to_string()
             } else {
@@ -106,13 +113,21 @@ pub fn font_data_styled(name: Option<&str>, bold: bool, italic: bool) -> Result<
     if trimmed.len() > MAX_FONT_NAME {
         return Err(SketchError::Invalid("the font name is too long".into()));
     }
-    let Some((data, face_bold, face_italic)) = find_style_in(&font_dirs(), trimmed, bold, italic)? else {
+    let Some((mut data, face_bold, face_italic)) = find_style_in(&font_dirs(), trimmed, bold, italic)? else {
         return Err(SketchError::Invalid(format!("unknown font `{trimmed}`: not an installed font family, and not a .ttf/.otf file path")));
     };
     if bold && !face_bold {
-        return Err(SketchError::Invalid(format!("the font `{trimmed}` has no bold face")));
+        data.weight = Some(variable_bold(&data).ok_or_else(|| SketchError::Invalid(format!("the font `{trimmed}` has no bold face")))?);
     }
     Ok((data, italic && !face_italic))
+}
+
+/// Bold on a variable face's weight axis: 700 (the weight fonts name Bold), within the axis, when
+/// the axis reaches past semibold from a lighter default. None for a face with no such axis.
+fn variable_bold(data: &FontData) -> Option<f32> {
+    let face = ttf_parser::Face::parse(data.bytes(), data.index).ok()?;
+    let axis = face.variation_axes().into_iter().find(|axis| axis.tag == ttf_parser::Tag::from_bytes(b"wght"))?;
+    (axis.def_value < 600.0 && axis.max_value >= 600.0).then(|| 700_f32.clamp(axis.min_value, axis.max_value))
 }
 
 /// An installed face whose family, full or PostScript name is `name`, searched in `dirs`.
@@ -149,7 +164,7 @@ pub fn find_style_in(dirs: &[PathBuf], name: &str, bold: bool, italic: bool) -> 
         }
         if let Some((_, path, index, face_bold, face_italic)) = best {
             let bytes = read_font(&path).map_err(|e| SketchError::Invalid(format!("font file `{}`: {e}", path.display())))?;
-            return Ok(Some((FontData { bytes: FontBytes::File(bytes), index }, face_bold, face_italic)));
+            return Ok(Some((FontData { bytes: FontBytes::File(bytes), index, weight: None }, face_bold, face_italic)));
         }
     }
     Ok(None)

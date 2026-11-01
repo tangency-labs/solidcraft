@@ -188,7 +188,7 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
     let lines = match p.get("lines") {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(a)) if !a.is_empty() && a.len() <= frame::MAX_MEMBERS && a.iter().all(Value::is_string) => {
-            let lines = string_list(p, "lines");
+            let lines = string_list(cmd, p, "lines")?;
             let mut seen = std::collections::HashSet::new();
             if let Some(twice) = lines.iter().find(|l| !seen.insert(l.as_str())) {
                 return Err(bad(cmd, format!("line `{twice}` is listed twice")));

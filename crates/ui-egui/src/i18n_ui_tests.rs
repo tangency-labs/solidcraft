@@ -62,6 +62,7 @@ fn sketch_palette_profile_and_points_rows_show_their_own_translation() {
 #[test]
 fn language_preference_cancel_restores_previous_locale() {
     let mut h = Harness::new();
+    h.app.preferences.language = "en".into();
     h.app.home.open = false;
     h.call("ui.prefs", json!({"open":"General"}));
     h.call("ui.prefs", json!({"language":"ja"}));
@@ -70,6 +71,17 @@ fn language_preference_cancel_restores_previous_locale() {
     h.call("ui.prefs", json!({"button":"cancel"}));
     assert_eq!(h.app.preferences.language, "en");
     assert_eq!(h.app.tr("ui.preferences"), "Preferences");
+}
+
+/// A first start (no saved language) shows `System` as the interface language choice (#10138).
+#[test]
+fn language_dropdown_defaults_to_system() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    assert_eq!(h.app.preferences.language, "system");
+    h.call("ui.prefs", json!({"open":"General"}));
+    let system = h.app.tr("prefs.language_system").to_owned();
+    assert!(h.widget(&system).is_some(), "the language dropdown reads {system}");
 }
 
 /// The chrome a user sees before touching anything: the browser heading and the SELECT panel.

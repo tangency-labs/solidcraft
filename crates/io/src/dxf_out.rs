@@ -4,10 +4,11 @@
 //! Curves stay exact: a circle is a CIRCLE, a circular arc an ARC, a whole ellipse one ELLIPSE
 //! and a conic arc of weight below 1 an elliptical ELLIPSE arc; Béziers (TrueType glyph
 //! outlines, spline pieces) and the other conics are SPLINEs of their own degree. The file holds
-//! what the entities refer to and what release 2000 needs to read them: the version, the
-//! handle seed, the units and the extents; the linetype, layer and block-record tables; the
-//! model and paper space blocks; handles, owners and the subclass markers of each entity; the
-//! root dictionary. Layers can be dashed and a drawing can carry TEXT (for annotations). Group
+//! what the entities refer to and what release 2000 needs to read them: the version, code page,
+//! handle seed, units and extents; the (empty) CLASSES section; all nine symbol tables, with the
+//! active viewport, the linetypes, layers, text style, the ACAD application id, the dimension
+//! style and the block records; the model and paper space blocks; handles, owners and the
+//! subclass markers of each entity; the root dictionary and its group dictionary. Layers can be dashed and a drawing can carry TEXT (for annotations). Group
 //! codes follow Autodesk's public DXF reference.
 
 use std::f64::consts::TAU;
@@ -267,6 +268,11 @@ impl Out {
         self.num(c + 10, p.y);
         self.num(c + 20, 0.0);
     }
+    /// A 2D point: codes `c` and `c + 10`.
+    fn point2(&mut self, c: i32, p: Vec2) {
+        self.num(c, p.x);
+        self.num(c + 10, p.y);
+    }
     fn handle(&mut self) -> String {
         let h = format!("{:X}", self.next);
         self.next += 1;
@@ -366,10 +372,48 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
     let (model, paper) = (o.handle(), o.handle());
     let root = o.handle();
 
+    // Release 2000 readers expect the CLASSES section, even empty, between HEADER and TABLES.
+    o.code(0, "SECTION");
+    o.code(2, "CLASSES");
+    o.code(0, "ENDSEC");
+
+    // All nine symbol tables, in the reference's order, even those with nothing to hold: a
+    // strict reader (AutoCAD among them, #9144) refuses a file that leaves one out.
     o.code(0, "SECTION");
     o.code(2, "TABLES");
-    // The three every drawing has, and DASHED, which the dashed layers name: dash and gap lengths
-    // (a gap is negative) after the pattern's total.
+    // The active viewport, looking down on the whole drawing so it opens zoomed to fit.
+    let t = o.table("VPORT", 1);
+    o.record("VPORT", "AcDbViewportTableRecord", &t);
+    o.code(2, "*Active");
+    o.code(70, 0);
+    o.point2(10, Vec2::ZERO);
+    o.point2(11, Vec2::new(1.0, 1.0));
+    o.point2(12, (lo + hi) * 0.5);
+    o.point2(13, Vec2::ZERO);
+    o.point2(14, Vec2::new(10.0, 10.0));
+    o.point2(15, Vec2::new(10.0, 10.0));
+    o.num(16, 0.0);
+    o.num(26, 0.0);
+    o.num(36, 1.0);
+    o.num(17, 0.0);
+    o.num(27, 0.0);
+    o.num(37, 0.0);
+    const ASPECT: f64 = 1.5;
+    let size = hi - lo;
+    let height = (size.y.max(size.x / ASPECT) * 1.1).max(1.0);
+    o.num(40, if height.is_finite() { height } else { 1.0 });
+    o.num(41, ASPECT);
+    o.num(42, 50.0);
+    o.num(43, 0.0);
+    o.num(44, 0.0);
+    o.num(50, 0.0);
+    o.num(51, 0.0);
+    for (code, value) in [(71, 0), (72, 1000), (73, 1), (74, 3), (75, 0), (76, 0), (77, 0), (78, 0)] {
+        o.code(code, value);
+    }
+    o.code(0, "ENDTAB");
+    // The three linetypes every drawing has, and DASHED, which the dashed layers name: dash and
+    // gap lengths (a gap is negative) after the pattern's total.
     let mut linetypes: Vec<(&str, &str, &[f64])> = vec![
         ("ByBlock", "", &[]),
         ("ByLayer", "", &[]),
@@ -415,6 +459,29 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
     o.num(42, 2.5);
     o.code(3, "txt");
     o.code(4, "");
+    o.code(0, "ENDTAB");
+    for name in ["VIEW", "UCS"] {
+        o.table(name, 0);
+        o.code(0, "ENDTAB");
+    }
+    // The application id every drawing registers.
+    let t = o.table("APPID", 1);
+    o.record("APPID", "AcDbRegAppTableRecord", &t);
+    o.code(2, "ACAD");
+    o.code(70, 0);
+    o.code(0, "ENDTAB");
+    // The one dimension style, with the default settings. The table has a subclass of its own
+    // and its records keep their handle under 105, not 5.
+    let t = o.table("DIMSTYLE", 1);
+    o.code(100, "AcDbDimStyleTable");
+    let h = o.handle();
+    o.code(0, "DIMSTYLE");
+    o.code(105, h);
+    o.code(330, &t);
+    o.code(100, "AcDbSymbolTableRecord");
+    o.code(100, "AcDbDimStyleTableRecord");
+    o.code(2, "Standard");
+    o.code(70, 0);
     o.code(0, "ENDTAB");
     let t = o.table("BLOCK_RECORD", 2);
     for (h, name) in [(&model, "*Model_Space"), (&paper, "*Paper_Space")] {
@@ -535,9 +602,18 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
 
     o.code(0, "SECTION");
     o.code(2, "OBJECTS");
+    // The root dictionary, which must name the group dictionary (empty: no groups).
+    let groups = o.handle();
     o.code(0, "DICTIONARY");
     o.code(5, root.as_str());
     o.code(330, 0);
+    o.code(100, "AcDbDictionary");
+    o.code(281, 1);
+    o.code(3, "ACAD_GROUP");
+    o.code(350, &groups);
+    o.code(0, "DICTIONARY");
+    o.code(5, &groups);
+    o.code(330, &root);
     o.code(100, "AcDbDictionary");
     o.code(281, 1);
     o.code(0, "ENDSEC");
@@ -548,6 +624,10 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
     head.code(2, "HEADER");
     head.code(9, "$ACADVER");
     head.code(1, "AC1015");
+    // Every character in the file is ASCII (other letters are `\U+XXXX`), which this code page
+    // reads as itself.
+    head.code(9, "$DWGCODEPAGE");
+    head.code(3, "ANSI_1252");
     head.code(9, "$HANDSEED");
     head.code(5, format!("{:X}", o.next));
     head.code(9, "$INSUNITS");
@@ -786,13 +866,11 @@ mod tests {
             "{:?}",
             back[3]
         );
-        // The reader makes an elliptical arc a spline through points of it: from (75, 40) to (50, 52).
-        let Geom2::Spline { pts, control: false, .. } = &back[4] else { panic!("{:?}", back[4]) };
-        let on_ellipse = |p: &Vec2| (((p.x - 50.0) / 25.0).powi(2) + ((p.y - 40.0) / 12.0).powi(2) - 1.0).abs() < 1e-9;
-        assert!(
-            pts.first().is_some_and(|p| p.dist(Vec2::new(75.0, 40.0)) < 1e-9) && pts.last().is_some_and(|p| p.dist(Vec2::new(50.0, 52.0)) < 1e-9)
-        );
-        assert!(pts.iter().all(on_ellipse));
+        // The quarter of the ellipse comes back as the one conic it was: from (75, 40) to (50, 52)
+        // with its apex at (75, 52) and its weight (#8155).
+        let Geom2::Conic { a, apex, b, rho } = &back[4] else { panic!("{:?}", back[4]) };
+        assert!(a.dist(Vec2::new(75.0, 40.0)) < 1e-9 && apex.dist(Vec2::new(75.0, 52.0)) < 1e-9 && b.dist(Vec2::new(50.0, 52.0)) < 1e-9);
+        assert!((rho - FRAC_1_SQRT_2 / (1.0 + FRAC_1_SQRT_2)).abs() < 1e-12, "{rho}");
         // The cubic: degree and control points.
         let Geom2::Spline { pts, control: true, degree: 3 } = &back[5] else { panic!("{:?}", back[5]) };
         assert!(pts.iter().zip(&cubic).all(|(a, b)| a.dist(*b) < 1e-9) && pts.len() == 4);
@@ -966,6 +1044,76 @@ mod tests {
             assert_eq!(field(&entity.1, 1), expected);
             assert!(dxf.contains("AC1015"));
         }
+    }
+
+    #[test]
+    fn a_strict_reader_finds_every_section_table_and_the_group_dictionary() {
+        // #9144: AutoCAD refused the exported view. A release 2000 file has the CLASSES section,
+        // all nine symbol tables with their standard records, and a root dictionary naming
+        // ACAD_GROUP.
+        let ents = [
+            DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Line(Vec2::new(0.0, 0.0), Vec2::new(30.0, 0.0)) },
+            DxfEntity { layer: "VISIBLE".into(), shape: DxfShape::Circle { c: Vec2::new(15.0, 5.0), r: 5.0 } },
+        ];
+        let dxf = write_dxf_drawing(&[DxfLayer::new("VISIBLE", 7)], &ents).unwrap();
+        let p = pairs(&dxf);
+        let sections: Vec<&str> = p.windows(2).filter(|w| w[0] == (0, "SECTION".into())).map(|w| w[1].1.as_str()).collect();
+        assert_eq!(sections, ["HEADER", "CLASSES", "TABLES", "BLOCKS", "ENTITIES", "OBJECTS"]);
+        let tables: Vec<&str> = p.windows(2).filter(|w| w[0] == (0, "TABLE".into())).map(|w| w[1].1.as_str()).collect();
+        assert_eq!(tables, ["VPORT", "LTYPE", "LAYER", "STYLE", "VIEW", "UCS", "APPID", "DIMSTYLE", "BLOCK_RECORD"]);
+        // Each table says how many records it holds, and holds them.
+        for table in tables {
+            let at = p.iter().position(|(c, v)| (*c, v.as_str()) == (2, table)).unwrap();
+            let count: usize = p[at..].iter().find(|(c, _)| *c == 70).unwrap().1.parse().unwrap();
+            assert_eq!(table_records(&p, table).len(), count, "{table}");
+        }
+        assert_eq!(table_records(&p, "APPID").iter().map(|r| field(r, 2)).collect::<Vec<_>>(), ["ACAD"]);
+        let dimstyles = table_records(&p, "DIMSTYLE");
+        // (The DIMSTYLE table's own subclass comes before its record.)
+        let [standard] = dimstyles.as_slice() else { panic!("{dimstyles:?}") };
+        assert_eq!(field(standard, 2), "Standard");
+        assert!(!field(standard, 105).is_empty() && field(standard, 5).is_empty(), "{standard:?}");
+        // The active viewport looks down on the middle of the drawing (0, 0)..(30, 10), all of it in view.
+        let vports = table_records(&p, "VPORT");
+        let [active] = vports.as_slice() else { panic!("{vports:?}") };
+        assert_eq!(field(active, 2), "*Active");
+        assert_eq!((field(active, 12), field(active, 22), field(active, 36)), ("15.0", "5.0", "1.0"));
+        let (height, aspect): (f64, f64) = (field(active, 40).parse().unwrap(), field(active, 41).parse().unwrap());
+        assert!(height >= 10.0 && height * aspect >= 30.0, "{height} {aspect}");
+        // The root dictionary names the group dictionary, which it owns.
+        let objects = p.iter().position(|(c, v)| (*c, v.as_str()) == (2, "OBJECTS")).unwrap();
+        let mut dictionaries: Vec<Vec<(i32, String)>> = Vec::new();
+        for (c, v) in p[objects + 1..].iter().take_while(|(c, v)| (*c, v.as_str()) != (0, "ENDSEC")) {
+            match c {
+                0 => dictionaries.push(Vec::new()),
+                _ => dictionaries.last_mut().unwrap().push((*c, v.clone())),
+            }
+        }
+        let [root, groups] = dictionaries.as_slice() else { panic!("{dictionaries:?}") };
+        assert_eq!((field(root, 330), field(root, 3)), ("0", "ACAD_GROUP"));
+        assert_eq!(field(root, 350), field(groups, 5));
+        assert_eq!(field(groups, 330), field(root, 5));
+        // Handles, under 5 and the DIMSTYLE's 105, are unique and below the seed.
+        let seed_at = p.iter().position(|(c, v)| (*c, v.as_str()) == (9, "$HANDSEED")).unwrap() + 1;
+        let seed = u64::from_str_radix(&p[seed_at].1, 16).unwrap();
+        let mut handles: Vec<u64> = p
+            .iter()
+            .enumerate()
+            .filter(|(i, (c, _))| *i != seed_at && (*c == 5 || *c == 105))
+            .map(|(_, (_, v))| u64::from_str_radix(v, 16).unwrap())
+            .collect();
+        let n = handles.len();
+        handles.sort_unstable();
+        handles.dedup();
+        assert_eq!(handles.len(), n);
+        assert!(handles.iter().all(|h| *h < seed));
+        // Every owner (330) is 0 or a handle in the file.
+        for (_, v) in p.iter().filter(|(c, _)| *c == 330) {
+            let h = u64::from_str_radix(v, 16).unwrap();
+            assert!(h == 0 || handles.binary_search(&h).is_ok(), "owner {v}");
+        }
+        // SolidCraft's own reader still reads it.
+        assert_eq!(read_dxf(&dxf).unwrap().len(), 2);
     }
 
     #[test]

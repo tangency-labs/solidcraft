@@ -136,6 +136,18 @@ test('syncDefaultLabel adds and removes', async () => {
   assert.deepEqual(f.calls, [['remove', 'changes-default']]);
 });
 
+test('syncDefaultLabel notes a read-only token instead of failing', async () => {
+  const yes = 'Changes a default: yes — a, old behaviour kept behind preference p';
+  const f = fakes(mk(1, 'a', yes));
+  const notes = [];
+  f.core.notice = (m) => notes.push(m);
+  f.github.rest.issues.addLabels = async () => { throw Object.assign(new Error('Resource not accessible by integration'), { status: 403 }); };
+  await pc.syncDefaultLabel(f);
+  assert.equal(notes.length, 1);
+  f.github.rest.issues.addLabels = async () => { throw Object.assign(new Error('server error'), { status: 500 }); };
+  await assert.rejects(pc.syncDefaultLabel(f));
+});
+
 test('checkDefaults only enforces from 2026-10-25', async () => {
   const files = [{ filename: 'crates/a.rs' }];
   const old = mk(20, 'alice', 'Fixes #5', { created_at: '2026-10-24T23:59:59Z' });

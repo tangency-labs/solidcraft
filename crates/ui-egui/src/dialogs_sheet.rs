@@ -23,14 +23,15 @@ const PERFORATION_LABELS: [&str; 2] = ["ui.perforate_staggered", "ui.perforate_s
 
 const FOLD_POSITIONS: [&str; 4] = ["centerline", "start", "end", "mould"];
 const FOLD_POSITION_LABELS: [&str; 4] = ["Centerline", "Start of Bend", "End of Bend", "Outside Mould Line"];
-const FLANGE_TYPES: [&str; 3] = ["Base", "Edge", "Contour"];
+/// The flange types' messages, by the type's index (Base, Edge, Contour).
+const FLANGE_TYPES: [&str; 3] = ["sheet.flange_type_base", "sheet.flange_type_edge", "sheet.flange_type_contour"];
 const POSITIONS: [&str; 5] = ["inside", "outside", "middle", "material_outside", "tangent"];
 const POSITION_LABELS: [&str; 5] = ["Inside", "Outside", "Middle", "Material Outside", "Tangent to Edge"];
 /// Where an edge flange's height is measured from (`height_from`; the first is the default).
 const HEIGHT_FROM: [&str; 3] = ["outer", "inner", "tangent"];
 const HEIGHT_FROM_LABELS: [&str; 3] = ["Outer Sharp", "Inner Sharp", "Tangent"];
 /// Rule fields the manager edits (parameter name, label).
-const RULE_FIELDS: [(&str, &str); 8] = [
+pub(crate) const RULE_FIELDS: [(&str, &str); 8] = [
     ("thickness", "Thickness"),
     ("k_factor", "K Factor"),
     ("bend_radius", "Bend Radius"),
@@ -41,11 +42,11 @@ const RULE_FIELDS: [(&str, &str); 8] = [
     ("gap", "Flange Gap"),
 ];
 /// The corner relief shapes the manager offers (the rule's `corner_relief_shape`) and their labels.
-const RELIEF_SHAPES: [&str; 4] = ["notch", "round", "rectangular", "tear"];
+pub(crate) const RELIEF_SHAPES: [&str; 4] = ["notch", "round", "rectangular", "tear"];
 const RELIEF_SHAPE_LABELS: [&str; 4] = ["Notch", "Round", "Rectangular", "Tear"];
 /// How the manager's rule reads bend angles in the DXF bend notes (the rule's `angle_display`)
 /// and their labels.
-const ANGLE_DISPLAYS: [&str; 2] = ["bend", "included"];
+pub(crate) const ANGLE_DISPLAYS: [&str; 2] = ["bend", "included"];
 const ANGLE_DISPLAY_LABELS: [&str; 2] = ["Bend", "Included"];
 /// The corner relief shapes an edge flange offers: the rule's (index 0, nothing of its own), then
 /// the shapes of `RELIEF_SHAPES` in order.
@@ -207,7 +208,13 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 
 /// The design's rules (the default steel rule when it has none).
 fn rule_list(app: &SolveApp) -> Vec<SheetRule> {
-    let r = &app.session.doc.sheet.rules;
+    design_rules(&app.session.doc)
+}
+
+/// The rules the manager lists for this design: its own, or the default steel rule when it has
+/// none.
+pub(crate) fn design_rules(doc: &solidcraft_engine::doc::Document) -> Vec<SheetRule> {
+    let r = &doc.sheet.rules;
     if r.is_empty() { vec![SheetRule::steel()] } else { r.clone() }
 }
 
@@ -242,7 +249,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
         Sm::Flange { ty, height, angle, radius, position, height_from, flip, distance, reverse, rule, own, relief, relief_size, then } => {
             *ty = flange_type(inputs);
             form_row(ui, "Type", |ui| {
-                ui.label(FLANGE_TYPES.get(*ty).copied().unwrap_or(""));
+                ui.label(FLANGE_TYPES.get(*ty).copied().map(crate::i18n::tr).unwrap_or(""));
             });
             match *ty {
                 1 => {
@@ -431,14 +438,13 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                     form_row(ui, "Body", |ui| {
                         ui.label(v["body"].as_str().unwrap_or(""));
                     });
-                    form_row(ui, "Flat size", |ui| {
-                        ui.label(format!(
-                            "{} × {} × {}",
-                            crate::prefs::show_mm(app, size[0].as_f64().unwrap_or(0.0), 1),
-                            crate::prefs::show_mm(app, size[1].as_f64().unwrap_or(0.0), 1),
-                            crate::prefs::show_mm(app, size[2].as_f64().unwrap_or(0.0), 1)
-                        ));
-                    });
+                    // One number per row, X and Y as in the DXF: on one row the panel's width cut the
+                    // flat size off after its first side, and the second is the one people read most.
+                    for (label, i) in [("Flat size X", 0), ("Flat size Y", 1), ("Thickness", 2)] {
+                        form_row(ui, label, |ui| {
+                            ui.label(crate::prefs::show_mm(app, size[i].as_f64().unwrap_or(0.0), 1));
+                        });
+                    }
                     let bends = v["bends"].as_array().cloned().unwrap_or_default();
                     form_row(ui, "Bends", |ui| {
                         ui.label(format!("{}", bends.len()));

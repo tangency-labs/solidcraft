@@ -9,7 +9,7 @@ use super::{run, volume};
 use crate::Session;
 
 fn open_fixture() -> Session {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tests/fixtures/cubeish-chamfer-too-large.solidcraft");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tests/fixtures/cubeish-chamfer-too-large.sc");
     let mut s = Session::default();
     run(&mut s, "doc.open", json!({"path": path.to_string_lossy()}));
     s

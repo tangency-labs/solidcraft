@@ -72,11 +72,14 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
     );
     let icon = Rect::from_center_size(pos2(r.left() + t.space_8 + t.space_16 * 0.5, r.center().y), vec2(t.space_16, t.space_16));
     icons::paint_ink(ui.painter(), icon, "zoom", t.form_dim);
-    let editor = Rect::from_min_max(pos2((icon.right() + t.space_6).min(r.right()), r.top()), r.right_bottom());
+    let show_clear = !value.is_empty();
+    let clear_side = if show_clear { t.control_height } else { 0.0 };
+    let editor =
+        Rect::from_min_max(pos2((icon.right() + t.space_6).min(r.right()), r.top()), pos2((r.right() - clear_side).max(icon.right()), r.bottom()));
     let response = ui
         .scope_builder(egui::UiBuilder::new().max_rect(editor), |ui| {
             ui.set_clip_rect(ui.clip_rect().intersect(editor));
-            ui.add_sized(
+            let mut response = ui.add_sized(
                 editor.size(),
                 super::fields::text_input(egui::TextEdit::singleline(value))
                     .id(id)
@@ -86,10 +89,24 @@ fn search_with_icon(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str) -
                     .margin(vec2(t.space_4, 0.0))
                     .clip_text(true)
                     .frame(egui::Frame::NONE),
-            )
+            );
+            super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
+            response
         })
         .inner;
-    if frame.clicked() {
+    let mut cleared = false;
+    if show_clear {
+        let clear_rect = Rect::from_center_size(pos2(r.right() - t.control_height * 0.5, r.center().y), vec2(t.control_height, t.control_height));
+        let clear = ui.push_id(id.with("clear"), |ui| super::quiet_icon_button_at(ui, clear_rect, "close", "Clear")).inner;
+        if id == egui::Id::new("prefs_search") {
+            crate::scenario::publish_handle("prefs:search:clear", clear_rect.center());
+        }
+        if clear.clicked() {
+            value.clear();
+            cleared = true;
+        }
+    }
+    if frame.clicked() && !cleared {
         response.request_focus();
     }
     super::layout::publish(ui, &response, egui::WidgetType::TextEdit);

@@ -157,10 +157,17 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     Some((Kind::PartSize(Resize::new(app, selected_component(app)?)?), vec![]))
 }
 
+/// Change Part Size has no standard part to work on: say what it takes, not the command's
+/// "`component` must be an id or a name" (#8735).
+pub(crate) fn needs_a_part(app: &mut SolveApp) {
+    let hint = app.tr("ui.part_size_needs_a_part").to_owned();
+    app.set_status(hint, true);
+}
+
 /// Select the context menu's exact target before using the normal command-start lifecycle.
 pub fn open(app: &mut SolveApp, component: u64) {
     if Resize::new(app, component).is_none() {
-        app.set_status("Select an inserted standard part to change its size", true);
+        needs_a_part(app);
         return;
     }
     app.session.selection.clear();
@@ -170,7 +177,7 @@ pub fn open(app: &mut SolveApp, component: u64) {
 
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Resize) -> bool {
     row(ui, "Type", |ui| {
-        ui.add(egui::Label::new(format!("{} ({})", k.family.name, k.family.standard)).wrap());
+        ui.add(egui::Label::new(format!("{} ({})", crate::dialogs_parts::family_name(&k.family), k.family.standard)).wrap());
     });
     let sizes: Vec<&str> = k.family.sizes.iter().map(|s| s.0.as_str()).collect();
     choice_row(ui, "Size", "part_resize_size", &mut k.size, &sizes);
@@ -388,6 +395,44 @@ mod tests {
         assert!(!context_menu::items(&app, &Target::Component { id: 0 }).iter().any(|i| i.id == "parts.resize"));
     }
 
+    /// Change Part Size started with no standard part selected (nothing, or a plain body), as
+    /// the command search starts it, says what it works on instead of the command's
+    /// "`component` must be an id or a name"; Standard Parts opens the Insert Part dialog instead
+    /// of doing nothing (#8735).
+    #[test]
+    fn part_size_without_a_part_explains_itself_and_standard_parts_opens_the_library() {
+        let mut app = SolveApp::new(Session::default(), crate::Services::default());
+        app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let body = app.session.world_state().bodies.first().map(|b| b.name.clone()).unwrap();
+        for selection in [vec![], vec![Sel::Body { name: body }]] {
+            app.session.selection = selection;
+            app.status = None;
+            let (doc, undo) = (app.session.doc.clone(), app.session.undo.len());
+            app.start("parts.resize");
+            assert!(app.dialog.is_none());
+            let (text, _, error) = app.status.clone().expect("a status message");
+            assert!(error);
+            assert_eq!(text, app.tr("ui.part_size_needs_a_part"));
+            // Nothing ran: the design and its history are as they were, and no message carries
+            // the command's own error.
+            assert_eq!(app.session.doc, doc);
+            assert_eq!(app.session.undo.len(), undo);
+            assert!(app.messages.iter().all(|m| !m.text.contains("must be an id or a name")));
+        }
+        app.session.selection.clear();
+        app.start("parts.library");
+        assert!(matches!(app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Part(_))));
+
+        let (mut app, id) = part("hex_nut", "M5", None);
+        // Run as a command (a script, an agent), Standard Parts still only lists the library.
+        let listing = app.run("parts.library", json!({})).unwrap();
+        assert!(listing.get("families").is_some() && app.dialog.is_none());
+        // With a standard part picked, Change Part Size opens on it rather than saying it needs one.
+        app.tree.picked_components = vec![id];
+        app.start("parts.resize");
+        assert_eq!(editor(&app).component, id);
+    }
+
     #[test]
     fn part_size_cancel_and_preview_do_not_change_the_design_or_history() {
         let (mut app, id) = part("hex_bolt", "M6", Some(20.0));
@@ -427,6 +472,7 @@ mod tests {
     fn part_size_round_trips_all_builtin_families_without_adding_a_length_to_rings() {
         for (family, size, length) in [
             ("socket_head_cap_screw", "M5", Some(20.0)),
+            ("button_head_cap_screw", "M5", Some(20.0)),
             ("hex_bolt", "M5", Some(20.0)),
             ("hex_nut", "M5", None),
             ("washer", "M5", None),

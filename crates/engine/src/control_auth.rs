@@ -91,13 +91,26 @@ fn parse_port(text: &str) -> Option<u16> {
     text.trim().parse::<u16>().ok().filter(|p| *p != 0)
 }
 
-/// Remove the discovery file at exit, unless a later app has taken it over (it names another port).
-pub fn remove_current_port(port: u16) {
-    if read_current_port() == Some(port)
-        && let Some(path) = current_port_path()
-    {
-        let _ = std::fs::remove_file(path);
+/// Remove the discovery file (and its process file) at exit, unless a later app has taken it
+/// over: it names another port, or another launch now holds this port's token file. Under
+/// Flatpak every instance has its own loopback, so two windows can listen on the same port
+/// number and write the same file names; the one closing first must leave the other's (#8794).
+/// Run it after [`remove_token_file`], which takes this launch's own token file away first.
+pub fn remove_current_port(port: u16, token: &str) {
+    if let (Some(current), Some(file)) = (current_port_path(), token_path(port)) {
+        remove_discovery(&current, &file, port, token);
     }
+}
+
+/// [`remove_current_port`] on given files: `current` is the discovery file, `file` the token file
+/// of `port`.
+fn remove_discovery(current: &Path, file: &Path, port: u16, token: &str) {
+    let named = std::fs::read_to_string(current).ok().filter(|t| t.len() <= 64).and_then(|t| parse_port(&t));
+    if named != Some(port) || held_by_another(file, token) {
+        return;
+    }
+    let _ = std::fs::remove_file(current);
+    let _ = std::fs::remove_file(pid_path(current));
 }
 
 /// A token set on purpose with `SOLIDCRAFT_CONTROL_TOKEN` (test harnesses, sandboxed packages
@@ -289,10 +302,28 @@ pub fn write_token_file(path: &Path, token: &str) -> Result<()> {
     Ok(())
 }
 
-/// Remove a token file this launch wrote, and its process file.
-pub fn remove_token_file(path: &Path) {
-    let _ = std::fs::remove_file(path);
-    let _ = std::fs::remove_file(pid_path(path));
+/// Remove a token file this launch wrote, and its process file, while it still holds `token`.
+/// Another launch may have written the same file since (a second window on the same port,
+/// #8794); its file stays. The process id can't tell the two apart, as every Flatpak instance
+/// has the same one, but each launch's token is its own.
+pub fn remove_token_file(path: &Path, token: &str) {
+    if read_token(path).is_some_and(|held| tokens_match(&held, token.trim())) {
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(pid_path(path));
+    }
+}
+
+/// The token a token file holds, trimmed; `None` when there is no readable token file.
+fn read_token(path: &Path) -> Option<String> {
+    let mut text = String::new();
+    std::fs::File::open(path).ok()?.take(MAX_TOKEN_FILE + 1).read_to_string(&mut text).ok()?;
+    let token = text.trim();
+    (text.len() as u64 <= MAX_TOKEN_FILE && !token.is_empty()).then(|| token.to_string())
+}
+
+/// Whether the token file at `path` holds a token other than `token`: another launch's.
+fn held_by_another(path: &Path, token: &str) -> bool {
+    read_token(path).is_some_and(|held| !tokens_match(&held, token.trim()))
 }
 
 /// How long `icacls` may take (#6145). It finishes at once; on some computers the new process
@@ -341,12 +372,12 @@ fn wait_within(mut child: std::process::Child, limit: std::time::Duration) -> Re
     }
 }
 
-/// Removes the token file when the app ends.
-pub struct TokenFile(pub PathBuf);
+/// Removes the token file (path, token) when the app ends, while it still holds that token.
+pub struct TokenFile(pub PathBuf, pub String);
 
 impl Drop for TokenFile {
     fn drop(&mut self) {
-        remove_token_file(&self.0);
+        remove_token_file(&self.0, &self.1);
     }
 }
 
@@ -490,8 +521,43 @@ mod tests {
         assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "0123456789abcdef0123456789abcdef");
         let writer = read_token_file(&path).unwrap().file.unwrap().writer;
         assert_eq!(writer.map(|(pid, _)| pid), Some(std::process::id()));
-        drop(TokenFile(path.clone()));
+        drop(TokenFile(path.clone(), "0123456789abcdef0123456789abcdef".into()));
         assert!(!path.exists() && !pid_path(&path).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #8794: under Flatpak two windows can listen on the same port number (each has its own
+    /// loopback) and write the same files. The one closing first leaves the other's token, process
+    /// and discovery files; the last one takes them all away, `current.pid` too.
+    #[test]
+    fn a_closing_launch_leaves_another_launchs_files() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-control-two-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (file, current) = (dir.join("27878.token"), dir.join("current.port"));
+        let (first, second) = ("a".repeat(64), "b".repeat(64));
+        // The first window, then the second on the same port, each writing both files.
+        for token in [&first, &second] {
+            write_token_file(&file, token).unwrap();
+            write_token_file(&current, "27878").unwrap();
+        }
+        // The first closes: the second's files stay.
+        remove_token_file(&file, &first);
+        remove_discovery(&current, &file, 27878, &first);
+        assert_eq!(read_token(&file).as_deref(), Some(second.as_str()));
+        assert!(pid_path(&file).exists() && current.exists() && pid_path(&current).exists());
+        // Another port named in the discovery file is another app's too.
+        remove_discovery(&current, &file, 27879, &second);
+        assert!(current.exists());
+        // The second closes: nothing of either is left.
+        remove_token_file(&file, &format!(" {second}\n"));
+        remove_discovery(&current, &file, 27878, &second);
+        assert!(!file.exists() && !pid_path(&file).exists() && !current.exists() && !pid_path(&current).exists());
+        // With no token file left (removed by hand, or never written), the discovery file of the
+        // port still goes; a missing file is no error.
+        write_token_file(&current, "27878").unwrap();
+        remove_token_file(&file, &second);
+        remove_discovery(&current, &file, 27878, &second);
+        assert!(!current.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

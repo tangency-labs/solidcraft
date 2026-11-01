@@ -833,6 +833,50 @@ fn replace_face_align_remove() {
     assert_eq!(measure(&mut s)["body_count"], 1);
 }
 
+#[test]
+fn align_can_keep_the_offset_to_chosen_axes() {
+    let aligned = |axes: Option<Value>| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "A"}));
+        run(&mut s, "solid.box", json!({"corner": [50, 20, 30], "length": 10, "width": 10, "height": 10, "body_name": "B"}));
+        let mut p = json!({"bodies": ["A"], "from": [0, 0, 0], "to": [50, 20, 30]});
+        if let Some(axes) = axes {
+            p["axes"] = axes;
+        }
+        run(&mut s, "solid.align", p);
+        s
+    };
+    let min = |s: &mut Session| {
+        let m = measure(s);
+        let a = m["bodies"].as_array().unwrap().iter().find(|b| b["name"] == "A").unwrap().clone();
+        let g = |i: usize| a["bbox"]["min"][i].as_f64().unwrap_or(f64::NAN);
+        [g(0), g(1), g(2)]
+    };
+    let close = |got: [f64; 3], want: [f64; 3]| got.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-6);
+    assert!(close(min(&mut aligned(Some(json!([false, false, true])))), [0.0, 0.0, 30.0]));
+    assert!(close(min(&mut aligned(Some(json!([true, false, false])))), [50.0, 0.0, 0.0]));
+    assert!(close(min(&mut aligned(Some(json!([false, true, false])))), [0.0, 20.0, 0.0]));
+    assert!(close(min(&mut aligned(Some(json!([true, true, true])))), [50.0, 20.0, 30.0]));
+    assert!(close(min(&mut aligned(None)), [50.0, 20.0, 30.0]));
+
+    // Refusal cases
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "A"}));
+    for axes in [json!([false, false, false]), json!([true, false]), json!([true, false, "yes"])] {
+        assert!(s.execute("solid.align", &json!({"bodies": ["A"], "from": [0, 0, 0], "to": [1, 2, 3], "axes": axes})).is_err(), "{axes}");
+    }
+    // Face/plane alignment cannot take an axis mask.
+    assert!(
+        s.execute("solid.align", &json!({"bodies": ["A"], "from_face": [5, 5, 10], "to_face": [5, 5, 20], "axes": [true, false, false]})).is_err()
+    );
+
+    // Normalisation: all axes true normalises to None in the saved feature
+    let made = run(&mut s, "solid.align", json!({"bodies": ["A"], "from": [0, 0, 0], "to": [1, 2, 3], "axes": [true, true, true]}));
+    let id = made["feature"].as_u64().expect("the feature id");
+    let f = s.doc.feature(id).expect("the saved feature");
+    assert!(matches!(&f.kind, solidcraft_doc::FeatureKind::Align { axes: None, .. }));
+}
+
 /// The z range and the x minimum of body `name`.
 fn z_x(s: &mut Session, name: &str) -> (f64, f64, f64) {
     let m = measure(s);
@@ -1131,6 +1175,111 @@ fn loft_joined_onto_a_box_exports_one_connected_mesh() {
     }
     let pieces: std::collections::BTreeSet<usize> = triangles.iter().map(|t| root(&mut piece, t[0] as usize)).collect();
     assert_eq!(pieces.len(), 1);
+}
+
+fn loft_between_blocks() -> (Session, Value) {
+    let mut s = Session::default();
+    for (name, z) in [("Lower", -5), ("Upper", 15)] {
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [0, 0, z], "body_name": name}));
+    }
+    for (name, z) in [("Start", -2), ("End", 18)] {
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": z, "name": name}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [8, 8]}));
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    (s, json!({"sections": [{"sketch": "Start"}, {"sketch": "End"}], "operation": "join"}))
+}
+
+fn assert_loft_leaves_upper_block(s: &Session) {
+    let st = s.model.state();
+    assert_eq!(st.bodies.len(), 2, "a hidden body must not be consumed by Join (#1988)");
+    for (name, expected) in [("Lower", 1148.0), ("Upper", 500.0)] {
+        let body = &st.body(name).unwrap().body;
+        let got = solidcraft_kernel::measure(body).unwrap().volume;
+        assert!((got - expected).abs() < 1e-6, "{name}: {got} vs {expected}");
+        assert!(body.validity().is_empty());
+    }
+}
+
+#[test]
+fn loft_join_keeps_hidden_bodies_and_persists_its_targets() {
+    let (mut s, params) = loft_between_blocks();
+    run(&mut s, "browser.visibility", json!({"items": ["Upper"], "visible": false}));
+    run(&mut s, "solid.loft", params);
+    assert_loft_leaves_upper_block(&s);
+    run(&mut s, "edit.undo", json!({}));
+    assert!((volume(&mut s) - 1000.0).abs() < 1e-6);
+    run(&mut s, "edit.redo", json!({}));
+    assert_loft_leaves_upper_block(&s);
+    // Visibility is only consulted when the feature is made, never when it is rebuilt.
+    run(&mut s, "browser.visibility", json!({"items": ["Upper"], "visible": true}));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.model.results.iter().all(|r| r.error.is_none()));
+    assert_loft_leaves_upper_block(&reopened);
+}
+
+#[test]
+fn loft_join_with_only_hidden_targets_is_refused_atomically() {
+    for hide in [json!({"items": ["Lower", "Upper"], "visible": false}), json!({"tree_folders": ["c0/bodies"], "visible": false})] {
+        let (mut s, params) = loft_between_blocks();
+        run(&mut s, "browser.visibility", hide);
+        let before = s.doc.to_json();
+        let err = s.execute("solid.loft", &params).unwrap_err().to_string();
+        assert!(err.contains("no visible body to join"), "{err}");
+        assert_eq!(s.doc.to_json(), before);
+        assert!((volume(&mut s) - 1000.0).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn loft_join_honours_explicit_hidden_targets_and_participants() {
+    for (key, targets) in [("targets", json!(["Lower", "Upper"])), ("participants", json!(["Lower", "Upper"])), ("participants", json!(["*"]))] {
+        let (mut s, mut params) = loft_between_blocks();
+        run(&mut s, "browser.visibility", json!({"items": ["Upper"], "visible": false}));
+        params[key] = targets;
+        run(&mut s, "solid.loft", params);
+        assert_eq!(s.model.state().bodies.len(), 1);
+        assert!((volume(&mut s) - 1540.0).abs() < 1e-6);
+    }
+    let (mut s, params) = loft_between_blocks();
+    run(&mut s, "solid.loft", params);
+    assert_eq!(s.model.state().bodies.len(), 1, "all-visible Join keeps its automatic scope");
+    assert!((volume(&mut s) - 1540.0).abs() < 1e-6);
+}
+
+#[test]
+fn loft_new_body_still_works_when_every_body_is_hidden() {
+    let (mut s, mut params) = loft_between_blocks();
+    run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies"], "visible": false}));
+    params["operation"] = json!("new_body");
+    run(&mut s, "solid.loft", params);
+    assert_eq!(s.model.state().bodies.len(), 3);
+    assert!((volume(&mut s) - 1720.0).abs() < 1e-6);
+}
+
+#[test]
+fn loft_join_visibility_does_not_expand_its_component_scope() {
+    let (mut s, params) = loft_between_blocks();
+    let part = run(&mut s, "component.create", json!({"name": "Part", "activate": false}));
+    run(&mut s, "component.move_bodies", json!({"bodies": ["Lower", "Upper"], "component": part["component"]}));
+    run(&mut s, "browser.visibility", json!({"items": ["Upper"], "visible": false}));
+    run(&mut s, "solid.loft", params);
+    assert_eq!(s.model.state().bodies.len(), 3, "a plain-plane loft in the empty root still creates its own body");
+    assert!((volume(&mut s) - 1720.0).abs() < 1e-6);
+}
+
+#[test]
+fn loft_join_does_not_fall_back_from_a_hidden_sketch_face_body() {
+    let (mut s, mut params) = loft_between_blocks();
+    run(&mut s, "sketch.create", json!({"plane": {"face": [5, 5, 0]}, "project_edges": false, "name": "OnLower"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [8, 8]}));
+    run(&mut s, "sketch.finish", json!({}));
+    params["sections"][0]["sketch"] = json!("OnLower");
+    run(&mut s, "browser.visibility", json!({"items": ["Lower"], "visible": false}));
+    let before = s.doc.to_json();
+    let err = s.execute("solid.loft", &params).unwrap_err().to_string();
+    assert!(err.contains("no visible body to join"), "{err}");
+    assert_eq!(s.doc.to_json(), before);
 }
 
 /// A cone that takes only a 1 mm chamfer off a cylinder's top edge leaves nearly all of the
@@ -2298,4 +2447,18 @@ fn align_takes_both_ends_where_they_are_shown_across_placed_components() {
     let a = world_bounds(&s, "A");
     assert!(near(a.min.z, 8.0) && near(a.max.z, 16.0), "on B's top, not across it: {a:?}");
     assert!(near(0.5 * (a.min.x + a.max.x), 60.0) && near(0.5 * (a.min.y + a.max.y), 15.0), "centred on the picked point: {a:?}");
+}
+
+#[test]
+fn align_axes_are_world_axes_on_a_placed_component() {
+    let mut s = Session::default();
+    placed_plate(&mut s, "Plate", 0.0, 90.0);
+    let before = world_bounds(&s, "Plate");
+    run(&mut s, "solid.align", json!({"bodies": ["Plate"], "from": [0, 0, 0], "to": [50, 20, 30], "axes": [false, true, false]}));
+    let after = world_bounds(&s, "Plate");
+    // World Y is masked in; X and Z stay where they were. A local-boolean mask would move
+    // along the component's local Y (world Z) instead.
+    assert!(near(after.min.x, before.min.x) && near(after.max.x, before.max.x), "x: {after:?}");
+    assert!(near(after.min.y, before.min.y + 20.0) && near(after.max.y, before.max.y + 20.0), "y: {after:?}");
+    assert!(near(after.min.z, before.min.z) && near(after.max.z, before.max.z), "z: {after:?}");
 }

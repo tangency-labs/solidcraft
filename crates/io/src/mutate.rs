@@ -525,6 +525,55 @@ outer
         survives("design JSON", &mutations(&json, true, 0xde6), usize::MAX, |b| crate::read_design(b).ok().map(|d| d.features.len()));
     }
 
+    /// A drawing, as a container and as plain JSON: every mutation gives an error or a drawing,
+    /// never a panic, and `file_kind` always answers.
+    #[test]
+    fn drawings_survive_mutation() {
+        use solidcraft_geom::drawing_sheet::{DrawingBorderProfile, Orientation, PaperSize, Sheet};
+        let mut ids = solidcraft_doc::ids::IdSource::seeded(0xd4a);
+        let a3 = Sheet::standard(PaperSize::A3, Orientation::Landscape);
+        let mut drawing = solidcraft_doc::drawing::Drawing::new("Fuzz", "en", "Sheet 1", a3, Some(DrawingBorderProfile::iso()), &mut ids).unwrap();
+        let id = drawing.allocate_id(&mut ids).unwrap();
+        drawing.sources.push(solidcraft_doc::drawing::Source { id, path: "plate.sc".into() });
+        let container = crate::write_drawing_container(&drawing).unwrap();
+        assert!(crate::read_drawing(&container).is_ok());
+        survives("drawing container", &mutations(&container, false, 0xd4b), usize::MAX, |b| {
+            let _ = crate::file_kind(b);
+            let _ = crate::read_design(b);
+            crate::read_drawing(b).ok().map(|d| d.sheets.len())
+        });
+        let json = drawing.to_json().unwrap().into_bytes();
+        assert!(crate::read_drawing(&json).is_ok());
+        survives("drawing JSON", &mutations(&json, true, 0xd4c), usize::MAX, |b| {
+            let _ = crate::file_kind(b);
+            crate::read_drawing(b).ok().map(|d| d.sheets.len())
+        });
+    }
+
+    /// A paper scene's JSON, mutated, read, prepared and written as SVG: an error or a document,
+    /// never a panic.
+    #[test]
+    fn paper_scenes_survive_mutation_into_svg() {
+        use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
+        use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
+        let p = Vec2::new;
+        let border = Loop2::polygon(&[p(20.0, 10.0), p(410.0, 10.0), p(410.0, 287.0), p(20.0, 287.0)]);
+        let items = vec![
+            Item::Stroke { path: border.segs.clone(), closed: true, width_mm: 0.7 },
+            Item::Stroke { path: vec![Seg2::Arc { center: p(50.0, 50.0), radius: 10.0, start: 0.0, sweep: 4.0 }], closed: false, width_mm: 0.35 },
+            Item::Fill { region: Region2 { outer: border, holes: vec![] } },
+        ];
+        let scene = Scene { size_mm: p(420.0, 297.0), groups: vec![Group { object: 7, kind: ObjectKind::DrawingBorder, items }] };
+        let json = serde_json::to_vec(&scene).unwrap();
+        let write = |b: &[u8]| -> Option<usize> {
+            let scene: Scene = serde_json::from_slice(b).ok()?;
+            let prepared = scene.prepare().ok()?;
+            crate::paper::paper_svg(&prepared).ok().map(|(bytes, _)| bytes.len())
+        };
+        assert!(write(&json).is_some());
+        survives("paper scene to SVG", &mutations(&json, true, 0x5a3), usize::MAX, write);
+    }
+
     /// Standard base64 (RFC 4648) of `bytes`, for a data URI.
     fn base64(bytes: &[u8]) -> String {
         const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";

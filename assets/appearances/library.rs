@@ -1,5 +1,5 @@
 //! Built-in model appearances: names, sRGB colours and metalness.
-pub const LIBRARY: [(&str, [u8; 3], f64); 20] = [
+pub const LIBRARY: &[(&str, [u8; 3], f64)] = &[
     ("Aluminum - Satin", [204, 208, 214], 1.0),
     ("Aluminum - Anodized Black", [44, 46, 50], 1.0),
     ("Aluminum - Anodized Blue", [52, 92, 160], 1.0),

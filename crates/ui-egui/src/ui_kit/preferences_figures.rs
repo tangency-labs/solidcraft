@@ -89,7 +89,7 @@ pub(crate) fn paint_orbit(p: &Painter, rect: Rect, pivot: usize) {
         p.line_segment([centre, c.at(x - 11.0, y + 5.5)], grey);
     }
     if pivot == 1 {
-        // A restrained screen-space crosshair makes "View centre" distinct from origin.
+        // A restrained screen-space crosshair makes "View center" distinct from origin.
         let guide = Stroke::new(c.width(1.0), t.form_dim.gamma_multiply(0.7));
         for (a, b) in [((x - 9.0, y), (x - 5.0, y)), ((x + 5.0, y), (x + 9.0, y)), ((x, y - 9.0), (x, y - 5.0))] {
             p.line_segment([c.at(a.0, a.1), c.at(b.0, b.1)], guide);
@@ -243,11 +243,13 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
     crate::icons::glyphs::brand_mark_silhouette(&p, object_centre, c.width(22.0), quiet);
     p.circle_filled(c.at(110.0 - inset, top + 7.0), c.width(3.5), quiet);
     let history = match state.history {
-        1 => panel(inset, top, 10.0, bottom - top, "", t.selected_bg),
-        2 => panel(bx, top + browser_height + gap, bw, bottom - top - browser_height - gap, "History", t.selected_bg),
-        _ => panel(inset, bottom - 10.0, 120.0 - inset * 2.0, 10.0, "History", t.selected_bg),
+        1 => Some(panel(inset, top, 10.0, bottom - top, "", t.selected_bg)),
+        2 => Some(panel(bx, top + browser_height + gap, bw, bottom - top - browser_height - gap, "History", t.selected_bg)),
+        // In the browser: no history panel of its own.
+        3 => None,
+        _ => Some(panel(inset, bottom - 10.0, 120.0 - inset * 2.0, 10.0, "History", t.selected_bg)),
     };
-    if state.history == 1 {
+    if let Some(history) = history.filter(|_| state.history == 1) {
         // A single vertical mark reads as the narrow icon-only history rail.
         p.line_segment(
             [history.center_top() + vec2(0.0, t.space_8), history.center_bottom() - vec2(0.0, t.space_8)],

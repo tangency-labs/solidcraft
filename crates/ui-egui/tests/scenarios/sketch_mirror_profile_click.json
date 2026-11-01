@@ -1,0 +1,19 @@
+[
+  {"note": "#8390: one click inside a closed profile selects its whole boundary for the shared Entities input; a double-click selects a curve's chain."},
+  {"queued": "engine.execute", "params": {"command": "sketch.create", "params": {"plane": "XY"}}},
+  {"queued": "engine.execute", "params": {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [40, 30]}}},
+  {"queued": "engine.execute", "params": {"command": "sketch.line", "params": {"points": [[-10, -40], [-10, 40]]}}},
+  {"expect": {"errors": 0, "sketch_curves": {"own": 5}}},
+
+  {"note": "Open Mirror; a single click inside the rectangle selects the whole profile."},
+  {"start": "sketch.mirror"},
+  {"expect": {"dialog": "SketchModify(Mirror"}},
+  {"click": {"sketch": [20, 15]}},
+  {"expect": {"dialog": "SketchModify(Mirror", "errors": 0}},
+
+  {"note": "Pick the line as the mirror line and OK: all four rectangle sides reflect (4 -> 8, plus the line)."},
+  {"click": {"handle": "dialog:Mirror line"}},
+  {"click": {"sketch": [-10, 0]}},
+  {"click": {"handle": "dialog:OK"}},
+  {"expect": {"dialog": null, "errors": 0, "sketch_curves": {"own": 9}}}
+]

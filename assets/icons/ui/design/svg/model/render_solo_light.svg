@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Solo light — point source and dotted stem inside focus brackets</title>
+  <path d="M13.5 5L5.5 5L5.5 13M50.5 5L58.5 5L58.5 13M58.5 51.5L58.5 59.5L50.5 59.5M13.5 59.5L5.5 59.5L5.5 51.5" fill="none" stroke="currentColor" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="23" r="15" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="32" cy="23" r="2.125" fill="#34465b"/>
+  <circle cx="32" cy="44" r="2.125" fill="#236ead"/>
+  <circle cx="32" cy="51" r="2.125" fill="#236ead"/>
+  <circle cx="32" cy="58" r="2.125" fill="#236ead"/>
+</svg>

@@ -21,18 +21,15 @@
 //! exact or certified measures for conics and freeform curves. Profile values contain geometry
 //! only: callers retain the original result's accuracy declarations and local identities.
 
-use std::f64::consts::TAU;
-
 use serde::{Deserialize, Serialize};
 
-use crate::{Loop2, MAX_BEZIER_DEGREE, Plane, Region2, Seg2, Vec2, Vec3};
+use crate::profile::coordinates;
+use crate::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 /// Aggregate input records/references, and the selected conversion's output items, at most.
 /// Input counts curves, wires, regions, contacts, curve uses and hole references together.
 pub const MAX_ITEMS: usize = 100_000;
-const MAX_NUMBER: f64 = 1e12;
-const MIN_POSITIVE: f64 = 1e-12;
-const MAX_START_ANGLE: f64 = 1e6;
+pub(crate) const MAX_NUMBER: f64 = 1e12;
 const FRAME_TOLERANCE: f64 = 1e-8;
 
 /// A section's geometric result, without source identity, freshness or persistence semantics.
@@ -66,6 +63,20 @@ pub enum CurveAccuracy {
     Bounded { max_deviation_mm: f64 },
     /// A deviation measured at samples only, with no bound between them. Zero remains sampled.
     Sampled { max_sample_deviation_mm: f64 },
+}
+
+impl CurveAccuracy {
+    /// The same accuracy for the curve scaled by `factor` (above 0): a deviation scales with it,
+    /// and an analytic curve stays analytic.
+    pub fn scaled(self, factor: f64) -> CurveAccuracy {
+        match self {
+            CurveAccuracy::Analytic => CurveAccuracy::Analytic,
+            CurveAccuracy::Bounded { max_deviation_mm } => CurveAccuracy::Bounded { max_deviation_mm: max_deviation_mm * factor },
+            CurveAccuracy::Sampled { max_sample_deviation_mm } => {
+                CurveAccuracy::Sampled { max_sample_deviation_mm: max_sample_deviation_mm * factor }
+            }
+        }
+    }
 }
 
 /// An ordered connected chain. `closed` is explicit, never inferred or repaired.
@@ -111,16 +122,12 @@ impl Budget {
     }
 }
 
-fn numbers(values: impl IntoIterator<Item = f64>) -> Result<()> {
-    require(values.into_iter().all(|v| v.is_finite() && v.abs() <= MAX_NUMBER), "non-finite or excessive coordinate")
-}
-
 fn point(p: Vec2) -> Result<()> {
-    numbers([p.x, p.y])
+    coordinates([p.x, p.y], MAX_NUMBER).map_err(Invalid)
 }
 
 fn vector(p: Vec3) -> Result<()> {
-    numbers([p.x, p.y, p.z])
+    coordinates([p.x, p.y, p.z], MAX_NUMBER).map_err(Invalid)
 }
 
 /// Strictly check an existing plane without re-orthonormalizing it or changing its serde format.
@@ -137,38 +144,8 @@ pub fn validate_plane(plane: &Plane) -> Result<()> {
     )
 }
 
-fn controls(points: &[Vec2]) -> Result<()> {
-    for p in points {
-        point(*p)?;
-    }
-    let Some((first, rest)) = points.split_first() else { return Err(Invalid("empty controls")) };
-    require(rest.iter().any(|p| p != first), "collapsed curve")
-}
-
 fn curve(curve: &SectionCurve) -> Result<()> {
-    match curve.geometry {
-        Seg2::Line { a, b } => controls(&[a, b])?,
-        Seg2::Arc { center, radius, start, sweep } => {
-            point(center)?;
-            require(radius.is_finite() && (MIN_POSITIVE..=MAX_NUMBER).contains(&radius), "arc radius")?;
-            require(start.is_finite() && start.abs() <= MAX_START_ANGLE, "arc start angle")?;
-            require(sweep.is_finite() && (MIN_POSITIVE..=TAU + 1e-12).contains(&sweep.abs()), "arc sweep")?;
-        }
-        Seg2::Cubic { p0, p1, p2, p3 } => controls(&[p0, p1, p2, p3])?,
-        Seg2::Conic { a, apex, b, w } => {
-            controls(&[a, apex, b])?;
-            require(w.is_finite() && (MIN_POSITIVE..=MAX_NUMBER).contains(&w), "conic weight")?;
-        }
-        Seg2::Bezier { n, ref p } => {
-            require((4..=MAX_BEZIER_DEGREE).contains(&usize::from(n)), "Bezier degree")?;
-            // The unused slots are serialized too: reject hidden non-finite/excessive values.
-            for q in p {
-                point(*q)?;
-            }
-            controls(p.get(..=usize::from(n)).ok_or(Invalid("Bezier degree"))?)?;
-        }
-    }
-    require(curve.geometry.start().is_finite() && curve.geometry.end().is_finite(), "non-finite curve endpoint")?;
+    curve.geometry.check(MAX_NUMBER).map_err(Invalid)?;
     match curve.accuracy {
         CurveAccuracy::Analytic => Ok(()),
         CurveAccuracy::Bounded { max_deviation_mm } => deviation(max_deviation_mm),

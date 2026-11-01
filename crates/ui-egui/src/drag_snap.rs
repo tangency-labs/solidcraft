@@ -6,10 +6,10 @@
 
 use std::cell::{Cell, RefCell};
 
-use egui::{Align2, FontId, Shape, Stroke};
+use egui::{Align2, FontId, Stroke};
 use serde_json::{Value, json};
 use solidcraft_engine::geom::Vec2;
-use solidcraft_engine::sketch::{CurveKind, Sketch};
+use solidcraft_engine::sketch::{ConstraintKind, CurveKind, Sketch};
 
 use crate::SolveApp;
 use crate::theme::Tokens;
@@ -175,20 +175,51 @@ pub fn find(sk: &Sketch, moving: &[(usize, Vec2)], exclude: &[usize], mm_px: f64
     keep(Some(Snap { point: id(mi), at, offset, target: Target::Align, guides }))
 }
 
-/// Points the drag of `entity` (a point or curve id) moves, and the points that move with them.
-pub fn moving_points(sk: &Sketch, entity: &str) -> (Vec<usize>, Vec<usize>) {
-    let own: Vec<usize> = if let Some(p) = sk.point_index(entity) {
-        vec![p]
-    } else {
-        match sk.curve_index(entity).and_then(|c| sk.curves.get(c)) {
-            // Only lines slide whole; a circle or arc grabbed on its edge changes its radius.
-            Some(c) if matches!(c.kind, CurveKind::Line { .. }) => c.kind.point_ids(),
-            _ => Vec::new(),
+/// Points the drag of `entities` (point or curve ids: the one grabbed and those dragged with it)
+/// moves, and the points that move with them.
+pub fn moving_points<'a>(sk: &Sketch, entities: impl IntoIterator<Item = &'a str>) -> (Vec<usize>, Vec<usize>) {
+    let mut own: Vec<usize> = entities
+        .into_iter()
+        .flat_map(|entity| {
+            if let Some(p) = sk.point_index(entity) {
+                vec![p]
+            } else {
+                match sk.curve_index(entity).and_then(|c| sk.curves.get(c)) {
+                    // Only lines slide whole; a circle or arc grabbed on its edge changes its radius.
+                    Some(c) if matches!(c.kind, CurveKind::Line { .. }) => c.kind.point_ids(),
+                    _ => Vec::new(),
+                }
+            }
+        })
+        .collect();
+    // A point held at the middle of a line (a centre rectangle's centre on its diagonal) goes
+    // where the line's ends go, and dragging it takes the line along. So it moves, and snaps,
+    // with a line whose ends both move; and when it is dragged, its line and the shape round it
+    // are no targets for it: they held it at their own middle instead of lining it up (#10086).
+    let middles: Vec<(usize, usize, usize)> = sk
+        .constraints
+        .iter()
+        .filter(|c| !c.driven)
+        .filter_map(|c| match c.kind {
+            ConstraintKind::Midpoint { p, l } => match sk.curves.get(l).map(|c| &c.kind) {
+                Some(CurveKind::Line { a, b }) => Some((p, *a, *b)),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    for &(p, a, b) in &middles {
+        if own.contains(&a) && own.contains(&b) && !own.contains(&p) {
+            own.push(p);
         }
-    };
-    let mut ex = own.clone();
+    }
+    own.sort_unstable();
+    own.dedup();
+    let mut moved = own.clone();
+    moved.extend(middles.iter().filter(|(p, ..)| own.contains(p)).flat_map(|&(_, a, b)| [a, b]));
+    let mut ex = moved.clone();
     for c in &sk.curves {
-        if own.iter().any(|&p| c.kind.uses(p)) {
+        if moved.iter().any(|&p| c.kind.uses(p)) {
             ex.extend(c.kind.point_ids());
         }
     }
@@ -223,7 +254,7 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let tk = Tokens::get();
     for (a, b) in &s.guides {
         if let (Some(a), Some(b)) = (to(*a), to(*b)) {
-            painter.add(Shape::dashed_line(&[a, b], Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
+            painter.extend(crate::viewport::dashed_line(&[a, b], painter.clip_rect(), Stroke::new(1.0, tk.rubber_band), 5.0, 4.0));
         }
     }
     let Some(sp) = to(s.at) else { return };
@@ -249,8 +280,45 @@ mod tests {
     }
 
     fn drag(s: &Sketch, entity: &str, p: Vec2) -> Option<Snap> {
-        let (own, ex) = moving_points(s, entity);
+        let (own, ex) = moving_points(s, [entity]);
         find(s, &[(own[0], p)], &ex, 0.1)
+    }
+
+    /// A centre rectangle 30 × 20 round `center`, as Center Rectangle draws it: the centre `p5`
+    /// held at the middle of the diagonal `l5`.
+    fn centre_rectangle(center: [f64; 2]) -> Sketch {
+        let mut s = solidcraft_engine::Session::default();
+        let _ = s.execute("sketch.create", &json!({"plane": "XY"}));
+        let corner = [center[0] + 15.0, center[1] + 10.0];
+        let _ = s.execute("sketch.rectangle.center", &json!({"center": center, "corner": corner}));
+        s.active_sketch.and_then(|id| s.doc.sketch(id).ok()).cloned().unwrap_or_else(Sketch::new)
+    }
+
+    /// #10086: dragged by its centre, a centre rectangle comes along with it, and the centre
+    /// lines up with the origin (the X axis here), as a circle's centre does. Its own diagonal,
+    /// moving with it, held it at the diagonal's middle instead. Each frame of a drag snaps
+    /// against the shape where the last frame left it: here just above the axis.
+    #[test]
+    fn a_centre_rectangles_centre_lines_up_when_dragged() {
+        let s = centre_rectangle([30.0, 0.5]);
+        let snap = drag(&s, "p5", Vec2::new(30.0, 0.3)).expect("a snap");
+        assert_eq!(snap.target, Target::Align, "{snap:?}");
+        assert_eq!(snap.at, Vec2::new(30.0, 0.0));
+    }
+
+    /// #10086: the whole rectangle dragged (its four sides selected) moves its centre too, and the
+    /// centre lines up as its corners do.
+    #[test]
+    fn a_dragged_centre_rectangle_moves_and_lines_up_its_centre() {
+        let s = centre_rectangle([30.0, 5.0]);
+        let centre = s.resolve_point("p5").unwrap_or(0);
+        let (own, ex) = moving_points(&s, ["l1", "l2", "l3", "l4"]);
+        assert!(own.contains(&centre) && ex.contains(&centre), "{own:?} {ex:?}");
+        let d = Vec2::new(0.0, -4.7);
+        let moving: Vec<(usize, Vec2)> = own.iter().filter_map(|&p| s.point(p).map(|x| (p, x + d))).collect();
+        let snap = find(&s, &moving, &ex, 0.1).expect("a snap");
+        assert_eq!((snap.point.as_str(), &snap.target), ("p5", &Target::Align), "{snap:?}");
+        assert_eq!(snap.at, Vec2::new(30.0, 0.0));
     }
 
     #[test]

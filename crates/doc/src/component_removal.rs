@@ -58,6 +58,22 @@ impl Document {
 
         let occurrences: BTreeSet<u64> =
             self.occurrences.iter().filter(|o| inside.contains(&o.component) || inside.contains(&o.parent)).map(|o| o.id).collect();
+        let joints = self.remove_occurrences(&occurrences);
+
+        let bodies: BTreeSet<String> = self.body_components.iter().filter(|(_, c)| inside.contains(*c)).map(|(name, _)| name.clone()).collect();
+        self.body_components.retain(|_, c| !inside.contains(c));
+        self.body_offsets.retain(|name, _| !bodies.contains(name));
+        self.components.retain(|c| !inside.contains(&c.id));
+        self.parts.retain(|c, _| !inside.contains(c));
+        self.links.retain(|c, _| !inside.contains(c));
+        self.remove_configuration_components(&components);
+        Ok(RemovedTree { components, features, deleted, occurrences: occurrences.into_iter().collect(), joints: joints.into_iter().collect() })
+    }
+
+    /// Remove these occurrences and every assembly record that refers to them: the joints with
+    /// either side on one (with those joints' motion links and motion keys), the joint origins
+    /// on them, their places in contact sets and their exploded moves. Returns the joints removed.
+    pub fn remove_occurrences(&mut self, occurrences: &BTreeSet<u64>) -> BTreeSet<u64> {
         let joints: BTreeSet<u64> = self
             .assembly
             .joints
@@ -65,6 +81,9 @@ impl Document {
             .filter(|j| occurrences.contains(&j.a.occurrence) || occurrences.contains(&j.b.occurrence))
             .map(|j| j.id)
             .collect();
+        for group in &mut self.timeline_groups {
+            group.joints.retain(|id| !joints.contains(id));
+        }
         let assembly = &mut self.assembly;
         assembly.joints.retain(|j| !joints.contains(&j.id));
         assembly.links.retain(|l| !joints.contains(&l.a) && !joints.contains(&l.b));
@@ -79,14 +98,6 @@ impl Document {
             view.moves.retain(|(o, _)| !occurrences.contains(o));
         }
         self.occurrences.retain(|o| !occurrences.contains(&o.id));
-
-        let bodies: BTreeSet<String> = self.body_components.iter().filter(|(_, c)| inside.contains(*c)).map(|(name, _)| name.clone()).collect();
-        self.body_components.retain(|_, c| !inside.contains(c));
-        self.body_offsets.retain(|name, _| !bodies.contains(name));
-        self.components.retain(|c| !inside.contains(&c.id));
-        self.parts.retain(|c, _| !inside.contains(c));
-        self.links.retain(|c, _| !inside.contains(c));
-        self.remove_configuration_components(&components);
-        Ok(RemovedTree { components, features, deleted, occurrences: occurrences.into_iter().collect(), joints: joints.into_iter().collect() })
+        joints
     }
 }

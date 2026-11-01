@@ -2,7 +2,10 @@
 //! the viewport or the browser goes in one undoable step through `selection.delete`. When it
 //! takes other features with it or makes some fail, a confirmation lists them first.
 
+use std::sync::Arc;
+
 use serde_json::{Value, json};
+use solidcraft_engine::doc::KeptResults;
 
 use crate::SolveApp;
 use crate::ui_kit;
@@ -15,6 +18,8 @@ const MAX_LISTED: usize = 20;
 pub struct Pending {
     pub params: Value,
     pub report: Value,
+    /// What the dry run computed ahead, for the delete to find (#9917).
+    pub kept: Option<Arc<KeptResults>>,
 }
 
 /// What Delete acts on now: the selection (bodies not locked), plus the components picked in
@@ -71,6 +76,11 @@ pub fn delete_selection(app: &mut SolveApp) {
     request(app, params);
 }
 
+/// Whether Delete has nothing to act on: nothing selected, and no joint open in Edit Joint.
+pub fn nothing_to_delete(app: &SolveApp) -> bool {
+    is_empty(&selection_params(app)) && edited_joint(app).is_none()
+}
+
 /// The joint the open Edit Joint dialog edits.
 fn edited_joint(app: &SolveApp) -> Option<u64> {
     match app.dialog.as_ref().map(|d| &d.kind) {
@@ -122,7 +132,7 @@ pub fn request(app: &mut SolveApp, params: Value) {
 }
 
 /// [`request`] once its dry run's report is in.
-pub(crate) fn checked(app: &mut SolveApp, params: Value, report: Result<Value, String>) {
+pub(crate) fn checked(app: &mut SolveApp, params: Value, report: Result<Value, String>, kept: Option<Arc<KeptResults>>) {
     let report = match report {
         Ok(r) => r,
         Err(e) => {
@@ -136,14 +146,16 @@ pub(crate) fn checked(app: &mut SolveApp, params: Value, report: Result<Value, S
     let fails = report["would_fail"].as_array().is_some_and(|a| !a.is_empty());
     let shared = shared_occurrences(app, &params);
     if extra || fails || shared {
-        app.menu.confirm = Some(Pending { params, report });
+        app.menu.confirm = Some(Pending { params, report, kept });
     } else {
-        run(app, &params);
+        run(app, &params, kept);
     }
 }
 
-fn run(app: &mut SolveApp, params: &Value) {
-    match app.run("selection.delete", params.clone()) {
+/// Delete for real. With the history rolled back it builds the history after the marker to see
+/// what the delete breaks: the dry run built it ahead, off the window thread, and `kept` it.
+fn run(app: &mut SolveApp, params: &Value, kept: Option<Arc<KeptResults>>) {
+    match app.run_with_kept(kept, |app| app.run("selection.delete", params.clone())) {
         Ok(r) => {
             app.tree.picked_components.clear();
             app.tree.picked_canvases.clear();
@@ -160,7 +172,7 @@ fn run(app: &mut SolveApp, params: &Value) {
 pub fn confirm(app: &mut SolveApp, accept: bool) -> bool {
     let Some(p) = app.menu.confirm.take() else { return false };
     if accept {
-        run(app, &p.params);
+        run(app, &p.params, p.kept);
     }
     true
 }

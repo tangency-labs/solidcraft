@@ -17,7 +17,7 @@ class AppRunCli(unittest.TestCase):
         (self.appdir / "usr/bin").mkdir(parents=True)
         (self.appdir / "usr/share/applications").mkdir(parents=True)
         shutil.copy(ROOT / "packaging/linux/AppRun", self.appdir / "AppRun")
-        (self.appdir / "usr/share/applications/ai.storyteller.solidcraft.desktop").write_text("[Desktop Entry]\nExec=solidcraft\n")
+        (self.appdir / "usr/share/applications/io.tangencylabs.solidcraft.desktop").write_text("[Desktop Entry]\nExec=solidcraft\n")
         for name in ("solidcraft", "solidcraft-cli"):
             p = self.appdir / "usr/bin" / name
             p.write_text(f"#!/bin/sh\necho {name} \"$@\"\n")
@@ -60,6 +60,23 @@ class AppRunCli(unittest.TestCase):
         other.symlink_to("/bin/true")
         self.run_apprun()
         self.assertTrue(other.is_symlink())
+
+    def test_entries_under_earlier_app_ids_are_replaced(self):
+        apps = self.home / ".local/share/applications"
+        apps.mkdir(parents=True)
+        icons = self.home / ".local/share/icons/hicolor/256x256/apps"
+        icons.mkdir(parents=True)
+        for old in ("ai.storyteller.solidcraft", "ai.storyteller.solvecraft"):
+            (apps / f"{old}.desktop").write_text(f'[Desktop Entry]\nExec="/old/SolidCraft.AppImage" %F\nIcon={old}\n')
+            (icons / f"{old}.png").write_text("png")
+        # An entry this script did not write (a package's, Exec on PATH) is left alone.
+        (apps / "ai.storyteller.other.desktop").write_text("[Desktop Entry]\nExec=other\nIcon=ai.storyteller.other\n")
+        self.run_apprun()
+        self.assertTrue((apps / "io.tangencylabs.solidcraft.desktop").is_file())
+        for old in ("ai.storyteller.solidcraft", "ai.storyteller.solvecraft"):
+            self.assertFalse((apps / f"{old}.desktop").exists())
+            self.assertFalse((icons / f"{old}.png").exists())
+        self.assertTrue((apps / "ai.storyteller.other.desktop").is_file())
 
     def test_opt_out_installs_nothing(self):
         self.run_apprun(SOLIDCRAFT_NO_DESKTOP_INTEGRATION="1")

@@ -360,3 +360,57 @@ fn construction_axis_revolve_rejects_invalid_axes_atomically() {
         assert!(s.model.state().bodies.is_empty());
     }
 }
+
+#[test]
+fn world_axis_from_timeline_inspect_round_trips() {
+    for (axis, radial, axial) in [("X", Vec3::Y, Vec3::X), ("Y", Vec3::X, Vec3::Y), ("Z", Vec3::X, Vec3::Z)] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"name":"Profile","plane":{"origin":[0,0,0],"x_dir":radial,"y_dir":axial}}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0":[2,0],"p1":[4,10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":axis,"angle":"90 deg","operation":"new","name":"Turn"}));
+        let inspected = run(&mut s, "timeline.inspect", json!({"feature":"Turn"}));
+        let stored_axis = inspected["definition"]["axis"].clone();
+        assert_eq!(stored_axis, json!({"type":"world","axis":axis}));
+        let original = s.doc.find_feature("Turn").unwrap().kind.clone();
+        let original_measure = solidcraft_kernel::measure(&s.model.state().bodies[0].body).unwrap();
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.model.state().bodies.is_empty());
+
+        run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":stored_axis,"angle":"90 deg","operation":"new","name":"Turn"}));
+        assert_eq!(s.doc.find_feature("Turn").unwrap().kind, original);
+        let state = s.model.state();
+        assert_eq!(state.bodies.len(), 1);
+        let measure = solidcraft_kernel::measure(&state.bodies[0].body).unwrap();
+        // A quarter of an annular cylinder: pi * (4^2 - 2^2) * 10 / 4.
+        assert!((measure.volume - 30.0 * PI).abs() < 0.03, "{axis}: {}", measure.volume);
+        assert!((measure.volume - original_measure.volume).abs() < 1e-6);
+        assert!(measure.centroid.dist(original_measure.centroid) < 1e-6);
+    }
+}
+
+#[test]
+fn invalid_world_axis_objects_are_rejected_atomically() {
+    let mut s = Session::default();
+    profile(&mut s, false);
+    let before = s.doc.to_json();
+    for axis in [
+        json!({"type":"world"}),
+        json!({"type":"world","axis":null}),
+        json!({"type":"world","axis":1}),
+        json!({"type":"world","axis":[0,1,0]}),
+        json!({"type":"world","axis":{}}),
+        json!({"type":"world","axis":""}),
+        json!({"type":"world","axis":"x"}),
+        json!({"type":"world","axis":"y"}),
+        json!({"type":"world","axis":"z"}),
+        json!({"type":"world","axis":"W","dir":[0,1,0]}),
+    ] {
+        let error = s.execute("solid.revolve", &json!({"sketch":"Profile","axis":axis,"angle":"90 deg","operation":"new"})).unwrap_err();
+        let message = error.to_string();
+        assert!(matches!(error, crate::EngineError::BadParams { .. }), "{axis}: {message}");
+        assert!(message.contains("world axis") && message.contains("X, Y or Z"), "{axis}: {message}");
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.model.state().bodies.is_empty());
+    }
+}

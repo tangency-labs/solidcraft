@@ -20,7 +20,7 @@ People trust SolidCraft with their designs. This outranks feature work.
 
 ## Proving a crash fix
 - Every crash fix lands with a regression test. `hostile_params_never_panic` in `crates/engine/src/tests.rs` runs every command with junk parameters; a new command gets this for free.
-- A crash report's `design.solidcraft` and `replay.json` are the test's starting point. Put the test in the area's existing test file (see `skills/solidcraft-tests/SKILL.md`).
+- A crash report's `design.sc` and `replay.json` are the test's starting point. Put the test in the area's existing test file (see `skills/solidcraft-tests/SKILL.md`).
 
 ## When someone says the app crashed
 The desktop app writes every panic and every unclean exit to a local crash folder, with the design and the commands that reproduce it (`solidcraft_engine::crash`, `docs/crash-reports.md`). Look there first:

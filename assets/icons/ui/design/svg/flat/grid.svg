@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Grid</title>
+  <path d="M12 12L52 12L52 52L12 52Z" fill="none" stroke="currentColor" stroke-width="5.6" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M25.3 12L25.3 52M38.7 12L38.7 52M12 25.3L52 25.3M12 38.7L52 38.7" fill="none" stroke="currentColor" stroke-width="4" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

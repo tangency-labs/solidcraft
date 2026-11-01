@@ -92,7 +92,7 @@ fn designs() -> Vec<(String, PathBuf)> {
     add("regressions", root.join("examples/regressions"), "json");
     add("demo", root.join("examples/demo"), "json");
     add("typical", root.join("tests/action_matrix/designs"), "json");
-    add("demo", root.join("tests/action_matrix/designs"), "solidcraft");
+    add("demo", root.join("tests/action_matrix/designs"), solidcraft_engine::io::DESIGN_EXT);
     let mut cases: Vec<PathBuf> =
         std::fs::read_dir(root.join("tests/oracle")).unwrap().flatten().map(|e| e.path()).filter(|p| p.join("recipe.json").is_file()).collect();
     cases.sort();
@@ -105,7 +105,7 @@ fn designs() -> Vec<(String, PathBuf)> {
 /// Build a design from its file.
 fn load(path: &Path) -> Result<Session, String> {
     let mut s = Session::default();
-    if path.extension().is_some_and(|x| x == "solidcraft") {
+    if solidcraft_engine::io::is_design_container_path(path) {
         s.execute("doc.open", &json!({"path": path.to_string_lossy()})).map_err(|e| e.to_string())?;
         return Ok(s);
     }
@@ -1558,7 +1558,7 @@ fn sketches_on_loft_and_sweep_faces() {
 #[test]
 fn press_pull_on_the_pi_case_floor() {
     reproduces(
-        Some("tests/action_matrix/designs/pi-case.solidcraft"),
+        Some("tests/action_matrix/designs/pi-case.sc"),
         json!([{"command": "solid.press_pull", "params": {"face": [30, 20, 0], "distance": 1}}]),
     );
 }

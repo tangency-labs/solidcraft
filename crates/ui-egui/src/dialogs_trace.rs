@@ -3,7 +3,7 @@
 //! and drawn in the viewport; OK keeps it as a 3D sketch spline (`motion.trace.keep`).
 
 use crate::ui_kit::{choice_row, expr_row, text_row};
-use egui::{Pos2, RichText, Stroke};
+use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{IDENTITY, Mat, apply_point, mat_inverse, mat_mul};
 use solidcraft_engine::geom::Vec3;
@@ -135,7 +135,6 @@ pub(crate) fn stop_text(v: &Value) -> Option<String> {
 
 /// The dialog's rows; true when Enter was pressed in a value.
 pub fn rows(app: &mut crate::SolveApp, ui: &mut egui::Ui, f: &mut TraceForm, inputs: &[SelInput]) -> bool {
-    let t = Tokens::get();
     let s = &app.session;
     let mut enter = false;
     let studies: Vec<&str> = s.doc.assembly.studies.iter().map(|m| m.name.as_str()).collect();
@@ -152,9 +151,7 @@ pub fn rows(app: &mut crate::SolveApp, ui: &mut egui::Ui, f: &mut TraceForm, inp
     } else {
         let list = movable(s);
         if list.is_empty() {
-            form_row(ui, "", |ui| {
-                ui.label(RichText::new(crate::i18n::tr_label("no joint that moves yet")).color(t.text_dim));
-            });
+            crate::ui_kit::status_line(ui, "no joint that moves yet", crate::ui_kit::StatusTone::Dim);
             return false;
         }
         let labels: Vec<&str> = list.iter().filter_map(|i| s.doc.assembly.joints.get(*i)).map(|j| j.name.as_str()).collect();
@@ -191,16 +188,14 @@ pub fn rows(app: &mut crate::SolveApp, ui: &mut egui::Ui, f: &mut TraceForm, inp
         f.view = placement(s, inputs).and_then(|(_, _, shown, placed)| Some((shown, mat_inverse(&placed)?)));
     }
     if let Some((_, r)) = &f.shown {
-        let (text, colour) = match r {
+        let (text, tone) = match r {
             Ok(v) => match stop_text(v) {
-                Some(why) => (why, t.warning),
-                None => (crate::i18n::format("trace.points", &[("count", &v["samples"].to_string())]), t.text_dim),
+                Some(why) => (why, crate::ui_kit::StatusTone::Warning),
+                None => (crate::i18n::format("trace.points", &[("count", &v["samples"].to_string())]), crate::ui_kit::StatusTone::Dim),
             },
-            Err(e) => (e.clone(), t.text_dim),
+            Err(e) => (crate::i18n::tr_label(e).to_string(), crate::ui_kit::StatusTone::Dim),
         };
-        form_row(ui, "", |ui| {
-            ui.add(egui::Label::new(RichText::new(text).color(colour)).wrap());
-        });
+        crate::ui_kit::status_line(ui, &text, tone);
     }
     enter
 }

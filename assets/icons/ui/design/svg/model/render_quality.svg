@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Render quality — draft, balanced or high</title>
+  <path d="M10 38L17 38A3.5 3.5 0 0 1 20.5 41.5L20.5 52.5A3.5 3.5 0 0 1 17 56L10 56A3.5 3.5 0 0 1 6.5 52.5L6.5 41.5A3.5 3.5 0 0 1 10 38Z" fill="#e2e8ef" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M28.5 24L35.5 24A3.5 3.5 0 0 1 39 27.5L39 52.5A3.5 3.5 0 0 1 35.5 56L28.5 56A3.5 3.5 0 0 1 25 52.5L25 27.5A3.5 3.5 0 0 1 28.5 24Z" fill="#b8c3cf" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M47 8L54 8A3.5 3.5 0 0 1 57.5 11.5L57.5 52.5A3.5 3.5 0 0 1 54 56L47 56A3.5 3.5 0 0 1 43.5 52.5L43.5 11.5A3.5 3.5 0 0 1 47 8Z" fill="#328bd3" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

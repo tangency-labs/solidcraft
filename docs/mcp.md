@@ -22,7 +22,7 @@ document remains the reference implementation today.
 solidcraft-cli mcp
 
 # Headless, starting from a design file or a command script.
-solidcraft-cli mcp --in part.solidcraft
+solidcraft-cli mcp --in part.sc
 
 # Bridged to the running app, so you can watch the agent model. The app's control channel is
 # on by default (see below), so no flag is needed on either side:
@@ -68,20 +68,38 @@ temporary file by the app and read back by the server, so both must run on the s
 Commands with a typed parameter contract (every new command, and more of the older ones as they
 are converted; `describe_command` shows a command's schemas) can be checked as they are called.
 `--param-check off|warn|strict` sets the level for a headless session, including a script or
-recipe given with `--in`; the default is `off`, which changes nothing. `warn` runs the call and
-adds `param_warnings` to its result, such as ``unknown key `operaton`; did you mean
-`operation`?`` (a starting script's warnings go to stderr). `strict` refuses the call, and the
-design is left as it was. Calls bridged to the app are not checked yet.
+recipe given with `--in`, and for calls bridged to the app; the default is `off`, which changes
+nothing. `warn` runs the call and adds `param_warnings` to its result, such as ``unknown key
+`operaton`; did you mean `operation`?`` (a starting script's warnings go to stderr). `strict`
+refuses the call, and the design is left as it was. Bridged, the server asks the app once per
+connection whether it checks a request's own level (`control.capabilities` and `param_check` in
+[control-protocol.md](control-protocol.md)). If it does, every call and `batch` is sent with the
+level and the app checks it against its own commands, so a newer app's keys are not refused. At
+`strict`, a reply that doesn't say the app checked the call at that level is an error (it may
+have run unchecked: inspect the design), and the server checks the next calls itself.
+An older app is checked here instead, against the server's own commands' contracts, before
+anything is sent: `strict` sends nothing that breaks one, and a command the server has no
+contract for goes to the app unchecked. With such an app, use the server from the same release:
+an app newer than the server may take keys the server's contracts don't know yet, and `strict`
+would refuse them.
 
 ### Which files the agent can reach
 
 Tool calls read, write and delete files only inside the server's folders:
 
-- the folder of the open design (the `--in` design, or whatever the agent last opened or saved),
-  but only when it lies strictly inside your home folder (or the temporary folder) and not in a
-  hidden folder. Home itself, a folder above it (`/`, `/home`, `/Users`, a drive's root),
-  hidden folders such as `~/.config` and folders elsewhere don't count. Hidden files and folders
-  inside the design's folder (`.env`, `.git`) are out of reach too;
+- the folder of the open design (the `--in` design, the design open in the app, or whatever
+  the agent last opened or saved), but only when it lies strictly inside your home folder (or
+  the temporary folder) and not in a hidden folder. Home itself, a folder above it (`/`,
+  `/home`, `/Users`, a drive's root), hidden folders such as `~/.config` and folders elsewhere
+  don't count. Hidden files and folders inside the design's folder (`.env`, `.git`) are out of
+  reach too;
+- on the same terms, every folder the agent opened or saved a design file in during this
+  server's run (`open`, `save`, or `doc.open`, `file.save` and `file.save_as` through `execute`
+  or `batch`, with the path given in full) and, headless, every folder a design was open in,
+  until the server stops (the 16 most recent). So after a new design, an opened STEP file or a
+  save-as elsewhere, the agent can still save beside the design it worked on. Such a call
+  succeeded only because its folder was already one of the agent's, so no folder joins just
+  because the agent names it;
 - SolidCraft's own recovery folder, so `doc.recovery_list`, `doc.recover` and
   `doc.recovery_discard` work out of the box (discarding deletes only real recovery entries);
 - the server's own scratch folder (a new private `solidcraft-mcp-*` folder in the temporary
@@ -116,7 +134,15 @@ solidcraft-cli mcp --allow-path ~/designs --allow-path ~/exports
 solidcraft-cli mcp --allow-any-path   # no limit (the behaviour before this option existed)
 ```
 
-Bridged, the server sends its folders with every request (`allow_paths`, see
+When a `save` (or any other call) is refused with `… outside the folders this agent may use …`,
+add the folder to the server's `args` in your MCP client's configuration (the `mcpServers`
+entries below, or what `solidcraft-cli mcp setup` wrote), for example
+`"args": ["mcp", "--allow-path", "/Users/NAME/Documents/Designs"]`, and restart the client.
+An agent should ask you to do that rather than save through the app's control port, which
+knows nothing of these folders.
+
+Bridged, the server sends its folders with every request (`allow_paths`, and the folders the
+agent opened or saved a design in as `design_folders`, see
 [control-protocol.md](control-protocol.md)) and the app adds its own recovery folder and the
 folder of the design open in it, under the same rules, so give absolute paths: a relative one
 resolves against the app's working folder, not the server's. The app's own
@@ -127,13 +153,14 @@ file dialogs are never limited.
 Each tool says what it may do, for clients that ask before running tools (or auto-approve on
 these hints). `list_commands`, `describe_command`, `inspect_design`, `measure`, `body_topology`,
 `skill_reference`, `crash_reports`, `pending` and `running` are read-only. `set_parameter`, `undo` and `redo`
-change the design undoably. `new_design` replaces it (destructive). `execute`, `batch`, `open`, `save`, `export` and
+change the design undoably, and so does `check_parameters` (it changes the design and puts it back:
+not read-only, not destructive). `new_design` replaces it (destructive). `execute`, `batch`, `open`, `save`, `export` and
 `screenshot` (whose `path` writes a file) can read, write, overwrite or delete files: they are
 not read-only, `destructiveHint` and `openWorldHint` are true.
 
 ### Client configuration
 
-`solidcraft-cli` is on `PATH` after every package install: the Windows installer adds its folder, the deb, rpm and FreeBSD packages install it in `/usr/bin`, the Homebrew cask links it, the AppImage writes a small `solidcraft-cli` launcher into `~/.local/bin` on its first run, and the macOS app links it into `/opt/homebrew/bin` or `/usr/local/bin` when it starts (Help > Install solidcraft-cli command does it with an administrator prompt when those are not writable). Two packages keep it out of `PATH` by design: Snap exposes it as `solidcraft.cli`, and Flatpak runs it as `flatpak run --command=solidcraft-cli ai.storyteller.solidcraft`; use those as the client's `command` (with `mcp` as the arguments).
+`solidcraft-cli` is on `PATH` after every package install: the Windows installer adds its folder, the deb, rpm and FreeBSD packages install it in `/usr/bin`, the Homebrew cask links it, the AppImage writes a small `solidcraft-cli` launcher into `~/.local/bin` on its first run, and the macOS app links it into `/opt/homebrew/bin` or `/usr/local/bin` when it starts (Help > Install solidcraft-cli command does it with an administrator prompt when those are not writable). Two packages keep it out of `PATH` by design: Snap exposes it as `solidcraft.cli`, and Flatpak runs it as `flatpak run --command=solidcraft-cli io.tangencylabs.solidcraft`; use those as the client's `command` (with `mcp` as the arguments).
 
 The quickest way: **Help > Connect AI assistants…** in the app, or
 
@@ -252,7 +279,7 @@ completely (from the notification area) and start it again to load the servers.
 
 They cover the workflow, the command shapes, how to verify with `measure`, and the known traps. With them an agent builds a part in a few `batch` calls and reads far less output. To install them for Claude Code, copy the folders into `~/.claude/skills/`; [skills/README.md](https://github.com/bherbruck/solidcraft/blob/main/skills/README.md) has the details.
 
-The `skill_reference` tool returns these documents from the copies built into SolidCraft, so an agent without file access can follow them: `{"skill": "solidcraft-modeling"}` returns its `reference.md`, the default file. Mechanisms also has `reference.md`, checking has `reference/porting.md`, and every skill has `SKILL.md` (editing uses modeling's reference). It never reads a path from disk, and an unknown skill or file is refused with the available choices. SolidCraft's own chat turns the agent's file tools off, so this is how its agent reads the skills there.
+The `skill_reference` tool returns these documents from the copies built into SolidCraft, so an agent without file access can follow them: `{"skill": "solidcraft-modeling"}` returns its `reference.md`, the default file. Mechanisms also has `reference.md`, checking has `reference/porting.md`, and every skill has `SKILL.md` (editing uses modeling's reference). It never reads a path from disk, and an unknown skill or file is refused with the available choices. SolidCraft's own chat turns the agent's file tools off, so this is how its agent reads the skills there. The instructions the server sends at `initialize` point agents at `skill_reference` first, then say how to plan the numbers, build in a few `batch` calls and verify each stage with `measure`; the same pointer is in the system note SolidCraft's own chat gives its agent.
 
 ## Tools
 
@@ -260,12 +287,33 @@ The `skill_reference` tool returns these documents from the copies built into So
 |---|---|---|
 | `list_commands` | `filter?` | The command catalog: id, label, tab/panel, shortcut, parameter docs, enabled now. `filter` matches id, label, tab and panel. |
 | `describe_command` | `id` | One command's parameter docs (`params`) and, for commands with a typed contract (every new command, and more of the older ones as they are converted), the JSON Schemas (2020-12) of its parameters (`input`) and of a successful result (`output`); `null` for the others. The same as `execute` `engine.describe {command}`. |
-| `execute` | `command`, `params?`, `verbose?` (default true) | Run any command with JSON parameters (`list_commands` shows them). Failures leave the design unchanged. A feature command replies with the feature (`feature`, `name`), every body (`bodies`) and the bodies it created, changed and removed (`created_bodies`, `changed_bodies`, `removed_bodies`). `verbose: false` uses the same compact reply as `batch`. |
-| `batch` | `commands: [{command, params}]`, `rollback?` (default true), `verbose?` (default true), `timings?`, `profile?`, `coalesce_parameters?` (default false) | Run steps in order, stop at the first error and undo the completed steps. The reply names the failing step (`failed.index`, `failed.command`, `failed.error`), every result before it, `rolled_back` (true only when the design really went back to where the batch started), `undone`, `applied` (the indices of the steps whose changes are in the design) and `not_run` (the steps never sent). A step may name a tool instead of a command, with that tool's arguments as `params`: `set_parameter` (runs `parameters.change`; `value` or `expression`), `list_commands` (`engine.commands`, filtered by `filter` as the tool filters it), `describe_command` (`engine.describe`), `execute` (`{command, params}`), `measure`, `inspect_design` (`document.inspect`: each sketch as its counts, not its full contents, and no joints), `undo`, `redo`, `export`, `save`, `open`, `new_design` and `crash_reports`. `screenshot`, `body_topology` (use `model.edges` and `model.faces`), `batch`, `pending`, `running` and `skill_reference` can't be steps: such a batch fails before anything is sent. So does a step the batch would certainly refuse at its turn (#5853): a step without a command, an unknown command id (the error names the closest ids) or, with `--param-check strict`, parameters that break a command's contract. A headless session checks this itself; an app checks it against its own commands when it gets the batch. `verbose: false` keeps the reply small in large designs: feature steps leave out the full body list (`created_bodies`, `changed_bodies`, `removed_bodies` stay) and sketch steps the ids they repeat outside `created`. Bridged to an app that has `engine.batch`, the whole batch is one control request (one frame of the app). Older apps, and apps showing the agent cursor, get the steps one by one. `timings: true` adds `timings: [{index, command, ms}]` for every step run, the failing one included, and `total_ms`. `profile: true` also adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`, its time in kernel booleans, in tessellation and the rest. Steps are timed where they run: in the app when bridged. An app without `engine.batch` is timed step by step, without `profile`. `coalesce_parameters: true` sets each run of consecutive plain parameter edits (`parameters.change` or `set_parameter` with a name and a value, or `changes`) together, so the design rebuilds once per run instead of once per edit. Steps between runs see the design up to date. Each step keeps its own result (`coalesced`: the run's length), and the run is one undo step. The run skips the states between its edits, so an edit refused on its own can go through with the run's later ones. A refused run goes step by step, naming the refused step. |
+| `execute` | `command`, `params?`, `verbose?` (default true), `expect?` | Run any command with JSON parameters (`list_commands` shows them). Failures leave the design unchanged. A feature command replies with the feature (`feature`, `name`), every body (`bodies`) and the bodies it created, changed and removed (`created_bodies`, `changed_bodies`, `removed_bodies`). `verbose: false` uses the same compact reply as `batch`. `expect` checks the design after the command, as it does for `batch` (see below). |
+| `batch` | `commands: [{command, params}]`, `rollback?` (default true), `verbose?` (default true), `timings?`, `profile?`, `coalesce_parameters?` (default false), `expect?` | Run steps in order, stop at the first error and undo the completed steps. The reply names the failing step (`failed.index`, `failed.command`, `failed.error`), every result before it, `rolled_back` (true only when the design really went back to where the batch started), `undone`, `applied` (the indices of the steps whose changes are in the design) and `not_run` (the steps never sent). A step may name a tool instead of a command, with that tool's arguments as `params`: `set_parameter` (runs `parameters.change`; `value` or `expression`), `list_commands` (`engine.commands`, filtered by `filter` as the tool filters it), `describe_command` (`engine.describe`), `execute` (`{command, params}`), `measure` (`summary: true` summarised as the tool summarises it), `inspect_design` (`document.inspect`: each sketch as its counts, not its full contents, and no joints), `undo`, `redo`, `export`, `save`, `open`, `new_design` and `crash_reports`. `screenshot`, `body_topology` (use `model.edges` and `model.faces`), `batch`, `check_parameters`, `pending`, `running` and `skill_reference` can't be steps, nor can `component.edit_in_place` and `component.finish_edit`, however a step names them, as they go to another design's tab (send them with the `execute` tool on their own): such a batch fails before anything is sent. So does a step the batch would certainly refuse at its turn (#5853): a step without a command, an unknown command id (the error names the closest ids) or, with `--param-check strict`, parameters that break a command's contract. A headless session checks this itself; an app checks it against its own commands when it gets the batch, and a bridged server at `--param-check strict` checks the contracts before it sends the batch. `verbose: false` keeps the reply small in large designs: feature steps leave out the full body list (`created_bodies`, `changed_bodies`, `removed_bodies` stay) and sketch steps the ids they repeat outside `created`. Bridged to an app that has `engine.batch`, the whole batch is one control request (one frame of the app). Older apps, and apps showing the agent cursor, get the steps one by one. `timings: true` adds `timings: [{index, command, ms}]` for every step run, the failing one included, and `total_ms`. `profile: true` also adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`, its time in kernel booleans, in tessellation and the rest. Steps are timed where they run: in the app when bridged. An app without `engine.batch` is timed step by step, without `profile`. `coalesce_parameters: true` sets each run of consecutive plain parameter edits (`parameters.change` or `set_parameter` with a name and a value, or `changes`) together, so the design rebuilds once per run instead of once per edit. Steps between runs see the design up to date. Each step keeps its own result (`coalesced`: the run's length), and the run is one undo step. The run skips the states between its edits, so an edit refused on its own can go through with the run's later ones. A refused run goes step by step, naming the refused step. |
+
+**`expect`** on `batch` and `execute` turns the verify step into part of the build. An agent
+computes the volume, body count or bounding box a stage should produce before building it;
+instead of a `measure` call and a comparison by hand after every stage, it gives them to the
+call: `"expect": {"volume_mm3": 59824.9, "tol": 0.002, "bodies": 1, "bbox": {"min": [0, 0, 0],
+"max": [140, 90, 30]}}`. Every key is optional (at least one of `volume_mm3`, `bodies` and `bbox`);
+`tol` is relative to the expected volume (default 0.002, so 0.2 %), and each bounding-box
+coordinate must lie within 0.05 mm. Once the call has gone through, the server measures the
+design the way `measure` does (the total volume of the closed bodies, the body count and the
+box round every body) and the reply gains
+`"expectation": {"ok": bool, "measured": {"volume_mm3", "bodies", "bbox"}, "expected": {...}, "mismatch": ["volume: measured 59680, expected 59824.9 (-0.24 %)", ...]}`.
+On a mismatch the tool result is flagged `isError: true`, with the mismatch text as its first
+content block and the reply as the second, so the model notices; the design is kept as built
+(undoably, as ever), and the agent decides whether to undo, edit a feature (`timeline.edit`) or
+carry on. A batch that fails is not measured, and an `expect` the tool cannot use (an unknown key,
+a value of the wrong type, a negative `tol`, a `bbox` without three coordinates a side) is
+refused before anything runs. `expect` is an argument of the tool, not a key of a step: a step
+carrying one is treated as any step with a key the batch does not know. Volume and body count
+say nothing about which kernel built the design, which is the point: the check holds whatever
+builds it.
 | `inspect_design` | `measure?` (default true), `sketches?` (default true), `joints?` (default true) | Design properties (`metadata`: project, author… and other tools' keys; set them with `execute` `document.metadata.set`), parameters, timeline (type, suppressed, rolled back, error, warning, timing), bodies (volume, area, centre of mass, bbox, face/edge/vertex counts, visible; `removed_later: true` while a sketch is being edited on a rolled-back timeline and a later feature deletes the body, which is then not shown), sketches (curves, points, constraints, profiles, DOF, solve status, visible), joints when the design has any (as `joint.inspect` gives them: each origin's occurrence, component and path, the snap as saved, the feature, face, edge or sketch curve (`sketch: {id, name, curve}`) its persistent names refer to, `resolves` and the `error` when it is lost; kind, offset, angle, flip, values, limits, expressions, motion links; `execute` `joint.inspect {joint}` gives one joint), selection, undo depth. Hide helper sketches, bodies or construction planes with `execute` `browser.visibility` (`{items, visible}` or `{folder, visible}`), and joint glyphs with `{joints: [id or name], visible}` or `{folder: "joints", visible}` (a hidden joint still constrains and drives; `joint.list` reports each joint's `visible`). |
-| `measure` | `body?` or `items?` | Area (mm²), bbox, topology counts and `closed` per body. Volume (mm³), volume centre of mass, density and mass are reported only for closed, consistently oriented bodies (null or omitted for open surfaces). Volume/mass totals skip open bodies; `total.open_bodies_skipped` gives their count. Area and topology totals include all bodies. With `items` (one or two selections as `execute` takes them: `face`, `edge`, `vertex`, `sketch_curve`, `profile`), the picked geometry instead: faces and edges need only `type`, `body` and `point`; `index` is optional. See below. |
-| `body_topology` | `body` | Edges (index, midpoint, length, ends) and faces (index, name, area, centroid, normal, `point`, and for a cylindrical face its `cylinder`: `origin`, `axis`, `radius`). An edge midpoint is the `[x,y,z]` that picks that edge for fillet and chamfer. A face's `point` lies on it and picks it (its centroid may not: that of a face with a hole is in the hole); a face's `name` picks it for the commands that take faces (`face.delete`, `solid.shell`, `solid.draft`, `solid.offset_face`, `solid.split_face`, `solid.replace_face`, and `face` of `sheet.convert`). |
-| `set_parameter` | `name`, `value` or `expression` (number or expression), `unit?`, `comment?` | Create or change a user parameter and recompute. `expression` is another name for `value` (the one `parameters.change` uses): give one of them, or both only when they agree; neither, or two that differ, is an error. Reports `recomputed` (features rebuilt), `restored` (features whose earlier result for the same inputs was reused, e.g. a value set back) and features that now fail. |
+| `measure` | `body?` or `items?`, `summary?` (default false) | Area (mm²), bbox, topology counts and `closed` per body. Volume (mm³), volume centre of mass, density and mass are reported only for closed, consistently oriented bodies (null or omitted for open surfaces). Volume/mass totals skip open bodies; `total.open_bodies_skipped` gives their count. Area and topology totals include all bodies. With `items` (one or two selections as `execute` takes them: `face`, `edge`, `vertex`, `sketch_curve`, `profile`), the picked geometry instead: faces and edges need only `type`, `body` and `point`; `index` is optional. See below. `summary: true` keeps one short object per body (`name`, `volume_mm3`, `bbox: {min, max}`, `faces`, `closed`; a body that could not be measured keeps its `error`), `body_count` and `total.volume_mm3`, nothing else: what a stage check against computed numbers needs, at a fraction of the size. It applies to the bodies reply, not to `items`. |
+| `body_topology` | `body`, `faces?` (`all`, `cylinders`; default `all`) | Edges (index, midpoint, length, ends) and faces (index, name, area, centroid, normal, `point`, and for a cylindrical face its `cylinder`: `origin`, `axis`, `radius`). An edge midpoint is the `[x,y,z]` that picks that edge for fillet and chamfer. A face's `point` lies on it and picks it (its centroid may not: that of a face with a hole is in the hole); a face's `name` picks it for the commands that take faces (`face.delete`, `solid.shell`, `solid.draft`, `solid.offset_face`, `solid.split_face`, `solid.replace_face`, and `face` of `sheet.convert`). `faces: "cylinders"` replies `cylinders` instead of `edges` and `faces`: one entry per cylinder, `{radius, origin, axis, extent, names}`, the halves the kernel splits a cylinder into merged (same radius, same axis line; `origin` and `axis` as the first half's `cylinder` gives them), `extent` the `[min, max]` distance along `axis` from `origin` that the body's points on the cylinder span (the faces' `point`s and the ends of the edges lying on it; left out when none were found), and `names` the merged faces' names, any of which picks the face. Enough to check where every hole and boss is, in a few lines instead of the whole topology. |
+| `set_parameter` | `name`, `value` or `expression` (number or expression), `unit?`, `comment?` | Create or change a user parameter and recompute. `expression` is another name for `value` (the one `parameters.change` uses): give one of them, or both only when they agree; neither, or two that differ, is an error. Reports `recomputed` (features rebuilt), `restored` (features whose earlier result for the same inputs was reused, e.g. a value set back) and features that now fail. An expression `new_name = expression` renames the parameter as it sets it; in any other tool's expression parameter it adds the user parameter `new_name` and the input uses it (`defined`, `definitions` in the reply). |
+| `check_parameters` | `set: {name: value}` (a number or an expression each, as `set_parameter`'s `value`), `report?` (`measure`, `cylinders`, `errors`; default all three) | Try parameter values without keeping them: one `edit.checkpoint`, every value set in one `parameters.change {changes}` (one rebuild; an app without `changes` gets one change per name), the reports read, then `edit.restore_checkpoint`, so the design, its parameters and its undo history are exactly as before. The reply has `values` (each parameter's value with the tried expressions in), `recomputed`, `measure` (volume, bbox, bodies and faces per body, as the `measure` tool reports them), `errors` and `warnings` (the features that fail or warn: `{feature, name, error}`) with `parameter_errors` (the parameters that don't evaluate), `cylinders` (every cylindrical face of every body as `{body, radius, origin, axis, faces, name, area}`; the halves a kernel splits one cylinder into are one entry, `origin` is the axis point closest to the world origin and `axis` points so that its first non-zero component is positive) and `restored: true`. A name the design has no parameter of, a value that is not a number or a string, an expression that does not evaluate or an unknown report item is an error, and nothing changes. If the checkpoint cannot be restored the call is an error with `restored: false`, `restore_error` and a note that the tried values are still in the design: set them back before saving. Replaces the loop `set_parameter`, `measure`, `body_topology`, `set_parameter` back, which cost every agent session three to five calls and up to 16 s of rebuilds. Not a `batch` step. |
 | `screenshot` | `view?` (iso, top, front, back, bottom, left, right, home, fit, or a named view saved with `view.save`), `camera?` (`{target, yaw, pitch, distance, fov?}`, as `view.apply`), `path?`, `width?`, `height?`, `source?` (window, model), `grid?`, `axes?` | A PNG image content block. Headless: a render with the viewport's pipelines on a headless GPU device (see `solidcraft-cli gpu`; with no adapter, the CPU rasterizer, without analysis colours), fitted to the model, or from the named view or camera; the reply's `renderer` says which (`gpu`, `gpu-software`, `cpu`, with a `warning` for `cpu`). Bridged: the app window (default) or a model render with the app's camera; a named view or camera moves the app's viewport there first (`execute` `view.apply` does the same without a screenshot). `grid: false` and `axes: false` leave the ground grid (it lies on Z 0 and cuts through a part that straddles it) and the origin's axes out of a model render; axes hidden with `browser.visibility` stay out whatever `axes` says. Bridged, a screenshot that gives `grid` or `axes` is a model render, which follows the app's Grid and Origin switches for what it does not give; `source: "window"` with either is an error. A window that is minimised or on another macOS Space presents no frame: with no `source` the reply is a model render and says so (`fallback`); `source: "window"` is an error saying why, at once. Agents that don't need the app's chrome can ask for `source: "model"`. |
 | `export` | `path`, `format?` (step, 3mf, 3mf-tagged, stl, stla, obj, urdf), `bodies?`, `mesh_prefix?`, `effort?`, `velocity?` | STEP, 3MF or mesh export; URDF writes the whole assembly with its meshes next to it (`docs/urdf.md`). |
 | `undo`, `redo` | — | Undo / redo one change. |
@@ -274,7 +322,7 @@ The `skill_reference` tool returns these documents from the copies built into So
 | `skill_reference` | `skill`, `file?` (default `reference.md`) | Read a bundled skill document. Skills: `solidcraft-modeling`, `solidcraft-mechanisms`, `solidcraft-editing`, `solidcraft-checking`. |
 | `running` | - | What the app is running or has queued, for every client (`control.running`, see [control-protocol.md](control-protocol.md#limits)): each request's connection and id, method, command id or a batch's step count, `running_s` and `queued`, never its parameters. Answers at once while the app is busy: ask it when a call timed out before sending a change again. Headless: always `{"running": []}`. |
 | `new_design` | `name?` | Start an empty design. |
-| `open` | `path` | Open a `.solidcraft` design, a STEP file (`.step`/`.stp`) as a new design holding its bodies (an Import base feature), or a 3MF/STL file as mesh bodies. |
+| `open` | `path` | Open a `.sc` design (or a `.solidcraft` one from an earlier release), a STEP file (`.step`/`.stp`) as a new design holding its bodies (an Import base feature), or a 3MF/STL file as mesh bodies. |
 | `save` | `path?` | Save the design (to its current file without `path`). |
 
 `measure` with `items` reports each item under `items` (`length_mm`, `area_mm2` or `position`).
@@ -294,6 +342,15 @@ the top level. With two items:
 - `angle_deg` between two planar faces or straight edges.
 
 Earlier fields are unchanged, so older scripts keep working.
+
+To select geometry in the view, use `execute` `select.set` with
+`{"items":[{"type":"face","body":"Body1","point":[5,5,10]}]}` (or `"type":"edge"`).
+The point is in world millimetres and uses the same proximity tolerance as Measure. An
+`index` can replace the point; the command then supplies a point on that face or edge,
+including curved faces and placed components. Existing selections with both fields keep
+their index and point. Missing geometry or an invalid partial pick leaves the entire
+selection unchanged, including with `"add":true`. `inspect_design` reports the completed
+selections with both fields.
 
 To change a feature after it is made, read its definition with `execute` `timeline.inspect`
 (`{feature}`: id or name) and change fields with `timeline.edit` (`{feature, set}`; e.g.
@@ -348,7 +405,7 @@ the batch added to the undo history.)
 
 ## Camera and close-up recipe
 
-The `camera` of `screenshot` (the object `view.apply`, `view.save` and `solidcraft-cli snapshot --camera` take too) is an orbit camera, `{target, yaw, pitch, distance, fov?}`, in millimetres and **radians**. Unlike the `angle` of `solid.move`, a bare number is not degrees here. The eye is at `target + distance * (-sin(yaw) * cos(pitch), -cos(yaw) * cos(pitch), sin(pitch))`, looking at `target` with Z up on the screen. So `yaw: 0, pitch: 0` is the front view: the eye at -Y, looking along +Y, with +X to the right. A yaw of π/2 looks from -X, π from +Y and -π/2 from +X. The pitch is the elevation angle up from the XY plane, and π/2 looks straight down with +X to the right and +Y up. `fov` is the vertical field of view in radians. `0`, or no `fov`, is an orthographic view whose visible half-height is 0.4 × `distance`; with a perspective `fov` the half-height at the target is `distance * tan(fov / 2)`. `inspect.section` removes what lies on the side its normal points to: it keeps the points `p` with `n · p < d`, where `d = n · origin` (`flip: true` keeps the other side). To look into the cut, put the eye on the removed side.
+The `camera` of `screenshot` (the object `view.apply`, `view.save` and `solidcraft-cli snapshot --camera` take too) is an orbit camera, `{target, yaw, pitch, distance, fov?}`, in millimetres and **radians**. Unlike the `angle` of `solid.move`, a bare number is not degrees here. The eye is at `target + distance * (-sin(yaw) * cos(pitch), -cos(yaw) * cos(pitch), sin(pitch))`, looking at `target` with Z up on the screen. So `yaw: 0, pitch: 0` is the front view: the eye at -Y, looking along +Y, with +X to the right. A yaw of π/2 looks from -X, π from +Y and -π/2 from +X. The pitch is the elevation angle up from the XY plane, and π/2 looks straight down with +X to the right and +Y up; `view.apply` refuses a pitch past ±π/2. A positive `roll` turns the picture clockwise. The app's View angles readout (`view.angle_readout`) shows the same yaw, pitch and roll in degrees. `fov` is the vertical field of view in radians. `0`, or no `fov`, is an orthographic view whose visible half-height is 0.4 × `distance`; with a perspective `fov` the half-height at the target is `distance * tan(fov / 2)`. `inspect.section` removes what lies on the side its normal points to: it keeps the points `p` with `n · p < d`, where `d = n · origin` (`flip: true` keeps the other side). To look into the cut, put the eye on the removed side.
 
 To look closely at one part of a large model, such as a STEP assembly, work in a headless session. These steps change only the open design in memory:
 

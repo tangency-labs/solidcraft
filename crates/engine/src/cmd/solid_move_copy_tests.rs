@@ -89,6 +89,24 @@ fn a_copied_body_keeps_the_appearance_of_the_body_it_came_from() {
     assert_eq!(s.doc.appearances.bodies.get(&copy), Some(&source), "the copy must keep the appearance of the body it came from");
 }
 
+/// Editing a copying Move from the History redefines it on a scratch session, where the old Move
+/// is still in the timeline as a suppressed placeholder (#7741).
+#[test]
+fn a_copying_move_can_be_edited_from_the_history() {
+    let mut s = Session::default();
+    cube20(&mut s, "Cube");
+    run(&mut s, "appearance.assign", json!({"bodies": ["Cube"], "appearance": "ABS - Blue"}));
+    let reply = run(&mut s, "solid.move", json!({"bodies": ["Cube"], "translate": [30, 0, 0], "copy": true}));
+    let feature = reply["feature"].clone();
+    let copy = created(&reply);
+    let edit = json!({"feature": feature, "command": "solid.move", "params": {"bodies": ["Cube"], "translate": [40, 0, 0], "copy": true}});
+    s.execute("timeline.redefine", &edit).expect("editing a copying move must keep copying");
+    assert_eq!(s.model.state().bodies.len(), 2, "the edited move still makes one copy");
+    assert_eq!(copy_of(&s, "Cube", Vec3::new(40.0, 0.0, 0.0)), copy, "the copy keeps its name and moves to the new place");
+    let source = s.doc.appearances.bodies.get("Cube").expect("the source body keeps its look").clone();
+    assert_eq!(s.doc.appearances.bodies.get(&copy), Some(&source), "the edited copy keeps the look of the body it came from");
+}
+
 #[test]
 fn a_copied_body_keeps_the_material_of_the_body_it_came_from() {
     let mut s = Session::default();

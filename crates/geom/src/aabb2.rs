@@ -57,6 +57,10 @@ impl Aabb2 {
     pub fn contains(&self, p: Vec2) -> bool {
         p.x >= self.min.x && p.y >= self.min.y && p.x <= self.max.x && p.y <= self.max.y
     }
+    /// The box both hold: empty when they do not meet.
+    pub fn intersection(&self, o: &Aabb2) -> Aabb2 {
+        Aabb2 { min: Vec2::new(self.min.x.max(o.min.x), self.min.y.max(o.min.y)), max: Vec2::new(self.max.x.min(o.max.x), self.max.y.min(o.max.y)) }
+    }
     /// Whether the two boxes share a point (never when either is empty).
     pub fn meets(&self, o: &Aabb2) -> bool {
         self.min.x <= o.max.x && o.min.x <= self.max.x && self.min.y <= o.max.y && o.min.y <= self.max.y

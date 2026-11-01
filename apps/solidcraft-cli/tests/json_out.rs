@@ -139,11 +139,13 @@ fn eval_json_out_holds_what_stdout_would() {
 fn json_out_needs_a_file_and_fails_when_it_cannot_write() {
     let dir = Scratch::new();
     let script = dir.script();
-    for cmd in ["run", "eval"] {
-        let output = cli().arg(cmd).arg(&script).arg("--json-out").output().unwrap();
-        assert_eq!(output.status.code(), Some(1), "{cmd}");
-        assert!(String::from_utf8_lossy(&output.stderr).contains("--json-out needs a FILE"), "{cmd}");
-        assert!(output.stdout.is_empty(), "{cmd}");
+    for cmd in ["run", "eval", "inspect"] {
+        for trailing in [&[][..], &["--in"][..]] {
+            let output = cli().arg(cmd).arg(&script).arg("--json-out").args(trailing).output().unwrap();
+            assert_eq!(output.status.code(), Some(1), "{cmd}");
+            assert!(String::from_utf8_lossy(&output.stderr).contains("--json-out needs a FILE"), "{cmd}");
+            assert!(output.stdout.is_empty(), "{cmd}");
+        }
 
         let missing = dir.0.join("missing").join("out.json");
         let output = cli().arg(cmd).arg(&script).arg("--json-out").arg(&missing).output().unwrap();
