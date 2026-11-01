@@ -1344,4 +1344,10 @@ fn a_second_placements_face_and_edge_project_where_it_is_placed() {
     let copy = s.doc.occurrences.iter().map(|o| o.id).find(|id| *id != first).unwrap();
     run(&mut s, "occurrence.move", json!({"occurrence":copy,"translate":[0,15,0],"capture":true}));
     check(&s, 15.0);
+    // Renaming the part or the body renames the copy ("Base (Housing:2)"): the links follow it.
+    run(&mut s, "component.rename", json!({"component":part["component"],"name":"Housing"}));
+    run(&mut s, "body.rename", json!({"body":"Block","name":"Base"}));
+    assert!(s.model.state().sketch(sketches[0]).unwrap().sketch.links.iter().all(|l| l.source.bodies() == ["Base (Housing:2)"]));
+    check(&s, 15.0);
+    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()), 15.0);
 }

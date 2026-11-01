@@ -8484,11 +8484,14 @@ pub fn with_placed_copies<'a>(
         return framed;
     }
     let Some(inv) = crate::mat_inverse(frame) else { return framed };
-    let owners = doc.model_body_components(st);
+    let mut by_component: std::collections::HashMap<u64, Vec<&ModelBody>> = std::collections::HashMap::new();
+    for (b, owner) in st.bodies.iter().zip(doc.model_body_components(st)) {
+        by_component.entry(owner).or_default().push(b);
+    }
     let world = crate::WorldNames::new(doc, st);
     let mut placed: Vec<ModelBody> = Vec::new();
     for (comp, path, m) in doc.placements() {
-        for (b, _) in st.bodies.iter().zip(&owners).filter(|(_, owner)| **owner == comp) {
+        for b in by_component.get(&comp).into_iter().flatten() {
             let name = world.name(&b.name, comp, &path);
             if !missing.contains(&name.as_str()) || placed.iter().any(|p| p.name == name) {
                 continue;
