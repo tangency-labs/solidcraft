@@ -1286,6 +1286,9 @@ pub(super) fn axis_param(s: &Session, sketch: u64, p: &Value, cmd: &str) -> Resu
         let dir = o.get("dir").and_then(vec3).ok_or_else(|| bad(cmd, "axis needs `dir`"))?;
         return Ok(AxisRef::Line { origin: Position(origin), dir: Dir(dir) });
     }
+    if let Some((origin, dir)) = str_(p, "axis").and_then(|name| s.origin_axis(name)) {
+        return Ok(AxisRef::Line { origin: Position(origin), dir: Dir(dir) });
+    }
     match str_(p, "axis") {
         Some(a @ ("X" | "Y" | "Z")) => Ok(AxisRef::World { axis: a.into() }),
         Some(a @ ("x" | "y")) => Ok(AxisRef::SketchAxis { axis: a.into() }),
@@ -1939,6 +1942,9 @@ fn axis_line(s: &Session, p: &Value, cmd: &str) -> Result<(Vec3, Vec3, Option<so
 /// An axis line from `axis`: X, Y, Z, a construction axis by name or {origin, dir}. A construction
 /// axis comes back where it is now, with its name.
 fn named_axis_line(s: &Session, p: &Value, cmd: &str) -> Result<(Vec3, Vec3, Option<FeatureName>)> {
+    if let Some((o, d)) = str_(p, "axis").and_then(|name| s.origin_axis(name)) {
+        return Ok((o, d, None));
+    }
     match p.get("axis") {
         Some(Value::String(a)) => match a.to_ascii_uppercase().as_str() {
             "X" => Ok((Vec3::ZERO, Vec3::X, None)),
@@ -2203,7 +2209,10 @@ pub(super) fn plane_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<s
             }
             Ok(PlaneRef::Origin { name: n.trim().to_ascii_uppercase() })
         }
-        Some(Value::String(n)) => construction(n.trim()),
+        Some(Value::String(n)) => match s.origin_plane(n) {
+            Some(plane) => Ok(PlaneRef::Custom { plane }),
+            None => construction(n.trim()),
+        },
         Some(Value::Number(id)) => match id.as_u64() {
             Some(id) => construction(&id.to_string()),
             None => Err(bad(cmd, format!("`plane` must be {WANT}"))),

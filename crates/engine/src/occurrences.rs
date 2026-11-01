@@ -765,6 +765,9 @@ impl Session {
 
     /// Is a browser folder or group hidden itself (by tree key, see `Visibility::hidden_folders`)?
     pub fn folder_hidden(&self, key: &str) -> bool {
+        if let Some(path) = crate::origins::folder_path(key) {
+            return !self.visibility.shown_component_origins.contains(&path);
+        }
         if let Some(cache) = self.visibility_index() {
             return cache.as_ref().is_none_or(|c| c.folder_keys.contains(key));
         }
@@ -825,6 +828,9 @@ impl Session {
     pub fn construction_visible(&self, name: &str) -> bool {
         if self.visibility.hidden_origin.iter().any(|h| h == name) {
             return false;
+        }
+        if let Some((path, _)) = crate::origins::item(name) {
+            return self.visibility.shown_component_origins.contains(&path) && self.occurrence_visible(&path);
         }
         match self.doc.features.iter().find(|f| f.name == name) {
             Some(f) => self.feature_placement_visible(f.id) && !self.feature_folder_hidden(f.id, "construction"),

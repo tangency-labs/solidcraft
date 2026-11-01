@@ -22,6 +22,8 @@ use crate::{DocError, Document, PlaneRef, Result};
 pub enum GeoRef {
     /// A fixed point.
     Point { p: Vec3 },
+    /// A fixed line captured from reference geometry, in the feature's component frame.
+    Line { a: Vec3, b: Vec3 },
     /// The design origin.
     Origin,
     /// A body vertex: where the edges named `edges` meet (the end they share), else the one
@@ -375,6 +377,10 @@ pub fn canonical_dir(d: Vec3) -> Vec3 {
 /// A reference as a line (origin, unit direction).
 pub(crate) fn line(ctx: &Ctx, g: &GeoRef) -> Result<(Vec3, Vec3)> {
     match g {
+        GeoRef::Line { a, b } => {
+            let dir = (*b - *a).normalized().filter(|_| a.is_finite() && b.is_finite()).ok_or_else(|| bad("invalid reference line"))?;
+            Ok((*a, dir))
+        }
         GeoRef::Edge { .. } | GeoRef::Face { .. } => model_line(ctx.st, g),
         GeoRef::SketchCurve { sketch, curve } => {
             let pts = sketch_curve_points(ctx, *sketch, curve)?;
@@ -684,6 +690,10 @@ impl GeoRef {
     pub fn map_points(&mut self, pt: &mut dyn FnMut(&mut Vec3), plane: &mut dyn FnMut(&mut PlaneRef)) {
         match self {
             GeoRef::Point { p } => pt(p),
+            GeoRef::Line { a, b } => {
+                pt(a);
+                pt(b);
+            }
             GeoRef::Vertex { at, .. } | GeoRef::Edge { at, .. } | GeoRef::Face { at, .. } => pt(at),
             GeoRef::Plane { plane: p } => plane(p),
             _ => {}
