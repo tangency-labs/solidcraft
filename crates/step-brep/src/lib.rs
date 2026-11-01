@@ -715,8 +715,10 @@ pub fn build_with_options(body: &Body, options: BuildOptions) -> Result<Brep, Bu
 /// joined as the file joins them, no geometric stitching), leaving out a face whose
 /// construction fails, then gets the seam fix, the UV trims and, with
 /// [`BuildOptions::heal`], the healer (a face whose seam fix or UV trim fails is kept
-/// as built and reported). The stitched build runs too. The topology build is kept
-/// when it is a closed solid ([`is_closed_solid`]), except where the stitched build is
+/// as built and reported). A closed solid ([`is_closed_solid`]) that needed no repair
+/// (no face left out or failing its pass, and the seam fix and UV-trim pass kept its
+/// edge and vertex counts) is kept as it is. Otherwise the stitched build runs too. The
+/// topology build is kept when it is a closed solid, except where the stitched build is
 /// also closed and their volumes differ by more than 1e-4 relative: then the topology
 /// build is made again with the healer before the seam fix, and that is kept if it
 /// agrees with the stitched build (the file's topology closed with the wrong trims),
@@ -741,18 +743,28 @@ pub fn build_body(body: &Body, options: BuildOptions) -> Result<BuiltBody, Build
         return build_stitched(body, options).map(|brep| stitched_body(brep, None));
     }
     let topology_built = |heal_first| {
-        build_topology(body, options, heal_first).map(|(brep, face_failures)| BuiltBody {
-            brep,
-            path: BuildPath::Topology,
-            face_failures,
-            topology_note: None,
+        build_topology(body, options, heal_first).map(|(brep, face_failures, repaired)| {
+            let built = BuiltBody {
+                brep,
+                path: BuildPath::Topology,
+                face_failures,
+                topology_note: None,
+            };
+            (built, repaired)
         })
     };
-    let topology = topology_built(false);
+    let (topology, repaired) = match topology_built(false) {
+        Ok((built, repaired)) => (Ok(built), repaired),
+        Err(error) => (Err(error), true),
+    };
     let topology_volume = topology
         .as_ref()
         .ok()
         .and_then(|built| closed_volume(&built.brep));
+    // A closed topology build that needed no repair is kept without the stitched build.
+    if topology_volume.is_some() && !repaired {
+        return topology.map_err(|message| BuildError { message });
+    }
     let stitched = build_stitched(body, options);
     let Some(topology_volume) = topology_volume else {
         // not a closed solid: the stitched build, else (by default) the open topology
@@ -775,7 +787,7 @@ pub fn build_body(body: &Body, options: BuildOptions) -> Result<BuiltBody, Build
     let agrees = |a: f64, b: f64| (a - b).abs() <= AGREEMENT * a.abs().max(b.abs());
     if let Some(stitched_volume) = stitched_volume {
         if !agrees(topology_volume, stitched_volume) && !options.heal {
-            if let Ok(healed) = topology_built(true) {
+            if let Ok((healed, _)) = topology_built(true) {
                 if closed_volume(&healed.brep).is_some_and(|v| agrees(v, stitched_volume)) {
                     return Ok(healed);
                 }
@@ -830,7 +842,7 @@ pub fn is_closed_solid(brep: &Brep) -> bool {
 /// Why the topology-first build gave no B-rep.
 pub fn build_from_topology(body: &Body, options: BuildOptions) -> Result<BuiltBody, BuildError> {
     build_topology(body, options, false)
-        .map(|(brep, face_failures)| BuiltBody {
+        .map(|(brep, face_failures, _)| BuiltBody {
             brep,
             path: BuildPath::Topology,
             face_failures,
@@ -843,11 +855,14 @@ pub fn build_from_topology(body: &Body, options: BuildOptions) -> Result<BuiltBo
 /// [`BuildOptions::heal`], the healer, as the stitched build gets them; `heal_first`
 /// heals the built B-rep before the seam fix instead. A face whose seam fix or UV trim
 /// fails is kept as built and reported.
+/// Also returns whether the build needed repair: a face left out or failing its pass,
+/// or the seam fix or UV-trim pass changing the edge or vertex count (the file's
+/// topology lacked seams, or closed with edges missing).
 fn build_topology(
     body: &Body,
     options: BuildOptions,
     heal_first: bool,
-) -> Result<(Brep, Vec<FaceFailure>), String> {
+) -> Result<(Brep, Vec<FaceFailure>, bool), String> {
     let constructor::Constructed {
         mut kernel,
         mut brep,
@@ -862,6 +877,8 @@ fn build_topology(
     if heal_first {
         api_heal_brep(&mut kernel, Some(&mut brep)).map_err(|e| format!("heal: {e}"))?;
     }
+    let counts = |brep: &Brep| (brep.edge_list().len(), brep.vertex_list().len());
+    let as_built = counts(&brep);
     let faces: Vec<FaceId> = brep.face_list().to_vec();
     for face in faces {
         let cone = options.skip_cone_seams
@@ -895,10 +912,11 @@ fn build_topology(
             });
         }
     }
+    let repaired = !failures.is_empty() || counts(&brep) != as_built;
     if options.heal && !heal_first {
         api_heal_brep(&mut kernel, Some(&mut brep)).map_err(|e| e.to_string())?;
     }
-    Ok((brep, failures))
+    Ok((brep, failures, repaired))
 }
 
 /// The stitched build: each face on its own, stitched, seam-fixed and trimmed.

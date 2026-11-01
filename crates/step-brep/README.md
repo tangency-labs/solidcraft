@@ -40,9 +40,11 @@ topology: its shared edges and vertices joined as the file joins them through th
 kernel's `BrepConstructor`, without geometric stitching. A face whose construction
 fails is left out and reported (`ImportReport.face_failures`), the first failing face in
 file order each time, up to 16 faces or 1% of the body; a face whose seam fix or UV trim
-fails is kept as built and reported too. The stitched build runs as well. The topology
-build is kept when it is a closed solid (manifold, display-ready, positive volume),
-unless the stitched build is also closed and their volumes differ by more than 1e-4
+fails is kept as built and reported too. A closed solid (manifold, display-ready,
+positive volume) that needed no repair (no face left out or failing, and the seam fix
+and UV-trim pass kept its edge and vertex counts) is kept without a stitched build.
+Otherwise the stitched build runs as well. The topology build is kept when it is a
+closed solid, unless the stitched build is also closed and their volumes differ by more than 1e-4
 relative: then the topology build healed before its seam fix is kept if it agrees with
 the stitched one, else the first topology build. A topology build that is not closed
 gives way to the stitched build, and where stitching fails too the open topology build
