@@ -174,7 +174,7 @@
     ],
     "radius": 2,
     "type": "curvature",
-    "tangent_chain": false
+    "tangent_chain": true
    }
   }
  ]
