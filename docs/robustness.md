@@ -167,6 +167,37 @@ designs and Boolean identity checks separately, including nested operations.
 These are event counts, so a single Boolean or seed can contribute several.
 Truncated reports are counted separately rather than implying complete totals.
 
+## Near contact and the retry budget
+
+Bodies that only just meet (an arm whose round end reaches a hundredth of a millimetre into a
+ring's rounded rim, or stops that far short of it) are where the meshed shortcuts and the
+intersection both go wrong. Before any intersection, bodies whose samples show no shared
+volume are looked at on their exact faces (`crates/kernel/src/distance.rs`, `contact`): near
+every place their meshes come within both chords of each other, the nearest points of the faces
+and their edges are found by least squares on the gap.
+
+- **Apart**: every gap is clear of round-off. The bodies share nothing whatever their meshes
+  say: a union keeps both side by side, an intersection is empty, a cut leaves the target, at
+  once and with no retry. (A 0.01 mm gap took most of a minute and was reported "unchecked".)
+- **Crossing**: two faces cross at an angle inside both. They share volume the samples were too
+  coarse to see: the shortcut is not taken, a union that keeps both shells is refused, an
+  empty intersection is not believed, and the intersection is traced at steps finer than the
+  usual ones, down to a fraction of how far the faces could overlap.
+- **Touching**: anything else; the boolean goes on as before.
+
+The membership check on a result skips sample points within two chords of any of the three
+meshes: there two facetings of one face can disagree although the faces agree, and where the
+bodies only just overlap, the overlap box is no thicker than that (a correct join of an arm
+0.1 mm into a rounded rim was refused for it, after minutes of retries).
+
+Each boolean makes at most 64 attempts at the intersection, its retries included (shifted and
+refined tries, nudges, and the booleans those make in turn). Every nudge used to run the whole
+round of retries again, so a join that could not succeed took minutes to say so; once the
+attempts are spent the rest is skipped and the error says so. It is a count, not a clock, so a
+design rebuilds the same way on any machine. A join of faces lying on one cylinder, back to
+back, that no route can take says so in its error rather than leaving the bodies unjoined by a
+nudge that only moved them apart.
+
 ## Results
 
 1000 seeds (0–999), 8 processes on a heavily loaded machine (load average 60–80), 90 s per
@@ -258,3 +289,6 @@ Found by QA on new users' first steps, each with an engine test against the anal
 - Shells of partial annuli (a half ring) whose cavity truck's boolean rejects although the
   same cavity built another way cuts cleanly.
 - Very slow booleans on bodies with many patterned features.
+- Joins where faces of both bodies lie on one cylinder back to back and the rest of them meets
+  it tangentially (a concave arm end hugging a ring with rounded rims): refused, with a reason,
+  after its attempts.
