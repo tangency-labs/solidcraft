@@ -503,6 +503,18 @@ pub struct UpstreamFixes {
     pub revolution_round_offset_collapses: bool,
     /// At an Nx1 corner whose end rib cannot be built because a rail missed a side edge ending within the fillet's width, the rib is deleted and the global merge cuts the round off (WR-303, #841).
     pub fillet_nx1_end_rib_global_merge: bool,
+    /// `SmCompositeCurve::CalculateBoundingBox` stacks each segment's composite span end
+    /// to end starting at the first segment's `GetNaturalInterval().GetMin()` (matching
+    /// [`CompositeCurve::natural_interval`](crate::curve::composite_curve::CompositeCurve::natural_interval)
+    /// and `MakeCompositeNurb` / `CreateByJoining`) instead of translating each segment's
+    /// natural interval from `0`, and maps each non-empty overlap with the requested
+    /// composite `interval` back onto the segment's natural interval (reversing within
+    /// `[min, max]` when `same_sense` is `false`) before querying the segment's boxes
+    /// (WR-34, #2135; `plan/upstream-issues/WR-34--addendum-2026-10-31-bbox-segment-interval.md`).
+    /// Segment box evaluation and unioning (including `PolarBox` tangent sense on
+    /// reversed segments) are otherwise unchanged. Off by default for pinned SMLib
+    /// compatibility.
+    pub composite_curve_bbox_segment_intervals: bool,
     /// `sm_FixUVTrimCurves` moves only the end control points of the two UV trims meeting at a corner onto the vertex's UV point, without dropping the vertex onto them, trimming there and stretching them back over the edge interval (WR-255, #959/#570; the fork's tangency-labs/smlib@e5606fb (was 5af7070)).
     pub uv_trim_corner_end_points_only: bool,
     /// `SmEdgeuse::CreateUVTrimCurve` takes a drop that came back in pieces as the longest run of pieces that meet end to end (the same edge parameter and `(u, v)`), joined exactly on the edge parameters it was dropped from, where upstream reparameterizes a piece covering 90% of the edge onto the whole edge interval, which runs the trim at the wrong pace (up to 5 mm off its edge) (WR-543, #1383; the fork's tangency-labs/smlib@e36feb1).
