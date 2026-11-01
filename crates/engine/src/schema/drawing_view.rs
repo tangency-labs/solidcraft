@@ -40,9 +40,9 @@ pub struct SnapshotParams {
     pub reference_style: StyleParam,
     /// Whether reference parts hide the model's lines behind them (false when not given).
     pub reference_hides_model: bool,
-    /// Model millimetres added on every side of the view's extents, so reference parts around
-    /// the model show inside its boundary: 0 to 100000 (0 when not given).
-    pub reference_margin_mm: f64,
+    /// How far the view's boundary grows from the model's box towards the box that also holds its
+    /// reference parts, each side on its own: 0 to 100 (0 when not given).
+    pub reference_shown_percent: f64,
     pub tangent_edges: TangentEdgesParam,
     pub sheet: SheetParam,
     /// Where the view's centre goes on the sheet, in paper millimetres from its lower-left
@@ -84,7 +84,7 @@ impl SnapshotParams {
             display_style: self.display_style.0,
             reference_style: self.reference_style.0,
             reference_hides_model: self.reference_hides_model,
-            reference_margin_mm: self.reference_margin_mm,
+            reference_shown_percent: self.reference_shown_percent,
             tangent_edges: self.tangent_edges.0,
         }
     }
@@ -298,10 +298,11 @@ pub struct ViewSet {
     pub reference_hides_model: Option<Option<bool>>,
     #[serde(deserialize_with = "super::present")]
     pub tangent_edges: Option<Option<TangentEdgesParam>>,
-    /// Model millimetres added on every side of the view's extents: 0 to 100000.
+    /// How far the view's boundary grows from the model's box towards the box that also holds its
+    /// reference parts, each side on its own: 0 to 100.
     #[serde(deserialize_with = "super::present")]
     #[schemars(with = "f64")]
-    pub reference_margin_mm: Option<f64>,
+    pub reference_shown_percent: Option<f64>,
     /// A base view's direction.
     #[serde(deserialize_with = "super::present")]
     #[schemars(with = "ViewParam")]
@@ -372,9 +373,9 @@ pub struct InspectResult {
     pub direction: ViewResult,
     pub place: PlaceParam,
     pub settings: SettingsResult,
-    pub reference_margin_mm: f64,
-    /// Where it sits on its sheet: its extents grown by its reference margin, at its scale, round
-    /// its centre; a placeholder 20 mm each way when there's nothing to measure.
+    pub reference_shown_percent: f64,
+    /// Where it sits on its sheet: its extents grown by `reference_shown_percent`, at its scale,
+    /// with the model's middle on its centre; a placeholder 20 mm each way when there's nothing to measure.
     pub boundary_mm: BoxResult,
     /// Its design's extents on its plane.
     pub extents: ExtentsResult,
@@ -474,10 +475,11 @@ pub struct BaseParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub reference_hides_model: Option<bool>,
-    /// Model millimetres added on every side of its extents: 0 to 100000 (0 when not given).
+    /// How far the view's boundary grows from the model's box towards the box that also holds its
+    /// reference parts, each side on its own: 0 to 100 (0 when not given).
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "f64")]
-    pub reference_margin_mm: Option<f64>,
+    pub reference_shown_percent: Option<f64>,
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "TangentEdgesParam")]
     pub tangent_edges: Option<TangentEdgesParam>,

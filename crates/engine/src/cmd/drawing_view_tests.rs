@@ -61,7 +61,7 @@ fn three_views_of(mut s: Session) -> (Session, [u64; 3]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let mut add = |d: &mut Drawing, kind: ViewKind, place: ViewPlace, settings: ViewOverrides| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_margin_mm: 0.0 })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent: 0.0 })]);
         id
     };
     let front_settings =
@@ -194,9 +194,11 @@ fn an_edit_is_one_undo_step_and_names_its_followers() {
     assert_eq!(turned["changed"], json!(["scale", "view"]));
     assert_eq!(turned["followers"], json!([ids::encode(top), ids::encode(right)]), "by id");
     assert_eq!(edit_view(&mut s, right, json!({"place": {"at": [320.0, 150.0]}}))["changed"], json!(["place"]));
-    assert_eq!(edit_view(&mut s, top, json!({"reference_margin_mm": 5.0}))["changed"], json!(["reference_margin_mm"]));
-    assert_eq!(inspect_view(&mut s, top)["reference_margin_mm"], 5.0);
-    assert!(edit_refused(&mut s, top, json!({"reference_margin_mm": -1.0})).contains("reference margin"));
+    assert_eq!(edit_view(&mut s, top, json!({"reference_shown_percent": 5.0}))["changed"], json!(["reference_shown_percent"]));
+    assert_eq!(inspect_view(&mut s, top)["reference_shown_percent"], 5.0);
+    for percent in [-1.0, 100.001, 1e308] {
+        assert!(edit_refused(&mut s, top, json!({"reference_shown_percent": percent})).contains("reference_shown_percent"), "{percent}");
+    }
     // Nothing changed, no step.
     let steps = s.undo.len();
     assert_eq!(edit_view(&mut s, front, json!({"scale": "1:5"}))["changed"], json!([]));
@@ -396,7 +398,7 @@ fn block_drawing() -> Session {
 }
 
 /// A base view with no scale takes the largest preset at which it lies inside the sheet's drawing
-/// space (not the paper), centred where it goes, its margin included: the 100 x 20 front view on A3
+/// space (not the paper), centred where it goes: the 100 x 20 front view on A3
 /// at 2:1, as the snapshot fits it; that scale is saved as the view's own. A scale given is kept,
 /// the settings given are the view's own, each view is one undo step ([`create`]), and with nothing
 /// to measure the view takes 1:1.
@@ -414,18 +416,16 @@ fn a_base_view_fits_its_sheet_and_saves_the_scale() {
     assert_eq!(inspect_view(&mut s, front)["settings"]["scale"], json!({"value": "2:1", "from": "this", "set": "2:1"}));
     let near_the_left = create(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [108, 148.5]})).0;
     assert_eq!(near_the_left["scale"]["text"], "1:1", "98 mm to the drawing border: 196 mm of room (the paper's edge would give 216)");
-    let with_margin = create(&mut s, BASE, json!({"sheet": "Sheet 1", "reference_margin_mm": 60})).0;
-    assert_eq!(with_margin["scale"]["text"], "1:1", "220 x 140 with the margin: 440 mm at 2:1");
-    let p = json!({"sheet": "Sheet 1", "view": "top", "scale": "1:5", "position_mm": [100, 100], "display_style": "visible_hidden", "reference_margin_mm": 5});
+    let p = json!({"sheet": "Sheet 1", "view": "top", "scale": "1:5", "position_mm": [100, 100], "display_style": "visible_hidden", "reference_shown_percent": 50});
     let (given, top) = create(&mut s, BASE, p);
     assert_eq!((given["scale"]["text"].as_str(), given["scale"]["fitted"].as_bool()), (Some("1:5"), Some(false)));
-    assert_box(&given, [89.0, 94.0], [111.0, 106.0]);
+    assert_box(&given, [90.0, 95.0], [110.0, 105.0]);
     let view = saved(&s, top);
     assert_eq!(
         view.settings,
         ViewOverrides { scale: Some("1:5".parse().unwrap()), display_style: Some(VisualStyle::VisibleHidden), ..ViewOverrides::default() }
     );
-    assert_eq!(view.reference_margin_mm, 5.0);
+    assert_eq!(view.reference_shown_percent, 50.0, "it has no reference parts, so its box doesn't grow");
     let before = s.drawing("test").unwrap().views.len();
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.drawing("test").unwrap().views.len(), before - 1, "one undo takes the view away");
@@ -486,9 +486,27 @@ fn a_projected_view_lines_up_a_gap_past_its_parent() {
     assert_eq!((beside["sheet"].clone(), saved(&s, beside_id).sheet), (json!(ids::encode(second)), second));
 }
 
+/// A base view with no scale fits what its percent shows, the scale the snapshot gives for the same
+/// percent, and stays inside the drawing space on the side the box grows on.
+#[test]
+fn a_base_view_fits_what_its_percent_shows() {
+    let (mut s, [_, block]) = plate_and_block(5.0);
+    run(&mut s, "occurrence.move", json!({"occurrence": block, "translate": [3000, 10, 5]}));
+    let snapshot = |s: &mut Session, percent: f64| snap(s, json!({"view": "top", "reference_shown_percent": percent}))["scale"]["text"].clone();
+    let (near, far) = (snapshot(&mut s, 0.0), snapshot(&mut s, 100.0));
+    assert_ne!(near, far);
+    run(&mut s, "drawing.create", json!({}));
+    for (percent, scale) in [(0.0, near), (100.0, far)] {
+        let (made, id) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "view": "top", "reference_shown_percent": percent}));
+        assert_eq!((&made["scale"]["text"], made["scale"]["fitted"].as_bool()), (&scale, Some(true)), "{made}");
+        assert!(made.get("outside").is_none(), "{made}");
+        assert_eq!(saved(&s, id).reference_shown_percent, percent);
+    }
+}
+
 /// What view creation refuses, each with the drawing and the undo steps unchanged: no drawing, a
 /// drawing that draws no design, unknown or badly given sheets, parents and sides, places and
-/// margins past their limits, a scale that doesn't fit, unknown fields, and a 33rd view in a chain.
+/// percents past their limits, a scale that doesn't fit, unknown fields, and a 33rd view in a chain.
 #[test]
 fn hostile_view_creation_is_refused() {
     let mut s = block();
@@ -508,8 +526,8 @@ fn hostile_view_creation_is_refused() {
         base(json!({"scale": "1:1", "position_mm": [1e300, 0]})),
         base(json!({"position_mm": [1e300, 0]})),
         base(json!({"position_mm": [5, 148.5]})),
-        base(json!({"reference_margin_mm": 1e6})),
-        base(json!({"reference_margin_mm": -1})),
+        base(json!({"reference_shown_percent": 100.001})),
+        base(json!({"reference_shown_percent": -1})),
         base(json!({"display_style": "glossy"})),
         base(json!({"colour": "red"})),
         base(json!({"position_mm": null})),
@@ -610,18 +628,16 @@ fn without_a_scale_the_view_fits_and_centres_on_its_sheet() {
     assert_eq!(a4["sheet"], json!({"size": {"standard": "a4"}, "orientation": "portrait", "dpi": 300.0}), "the sheet, its defaults filled in");
 }
 
-/// Scale and position only scale and move the boundary; the margin grows each side by the
-/// margin times the scale; the browser's eye counts for nothing; nothing in the design changes.
+/// Scale and position only scale and move the boundary; the browser's eye counts for nothing;
+/// nothing in the design changes.
 #[test]
-fn scale_position_and_margin_set_the_boundary_and_the_design_is_untouched() {
+fn scale_and_position_set_the_boundary_and_the_design_is_untouched() {
     let mut s = block();
     let (undo, doc) = (s.undo.len(), s.doc.clone());
     let dirty = s.is_dirty();
     let one = boundary(&snap(&mut s, json!({"scale": "1:1", "position_mm": [0, 0]})));
     let half = boundary(&snap(&mut s, json!({"scale": "1:2", "position_mm": [0, 0]})));
     assert!((one.0 - half.0 * 2.0).len() < EPS && one.1.len() < EPS && half.1.len() < EPS);
-    let margin = boundary(&snap(&mut s, json!({"scale": "1:2", "position_mm": [0, 0], "reference_margin_mm": 5})));
-    assert!((margin.0 - (half.0 + Vec2::new(5.0, 5.0))).len() < EPS, "2.5 mm a side at 1:2: {margin:?}");
     // The same call gives the same answer, apart from what working it out took.
     let answer = |mut v: Value| {
         if let Some(reply) = v.as_object_mut() {
@@ -718,7 +734,7 @@ fn hostile_snapshots_are_refused() {
         (json!({"sheet": {"dpi": 24.9}}), "dpi"),
         (json!({"sheet": {"dpi": 2400.1}}), "dpi"),
         (json!({"sheet": {"size": {"custom": {"sides_mm": [0, 10]}}}}), "sheet"),
-        (json!({"reference_margin_mm": -1}), "reference_margin_mm"),
+        (json!({"reference_shown_percent": -1}), "reference_shown_percent"),
         (json!({"position_mm": [1e308, 0]}), "point"),
         (json!({"position_mm": [5000.1, 0], "scale": "1:1"}), "position"),
         (json!({"scael": "1:2"}), "scael"),
@@ -1198,7 +1214,7 @@ fn assert_lengths(v: &Value, reference: bool, visible: f64, hidden: f64) {
     assert!((got.0 - visible).abs() < 1e-6 && (got.1 - hidden).abs() < 1e-6, "{reference}: {got:?}, not ({visible}, {hidden})");
 }
 
-/// Worked by hand, top view at 1:1 with a margin taking in all of the block. The plate's outline is
+/// Worked by hand, top view at 1:1 showing all of the block. The plate's outline is
 /// 160 mm, 20 of it (x = 40, y 10..30) under the block when the block is above; the block's is 80,
 /// and when it is below, its parts at x 30..40 are under the plate: 40 hidden and 40 visible.
 /// Reference parts cover the model only when told, and the plate always covers the block.
@@ -1206,7 +1222,7 @@ fn assert_lengths(v: &Value, reference: bool, visible: f64, hidden: f64) {
 fn reference_lines_are_their_own_and_cover_the_model_only_when_told() {
     let view = |hides: bool| {
         json!({"view": "top", "scale": "1:1", "display_style": "visible_hidden", "reference_style": "visible_hidden",
-               "reference_hides_model": hides, "reference_margin_mm": 20})
+               "reference_hides_model": hides, "reference_shown_percent": 100})
     };
     let (mut above, _) = plate_and_block(5.0);
     let v = snap(&mut above, view(false));
@@ -1228,28 +1244,95 @@ fn reference_lines_are_their_own_and_cover_the_model_only_when_told() {
 #[test]
 fn each_part_of_a_view_draws_hidden_lines_by_its_own_style() {
     let (mut above, _) = plate_and_block(5.0);
-    let hides = json!({"view": "top", "scale": "1:1", "reference_hides_model": true, "reference_margin_mm": 20});
+    let hides = json!({"view": "top", "scale": "1:1", "reference_hides_model": true, "reference_shown_percent": 100});
     let v = snap(&mut above, hides.clone());
     assert_lengths(&v, false, 140.0, 0.0);
     let (mut below, _) = plate_and_block(-10.0);
     let v = snap(&mut below, hides);
     assert_lengths(&v, true, 40.0, 0.0);
-    let v = snap(&mut below, json!({"view": "top", "scale": "1:1", "reference_style": "visible_hidden", "reference_margin_mm": 20}));
+    let v = snap(&mut below, json!({"view": "top", "scale": "1:1", "reference_style": "visible_hidden", "reference_shown_percent": 100}));
     assert_lengths(&v, true, 40.0, 40.0);
 }
 
-/// With model parts there, the boundary is theirs and the margin's, and reference lines stop at it:
-/// with no margin the block keeps x 30..40 (20 + 10 + 10); with 5 mm, x 30..45 (20 + 15 + 15).
+/// With model parts there, the boundary starts at theirs and reference lines stop at it. The block
+/// passes only the plate's right side, so that side alone grows, to x 50 at 100%: the block keeps
+/// x 30..40 at 0% (20 + 10 + 10), x 30..45 at 50% (20 + 15 + 15) and all of itself at 100%. The model
+/// stays where it is throughout, so a view stays lined up with its projected views.
 #[test]
-fn reference_parts_stop_at_the_boundary_of_the_model_and_its_margin() {
+fn reference_parts_grow_the_boundary_on_their_own_side_as_far_as_asked() {
     let (mut s, _) = plate_and_block(5.0);
-    let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
-    assert_box(&v, [190.0, 128.5], [230.0, 168.5]);
-    assert_eq!(v["source"]["bodies"], 2, "{v}");
-    assert_lengths(&v, true, 40.0, 0.0);
-    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "reference_margin_mm": 5}));
-    assert_box(&v, [185.0, 123.5], [235.0, 173.5]);
-    assert_lengths(&v, true, 50.0, 0.0);
+    let at = |s: &mut Session, percent: f64| snap(s, json!({"view": "top", "scale": "1:1", "reference_shown_percent": percent}));
+    let model_lines = |v: &Value| v["lines"].as_array().unwrap().iter().filter(|l| l["reference"] == false).cloned().collect::<Vec<_>>();
+    let none = at(&mut s, 0.0);
+    assert_box(&none, [190.0, 128.5], [230.0, 168.5]);
+    assert_eq!(none["source"]["bodies"], 2, "{none}");
+    assert_lengths(&none, true, 40.0, 0.0);
+    let half = at(&mut s, 50.0);
+    assert_box(&half, [190.0, 128.5], [235.0, 168.5]);
+    assert_lengths(&half, true, 50.0, 0.0);
+    let all = at(&mut s, 100.0);
+    assert_box(&all, [190.0, 128.5], [240.0, 168.5]);
+    assert_lengths(&all, true, 80.0, 0.0);
+    assert_eq!(model_lines(&none), model_lines(&half));
+    assert_eq!(model_lines(&none), model_lines(&all));
+    // A side no reference part passes is the model's, exactly, whatever the percent, and the side it
+    // passes only ever grows.
+    let mut reach = f64::MIN;
+    for percent in [0.0, 1e-9, 0.1, 33.3, 50.0, 99.999, 100.0] {
+        let v = at(&mut s, percent);
+        assert_eq!(none["boundary_mm"]["min"], v["boundary_mm"]["min"], "{percent}: {v}");
+        let right = v["boundary_mm"]["max"][0].as_f64().unwrap();
+        assert!(right >= reach && right <= 240.0, "{percent}: {v}");
+        reach = right;
+    }
+}
+
+/// Left out and 0 are one picture, reply for reply, apart from what working it out took.
+#[test]
+fn no_reference_shown_is_the_same_picture_as_not_asking() {
+    let (mut s, _) = plate_and_block(5.0);
+    let reply = |s: &mut Session, p: Value| {
+        let mut v = snap(s, p);
+        v.as_object_mut().unwrap().remove("stats");
+        v
+    };
+    let plain = reply(&mut s, json!({"view": "top", "scale": "1:1", "scene": true}));
+    assert_eq!(plain, reply(&mut s, json!({"view": "top", "scale": "1:1", "scene": true, "reference_shown_percent": 0})));
+}
+
+/// A part many times the model's size: at 100% the box holds it all and a fitted scale takes it in,
+/// and a scale that can't holds it is refused by name, while 0% still draws. A view with only
+/// reference parts is measured by them already, so the percent changes nothing.
+#[test]
+fn a_reference_part_much_bigger_than_the_model_is_held_or_refused() {
+    let mut s = Session::default();
+    let add = |s: &mut Session, name: &str, size: f64, body: &str| {
+        let occurrence = run(s, "component.create", json!({"name": name}))["occurrence"].as_u64().unwrap();
+        run(s, "solid.box", json!({"length": size, "width": size, "height": 5, "body_name": body, "operation": "new"}));
+        run(s, "component.activate", json!({"component": 0}));
+        occurrence
+    };
+    add(&mut s, "PlatePart", 10.0, "Plate");
+    let big = add(&mut s, "BigPart", 20000.0, "Big");
+    run(&mut s, "occurrence.bom_type", json!({"occurrence": big, "bom_type": "reference"}));
+    let fitted = |s: &mut Session, percent: f64| snap(s, json!({"view": "top", "reference_shown_percent": percent}));
+    let (near, far) = (fitted(&mut s, 0.0), fitted(&mut s, 100.0));
+    assert_ne!(near["scale"], far["scale"], "{far}");
+    assert!(role_length(&far, true, "visible") > role_length(&near, true, "visible"), "{far}");
+    // Fitted round the model's middle, the side it grows on still stays on the sheet.
+    let position = (point(&near["boundary_mm"]["min"]) + point(&near["boundary_mm"]["max"])) * 0.5;
+    let (low, high) = (point(&far["boundary_mm"]["min"]), point(&far["boundary_mm"]["max"]));
+    assert!(low.x >= 0.0 && low.y >= 0.0 && high.x <= position.x * 2.0 && high.y <= position.y * 2.0, "{far}");
+    let refused =
+        s.execute("drawing.view.snapshot", &json!({"view": "top", "scale": "100:1", "reference_shown_percent": 100})).unwrap_err().to_string();
+    assert!(refused.contains("reaches past"), "{refused}");
+    snap(&mut s, json!({"view": "top", "scale": "100:1"}));
+
+    let (mut only, [plate, _]) = plate_and_block(5.0);
+    run(&mut only, "occurrence.bom_type", json!({"occurrence": plate, "bom_type": "reference"}));
+    let at = |s: &mut Session, percent: f64| snap(s, json!({"view": "top", "scale": "1:1", "reference_shown_percent": percent}));
+    let (none, all) = (at(&mut only, 0.0), at(&mut only, 100.0));
+    assert_eq!((&none["boundary_mm"], &none["lines"]), (&all["boundary_mm"], &all["lines"]));
 }
 
 /// Reference lines test against everything: with both parts reference, the block hides 20 mm of the
@@ -1343,7 +1426,7 @@ fn no_reference_parts_means_the_setting_changes_nothing() {
 #[test]
 fn a_scene_draws_reference_parts_thin_under_the_model() {
     let (mut s, _) = plate_and_block(5.0);
-    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "scene": true, "reference_margin_mm": 20}));
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "scene": true, "reference_shown_percent": 100}));
     let widths: Vec<f64> = strokes(&v).iter().map(|(_, _, width)| *width).collect();
     let thin = widths.iter().take_while(|w| **w == crate::drawing_view::REFERENCE_MM).count();
     assert!(thin > 0 && widths[thin..].iter().all(|w| *w == crate::drawing_view::VISIBLE_MM), "{widths:?}");
@@ -1468,26 +1551,19 @@ fn a_saved_views_boundary_is_its_extents_at_its_scale_round_its_centre() {
 
 /// The right view follows the front view up and down when it moves, and keeps its own place
 /// across; at its own scale (1:1, 50 x 20) it is still lined up through its centre, and the top
-/// view projected from it takes that scale too. The top view's 5 mm reference margin grows it by
-/// 2.5 mm a side at 1:2, its extents unchanged. The largest margin at the largest scale still
-/// gives a finite box.
+/// view projected from it takes that scale too. The largest scale still gives a finite box.
 #[test]
-fn a_lined_up_view_follows_its_parent_and_a_margin_grows_the_boundary() {
+fn a_lined_up_view_follows_its_parent() {
     let (mut s, [front, right, top]) = three_views();
     edit_view(&mut s, front, json!({"place": {"at": [160.0, 140.0]}}));
     assert_box(&inspect_view(&mut s, front), [135.0, 135.0], [185.0, 145.0]);
     assert_box(&inspect_view(&mut s, right), [287.5, 135.0], [312.5, 145.0]);
-    edit_view(&mut s, top, json!({"reference_margin_mm": 5.0}));
-    let margin = inspect_view(&mut s, top);
-    assert_box(&margin, [285.0, 222.5], [315.0, 277.5]);
-    let size = point(&margin["extents"]["max"]) - point(&margin["extents"]["min"]);
-    assert!((size - Vec2::new(50.0, 100.0)).len() < EPS, "{margin}");
     edit_view(&mut s, right, json!({"scale": "1:1"}));
     assert_box(&inspect_view(&mut s, right), [275.0, 130.0], [325.0, 150.0]);
-    assert_box(&inspect_view(&mut s, top), [270.0, 195.0], [330.0, 305.0]);
-    edit_view(&mut s, top, json!({"reference_margin_mm": 100000.0, "scale": "50:1"}));
+    assert_box(&inspect_view(&mut s, top), [275.0, 200.0], [325.0, 300.0]);
+    edit_view(&mut s, top, json!({"scale": "1000:1"}));
     let (huge, centre) = boundary(&inspect_view(&mut s, top));
-    assert!(huge.x.is_finite() && huge.x > 1e7 && (centre - Vec2::new(300.0, 250.0)).len() < 1e-6, "{huge:?} {centre:?}");
+    assert!(huge.x.is_finite() && huge.x > 1e4 && (centre - Vec2::new(300.0, 250.0)).len() < 1e-6, "{huge:?} {centre:?}");
 }
 
 /// With nothing to measure a view gets a 20 x 20 mm placeholder round its centre, and says why:

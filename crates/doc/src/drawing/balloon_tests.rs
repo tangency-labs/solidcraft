@@ -34,7 +34,7 @@ fn ballooned() -> (Drawing, [u64; 2]) {
         kind,
         place: ViewPlace::At([150.0, 150.0]),
         settings: ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() },
-        reference_margin_mm: 0.0,
+        reference_shown_percent: 0.0,
     })]);
     let mut added = [0; 2];
     for ((path, at), id) in [(vec![3], [40.0, 25.0]), (vec![3, 7], [-35.5, 60.0])].into_iter().zip(&mut added) {

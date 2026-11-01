@@ -57,14 +57,14 @@ fn boxed() -> Fixture {
     let base = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let side = ViewKind::Projected { parent: front, side: ProjectedSide::Right };
     d.add_views([
-        Arc::new(View { id: front, sheet, kind: base, place: ViewPlace::At([150.0, 150.0]), settings: half, reference_margin_mm: 0.0 }),
+        Arc::new(View { id: front, sheet, kind: base, place: ViewPlace::At([150.0, 150.0]), settings: half, reference_shown_percent: 0.0 }),
         Arc::new(View {
             id: right,
             sheet,
             kind: side,
             place: ViewPlace::Aligned(300.0),
             settings: ViewOverrides::default(),
-            reference_margin_mm: 0.0,
+            reference_shown_percent: 0.0,
         }),
     ]);
     d.validate().unwrap();

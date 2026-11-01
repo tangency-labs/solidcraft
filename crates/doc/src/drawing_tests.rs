@@ -24,7 +24,7 @@ fn own_border() -> DrawingBorderProfile {
 /// the second (A4 portrait, a border of its own, 600 dpi, left out of printing) the design itself.
 /// On the first sheet, the front view at 1:2, its right view lined up with it and drawing hidden
 /// lines too, and the right view's top view placed apart; on the second, an iso view at 1:1,
-/// tangent edges shown, with a 5 mm reference margin. On the front view, a dimension of each kind:
+/// tangent edges shown, with reference_shown_percent 5. On the front view, a dimension of each kind:
 /// between two corners, a placed copy's edge length along a direction, and an angle with its text
 /// given; and a balloon on the placed copy's top edge.
 fn plate() -> Drawing {
@@ -48,9 +48,9 @@ fn plate() -> Drawing {
     Arc::make_mut(&mut d.properties).set(crate::metadata::Owner::Design, "author", json!("Jane Doe")).unwrap();
     d.units = Units::Fixed { unit: "in".into() };
     let (assembly, bolt_sheet) = (d.sheets[0].id, d.sheets[1].id);
-    let mut add = |d: &mut Drawing, sheet, kind, place, settings, reference_margin_mm| {
+    let mut add = |d: &mut Drawing, sheet, kind, place, settings, reference_shown_percent| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_margin_mm })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent })]);
         id
     };
     let half = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };

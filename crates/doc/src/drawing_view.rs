@@ -7,8 +7,8 @@ use solidcraft_geom::Plane;
 use solidcraft_geom::drawing_view::{Invalid, NamedView, Scale, basis_looking};
 use solidcraft_render::VisualStyle;
 
-/// The largest reference margin, in model millimetres.
-pub const MAX_REFERENCE_MARGIN_MM: f64 = 1e5;
+/// The most of its reference parts a view shows, as a percent.
+pub const MAX_REFERENCE_SHOWN_PERCENT: f64 = 100.0;
 
 /// Which way a view looks: by name, or along any direction with an up.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
@@ -86,9 +86,9 @@ pub struct ViewSettings {
     pub reference_style: VisualStyle,
     /// Whether reference parts hide the model's lines behind them.
     pub reference_hides_model: bool,
-    /// Model millimetres added on every side of the view's extents, so reference parts around the
-    /// model show inside its boundary: 0 to [`MAX_REFERENCE_MARGIN_MM`].
-    pub reference_margin_mm: f64,
+    /// How far the view's boundary grows from the model's box towards the box that also holds its
+    /// reference parts, each side on its own: 0 to [`MAX_REFERENCE_SHOWN_PERCENT`].
+    pub reference_shown_percent: f64,
     pub tangent_edges: TangentEdges,
 }
 
@@ -117,11 +117,11 @@ impl ViewOverrides {
 }
 
 impl ViewSettings {
-    /// What reading alone can't check: the margin's range and the view's basis.
+    /// What reading alone can't check: the percent's range and the view's basis.
     pub fn validate(&self) -> Result<Plane, Invalid> {
-        let margin = self.reference_margin_mm;
-        if !(margin.is_finite() && (0.0..=MAX_REFERENCE_MARGIN_MM).contains(&margin)) {
-            return Err(Invalid("reference_margin_mm is a number of model millimetres from 0 to 100000"));
+        let percent = self.reference_shown_percent;
+        if !(percent.is_finite() && (0.0..=MAX_REFERENCE_SHOWN_PERCENT).contains(&percent)) {
+            return Err(Invalid("reference_shown_percent is a number from 0 to 100"));
         }
         self.view.basis()
     }

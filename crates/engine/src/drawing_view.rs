@@ -189,35 +189,51 @@ pub fn measure(shown: &ShownSet, basis: &Plane) -> std::result::Result<Extents, 
     if extents.model.is_empty() { Err(Unmeasured::NoBodies) } else { Ok(extents) }
 }
 
-/// The view through `basis` at `scale` on paper, with the middle of `shown` (model mm on its
-/// plane) at `centre`: the one rule the snapshot and saved views are placed by.
-pub fn frame(basis: Plane, scale: Scale, shown: &Aabb2, centre: Vec2, cmd: &str) -> Result<ViewFrame> {
-    ViewFrame::new(basis, scale, shown.center(), centre).map_err(|e| bad(cmd, e.to_string()))
+/// What a view of `shown` shows on `basis`: its `extents`, each side grown on its own towards the box
+/// that also holds its reference parts, `percent` of the way. A side no reference part passes stays
+/// exactly where it is, and at 0 no reference part is measured.
+pub fn shows(shown: &ShownSet, basis: &Plane, extents: &Extents, percent: f64) -> Aabb2 {
+    if percent <= 0.0 {
+        return extents.model;
+    }
+    let references = shown.bodies.iter().filter(|b| b.reference).filter_map(|b| shown.body(b));
+    let all = references.fold(extents.model, |all, body| all.union(&body.mesh_bounds_in(basis)));
+    let part = percent / 100.0;
+    let side = |from: f64, to: f64| if from == to { from } else { from * (1.0 - part) + to * part };
+    let model = extents.model;
+    Aabb2 {
+        min: Vec2::new(side(model.min.x, all.min.x), side(model.min.y, all.min.y)),
+        max: Vec2::new(side(model.max.x, all.max.x), side(model.max.y, all.max.y)),
+    }
 }
 
-/// The boundary on the sheet of [`frame`]'s view: the box round `shown` there.
-pub fn boundary(basis: Plane, scale: Scale, shown: &Aabb2, centre: Vec2, cmd: &str) -> Result<Aabb2> {
-    frame(basis, scale, shown, centre, cmd)?.boundary(shown).map_err(|e| bad(cmd, e.to_string()))
+/// The view through `basis` at `scale` on paper, with the middle of the model's box (model mm on its
+/// plane) at `centre`, however far reference parts grow what it shows, so it stays lined up with its
+/// projected views: the one rule the snapshot and saved views are placed by.
+pub fn frame(basis: Plane, scale: Scale, model: &Aabb2, centre: Vec2, cmd: &str) -> Result<ViewFrame> {
+    ViewFrame::new(basis, scale, model.center(), centre).map_err(|e| bad(cmd, e.to_string()))
 }
 
 /// Saved view `id` of `drawing`, one of `s`'s design's drawings, on its sheet: the design's extents
-/// on its plane (a view's source is the design the drawing is in), grown by its reference margin,
-/// at its scale, with their middle on its centre ([`Drawing::view_centre`]); with nothing to
+/// on its plane (a view's source is the design the drawing is in), grown by [`shows`], at its
+/// scale, with the model's middle on its centre ([`Drawing::view_centre`]); with nothing to
 /// measure, a placeholder [`PLACEHOLDER_MM`] each way round its centre. It reads the model as it
 /// is evaluated: no model is evaluated.
 pub fn on_sheet(s: &Session, drawing: &Drawing, id: u64, cmd: &str) -> Result<OnSheet> {
     let view = drawing.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?;
     let centre = drawing.view_centre(id).map_err(|e| bad(cmd, e.to_string()))?;
     let scale = view.scale.value;
-    let (extents, shown, unmeasured) = match shown(s).and_then(|set| measure(&set, &view.basis)) {
-        Ok(extents) => (extents, extents.model.inflated(view.reference_margin_mm), None),
+    let measured = shown(s).and_then(|set| measure(&set, &view.basis).map(|e| (e, shows(&set, &view.basis, &e, view.reference_shown_percent))));
+    let (extents, shows, unmeasured) = match measured {
+        Ok((extents, shows)) => (extents, shows, None),
         Err(why) => {
             let half = PLACEHOLDER_MM / 2.0 / scale.factor();
             let model = Aabb2 { min: Vec2::new(-half, -half), max: Vec2::new(half, half) };
             (Extents { model, error_mm: 0.0, bodies: 0 }, model, Some(why))
         }
     };
-    Ok(OnSheet { boundary: boundary(view.basis, scale, &shown, centre, cmd)?, extents, unmeasured })
+    let boundary = frame(view.basis, scale, &extents.model, centre, cmd)?.boundary(&shows).map_err(|e| bad(cmd, e.to_string()))?;
+    Ok(OnSheet { boundary, extents, unmeasured })
 }
 
 /// Each of `views` of `drawing` (one of `s`'s design's) whose boundary leaves its sheet's drawing
