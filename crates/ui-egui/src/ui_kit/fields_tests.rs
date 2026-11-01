@@ -5,6 +5,40 @@ use crate::scenario;
 use egui::Ui;
 
 #[test]
+fn combo_backing_zero_preserves_stock_shapes_and_semantics() {
+    let fixture = |stock: bool| {
+        let ctx = crate::fonts::test_context();
+        let mut id = egui::Id::NULL;
+        let mut semantics = String::new();
+        let mut output = egui::FullOutput::default();
+        for pass in 0..4 {
+            if pass > 0 {
+                egui::Popup::open_id(&ctx, id.with("popup"));
+            }
+            output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+                let salt = egui::IdSalt::new("stock combo");
+                let widget = ui.make_persistent_id(salt);
+                let combo = egui::ComboBox::from_id_salt("stock combo").selected_text("One");
+                let mut body = |ui: &mut Ui| {
+                    let response = ui.button("Two");
+                    semantics = format!("{:?}", (ui.id(), ui.max_rect(), ui.clip_rect(), response.id, response.rect));
+                };
+                let response = if stock { combo.show_ui(ui, &mut body) } else { container::show_combo(ui, widget, combo, &mut body) };
+                id = response.response.id;
+                assert_eq!(widget, id);
+                semantics.push_str(&format!("{:?}", (id, response.response.rect, response.inner)));
+            });
+        }
+        let mut shapes = Vec::new();
+        for clipped in &output.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |shape| shapes.push(format!("{:?} {shape:?}", clipped.clip_rect)));
+        }
+        (semantics, shapes)
+    };
+    assert_eq!(fixture(true), fixture(false), "zero adds no shapes or slots and keeps native IDs, geometry and clip");
+}
+
+#[test]
 fn every_text_input_centres_its_galley_for_mono_and_proportional_fonts() {
     for case in ["expression", "plain", "cell", "invalid", "library", "placement", "password", "multiline", "area", "message"] {
         let ctx = crate::fonts::test_context();

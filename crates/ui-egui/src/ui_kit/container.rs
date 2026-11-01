@@ -32,6 +32,41 @@ impl BackingSlot {
     }
 }
 
+/// Keep the stock combo's placement, focus and scroll behavior. Its popup frame is
+/// reserved before `show_ui` paints it, just as for the other native popup hosts.
+pub(super) fn show_combo<R>(
+    ui: &mut egui::Ui,
+    widget: Id,
+    combo: egui::ComboBox,
+    body: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    if !crate::blur::enabled() || ui.ctx().viewport_id() != egui::ViewportId::ROOT {
+        return combo.show_ui(ui, body);
+    }
+    let popup = widget.with("popup");
+    let slot = egui::ComboBox::is_open(ui.ctx(), widget)
+        .then(|| BackingSlot::reserve(ui.ctx(), egui::LayerId::new(egui::Order::Foreground, popup)))
+        .flatten();
+    let mut host = None;
+    let shown = combo.show_ui(ui, |ui| {
+        // ComboBox calls us inside its ScrollArea, whose content Frame has no
+        // fill and whose clip omits popup padding and any scrollbar. Its parent
+        // owns the actual native popup Frame; finish using the final Area rect.
+        if slot.is_some()
+            && let Some(frame) = ui.stack().iter().find(|node| node.kind() == Some(egui::UiKind::ScrollArea)).and_then(|node| node.parent.as_ref())
+        {
+            let mut painter = ui.painter().clone();
+            painter.set_clip_rect(ui.ctx().content_rect());
+            host = Some((painter, *frame.frame()));
+        }
+        body(ui)
+    });
+    if let (Some(slot), Some((painter, frame)), Some(response)) = (slot, host, ui.ctx().read_response(popup)) {
+        slot.painter.set(slot.slot, crate::blur::decorate(&painter, frame, response.rect - frame.total_margin(), egui::Shape::Noop));
+    }
+    shown
+}
+
 /// Native popup interaction and placement, with its backing surface reserved before contents.
 pub struct BackingPopup<'a>(egui::Popup<'a>);
 

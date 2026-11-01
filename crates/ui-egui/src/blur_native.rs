@@ -734,12 +734,7 @@ impl FrameCompositor for Shared {
             }
             let mut marker_ids: Vec<_> = inner.markers.iter().map(|marker| marker.callback_id).collect();
             marker_ids.sort_unstable();
-            let data = (
-                gpu.composition.view.clone(),
-                gpu.present.clone(),
-                gpu.presentation.group.clone(),
-                marker_ids,
-            );
+            let data = (gpu.composition.view.clone(), gpu.present.clone(), gpu.presentation.group.clone(), marker_ids);
             inner.counts.composition_passes += 1;
             data
         };
@@ -919,7 +914,12 @@ fn load_pass(encoder: &mut wgpu::CommandEncoder, label: &'static str, view: &wgp
     attachment_pass(encoder, label, view, wgpu::LoadOp::Load)
 }
 
-fn attachment_pass(encoder: &mut wgpu::CommandEncoder, label: &'static str, view: &wgpu::TextureView, load: wgpu::LoadOp<wgpu::Color>) -> wgpu::RenderPass<'static> {
+fn attachment_pass(
+    encoder: &mut wgpu::CommandEncoder,
+    label: &'static str,
+    view: &wgpu::TextureView,
+    load: wgpu::LoadOp<wgpu::Color>,
+) -> wgpu::RenderPass<'static> {
     encoder
         .begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some(label),

@@ -208,51 +208,50 @@ fn searchable_dropdown_with(
     } else {
         combo.icon(dropdown_arrow)
     };
-    let response = combo
-        .show_ui(ui, |ui| {
-            let search = ui.add(
-                text_input(egui::TextEdit::singleline(filter))
-                    .id_salt(format!("{id}_search"))
-                    .hint_text(crate::i18n::tr_label("Search"))
-                    .desired_width(f32::INFINITY),
-            );
-            // Preferences types into its own search only while no field has the keyboard.
-            if search.has_focus() {
-                crate::prefs_search::note_key_sink(ui.ctx());
+    let response = super::container::show_combo(ui, ui.make_persistent_id(egui::IdSalt::new(id)), combo, |ui| {
+        let search = ui.add(
+            text_input(egui::TextEdit::singleline(filter))
+                .id_salt(format!("{id}_search"))
+                .hint_text(crate::i18n::tr_label("Search"))
+                .desired_width(f32::INFINITY),
+        );
+        // Preferences types into its own search only while no field has the keyboard.
+        if search.has_focus() {
+            crate::prefs_search::note_key_sink(ui.ctx());
+        }
+        scenario::publish_handle(&format!("dialog:{row} search"), search.rect.center());
+        if let Some(custom) = custom {
+            let response = ui.selectable_label(false, custom);
+            scenario::publish_handle(&format!("dialog:{row} file"), response.rect.center());
+            if response.clicked() {
+                chosen = Some(filter.trim().to_owned());
+                ui.close();
             }
-            scenario::publish_handle(&format!("dialog:{row} search"), search.rect.center());
-            if let Some(custom) = custom {
-                let response = ui.selectable_label(false, custom);
-                scenario::publish_handle(&format!("dialog:{row} file"), response.rect.center());
-                if response.clicked() {
-                    chosen = Some(filter.trim().to_owned());
-                    ui.close();
+            return;
+        }
+        let query = filter.to_lowercase();
+        egui::ScrollArea::vertical()
+            .id_salt(format!("{id}_list"))
+            .max_height(Tokens::get().space_24 * 10.0)
+            .min_scrolled_height(Tokens::get().space_24 * 10.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for option in options.iter().filter(|o| o.label.to_lowercase().contains(&query)) {
+                    let response = ui.selectable_label(current == option.label, option.label);
+                    if let Some(handle) = option.handle {
+                        scenario::publish_handle(handle, response.rect.center());
+                    }
+                    if response.clicked() {
+                        chosen = Some(option.value.to_owned());
+                        ui.close();
+                    }
                 }
-                return;
-            }
-            let query = filter.to_lowercase();
-            egui::ScrollArea::vertical()
-                .id_salt(format!("{id}_list"))
-                .max_height(Tokens::get().space_24 * 10.0)
-                .min_scrolled_height(Tokens::get().space_24 * 10.0)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    for option in options.iter().filter(|o| o.label.to_lowercase().contains(&query)) {
-                        let response = ui.selectable_label(current == option.label, option.label);
-                        if let Some(handle) = option.handle {
-                            scenario::publish_handle(handle, response.rect.center());
-                        }
-                        if response.clicked() {
-                            chosen = Some(option.value.to_owned());
-                            ui.close();
-                        }
-                    }
-                    if let Some(pending) = pending {
-                        ui.label(pending);
-                    }
-                });
-        })
-        .response;
+                if let Some(pending) = pending {
+                    ui.label(pending);
+                }
+            });
+    })
+    .response;
     publish(ui, &response, egui::WidgetType::ComboBox);
     chosen
 }
@@ -324,14 +323,16 @@ pub(crate) fn search_picker(ui: &mut Ui, p: SearchPicker<'_>) -> egui::InnerResp
     let mut picked = None;
     let response = ui
         .add_enabled_ui(p.enabled, |ui| {
-            let response = egui::ComboBox::from_id_salt(p.id)
+            let combo = egui::ComboBox::from_id_salt(p.id)
                 .width(dimension(ui.available_width()))
                 .height(Tokens::get().space_24 * 20.0)
                 .selected_text(p.current)
                 .icon(dropdown_arrow)
-                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                .show_ui(ui, |ui| picked = search_picker_popup(ui, &p, state))
-                .response;
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+            let response = super::container::show_combo(ui, ui.make_persistent_id(egui::IdSalt::new(p.id)), combo, |ui| {
+                picked = search_picker_popup(ui, &p, state)
+            })
+            .response;
             // Closed: the next opening starts with an empty box that has the focus.
             if !egui::ComboBox::is_open(ui.ctx(), response.id) {
                 ui.data_mut(|data| {
@@ -487,8 +488,11 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
                             SearchRow::Choice(choice) => {
                                 let response = search_row(ui, &compact(choice.label, SEARCH_LABEL_CAP), choice.value == p.current_value);
                                 scenario::publish_target(&format!("{}:{}", p.handles, choice.value), response.rect);
-                                let response =
-                                    if choice.tip.is_empty() { response } else { response.on_hover_text(compact(choice.tip, SEARCH_NOTE_CAP)) };
+                                let response = if choice.tip.is_empty() {
+                                    response
+                                } else {
+                                    response.backing_on_hover_text(compact(choice.tip, SEARCH_NOTE_CAP))
+                                };
                                 if response.clicked() {
                                     picked = Some(Picked::Listed(choice.value.to_owned()));
                                 }
@@ -507,7 +511,7 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
         if let Some(note) = note {
             let response = ui.add(egui::Label::new(note));
             if let Some(whole) = p.note.filter(|whole| whole.chars().count() > SEARCH_NOTE_SHOWN) {
-                response.on_hover_text(compact(whole, SEARCH_NOTE_CAP));
+                response.backing_on_hover_text(compact(whole, SEARCH_NOTE_CAP));
             }
         }
     });
@@ -605,7 +609,7 @@ fn search_group_row(ui: &mut Ui, name: &str, count: usize, open: bool) -> Respon
     if rule_from < rule_to {
         painter.hline(rule_from..=rule_to, y, egui::Stroke::new(1.0, t.border));
     }
-    response.on_hover_text(crate::i18n::format("ui.agent_chat_provider_models", &[("count", &count.to_string())]))
+    response.backing_on_hover_text(crate::i18n::format("ui.agent_chat_provider_models", &[("count", &count.to_string())]))
 }
 
 /// A `search_picker` row: as `list_picker`, but read from the left, as a list of ids is.
@@ -626,7 +630,7 @@ fn search_heading(ui: &mut Ui, text: &str, height: f32) {
         false,
     );
     if text.chars().count() > SEARCH_LABEL_CAP {
-        response.on_hover_text(compact(text, SEARCH_NOTE_CAP));
+        response.backing_on_hover_text(compact(text, SEARCH_NOTE_CAP));
     }
 }
 
@@ -786,14 +790,14 @@ fn dropdown_menu_width(
     } else {
         dimension(ui.available_width())
     };
-    let response = egui::ComboBox::from_id_salt(id)
+    let widget = ui.make_persistent_id(egui::IdSalt::new(&id));
+    let combo = egui::ComboBox::from_id_salt(id)
         .width(width)
         .height(Tokens::get().space_24 * 14.0)
         .selected_text(current)
         .icon(dropdown_arrow)
-        .close_behavior(close_behavior)
-        .show_ui(ui, add)
-        .response;
+        .close_behavior(close_behavior);
+    let response = super::container::show_combo(ui, widget, combo, add).response;
     publish(ui, &response, egui::WidgetType::ComboBox);
     response
 }
