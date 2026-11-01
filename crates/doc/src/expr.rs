@@ -304,6 +304,28 @@ pub fn value_in_unit(v: Value, unit: &str) -> f64 {
     }
 }
 
+/// The number a reply reports for a value: millimetres for a length, degrees for an angle,
+/// as-is for a unit-less or compound value. One meaning of `value` in every reply (#10747).
+pub fn reported_value(v: Value) -> f64 {
+    match v.kind() {
+        Some(Kind::Angle) => v.v.to_degrees(),
+        _ => v.v,
+    }
+}
+
+/// The number a person would read for `v`: the shortest decimal that reads back after
+/// rounding off the last few bits (12 significant digits), so `30 deg` stored as
+/// 29.999999999999996 reports 30 and `0.1 + 0.2` reports 0.3. Only what is *reported*
+/// is rounded; stored values and evaluation keep full precision (#10747).
+pub fn round_reported(v: f64) -> f64 {
+    if !v.is_finite() {
+        return v;
+    }
+    // `:.11e` keeps 12 significant digits; parsing back gives the f64 nearest that decimal,
+    // which serializes as the shortest form that reads back to it.
+    format!("{v:.11e}").parse().unwrap_or(v)
+}
+
 fn unit(name: &str) -> Option<Value> {
     UNITS.iter().find(|(n, _, _)| *n == name).map(|(_, k, s)| match k {
         Kind::Angle => Value::angle(*s),
@@ -1636,5 +1658,37 @@ mod tests {
         }
         defs[2].expr = "bad +".into();
         assert!(eval_params(&defs, 1.0).1.contains_key("c"));
+    }
+
+    /// #10747: reported numbers are the shortest decimals that read back after rounding off
+    /// the last few bits (12 significant digits); stored values keep full precision.
+    #[test]
+    fn round_reported_reads_as_a_person_would() {
+        for (noisy, read) in [
+            (30f64.to_radians().to_degrees(), 30.0),
+            (0.1 + 0.2, 0.3),
+            (3.0 * 25.4, 76.2),
+            (1.2 * 25.4, 30.48),
+            (29.999999999999996, 30.0),
+            (0.30000000000000004, 0.3),
+            (-0.1 - 0.2, -0.3),
+        ] {
+            assert_eq!(round_reported(noisy), read, "{noisy}");
+        }
+        // A number with real digits of its own keeps them up to 12 significant digits.
+        assert_eq!(round_reported(1.234567890123), 1.23456789012);
+        assert_eq!(round_reported(1.0000000000001), 1.0);
+        // Zero and non-finite values pass through.
+        assert_eq!(round_reported(0.0), 0.0);
+        assert!(round_reported(f64::INFINITY).is_infinite());
+        assert!(round_reported(f64::NAN).is_nan());
+    }
+
+    /// #10747: `value` means millimetres and degrees in every reply.
+    #[test]
+    fn reported_value_is_mm_and_degrees() {
+        assert_eq!(reported_value(Value::length(50.8)), 50.8);
+        assert_eq!(round_reported(reported_value(Value::angle(30f64.to_radians()))), 30.0);
+        assert_eq!(reported_value(Value::num(4.0)), 4.0);
     }
 }

@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Value, json};
-use solidcraft_doc::expr::Kind;
+use solidcraft_doc::expr::{self, Kind};
 use solidcraft_doc::joints::cam::{self, Cam, CamProfile, Follower};
 use solidcraft_doc::joints::{self, Coupling, Joint, JointExprs, JointKind, JointOrigin, MotionLink, NamedOrigin, Size, Snap, XRef};
 use solidcraft_geom::{Aabb3, Vec3};
@@ -232,7 +232,8 @@ fn sol_json(sol: &joints::Solution, p: &Value) -> Value {
 }
 
 /// A joint's values as `joint.list` gives them: degrees for angles, mm for distances, each with
-/// its name and limits.
+/// its name and limits. The numbers are rounded for reading (#10747); the joint keeps full
+/// precision.
 pub(crate) fn named_values(j: &Joint, q: &[f64]) -> Vec<Value> {
     j.kind
         .dofs()
@@ -240,8 +241,8 @@ pub(crate) fn named_values(j: &Joint, q: &[f64]) -> Vec<Value> {
         .enumerate()
         .map(|(i, n)| {
             let (v, angle) = (q.get(i).copied().unwrap_or(0.0), j.kind.is_angle(i));
-            json!({"name": n, "value": if angle { v.to_degrees() } else { v }, "unit": if angle { "deg" } else { "mm" },
-                "limits": j.limits.get(i).copied().flatten().map(|(a, b)| if angle { [a.to_degrees(), b.to_degrees()] } else { [a, b] })})
+            json!({"name": n, "value": expr::round_reported(if angle { v.to_degrees() } else { v }), "unit": if angle { "deg" } else { "mm" },
+                "limits": j.limits.get(i).copied().flatten().map(|(a, b)| if angle { [expr::round_reported(a.to_degrees()), expr::round_reported(b.to_degrees())] } else { [expr::round_reported(a), expr::round_reported(b)] })})
         })
         .collect()
 }
@@ -982,7 +983,7 @@ fn held_values(s: &Session, j: &Joint, requested: &[f64], driven: &[usize], r: &
             continue;
         }
         let angle = j.kind.is_angle(i);
-        let shown = |v: f64| if angle { v.to_degrees() } else { v };
+        let shown = |v: f64| expr::round_reported(if angle { v.to_degrees() } else { v });
         let name = names.get(i).copied().unwrap_or("value");
         let why = if let Some(l) = s.doc.assembly.links.iter().find(|l| l.b == j.id && l.ib == i) {
             let coupling = match &l.coupling {

@@ -2472,3 +2472,21 @@ fn driving_one_cylindrical_coordinate_preserves_the_other_expression_and_reports
         assert!(s.execute("joint.drive", &json!({"joint":joint,"index":bad,"value":0})).is_err());
     }
 }
+
+/// #10747: driving a joint to 30 reports 30, not 29.999999999999996; the joint keeps
+/// full precision.
+#[test]
+fn driving_an_angle_reports_the_number_a_person_would_read() {
+    let mut s = two_cubes();
+    run(
+        &mut s,
+        "joint.create",
+        json!({"type": "revolute", "a": {"occurrence": "A", "point": [5.0, 5.0, 10.0]}, "b": {"occurrence": "B", "point": [25.0, 5.0, 10.0]}, "name": "Turn"}),
+    );
+    let r = run(&mut s, "joint.drive", json!({"joint": "Turn", "value": 30}));
+    assert_eq!(r["values"][0]["value"], json!(30.0), "{r}");
+    assert_eq!(r["requested"][0]["value"], json!(30.0), "{r}");
+    // Only what is reported is rounded: the stored value keeps full precision.
+    let j = s.doc.assembly.joints.iter().find(|j| j.name == "Turn").unwrap();
+    assert_ne!(j.values[0].to_degrees(), 30.0, "the stored angle keeps its bits");
+}

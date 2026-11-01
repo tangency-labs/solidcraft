@@ -257,7 +257,7 @@ fn design_rows(app: &mut SolveApp, query: &str) -> Vec<DesignRow> {
                 .iter()
                 .take(64)
                 .find_map(|name| values.get(name.as_str()))
-                .map(|p| p.value.filter(|v| v.is_finite()).map_or_else(|| bounded(&p.expression), |v| format!("{v} {}", p.unit)))
+                .map(|p| p.display_value.or(p.value).filter(|v| v.is_finite()).map_or_else(|| bounded(&p.expression), |v| format!("{v} {}", p.unit)))
                 .unwrap_or_default();
             rows.push(DesignRow {
                 label: bounded(&feature.name),
@@ -268,7 +268,7 @@ fn design_rows(app: &mut SolveApp, query: &str) -> Vec<DesignRow> {
         }
         let icon = solidcraft_engine::find_command("parameters.change").map_or("", |c| c.icon);
         for p in params.iter().filter(|p| p.source == "user").take(10_000) {
-            let value = p.value.filter(|v| v.is_finite()).map_or_else(|| bounded(&p.expression), |v| format!("{v} {}", p.unit));
+            let value = p.display_value.or(p.value).filter(|v| v.is_finite()).map_or_else(|| bounded(&p.expression), |v| format!("{v} {}", p.unit));
             rows.push(DesignRow {
                 label: bounded(&p.name),
                 detail: format!("{} · {value}", crate::i18n::tr("search.parameter")),
