@@ -445,10 +445,14 @@ pub fn scene_geometry(scene: &Scene) -> GpuScene {
             sc.under_line(w[0].to_f32(), w[1].to_f32(), col, l.width as f32);
         }
     }
-    for l in &scene.lines {
+    for (l, unclipped) in scene.lines.iter().map(|l| (l, false)).chain(scene.unclipped_lines.iter().map(|l| (l, true))) {
         let col = sc.color([l.color.0, l.color.1, l.color.2, alpha(l.alpha)]);
         for w in l.points.windows(2) {
-            sc.line(w[0].to_f32(), w[1].to_f32(), col, l.width as f32, l.on_top);
+            if unclipped && !l.on_top {
+                sc.guide_line(w[0].to_f32(), w[1].to_f32(), col, l.width as f32);
+            } else {
+                sc.line(w[0].to_f32(), w[1].to_f32(), col, l.width as f32, l.on_top);
+            }
         }
     }
     sc

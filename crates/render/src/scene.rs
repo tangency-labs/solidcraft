@@ -71,6 +71,9 @@ pub struct SceneLine {
 pub struct Scene {
     pub meshes: Vec<SceneMesh>,
     pub lines: Vec<SceneLine>,
+    /// Sketch references left whole by a section. Their `on_top` flag still controls whether
+    /// bodies hide them; ignoring the section does not imply drawing through bodies.
+    pub unclipped_lines: Vec<SceneLine>,
     /// The ground grid: drawn under everything (the model hides it; it never hides the model).
     pub grid: Vec<SceneLine>,
     /// Background gradient top → bottom.

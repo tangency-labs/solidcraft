@@ -441,6 +441,9 @@ pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides
         app.preferences.cosmetic_threads,
     );
     scene.plain_cap = !crate::viewport::section_hatch(app);
+    if app.preferences.section_clips_sketches {
+        scene.lines.append(&mut scene.unclipped_lines);
+    }
     scene
 }
 

@@ -1066,6 +1066,8 @@ preference_settings! {
     /// Draw reference geometry such as inactive sketches and datum planes through shaded bodies.
     /// Off by default to preserve the depth-tested viewport behaviour.
     reference_geometry_through_bodies: bool = false, PAGE_GRAPHICS => check_id("settings.reference_geometry_through_bodies");
+    /// Restore section clipping of sketch curves and profiles; by default sketches stay whole.
+    section_clips_sketches: bool = false, PAGE_GRAPHICS => check_id("settings.section_clips_sketches");
     /// A small dot at every vertex wherever edges are drawn (#7834). Off by default: the viewport
     /// draws edges only, as it always has.
     vertex_markers: bool = false => check("Vertex markers", "Show a small dot at every vertex wherever edges are drawn");
@@ -7397,6 +7399,20 @@ mod tests {
         assert_eq!(serde_json::to_value(super::lenient(&saved)).unwrap()["sketch_halo"], true);
         super::defaults(&mut app, super::PAGE_GRAPHICS);
         assert_eq!(serde_json::to_value(&app.preferences).unwrap()["sketch_halo"], false);
+    }
+
+    #[test]
+    fn section_sketch_clipping_is_off_by_default_saved_and_restored() {
+        use serde_json::json;
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        assert!(!app.preferences.section_clips_sketches);
+        assert!(!super::lenient(&json!({})).section_clips_sketches);
+        let saved = super::set(&mut app, &json!({"section_clips_sketches": true})).unwrap();
+        assert_eq!(saved["section_clips_sketches"], true);
+        assert!(super::lenient(&saved).section_clips_sketches);
+        assert!(super::set(&mut app, &json!({"section_clips_sketches": "true"})).is_err());
+        super::defaults(&mut app, super::PAGE_GRAPHICS);
+        assert!(!app.preferences.section_clips_sketches);
     }
 
     /// Supersampling (#1288): off by default, adaptive, set by factor and checked.

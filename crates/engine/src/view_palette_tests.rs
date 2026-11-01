@@ -357,7 +357,7 @@ fn every_scene_colour_comes_from_its_palette_and_appearances_stay() {
         MARK.sketch_construction,
         MARK.sketch_centerline,
     ];
-    let all_lines = || marked.grid.iter().chain(&marked.lines);
+    let all_lines = || marked.grid.iter().chain(&marked.lines).chain(&marked.unclipped_lines);
     let stray: Vec<Rgb> = all_lines().map(|l| l.color).filter(|c| !allowed.contains(c)).collect();
     assert!(stray.is_empty(), "line colours not from the palette: {stray:?}");
     for want in [MARK.grid, MARK.grid_major, MARK.edge, MARK.axes[0], MARK.axes[1], MARK.axes[2], MARK.sketch_done] {
@@ -377,9 +377,13 @@ fn every_scene_colour_comes_from_its_palette_and_appearances_stay() {
         (default.background, default.cap, default.clip, default.radius),
         (plain_scene.background, plain_scene.cap, plain_scene.clip, plain_scene.radius)
     );
-    assert_eq!((default.lines.len(), default.grid.len()), (plain_scene.lines.len(), plain_scene.grid.len()));
-    for (a, b) in default.lines.iter().zip(&plain_scene.lines).chain(default.grid.iter().zip(&plain_scene.grid)) {
-        assert_eq!((&a.points, a.color, a.width, a.on_top), (&b.points, b.color, b.width, b.on_top));
+    for (default, plain) in
+        [(&default.lines, &plain_scene.lines), (&default.grid, &plain_scene.grid), (&default.unclipped_lines, &plain_scene.unclipped_lines)]
+    {
+        assert_eq!(default.len(), plain.len());
+        for (a, b) in default.iter().zip(plain) {
+            assert_eq!((&a.points, a.color, a.width, a.on_top), (&b.points, b.color, b.width, b.on_top));
+        }
     }
     for name in &names {
         assert_eq!(mesh(&default, name), mesh(&plain_scene, name), "{name}");

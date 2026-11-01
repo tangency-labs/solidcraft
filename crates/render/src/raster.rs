@@ -228,7 +228,7 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
             *s = s.max(cap_slope);
         }
     }
-    for l in scene.grid.iter().chain(&scene.lines) {
+    for (l, clip) in scene.grid.iter().chain(&scene.lines).map(|l| (l, scene.clip)).chain(scene.unclipped_lines.iter().map(|l| (l, None))) {
         let col = l.color.f();
         // A line that is not opaque is blended with what is under it (the grid fading out).
         let alpha = f64::from(l.alpha).clamp(0.0, 1.0);
@@ -237,7 +237,7 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
             let (Some(&p), Some(&q)) = (seg.first(), seg.get(1)) else { continue };
             // The section cuts the segment in 3D (screen space is not linear in depth in
             // perspective views).
-            let Some((p, q)) = clip_segment(p, q, scene.clip) else { continue };
+            let Some((p, q)) = clip_segment(p, q, clip) else { continue };
             let (Some(a), Some(b)) = (project(p), project(q)) else { continue };
             let len = ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2)).sqrt();
             let steps = (len.ceil() as usize).clamp(1, 20_000);

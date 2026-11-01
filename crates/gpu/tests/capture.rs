@@ -77,6 +77,23 @@ fn opengl_viewport_pipelines_render_a_model() {
     assert!(changed > 500, "the model covers only {changed} pixels");
 }
 
+/// #8617: sectioning bodies leaves sketch curves on both sides of the plane visible.
+#[test]
+fn pictures_leave_sketches_whole_in_a_section() {
+    let Some(c) = capturer() else { return };
+    let s = session(&[
+        ("sketch.create", json!({"plane": "XY"})),
+        ("sketch.circle.center", json!({"center": [-20, 0], "radius": 8})),
+        ("sketch.circle.center", json!({"center": [20, 0], "radius": 8})),
+        ("sketch.finish", json!({})),
+    ]);
+    let cam = Camera { target: Vec3::ZERO, yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, distance: 70.0, ..Default::default() };
+    let picture = |section| c.rgba(&view::scene_with_guides(&s, &cam, section, Guides { grid: false, axes: false }), &cam, 300, 200).unwrap();
+    let (whole, cut) = (picture(None), picture(Some((Vec3::ZERO, Vec3::X))));
+    let changed = pixels(&whole).zip(pixels(&cut)).filter(|(a, b)| a != b).count();
+    assert_eq!(changed, 0, "the section hides sketch pixels");
+}
+
 /// Appearances show as the viewport shows them: a body's colour, a face's own look.
 #[test]
 fn pictures_show_appearances() {
