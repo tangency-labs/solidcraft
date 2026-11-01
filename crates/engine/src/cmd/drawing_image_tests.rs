@@ -6,18 +6,10 @@ use solidcraft_geom::paper::MAX_IMAGE_PIXELS;
 use solidcraft_io::vfs::{self, PathScope};
 
 use super::*;
+use crate::drawing_pictures::tests::png;
 use crate::schema::tests::conforms;
 
 const RECT: [f64; 4] = [10.0, 20.0, 60.0, 45.0];
-
-/// A PNG's header, saying these pixels.
-fn png(w: u32, h: u32) -> Vec<u8> {
-    let mut b = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
-    b.extend(w.to_be_bytes());
-    b.extend(h.to_be_bytes());
-    b.extend([8, 6, 0, 0, 0]);
-    b
-}
 
 /// A folder of this test's own, holding `bytes` as `logo.png`: the folder and the file.
 fn on_disk(test: &str, bytes: &[u8]) -> (PathBuf, String) {
