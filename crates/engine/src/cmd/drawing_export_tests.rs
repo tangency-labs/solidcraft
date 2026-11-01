@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 use solidcraft_doc::canvas::base64_decode;
-use solidcraft_io::paper::{PngColour, paper_png};
+use solidcraft_io::paper::paper_png;
 
 use super::*;
 use crate::drawing_scene::tests::{front_and_top, nest};
@@ -135,6 +135,41 @@ fn a_sheet_exports_as_its_scenes_png() {
     let written = std::fs::read(&path).unwrap();
     assert_eq!(written, scene_png(&s, sheet, PngOptions { dpi: 75.0, colour: PngColour::Grey }));
     assert_eq!((reply["path"].as_str(), reply.get("data"), reply["bytes"].as_u64()), (Some(path.as_str()), None, Some(written.len() as u64)));
+}
+
+/// `paper` reaches both writers, and white is what no `paper` is, byte for byte. A blue paper's PNG
+/// is rgb, asked or not; any other colour is refused by name, in place of being ignored.
+#[test]
+fn a_sheet_exports_on_its_paper() {
+    let (mut s, sheet, _) = front_and_top();
+    let id = ids::encode(sheet);
+    let data = |reply: Value| reply["data"].as_str().and_then(base64_decode).unwrap();
+    let plain = scene_svg(&s, sheet);
+    let reply = run(&mut s, CMD, json!({"sheet": id, "paper": "white"}));
+    assert_eq!(reply["text"].as_str().map(str::as_bytes), Some(plain.as_slice()));
+    for colour in [json!({}), json!({"colour": "rgb"}), json!({"colour": "grey"}), json!({"colour": "black_white"}), json!({"colour": "transparent"})]
+    {
+        let mut asked = json!({"sheet": id, "format": "png", "dpi": 25});
+        asked.as_object_mut().unwrap().extend(colour.as_object().unwrap().clone());
+        let mut white = asked.clone();
+        white["paper"] = json!("white");
+        assert_eq!(data(run(&mut s, CMD, white)), data(run(&mut s, CMD, asked)), "{colour}");
+    }
+    for (name, paper, hex) in [("blueprint", PaperColour::Blueprint, "#123A76"), ("prussian_blue", PaperColour::PrussianBlue, "#003153")] {
+        let reply = run(&mut s, CMD, json!({"sheet": id, "paper": name}));
+        let text = reply["text"].as_str().unwrap();
+        assert!(text.contains(&format!("fill=\"{hex}\"")) && text.contains("stroke=\"#E2EEFC\"") && !text.contains("#000"), "{name}");
+        let png = scene_png(&s, sheet, PngOptions { dpi: 25.0, colour: PngColour::On(paper) });
+        assert_eq!(data(run(&mut s, CMD, json!({"sheet": id, "format": "png", "dpi": 25, "paper": name}))), png, "{name}");
+        assert_eq!(data(run(&mut s, CMD, json!({"sheet": id, "format": "png", "dpi": 25, "paper": name, "colour": "rgb"}))), png, "{name}");
+        for colour in ["grey", "black_white", "transparent"] {
+            let why = refused(&mut s, json!({"sheet": id, "format": "png", "paper": name, "colour": colour}));
+            assert!(why.contains("a blue `paper` is rgb") && why.contains(colour), "{name}, {colour}: {why}");
+        }
+        assert!(refused(&mut s, json!({"sheet": id, "format": "dxf", "paper": name})).contains("not supported yet: DXF"), "{name}");
+    }
+    assert!(refused(&mut s, json!({"sheet": id, "paper": "cyan"})).contains("paper"));
+    assert!(refused(&mut s, json!({"sheet": id, "paper": null})).contains("paper"));
 }
 
 /// A document held for the reply takes up to its limit and is refused past it, naming the way out.

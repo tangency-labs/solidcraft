@@ -30,6 +30,10 @@ pub struct ExportParams {
     #[serde(default, deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ExportColour")]
     pub colour: Option<ExportColour>,
+    /// The paper (white when not given), which the lines, dimensions and text suit. A blue paper's
+    /// PNG is rgb.
+    #[serde(default)]
+    pub paper: ExportPaper,
 }
 
 /// A sheet export's file format.
@@ -75,6 +79,29 @@ impl From<ExportColour> for solidcraft_io::paper::PngColour {
             ExportColour::BlackWhite => Self::BlackWhite,
             ExportColour::Rgb => Self::Rgb,
             ExportColour::Transparent => Self::Transparent,
+        }
+    }
+}
+
+/// The paper a sheet is exported on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportPaper {
+    /// White, or in an SVG no background at all.
+    #[default]
+    White,
+    /// Blue paper, `#123A76`, with `#E2EEFC` lines.
+    Blueprint,
+    /// Prussian blue paper, `#003153`, with `#E2EEFC` lines.
+    PrussianBlue,
+}
+
+impl From<ExportPaper> for Option<solidcraft_io::paper::PaperColour> {
+    fn from(paper: ExportPaper) -> Self {
+        match paper {
+            ExportPaper::White => None,
+            ExportPaper::Blueprint => Some(solidcraft_io::paper::PaperColour::Blueprint),
+            ExportPaper::PrussianBlue => Some(solidcraft_io::paper::PaperColour::PrussianBlue),
         }
     }
 }

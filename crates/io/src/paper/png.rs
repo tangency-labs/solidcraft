@@ -4,7 +4,7 @@
 //!   both draw the same joints, closures and merges. Curves are flattened within 1/8 px
 //!   ([`paper::flatten`]) and tiny-skia is given lines only: its own flattening stops at 64 lines a
 //!   curve, more than a pixel off on a large arc at a high dpi.
-//! - **Paint** as the scene says: black, strokes with butt caps and miter joins (limit 4), fills
+//! - **Paint** as the scene says: black or a coloured paper's ink, strokes with butt caps and miter joins (limit 4), fills
 //!   even-odd. Each line is stroked once, then filled band by band; a line under a pixel wide is
 //!   drawn as tiny-skia's hairline instead, its coverage scaled by its width, so it never vanishes.
 //! - **Bands:** the sheet is drawn [`BAND_BYTES`] of pixels at a time, with a row above and below
@@ -29,6 +29,7 @@ use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pi
 
 use solidcraft_doc::drawing::{DEFAULT_DPI, MAX_DPI, MIN_DPI};
 
+use super::PaperColour;
 use crate::{IoError, Result};
 
 /// The resolutions a sheet PNG may have, in dots per inch: a sheet's.
@@ -57,6 +58,8 @@ pub enum PngColour {
     Rgb,
     /// 32-bit colour, the paper transparent.
     Transparent,
+    /// 24-bit colour on a coloured paper, in its ink.
+    On(PaperColour),
 }
 
 /// A sheet PNG's resolution and colour.
@@ -135,7 +138,7 @@ fn write(scene: &Prepared, options: PngOptions, pictures: &dyn Pictures, out: im
     let format = match colour {
         PngColour::Grey => (png::ColorType::Grayscale, png::BitDepth::Eight),
         PngColour::BlackWhite => (png::ColorType::Grayscale, png::BitDepth::One),
-        PngColour::Rgb => (png::ColorType::Rgb, png::BitDepth::Eight),
+        PngColour::Rgb | PngColour::On(_) => (png::ColorType::Rgb, png::BitDepth::Eight),
         PngColour::Transparent => (png::ColorType::Rgba, png::BitDepth::Eight),
     };
     let mut header = encoder(out, pixels, format, dpi).write_header().map_err(png_error)?;
@@ -153,13 +156,18 @@ fn write(scene: &Prepared, options: PngOptions, pictures: &dyn Pictures, out: im
         })
         .collect();
     let mut paint = Paint { anti_alias: colour != PngColour::BlackWhite, ..Paint::default() };
-    paint.set_color(Color::BLACK);
+    paint.set_color(if matches!(colour, PngColour::On(_)) { solid(PaperColour::INK) } else { Color::BLACK });
+    let paper = match colour {
+        PngColour::Transparent => Color::TRANSPARENT,
+        PngColour::On(paper) => solid(paper.rgb()),
+        _ => Color::WHITE,
+    };
     let mut dithered = false;
     let mut row = Vec::with_capacity(width * 4);
     let mut top = 0;
     while top < pixels[1] {
         let n = rows.min(pixels[1] - top);
-        band.fill(if colour == PngColour::Transparent { Color::TRANSPARENT } else { Color::WHITE });
+        band.fill(paper);
         let shift = Transform::from_translate(0.0, MARGIN as f32 - top as f32);
         for (shape, (y0, y1)) in shapes.iter().zip(&spans) {
             if *y1 >= top as f32 - MARGIN as f32 && *y0 <= (top + n + MARGIN) as f32 {
@@ -185,7 +193,7 @@ fn write(scene: &Prepared, options: PngOptions, pictures: &dyn Pictures, out: im
                     // Most significant bit first; 1 is white.
                     eight.iter().enumerate().fold(0u8, |byte, (i, p)| byte | (u8::from(luma(p.red(), p.green(), p.blue()) >= 128) << (7 - i)))
                 })),
-                PngColour::Rgb => row.extend(line.iter().flat_map(|p| [p.red(), p.green(), p.blue()])),
+                PngColour::Rgb | PngColour::On(_) => row.extend(line.iter().flat_map(|p| [p.red(), p.green(), p.blue()])),
                 PngColour::Transparent => row.extend(line.iter().flat_map(|p| {
                     let c = p.demultiply();
                     [c.red(), c.green(), c.blue(), c.alpha()]
@@ -339,6 +347,11 @@ fn composite(
         }
     }
     Ok(colour == PngColour::BlackWhite)
+}
+
+/// An opaque sRGB colour.
+fn solid([r, g, b]: [u8; 3]) -> Color {
+    Color::from_rgba8(r, g, b, 255)
 }
 
 /// What a band draws for one item.
