@@ -4031,7 +4031,55 @@ where
     O: ClassObject + SolutionObject + Ord,
     G: IntersectorBrep<O> + ?Sized,
 {
-    with_face_caches(k, geometry, |objects| solve(objects))
+    with_face_caches(k, geometry, None, |objects| solve(objects))
+}
+
+/// [`solve_with_face_caches`] that afterwards also builds, for every face whose cache
+/// the solve built with `GetTree`, the trimmed cache the face's surface keeps
+/// ([`keep_face_cache_tree`]). Upstream's `GetTree` builds that kept cache
+/// (`SM_OC_TRIMSRF`), so a later `SmFace::PointClassify` of the surface takes its
+/// trimmed-cache fast path; the solve itself reads its own copies, as before.
+///
+/// # Errors
+///
+/// As [`solve_with_face_caches`]; [`SolidError::Unported`] and
+/// [`SolidError::InvalidInput`] of the kept builds (other failures of a kept build
+/// leave that cache as it was).
+pub(crate) fn solve_with_face_caches_keeping_trees<O, G, R>(
+    k: &Kernel,
+    geometry: &mut G,
+    mut solve: impl FnMut(&dyn TopologyObjects<O>) -> Result<R>,
+) -> Result<R>
+where
+    O: ClassObject + SolutionObject + Ord,
+    G: IntersectorBrep<O> + ?Sized,
+{
+    let mut built = Vec::new();
+    let result = with_face_caches(k, geometry, Some(&mut built), |objects| solve(objects));
+    for face in built {
+        ignore_soft(keep_face_cache_tree(k, geometry, face))?;
+    }
+    result
+}
+
+/// `GetTree` of the trimmed cache the surface of `face` keeps
+/// (`smsurf_GetSurfaceCache(pFace->GetSurface())->GetTree()`): the cache is made
+/// when the surface has none, and its tree is built with the face when it has none or
+/// lacks the face's boundary.
+fn keep_face_cache_tree<O, G>(k: &Kernel, geometry: &mut G, face: O) -> Result<()>
+where
+    O: ClassObject + SolutionObject + Ord,
+    G: IntersectorBrep<O> + ?Sized,
+{
+    let target = geometry.face_cache_target(face)?;
+    let mut lease = crate::query::face::p2::face_surface_cache(k, target.brep, target.face)?;
+    let built = if lease.trimmed {
+        crate::query::face::p2::face_cache_tree(k, target.brep, target.face, &mut lease.cache)
+    } else {
+        Ok(())
+    };
+    lease.release();
+    built
 }
 
 /// [`solve_with_face_caches`] for a surface solve outside the topology solver: `solve`
@@ -4050,7 +4098,9 @@ where
     O: ClassObject + SolutionObject + Ord,
     G: IntersectorBrep<O> + ?Sized,
 {
-    with_face_caches(k, geometry, |objects| solve(&mut FaceCacheContext(objects)))
+    with_face_caches(k, geometry, None, |objects| {
+        solve(&mut FaceCacheContext(objects))
+    })
 }
 
 /// The face owning the edge use of a UV trim request: among the faces the attempt's
@@ -4113,6 +4163,7 @@ fn trim_owner_face<O: Copy>(
 fn with_face_caches<O, G, R>(
     k: &Kernel,
     geometry: &mut G,
+    mut built_with_tree: Option<&mut Vec<O>>,
     mut solve: impl FnMut(&FaceCacheObjects<'_, O, G>) -> Result<R>,
 ) -> Result<R>
 where
@@ -4159,6 +4210,11 @@ where
                 OP_FACE_CACHES,
                 "face cache preparation made no progress",
             ));
+        }
+        if get_tree {
+            if let Some(list) = built_with_tree.as_deref_mut() {
+                list.push(face);
+            }
         }
         let cache = match geometry.face_cache_target(face) {
             Ok(t) if get_tree => {
@@ -4326,7 +4382,9 @@ pub fn intersect_wire_lamina_edges<O: ClassObject + SolutionObject + Ord>(
 
         // temporarily disable EditingEnabled bit; Intersect Edge->Curve with Brep
         let old_edit = geometry.set_editing_enabled(brep2, false)?;
-        let solved = solve_with_face_caches(k, geometry, |objects| {
+        // (upstream's GetTree inside this BrepCurveSolve builds each face surface's kept
+        // trimmed cache, with brep2's editing still off)
+        let solved = solve_with_face_caches_keeping_trees(k, geometry, |objects| {
             let curve_ref = CurveRef {
                 curve: objects.curve(curve)?,
                 handle: curve,
