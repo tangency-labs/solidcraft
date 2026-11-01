@@ -2124,6 +2124,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let c = Tokens::get().body_selected;
                 [f32::from(c.r()) / 255.0, f32::from(c.g()) / 255.0, f32::from(c.b()) / 255.0]
             },
+            moving: None,
         });
         crate::blur::viewport(ui.painter(), rect, callback, viewport, [background.viewport_top, background.viewport_bottom]);
         Ok(())

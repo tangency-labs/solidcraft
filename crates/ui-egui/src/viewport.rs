@@ -40,6 +40,9 @@ mod refine_wait_tests;
 #[path = "navigation_cube.rs"]
 mod navigation_cube;
 
+#[path = "viewport_drag_layer.rs"]
+mod drag_layer;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NavMode {
     Orbit,
@@ -140,6 +143,13 @@ pub struct ViewportState {
     pub(crate) hl_key: u64,
     /// Browser/timeline body feedback, independent of the camera and reference widget scale.
     hover_block: std::sync::Mutex<Option<HoverBlock>>,
+    /// A component's Move triad drag drawn as a layer of its own (`viewport_drag_layer.rs`),
+    /// the world the last whole model scene was built from (where such a drag begins), and the
+    /// dragged bodies' scene.
+    drag: Option<drag_layer::DragLayer>,
+    scene_world: Option<drag_layer::SceneWorld>,
+    moving_slot: SceneSlot,
+    moving_key: u64,
     /// Each shown body the model builds on the CPU: the block of the model scene that holds its
     /// triangles, and the body's index and vertex ranges in it (for whole-body highlights).
     body_tris: std::sync::Mutex<std::collections::HashMap<String, crate::gpu::BlockTris>>,
@@ -558,12 +568,20 @@ fn scene_key(app: &SolveApp) -> u64 {
     (std::sync::Arc::as_ptr(&app.session.doc) as usize).hash(&mut h);
     app.session.colored_components.hash(&mut h);
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
+    base_scene_key(app).hash(&mut h);
+    lod_generation(app).hash(&mut h);
+    app.viewport.mesh_lods.generation().hash(&mut h);
+    h.finish()
+}
+
+/// Everything the model scene shows but the world, the session's revision and the display
+/// refinement (a drag drawn as a layer keeps the refinement it began with).
+fn base_scene_key(app: &SolveApp) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
     app.ui.visual_style.hash(&mut h);
     app.preferences.vertex_markers.hash(&mut h);
     app.ui.ground_shadow.hash(&mut h);
     solidcraft_engine::doc::display_quality::current().hash(&mut h);
-    lod_generation(app).hash(&mut h);
-    app.viewport.mesh_lods.generation().hash(&mut h);
     // How bodies are drawn: from their plans on the GPU, or built here (until the evaluation
     // shader has compiled, #4860).
     app.viewport.gpu.is_some_and(|g| g.tess).hash(&mut h);
@@ -1344,8 +1362,11 @@ struct Instances {
 impl Instances {
     /// The shown bodies' shared meshes, keeping those more than one body is drawn from and large
     /// ones.
-    fn new(app: &SolveApp, shown: &[&solidcraft_engine::doc::ModelBody], shaded: bool) -> Instances {
-        let kept = app.viewport.instanced_tris.lock().map(|mut k| std::mem::take(&mut *k)).unwrap_or_default();
+    ///
+    /// A scene of only some of the bodies (`whole` false: a drag's layer and the model beside
+    /// it) leaves the kept triangles of the others where they are.
+    fn new(app: &SolveApp, shown: &[&solidcraft_engine::doc::ModelBody], shaded: bool, whole: bool) -> Instances {
+        let kept = app.viewport.instanced_tris.lock().map(|mut k| if whole { std::mem::take(&mut *k) } else { k.clone() }).unwrap_or_default();
         let mut candidates = std::collections::HashMap::new();
         if shaded {
             let mut uses: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
@@ -1398,13 +1419,20 @@ impl Instances {
         Some((mesh, m))
     }
 
-    /// The instanced meshes, keeping their triangles for the next scene.
-    fn finish(self, app: &SolveApp) -> Vec<crate::gpu::InstancedMesh> {
+    /// The instanced meshes, keeping their triangles for the next scene (and, for a scene of
+    /// only some bodies, the others' too: their levels of detail stay).
+    fn finish(self, app: &SolveApp, whole: bool) -> Vec<crate::gpu::InstancedMesh> {
         let kept: InstancedTris =
             self.meshes.iter().map(|(mesh, inst)| (std::sync::Arc::as_ptr(mesh) as usize, (mesh.clone(), inst.tris.clone()))).collect();
-        self.lods.retain(&kept.keys().copied().collect());
+        if whole {
+            self.lods.retain(&kept.keys().copied().collect());
+        }
         if let Ok(mut k) = app.viewport.instanced_tris.lock() {
-            *k = kept;
+            if whole {
+                *k = kept;
+            } else {
+                k.extend(kept);
+            }
         }
         self.meshes.into_iter().map(|(_, inst)| inst).collect()
     }
@@ -1425,10 +1453,92 @@ fn shared_mesh(
 }
 
 pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
-    let tk = Tokens::get();
-    let s = &app.session;
     // Bodies where their occurrences place them.
     let st = crate::open_meshing::shown_world(app);
+    // The blocks the last scene built, reused when their bodies come back as they were.
+    let mut kept = app.viewport.blocks.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
+    let (mut sc, made) = body_scene(app, &st, |_| true, true, &mut kept);
+    keep_body_tris(app, &made);
+    if let Ok(mut b) = app.viewport.blocks.lock() {
+        *b = made;
+    }
+    if app.ui.ground_shadow && app.ui.visual_style != 2 && app.cam.pitch > 0.0 {
+        ground_shadow(&mut sc, app, &st);
+    }
+    // Section: the outline of each body where the plane cuts it, in the view's text colour (#4146).
+    if let Some((o, n)) = section_plane(app) {
+        let col = sc.color(c4(Tokens::view().text.gamma_multiply(0.9)));
+        let mut kept = app.viewport.section_index.lock().map(|mut k| std::mem::take(&mut *k)).unwrap_or_default();
+        let mut made = std::collections::HashMap::with_capacity(kept.len());
+        let normal = [n.x.to_bits(), n.y.to_bits(), n.z.to_bits()];
+        for b in st.bodies.iter().filter(|b| app.body_visible(&b.name)) {
+            let mesh = b.mesh();
+            let key = (std::sync::Arc::as_ptr(&mesh) as usize, normal);
+            let index = match kept.remove(&key).filter(|(m, i)| std::sync::Arc::ptr_eq(m, &mesh) && i.normal() == n) {
+                Some((_, index)) => index,
+                None => std::sync::Arc::new(solidcraft_engine::view::SectionIndex::new(&mesh, n)),
+            };
+            for (a, c) in index.segments(&mesh, o) {
+                sc.line(a.to_f32(), c.to_f32(), col, 1.8, false);
+            }
+            made.insert(key, (mesh, index));
+        }
+        if let Ok(mut k) = app.viewport.section_index.lock() {
+            *k = made;
+        }
+    }
+    continuity_seams(&mut sc, app);
+    crate::edit_in_place::draw_context(app, &mut sc);
+    sc
+}
+
+/// Continuity analysis: each seam `inspect.continuity` measured, drawn over the model in the
+/// colour of its worst verdict.
+fn continuity_seams(sc: &mut GpuScene, app: &SolveApp) {
+    let tk = Tokens::get();
+    let s = &app.session;
+    for (seam, detail) in s.continuity.iter().zip(s.continuity_details()) {
+        if !detail.current {
+            continue;
+        }
+        let col = sc.color(c4(continuity_color(&tk, seam.verdict)));
+        for w in seam.points.windows(2) {
+            if let (Some(a), Some(b)) = (w.first(), w.get(1)) {
+                sc.line(a.to_f32(), b.to_f32(), col, 2.6, true);
+            }
+        }
+    }
+}
+
+/// Where each CPU-built body's triangles are in the model's blocks, for whole-body
+/// highlights (see `highlight_block_tris`).
+fn keep_body_tris(app: &SolveApp, made: &std::collections::HashMap<u64, CachedBlock>) {
+    let mut body_tris = std::collections::HashMap::new();
+    for (key, c) in made {
+        for range in &c.ranges {
+            if !range.vertices.is_empty() {
+                body_tris
+                    .insert(range.name.clone(), crate::gpu::BlockTris { block: *key, tris: range.opaque.clone(), vertices: range.vertices.clone() });
+            }
+        }
+    }
+    if let Ok(mut m) = app.viewport.body_tris.lock() {
+        *m = body_tris;
+    }
+}
+
+/// The scene of the shown bodies of `st` that `takes` (by their place in it) and nothing else,
+/// built from the blocks in `kept` where their bodies come back as they were; with the blocks
+/// it holds by key. `whole`: all of the shown bodies (see [`Instances::new`]).
+fn body_scene(
+    app: &SolveApp,
+    st: &solidcraft_engine::doc::ModelState,
+    takes: impl Fn(usize) -> bool,
+    whole: bool,
+    kept: &mut std::collections::HashMap<u64, CachedBlock>,
+) -> (GpuScene, std::collections::HashMap<u64, CachedBlock>) {
+    let tk = Tokens::get();
+    let s = &app.session;
     let active_bodies = s.active_occurrence_path.as_ref().and_then(|p| s.occurrence_bodies(p, true).ok());
     let (shaded, edges) = match app.ui.visual_style {
         1 => (true, false),
@@ -1441,10 +1551,14 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     // Vertex markers are an option (#7834), off by default.
     let markers = app.preferences.vertex_markers;
     let hidden_col = c4(tk.text.gamma_multiply(0.35));
+    // Every shown body, and the ones this scene takes. The arena and the appearance cache
+    // keep every shown body, so a scene of some of them (a drag drawn as a layer) leaves the
+    // others' slots and looks as they were.
+    let visible = |b: &&solidcraft_engine::doc::ModelBody| app.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name);
+    let shown_names: Vec<&str> = st.bodies.iter().filter(visible).map(|b| b.name.as_str()).collect();
     let shown: Vec<&solidcraft_engine::doc::ModelBody> =
-        st.bodies.iter().filter(|b| app.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name)).collect();
+        st.bodies.iter().enumerate().filter(|(i, b)| takes(*i) && visible(b)).map(|(_, b)| b).collect();
     let mut arena = app.viewport.palette.lock().unwrap_or_else(|e| e.into_inner());
-    let shown_names: Vec<&str> = shown.iter().map(|b| b.name.as_str()).collect();
     arena.sync(shown_names.iter().copied());
     // Allocate every body's slots before the scene's palette is copied, so the stable prefix
     // covers them; the colours themselves are written in the loop below, into both the arena
@@ -1463,15 +1577,13 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
         // key comes back unchanged are still reused.
         appearance.keys.clear();
     }
-    // The blocks the last scene built, reused when their bodies come back as they were.
-    let mut kept = app.viewport.blocks.lock().map(|mut b| std::mem::take(&mut *b)).unwrap_or_default();
     let mut made: std::collections::HashMap<u64, CachedBlock> = std::collections::HashMap::new();
     let mut run: Vec<BodyDraw> = Vec::new();
     let mut run_key = std::collections::hash_map::DefaultHasher::new();
     // Bodies drawn from the same triangles more than once (a part placed by many occurrences)
     // are drawn as instances of them: one copy of the triangles on the GPU, and none moved on
     // the CPU.
-    let mut instances = Instances::new(app, &shown, shaded);
+    let mut instances = Instances::new(app, &shown, shaded, whole);
     let mut thread_budget = solidcraft_engine::cosmetic_threads::Budget::default();
     for (b, slots) in shown.into_iter().zip(slots) {
         let faded = body_faded(app, b, &active_bodies);
@@ -1596,25 +1708,11 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
         if key.is_multiple_of(16) || run.len() >= 64 {
             let draws = std::mem::take(&mut run);
             let block_key = std::mem::replace(&mut run_key, std::collections::hash_map::DefaultHasher::new()).finish();
-            push_block(&mut sc, &mut kept, &mut made, block_key, draws, shaded, |d, out| d.build(out, shaded, edges, hidden_edges, markers));
+            push_block(&mut sc, kept, &mut made, block_key, draws, shaded, |d, out| d.build(out, shaded, edges, hidden_edges, markers));
         }
     }
     if !run.is_empty() {
-        push_block(&mut sc, &mut kept, &mut made, run_key.finish(), run, shaded, |d, out| d.build(out, shaded, edges, hidden_edges, markers));
-    }
-    // Where each CPU-built body's triangles are in the model's blocks, for whole-body
-    // highlights (see `highlight_block_tris`).
-    let mut body_tris = std::collections::HashMap::new();
-    for (key, c) in &made {
-        for range in &c.ranges {
-            if !range.vertices.is_empty() {
-                body_tris
-                    .insert(range.name.clone(), crate::gpu::BlockTris { block: *key, tris: range.opaque.clone(), vertices: range.vertices.clone() });
-            }
-        }
-    }
-    if let Ok(mut m) = app.viewport.body_tris.lock() {
-        *m = body_tris;
+        push_block(&mut sc, kept, &mut made, run_key.finish(), run, shaded, |d, out| d.build(out, shaded, edges, hidden_edges, markers));
     }
     // Every shown body has its entries, so only a larger map holds bodies no longer shown.
     if appearance.bodies.len() > shown_names.len() || appearance.keys.len() > shown_names.len() {
@@ -1622,51 +1720,8 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
         appearance.bodies.retain(|name, _| names.contains(name.as_str()));
         appearance.keys.retain(|name, _| names.contains(name.as_str()));
     }
-    if let Ok(mut b) = app.viewport.blocks.lock() {
-        *b = made;
-    }
-    sc.instanced = instances.finish(app);
-    if app.ui.ground_shadow && app.ui.visual_style != 2 && app.cam.pitch > 0.0 {
-        ground_shadow(&mut sc, app, &st);
-    }
-    // Section: the outline of each body where the plane cuts it, in the view's text colour (#4146).
-    if let Some((o, n)) = section_plane(app) {
-        let col = sc.color(c4(Tokens::view().text.gamma_multiply(0.9)));
-        let mut kept = app.viewport.section_index.lock().map(|mut k| std::mem::take(&mut *k)).unwrap_or_default();
-        let mut made = std::collections::HashMap::with_capacity(kept.len());
-        let normal = [n.x.to_bits(), n.y.to_bits(), n.z.to_bits()];
-        for b in st.bodies.iter().filter(|b| app.body_visible(&b.name)) {
-            let mesh = b.mesh();
-            let key = (std::sync::Arc::as_ptr(&mesh) as usize, normal);
-            let index = match kept.remove(&key).filter(|(m, i)| std::sync::Arc::ptr_eq(m, &mesh) && i.normal() == n) {
-                Some((_, index)) => index,
-                None => std::sync::Arc::new(solidcraft_engine::view::SectionIndex::new(&mesh, n)),
-            };
-            for (a, c) in index.segments(&mesh, o) {
-                sc.line(a.to_f32(), c.to_f32(), col, 1.8, false);
-            }
-            made.insert(key, (mesh, index));
-        }
-        if let Ok(mut k) = app.viewport.section_index.lock() {
-            *k = made;
-        }
-    }
-    // Continuity analysis: each seam `inspect.continuity` measured, drawn over the model in the
-    // colour of its worst verdict.
-    for (seam, detail) in s.continuity.iter().zip(s.continuity_details()) {
-        if !detail.current {
-            continue;
-        }
-        let col = sc.color(c4(continuity_color(&tk, seam.verdict)));
-        for w in seam.points.windows(2) {
-            if let (Some(a), Some(b)) = (w.first(), w.get(1)) {
-                sc.line(a.to_f32(), b.to_f32(), col, 2.6, true);
-            }
-        }
-    }
-    crate::edit_in_place::draw_context(app, &mut sc);
-
-    sc
+    sc.instanced = instances.finish(app, whole);
+    (sc, made)
 }
 
 /// The colour of a measured seam, one per verdict from the theme's `continuity` tokens: within
@@ -1829,21 +1884,28 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
 
 /// A soft dark ellipse on the ground under the shown bodies (darkest in the middle).
 fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::ModelState>) {
+    let boxes = body_bounds(app, st);
+    let shown = st.bodies.iter().zip(boxes.iter()).filter(|(x, (_, bb))| !bb.is_empty() && app.body_visible(&x.name));
+    ground_shadow_under(sc, app, shown.flat_map(|(_, (_, bb))| box_corners(bb)));
+}
+
+/// The corners of a box.
+fn box_corners(bb: &solidcraft_engine::geom::Aabb3) -> [Vec3; 8] {
+    std::array::from_fn(|i| {
+        Vec3::new(
+            if i & 1 == 0 { bb.min.x } else { bb.max.x },
+            if i & 2 == 0 { bb.min.y } else { bb.max.y },
+            if i & 4 == 0 { bb.min.z } else { bb.max.z },
+        )
+    })
+}
+
+/// The soft shadow on the ground under the shown bodies, whose boxes' corners are `corners`.
+fn ground_shadow_under(sc: &mut GpuScene, app: &SolveApp, corners: impl Iterator<Item = Vec3>) {
     // The bodies' box in the camera's Z-up frame (the ground is its XY plane).
     let mut b = solidcraft_engine::geom::Aabb3::EMPTY;
-    let boxes = body_bounds(app, st);
-    for (x, (_, bb)) in st.bodies.iter().zip(boxes.iter()) {
-        if bb.is_empty() || !app.body_visible(&x.name) {
-            continue;
-        }
-        for i in 0..8 {
-            let p = Vec3::new(
-                if i & 1 == 0 { bb.min.x } else { bb.max.x },
-                if i & 2 == 0 { bb.min.y } else { bb.max.y },
-                if i & 4 == 0 { bb.min.z } else { bb.max.z },
-            );
-            b.add(app.cam.to_frame(p));
-        }
+    for p in corners {
+        b.add(app.cam.to_frame(p));
     }
     if b.is_empty() {
         return;
@@ -2133,6 +2195,13 @@ pub(crate) fn body_bounds(
         return b;
     }
     std::sync::Arc::new(Vec::new())
+}
+
+/// `boxes` are the boxes of `st`'s bodies (worked out without its meshes).
+fn known_body_bounds(app: &SolveApp, st: &std::sync::Arc<solidcraft_engine::doc::ModelState>, boxes: Vec<(String, solidcraft_engine::geom::Aabb3)>) {
+    if let Ok(mut g) = app.viewport.pick_bounds.lock() {
+        *g = Some((st.clone(), std::sync::Arc::new(boxes)));
+    }
 }
 
 type BodyBounds = (std::sync::Arc<solidcraft_engine::doc::ModelState>, std::sync::Arc<Vec<(String, solidcraft_engine::geom::Aabb3)>>);
@@ -3728,6 +3797,11 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
     let st = crate::open_meshing::shown_world(app);
     let s = &app.session;
     let active_bodies = s.active_occurrence_path.as_ref().and_then(|p| s.occurrence_bodies(p, true).ok());
+    // Whole bodies are lit by drawing the model's own triangles again, but a drag drawn as a layer
+    // moves its bodies' triangles on the GPU from where the drag found them: those are built
+    // where they stand.
+    let dragged = drag_layer::dragged_names(app);
+    let gpu_lit = |b: &solidcraft_engine::doc::ModelBody| !dragged.contains(b.name.as_str());
     // Faces lit over the model use the triangles the model shows them with.
     let product = crate::render_workspace::active(app);
     // Bodies a Move dialog moves are lit where they stand (as they are picked). While its triad
@@ -3917,7 +3991,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                     && app.body_visible(name)
                 {
                     let lit = WholeBody { selected: true, colour: c4(t.body_selected) };
-                    if !light_whole_body(app, b, &active_bodies, lit, &body_slots, &mut feedback, &mut selected_instances) {
+                    if !(gpu_lit(b) && light_whole_body(app, b, &active_bodies, lit, &body_slots, &mut feedback, &mut selected_instances)) {
                         let m = shown(b);
                         let count = b.body.face_count();
                         mesh_tris(&mut feedback, &m, c4(t.body_selected), true, |f| (f as usize) < count);
@@ -4036,7 +4110,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             // A whole body the model draws from a plan is lit by redrawing the plan's own
             // evaluated triangles, not by building every triangle again (see `highlight_plan`).
             let lit = WholeBody { selected: false, colour: hover_col };
-            if whole && light_whole_body(app, b, &active_bodies, lit, &body_slots, &mut feedback, &mut hover_instances) {
+            if whole && gpu_lit(b) && light_whole_body(app, b, &active_bodies, lit, &body_slots, &mut feedback, &mut hover_instances) {
                 // Drawn again from what the model already has on the GPU.
             } else {
                 let lit = shown(b);
@@ -4274,6 +4348,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let rect = ui.max_rect();
     app.viewport.rect = Some(rect);
+    // A component dragged as a layer is drawn from the meshes where its drag began.
+    let layered = drag_layer::follow(app);
     refresh_layout(app, ui.ctx());
     let resp = ui.interact(rect, ui.id().with("viewport"), Sense::click_and_drag());
     let flat = crate::dialogs_sheet::flat_active(app);
@@ -4330,9 +4406,14 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         || app.viewport.spin
         || app.cam_anim.is_some();
     let joint_handle_pointer = hover.is_some_and(|p| inside && crate::joint_handles::owns_pointer(app, &proj, p));
-    // A part dragged along its joint owns the pointer: nothing under it lights up (#5137).
+    // Nor while a component's triad drags it as a layer: the pointer holds the triad, and picking
+    // the dragged bodies would move their meshes at every step. A part dragged along its joint
+    // owns the pointer too: nothing under it lights up (#5137).
+    let dragging_layer = layered && manipulator_dragging;
     let hits = hover
-        .filter(|_| inside && app.viewport.boxsel.is_none() && !crate::joint_drag::active(app) && !joint_handle_pointer && !navigating)
+        .filter(|_| {
+            inside && app.viewport.boxsel.is_none() && !crate::joint_drag::active(app) && !joint_handle_pointer && !navigating && !dragging_layer
+        })
         .map(|p| pick_cached(app, &proj, p))
         .unwrap_or_default();
     // The Fillet and Chamfer window resolves its own corners: the nearest sketch point to a
@@ -4360,7 +4441,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
 
     // ---- model ----
     crate::frame_watch::step(app, "viewport before the model");
-    update_refinement(app, ui.ctx(), &proj);
+    // A drag drawn as a layer keeps the refinements it began with.
+    if !layered {
+        update_refinement(app, ui.ctx(), &proj);
+    }
     // Levels of detail being made: keep frames coming to draw them when they are.
     if app.viewport.mesh_lods.busy() {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
@@ -4370,11 +4454,13 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t0 = crate::now_ms();
     // Drawn on the GPU; without one (the headless harness, tests) the model is not drawn.
     if app.viewport.gpu.is_some() {
-        if key != app.viewport.key {
+        let moving = if layered { drag_layer::scenes(app) } else { None };
+        if !layered && key != app.viewport.key {
             let sc = build_scene(app);
             if let Ok(mut slot) = app.viewport.slot.lock() {
                 *slot = Some(sc);
             }
+            drag_layer::whole_scene_built(app);
             app.viewport.key = key;
             app.viewport.build_ms = crate::now_ms() - t0;
             crate::frame_watch::step(app, "model scene");
@@ -4446,6 +4532,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 [f32::from(c.r()) / 255.0, f32::from(c.g()) / 255.0, f32::from(c.b()) / 255.0]
             },
             sky: sky_uniform(app.preferences.dark_parts_shading, proj.cam.up),
+            moving,
         });
         crate::blur::viewport(&painter, rect, cb, rect, [t.viewport_top, t.viewport_bottom]);
         // The graphics card had no memory for the view's frame (#7296): say once why it looks
@@ -6747,6 +6834,128 @@ mod tests {
     use super::*;
     use crate::navigation::*;
 
+    /// A component dragged with its Move triad is drawn as a layer: its bodies' scene is built
+    /// once, where the drag found them, and drawn moved by the drag's motion, the rest of the
+    /// model scene stays as it was (with the ground shadow, put together again under the dragged
+    /// bodies), and a step of the drag builds and moves nothing. Captured, the model scene is
+    /// whole again.
+    #[test]
+    fn a_dragged_component_is_drawn_as_a_layer_built_once() {
+        for shadow in [false, true] {
+            let mut s = solidcraft_engine::Session::default();
+            s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "body_name": "Stays"})).unwrap();
+            let first = s.execute("component.create", &json!({"name": "Part"})).unwrap()["occurrence"].as_u64().unwrap();
+            s.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4, "body_name": "Block", "operation": "new"})).unwrap();
+            let dragged = s.execute("occurrence.copy", &json!({"occurrence": first})).unwrap()["occurrence"].as_u64().unwrap();
+            s.execute("occurrence.move", &json!({"occurrence": dragged, "translate": [20, 0, 0]})).unwrap();
+            let mut app = SolveApp::new(s, crate::Services::default());
+            app.viewport.gpu =
+                Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+            app.ui.ground_shadow = shadow;
+            app.cam.pitch = 0.5;
+            let whole = build_scene(&app);
+            drag_layer::whole_scene_built(&mut app);
+            // What the scene draws of its bodies (a body outside the active component is faded).
+            let drawn = |sc: GpuScene| {
+                let sc = sc.merged();
+                (sc.tris.len() + sc.lines.len(), sc.trans, sc.shadow)
+            };
+            let (whole, whole_trans, _) = drawn(whole);
+            let base = app.session.doc.occurrences.iter().find(|o| o.id == dragged).map(|o| o.transform).unwrap();
+            let found = body_bounds(&app, &app.session.world_state());
+            let taken = |slot: &SceneSlot| slot.lock().unwrap().take();
+            let mut first_step = None;
+            for step in 1..4 {
+                let x = 3.0 * f64::from(step);
+                app.run("occurrence.move", json!({"occurrence": dragged, "base_transform": base, "translate": [x, 0, 0], "capture": false})).unwrap();
+                assert!(drag_layer::follow(&mut app), "step {step}: drawn as a layer");
+                let moving = drag_layer::scenes(&mut app).unwrap();
+                assert_eq!(moving.transform[3][..3], [x as f32, 0.0, 0.0], "step {step}: drawn moved by the drag");
+                let (statics, layer) = (taken(&app.viewport.slot), taken(&moving.slot));
+                match (step, statics) {
+                    (1, Some(statics)) => {
+                        // The dragged body is the layer's, the others the model scene's.
+                        let ((statics, statics_trans, statics_shadow), (layer, layer_trans, _)) = (drawn(statics), drawn(layer.unwrap()));
+                        assert!(statics > 0 && layer > 0 && statics + layer == whole, "{statics} + {layer} of {whole}");
+                        if !shadow {
+                            assert_eq!(statics_trans.len() + layer_trans.len(), whole_trans.len());
+                        }
+                        first_step = Some((app.viewport.key, moving.key, statics_shadow));
+                    }
+                    (_, statics) => {
+                        let Some((key, moving_key, first_shadow)) = &first_step else { panic!("step {step}: no first step") };
+                        assert!(layer.is_none() && *moving_key == moving.key, "step {step}: the dragged bodies not built again");
+                        match statics {
+                            // Only the shadow moved.
+                            Some(statics) if shadow => {
+                                let (_, _, now) = drawn(statics);
+                                assert!(now.len() == first_shadow.len() && now != *first_shadow, "step {step}: the shadow follows");
+                            }
+                            None if !shadow => assert_eq!(app.viewport.key, *key, "step {step}"),
+                            _ => panic!("step {step}: the model scene built again"),
+                        }
+                    }
+                }
+                // Its mesh is not moved to draw it.
+                let world = app.session.world_state();
+                let unmoved: Vec<usize> = (0..world.bodies.len()).filter(|&i| world.bodies[i].cached_mesh().is_none()).collect();
+                assert_eq!(unmoved.len(), 1, "step {step}");
+                // Nor its box worked out from a mesh: it is the box the drag found it in, moved.
+                let known = app.viewport.pick_bounds.lock().unwrap().as_ref().is_some_and(|(st, _)| std::sync::Arc::ptr_eq(st, &world));
+                assert!(known, "step {step}: the boxes come with the layer");
+                let i = unmoved[0];
+                let (was, now) = (found[i].1, body_bounds(&app, &world)[i].1);
+                assert!(
+                    (now.min - was.min - Vec3::new(x, 0.0, 0.0)).len() < 1e-9 && (now.max - was.max - Vec3::new(x, 0.0, 0.0)).len() < 1e-9,
+                    "step {step}"
+                );
+            }
+            // Captured: no longer a drag, and the model scene is whole again.
+            app.run("component.capture_position", json!({})).unwrap();
+            assert!(!drag_layer::follow(&mut app), "captured: no longer a drag");
+            assert!(app.viewport.drag.is_none());
+        }
+    }
+
+    /// A drag that comes back to where its layer found the component (the triad snapped back, or
+    /// dragged back to where it began) draws the same layer, unmoved. Built again with nothing
+    /// dragged, it would put every dragged body back in the model scene (the GPU uploading them
+    /// again) and take them once more at the next step.
+    #[test]
+    fn a_drag_back_where_it_began_keeps_its_layer() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "body_name": "Stays"})).unwrap();
+        let first = s.execute("component.create", &json!({"name": "Part"})).unwrap()["occurrence"].as_u64().unwrap();
+        s.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4, "body_name": "Block", "operation": "new"})).unwrap();
+        let dragged = s.execute("occurrence.copy", &json!({"occurrence": first})).unwrap()["occurrence"].as_u64().unwrap();
+        s.execute("occurrence.move", &json!({"occurrence": dragged, "translate": [20, 0, 0]})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
+        app.ui.ground_shadow = false;
+        let _ = build_scene(&app);
+        drag_layer::whole_scene_built(&mut app);
+        let base = app.session.doc.occurrences.iter().find(|o| o.id == dragged).map(|o| o.transform).unwrap();
+        let step = |app: &mut SolveApp, x: f64| {
+            app.run("occurrence.move", json!({"occurrence": dragged, "base_transform": base, "translate": [x, 0, 0], "capture": false})).unwrap();
+            drag_layer::follow(app).then(|| drag_layer::scenes(app)).flatten()
+        };
+        // A drag that has not moved anything yet is drawn as before.
+        assert!(step(&mut app, 0.0).is_none(), "nothing dragged yet: no layer");
+        let _ = build_scene(&app);
+        drag_layer::whole_scene_built(&mut app);
+        let taken = |slot: &SceneSlot| slot.lock().unwrap().take();
+        let first = step(&mut app, 3.0).expect("drawn as a layer");
+        assert!(taken(&first.slot).is_some_and(|sc| !sc.blocks.is_empty()), "the dragged body's scene");
+        assert!(taken(&app.viewport.slot).is_some(), "the model scene without it");
+        let statics = app.viewport.key;
+        for x in [0.0, 6.0, 0.0, 9.0, 0.0] {
+            let moving = step(&mut app, x).expect("drawn as a layer");
+            assert_eq!(moving.transform[3][..3], [x as f32, 0.0, 0.0], "x {x}: drawn moved by the drag");
+            assert!(moving.key == first.key && taken(&moving.slot).is_none(), "x {x}: the dragged body's scene not built again");
+            assert!(app.viewport.key == statics && taken(&app.viewport.slot).is_none(), "x {x}: the model scene not built again");
+        }
+    }
+
     #[test]
     fn ground_shadow_does_not_enter_see_through_geometry() -> Result<(), Box<dyn std::error::Error>> {
         let mut session = solidcraft_engine::Session::default();
@@ -8224,6 +8433,7 @@ mod tests {
                     ssaa: 1.0,
                     hover_tint: [0.0; 3],
                     selection_tint: [0.0; 3],
+                    moving: None,
                 };
                 let t0 = std::time::Instant::now();
                 let mut encoder = device.create_command_encoder(&Default::default());

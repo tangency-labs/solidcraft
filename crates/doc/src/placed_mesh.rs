@@ -47,6 +47,16 @@ impl PlacedMesh {
         })
     }
 
+    /// Identity of the definition's display cells, shared by every placement of it.
+    pub(super) fn definition_id(&self) -> usize {
+        Arc::as_ptr(&self.mesh) as usize
+    }
+
+    /// Where this placement puts the definition.
+    pub(super) fn transform(&self) -> &crate::Mat {
+        &self.transform
+    }
+
     pub(super) fn mesh(&self) -> Arc<Mesh> {
         Arc::new(self.moved(&reference_mesh(&self.body, &self.mesh, self.tolerance)))
     }

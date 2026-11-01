@@ -224,6 +224,35 @@ impl ModelBody {
         self.mesh.clone()
     }
 
+    /// Identity of the display cells of the solid this body shows: its own, or for a rigidly
+    /// placed copy its definition's (shared by every placement of it).
+    fn solid_id(&self) -> usize {
+        self.mesh_placement.as_deref().map_or(Arc::as_ptr(&self.mesh) as usize, placed_mesh::PlacedMesh::definition_id)
+    }
+
+    /// How this body is drawn moved from `before`: [`crate::IDENTITY`] when it is `before` where
+    /// it stood (its meshes and plans the same), the rigid motion between them when it is the same
+    /// solid placed elsewhere (a dragged component's body: `before`'s meshes and plans drawn moved
+    /// show it; a definition shown where it is defined is its own placement), `None` when it is
+    /// another body or its geometry differs.
+    pub fn display_moved_from(&self, before: &ModelBody) -> Option<crate::Mat> {
+        if self.name != before.name || self.solid_id() != before.solid_id() {
+            return None;
+        }
+        let (now, was) = (self.mesh_placement.as_deref(), before.mesh_placement.as_deref());
+        if let (Some(now), Some(was)) = (now, was)
+            && now.tolerance.to_bits() != was.tolerance.to_bits()
+        {
+            return None;
+        }
+        let at = |p: Option<&placed_mesh::PlacedMesh>| p.map_or(crate::IDENTITY, |p| *p.transform());
+        let (now, was) = (at(now), at(was));
+        if now == was {
+            return Some(crate::IDENTITY);
+        }
+        Some(crate::mat_mul(&now, &crate::mat_inverse(&was)?))
+    }
+
     /// [`ModelBody::mesh`] as a shared mesh and the move that places it: for a rigid placement
     /// of a definition, the definition's own mesh (the same one for every placement of it) and
     /// the placement; for any other body its own mesh, unmoved. The mesh moved by the matrix is
@@ -8863,6 +8892,49 @@ mod world_placement_cache_tests {
         let again = world_state(&doc, &state);
         assert!(Arc::ptr_eq(&original_mesh, &again.body("Block").unwrap().mesh()));
         assert!(Arc::ptr_eq(&names, &crate::naming::face_names(again.body(&second_name).unwrap())));
+    }
+
+    /// A dragged component's bodies are drawn from the meshes and plans made where the drag found
+    /// them, moved: each is the same solid moved rigidly, the others stand where they were, and a
+    /// body whose geometry changed is no such move.
+    #[test]
+    fn a_moved_placement_is_drawn_moved_from_where_it_stood() {
+        // A placement moved, and the part moved off where it is defined.
+        for from_definition in [false, true] {
+            let mut doc = Document::new("placements");
+            let component = doc.add_component(Some("Part"), 0).unwrap();
+            doc.body_components.insert("Block".into(), component);
+            let start = if from_definition { crate::IDENTITY } else { crate::rigid(Vec3::new(10., 20., 0.), Vec3::ZERO, Vec3::Z, 0.4) };
+            let second = doc.add_occurrence(component, 0, start).unwrap();
+            let mut state = ModelState::default();
+            state.bodies.push(ModelBody::new("Block".into(), kernel::box_solid(Vec3::ZERO, Vec3::new(2., 3., 4.)).unwrap(), 1));
+            let before = world_state(&doc, &state);
+            let delta = crate::rigid(Vec3::new(4., -7., 1.5), Vec3::new(1., 1., 0.), Vec3::new(0., 1., 1.), 0.6);
+            let moved = doc.occurrences.iter_mut().find(|o| o.id == second).unwrap();
+            moved.transform = crate::mat_mul(&delta, &moved.transform);
+            let after = world_state(&doc, &state);
+            assert_eq!(after.bodies.len(), 2);
+            let mut moves = 0;
+            for now in &after.bodies {
+                let was = before.body(&now.name).unwrap();
+                let d = now.display_moved_from(was).unwrap();
+                if d == crate::IDENTITY {
+                    assert!(Arc::ptr_eq(&now.mesh(), &was.mesh()), "{}: unchanged, the same mesh", now.name);
+                    continue;
+                }
+                moves += 1;
+                assert!(d.iter().flatten().zip(delta.iter().flatten()).all(|(a, b)| (a - b).abs() < 1e-9), "{}: {d:?}", now.name);
+                // `was`'s mesh drawn moved is `now`'s.
+                for (p, q) in was.mesh().positions.iter().zip(&now.mesh().positions) {
+                    assert!(crate::apply_point(&d, *p).dist(*q) < 1e-9);
+                }
+            }
+            assert_eq!(moves, 1, "from its definition: {from_definition}");
+            // Another body, or other geometry: no move draws it.
+            assert!(after.bodies[0].display_moved_from(&before.bodies[1]).is_none());
+            let other = ModelBody::new(before.bodies[0].name.clone(), kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap(), 1);
+            assert!(other.display_moved_from(&before.bodies[0]).is_none());
+        }
     }
 }
 
