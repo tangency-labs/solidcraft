@@ -521,7 +521,6 @@ fn exact_min(a: &Shape, b: &Shape) -> Option<(f64, Vec3, Vec3)> {
                 };
                 Some((dist, q, *a2))
             } else {
-                let n = n.normalized()?;
                 let w = *a1 - *a2;
                 let a = d1.dot(d1);
                 let b = d1.dot(d2);
@@ -532,7 +531,6 @@ fn exact_min(a: &Shape, b: &Shape) -> Option<(f64, Vec3, Vec3)> {
                 let (t, s) = if den.abs() < 1e-12 { (0.0, e / c) } else { ((b * e - c * d) / den, (a * e - b * d) / den) };
                 let p = *a1 + d1 * t;
                 let q = *a2 + d2 * s;
-                let _ = n;
                 Some((p.dist(q), p, q))
             }
         }
