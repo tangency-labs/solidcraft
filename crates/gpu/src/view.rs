@@ -18,7 +18,7 @@ use wgpu::util::DeviceExt;
 
 mod ao;
 mod clouds;
-pub use clouds::{CloudFilter, CloudStyle, ColorMode, DOT_SIZE, Dot, FILTERS, GpuCloud, cloud_dot};
+pub use clouds::{CELL_SIZE, Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, GpuCloud, cloud_cell};
 #[cfg(not(target_arch = "wasm32"))]
 mod msaa_check;
 mod oit;
@@ -963,7 +963,7 @@ pub struct Frame {
     pub cap: [f32; 4],
     /// Canvases and decals.
     pub images: Vec<GpuImage>,
-    /// Point clouds.
+    /// Point clouds and their cells.
     pub clouds: Vec<GpuCloud>,
     /// Surface analysis: (mode: 0 none, 1 zebra, 2 draft, 3 curvature, 4 environment,
     /// 5 accessibility; parameter; scale; size) and the pull / access direction.
@@ -5028,19 +5028,30 @@ mod glass_tests {
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let mut renderer = Renderer::new(&device, GpuTarget { format, depth: Some(depth), samples: 1, tess: false, oit: false }, None);
         let mut frame = test_frame(GpuScene::default(), 2.0);
-        // A dot labelled 2 (red in the palette) and a dot filtered by 5 (a range) and the label
-        // 2 (a set).
+        // A dot (labelled 2, red in the palette) and a bead across the view, filtered by 5 (a
+        // range) and the label 2 (a set).
         let mut dots = Vec::new();
-        cloud_dot(&mut dots, &Dot { at: [5.0, 5.0, 0.0], rgb: [0, 0, 255], value: 2.0, has: 16, ..Default::default() });
-        let filtered = Dot { at: [-3.0, -3.0, 0.0], value: 1.0, filtered: [5.0, 2.0, 0.0, 0.0], rgb: [0, 255, 0], has: 0b10011 };
-        cloud_dot(&mut dots, &filtered);
+        cloud_cell(&mut dots, &Cell { corners: [[5.0, 5.0, 0.0]; 3], rgb: [0, 0, 255], value: [2.0; 3], has: 16, ..Default::default() });
+        let mut segments = Vec::new();
+        let ends = [[-3.0, -3.0, 0.0], [3.0, -3.0, 0.0], [3.0, -3.0, 0.0]];
+        let bead = Cell {
+            corners: ends,
+            value: [1.0; 3],
+            filtered: [[5.0; 3], [2.0; 3], [0.0; 3], [0.0; 3]],
+            size: [0.2, 0.2],
+            rgb: [0, 255, 0],
+            has: 0b10011,
+            ..Default::default()
+        };
+        cloud_cell(&mut segments, &bead);
         let style = CloudStyle { mode: ColorMode::Own, range: [0.0, 1.0], filters: Default::default(), point_size: 20.0 };
-        frame.clouds.push(GpuCloud { id: 1, version: 1, dots: Arc::new(dots), style });
+        let empty = Arc::new(Vec::new());
+        frame.clouds.push(GpuCloud { id: 1, version: 1, dots: Arc::new(dots), segments: Arc::new(segments), triangles: empty, style });
         let has = |img: &[u8], f: &dyn Fn(&[u8; 4]) -> bool| img.as_chunks::<4>().0.iter().any(f);
         let green = |p: &[u8; 4]| p[1] > 120 && p[0] < 30 && p[2] < 30;
         let own = render_frame(&mut renderer, &device, &queue, &frame, true);
-        assert!(has(&own, &|p| p[2] > 200 && p[0] < 30), "a dot in its own colour");
-        assert!(has(&own, &green), "the other in its own colour");
+        assert!(has(&own, &|p| p[2] > 200 && p[0] < 30), "the dot in its own colour");
+        assert!(has(&own, &green), "the bead in its own colour");
         // Values from -1: bit 3 is the label 2, bit 2 the label 1.
         frame.clouds[0].style.filters[1] = CloudFilter::Values { offset: -1, mask: 0b1000 };
         assert!(has(&render_frame(&mut renderer, &device, &queue, &frame, true), &green), "label 2 kept");
@@ -5050,8 +5061,8 @@ mod glass_tests {
         frame.clouds[0].style.filters[0] = CloudFilter::Range([0.0, 4.0]);
         frame.clouds[0].style.mode = ColorMode::Palette;
         let filtered = render_frame(&mut renderer, &device, &queue, &frame, true);
-        assert!(!has(&filtered, &green), "its 5 lies outside the range");
-        assert!(has(&filtered, &|p| p[0] > 200 && p[1] < 90 && p[2] < 90), "the first, without that value, in the palette's red");
+        assert!(!has(&filtered, &green), "the bead's 5 lies outside the range");
+        assert!(has(&filtered, &|p| p[0] > 200 && p[1] < 90 && p[2] < 90), "the dot, without that value, in the palette's red");
         frame.clouds.clear();
         let hidden = render_frame(&mut renderer, &device, &queue, &frame, true);
         assert!(!has(&hidden, &|p| p[0] > 200 && p[1] < 90 && p[2] < 90), "hiding the cloud removes it");

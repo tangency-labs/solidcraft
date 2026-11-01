@@ -11,7 +11,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use solidcraft_geom::Vec3;
 
 use crate::canvas::{base64_decode, base64_encode};
-pub use crate::point_cloud_complex::{Column, Complex, Filter, Floats, Keep, MAX_COLUMNS, MAX_NAMES, Names};
+pub use crate::point_cloud_complex::{Column, Complex, Filter, Floats, Indices, Keep, MAX_CELLS, MAX_COLUMNS, MAX_NAMES, Names, On};
 use crate::{DocError, IDENTITY, Mat, Result};
 
 /// Most points one cloud may hold.
@@ -70,24 +70,26 @@ pub struct PointCloud {
     pub height_range: Option<[f64; 2]>,
     #[serde(default = "yes")]
     pub visible: bool,
-    /// The file's other properties of the points.
+    /// Segments and triangles over the points, and the file's other properties.
     #[serde(default, skip_serializing_if = "Complex::is_empty")]
     pub complex: Complex,
     /// The property `color_by: property` colours by.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color_property: Option<String>,
-    /// Only the points every filter keeps are shown.
+    /// Only the elements within every filter's range are shown.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub filters: Vec<Filter>,
 }
 
-/// Where a property's values come from.
+/// Where a property's values come from on one kind of element.
 #[derive(Clone, Copy, Debug)]
 pub enum Source<'a> {
-    /// A coordinate of each point in the design.
+    /// A coordinate of each corner in the design.
     Coordinate(usize),
-    /// A column of the file: each point's.
-    Column(&'a [f32]),
+    /// A column on the points: each corner's.
+    Corners(&'a [f32]),
+    /// A column on the element itself.
+    Element(&'a [f32]),
 }
 
 /// How a cloud's points are coloured.
@@ -238,16 +240,21 @@ impl PointCloud {
             ColorBy::File | ColorBy::Single => None,
         }
     }
-    /// Where the values of `name` are: a coordinate of each point or a column of the file.
-    pub fn source(&self, name: &str) -> Option<Source<'_>> {
+    /// Where the values of `name` are on elements of kind `on`: a coordinate of each corner, a
+    /// column on the points (each corner's, varying across the element) or one on the element.
+    pub fn source(&self, name: &str, on: On) -> Option<Source<'_>> {
         if let Some(k) = COORDINATES.iter().position(|n| *n == name) {
             return Some(Source::Coordinate(k));
         }
-        self.complex.column(name).map(|col| Source::Column(&col.values.0))
+        if let Some(col) = self.complex.column(name, on) {
+            return Some(Source::Element(&col.values.0));
+        }
+        self.complex.column(name, On::Point).map(|col| Source::Corners(&col.values.0))
     }
     /// Every property the cloud can be coloured and filtered by: its coordinates, then its columns.
     pub fn property_names(&self) -> impl Iterator<Item = &str> {
-        COORDINATES.into_iter().chain(self.complex.columns.iter().map(|c| c.name.as_str()))
+        let mut seen = std::collections::BTreeSet::new();
+        COORDINATES.into_iter().chain(self.complex.columns.iter().map(|c| c.name.as_str())).filter(move |n| seen.insert(*n))
     }
     /// The smallest and largest value of a property, the coordinates in the design.
     pub fn span(&self, property: &str) -> Option<[f64; 2]> {
@@ -272,6 +279,19 @@ impl PointCloud {
             self.filters.iter().filter(|f| f.property == property).filter_map(Filter::range).fold(span, |[lo, hi], [a, b]| [lo.max(a), hi.min(b)]);
         Some(if shown[0] <= shown[1] { crate::point_cloud_distribution::ramp_range(shown) } else { span })
     }
+    /// Points no segment or triangle ends on: those drawn as dots.
+    pub fn isolated_points(&self) -> usize {
+        if self.complex.segments.is_empty() && self.complex.triangles.is_empty() {
+            return self.len();
+        }
+        let mut used = vec![false; self.len()];
+        for i in self.complex.segments.0.iter().chain(self.complex.triangles.0.iter()) {
+            if let Some(u) = used.get_mut(*i as usize) {
+                *u = true;
+            }
+        }
+        used.iter().filter(|u| !**u).count()
+    }
     /// The heights the height ramp runs between now: the cloud's own, else the automatic ones.
     pub fn height_range_now(&self) -> Option<[f64; 2]> {
         self.height_range.or_else(|| self.auto_height_range())
@@ -280,7 +300,7 @@ impl PointCloud {
     pub fn shade(&self, range: Option<[f64; 2]>) -> impl Fn(usize) -> [u8; 3] + '_ {
         let single = self.color.unwrap_or(PLAIN).map(byte);
         let plain = PLAIN.map(byte);
-        let column = self.color_property.as_deref().and_then(|n| self.complex.column(n));
+        let column = self.color_property.as_deref().and_then(|n| self.complex.column(n, On::Point));
         move |i| match self.color_by {
             ColorBy::File => self.colors.get(i).unwrap_or(plain),
             ColorBy::Single => single,
@@ -557,9 +577,10 @@ mod tests {
     }
 
     #[test]
-    fn the_ramp_spans_what_is_shown_unless_set() {
+    fn the_ramp_spans_what_is_shown_unless_set_and_isolated_points_are_counted() {
         let mut c = cloud(vec![0.0; 9], Vec::new());
-        c.complex.columns.push(Column { name: "t".into(), integer: false, values: Floats(vec![0.0, 10.0, 20.0].into()) });
+        c.complex.segments = Indices(vec![0, 1].into());
+        c.complex.columns.push(Column { name: "t".into(), on: On::Point, integer: false, values: Floats(vec![0.0, 10.0, 20.0].into()) });
         (c.color_by, c.color_property) = (ColorBy::Property, Some("t".into()));
         assert_eq!(c.color_range(), Some([0.0, 20.0]), "the whole span");
         c.filters = vec![Filter { property: "t".into(), keep: Keep::Range { range: [5.0, 50.0] } }];
@@ -568,6 +589,7 @@ mod tests {
         assert_eq!(c.color_range(), Some([5.0, 20.0]), "another property's filter changes nothing");
         c.height_range = Some([1.0, 2.0]);
         assert_eq!(c.color_range(), Some([1.0, 2.0]), "a range set is kept");
+        assert_eq!(c.isolated_points(), 1, "point 2 ends no segment");
     }
 
     #[test]
