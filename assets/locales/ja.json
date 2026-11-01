@@ -1918,6 +1918,8 @@
   "motion.track_name": "トラック {number}",
   "nav.alias.help": "Shift+Alt+左ドラッグで回転、Shift+Alt+中ドラッグでパン、Shift+Alt+右ドラッグでズーム。中ドラッグでもパン、右ドラッグで回転。",
   "nav.blender.help": "中ドラッグで回転、Shift+中ドラッグでパン、Ctrl+中ドラッグでズーム。右ドラッグではカメラは動きません。",
+  "nav.creo.help": "マウスの中ボタンドラッグで回転、Shift+中ボタンで平行移動、Ctrl+中ボタンの上下ドラッグでズーム（下方向で拡大）。ホイールの回転でもズーム",
+  "nav.creo.label": "Creo",
   "nav.free_orbit.help": "マウスと3Dマウスで、極点を越えて回転し、ロールを保ちます。\nShiftによる軸スナップは無効になります。",
   "nav.free_orbit.label": "自由回転",
   "nav.free_orbit.snap_help": "マウスと3Dマウスで両極を越えて回転でき、ロールも保持されます。オービットのドラッグ中にShiftを押すと、視線方向とロールがスナップします。",

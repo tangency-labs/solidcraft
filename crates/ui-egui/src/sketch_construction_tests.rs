@@ -269,3 +269,25 @@ fn the_normal_switch_needs_a_length_and_draws_a_normal_line() {
     let curve = sk.curves.last().unwrap();
     assert!(curve.construction && curve.infinite, "{curve:?}");
 }
+
+#[test]
+fn perpendicular_click_on_reference_endpoint_places_line() {
+    // #10600: after picking the reference line, a click exactly on that line's own endpoint
+    // must reach the tool and place the perpendicular through the endpoint. The Length box
+    // waits beside the pointer there, and its click must not swallow the endpoint's.
+    let mut h = sketch();
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.perpendicular", &[[10., 0.], [20., 0.]]);
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "endpoint click swallowed: tool={:?} status={:?}", h.app.tool, h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(curve.infinite && curve.construction, "{curve:?}");
+    let CurveKind::Line { a, b } = curve.kind else { panic!("a line") };
+    let (p, q) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+    let d = q - p;
+    let end = sk.resolve_point("a.end").and_then(|i| sk.point(i)).unwrap();
+    // Through a.end (20, 0) and perpendicular to a, which runs along the sketch x axis.
+    assert!((end - p).x.abs() < 1e-6, "not through a.end: {p:?} {q:?}");
+    assert!(d.x.abs() < 1e-6, "not perpendicular to a: {d:?}");
+}

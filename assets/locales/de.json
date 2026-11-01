@@ -1916,6 +1916,8 @@
   "motion.track_name": "Spur {number}",
   "nav.alias.help": "Umschalt+Alt+Linksziehen dreht, Umschalt+Alt+Mitte verschiebt, Umschalt+Alt+Rechtsziehen zoomt; mittleres Ziehen verschiebt ebenfalls und rechtes Ziehen dreht",
   "nav.blender.help": "Mittlere Maustaste dreht, Umschalt+Mitte verschiebt, Strg+Mitte zoomt; rechtes Ziehen lässt die Kamera unverändert",
+  "nav.creo.help": "Ziehen mit der mittleren Maustaste dreht, Umschalt+Mitte verschiebt, Strg+Mitte zoomt beim vertikalen Ziehen (nach unten zum Vergrößern); das Mausrad zoomt",
+  "nav.creo.label": "Creo",
   "nav.free_orbit.help": "Maus und 3D-Maus drehen über beide Pole hinweg und behalten die Rollneigung bei. Das Einrasten mit Umschalt ist deaktiviert.",
   "nav.free_orbit.label": "Freie Drehung",
   "nav.free_orbit.snap_help": "Maus und 3D-Maus drehen über beide Pole hinweg und behalten die Rollausrichtung bei. Halten Sie beim Ziehen zum Drehen die Umschalttaste gedrückt, um Blickrichtung und Rollausrichtung einrasten zu lassen.",

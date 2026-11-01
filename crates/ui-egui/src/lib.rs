@@ -206,6 +206,8 @@ mod prefs_search;
 #[cfg(test)]
 mod preselect_tests;
 pub mod preview;
+#[cfg(test)]
+mod preview_placement_tests;
 mod primitive_placement;
 #[cfg(test)]
 mod primitive_units_tests;
