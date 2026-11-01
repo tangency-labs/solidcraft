@@ -1,9 +1,12 @@
-//! Evaluation of portable B-rep curves: lines, circle and ellipse arcs, polynomial and rational
-//! splines (fitted intersection records are ordinary splines with a stated fitting tolerance).
+//! Evaluation of portable B-rep edges: lines, circle and ellipse arcs, polynomial and rational
+//! splines (a traced intersection whose leader is a spline is that spline, within its tolerance).
+//! Records' curves are unbounded: every curve here is cut to its edge's interval, so `domain` and
+//! `breaks` are the edge's.
 
 use super::HlrError;
 use crate::Vec3;
-use crate::brep::{Curve, Frame};
+use crate::brep::eval::{CurveEval, SurfaceEval};
+use crate::brep::{Curve, Edge, Frame};
 use crate::section::CurveAccuracy;
 
 #[derive(Clone, Debug)]
@@ -41,27 +44,104 @@ pub(crate) fn frame_axes(f: &Frame) -> (Vec3, Vec3, Vec3) {
     (v3(f.origin), x, y)
 }
 
+/// Whether every sample of `c`, a few to each of its breaks, lies within `tolerance` of both
+/// `surfaces`.
+fn on_both_surfaces(c: &C3, surfaces: &[Box<crate::brep::Surface>; 2], tolerance: f64) -> bool {
+    /// Most samples checked; a longer curve's are spread evenly over it.
+    const MAX_SAMPLES: usize = 512;
+    let [Ok(a), Ok(b)] = [SurfaceEval::new(&surfaces[0]), SurfaceEval::new(&surfaces[1])] else { return false };
+    let breaks = c.breaks();
+    let samples: Vec<f64> = breaks.windows(2).flat_map(|w| (0..4).map(move |i| w[0] + (w[1] - w[0]) * f64::from(i) / 4.0)).chain(breaks.last().copied()).collect();
+    let stride = (samples.len() / MAX_SAMPLES).max(1);
+    samples.iter().step_by(stride).all(|t| {
+        let p = c.at(*t);
+        // A plane's `project` answers with the foot of a point however far off, so the distance
+        // is measured here.
+        let on = |s: &SurfaceEval| s.project(p, None, tolerance).and_then(|uv| s.point(uv)).is_some_and(|q| q.dist(p) <= tolerance);
+        p.is_finite() && on(&a) && on(&b)
+    })
+}
+
 impl C3 {
-    pub fn new(c: &Curve) -> Result<(C3, CurveAccuracy), HlrError> {
+    /// The bounded curve of an edge. A line, circle or ellipse with a NURBS form has its bounds
+    /// on the form ([`Edge::parameters`]): a line's ends are evaluated there, a conic's angles come
+    /// from [`Edge::curve_interval`].
+    pub fn of_edge(e: &Edge) -> Result<(C3, CurveAccuracy), HlrError> {
+        let exact = |c: C3| (c, CurveAccuracy::Analytic);
+        match (&e.curve, &e.nurbs) {
+            (Curve::SurfaceIntersection { surfaces, leader, tolerance }, form) => {
+                // Procedural: traced on demand from its leader. A spline to follow (its form, or
+                // the leader itself) is a fitted curve, good to the record's tolerance; a polyline
+                // leader carries no such curve.
+                let fitted = match (form, leader.as_ref()) {
+                    (Some(n @ (Curve::Spline { .. } | Curve::RationalSpline { .. })), _) | (None, n @ Curve::Spline { .. }) => n,
+                    _ => return Err(HlrError::Unsupported("surface intersection curve")),
+                };
+                let c = C3::bounded(fitted, e.interval)?;
+                // What is drawn is that spline: it has to lie on both surfaces, or the tolerance
+                // the record claims says nothing and the drawing would show a wrong line.
+                if !on_both_surfaces(&c, surfaces, *tolerance) {
+                    return Err(HlrError::Unsupported("surface intersection curve"));
+                }
+                Ok((c, CurveAccuracy::Bounded { max_deviation_mm: *tolerance }))
+            }
+            (Curve::Line { .. }, Some(form)) => {
+                let eval = CurveEval::new(form).map_err(|_| HlrError::Invalid("edge form"))?;
+                let end = |t: f64| eval.point(t).filter(|p| p.is_finite()).ok_or(HlrError::Invalid("edge form"));
+                Ok(exact(C3::Line { a: end(e.interval[0])?, b: end(e.interval[1])? }))
+            }
+            (Curve::Circle { .. } | Curve::Ellipse { .. }, _) => {
+                let angles = e.curve_interval().ok_or(HlrError::Invalid("edge form"))?;
+                Ok(exact(C3::bounded(&e.curve, angles)?))
+            }
+            (curve, _) => Ok(exact(C3::bounded(curve, e.interval)?)),
+        }
+    }
+
+    /// `c` between the parameters `t` on its own parameter (a line then runs over [0, 1], a
+    /// polyline over [0, its segments]).
+    pub fn bounded(c: &Curve, t: [f64; 2]) -> Result<C3, HlrError> {
+        if !(t[0].is_finite() && t[1].is_finite() && t[0] < t[1]) {
+            return Err(HlrError::Invalid("curve interval"));
+        }
         Ok(match c {
-            Curve::Line { start, end } => (C3::Line { a: v3(*start), b: v3(*end) }, CurveAccuracy::Analytic),
-            Curve::CircleArc { frame, radius, angle } => {
-                let (o, x, y) = frame_axes(frame);
-                (C3::Arc { o, x, y, r: [*radius, *radius], range: *angle }, CurveAccuracy::Analytic)
+            Curve::Line { start, end } => {
+                let (a, d) = (v3(*start), v3(*end) - v3(*start));
+                let (p, q) = (a + d * t[0], a + d * t[1]);
+                if !(p.is_finite() && q.is_finite()) {
+                    return Err(HlrError::Invalid("curve interval"));
+                }
+                C3::Line { a: p, b: q }
             }
-            Curve::EllipseArc { frame, radii, angle } => {
+            Curve::Circle { frame, radius } => {
                 let (o, x, y) = frame_axes(frame);
-                (C3::Arc { o, x, y, r: *radii, range: *angle }, CurveAccuracy::Analytic)
+                C3::Arc { o, x, y, r: [*radius, *radius], range: t }
             }
-            Curve::Polyline { points } => (C3::Polyline(points.iter().copied().map(v3).collect()), CurveAccuracy::Analytic),
-            Curve::Spline { knots, points } => (spline(knots, points.iter().map(|p| [p[0], p[1], p[2], 1.]).collect())?, CurveAccuracy::Analytic),
-            Curve::RationalSpline { knots, homogeneous } => (spline(knots, homogeneous.clone())?, CurveAccuracy::Analytic),
-            Curve::Intersection { knots, points, fitting_tolerance, .. } => (
-                spline(knots, points.iter().map(|p| [p[0], p[1], p[2], 1.]).collect())?,
-                CurveAccuracy::Bounded { max_deviation_mm: *fitting_tolerance },
-            ),
-            // Procedural: the curve is traced on demand from its leader, which carries no bound.
+            Curve::Ellipse { frame, radii } => {
+                let (o, x, y) = frame_axes(frame);
+                C3::Arc { o, x, y, r: *radii, range: t }
+            }
+            Curve::Polyline { points } => C3::Polyline(polyline_part(points, t)?),
+            Curve::Spline { knots, points } => part(knots, points.iter().map(|p| [p[0], p[1], p[2], 1.]).collect(), t)?,
+            Curve::RationalSpline { knots, homogeneous } => part(knots, homogeneous.clone(), t)?,
             Curve::SurfaceIntersection { .. } => return Err(HlrError::Unsupported("surface intersection curve")),
+        })
+    }
+
+    /// The curve under a placement: `point` maps positions, `direction` directions (a rigid motion,
+    /// which keeps the arcs' parameter and a spline's weights).
+    pub fn placed(&self, point: &dyn Fn(Vec3) -> Vec3, direction: &dyn Fn(Vec3) -> Vec3) -> Result<C3, HlrError> {
+        Ok(match self {
+            C3::Line { a, b } => C3::Line { a: point(*a), b: point(*b) },
+            C3::Arc { o, x, y, r, range } => C3::Arc { o: point(*o), x: direction(*x), y: direction(*y), r: *r, range: *range },
+            C3::Polyline(p) => C3::Polyline(p.iter().map(|q| point(*q)).collect()),
+            C3::Spline { knots, points, .. } => {
+                let moved = points.iter().map(|h| {
+                    let q = point(Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3]));
+                    [q.x * h[3], q.y * h[3], q.z * h[3], h[3]]
+                });
+                spline(knots, moved.collect())?
+            }
         })
     }
 
@@ -137,6 +217,57 @@ fn spline(knots: &[f64], points: Vec<[f64; 4]>) -> Result<C3, HlrError> {
     }
     let pieces = bezier_pieces(degree, knots, &points);
     Ok(C3::Spline { degree, knots: knots.to_vec(), points, pieces })
+}
+
+/// The polyline's points between the parameters `t` (segment i spans [i, i + 1]).
+fn polyline_part(points: &[[f64; 3]], t: [f64; 2]) -> Result<Vec<Vec3>, HlrError> {
+    let last = points.len().saturating_sub(1) as f64;
+    let t = [t[0].clamp(0., last), t[1].clamp(0., last)];
+    let at = |x: f64| {
+        let i = (x.floor().max(0.) as usize).min(points.len().saturating_sub(2));
+        match (points.get(i), points.get(i + 1)) {
+            (Some(a), Some(b)) => Ok(v3(*a).lerp(v3(*b), x - i as f64)),
+            _ => Err(HlrError::Invalid("polyline")),
+        }
+    };
+    let inner = (t[0].floor() as i64 + 1..t[1].ceil() as i64).filter_map(|i| usize::try_from(i).ok()).filter_map(|i| points.get(i).copied()).map(v3);
+    Ok(std::iter::once(at(t[0])?).chain(inner).chain(std::iter::once(at(t[1])?)).collect())
+}
+
+/// The spline's part between the parameters `t`, itself a clamped spline on them: the whole
+/// spline as it stands when `t` is its whole active interval.
+fn part(knots: &[f64], points: Vec<[f64; 4]>, t: [f64; 2]) -> Result<C3, HlrError> {
+    use crate::bspline::{HPoint, clamp_row, insert_knot};
+    let refused = HlrError::Unsupported("spline edge interval");
+    let p = knots.len().checked_sub(points.len() + 1).ok_or(HlrError::Unsupported("spline knot count"))?;
+    let (Some(&lo), Some(&hi)) = (knots.get(p), knots.get(points.len())) else { return Err(HlrError::Unsupported("spline knot count")) };
+    if t[0] <= lo && hi <= t[1] {
+        return spline(knots, points);
+    }
+    let row: Vec<HPoint> = points.iter().map(|h| HPoint { x: h[0], y: h[1], z: h[2], w: h[3] }).collect();
+    let Ok((mut k, mut c)) = clamp_row(p, knots, &row) else { return Err(refused) };
+    let t = [t[0].max(lo), t[1].min(hi)];
+    if !(t[0] < t[1]) {
+        return Err(refused);
+    }
+    for u in t {
+        if u > lo && u < hi {
+            // Each end a knot of full multiplicity: the control net splits there.
+            for _ in k.iter().filter(|x| **x == u).count()..p {
+                let Ok((nk, nc)) = insert_knot(p, &k, &c, u) else { return Err(refused) };
+                (k, c) = (nk, nc);
+            }
+        }
+    }
+    let last_at_start = k.partition_point(|x| *x <= t[0]).checked_sub(1).ok_or(HlrError::Unsupported("spline edge interval"))?;
+    let first_at_end = k.partition_point(|x| *x < t[1]);
+    let (Some(inner), Some(net)) = (k.get(last_at_start + 1..first_at_end), last_at_start.checked_sub(p).and_then(|s| c.get(s..first_at_end))) else {
+        return Err(refused);
+    };
+    let mut cut = vec![t[0]; p + 1];
+    cut.extend_from_slice(inner);
+    cut.extend(std::iter::repeat_n(t[1], p + 1));
+    spline(&cut, net.iter().map(|h| [h.x, h.y, h.z, h.w]).collect())
 }
 
 /// A spline split into Bézier pieces: clamped, then every inner knot raised to the degree

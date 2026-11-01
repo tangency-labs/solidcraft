@@ -64,8 +64,8 @@ rational quadratic arc represents exactly. Chords are refined until their sag on
 is at most 1e-7 of the scene size. A fitted edge record also carries its own bound, and
 the visibility work allows for it.
 
-Surfaces are recognised whether they are stored as analytic records, as revolutions of
-lines and circles or as spline patches (to 1e-9 relative; a patch whose control points lie
+Surfaces are recognised whether they are stored as analytic records, as rigidly placed
+revolutions of lines and circles or as spline patches (to 1e-9 relative; a patch whose control points lie
 in one plane is that plane). A spline curve or patch is taken for a circle, quadric or torus
 only when it lies on it at enough points of every knot span to make the check exact for its
 degree, with its largest distance there, scaled by how far apart its weights are, within
@@ -130,10 +130,11 @@ in the W05a findings.
 - Not in this slice: parallel per-curve work and the shared work limits of
   `geom::section`, the kernel adapter (after W02), perspective, section regions (W03),
   views and commands (W07), and mirrored placements. Of the records the kernel now saves,
-  planes through three points (`PlaneThrough`) are drawn as planes; a body with a procedural
-  `SurfaceIntersection` curve or a `PlacedRevolution` surface (whose placement may scale it
-  unevenly) is refused by `prepare` with `HlrError::Unsupported` until the adapter handles
-  them.
+  planes through three points (`PlaneThrough`) are drawn as planes; a procedural
+  `SurfaceIntersection` curve is drawn as its leader, within its tolerance, when the leader is
+  a spline; one with a polyline leader, or a `PlacedRevolution` surface whose placement is not
+  rigid (it may scale it unevenly), is refused by `prepare` with `HlrError::Unsupported` until
+  the adapter handles them.
 
 ## Fixtures
 
@@ -184,8 +185,8 @@ and intervals:
 - mirrored placements, bad body indices and bad views are refused; cancellation and
   budgets return errors;
 - a box stored with planes through three points draws the same bits as one with
-  axis-stored planes; placed revolutions and procedural intersection curves are refused as
-  not supported yet;
+  axis-stored planes; rigidly placed revolutions draw as what they are, others are refused
+  as not supported yet, as are intersection curves with no spline to follow;
 - torus ray roots for thin, large and nearly tangent cases, and torus silhouettes near
   the axis direction.
 

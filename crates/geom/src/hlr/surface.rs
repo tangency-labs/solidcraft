@@ -1,11 +1,13 @@
 //! Surfaces of portable B-rep faces with a parameter chart, inversion, ray intersection and
 //! analytic recognition. Planes are closed form; revolutions are reduced to their 2D profile;
-//! spline surfaces use Newton iterations seeded from a sample grid.
+//! spline surfaces use Newton iterations seeded from a sample grid. Records' surfaces are unbounded:
+//! a cylinder, cone, sphere, torus or revolution gets its chart's bounds from its face.
 
 use super::HlrError;
 use super::curve::{C3, as_circle, frame_axes, v3};
 use crate::Vec3;
-use crate::brep::{Frame, Surface};
+use crate::brep::eval::SurfaceEval;
+use crate::brep::{Curve, Face, Frame, Surface, form, placement::Rigid};
 use crate::bspline::{HPoint, NurbsSurface};
 
 const TAU: f64 = std::f64::consts::TAU;
@@ -116,8 +118,11 @@ fn perp(a: Vec3) -> Vec3 {
 }
 
 impl S3 {
-    pub fn new(s: &Surface) -> Result<S3, HlrError> {
-        Ok(match s {
+    /// The chart of a face: its surface, in its own parameters where it is a plane or a spline
+    /// and in angle and height (angle and angle) where it is a cylinder, cone, sphere or torus,
+    /// over the part its NURBS form spans ([`Face::domain`]).
+    pub fn of_face(face: &Face) -> Result<S3, HlrError> {
+        Ok(match &face.surface {
             Surface::Plane { origin, u_axis, v_axis } => {
                 let (u, v) = (v3(*u_axis), v3(*v_axis));
                 let n = u.cross(v).normalized().ok_or(HlrError::Unsupported("degenerate plane"))?;
@@ -130,39 +135,45 @@ impl S3 {
                 let n = u.cross(v).normalized().ok_or(HlrError::Unsupported("degenerate plane"))?;
                 S3::Plane { o, u, v, n }
             }
-            // A revolution mapped by an affine placement, which may scale it unevenly.
-            Surface::PlacedRevolution { .. } => return Err(HlrError::Unsupported("placed revolution surface")),
             Surface::Spline { u_knots, v_knots, points } => {
                 let h = points.iter().map(|r| r.iter().map(|p| [p[0], p[1], p[2], 1.]).collect()).collect::<Vec<Vec<_>>>();
                 S3::Nurbs(Box::new(Nurbs::new(u_knots, v_knots, &h)?))
             }
             Surface::RationalSpline { u_knots, v_knots, homogeneous } => S3::Nurbs(Box::new(Nurbs::new(u_knots, v_knots, homogeneous)?)),
-            Surface::Revolution { profile, origin, axis, angle } => {
-                let (c, _) = C3::new(profile)?;
-                S3::Rev(Box::new(Rev::new(v3(*origin), v3(*axis), None, c, *angle)?))
-            }
-            Surface::Cylinder { frame, radius, angle, height } => {
+            Surface::PlacedRevolution { .. } => placed_revolution(face)?,
+            label => S3::bounded(label, form_box(face, label)?)?,
+        })
+    }
+
+    /// A cylinder, cone, sphere or torus over `[angle, along]`: `along` the height on the frame's
+    /// axis of a cylinder or cone, the latitude of a sphere, a torus's tube angle from the frame
+    /// (its tube start counted in).
+    pub fn bounded(s: &Surface, [angle, along]: [[f64; 2]; 2]) -> Result<S3, HlrError> {
+        let rev = match s {
+            Surface::Cylinder { frame, radius } => {
                 let (o, x, _, z) = axes(frame);
-                let line = C3::Line { a: o + x * *radius + z * height[0], b: o + x * *radius + z * height[1] };
-                S3::Rev(Box::new(Rev::new(o, z, Some(x), line, *angle)?))
+                let line = C3::Line { a: o + x * *radius + z * along[0], b: o + x * *radius + z * along[1] };
+                Rev::new(o, z, Some(x), line, angle)?
             }
-            Surface::Cone { frame, radius_at_origin, half_angle, angle, height } => {
+            Surface::Cone { frame, radius_at_origin, half_angle } => {
                 let (o, x, _, z) = axes(frame);
                 let r = |h: f64| radius_at_origin + h * half_angle.tan();
-                let line = C3::Line { a: o + x * r(height[0]) + z * height[0], b: o + x * r(height[1]) + z * height[1] };
-                S3::Rev(Box::new(Rev::new(o, z, Some(x), line, *angle)?))
+                let line = C3::Line { a: o + x * r(along[0]) + z * along[0], b: o + x * r(along[1]) + z * along[1] };
+                Rev::new(o, z, Some(x), line, angle)?
             }
-            Surface::Sphere { frame, radius, longitude, latitude } => {
+            Surface::Sphere { frame, radius } => {
                 let (o, x, _, z) = axes(frame);
-                let arc = C3::Arc { o, x, y: z, r: [*radius, *radius], range: *latitude };
-                S3::Rev(Box::new(Rev::new(o, z, Some(x), arc, *longitude)?))
+                let arc = C3::Arc { o, x, y: z, r: [*radius, *radius], range: along };
+                Rev::new(o, z, Some(x), arc, angle)?
             }
-            Surface::Torus { frame, major_radius, minor_radius, longitude, meridian } => {
+            Surface::Torus { frame, major_radius, minor_radius, .. } => {
                 let (o, x, _, z) = axes(frame);
-                let arc = C3::Arc { o: o + x * *major_radius, x, y: z, r: [*minor_radius, *minor_radius], range: *meridian };
-                S3::Rev(Box::new(Rev::new(o, z, Some(x), arc, *longitude)?))
+                let arc = C3::Arc { o: o + x * *major_radius, x, y: z, r: [*minor_radius, *minor_radius], range: along };
+                Rev::new(o, z, Some(x), arc, angle)?
             }
-        })
+            _ => return Err(HlrError::Unsupported("surface chart")),
+        };
+        Ok(S3::Rev(Box::new(rev)))
     }
 
     /// The recognised quadric or torus as a revolution chart: closed-form inversion and exact
@@ -525,6 +536,123 @@ pub(crate) fn torus_roots(w: Vec3, d: Vec3, a: Vec3, big: f64, small: f64, range
     out
 }
 
+/// Steps per direction when a face's NURBS form is read back onto its label: along a direction
+/// that turns (at most a turn, in rational quarter arcs) each step stays well within half a turn.
+const FORM_STEPS: usize = 16;
+
+/// The angle `x` on the turn nearest `near`.
+fn unwrapped(x: f64, near: f64) -> f64 {
+    x + TAU * ((near - x) / TAU).round()
+}
+
+/// A cylinder, cone, sphere or torus face's box on its label ([`S3::bounded`]): where its form's
+/// points over its domain lie on the label's frame, whichever way round the form runs.
+fn form_box(face: &Face, label: &Surface) -> Result<[[f64; 2]; 2], HlrError> {
+    let frame = match label {
+        Surface::Cylinder { frame, .. } | Surface::Cone { frame, .. } | Surface::Sphere { frame, .. } | Surface::Torus { frame, .. } => frame,
+        _ => return Err(HlrError::Unsupported("surface chart")),
+    };
+    let (o, x, y, z) = axes(frame);
+    let along = |w: Vec3, rho: f64| match label {
+        Surface::Sphere { .. } => w.dot(z).atan2(rho),
+        Surface::Torus { major_radius, .. } => w.dot(z).atan2(rho - major_radius),
+        _ => w.dot(z),
+    };
+    let turns = matches!(label, Surface::Torus { .. });
+    let (angle, mut second) = sampled_box(face, turns, &|p| {
+        let w = p - o;
+        let (a, b) = (w.dot(x), w.dot(y));
+        let rho = a.hypot(b);
+        [rho, b.atan2(a), along(w, rho)]
+    })?;
+    if !(second[0] < second[1]) {
+        return Err(HlrError::Invalid("surface form domain"));
+    }
+    if turns && second[1] - second[0] >= TAU - 1e-9 {
+        second[1] = second[0] + TAU;
+    }
+    Ok([angle, second])
+}
+
+/// The range of the angle about the axis and of a second coordinate over a form's points on a grid
+/// of the face's domain; `at` gives a point's distance from the axis, angle and second coordinate,
+/// the second an angle too when `turns`. Angles are unwrapped from point to point, row after row, so
+/// a face that goes round comes to one turn. On the axis (a pole, an apex) there is no angle.
+fn sampled_box(face: &Face, turns: bool, at: &dyn Fn(Vec3) -> [f64; 3]) -> Result<([f64; 2], [f64; 2]), HlrError> {
+    let form = face.nurbs.as_ref().ok_or(HlrError::Invalid("analytic surface without its form"))?;
+    let eval = SurfaceEval::new(form).map_err(|_| HlrError::Invalid("surface form"))?;
+    let [[u0, u1], [v0, v1]] = face.domain;
+    let step = |a: f64, b: f64, k: usize| a + (b - a) * k as f64 / FORM_STEPS as f64;
+    let mut samples = Vec::with_capacity((FORM_STEPS + 1) * (FORM_STEPS + 1));
+    for j in 0..=FORM_STEPS {
+        for i in 0..=FORM_STEPS {
+            let p = eval.point([step(u0, u1, i), step(v0, v1, j)]).filter(|p| p.is_finite()).ok_or(HlrError::Invalid("surface form"))?;
+            samples.push(at(p));
+        }
+    }
+    let widest = samples.iter().fold(0f64, |m, s| m.max(s[0]));
+    let (mut angle, mut second) = ([f64::INFINITY, f64::NEG_INFINITY], [f64::INFINITY, f64::NEG_INFINITY]);
+    // Each row starts next to the start of the one before.
+    let (mut row_a, mut row_s): (Option<f64>, Option<f64>) = (None, None);
+    for row in samples.chunks(FORM_STEPS + 1) {
+        let (mut last_a, mut last_s) = (row_a, row_s);
+        for (i, &[rho, a, s]) in row.iter().enumerate() {
+            if rho > 1e-6 * widest {
+                let a = last_a.map_or(a, |l| unwrapped(a, l));
+                angle = [angle[0].min(a), angle[1].max(a)];
+                last_a = Some(a);
+                if i == 0 || row_a.is_none() {
+                    row_a = Some(a);
+                }
+            }
+            let s = if turns { last_s.map_or(s, |l| unwrapped(s, l)) } else { s };
+            second = [second[0].min(s), second[1].max(s)];
+            last_s = Some(s);
+            if i == 0 {
+                row_s = Some(s);
+            }
+        }
+    }
+    if !(angle[0] < angle[1]) {
+        return Err(HlrError::Invalid("surface form domain"));
+    }
+    Ok((angle, second))
+}
+
+/// A placed revolution's chart. Its placement must be rigid: then it is a revolution of the placed
+/// profile about the placed axis. Any other (which may scale it unevenly) is refused. The profile's
+/// range is `domain` along it: its own parameter, a conic's on its form's quarter grid.
+fn placed_revolution(face: &Face) -> Result<S3, HlrError> {
+    let Surface::PlacedRevolution { profile, origin, axis, matrix, forward } = &face.surface else {
+        return Err(HlrError::Unsupported("surface chart"));
+    };
+    let Some(rigid) = Rigid::of_matrix(matrix) else { return Err(HlrError::Unsupported("placed revolution surface")) };
+    let along = if *forward { face.domain[0] } else { face.domain[1] };
+    let range = match profile.as_ref() {
+        Curve::Circle { .. } | Curve::Ellipse { .. } => [form::angle(along[0]), form::angle(along[1])],
+        _ => along,
+    };
+    if matches!(profile.as_ref(), Curve::Circle { .. } | Curve::Ellipse { .. }) && !(range[1] - range[0] <= TAU * (1. + 1e-9)) {
+        return Err(HlrError::Invalid("revolution profile range"));
+    }
+    let rows = rigid.rotation.map(v3);
+    let direction = |d: Vec3| Vec3::new(rows[0].dot(d), rows[1].dot(d), rows[2].dot(d));
+    let point = |p: Vec3| direction(p) + v3(rigid.translation);
+    let curve = C3::bounded(profile, range)?.placed(&point, &direction)?;
+    let (o, a) = (point(v3(*origin)), direction(v3(*axis)).normalized().ok_or(HlrError::Unsupported("zero revolution axis"))?);
+    let [t0, _] = curve.domain();
+    let start = curve.at(t0) - o;
+    let e1 = (start - a * start.dot(a)).normalized().unwrap_or_else(|| perp(a));
+    let e2 = a.cross(e1);
+    let (angle, _) = sampled_box(face, false, &|p| {
+        let w = p - o;
+        let h = w.dot(a);
+        let radial = w - a * h;
+        [radial.len(), radial.dot(e2).atan2(radial.dot(e1)), h]
+    })?;
+    Ok(S3::Rev(Box::new(Rev::new(o, a, Some(e1), curve, angle)?)))
+}
+
 fn axes(f: &Frame) -> (Vec3, Vec3, Vec3, Vec3) {
     let (o, x, y) = frame_axes(f);
     (o, x, y, x.cross(y))
@@ -828,12 +956,9 @@ impl Rev {
         let r = radial.len();
         let theta = if r > 1e-12 * (1. + self.rmax) { radial.dot(self.e2).atan2(radial.dot(self.e1)) } else { hint.map_or(0., |u| u[0]) };
         let (s, _) = self.closest([r, h]);
-        let mut t = theta;
-        if self.theta[1] - self.theta[0] >= TAU - 1e-9 {
-            t = t.rem_euclid(TAU);
-        } else if t < self.theta[0] {
-            t += TAU;
-        }
+        // Of a part of a turn, the copy nearest its middle: an end rounds either way.
+        let t =
+            if self.theta[1] - self.theta[0] >= TAU - 1e-9 { theta.rem_euclid(TAU) } else { unwrapped(theta, 0.5 * (self.theta[0] + self.theta[1])) };
         Some([t, s])
     }
 
