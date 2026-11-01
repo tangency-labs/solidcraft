@@ -203,23 +203,119 @@ fn a_planar_face_with_inner_points_is_one_ngon() {
     assert_eq!((p.stats.open_edges, p.stats.ngons), (6, 1));
 }
 
-#[test]
-fn a_planar_face_with_a_hole_is_not_one_ngon() {
-    // A square ring: outer 0..4, inner 4..8, eight triangles between.
-    let mut pts: Vec<Vec3> = [(-2.0, -2.0), (2.0, -2.0), (2.0, 2.0), (-2.0, 2.0)].iter().map(|&(x, y)| Vec3::new(x, y, 0.0)).collect();
-    pts.extend([(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)].iter().map(|&(x, y)| Vec3::new(x, y, 0.0)));
+/// Every polygon convex, turning about its first corner's normal.
+fn assert_convex(p: &PolyMesh) {
+    let mut at = 0;
+    for &size in &p.poly_sizes {
+        let size = size as usize;
+        let n = p.loop_normals[at];
+        let q = |k: usize| p.positions[p.loops[at + k % size] as usize];
+        for k in 0..size {
+            let (a, v, b) = (q(k + size - 1), q(k), q(k + 1));
+            assert!((v - a).cross(b - v).dot(n) >= -1e-9 * a.dist(v) * v.dist(b), "polygon at loop {at} turns the wrong way at {k}");
+        }
+        at += size;
+    }
+}
+
+/// Area of the polygons, each projected along its first corner's normal.
+fn area(p: &PolyMesh) -> f64 {
+    let mut at = 0;
+    let mut sum = 0.0;
+    for &size in &p.poly_sizes {
+        let size = size as usize;
+        let q = |k: usize| p.positions[p.loops[at + k % size] as usize];
+        let twice = (0..size).fold(Vec3::ZERO, |s, k| s + q(k).cross(q(k + 1)));
+        sum += twice.dot(p.loop_normals[at]) * 0.5;
+        at += size;
+    }
+    sum
+}
+
+/// Points of the square ring between ±2 and ±1, as one side of it rotated `k` quarter turns:
+/// outer corner, outer midpoint, next outer corner, next inner corner, inner corner, and a point
+/// inside the band (as a Delaunay mesh seeds one).
+fn ring_side(k: u32) -> [(f64, f64); 6] {
+    let side = [(-2.0, -2.0), (0.0, -2.0), (2.0, -2.0), (1.0, -1.0), (-1.0, -1.0), (0.0, -1.5)];
+    let (c, s) = match k % 4 {
+        0 => (1.0, 0.0),
+        1 => (0.0, 1.0),
+        2 => (-1.0, 0.0),
+        _ => (0.0, -1.0),
+    };
+    side.map(|(x, y)| (c * x - s * y, s * x + c * y))
+}
+
+/// The square ring's face at height `z` with its midpoints and band points; facing up, or down
+/// with `down`.
+fn ring_face(plan: &mut TessPlan, face: u32, z: f64, down: bool) {
+    let mut pts = Vec::new();
     let mut tris = Vec::new();
     for k in 0..4u32 {
-        let (o0, o1, i0, i1) = (k, (k + 1) % 4, 4 + k, 4 + (k + 1) % 4);
-        tris.push([o0, o1, i1]);
-        tris.push([o0, i1, i0]);
+        let base = pts.len() as u32;
+        pts.extend(ring_side(k).iter().map(|&(x, y)| Vec3::new(x, y, z)));
+        // Points of this side: 0 corner, 1 mid, 2 next corner, 3 next inner, 4 inner, 5 band.
+        for [a, b] in [[0, 1], [1, 2], [2, 3], [3, 4], [4, 0]] {
+            let t = [base + a, base + b, base + 5];
+            tris.push(if down { [t[1], t[0], t[2]] } else { t });
+        }
     }
+    planar_face(plan, face, &pts, if down { -Vec3::Z } else { Vec3::Z }, tris);
+}
+
+#[test]
+fn a_planar_face_with_a_hole_is_a_few_convex_ngons() {
     let mut plan = TessPlan::default();
-    planar_face(&mut plan, 0, &pts, Vec3::Z, tris);
+    ring_face(&mut plan, 0, 0.0, false);
     let p = PolyMesh::from_plan(&plan, &plan.evaluate(), &PolyOptions::default()).unwrap();
     check_invariants(&p);
-    assert_eq!((p.stats.ngons, p.stats.open_edges, p.positions.len()), (0, 8, 8), "{:?}", p.stats);
-    assert!((p.volume()).abs() < 1e-12);
+    assert_convex(&p);
+    assert!((area(&p) - 12.0).abs() < 1e-9, "{}", area(&p));
+    // The band points are dropped, and the midpoints too: they only continue straight sides.
+    assert_eq!(p.positions.len(), 8);
+    assert!(p.poly_sizes.len() <= 5, "{:?}", p.poly_sizes);
+    assert!(p.poly_face.iter().all(|&f| f == 0));
+    assert!(p.loop_normals.iter().all(|n| n.dist(Vec3::Z) < 1e-12));
+    // As quads, the band points stay.
+    let quads = PolyMesh::from_plan(&plan, &plan.evaluate(), &PolyOptions { topology: PolyTopology::Quads, ..PolyOptions::default() }).unwrap();
+    assert_eq!(quads.positions.len(), 16);
+}
+
+#[test]
+fn a_frame_with_a_hole_closes_and_drops_its_edge_midpoints() {
+    // A 4 × 4 × 1 block with a 2 × 2 hole through it; the outer edges of the top and bottom
+    // carry midpoints, which the outer walls share.
+    let mut plan = TessPlan::default();
+    ring_face(&mut plan, 0, 1.0, false);
+    ring_face(&mut plan, 1, 0.0, true);
+    let at = |(x, y): (f64, f64), z: f64| Vec3::new(x, y, z);
+    for k in 0..4u32 {
+        let s = ring_side(k);
+        let (c0, m, c1, i1, i0) = (s[0], s[1], s[2], s[3], s[4]);
+        let out = Vec3::new(m.0, m.1, 0.0).normalized().unwrap();
+        // The outer wall, fanned round its centre.
+        let wall = vec![at(c0, 0.0), at(m, 0.0), at(c1, 0.0), at(c1, 1.0), at(m, 1.0), at(c0, 1.0), at(m, 0.5)];
+        planar_face(&mut plan, 2 + k, &wall, out, (0..6u32).map(|i| [6, i, (i + 1) % 6]).collect());
+        // The inner wall, facing into the hole.
+        let inner = vec![at(i1, 0.0), at(i0, 0.0), at(i0, 1.0), at(i1, 1.0)];
+        planar_face(&mut plan, 6 + k, &inner, -out, vec![[0, 1, 2], [0, 2, 3]]);
+        for z in [0.0, 1.0] {
+            plan.edges.push(vec![at(c0, z), at(m, z), at(c1, z)]);
+            plan.edges.push(vec![at(i0, z), at(i1, z)]);
+        }
+        plan.edges.push(vec![at(c0, 0.0), at(c0, 1.0)]);
+        plan.edges.push(vec![at(i0, 0.0), at(i0, 1.0)]);
+    }
+    plan.edge_faces = vec![vec![]; plan.edges.len()];
+    let p = PolyMesh::from_plan(&plan, &creased(&plan), &PolyOptions::default()).unwrap();
+    check_invariants(&p);
+    assert_convex(&p);
+    assert_eq!(p.stats.open_edges, 0, "{:?}", p.stats);
+    assert!((p.volume() - 12.0).abs() < 1e-9, "{}", p.volume());
+    assert_eq!(p.positions.len(), 16, "the corners only: band points and edge midpoints are gone");
+    assert_eq!(p.edges.len(), 24, "each B-rep edge one segment");
+    // Genus one: V - E + F = 0.
+    assert_eq!(p.positions.len() as i64 - p.edge_count() as i64 + p.poly_sizes.len() as i64, 0);
 }
 
 /// An `n` × `n` grid of cells on z = 0, each cell two triangles; with `flip`, wound the other
@@ -382,6 +478,23 @@ fn hostile_plans_never_panic() {
         flip: false,
         triangles: vec![[0, 1, 2]],
     });
+    // Planar faces with more than one loop that are not one outer loop around holes: two
+    // squares side by side, a "hole" outside its outer loop, a hole crossing it.
+    let square =
+        |x: f64, y: f64, s: f64| vec![Vec3::new(x, y, 0.0), Vec3::new(x + s, y, 0.0), Vec3::new(x + s, y + s, 0.0), Vec3::new(x, y + s, 0.0)];
+    let mut two = square(0.0, 0.0, 1.0);
+    two.extend(square(3.0, 0.0, 1.0));
+    planar_face(&mut plan, 3, &two, Vec3::Z, vec![[0, 1, 2], [0, 2, 3], [4, 5, 6], [4, 6, 7]]);
+    for inner in [square(5.0, 5.0, 1.0), square(1.5, 1.5, 2.0), square(-1.0, -1.0, 6.0)] {
+        let mut pts = square(0.0, 0.0, 4.0);
+        pts.extend(inner);
+        let mut tris = Vec::new();
+        for k in 0..4u32 {
+            let (o0, o1, i0, i1) = (k, (k + 1) % 4, 4 + k, 4 + (k + 1) % 4);
+            tris.extend([[o0, o1, i1], [o0, i1, i0]]);
+        }
+        planar_face(&mut plan, 4, &pts, Vec3::Z, tris);
+    }
     plan.edges = vec![vec![], vec![Vec3::new(nan, 0.0, 0.0), Vec3::X], vec![Vec3::X, Vec3::X]];
     plan.edge_faces = vec![vec![0]];
     for topology in [PolyTopology::Triangles, PolyTopology::Quads, PolyTopology::NGons] {

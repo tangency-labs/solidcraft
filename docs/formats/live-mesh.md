@@ -13,8 +13,9 @@ and the B-rep edges marked. The `live.meshes` command sends them in this form
 The body's display tessellation is joined face by face (`crates/geom/src/poly_mesh.rs`):
 
 - A planar face whose triangles have one boundary loop is one polygon (an n-gon) through its
-  boundary points. A planar face with holes keeps its triangles, joined into quads where they
-  form good ones.
+  boundary points. A planar face with holes becomes a few convex polygons through its boundary
+  points: no polygon has a hole or a corner turning inwards, and along a round hole each rim
+  side has a polygon of its own.
 - On every other face, two triangles that share an edge become a quad when the quad is convex,
   folded by at most 30° and no corner is more than 45° from a right angle. The cells of grids
   and strips (cylinders, cones, blends, revolved faces) come back as quads; points such as a

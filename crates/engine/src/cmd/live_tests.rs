@@ -167,6 +167,23 @@ fn a_hole_through_a_block_has_genus_one() {
     assert_eq!(m.euler_closed(), (0, true));
     let volume = 9000.0 - std::f64::consts::PI * 250.0;
     assert!((m.volume() - volume).abs() < volume * 0.01, "{} vs {volume}", m.volume());
+    // The top and bottom are convex polygons through their rims only: no inner points.
+    let mut at = 0;
+    for p in m.polygons() {
+        let n = m.normals[at];
+        at += p.len();
+        if n.z.abs() < 0.5 {
+            continue;
+        }
+        let q = |k: usize| m.positions[p[k % p.len()] as usize];
+        for k in 0..p.len() {
+            let (a, v, b) = (q(k + p.len() - 1), q(k), q(k + 1));
+            assert!((v - a).cross(b - v).dot(n) >= -1e-4 * a.dist(v) * v.dist(b), "a cap polygon turns the wrong way: {p:?}");
+            let on_square = [v.x, v.y].iter().any(|c| c.abs() < 1e-4 || (c - 30.0).abs() < 1e-4);
+            let on_rim = ((v.x - 15.0).hypot(v.y - 15.0) - 5.0).abs() < 1e-3;
+            assert!(on_square || on_rim, "{v:?} is inside the cap");
+        }
+    }
 }
 
 #[test]
