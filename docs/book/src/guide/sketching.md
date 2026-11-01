@@ -40,6 +40,8 @@ that Extrude can use ([Solid features](features.md)).
 **1** Sketch tools · **2** A constraint (this side is vertical) · **3** A dimension ·
 **4** The sketch's state · **5** Finish Sketch
 
+## Working in a sketch
+
 Opening a sketch turns the view to face it; to keep the view as it is and face the sketch only with **Look At**, turn off Preferences › Sketch › **Turn to face a sketch when it opens**. When the sketch ends, the view stays where it is by default. Preferences › Sketch › **When a sketch ends** changes that: **Return to the previous view** goes back to the view from before the sketch, and **Return unless rotated** goes back only when you panned or zoomed the sketch view but didn't turn it.
 
 In an assembly a new sketch belongs to the active component and is listed in its Sketches
