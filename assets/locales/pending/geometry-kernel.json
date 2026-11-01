@@ -41,6 +41,13 @@
     "prefs.geometry_kernel_note": "既定の solidcore がすべての処理を行います。C++ カーネルを使うには SMLib を選択してください。solidcore の失敗は報告され、SMLib で再試行されることはありません。",
     "prefs.geometry_kernel_unavailable": "このビルドでは SMLib を利用できません。処理は solidcore で実行されます。"
   },
+  "vi": {
+    "cmd.diagnostics_kernel": "Nhân hình học",
+    "prefs.geometry_kernel": "Nhân hình học",
+    "prefs.geometry_kernel_environment": "Biến môi trường SOLIDCRAFT_KERNEL đã được đặt; biến này được ưu tiên hơn thiết lập này.",
+    "prefs.geometry_kernel_note": "solidcore, mặc định, xử lý mọi thao tác. Chọn SMLib để dùng nhân C++. Lỗi của solidcore được báo cáo, không bao giờ thử lại trên SMLib.",
+    "prefs.geometry_kernel_unavailable": "Bản dựng này không có SMLib. Các thao tác chạy trên solidcore."
+  },
   "zh": {
     "cmd.diagnostics_kernel": "几何内核",
     "prefs.geometry_kernel": "几何内核",
