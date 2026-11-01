@@ -761,11 +761,27 @@ fn kind_param(p: &Value, cmd: &str) -> Result<JointKind> {
         .ok_or_else(|| bad(cmd, "`type` must be rigid, revolute, slider, cylindrical, pin_slot, planar, ball, parallel, perpendicular, angle, point_on_plane, point_on_line or line_on_plane"))
 }
 
-fn new_joint_name(s: &Session, p: &Value) -> String {
-    str_(p, "name").map(str::to_string).unwrap_or_else(|| {
+fn new_joint_name(s: &Session, p: &Value, kind: JointKind) -> String {
+    str_(p, "name").map(str::trim).filter(|n| !n.is_empty()).map(str::to_string).unwrap_or_else(|| {
+        let label = match kind {
+            JointKind::Rigid => "Rigid",
+            JointKind::Revolute => "Revolute",
+            JointKind::Slider => "Slider",
+            JointKind::Cylindrical => "Cylindrical",
+            JointKind::PinSlot => "Pin_slot",
+            JointKind::Planar => "Planar",
+            JointKind::Ball => "Ball",
+            JointKind::Parallel => "Parallel",
+            JointKind::Perpendicular => "Perpendicular",
+            JointKind::Angle => "Angle",
+            JointKind::PointOnPlane => "Point_on_plane",
+            JointKind::PointOnLine => "Point_on_line",
+            JointKind::LineOnPlane => "Line_on_plane",
+        };
+        let prefix = format!("{label} Joint");
         let names: std::collections::BTreeSet<_> = s.doc.assembly.joints.iter().map(|j| j.name.as_str()).collect();
-        let number = (1..=s.doc.assembly.joints.len().saturating_add(1)).find(|n| !names.contains(format!("Joint{n}").as_str())).unwrap_or(1);
-        format!("Joint{number}")
+        let number = (1..=s.doc.assembly.joints.len().saturating_add(1)).find(|n| !names.contains(format!("{prefix}{n}").as_str())).unwrap_or(1);
+        format!("{prefix}{number}")
     })
 }
 
@@ -775,7 +791,7 @@ fn joint(s: &mut Session, p: &Value) -> Result<Value> {
     let a = origin_param(s, p.get("a"), cmd)?;
     let b = origin_param(s, p.get("b"), cmd)?;
     let id = s.doc_mut().allocate_id()?;
-    let name = new_joint_name(s, p);
+    let name = new_joint_name(s, p, kind);
     let offset = match p.get("offset") {
         Some(v) => value(s, v, false, cmd)?,
         None => 0.0,
@@ -834,7 +850,7 @@ fn as_built(s: &mut Session, p: &Value) -> Result<Value> {
     let fa = side(oa)?;
     let fb = side(ob)?;
     let id = s.doc_mut().allocate_id()?;
-    let name = new_joint_name(s, p);
+    let name = new_joint_name(s, p, kind);
     let n = kind.dofs().len();
     let j = Joint {
         id,

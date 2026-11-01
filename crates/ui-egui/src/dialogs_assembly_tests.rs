@@ -1113,3 +1113,36 @@ fn inch_joint_offsets_limits_and_drive_values_keep_their_units() {
     let Kind::Assembly(Asm::Joint(f)) = edit.kind else { panic!("no edit") };
     assert_eq!((f.limits[0].1.as_str(), f.limits[0].2.as_str()), ("0 in", "0.5 in"));
 }
+
+#[test]
+fn joint_dialog_applies_custom_name_or_falls_back_to_type_default() {
+    // 1. Empty name field: commands() generates payload without "name", backend creates "Rigid Joint1"
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].0, "joint.create");
+    assert!(cmds[0].1.get("name").is_none());
+    for (id, p) in cmds {
+        let r = app.run(&id, p).unwrap();
+        assert_eq!(r["name"], "Rigid Joint1");
+    }
+
+    // 2. Custom name in f.name: reset to fresh boxes so B is at its initial coordinates
+    let mut app = two_boxes();
+    app.start("joint.create");
+    let mut d = app.dialog.clone().unwrap();
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(10.0, 10.0, 10.0)).unwrap());
+    d.pick(&app.session, face_sel(&app.session, Vec3::new(40.0, 10.0, 0.0)).unwrap());
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.name = "MyCustomJoint".into();
+    }
+    let cmds = apply_commands(&app, &d).unwrap();
+    assert_eq!(cmds[0].1["name"], "MyCustomJoint");
+    for (id, p) in cmds {
+        let r = app.run(&id, p).unwrap();
+        assert_eq!(r["name"], "MyCustomJoint");
+    }
+}
