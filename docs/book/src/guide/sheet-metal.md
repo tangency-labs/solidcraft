@@ -103,7 +103,10 @@ edge (above), from either end, and apply to every edge of the feature. The base,
 the flange it stands on (a tab on a wall's end edge), loses its setback strip only along the
 flange and keeps its edge beyond; there the rule's bend relief is cut beside the bend's end, as
 at an inside corner. The bend is as long as the flange, in the flat pattern and the bend table.
-Set-backs that are negative, or leave nothing of the edge, are refused.
+Set-backs that are negative, or leave nothing of the edge, are refused. What such a flange
+leaves of its edge, beside each end it stops short of, is a stretch of its own: a later flange
+picked on that edge stands on the stretch the pick is on, and its own set-backs are measured from
+that stretch's ends.
 
 ```json
 {"command":"sheet.flange","params":{"edges":[[0,50,2]],"height":40,

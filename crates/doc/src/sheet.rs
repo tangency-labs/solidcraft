@@ -4018,9 +4018,10 @@ impl SheetBody {
         self.edge_name_of(panel, a, b, top)
     }
 
-    /// A world point on the sheet edge with this name (the one nearest `near` if several): the
-    /// point of that edge nearest `near`, off its very ends, so that what is made on the edge
-    /// knows where along it the pick was.
+    /// A world point on the sheet edge with this name: the point of that edge nearest `near`, off
+    /// its very ends, so that what is made on the edge knows where along it the pick was. Where
+    /// several stretches have the name (an edge that a flange's set-backs have split), the one
+    /// with the point nearest `near`: the stretch the pick is on, wherever their middles are.
     pub fn edge_by_name(&self, name: &str, near: Vec3) -> Option<Vec3> {
         let mut best: Option<(f64, Vec3)> = None;
         for (pi, r) in self.panels() {
@@ -4035,12 +4036,11 @@ impl SheetBody {
                 }
                 for (z, top) in [(0.0, false), (self.t, true)] {
                     if self.edge_name_of(pi, a, b, top).as_deref() == Some(name) {
-                        let mid = (a + b) * 0.5;
-                        let q = apply_point(&w, Vec3::new(mid.x, mid.y, z));
+                        let along = local.map(|p| (Vec2::new(p.x, p.y) - a).dot(b - a) / (b - a).len2()).filter(|t| t.is_finite());
+                        let on = a + (b - a) * along.map_or(0.5, |t| t.clamp(1e-6, 1.0 - 1e-6));
+                        let q = apply_point(&w, Vec3::new(on.x, on.y, z));
                         if best.is_none_or(|(d, _)| q.dist(near) < d) {
-                            let along = local.map(|p| (Vec2::new(p.x, p.y) - a).dot(b - a) / (b - a).len2()).filter(|t| t.is_finite());
-                            let on = a + (b - a) * along.map_or(0.5, |t| t.clamp(1e-6, 1.0 - 1e-6));
-                            best = Some((q.dist(near), apply_point(&w, Vec3::new(on.x, on.y, z))));
+                            best = Some((q.dist(near), q));
                         }
                     }
                 }

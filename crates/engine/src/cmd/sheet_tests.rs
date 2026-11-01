@@ -1953,6 +1953,62 @@ fn a_return_on_a_wall_can_stop_short_of_its_edge_too() {
     assert!(rel(volume(&mut s), want) < 1e-6, "{} vs {want}", volume(&mut s));
 }
 
+/// A flange with set-backs splits its edge in two: a 10 mm tab at y 31.5–41.5 on the right edge
+/// of a 200 x 390 base (1 mm, R 1) leaves that edge as y 0–30.5 and 42.5–390 beside its
+/// reliefs. A later flange picked on that edge stands on the stretch the pick is on, not on the
+/// one whose middle is nearest the pick, and its set-backs come off that stretch.
+#[test]
+fn a_flange_on_an_edge_that_set_backs_split_stands_on_the_stretch_picked() {
+    let tabbed = || {
+        let mut s = Session::default();
+        for (id, p) in [
+            ("sheet.manage_rules", json!({"name": "S1", "thickness": "1", "bend_radius": "1", "k_factor": 0.44, "active": true})),
+            ("sketch.create", json!({"plane": "XY", "name": "B"})),
+            ("sketch.line", json!({"points": [[0, 0], [200, 0], [200, 390], [0, 390]], "closed": true})),
+            ("sketch.finish", json!({})),
+            ("sheet.flange", json!({"sketch": "B"})),
+            ("sheet.flange", json!({"edges": [[200, 36.5, 1]], "height": 10, "start_setback": "31.5 mm", "end_setback": "348.5 mm"})),
+        ] {
+            run(&mut s, id, p);
+        }
+        s
+    };
+    // The y the last bend in the flat pattern runs between, low to high, and whether the flat
+    // pattern is one piece.
+    let span = |s: &mut Session| {
+        let flat = flat(s);
+        let bend = flat["bends"].as_array().and_then(|b| b.last()).cloned().unwrap_or_default();
+        let (a, b) = (bend["start"][1].as_f64().unwrap_or(f64::NAN), bend["end"][1].as_f64().unwrap_or(f64::NAN));
+        ((a.min(b), a.max(b)), flat["outline"].as_array().map(Vec::len) == Some(1))
+    };
+    let near = |(lo, hi): (f64, f64), want: (f64, f64)| (lo - want.0).abs() < 1e-6 && (hi - want.1).abs() < 1e-6;
+    let (tab, _) = span(&mut tabbed());
+    assert!(near(tab, (31.5, 41.5)), "the tab: {tab:?}");
+    // The edge runs up (counter-clockwise), so a stretch's start is its lower end.
+    for (y, start, end, want) in [
+        (50.0, None, None, (42.5, 390.0)),
+        (200.0, None, None, (42.5, 390.0)),
+        (385.0, None, None, (42.5, 390.0)),
+        (15.0, None, None, (0.0, 30.5)),
+        (29.0, None, None, (0.0, 30.5)),
+        (50.0, Some("10 mm"), Some("20 mm"), (52.5, 370.0)),
+        (300.0, Some("10 mm"), Some("20 mm"), (52.5, 370.0)),
+        (3.0, Some("5 mm"), Some("5 mm"), (5.0, 25.5)),
+        (29.0, Some("5 mm"), Some("5 mm"), (5.0, 25.5)),
+    ] {
+        let mut s = tabbed();
+        let mut p = json!({"edges": [[200, y, 1]], "height": 10});
+        if let (Some(start), Some(end)) = (start, end) {
+            p["start_setback"] = json!(start);
+            p["end_setback"] = json!(end);
+        }
+        run(&mut s, "sheet.flange", p);
+        let (bend, whole) = span(&mut s);
+        assert!(near(bend, want), "picked at y {y} with set-backs {start:?}, {end:?}: the bend runs {bend:?}, not {want:?}");
+        assert!(whole, "picked at y {y}: the flat pattern is one piece");
+    }
+}
+
 #[test]
 fn a_flange_bent_inside_keeps_the_base_sketchs_arcs_in_the_flat_pattern_and_the_dxf() {
     // A 200 x 100 plate with its corners rounded 8, drawn as arcs, and a 40 high flange on its
