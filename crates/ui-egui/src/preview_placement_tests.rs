@@ -40,9 +40,7 @@ fn ear(mirror: bool) -> (Session, u64, u64) {
 /// Returns the command and the sketch.
 fn two_circle_cut_on_face(s: &mut Session, component: u64, occurrence: u64, face_point: [f64; 3]) -> (Vec<(String, Value)>, u64) {
     run(s, "component.activate", json!({"component": component, "occurrence": occurrence}));
-    let sketch = run(s, "sketch.create", json!({"plane": {"face": face_point}, "project_edges": false}))["sketch"]
-        .as_u64()
-        .unwrap();
+    let sketch = run(s, "sketch.create", json!({"plane": {"face": face_point}, "project_edges": false}))["sketch"].as_u64().unwrap();
     // The face plane's origin is the component's own, not the pick: place the circles around
     // the picked point in the plane's coordinates so both profiles sit on the face.
     let FeatureKind::Sketch { plane: PlaneRef::Face { plane, at, .. }, .. } = &s.doc.feature(sketch).unwrap().kind else {
@@ -53,10 +51,8 @@ fn two_circle_cut_on_face(s: &mut Session, component: u64, occurrence: u64, face
         run(s, "sketch.circle.center", json!({"center": [centre.x + d, centre.y], "radius": 3}));
     }
     run(s, "sketch.finish", json!({}));
-    let commands = vec![(
-        "solid.extrude".to_string(),
-        json!({"sketch": sketch, "profiles": "all", "operation": "cut", "distance": 5, "direction": "negative"}),
-    )];
+    let commands =
+        vec![("solid.extrude".to_string(), json!({"sketch": sketch, "profiles": "all", "operation": "cut", "distance": 5, "direction": "negative"}))];
     (commands, sketch)
 }
 
@@ -107,9 +103,7 @@ fn extrude_cut_preview_on_a_face_sketch_in_a_translated_component_sits_at_the_sk
     // Placed: the local top-face centre (20, 10, 10) plus [10, 20, 0]; the tool cuts 5 mm down.
     assert_tool_at(&built, [30.0, 30.0, 7.5], [20.0, 10.0, 7.5]);
     // The sketch is anchored to the face of the placed body, as in the issue.
-    let FeatureKind::Sketch { plane: PlaneRef::Face { .. }, .. } = s.doc.feature(sketch).unwrap().kind else {
-        panic!("a sketch on a face")
-    };
+    let FeatureKind::Sketch { plane: PlaneRef::Face { .. }, .. } = s.doc.feature(sketch).unwrap().kind else { panic!("a sketch on a face") };
 }
 
 /// #2103: the shape of the STEP repro — a component whose body was mirrored, placed as a copy
@@ -123,7 +117,5 @@ fn extrude_cut_preview_on_a_face_sketch_in_a_mirrored_component_sits_at_the_sket
     let colors = crate::preview::Colors::from_tokens(&crate::theme::Tokens::dark());
     let built = crate::preview::compute(&s, &commands, colors).unwrap();
     assert_tool_at(&built, [30.0, 30.0, 7.5], [20.0, 10.0, 7.5]);
-    let FeatureKind::Sketch { plane: PlaneRef::Face { .. }, .. } = s.doc.feature(sketch).unwrap().kind else {
-        panic!("a sketch on a face")
-    };
+    let FeatureKind::Sketch { plane: PlaneRef::Face { .. }, .. } = s.doc.feature(sketch).unwrap().kind else { panic!("a sketch on a face") };
 }
