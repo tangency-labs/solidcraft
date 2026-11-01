@@ -4981,7 +4981,9 @@ fn render_workspace_dock_command_swaps_sides_without_design_edits() {
         let camera = h.app.cam;
         let product_camera = h.app.render_workspace.view.draft.camera;
         let widths = (h.app.preferences.render_browser_width, h.app.preferences.render_inspector_width);
-        assert!(crate::shortcut_box::search(&h.app, "view.render_dock").iter().any(|row| row.0 == "view.render_dock"));
+        // The dock mover takes its input as parameters and has no ribbon place: search leaves
+        // it out, and it is reached by typing the id with a JSON object (#9734).
+        assert!(!crate::shortcut_box::search(&h.app, "view.render_dock").iter().any(|row| row.0 == "view.render_dock"));
         for (panel, side, inspector, browser) in [
             ("inspector", "left", "left", "right"),
             ("browser", "left", "right", "left"),
