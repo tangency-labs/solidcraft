@@ -75,10 +75,9 @@ another face of a body replaces its print face, and taking a face out of the row
 design keeps each body's print face. Each send then turns a copy of the body so the print face
 points down at Z = 0, with its centre of mass over the origin; the design itself does not move.
 While the window is open, the print faces of the bodies being sent are tinted and outlined in the
-viewport; closing it hides them again and returns the ribbon to the tab it was opened from. A copy
-made with Move/Copy or Mirror keeps its print face. To mark print faces with Ctrl+B and the face
-menu and see them at all times, as earlier versions did, turn on **Print faces outside Send to
-Slicer** in Preferences › General › Slicer. A print face that is gone or no longer flat is
+viewport; closing it hides them again. A copy made with Move/Copy or Mirror keeps its print face.
+To mark print faces with Ctrl+B and the face menu and see them at all times, as earlier versions
+did, turn on **Print faces outside Send to Slicer** in Preferences › General › Slicer. A print face that is gone or no longer flat is
 reported, and the body is sent as it lies. Curved faces and mesh bodies can't be print faces.
 Known limitation: after a shell of a body that is already shelled, no face of that body can be
 marked, as no sketch can be attached to one either; this needs kernel work, which is paused.
