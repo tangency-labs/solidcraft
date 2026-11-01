@@ -6048,7 +6048,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         let exprs: Vec<&str> = at.iter().map(|e| e.as_str()).collect();
                         d.extra.insert("position_exprs".into(), json!({"at": exprs, "point": pt3(position.0)}));
                     }
-                    crate::hole_refs::restore(s, &mut d, references, &f.edge_names);
+                    crate::hole_refs::restore(s, &mut d, references, &f.edge_names, app.preferences.length_decimals);
                 }
             }
             if to.is_some() {
@@ -6101,7 +6101,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 if let Some(inp) = d.inputs.first_mut() {
                     inp.items = vec![face];
                 }
-                crate::hole_refs::restore(s, &mut d, references, &f.edge_names);
+                crate::hole_refs::restore(s, &mut d, references, &f.edge_names, app.preferences.length_decimals);
             }
             d
         }
