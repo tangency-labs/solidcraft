@@ -46,6 +46,13 @@ pub const RESERVED: &[&str] = &[
     "Ctrl+Up",
     "Ctrl+Down",
     "Ctrl+8",
+    // Keyboard zoom (`navigation::view_key`, #717).
+    "PageUp",
+    "PageDown",
+    "Plus",
+    "Shift+Plus",
+    "Minus",
+    "Equals",
 ];
 
 /// The most keys one command keeps; more from a settings file are dropped.

@@ -427,11 +427,26 @@ fn view_keys_blocked(app: &SolveApp, ctx: &egui::Context) -> bool {
         || ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new("sc_panel_open")).is_some())
 }
 
+/// How much one keyboard zoom press changes the camera distance (#717).
+const KEY_ZOOM_FACTOR: f64 = 1.25;
+
+/// The zoom direction a key asks for (true: in), if it is a keyboard zoom key (#717). `+` is
+/// Shift+`=` on many layouts, so Shift is accepted on all of them; the keys say what they mean,
+/// so the invert-zoom preference does not apply.
+fn zoom_key(key: egui::Key) -> Option<bool> {
+    match key {
+        egui::Key::PageUp | egui::Key::Plus | egui::Key::Equals => Some(true),
+        egui::Key::PageDown | egui::Key::Minus => Some(false),
+        _ => None,
+    }
+}
+
 /// View keys (#1541): the arrows turn the view 15° (with Shift a quarter turn, as the navigation
 /// cube's arrows), Ctrl+arrows pan it a tenth of the view, and Ctrl+8 looks straight at the
-/// selected face, plane or sketch. Held longer than a tap, an arrow keeps turning the view at a
-/// steady rate (`step_key_hold`); the operating system's key repeat does nothing. Not while a
-/// menu, the command box or a focused widget has the arrows. Returns whether the key was used.
+/// selected face, plane or sketch. PageUp/PageDown and +/− zoom (#717). Held longer than a tap,
+/// an arrow keeps turning the view at a steady rate (`step_key_hold`); the operating system's key
+/// repeat does nothing. Not while a menu, the command box or a focused widget has the keys.
+/// Returns whether the key was used.
 pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, mods: egui::Modifiers, repeat: bool) -> bool {
     use egui::Key;
     let menu_open = view_keys_blocked(app, ctx);
@@ -442,6 +457,26 @@ pub(crate) fn view_key(app: &mut SolveApp, ctx: &egui::Context, key: egui::Key, 
     let result = crate::render_workspace::result_active(app);
     if key == Key::Num8 && ctrl && !mods.shift && !result {
         crate::viewport::look_at_selection(app);
+        return true;
+    }
+    // Keyboard zoom (#717): PageUp/PageDown and +/−, around the view's centre (no cursor anchor —
+    // the keyboard does not know where the pointer is). Ctrl belongs to other shortcuts (the
+    // Preferences page zooms the UI with Ctrl+Plus/Minus), so plain keys only; OS repeat does
+    // nothing, like the arrows.
+    if !ctrl && let Some(zoom_in) = zoom_key(key) {
+        if !repeat {
+            let f = if zoom_in { 1.0 / KEY_ZOOM_FACTOR } else { KEY_ZOOM_FACTOR };
+            let zoom = |app: &mut SolveApp| {
+                app.cancel_view_animation();
+                app.viewport.orbit_free = None;
+                app.cam.zoom_at(f, None);
+            };
+            if result {
+                crate::render_workspace::with_result_camera(app, zoom);
+            } else {
+                zoom(app);
+            }
+        }
         return true;
     }
     let (action, dx, dy): (&'static str, f32, f32) = match key {
@@ -2568,6 +2603,44 @@ mod view_key_tests {
             }
         }
         assert!(crate::keymap::RESERVED.contains(&crate::keymap::key_name(egui::Key::Num8, egui::Modifiers::COMMAND).as_str()));
+    }
+
+    /// #717: PageUp/PageDown and +/− zoom the view; the keys are reserved like the arrows, OS
+    /// repeat does nothing, and a focused text field keeps them for typing.
+    #[test]
+    fn zoom_keys_zoom_the_view() {
+        let mut h = Harness::new();
+        h.app.preferences.look_at_anim = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        h.frames(2);
+        let near = |a: f64, b: f64| ((a / b) - 1.0).abs() < 1e-9;
+        let before = h.app.cam.distance;
+        h.step(&json!({"key": "PageUp"})).unwrap();
+        h.frames(2);
+        assert!(near(h.app.cam.distance, before / 1.25), "PageUp zooms in: {}", h.app.cam.distance);
+        h.step(&json!({"key": "PageDown"})).unwrap();
+        h.frames(2);
+        assert!(near(h.app.cam.distance, before), "PageDown zooms back out: {}", h.app.cam.distance);
+        h.step(&json!({"key": "Plus"})).unwrap();
+        h.frames(2);
+        assert!(near(h.app.cam.distance, before / 1.25), "Plus zooms in");
+        h.step(&json!({"key": "Equals"})).unwrap();
+        h.frames(2);
+        assert!(near(h.app.cam.distance, before / 1.25 / 1.25), "Equals zooms in too");
+        h.step(&json!({"key": "Minus"})).unwrap();
+        h.frames(2);
+        assert!(near(h.app.cam.distance, before / 1.25), "Minus zooms out");
+        for name in ["PageUp", "PageDown", "Plus", "Shift+Plus", "Minus", "Equals"] {
+            assert!(crate::keymap::RESERVED.contains(&name), "{name} must be reserved");
+        }
+        // OS key repeat does nothing, and a focused widget keeps the keys for typing (#717).
+        let ctx = egui::Context::default();
+        let d = h.app.cam.distance;
+        assert!(crate::navigation::view_key(&mut h.app, &ctx, egui::Key::PageUp, egui::Modifiers::NONE, true));
+        assert_eq!(h.app.cam.distance, d, "key repeat does nothing");
+        ctx.memory_mut(|m| m.request_focus(egui::Id::new("field")));
+        assert!(!crate::navigation::view_key(&mut h.app, &ctx, egui::Key::PageUp, egui::Modifiers::NONE, false));
+        assert_eq!(h.app.cam.distance, d, "a focused widget keeps the key");
     }
 
     fn arrow(pressed: bool, repeat: bool) -> egui::Event {
