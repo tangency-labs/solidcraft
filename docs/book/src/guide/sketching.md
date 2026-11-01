@@ -35,7 +35,8 @@ is fully constrained and its curves turn white.
 **4. Finish.** Click **Finish Sketch** to go back to the model; the shaded region is a profile
 that Extrude can use ([Solid features](features.md)).
 
-![The finished sketch, numbered 1 to 5](../media/sketching/parts.png)
+<img class="dark-ui" src="../media/sketching/parts.png" alt="The finished sketch, numbered 1 to 5">
+<img class="light-ui" src="../media/sketching/parts.light.png" alt="The finished sketch, numbered 1 to 5">
 
 **1** Sketch tools · **2** A constraint (this side is vertical) · **3** A dimension ·
 **4** The sketch's state · **5** Finish Sketch
