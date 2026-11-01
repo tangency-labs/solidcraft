@@ -5860,13 +5860,16 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
                 return BODIES;
             }
             match app.ui.pick_filter {
-                crate::PickFilter::Any | crate::PickFilter::Faces => {
+                // The marquee's own default stays the bodies (and, in a design with no body,
+                // its regions): the filter's other kinds narrow it.
+                crate::PickFilter::Any => {
                     if has_body {
-                        FACES
+                        BODIES
                     } else {
-                        FACES | PROFILES
+                        PROFILES
                     }
                 }
+                crate::PickFilter::Faces => FACES,
                 crate::PickFilter::Edges => EDGES,
                 crate::PickFilter::Points => crate::selection::VERTICES,
                 crate::PickFilter::Bodies => BODIES,

@@ -4598,7 +4598,7 @@ fn render_workspace_pick_stage_tools_filter_sample_clicks_with_shots_shown_and_h
         assert!(tools.contains_rect(crate::scenario::rect_of("render:pick").unwrap()));
         assert!(tools.contains_rect(crate::scenario::rect_of("render:preview_note").unwrap()));
         assert!(crate::scenario::rect_of("render:hud").is_none());
-        for mode in ["any", "body", "face", "edge", "vertex", "sketch", "component"] {
+        for mode in ["body", "face", "component"] {
             assert!(crate::scenario::handle_at(&format!("render:pick:{mode}")).is_some(), "Pick must be enabled");
             h.step(&json!({"click":{"handle":format!("render:pick:{mode}")}})).unwrap();
             h.frames(2);
@@ -4629,7 +4629,6 @@ fn render_workspace_pick_stage_tools_filter_sample_clicks_with_shots_shown_and_h
 #[test]
 fn modelling_select_panel_shows_and_clears_renders_component_pick() {
     use egui::accesskit::{Role, Toggled};
-    const BODY: &str = "Select bodies (a face picks its body)";
     const COMPONENT: &str = "Select components (a face picks its component)";
     let (mut h, _) = render_pick_sample();
     h.step(&json!({"click":{"handle":"render:pick:component"}})).unwrap();
@@ -4641,18 +4640,18 @@ fn modelling_select_panel_shows_and_clears_renders_component_pick() {
     let check = |h: &Harness, body: bool, component: bool| {
         assert_eq!((h.app.ui.pick_bodies, h.app.ui.pick_components), (body, component));
         let tree = h.output.accesskit_update.as_ref().unwrap();
-        for (label, on) in [(BODY, body), (COMPONENT, component)] {
-            let node = tree.nodes.iter().find(|(_, n)| n.role() == Role::CheckBox && n.label() == Some(label));
-            assert_eq!(node.and_then(|(_, n)| n.toggled()), Some(if on { Toggled::True } else { Toggled::False }), "{label}");
-        }
+        let node = tree.nodes.iter().find(|(_, n)| n.role() == Role::CheckBox && n.label() == Some(COMPONENT));
+        assert_eq!(node.and_then(|(_, n)| n.toggled()), Some(if component { Toggled::True } else { Toggled::False }), "{COMPONENT}");
     };
     check(&h, false, true);
-    h.step(&json!({"widget":"Faces"})).unwrap();
-    for (label, body, component) in [(COMPONENT, false, false), (BODY, true, false), (COMPONENT, false, true), (BODY, true, false)] {
-        h.step(&json!({"widget":label})).unwrap();
-        check(&h, body, component);
-        assert!(h.app.ui.pick_off.iter().any(|kind| kind == "faces"), "changing pick mode must preserve the panel's Faces filter");
-    }
+    // Clearing the component pick from the modelling panel leaves the render pick alone.
+    h.step(&json!({"widget":COMPONENT})).unwrap();
+    check(&h, false, false);
+    // The type filter's Solid body is what a body pick is now (its 'Select bodies' checkbox
+    // was folded into the filter).
+    h.app.run("select.filter", json!({"mode":"body"})).unwrap();
+    h.frames(2);
+    assert!(h.app.ui.pick_bodies && !h.app.ui.pick_components);
 }
 
 #[test]
@@ -4727,7 +4726,7 @@ fn render_workspace_selection_overlay_never_changes_started_frames_png_or_retain
 fn render_workspace_pick_filter_rejects_invalid_requests_atomically() {
     let mut h = Harness::new();
     let doc = h.app.session.doc.clone();
-    for mode in ["body", "face", "component"] {
+    for mode in ["any", "body", "face", "edge", "vertex", "sketch", "component"] {
         assert_eq!(h.app.run("select.filter", json!({"mode":mode})).unwrap()["mode"], mode);
         assert_eq!(h.app.ui.pick_bodies, mode == "body");
         assert_eq!(h.app.ui.pick_components, mode == "component");
