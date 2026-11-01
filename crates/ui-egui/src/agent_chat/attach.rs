@@ -30,6 +30,11 @@ const MAX_PICTURE_BYTES: u64 = 40 * 1024 * 1024;
 const MAX_TEXT_BYTES: u64 = 256 * 1024;
 /// Largest PDF sent as a document; a bigger one goes by reference.
 const MAX_PDF_BYTES: u64 = 12 * 1024 * 1024;
+/// Pages whose text is taken from a PDF, and the most characters of it kept.
+const MAX_PDF_PAGES: usize = 300;
+const MAX_PDF_CHARS: usize = 200_000;
+/// A PDF page's content may inflate to at most this (a compressed bomb is refused by the reader).
+const MAX_PDF_PAGE_BYTES: usize = 32 * 1024 * 1024;
 /// A picture's longer side is scaled down to this before it is sent.
 pub const MAX_SIDE: u32 = 2048;
 /// Largest picture sent, as it came or re-encoded: its base64 (a third larger) stays under 5 MB,
@@ -88,10 +93,11 @@ pub enum Content {
         size: [u32; 2],
     },
     Text(Arc<String>),
-    /// A PDF, sent whole as a document to an agent that takes them.
+    /// A PDF, sent whole as a document to an agent that takes them; to the others, its text.
     Pdf {
         bytes: Arc<Vec<u8>>,
         path: PathBuf,
+        text: Option<Arc<PdfText>>,
     },
     /// A file the agent is pointed to, not given: what it is, its size and where it is.
     Reference {
@@ -101,6 +107,60 @@ pub enum Content {
     },
     /// A CAD file imported into the design as its own component.
     Imported,
+}
+
+/// What was taken out of a PDF: its page count and its text, without layout, pictures or fonts.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PdfText {
+    pub pages: usize,
+    pub text: String,
+    /// The text stops short: of the pages or of the characters kept.
+    pub cut: bool,
+}
+
+/// The text of a PDF, from its pages in order (up to [`MAX_PDF_PAGES`] pages and
+/// [`MAX_PDF_CHARS`] characters). `None` when it can't be read at all (damaged, or a reader
+/// panic, which is caught); an encrypted or scanned one gives its page count and no text.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn pdf_text(bytes: &[u8]) -> Option<PdfText> {
+    std::panic::catch_unwind(|| {
+        let doc = lopdf::Document::load_mem(bytes).ok()?;
+        let pages: Vec<u32> = doc.get_pages().keys().copied().collect();
+        let mut text = String::new();
+        let mut chars = 0usize;
+        let mut cut = pages.len() > MAX_PDF_PAGES;
+        if !doc.is_encrypted() {
+            for page in pages.iter().take(MAX_PDF_PAGES) {
+                // A page that can't be read is skipped; the others still give their text.
+                let chunks = doc.extract_text_chunks_with_limit(&[*page], MAX_PDF_PAGE_BYTES);
+                let page_text: String = chunks.into_iter().filter_map(Result::ok).collect();
+                let page_text = page_text.trim();
+                if page_text.is_empty() {
+                    continue;
+                }
+                if !text.is_empty() {
+                    text.push_str("\n\n");
+                }
+                let room = MAX_PDF_CHARS.saturating_sub(chars);
+                let n = page_text.chars().count();
+                if n > room {
+                    text.extend(page_text.chars().take(room));
+                    cut = true;
+                    break;
+                }
+                text.push_str(page_text);
+                chars += n;
+            }
+        }
+        Some(PdfText { pages: pages.len(), text, cut })
+    })
+    .ok()
+    .flatten()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn pdf_text(_bytes: &[u8]) -> Option<PdfText> {
+    None
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -222,7 +282,9 @@ pub fn read(path: &Path) -> Result<Attachment, String> {
                 return Ok(Attachment { id: 0, name, content: Content::Reference { path, size: meta.len(), mime: "application/pdf" }, thumb: None });
             }
             let bytes = std::fs::read(&path).map_err(|e| failed(&name, e))?;
-            Ok(Attachment { id: 0, name, content: Content::Pdf { bytes: Arc::new(bytes), path }, thumb: None })
+            // Read here, off the window thread: for an agent that takes no documents.
+            let text = pdf_text(&bytes).map(Arc::new);
+            Ok(Attachment { id: 0, name, content: Content::Pdf { bytes: Arc::new(bytes), path, text }, thumb: None })
         }
         Kind::Other if matches!(path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref(), Some("heic" | "heif")) => {
             Err(refused("ui.agent_chat_file_heic", &name, &[]))
@@ -334,6 +396,24 @@ fn thumbnail(img: &image::DynamicImage) -> Option<Arc<egui::ColorImage>> {
     Some(Arc::new(egui::ColorImage::from_rgba_unmultiplied(size, t.as_raw())))
 }
 
+/// Add a file's text to the message under `head`, within the `left` characters shared by the
+/// files: whole when it fits; cut, saying how much is missing, when it doesn't; named only when
+/// nothing is left.
+fn fit(out: &mut String, left: &mut usize, head: &str, text: &str) {
+    let t = text.trim_end();
+    let len = t.chars().count();
+    if *left == 0 {
+        *out += &format!("\n\n{head}: left out, the message is at its size limit.");
+    } else if len <= *left {
+        *out += &format!("\n\n{head}:\n```\n{t}\n```");
+        *left -= len;
+    } else {
+        let kept: String = t.chars().take(*left).collect();
+        *out += &format!("\n\n{head} (cut: {} more characters left out):\n```\n{kept}\n```", len - *left);
+        *left = 0;
+    }
+}
+
 /// What the message says about its files, after the person's words: the text files' text, and the
 /// pictures and imported parts by name (the agent sees the pictures themselves as images).
 /// `pictures_sent` and `documents_sent`: whether this agent takes pictures and PDFs. The text files share `budget` characters
@@ -353,21 +433,8 @@ pub fn note(files: &[Attachment], pictures_sent: bool, documents_sent: bool, bud
     let mut left = budget;
     for f in files {
         match &f.content {
-            Content::Text(t) => {
-                let t = t.trim_end();
-                let len = t.chars().count();
-                if left == 0 {
-                    out += &format!("\n\nAttached file `{}`: left out, the message is at its size limit.", f.name);
-                } else if len <= left {
-                    out += &format!("\n\nAttached file `{}`:\n```\n{t}\n```", f.name);
-                    left -= len;
-                } else {
-                    let kept: String = t.chars().take(left).collect();
-                    out += &format!("\n\nAttached file `{}` (cut: {} more characters left out):\n```\n{kept}\n```", f.name, len - left);
-                    left = 0;
-                }
-            }
-            Content::Pdf { path, bytes } if documents_sent => {
+            Content::Text(t) => fit(&mut out, &mut left, &format!("Attached file `{}`", f.name), t),
+            Content::Pdf { path, bytes, .. } if documents_sent => {
                 out += &format!(
                     "\n\nAttached PDF `{}` ({}, at {}): sent with this message as a document.",
                     f.name,
@@ -375,14 +442,29 @@ pub fn note(files: &[Attachment], pictures_sent: bool, documents_sent: bool, bud
                     path.display()
                 );
             }
-            // An agent that takes no documents is pointed to the file, as for any other file.
-            Content::Pdf { path, bytes } => {
-                out += &format!(
-                    "\n\nAttached file `{}` (PDF, {}, at {}): read it with your own tools; it is not in this message.",
-                    f.name,
-                    size_text(bytes.len() as u64),
-                    path.display()
-                );
+            // An agent that takes no documents gets the text, or is pointed to the file.
+            Content::Pdf { path, bytes, text } => {
+                let size = size_text(bytes.len() as u64);
+                match text.as_deref().filter(|t| !t.text.trim().is_empty()) {
+                    Some(t) => {
+                        let cut = if t.cut { "; cut, the rest is in the file" } else { "" };
+                        let head = format!(
+                            "Attached PDF `{}` ({} pages, {size}, at {}): its text only, layout, pictures and fonts are dropped{cut}",
+                            f.name,
+                            t.pages,
+                            path.display()
+                        );
+                        fit(&mut out, &mut left, &head, &t.text);
+                    }
+                    None => {
+                        let why = if text.is_some() { "no text could be taken from it (scanned or protected)" } else { "its text could not be read" };
+                        out += &format!(
+                            "\n\nAttached file `{}` (PDF, {size}, at {}): {why}; read it with your own tools, it is not in this message.",
+                            f.name,
+                            path.display()
+                        );
+                    }
+                }
             }
             Content::Reference { path, size, mime } => {
                 out += &format!(
@@ -405,7 +487,7 @@ pub fn parts(files: &[Attachment], pictures: bool, documents: bool) -> Vec<Promp
         .iter()
         .filter_map(|f| match &f.content {
             Content::Picture { mime, bytes, .. } if pictures => Some(PromptPart::Image { mime: (*mime).to_string(), base64: backend::base64(bytes) }),
-            Content::Pdf { bytes, path } if documents => Some(PromptPart::Document {
+            Content::Pdf { bytes, path, .. } if documents => Some(PromptPart::Document {
                 name: f.name.clone(),
                 uri: file_uri(path),
                 mime: "application/pdf".to_string(),
@@ -675,5 +757,108 @@ mod tests {
         assert_eq!(file_uri(Path::new("C:\\Users\\a\\x.pdf")), "file:///C:/Users/a/x.pdf");
         assert_eq!(size_text(1536), "2 KB");
         assert_eq!(size_text(5 * 1024 * 1024 + 512 * 1024), "5.5 MB");
+    }
+
+    /// A PDF with one line of text on each page.
+    fn sample_pdf(pages: &[&str]) -> Vec<u8> {
+        use lopdf::content::{Content, Operation};
+        use lopdf::{Document, Object, Stream, dictionary};
+        let mut doc = Document::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let font = doc.add_object(dictionary! {"Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica"});
+        let resources = doc.add_object(dictionary! {"Font" => dictionary! {"F1" => font}});
+        let mut kids = Vec::new();
+        for line in pages {
+            let mut ops = vec![
+                Operation::new("BT", vec![]),
+                Operation::new("Tf", vec!["F1".into(), 12.into()]),
+                Operation::new("Td", vec![72.into(), 700.into()]),
+            ];
+            if !line.is_empty() {
+                ops.push(Operation::new("Tj", vec![Object::string_literal(*line)]));
+            }
+            ops.push(Operation::new("ET", vec![]));
+            let content = doc.add_object(Stream::new(dictionary! {}, Content { operations: ops }.encode().unwrap()));
+            kids.push(Object::Reference(doc.add_object(dictionary! {"Type" => "Page", "Parent" => pages_id, "Contents" => content})));
+        }
+        let tree = dictionary! {
+            "Type" => "Pages", "Kids" => kids, "Count" => pages.len() as i64, "Resources" => resources,
+            "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+        };
+        doc.objects.insert(pages_id, Object::Dictionary(tree));
+        let catalog = doc.add_object(dictionary! {"Type" => "Catalog", "Pages" => pages_id});
+        doc.trailer.set("Root", catalog);
+        let mut out = Vec::new();
+        doc.save_to(&mut out).unwrap();
+        out
+    }
+
+    /// An agent that takes no documents gets the PDF's text, with its page count and a note that
+    /// the layout was dropped; one that takes documents gets the PDF and not the text.
+    #[test]
+    fn a_pdf_gives_its_text_to_agents_without_documents() {
+        let d = dir("pdftext");
+        let path = d.join("brief.pdf");
+        std::fs::write(&path, sample_pdf(&["Wall 2 mm", "Hole 5 mm"])).unwrap();
+        let a = read(&path).unwrap();
+        let Content::Pdf { text: Some(t), .. } = &a.content else { panic!("a PDF with its text: {:?}", a.content) };
+        assert_eq!(t.pages, 2);
+        assert!(!t.cut && t.text.contains("Wall 2 mm") && t.text.contains("Hole 5 mm"), "{:?}", t.text);
+        assert!(t.text.find("Wall").unwrap() < t.text.find("Hole").unwrap(), "pages in order");
+        let files = vec![a];
+        let n = note(&files, false, false, usize::MAX);
+        assert!(n.contains("Attached PDF `brief.pdf` (2 pages"), "{n}");
+        assert!(n.contains("layout, pictures and fonts are dropped") && n.contains("Wall 2 mm"), "{n}");
+        let short = note(&files, false, false, 5);
+        assert!(short.contains("more characters left out"), "the text shares the message's budget: {short}");
+        let with = note(&files, false, true, usize::MAX);
+        assert!(with.contains("as a document") && !with.contains("Wall 2 mm"), "{with}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// A PDF that is all pictures (a scan), or can't be read, says so and points to the file; the
+    /// text kept is capped.
+    #[test]
+    fn pdfs_without_text_or_too_long_are_said_so() {
+        let blank = pdf_text(&sample_pdf(&[""])).unwrap();
+        assert_eq!((blank.pages, blank.text.as_str()), (1, ""));
+        let a = Attachment {
+            id: 0,
+            name: "scan.pdf".into(),
+            content: Content::Pdf { bytes: Arc::new(vec![1; 10]), path: "/a/scan.pdf".into(), text: Some(Arc::new(blank)) },
+            thumb: None,
+        };
+        assert!(note(&[a], false, false, usize::MAX).contains("no text could be taken from it"));
+        let broken = Attachment {
+            id: 0,
+            name: "x.pdf".into(),
+            content: Content::Pdf { bytes: Arc::new(vec![1; 10]), path: "/a/x.pdf".into(), text: None },
+            thumb: None,
+        };
+        assert!(note(&[broken], false, false, usize::MAX).contains("its text could not be read"));
+        let long = "a".repeat(MAX_PDF_CHARS + 5000);
+        let t = pdf_text(&sample_pdf(&[&long])).unwrap();
+        assert!(t.cut && t.text.chars().count() == MAX_PDF_CHARS, "{} characters", t.text.chars().count());
+    }
+
+    /// Hostile PDFs never panic: truncated and damaged copies of a real one are read or refused.
+    #[test]
+    fn damaged_pdfs_never_panic() {
+        let good = sample_pdf(&["Wall 2 mm", "Hole 5 mm"]);
+        assert!(pdf_text(&good).is_some());
+        assert!(pdf_text(b"").is_none() && pdf_text(b"%PDF-1.7\n").is_none() && pdf_text(b"not a pdf").is_none());
+        for cut in (0..good.len()).step_by(37) {
+            let _ = pdf_text(&good[..cut]);
+        }
+        let mut seed = 0x9e37_79b9_u32;
+        for _ in 0..200 {
+            let mut bad = good.clone();
+            for _ in 0..4 {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let at = usize::try_from(seed >> 8).unwrap() % bad.len();
+                bad[at] = (seed & 0xff) as u8;
+            }
+            let _ = pdf_text(&bad);
+        }
     }
 }
