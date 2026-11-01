@@ -376,6 +376,57 @@
           }
         }
       ]
+    },
+    {
+      "id": "foreground_colours",
+      "type": "choice",
+      "default": "muted",
+      "label": {
+        "en": "Foreground colours",
+        "de": "Vordergrundfarben",
+        "ja": "前景の色",
+        "ko": "전경 색상",
+        "zh": "前景颜色"
+      },
+      "help": {
+        "en": "Muted keeps the original palette. Neutral brightens restrained colours; Vibrant strengthens axes, icons and guides. Accent controls selection.",
+        "de": "Gedämpft behält die Palette. Neutral hellt Farben auf; Leuchtend verstärkt Achsen, Symbole und Hilfen. Akzent steuert die Auswahl.",
+        "ja": "落ち着いた配色は元の色を保ちます。ニュートラルは控えめな色を明るく、鮮やかは軸・アイコン・作図ガイドを強調します。選択の色はアクセントで設定します。",
+        "ko": "차분함은 기존 팔레트를 유지합니다. 중립은 은은한 색상을 밝게 하고, 선명함은 축·아이콘·가이드를 강조합니다. 선택 색상은 강조색 설정을 따릅니다.",
+        "zh": "柔和保留原有配色。中性提亮柔和色彩；鲜艳增强轴、图标和辅助线的色彩。选择颜色仍由强调色控制。"
+      },
+      "values": [
+        {
+          "id": "muted",
+          "label": {
+            "en": "Muted",
+            "de": "Gedämpft",
+            "ja": "落ち着いた",
+            "ko": "차분함",
+            "zh": "柔和"
+          }
+        },
+        {
+          "id": "neutral",
+          "label": {
+            "en": "Neutral",
+            "de": "Neutral",
+            "ja": "ニュートラル",
+            "ko": "중립",
+            "zh": "中性"
+          }
+        },
+        {
+          "id": "vibrant",
+          "label": {
+            "en": "Vibrant",
+            "de": "Leuchtend",
+            "ja": "鮮やか",
+            "ko": "선명함",
+            "zh": "鲜艳"
+          }
+        }
+      ]
     }
   ],
   "overlays": [
@@ -525,6 +576,212 @@
           "#d1ddd4",
           "#becec2",
           "#aabcae"
+        ]
+      }
+    },
+    {
+      "when": {
+        "opt": "foreground_colours",
+        "eq": "neutral"
+      },
+      "colors": {
+        "axis_x": "#e5b3af",
+        "axis_y": "#c2d7bc",
+        "axis_z": "#b9d1e7",
+        "agent_busy": "#b9d1e7",
+        "agent_ok": "#c2d7bc",
+        "warning": "#e2cfad",
+        "error": "#e5b3af",
+        "form_error": "#e5b3af",
+        "form_success": "#c2d7bc",
+        "glyph_edge": "#e5b3af",
+        "glyph_text": "#e5b3af",
+        "interference": "#e5b3af",
+        "sketch_conflict": "#e5b3af",
+        "sketch_lost": "#e5b3af",
+        "sketch_locked": "#c2d7bc",
+        "sketch_projected": "#d4c2df",
+        "dimension": "#e2cfad",
+        "dimension_driven": "#dfc0a7",
+        "construction_geom": "#dfc0a7",
+        "sketch_centerline": "#e2cfad",
+        "sketch_construction": "#e2cfad",
+        "joint_axis": "#b3d7d5",
+        "bend_down": "#d4c2df",
+        "bend_up": "#c2d7bc",
+        "preview_cut": "#e5b3af68",
+        "preview_new": "#e2cfad",
+        "preview_sketch": "#c2d7bc",
+        "section_cap": "#e2cfad",
+        "sketch_accent": "#c2d7bc",
+        "sketch_ink": "#c2d7bc",
+        "surface_accent": "#dfc0a7",
+        "surface_fill": "#dfc0a7",
+        "surface_ink": "#dfc0a7",
+        "mesh_accent": "#e2cfad",
+        "mesh_fill": "#e2cfad",
+        "mesh_ink": "#e2cfad",
+        "form_accent": "#d4c2df",
+        "form_fill": "#d4c2df",
+        "form_tab_ink": "#d4c2df",
+        "sheet_fill": "#b3d7d5",
+        "sheet_ink": "#b3d7d5",
+        "render_accent": "#e5b3af",
+        "render_fill": "#e5b3af",
+        "render_ink": "#e5b3af",
+        "icons.agent": "#d4c2df",
+        "continuity": [
+          "#c2d7bc",
+          "#b9d1e7",
+          "#e2cfad",
+          "#d4c2df"
+        ],
+        "origin_plane_edge": "#dfc0a794"
+      },
+      "icon_palette": {
+        "ink": "#1b1d1f",
+        "line": "#d7d9d8",
+        "passive-1": "#d3d8dc",
+        "passive-2": "#b2bbc2",
+        "passive-3": "#929fa9",
+        "guide": "#c2c9ce",
+        "solid": [
+          "#cedfee",
+          "#c1d7ea",
+          "#b9d1e7"
+        ],
+        "surface": [
+          "#e9d3c1",
+          "#e3c8b2",
+          "#dfc0a7"
+        ],
+        "mesh": [
+          "#ebddc6",
+          "#e5d5b7",
+          "#e2cfad"
+        ],
+        "form": [
+          "#e1d4e9",
+          "#d9c9e3",
+          "#d4c2df"
+        ],
+        "sketch": [
+          "#d4e3d0",
+          "#c9dcc4",
+          "#c2d7bc"
+        ],
+        "constraint": [
+          "#edcac7",
+          "#e8bcb9",
+          "#e5b3af"
+        ],
+        "construction": [
+          "#e9d3c1",
+          "#e3c8b2",
+          "#dfc0a7"
+        ]
+      }
+    },
+    {
+      "when": {
+        "opt": "foreground_colours",
+        "eq": "vibrant"
+      },
+      "colors": {
+        "axis_x": "#ff6d79",
+        "axis_y": "#4fd681",
+        "axis_z": "#4da7ff",
+        "agent_busy": "#4da7ff",
+        "agent_ok": "#4fd681",
+        "warning": "#ffd166",
+        "error": "#ff6d79",
+        "form_error": "#ff6d79",
+        "form_success": "#4fd681",
+        "glyph_edge": "#ff6d79",
+        "glyph_text": "#ff6d79",
+        "interference": "#ff6d79",
+        "sketch_conflict": "#ff6d79",
+        "sketch_lost": "#ff6d79",
+        "sketch_locked": "#4fd681",
+        "sketch_projected": "#c78bff",
+        "dimension": "#ffd166",
+        "dimension_driven": "#ffb166",
+        "construction_geom": "#ffb166",
+        "sketch_centerline": "#ffd166",
+        "sketch_construction": "#ffd166",
+        "joint_axis": "#42d9dd",
+        "bend_down": "#c78bff",
+        "bend_up": "#4fd681",
+        "preview_cut": "#ff6d7968",
+        "preview_new": "#ffd166",
+        "preview_sketch": "#4fd681",
+        "section_cap": "#ffd166",
+        "sketch_accent": "#4fd681",
+        "sketch_ink": "#4fd681",
+        "surface_accent": "#ffb166",
+        "surface_fill": "#ffb166",
+        "surface_ink": "#ffb166",
+        "mesh_accent": "#ffd166",
+        "mesh_fill": "#ffd166",
+        "mesh_ink": "#ffd166",
+        "form_accent": "#c78bff",
+        "form_fill": "#c78bff",
+        "form_tab_ink": "#c78bff",
+        "sheet_fill": "#42d9dd",
+        "sheet_ink": "#42d9dd",
+        "render_accent": "#ff6d79",
+        "render_fill": "#ff6d79",
+        "render_ink": "#ff6d79",
+        "icons.agent": "#c78bff",
+        "continuity": [
+          "#4fd681",
+          "#4da7ff",
+          "#ffd166",
+          "#c78bff"
+        ],
+        "origin_plane_edge": "#ffb16694"
+      },
+      "icon_palette": {
+        "ink": "#1b1d1f",
+        "line": "#d7d9d8",
+        "passive-1": "#d3d8dc",
+        "passive-2": "#b2bbc2",
+        "passive-3": "#929fa9",
+        "guide": "#b4c8d6",
+        "solid": [
+          "#82c1ff",
+          "#62b2ff",
+          "#4da7ff"
+        ],
+        "surface": [
+          "#ffc894",
+          "#ffba78",
+          "#ffb166"
+        ],
+        "mesh": [
+          "#ffdf94",
+          "#ffd778",
+          "#ffd166"
+        ],
+        "form": [
+          "#d8aeff",
+          "#ce99ff",
+          "#c78bff"
+        ],
+        "sketch": [
+          "#84e2a7",
+          "#64db90",
+          "#4fd681"
+        ],
+        "constraint": [
+          "#ff99a1",
+          "#ff7f89",
+          "#ff6d79"
+        ],
+        "construction": [
+          "#ffc894",
+          "#ffba78",
+          "#ffb166"
         ]
       }
     }

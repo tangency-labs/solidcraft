@@ -2331,7 +2331,7 @@ mod tests {
         let file = find("onyx", &[]).unwrap();
         assert_eq!(file.base, Base::Dark);
         assert!(!file.needs_newer());
-        assert_eq!(file.options.len(), 7, "six controls plus the Fade child");
+        assert_eq!(file.options.len(), 8, "seven controls plus the Fade child");
         assert_eq!(builtin().last().map(|theme| theme.id.as_str()), Some("onyx"), "existing picker order is retained");
         let (values, notices) = effective_values(file, &BTreeMap::new());
         assert!(notices.is_empty());
@@ -2342,9 +2342,10 @@ mod tests {
         assert_eq!(values["contrast"], OptionValue::Choice("soft".into()));
         assert_eq!(values["edge_finish"], OptionValue::Choice("etched".into()));
         assert_eq!(values["accent"], OptionValue::Choice("slate".into()));
+        assert_eq!(values["foreground_colours"], OptionValue::Choice("muted".into()));
         assert_eq!(
             ordered_options(file).iter().map(|o| o.id.as_str()).collect::<Vec<_>>(),
-            ["opacity", "blur", "tab_colours", "tab_fade_ms", "contrast", "edge_finish", "accent"]
+            ["opacity", "blur", "tab_colours", "tab_fade_ms", "contrast", "edge_finish", "accent", "foreground_colours"]
         );
         let opacity = file.options.iter().find(|o| o.id == "opacity").unwrap();
         let OptionKind::Range { min, max, .. } = &opacity.kind else { panic!("opacity must be a range") };

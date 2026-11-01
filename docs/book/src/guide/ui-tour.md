@@ -454,10 +454,14 @@ last contrast; Reset returns it to Standard.
 and a restrained blue-grey accent. Its defaults pair **87% Opacity** with a broad **60 px Blur**:
 Opacity sets how much of the scene shows through; Blur sets how widely its detail softens.
 It also offers **Contrast** (Soft or Defined), **Edge finish** (Flat, Etched or Soft bevel),
-**Accent** (Slate blue, Silver or Sage), and optional **Tab colours** with a Fade control.
+**Accent** (Slate blue, Silver or Sage), **Foreground colours** (Muted, Neutral or Vibrant),
+and optional **Tab colours** with a Fade control. Muted preserves the original quiet palette.
+Neutral brightens the semantic colours; Vibrant gives the axes, icons and modelling guides
+stronger colour. Accent independently controls selection and highlights; foreground modes
+keep the stone-grey backgrounds and red/green/blue axis meanings.
 Tab colours gently tint panels and the viewport while preserving the selected accent.
-Accent changes selection and Model controls; functional workspace and status colours keep
-their meaning. As with other themes, the existing blur availability and readability limits apply.
+Accent changes selection and control accents; Foreground colours sets semantic glyphs,
+workspace colours and status colours while retaining their meaning. As with other themes, the existing blur availability and readability limits apply.
 
 Up to 32 overlays apply in file order, after the base palette and the theme's own value tables.
 Later matching entries win by key. Every overlay has one `when`: `{"opt":"id","eq":value}`
