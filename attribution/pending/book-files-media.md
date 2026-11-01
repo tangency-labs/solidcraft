@@ -1,0 +1,1 @@
+| docs/book/src/media/files/menu.png | SolidCraft contributors | screenshot of SolidCraft 0.29.0 itself (`--sample`, default dark theme, software renderer) showing the File menu, with original numbered callouts (digits set in DejaVu Sans Bold), captured with examples/demo/doc_shots.py | MIT OR Apache-2.0 |
