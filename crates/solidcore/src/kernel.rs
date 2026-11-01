@@ -825,6 +825,18 @@ pub struct UpstreamFixes {
     /// of one read unset (WR-663, #2009 group D; tangency-labs/smlib 7a35f33, 6997962,
     /// 666242b, 8843967, 8311f8e, 21dcf69). Off by default for pinned parity.
     pub query_statuses_pass_on: bool,
+    /// `SmTrimmingTools::IsIsoCurve(cpUVCurve, eSide, dLow, d2DTolerance)`
+    /// ([`crate::topology::trimming_tools::is_iso_curve_at_with_fixes`], and its callers
+    /// [`crate::topology::trimming_tools::is_iso_curve`] and
+    /// [`crate::topology::trimming_tools::fix_backwards_outer_loop_on_seam`]) propagates a
+    /// failing `GetCanonical` status (such as `SM_ERR` on an `SmBSplineCurve` without a
+    /// NURB) as `Err` instead of returning `SER(cpUVCurve->GetCanonical(..))`'s nonzero
+    /// status as `SmBoolean` (`Ok(true)`), which falsely classifies a curve whose control
+    /// points cannot be read as an iso-curve (WR-97, #2212;
+    /// `plan/upstream-issues/WR-97--addendum-2026-11-01-is-iso-curve-canonical-failure.md`).
+    /// [`crate::topology::trimming_tools::is_iso_curve_at`] keeps its four-argument
+    /// signature and pinned `Ok(true)` default. Off by default for pinned C++ parity.
+    pub is_iso_curve_at_propagates_canonical_failure: bool,
     /// Extrusions, revolutions, sweeps, lofts and the station sweeps (`SmPrimitiveCreation`,
     /// `SmTopologySweep`, the translational and rotational sweep geometry and `SM_API`'s
     /// primitive wrappers) pass on the statuses SMLib drops: a failed evaluation, copy,
