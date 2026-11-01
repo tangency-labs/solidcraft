@@ -355,6 +355,12 @@ pub fn pending_names() -> Vec<String> {
     DESIGN.pending_names()
 }
 
+/// Whether the design reader recognizes a development-format change, including changes
+/// folded into released formats. Storage adapters check this before fetching payloads.
+pub fn supports_change(version: u32, name: &str) -> bool {
+    FORMATS.knows_part_name(FORMATS.canonical_applied_name(version, name))
+}
+
 /// A family's upgrade path: the steps written out by hand (designs' up to [`HAND_WRITTEN`]), the
 /// folded formats after them (each a list of changes) and the pending changes, which make the
 /// next format.

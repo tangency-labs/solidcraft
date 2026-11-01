@@ -63,6 +63,11 @@ use serde_json::{Value, json};
 
 use crate::web_offline;
 
+mod cloud_live_test;
+pub use cloud_live_test::run as run_cloud_live;
+mod cloud_storage_test;
+pub use cloud_storage_test::run as run_cloud_storage;
+
 const PREFIX: &str = "/solidcraft/app/";
 /// Another copy of the app on the same origin.
 const ELSEWHERE: &str = "/solidcraft/elsewhere/";
@@ -908,7 +913,9 @@ impl Chrome {
             .stderr(Stdio::null());
         // Linux CI runners don't allow Chrome's sandbox; the browser only opens this test's pages.
         if cfg!(target_os = "linux") {
-            c.arg("--no-sandbox");
+            // Test profiles have no browser passwords. Avoid desktop-wallet prompts in
+            // isolated D-Bus sessions; application credentials still use their own stores.
+            c.args(["--no-sandbox", "--password-store=basic"]);
         }
         let child = c.spawn().map_err(|e| format!("{}: {e}", exe.display()))?;
         Ok(Chrome { child, profile: profile.to_path_buf() })

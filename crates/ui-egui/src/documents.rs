@@ -196,6 +196,7 @@ fn put_view(app: &mut SolveApp, v: DocView) {
 
 /// Put `slot` into the app and return what was there.
 fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
+    slot.session.inherit_cloud_services(&app.session);
     if crate::render_workspace::active(app) {
         let _ = crate::render_workspace::enter(app, false);
     }
@@ -425,7 +426,13 @@ pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
 /// Is the active design an untouched new one (it can be replaced instead of opening a tab)?
 pub fn active_is_blank(app: &SolveApp) -> bool {
     let s = &app.session;
-    s.path.is_none() && s.doc.features.is_empty() && s.doc.params.is_empty() && s.doc.components.is_empty() && !s.is_dirty()
+    s.path.is_none()
+        && s.cloud_binding().is_none()
+        && !s.cloud_save_pending()
+        && s.doc.features.is_empty()
+        && s.doc.params.is_empty()
+        && s.doc.components.is_empty()
+        && !s.is_dirty()
 }
 
 /// Show `session` (a design built or read elsewhere): in place of a blank active design,
@@ -516,6 +523,15 @@ pub fn close(app: &mut SolveApp, i: usize, force: bool) {
     }
     if !force && dirty(app, i) {
         app.docs.closing = Some(i);
+        let pending = if i == app.docs.active {
+            app.session.cloud_save_pending()
+        } else {
+            app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|slot| slot.session.cloud_save_pending())
+        };
+        if pending {
+            switch(app, i);
+            app.docs.saving = true;
+        }
         return;
     }
     app.docs.closing = None;
@@ -639,6 +655,7 @@ fn quit_step(app: &mut SolveApp) {
         Some(i) => {
             switch(app, i);
             app.docs.closing = Some(i);
+            app.docs.saving |= app.session.cloud_save_pending();
         }
         None => {
             // Don't Save means discard: no recovery copy is kept for the next launch either.
@@ -665,9 +682,9 @@ pub fn any_dirty(app: &SolveApp) -> bool {
 
 fn dirty(app: &SolveApp, i: usize) -> bool {
     if i == app.docs.active || app.docs.slots.is_empty() {
-        return app.session.is_dirty();
+        return app.session.is_dirty() || app.session.cloud_save_pending();
     }
-    app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|s| s.session.is_dirty())
+    app.docs.slots.get(i).and_then(Option::as_ref).is_some_and(|s| s.session.is_dirty() || s.session.cloud_save_pending())
 }
 
 /// Tab names (with an unsaved-changes flag), in order.
@@ -803,6 +820,12 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let t = Tokens::get();
     let info = tabs_info(app);
     let paths = tab_paths(app);
+    let cloud: Vec<_> = (0..info.len())
+        .map(|index| {
+            let session = app.docs.slots.get(index).and_then(Option::as_ref).map_or(&app.session, |slot| &slot.session);
+            crate::cloud_browser::tabs::indicator(app, session)
+        })
+        .collect();
     let n = info.len();
     let (first, shown, w) = layout(n, app.docs.active, x1 - x0);
     let mut pick: Option<usize> = None;
@@ -811,11 +834,12 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     const MAX_FIT: f32 = 200.0;
     let natural: Vec<f32> = info
         .iter()
-        .map(|(name, dirty)| {
+        .enumerate()
+        .map(|(index, (name, dirty))| {
             let shown_name = crate::i18n::Locale::for_language(&app.preferences.language).given_name(name);
-            let label = format!("{shown_name}{}", if *dirty { " •" } else { "" });
+            let label = format!("{shown_name}{}", if *dirty && !cloud.get(index).is_some_and(Option::is_some) { " •" } else { "" });
             let text = ui.painter().layout_no_wrap(label, crate::fonts::semibold(crate::theme::Tokens::get().font_button), t.app_bar_text).size().x;
-            (text + 40.0).clamp(72.0, MAX_FIT)
+            (text + 40.0 + if cloud.get(index).is_some_and(Option::is_some) { t.space_14 } else { 0.0 }).clamp(72.0, MAX_FIT)
         })
         .collect();
     let fit_all = shown == n && natural.iter().sum::<f32>() <= x1 - x0 - 34.0;
@@ -891,15 +915,26 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
         tab_shape(ui.painter(), &t, tr, active, lit || resp.has_focus());
         let ink = if active || lit { t.app_bar_text } else { t.app_bar_text.gamma_multiply(0.7) };
         let name_display = crate::i18n::Locale::for_language(&app.preferences.language).given_name(name);
-        let label = format!("{name_display}{}", if *dirty { " •" } else { "" });
+        let indicator = cloud.get(i).and_then(Option::as_ref);
+        let label = format!("{name_display}{}", if *dirty && indicator.is_none() { " •" } else { "" });
         let font = if active {
             crate::fonts::semibold(crate::theme::Tokens::get().font_button)
         } else {
             FontId::proportional(crate::theme::Tokens::get().font_button)
         };
         let g = ui.painter().layout_no_wrap(label, font, ink);
-        let text_w = (tr.width() - 30.0).max(10.0);
-        let tip = tab_tooltip(&name_display, paths.get(i).cloned().flatten().as_deref(), g.size().x > text_w);
+        let inset = if indicator.is_some() { t.space_14 } else { 0.0 };
+        let text_w = (tr.width() - 30.0 - inset).max(10.0);
+        let tip = if let Some(indicator) = indicator {
+            let dot = Rect::from_center_size(pos2(tr.left() + 10.0 + g.size().x.min(text_w) + t.space_6, tr.center().y), vec2(t.space_6, t.space_6));
+            indicator.status.paint_dot(ui, dot);
+            crate::scenario::publish_rect(&format!("tab:design:{i}:sync-dot"), dot);
+            let tip = format!("{name_display}\n{}", indicator.tooltip);
+            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, resp.enabled(), active, &tip));
+            tip
+        } else {
+            tab_tooltip(&name_display, paths.get(i).cloned().flatten().as_deref(), g.size().x > text_w)
+        };
         let clip = Rect::from_min_size(tr.min, vec2(text_w + 10.0, tr.height()));
         ui.painter().with_clip_rect(clip).galley(pos2(tr.left() + 10.0, tr.center().y - g.size().y / 2.0), g, ink);
         // ×
@@ -1104,6 +1139,9 @@ pub enum Answer {
 pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
     let _language = crate::i18n::scope(&app.preferences.language);
     quit_step(app);
+    if crate::cloud_browser::choosing_destination(app) {
+        return;
+    }
     let Some(i) = app.docs.closing else { return };
     let name = tabs_info(app).get(i).map(|x| x.0.clone()).unwrap_or_default();
     let name_display = crate::i18n::tr_name(&name);
@@ -1171,6 +1209,9 @@ pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
         Answer::Save => {
             switch(app, i);
             app.docs.saving = true;
+            if app.session.cloud_save_pending() {
+                return;
+            }
             crate::toolbar::save(app);
             if !app.file_picker_busy() {
                 saved_for_close(app);
@@ -1198,6 +1239,9 @@ pub fn answer_prompt(app: &mut SolveApp, answer: Answer) {
 
 /// Resume Close/Quit only after Save As has answered and the write succeeded.
 pub(crate) fn saved_for_close(app: &mut SolveApp) {
+    if app.session.cloud_save_pending() || crate::cloud_browser::choosing_destination(app) {
+        return;
+    }
     if !std::mem::take(&mut app.docs.saving) || app.docs.closing.is_none() {
         return;
     }

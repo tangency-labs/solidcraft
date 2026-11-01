@@ -626,6 +626,9 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             ok(json!(app.ui.agent_cursor))
         }
         "engine.script" => {
+            if let Some(error) = crate::cloud::configuration::script_refusal(app, p) {
+                return err(error);
+            }
             let steps = p.as_array().or_else(|| p.get("commands").and_then(Value::as_array));
             if let Some(c) = steps.and_then(|steps| steps.iter().find_map(switches_design)) {
                 return err(format!("engine.script unavailable: {c} switches to another design (send it on its own)"));
@@ -635,7 +638,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 .session
                 .run_script_each(p, &mut |i, _| {
                     let id = steps.and_then(|steps| steps.get(i)).and_then(command).and_then(solidcraft_engine::find_command).map(|spec| spec.id);
-                    replaced |= matches!(id, Some("file.new" | "doc.open" | "doc.recover"));
+                    replaced |= matches!(id, Some("file.new" | "doc.open" | "doc.recover" | "cloud.open.finish"));
                 })
                 .map(|v| json!(v))
                 .map_err(|e| e.to_string());

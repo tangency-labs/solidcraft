@@ -35,6 +35,7 @@ impl Class {
 /// The layering table. Names are package names without the `solidcraft-`
 /// prefix.
 pub const TABLE: &[(&str, Class)] = &[
+    ("cloud", Class::Standalone),
     ("geom", Class::Layer(0)),
     // 3D mouse descriptors and reports (no workspace dependencies; the apps read the device)
     ("space-mouse", Class::Layer(0)),

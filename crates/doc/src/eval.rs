@@ -236,6 +236,15 @@ impl ModelBody {
         }
     }
 
+    /// Warm display geometry and its placement, without meshing or making moved copies.
+    /// Optional save pictures can reuse what an instanced viewport already drew.
+    pub fn cached_mesh_in_place(&self) -> Option<(Arc<Mesh>, crate::Mat)> {
+        if let Some(mesh) = self.cached_mesh() {
+            return Some((mesh, crate::IDENTITY));
+        }
+        self.mesh_placement.as_deref()?.cached_source_mesh()
+    }
+
     /// The box of [`ModelBody::mesh`] without making a placement's moved copy: the shared mesh's
     /// points, moved.
     pub fn mesh_bounds(&self) -> solidcraft_geom::Aabb3 {

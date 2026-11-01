@@ -1,7 +1,6 @@
 //! Documents and files: new, open designs, CAD files and drawings, insert STEP, save, export.
 
-#[path = "file_thumbnail.rs"]
-mod thumbnail;
+use crate::thumbnail;
 
 #[path = "file_easyprint.rs"]
 mod easyprint;
@@ -413,7 +412,7 @@ fn saved_name(name: &str, old_path: Option<&str>, path: &str, user_named: bool) 
 
 /// Rename the design, and the undo and redo states that still carry the old name, so undo
 /// does not bring the default name back and leave the design looking changed.
-fn rename_design(s: &mut Session, from: &str, to: &str) {
+pub(crate) fn rename_design(s: &mut Session, from: &str, to: &str) {
     // A prepared world is keyed by the document's Arc. Changing only its name
     // must not make an opted-in save lose warm geometry and display caches.
     // Retag only a cache that already matches: cold or stale placements stay so.
@@ -487,6 +486,8 @@ fn write_bytes(
     s.path = Some(path.to_string());
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
+    s.cloud.binding = None;
+    s.cloud.clear_captures();
     s.mark_saved();
     Ok(json!({"path": path, "bytes": bytes.len(), "name": s.doc.name}))
 }
@@ -543,6 +544,8 @@ impl Session {
         self.path.clone_from(&done.path);
         self.disk = done.disk;
         self.read_only = done.read_only;
+        self.cloud.binding.clone_from(&done.cloud.binding);
+        self.cloud.clear_captures();
         self.saved = done.saved.clone();
         self.saved_visibility = done.saved_visibility.clone();
     }
@@ -617,6 +620,9 @@ fn saved_preview(s: &Session) -> Option<solidcraft_io::DesignPreview> {
 }
 
 fn save(s: &mut Session, p: &Value) -> Result<Value> {
+    if s.cloud_binding().is_some() && str_(p, "path").is_none() {
+        return super::cloud::save(s, &json!({}));
+    }
     let path = match str_(p, "path") {
         Some(x) if !x.trim().is_empty() => x.to_string(),
         _ => s.path.clone().ok_or_else(|| bad("file.save", "the design has no file yet: give a `path`"))?,

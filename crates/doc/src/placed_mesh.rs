@@ -68,6 +68,11 @@ impl PlacedMesh {
         (reference_mesh(&self.body, &self.mesh, self.tolerance), self.transform)
     }
 
+    /// Already computed definition geometry and its placement, without tessellation.
+    pub(super) fn cached_source_mesh(&self) -> Option<(Arc<Mesh>, crate::Mat)> {
+        Some((self.mesh.get()?.clone(), self.transform))
+    }
+
     /// The definition's display plan mesh at quality `q` (shared by every placement of it) and
     /// this placement.
     pub(super) fn source_plan_mesh(&self, q: crate::display_quality::DisplayQuality, name: &str) -> Option<(Arc<Mesh>, crate::Mat)> {
@@ -262,11 +267,15 @@ mod tests {
                     p
                 })
                 .collect();
+        assert!(placed.iter().all(|p| p.cached_mesh_in_place().is_none()), "checking a thumbnail never meshes cold geometry");
         let (own, identity) = source.mesh_in_place();
         assert_eq!(identity, crate::IDENTITY);
         let q = DisplayQuality::parse("normal").unwrap();
         for p in &placed {
+            let (warm, warm_transform) = p.cached_mesh_in_place().unwrap();
             let (mesh, m) = p.mesh_in_place();
+            assert!(Arc::ptr_eq(&warm, &own));
+            assert_eq!(warm_transform, m);
             assert!(Arc::ptr_eq(&mesh, &own), "the definition's mesh, not a copy");
             let bounds = p.mesh_bounds();
             assert!(p.cached_mesh().is_none(), "no moved copy is made");

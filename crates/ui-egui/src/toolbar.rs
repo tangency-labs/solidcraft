@@ -567,6 +567,7 @@ impl FileAction {
             Self::Redo => !app.session.redo.is_empty(),
             Self::ClearRecent => !app.home.recent.is_empty(),
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
+            Self::Command("cloud.save") => app.services.cloud_host.is_some() && !app.session.cloud_save_pending(),
             _ => true,
         };
         !app.file_picker_busy() && !app.file_load.busy() && !behind_report && (!needs_design || design_shown(app)) && available
@@ -687,6 +688,12 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                     FileAction::SaveAs.run(app);
                     close = true;
                 }
+                if app.services.cloud_host.is_some()
+                    && item_if(ui, app.tr("cmd.cloud.save"), "", "save", FileAction::Command("cloud.save").enabled(app))
+                {
+                    FileAction::Command("cloud.save").run(app);
+                    close = true;
+                }
                 if item(ui, "Save As JSON…", "", "save") {
                     FileAction::SaveJson.run(app);
                     close = true;
@@ -781,11 +788,15 @@ pub fn save(app: &mut SolveApp) {
         app.tree.capture_prompt = Some(crate::browser::SAVE.into());
         return;
     }
-    if app.session.path.is_some() {
+    if app.session.cloud_binding().is_some() {
+        crate::save_job::start(app, "file.save", json!({}));
+    } else if app.session.path.is_some() {
         // Read-only, or changed on disk since it was opened: Save As, or a question, instead.
         if crate::open_elsewhere::check_save(app) {
             crate::save_job::start(app, "file.save", json!({}));
         }
+    } else if app.services.cloud_host.is_some() && app.session.cloud_settings().default_connection.is_some() {
+        app.start("cloud.save");
     } else {
         save_as(app);
     }
