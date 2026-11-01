@@ -778,6 +778,9 @@ pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> O
             Some(match item {
                 Sel::Body { name } => json!({"body":name}),
                 Sel::ExternalSketchCurve { sketch, id } => json!({"sketch":sketch,"curve":id}),
+                // A straight line of another sketch, picked into the dialog, names its sketch
+                // (#3726): the same reference the external pick stands for (#10291).
+                Sel::SketchCurve { id, sketch: Some(sketch) } => json!({"sketch":sketch,"curve":id}),
                 Sel::ExternalSketchPoint { sketch, id } => json!({"sketch":sketch,"point":id}),
                 Sel::Vertex { body, point } => json!({"body":body,"vertex":[point.x,point.y,point.z]}),
                 Sel::Edge { body, point, .. } => json!({"body":body,"edge":[point.x,point.y,point.z]}),
