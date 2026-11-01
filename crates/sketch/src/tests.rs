@@ -928,6 +928,25 @@ fn links_update_in_place_rebuild_and_break() {
     assert_eq!(back.link(&j3).unwrap().kind, LinkKind::Intersect);
 }
 
+/// A reference that names no body describes itself by its kind alone: the message must not
+/// end in "face of " with nothing after the "of" (#4929).
+#[test]
+fn a_source_without_a_body_name_names_its_kind_alone() {
+    use solidcraft_geom::Vec3;
+    let at = Vec3::ZERO;
+    for (source, expected) in [
+        (LinkSource::Edge { body: String::new(), at }, "edge"),
+        (LinkSource::Face { body: String::new(), at }, "face"),
+        (LinkSource::Vertex { body: String::new(), at }, "vertex"),
+        (LinkSource::Iso { body: String::new(), at, dir: "u".into() }, "isoparametric curve"),
+        (LinkSource::Spun { body: String::new(), origin: at, dir: Vec3::X }, "spun profile"),
+    ] {
+        assert_eq!(source.describe(), expected, "{source:?}");
+    }
+    // A named body keeps its name.
+    assert_eq!(LinkSource::Face { body: "Body1".into(), at }.describe(), "face of Body1");
+}
+
 /// Many independent constrained rectangles solve quickly (per-component work).
 #[test]
 fn large_sketch_solves_fast() {
