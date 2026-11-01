@@ -1766,6 +1766,14 @@ where
         }
         last = format!("{last}; the prisms joined in 2D gave an implausible volume {v:.4}");
     }
+    // A sphere (either operand) whose patches the other body's faces and edges lie along (#3633):
+    // turned about its centre, the same solid meets it across its faces. Exact, so it is asked
+    // before the nudge, which moves the tool.
+    if !APART.with(|c| c.get())
+        && let Some(body) = tool_reseam::sphere(a, b, op)
+    {
+        return Ok(Some(body));
+    }
     // Last resort: nudge the tool by a micron-scale screw motion (turned 2e-6 rad about a
     // skew axis and moved 2e-6 of the size), which breaks tangencies and seams lying exactly on
     // the other body. The result moves by no more than that.
