@@ -35,7 +35,7 @@
     ],
     "radius": 3,
     "type": "curvature",
-    "tangent_chain": false
+    "tangent_chain": true
    }
   }
  ]

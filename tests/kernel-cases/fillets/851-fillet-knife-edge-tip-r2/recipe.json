@@ -72,7 +72,7 @@
      ]
     ],
     "radius": 2,
-    "tangent_chain": false
+    "tangent_chain": true
    }
   }
  ]

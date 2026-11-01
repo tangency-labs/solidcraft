@@ -31,7 +31,7 @@
     ],
     "radius": 3,
     "corner": "g2",
-    "tangent_chain": false,
+    "tangent_chain": true,
     "setbacks": [
      {
       "vertex": [
