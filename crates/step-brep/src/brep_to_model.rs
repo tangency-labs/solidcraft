@@ -12,7 +12,13 @@
 
 use std::collections::BTreeMap;
 
+use solidcore::curve::curve::p1::ApproximateCurveOptions;
 use solidcore::curve::curve::p2::CurveKind;
+use solidcore::curve::curve::Curve;
+use solidcore::geom::extent1d::Extent1d;
+use solidcore::geom::tol::ZONE_TOL_3D;
+use solidcore::kernel::Kernel;
+use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::topology::brep::p2::is_sheet;
 use solidcore::topology::edgeuse::p1 as eu;
 use solidcore::topology::{Brep, VertexId};
@@ -77,7 +83,43 @@ fn frame(
     })
 }
 
-fn curve(curve: &solidcore::curve::curve::Curve) -> Result<ModelCurve, ExportModelError> {
+fn bspline_to_model(curve: &BSplineCurve) -> Result<ModelCurve, ExportModelError> {
+    let (points, weights) = curve.control_polygon().map_err(|e| err(e.to_string()))?;
+    let (knots, mults) = curve.knots(None).map_err(|e| err(e.to_string()))?;
+    Ok(ModelCurve::BSpline(step_import::model::BSplineCurve {
+        degree: curve.degree().map_err(|e| err(e.to_string()))? as u32,
+        points: points.into_iter().map(point).collect(),
+        weights: (!weights.is_empty()).then_some(weights),
+        knots,
+        mults: mults.into_iter().map(|m| m as u32).collect(),
+    }))
+}
+
+fn approximate_crv_on_surf(
+    kernel: &Kernel,
+    curve: &Curve,
+    interval: Extent1d,
+    tolerance: f64,
+) -> Result<ModelCurve, ExportModelError> {
+    let breaks = [interval.min(), interval.max()];
+    let tol = if tolerance > 0.0 {
+        tolerance
+    } else {
+        ZONE_TOL_3D
+    };
+    let opts = ApproximateCurveOptions::default();
+    let approx = curve
+        .approximate_curve(kernel, &breaks, tol, &opts)
+        .map_err(|e| err(format!("failed to approximate curve on surface: {e}")))?;
+    match approx.curve.kind() {
+        CurveKind::BSpline(curve) => bspline_to_model(curve),
+        other => Err(err(format!(
+            "expected B-spline approximation for curve on surface, got {other:?}"
+        ))),
+    }
+}
+
+fn curve(curve: &Curve) -> Result<ModelCurve, ExportModelError> {
     match curve.kind() {
         CurveKind::Line(line) => Ok(ModelCurve::Line {
             origin: point(line.line_point()),
@@ -98,17 +140,13 @@ fn curve(curve: &solidcore::curve::curve::Curve) -> Result<ModelCurve, ExportMod
                 })
             }
         }
-        CurveKind::BSpline(curve) => {
-            let (points, weights) = curve.control_polygon().map_err(|e| err(e.to_string()))?;
-            let (knots, mults) = curve.knots(None).map_err(|e| err(e.to_string()))?;
-            Ok(ModelCurve::BSpline(step_import::model::BSplineCurve {
-                degree: curve.degree().map_err(|e| err(e.to_string()))? as u32,
-                points: points.into_iter().map(point).collect(),
-                weights: (!weights.is_empty()).then_some(weights),
-                knots,
-                mults: mults.into_iter().map(|m| m as u32).collect(),
-            }))
-        }
+        CurveKind::BSpline(curve) => bspline_to_model(curve),
+        CurveKind::CrvOnSurf(_) => approximate_crv_on_surf(
+            &Kernel::default(),
+            curve,
+            curve.natural_interval(),
+            ZONE_TOL_3D,
+        ),
         other => Err(err(format!("unsupported curve kind {other:?}"))),
     }
 }
@@ -224,7 +262,7 @@ fn edge_start_is_end(brep: &Brep, edge: solidcore::topology::EdgeId) -> bool {
 /// extrusion's u for a conic generator.
 fn step_angles(surface: &solidcore::surface::surface::Surface) -> (bool, bool) {
     use solidcore::surface::surface::p2::SurfaceKind;
-    let conic = |curve: Option<&solidcore::curve::curve::Curve>| {
+    let conic = |curve: Option<&Curve>| {
         curve.is_some_and(|curve| matches!(curve.kind(), CurveKind::Ellipse(_)))
     };
     match surface.kind() {
@@ -256,6 +294,7 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    let kernel = Kernel::default();
     let mut edges = Vec::new();
     let mut edge_index = BTreeMap::new();
     for id in brep.edge_list() {
@@ -274,11 +313,17 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
             .ok_or_else(|| err("edge has no curve"))?;
         let interval = edge.interval;
         edge_index.insert(*id, edges.len());
+        let curve_geom = match edge_curve.kind() {
+            CurveKind::CrvOnSurf(_) => {
+                approximate_crv_on_surf(&kernel, edge_curve, interval, edge.tolerance)?
+            }
+            _ => curve(edge_curve)?,
+        };
         edges.push(Edge {
             step_id: u64::from(id.index()) + 1,
             start,
             end,
-            curve: curve(edge_curve)?,
+            curve: curve_geom,
             same_sense: true,
             t_start: interval.min(),
             t_end: interval.max(),
@@ -289,7 +334,7 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
     let mut face_indices = Vec::new();
     let mut face_by_id = BTreeMap::new();
     let mut pcurves = BTreeMap::new();
-    let pcurve_kernel = solidcore::kernel::Kernel::default();
+    let pcurve_kernel = &kernel;
     for id in brep.face_list() {
         let face = brep.face(*id).map_err(|e| err(e.to_string()))?;
         let surf = face
@@ -327,9 +372,9 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
                     let mut converted = true;
                     for step in 0..=64 {
                         let t = low + (high - low) * f64::from(step) / 64.0;
-                        if let Ok(p) = uv_curve.evaluate_point(&pcurve_kernel, t) {
+                        if let Ok(p) = uv_curve.evaluate_point(pcurve_kernel, t) {
                             match surf.convert_uv_from_nurbs_to_step(
-                                &pcurve_kernel,
+                                pcurve_kernel,
                                 solidcore::geom::vector2d::Point2::new(p.x, p.y),
                             ) {
                                 Ok(step_uv) => uv.push([step_uv.x, step_uv.y]),
@@ -426,7 +471,7 @@ pub fn brep_to_model(brep: &Brep) -> Result<Model, ExportModelError> {
     if faces.is_empty() {
         return Err(err("B-rep has no faces"));
     }
-    let mut kernel = solidcore::kernel::Kernel::default();
+    let mut kernel = Kernel::default();
     let sheet = is_sheet(&mut kernel, brep).map_err(|e| err(e.to_string()))?;
     let mut shell_records = Vec::new();
     let mut seen_shell_faces: Vec<Vec<usize>> = Vec::new();

@@ -1098,6 +1098,7 @@ pub fn import_with_report(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcore::curve::curve::p2::CurveKind;
     use step_import::model::{
         Bound, Curve, Edge, Face, Frame, Loop, OrientedEdge, Shell, Surface, Vertex,
     };
@@ -1462,5 +1463,69 @@ mod tests {
             .expect("healed build")
             .face_list()
             .is_empty());
+    }
+
+    #[test]
+    fn exports_and_reimports_edge_with_crv_on_surf_seam() {
+        let body = cylinder_solid();
+        let brep = build(&body).expect("cylinder solid build");
+        assert_eq!(brep.face_list().len(), 3);
+
+        // Verify the cylinder wall has an inserted seam edge with CrvOnSurf curve
+        let mut seam_count = 0;
+        for id in brep.edge_list() {
+            let edge = brep.edge(*id).unwrap();
+            if let Some(c) = &edge.curve {
+                if matches!(c.kind(), CurveKind::CrvOnSurf(_)) {
+                    seam_count += 1;
+                }
+            }
+        }
+        assert_eq!(seam_count, 1, "expected 1 CrvOnSurf seam edge");
+
+        // Export to Model and STEP
+        let model = brep_to_model(&brep).expect("brep_to_model");
+        assert_eq!(
+            model.bodies[0].kind,
+            step_import::model::BodyKind::ManifoldSolid
+        );
+        let step_text = step_export::write(&model).expect("step_export write");
+        assert!(step_text.contains("MANIFOLD_SOLID_BREP"));
+        assert!(step_text.contains("SEAM_CURVE") || step_text.contains("SURFACE_CURVE"));
+        assert!(step_text.contains("B_SPLINE_CURVE_WITH_KNOTS"));
+        assert!(step_text.contains("PCURVE"));
+
+        // Re-import the exported STEP
+        let imported =
+            import(step_text.as_bytes(), &step_import::Limits::default()).expect("re-import");
+        assert_eq!(imported.len(), 1);
+        let imported_brep = &imported[0];
+
+        // Check edge count, face count, and display validity
+        assert_eq!(imported_brep.face_list().len(), 3);
+        assert_eq!(imported_brep.edge_list().len(), brep.edge_list().len());
+        validate_for_display(imported_brep).expect("display validity");
+
+        // Verify that the seam's 3D curve points lie on the cylinder surface (radius 10) within tolerance
+        let kernel = Kernel::default();
+        for edge_id in imported_brep.edge_list() {
+            let edge = imported_brep.edge(*edge_id).unwrap();
+            if let Some(c) = &edge.curve {
+                let interval = edge.interval;
+                for step in 0..=10 {
+                    let t =
+                        interval.min() + (interval.max() - interval.min()) * f64::from(step) / 10.0;
+                    let pt = c.evaluate_point(&kernel, t).unwrap();
+                    let radius = (pt.x * pt.x + pt.y * pt.y).sqrt();
+                    let dist = (radius - 10.0).abs();
+                    assert!(
+                        dist <= edge.tolerance.max(1e-4),
+                        "point at t={t} ({:?}) is distance {dist} from cylinder surface (tol: {})",
+                        pt,
+                        edge.tolerance
+                    );
+                }
+            }
+        }
     }
 }

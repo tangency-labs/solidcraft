@@ -10,5 +10,8 @@ publish = false
 solidcore = { path = "../solidcore" }
 step-import = { path = "../step-import" }
 
+[dev-dependencies]
+step-export = { path = "../step-export" }
+
 [lints]
 workspace = true
