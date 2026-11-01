@@ -1344,6 +1344,9 @@ preference_settings! {
     /// With `extrude_view_isometric`: when Extrude closes (OK or Cancel) the view goes back to
     /// where it was before it turned (#9176). Off (the default): it stays isometric.
     extrude_view_return: bool = false, PAGE_TOOLS => check_id("prefs.extrude_view_return");
+    /// The distance Extrude opens with, in the design's unit. 0 (the default): the profile is
+    /// shown with no depth until one is typed or pulled. 10 gives the earlier start.
+    extrude_default_distance: f64 = 0.0, PAGE_TOOLS, accept(0.0..=1000.0) => number("prefs.extrude_default_distance", 0.0..=1000.0);
     /// Feature windows choose Join, New Body or Cut from what their material touches (`op_auto`,
     /// #6901). Off: they keep the operation they open with (Extrude its own Join or Cut), as before.
     auto_operation: bool = true, PAGE_TOOLS => check_id("prefs.auto_operation");
@@ -3921,6 +3924,9 @@ pub fn migrate(mut p: Prefs) -> Prefs {
     if !accepted::wheel_zoom_speed(&p) {
         p.wheel_zoom_speed = Prefs::default().wheel_zoom_speed;
     }
+    if !accepted::extrude_default_distance(&p) {
+        p.extrude_default_distance = Prefs::default().extrude_default_distance;
+    }
     if !accepted::home_fit_size(&p) {
         p.home_fit_size = Prefs::default().home_fit_size;
     }
@@ -4154,6 +4160,9 @@ fn prepare_preferences(
     }
     if !accepted::ui_scale(&new) || !accepted::look_at_speed(&new) {
         return Err("`ui_scale` must be 0.5…2.5 and `look_at_speed` 0.25…4".into());
+    }
+    if !accepted::extrude_default_distance(&new) {
+        return Err("`extrude_default_distance` must be 0…1000".into());
     }
     if !accepted::print_face_highlight(&new) {
         return Err("`print_face_highlight` must be 0…1".into());

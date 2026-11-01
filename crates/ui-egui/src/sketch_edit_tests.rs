@@ -492,6 +492,7 @@ mod extrude_view_preference {
     /// A finished sketch on XY, seen from the top, with the two preferences set; and that view.
     fn from_the_top(isometric: bool, back: bool) -> (Harness, Camera) {
         let mut h = Harness::new();
+        h.app.preferences.extrude_default_distance = 10.0;
         h.app.preferences.extrude_view_isometric = isometric;
         h.app.preferences.extrude_view_return = back;
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();

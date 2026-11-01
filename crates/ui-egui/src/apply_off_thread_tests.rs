@@ -10,6 +10,7 @@ use crate::scenario::Harness;
 /// A 60 × 20 × 10 block and, just finished on its top, a 10 × 10 square: Extrude takes it.
 fn square_on_a_block() -> Harness {
     let mut h = Harness::new();
+    h.app.preferences.extrude_default_distance = 10.0;
     h.app.home.open = false;
     for (id, p) in [
         ("sketch.create", json!({"plane": "XY"})),

@@ -12,6 +12,7 @@ use crate::scenario::Harness;
 /// A 10 mm cube at the origin, named `Base`.
 fn cube() -> Harness {
     let mut h = Harness::new();
+    h.app.preferences.extrude_default_distance = 10.0;
     h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Base"})).unwrap();
     h
 }
