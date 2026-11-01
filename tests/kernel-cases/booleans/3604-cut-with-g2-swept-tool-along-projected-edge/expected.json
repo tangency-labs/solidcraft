@@ -5,11 +5,11 @@
   ],
   "what": "cut of a box by a swept G2 corner-removal tool along a projected edge chain (left-rear corner; the symmetric front-left chain works)",
   "source": "analytic",
-  "method": "fillet: the documented curvature section, the quintic Bezier on setback s = 5 (controls p+s t1, p+2s/3 t1, p+s/3 t1, p+s/3 t2, p+2s/3 t2, p+s t2), cuts 113/21 * 25/36 = 3.73677 mm^2 off each vertical edge (Green on the Bezier): Vf = 8000 - 4*10*3.73677 = 7850.529. Tool section: the G2 blend between two lines is the degree 5 Hermite Bezier of the lines' own derivatives, controls (0.8,0) (0.8,0.04) (0.8,0.08) (0.08,0.8) (0.04,0.8) (0,0.8); the part of the profile in the material quadrant has area a = 0.360667 and first moment about the wall S = 0.102152. Swept along the corner curve (length 8.21299, total turn pi/2, curvature at most 0.269, so 1 - k*0.8 > 0 and the tube does not fold), it removes a*L - S*pi/2 = 2.8015; along l3, a straight bottom edge next to that corner (10 long on the left, 30 on the rear: the chain's naming fixes which, analysis does not), a*10 = 3.6067 or a*30 = 10.820. V lies between 7850.529 - 13.622 = 7836.907 and 7850.529 - 6.408 = 7844.121, widened by 1e-4 relative for the measurement: a cut that did nothing (7850.53) or a fillet not made falls outside. Box: the 40 x 20 x 10 box's (the fillets and the cut leave every extreme face)",
+  "method": "fillet: the documented curvature section, the order-2 section at the equal-area thumbweight on setback s = 5 between square planes (cov-fillet-section-curvature-box-edge-r3), cuts (1 - pi/4) * 25 = 5.36504592 mm^2 off each vertical edge (Green's theorem on it): Vf = 8000 - 4*10*5.36504592 = 7785.398. Tool section: the G2 blend between two lines is the degree 5 Hermite Bezier of the lines' own derivatives, controls (0.8,0) (0.8,0.04) (0.8,0.08) (0.08,0.8) (0.04,0.8) (0,0.8); the part of the profile in the material quadrant has area a = 0.360667 and first moment about the wall S = 0.102152. Swept along the corner curve (length 8.21299, total turn pi/2, curvature at most 0.269, so 1 - k*0.8 > 0 and the tube does not fold), it removes a*L - S*pi/2 = 2.8015; along l3, a straight bottom edge next to that corner (10 long on the left, 30 on the rear: the chain's naming fixes which, analysis does not), a*10 = 3.6067 or a*30 = 10.820. V lies between 7785.398 - 13.622 = 7771.776 and 7785.398 - 6.408 = 7778.990, widened by 1e-4 relative for the measurement: a cut that did nothing (7785.40) or a fillet not made falls outside. Box: the 40 x 20 x 10 box's (the fillets and the cut leave every extreme face)",
   "body_count": 1,
   "volume_mm3": [
-    7836.1,
-    7844.9
+    7771.0,
+    7779.8
   ],
   "bbox": {
     "min": [

@@ -1,0 +1,14 @@
+{
+ "sources": [],
+ "what": "a pocket whose vertical corners are rounded R3 first, then its floor outline rounded R1 as one tangent chain: the round follows the corners round, a torus at each (no turn to choose)",
+ "source": "analytic",
+ "method": "pocket 20x10x5 with R3 vertical corners: V0 = 12000 - 5 (200 - (4 - pi) 9) = 11038.628330588. The floor round: straight runs 14, 4, 14, 4 add A each per length; at each corner the section turns about the corner's axis, its spandrel at distance R - u from it (u from the wall): (pi/2)(R A - M) each (Pappus). V = 11050.097960471. Every seam G1. Graded to 1e-7 relative: the Mitre and Swept turns differ by (8 - 2 pi) M = 0.0823 mm^3 at these four corners, 6.6e-6 of the volume.",
+ "body_count": 1,
+ "volume_mm3": 11050.097960470617,
+ "continuity": {
+  "order": "g1"
+ },
+ "tolerance": {
+  "rel": 1e-07
+ }
+}

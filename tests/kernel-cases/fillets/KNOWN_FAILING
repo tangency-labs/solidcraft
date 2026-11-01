@@ -16,10 +16,20 @@ cov-fillet-g2-corner-beside-a-cylinder not supported yet: the curvature fillet b
 cov-fillet-g2-five-edge-apex-corner refused: the default setback is shorter than where the rounds' contact lines meet (3.5056 mm from the apex); the corner should take a setback that works
 cov-fillet-g2-four-edge-apex-corner refused: the default setback is shorter than where the rounds' contact lines meet (3.9027 mm from the apex); the corner should take a setback that works
 cov-fillet-g2-mixed-corner not supported yet: SMLib sets back a corner only where its edges are all convex or all concave
+cov-fillet-g2-oblique-three-edge-corner the G2 corner patch meets the new order-2 section's rounds only G1 at one face seam (its volume holds); the corner step rebuilds the patch
+cov-fillet-g2-pocket-corner the G2 corner patch meets the new order-2 section's rounds only G1 at one face seam (its volume holds); the corner step rebuilds the patch
+cov-fillet-turn-swept-boss-base-r1 not supported yet: solid.fillet has no `turn`; the corners are mitred (12508.9676, the Mitre case's volume)
+cov-fillet-turn-swept-pocket-sharp-corner-refused-r1 not supported yet: solid.fillet has no `turn`, so the sharp concave corners are mitred, not refused
+cov-junction-boss-tilt-20-root-round SMLib fillet status 1001 on a cylinder tilted 20 degrees into the plate (also before the blend rework)
+cov-junction-boss-tilt-40-root-round SMLib fillet status 1001 on a cylinder tilted 40 degrees into the plate (also before the blend rework)
+cov-junction-tee-equal-round equal pipes' intersection is two plane ellipses crossing: their exact conic-pair rounds meet at the crossings in a corner the old corner code cannot join (built by the traced rounds before smlib#77); the corner step
+cov-junction-y-junction-120-round refused: the faces between the three intersection curves narrow to nothing at the two triple points, so the room check trips; a three-edge concave corner (the corner step)
 report-drafted-peg-front-and-concave-rounds-together-r2 not supported yet: SMLib refuses the corner where the drafted front top edge runs tangent into the concave arc (on the cone) as of no kind its blend corners take
 report-fillet-concave-arc-and-front-top-edge-together-r5-solver-residues the corner patch where the convex and concave rounds meet stands 0.128 out of the front face (box y min -0.0699 against 0.0579)
 report-fillet-concave-arc-and-front-top-edge-together-r7-solver-residues the corner patch where the convex and concave rounds meet stands 0.230 out of the front face (box y min -0.1723 against 0.0579)
 report-fillet-concave-arc-and-front-top-edge-together-solver-residues the corner patch where the convex and concave rounds meet stands 0.0374 out of the front face (box y min 0.0205 against 0.0579)
+report-fillet-curvature-three-edges-at-bar-corner the G2 corner patch meets the new order-2 section's rounds only G1 at one face seam (its volume holds); the corner step rebuilds the patch
+report-fillet-curvature-three-edges-at-bar-corner-solver-residues the G2 corner patch meets the new order-2 section's rounds only G1 at one face seam (its volume holds); the corner step rebuilds the patch
 report-peg-front-and-concave-chamfers-together-d2 SMLib status 1001 at the 3x2 mixed-convexity corner where the two chamfers meet on the tangent seam (SmFillet3x2MixedConvexityCorner): the corner, not the tangent ends, which each chamfer alone now builds
 report-peg-front-and-concave-rounds-together-r2 the corner patch where the convex and concave rounds meet stands 0.0374 out of the front face (box y min -0.0374), and the two rounds meet at (32, 2, 10), where their contact lines on the top cross, with normals 180 degrees apart
 report-peg-front-and-concave-rounds-together-r5 the corner patch where the convex and concave rounds meet stands 0.128 out of the front face (box y min -0.1278), and the two rounds meet at (27.351, 5, 10), where their contact lines on the top cross, with normals 180 degrees apart
