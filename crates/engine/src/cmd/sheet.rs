@@ -92,9 +92,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CONVERT_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-            "body; face: [x,y,z] on its large flat face (a plate of even thickness; recesses in one face up to half the thickness deep, \
-             such as an engraved label, become pockets of the sheet), or that face's name from model.faces; rule?; \
-             bends?: [[x,y,z] on sharp edges] (a solid or a shelled body: `face` is the fixed face and the flat faces reached from it \
+            "body; face?: [x,y,z] on its large flat face (a plate of even thickness; recesses in one face up to half the thickness deep, \
+             such as an engraved label, become pockets of the sheet), or that face's name from model.faces (default: the body's largest \
+             flat face); rule?; \
+             bends?: [[x,y,z] on sharp edges] (without them, a body that is no plate has its bends found by themselves: every bend \
+             modelled with its radius, bent with the thickness and inside radius it is modelled with and the rule's K-factor, said in the \
+             warning; with them, a solid or a shelled body: `face` is the fixed face and the flat faces reached from it \
              across these edges become the sheet; a shell keeps its thickness, a solid takes the rule's inward; \
              edges between two of those faces that are no bends are cut open with the rule's gap; \
              a point in the middle of a chamfer between two faces, or on a bend modelled with its radius (a cylinder between \
@@ -598,8 +601,11 @@ fn convert(s: &mut Session, p: &Value) -> Result<Value> {
     if s.model.state().body(&body).is_none() {
         return Err(bad(cmd, format!("no body `{body}`")));
     }
-    let face = p.get("face").ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z] on the plate's face, or its name from model.faces"))?;
-    let face = super::face::face_ref(s, face, Some(&body), cmd)?;
+    let face = match p.get("face").filter(|v| !v.is_null()) {
+        Some(face) => super::face::face_ref(s, face, Some(&body), cmd)?,
+        None => largest_flat_face(s, &body)
+            .ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z] on the plate's face, or its name from model.faces"))?,
+    };
     // With bend edges, a solid or shelled body; without, a plate.
     let bends = match p.get("bends") {
         None | Some(Value::Null) => Vec::new(),
@@ -615,6 +621,16 @@ fn convert(s: &mut Session, p: &Value) -> Result<Value> {
         p,
         FeatureKind::SheetConvert { body: BodyName(body), face: FacePick(face), rule, bends: bends.into_iter().map(Position).collect() },
     )
+}
+
+/// A point on the largest flat face of `body`, in the frame [`super::face::face_ref`] gives a
+/// named face's point in: `sheet.convert`'s fixed face when none is given.
+fn largest_flat_face(s: &Session, body: &str) -> Option<Vec3> {
+    let st = if crate::frames::mapped() { s.model.state() } else { s.world_state() };
+    let b = st.body(body)?;
+    let faces = b.body.faces((b.body.size() * 2e-3).max(1e-3)).ok()?;
+    let flat = faces.iter().filter(|f| f.plane_normal.is_some() && f.area.is_finite()).max_by(|x, y| x.area.total_cmp(&y.area))?;
+    solidcraft_doc::naming::face_spot(b, flat.index).map(|x| x.point)
 }
 
 fn rules(s: &mut Session, p: &Value) -> Result<Value> {
