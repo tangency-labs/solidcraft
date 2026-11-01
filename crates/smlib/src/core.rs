@@ -343,6 +343,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.ssi_split_curves_at_singular_points = true;
     f.surface_parallel_to_vector_checks = true;
     f.fillet_round_ends_at_tangent_continuation = true;
+    f.geometric_g2_continuity = true;
     f
 }
 
@@ -352,11 +353,7 @@ pub(crate) fn fixes() -> UpstreamFixes {
 /// the fork doesn't have stays on, and where solidcore builds what SMLib refuses, a result right
 /// against its closed form is a win.
 #[cfg(test)]
-const HELD_BACK: &[&str] = &[
-    // crashes/2992-join-disk-and-36-twisted-loft-blades takes 121 s with it on, 31 s off, run alone on one
-    // machine (the C++ kernel: 26 s), and times out in a loaded rig. The result is the same.
-    "geometric_g2_continuity",
-];
+const HELD_BACK: &[&str] = &[];
 
 fn fresh() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
