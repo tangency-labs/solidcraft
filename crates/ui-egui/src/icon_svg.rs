@@ -949,7 +949,7 @@ mod tests {
             for dark in [false, true] {
                 for size in [16, 24, 64, 128] {
                     let doc = doc_for(resolved.master, size).unwrap();
-                    let image = render(doc, Look { dark, accent: None, vision: crate::theme::ColorVision::Off }, size).unwrap();
+                    let image = render(doc, Look { dark, accent: None, vision: crate::theme::ColorVision::Off, palette: None }, size).unwrap();
                     assert!(image.pixels().iter().any(|pixel| pixel.alpha() > 0), "{candidate}: {dark} at {size}px");
                 }
             }
