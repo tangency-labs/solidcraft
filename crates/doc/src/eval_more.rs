@@ -1094,12 +1094,23 @@ pub(super) fn sheet_primitive_cut(
 /// panel at an angle).
 pub(super) fn sheet_bore_cut(f: &Feature, st: &mut ModelState, prism: PrimitivePrism) -> Result<Option<Vec<String>>> {
     let PrimitivePrism::Cylinder { base, axis, radius, height } = prism else { return Ok(None) };
+    // Drilling a sheet builds each of its panels and runs a boolean on it, only to find that a
+    // drill far off meets none (#10226): a sheet whose box lies clear of the drill's is left out.
+    // Both boxes are grown past how far the exact faces curve out from their meshes, as for
+    // the other sheet cuts. A drill a sheet refuses whatever it meets (not a cylinder, or the
+    // sheet holds all the bores it may) is still put to every sheet.
+    let reach = drill_box(base, axis, radius, height);
     let mut plans = Vec::new();
     for original in &st.sheets {
         if !sheet_eligible(f, st, &[], original) {
             continue;
         }
+        if !original.bores_full() && st.body(&original.body).is_some_and(|mb| boxes_apart(&mesh_box(mb), &reach)) {
+            continue;
+        }
         let mut sh = original.clone();
+        #[cfg(test)]
+        super::cost_tests::count(|c| c.cut += 1);
         match sh.add_bore(base, axis, radius, height) {
             Ok(true) => {}
             Ok(false) => continue,
@@ -1124,6 +1135,16 @@ pub(super) fn sheet_bore_cut(f: &Feature, st: &mut ModelState, prism: PrimitiveP
         }
     }
     Ok(Some(handled))
+}
+
+/// [`body_box`] of a hole's drill as [`crate::sheet::SheetBody::add_bore`] makes it; None
+/// (never apart) for a drill it refuses.
+fn drill_box(base: Vec3, axis: Vec3, radius: f64, height: f64) -> Option<Aabb3> {
+    let axis = axis.normalized()?;
+    if ![base.x, base.y, base.z, radius, height].iter().all(|v| v.is_finite()) || !(radius > 0.0) || height == 0.0 {
+        return None;
+    }
+    body_box(&kernel::cylinder(base, axis, radius, height).ok()?)
 }
 
 /// The most hole tools machined in one pass by [`sheet_drill_cuts`].
@@ -1556,13 +1577,13 @@ fn sheet_prism_cut(
 
 /// A box around `body`, grown past its mesh's deflection from the exact faces (and a hair
 /// more): bodies whose boxes are apart do not meet. None when it can't be worked out.
-fn body_box(body: &Body) -> Option<Aabb3> {
+pub(super) fn body_box(body: &Body) -> Option<Aabb3> {
     let tol = (body.size() * 1e-3).max(1e-4);
     padded_box(&body.tessellate(tol).ok()?, tol)
 }
 
 /// [`body_box`] of a model body, from the mesh it keeps.
-fn mesh_box(mb: &ModelBody) -> Option<Aabb3> {
+pub(super) fn mesh_box(mb: &ModelBody) -> Option<Aabb3> {
     padded_box(&mb.mesh(), mb.display_tol())
 }
 
@@ -1572,7 +1593,7 @@ fn padded_box(mesh: &solidcraft_geom::Mesh, tol: f64) -> Option<Aabb3> {
 }
 
 /// Whether two boxes are known to be apart (an unknown box is never apart).
-fn boxes_apart(a: &Option<Aabb3>, b: &Option<Aabb3>) -> bool {
+pub(super) fn boxes_apart(a: &Option<Aabb3>, b: &Option<Aabb3>) -> bool {
     let (Some(a), Some(b)) = (a, b) else { return false };
     a.max.x < b.min.x || b.max.x < a.min.x || a.max.y < b.min.y || b.max.y < a.min.y || a.max.z < b.min.z || b.max.z < a.min.z
 }
