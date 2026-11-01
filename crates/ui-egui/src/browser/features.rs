@@ -9,6 +9,12 @@ pub(crate) struct Reveal {
     pub path: Vec<u64>,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Folded Features folders whose mark was worked out (the tests count them).
+    static MARKS_WORKED_OUT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Open the Features folder that lists this feature and scroll to its row, without changing the
 /// active component or history marker. The folder is the one of the placement `body` belongs to:
 /// without a body there is no telling which copy of a component was meant.
@@ -82,10 +88,14 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     let (key, label) =
         if compact { (format!("{scope}/history"), crate::i18n::tr("ui.history_title")) } else { (format!("{scope}/features"), "Features") };
     let open = is_open(app, &key, compact);
-    // Folded, it carries the worst mark of what it holds.
-    let ids: Vec<u64> = if open {
+    // Folded, it carries the worst mark of what it holds. A row scrolled out of view paints
+    // nothing, so its mark is not worked out: in a long tree of placements of a part with a long
+    // history, every folder's mark scanned the design's whole history on every frame (#6083).
+    let ids: Vec<u64> = if open || !ui.is_rect_visible(row_rect(ui)) {
         Vec::new()
     } else {
+        #[cfg(test)]
+        MARKS_WORKED_OUT.with(|n| n.set(n.get() + 1));
         app.session
             .doc
             .features
@@ -713,6 +723,29 @@ mod tests {
             assert!(h.app.tree.reveal.is_none(), "{world_body}: the placed body row was drawn and scrolled to");
             assert_eq!(h.app.session.selection, [Sel::Body { name: world_body }]);
         }
+    }
+
+    /// #6083: in a long tree of placements, only the folded Features folders on screen work out
+    /// their mark (each scanned the design's whole history, every frame); those on screen still
+    /// show it.
+    #[test]
+    fn only_folded_features_folders_on_screen_work_out_their_mark() {
+        let mut h = Harness::new();
+        let component = h.app.run("component.create", json!({"name":"Part"})).unwrap();
+        let feature = h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        let first = component["occurrence"].as_u64().unwrap();
+        for i in 1..=80 {
+            h.app.run("occurrence.copy", json!({"occurrence":first,"translate":[20.0 * f64::from(i),0,0]})).unwrap();
+        }
+        h.frames(2);
+        let result = h.app.session.model.results.iter_mut().find(|r| r.id == feature).unwrap();
+        result.error = Some("the blend is larger than the neighbouring faces".into());
+        MARKS_WORKED_OUT.with(|n| n.set(0));
+        h.frame();
+        let worked = MARKS_WORKED_OUT.with(std::cell::Cell::get);
+        assert!(worked > 0 && worked < 40, "{worked} of 81 folded Features folders worked out their mark");
+        assert!(!crate::scenario::handles("status:error:Features").is_empty(), "a folder on screen shows its mark");
     }
 
     #[test]
