@@ -47,6 +47,9 @@
 //! `cargo xtask web-offline`'s generator and a `data-build` marker on `<html>`. Chrome comes from
 //! `CHROME` or the usual install locations; `cargo xtask ci` skips this test when there is none.
 //!
+//! A real build's copies each get a file of their own, as successive deployments have files
+//! named differently.
+//!
 //! The stand-in app has a content-named script, a `shared.js` whose name is the same in every
 //! build (a page must get its own build's), more files under `icons/` than the browser asks for
 //! at once, and an on-demand file under `fonts/` (not kept).
@@ -240,6 +243,10 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
             check_site(root, Path::new(dir), &work.0.join("check"))?;
             for (to, build) in &builds {
                 copy_dir(Path::new(dir), to)?;
+                // Trunk names files after their contents, so two real deployments differ in more
+                // than `index.html`; copies of one build don't. A file of its own per copy lets
+                // a step hold back what one build has and the next lacks (step 13).
+                std::fs::write(to.join(format!("own-{build}.txt")), format!("{build}\n")).map_err(|e| format!("{}: {e}", to.display()))?;
                 let index = to.join("index.html");
                 let html = std::fs::read_to_string(&index).map_err(|e| format!("{}: {e}", index.display()))?;
                 std::fs::write(&index, mark(&html, build)?).map_err(|e| format!("{}: {e}", index.display()))?;
