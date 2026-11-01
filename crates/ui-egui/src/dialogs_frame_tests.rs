@@ -195,3 +195,85 @@ fn picked_lines_stay_in_the_sketch_they_were_picked_in() {
     d.inputs[0].items.push(Sel::ExternalSketchCurve { sketch: rails, id: ids[0].clone() });
     assert!(apply_commands(&app, &d).unwrap_err().contains("one sketch"));
 }
+
+fn gusset_with_picked_supports() -> SolveApp {
+    let mut app = app_with(&[
+        ("solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":300,"body_name":"Post"})),
+        ("solid.box", json!({"corner":[20,-20,0],"length":300,"width":40,"height":40,"body_name":"Rail"})),
+    ]);
+    for (name, point, normal) in [("Post", [20., 0., 100.], [1., 0., 0.]), ("Rail", [100., 0., 40.], [0., 0., 1.])] {
+        let st = app.session.model.state();
+        let body = st.body(name).unwrap();
+        let point = solidcraft_engine::geom::Vec3::new(point[0], point[1], point[2]);
+        let normal = solidcraft_engine::geom::Vec3::new(normal[0], normal[1], normal[2]);
+        let index = (0..body.body.face_count())
+            .find(|i| body.body.planar_face(*i).is_some_and(|p| p.normal().dot(normal) > 0.999 && (p.origin - point).dot(normal).abs() < 1e-6))
+            .unwrap();
+        app.session.selection.push(Sel::Face { body: name.into(), index, point });
+    }
+    app
+}
+
+#[test]
+fn gusset_preselection_preview_and_edit_keep_exact_supports() {
+    let mut app = gusset_with_picked_supports();
+    app.start("frame.gusset");
+    let mut d = app.dialog.clone().unwrap();
+    assert!(d.previews());
+    assert_eq!(d.inputs.iter().map(|i| i.items.len()).collect::<Vec<_>>(), [1, 1]);
+    let Kind::Gusset(g) = &mut d.kind else { panic!("wrong dialog") };
+    g.leg1 = "80 mm".into();
+    g.leg2 = "100 mm".into();
+    let preview = crate::dialogs::preview_commands(&app, &d).unwrap();
+    assert_eq!(preview[0].0, "frame.gusset");
+    assert!(preview[0].1["supports"][0]["index"].is_number());
+    let c = apply_commands(&app, &d).unwrap();
+    run_all(&mut app, c);
+    let fid = app.session.doc.features.last().unwrap().id;
+    let mut edit = edit_dialog(&app, fid, None).unwrap();
+    assert!(edit.inputs.iter().all(|i| i.items.len() == 1));
+    let Kind::Gusset(g) = &mut edit.kind else { panic!("wrong edit dialog") };
+    assert_eq!(g.leg2, "100 mm");
+    g.thickness = "8 mm".into();
+    let c = apply_commands(&app, &edit).unwrap();
+    assert_eq!(c[0].0, "timeline.redefine");
+    run_all(&mut app, c);
+    let state = app.session.model.state();
+    let body = state.bodies.iter().find(|b| b.feature == fid).unwrap();
+    assert!((body.mesh().measure().volume - 32000.).abs() < 1e-5);
+}
+
+#[test]
+fn gusset_placement_icons_select_both_sides_and_center_with_exact_bounds() {
+    let mut h = crate::scenario::Harness::new();
+    h.app = gusset_with_picked_supports();
+    h.app.home.open = false;
+    h.app.start("frame.gusset");
+    h.frames(3);
+    assert!(crate::scenario::rect_of("dialog:segments:Thickness Placement").is_some(), "placement is a visible icon strip");
+    let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
+    for label in ["Negative Side", "Centered", "Positive Side"] {
+        assert!(nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(label)), "accessible icon: {label}");
+    }
+    for (label, placement, min, max) in
+        [("Negative Side", "negative", 0., 6.), ("Centered", "center", -3., 3.), ("Positive Side", "positive", -6., 0.)]
+    {
+        crate::test_support::click(&mut h, &format!("dialog:Thickness Placement:{label}"));
+        let d = h.app.dialog.as_ref().unwrap();
+        let commands = crate::dialogs::preview_commands(&h.app, d).unwrap();
+        assert_eq!(commands[0].1["placement"], placement);
+        let mut preview = Session::new(solidcraft_engine::doc::Document::from_json(&h.app.session.doc.to_json()).unwrap());
+        let result = preview.execute(&commands[0].0, &commands[0].1).unwrap();
+        let state = preview.model.state();
+        let body = state.bodies.iter().find(|b| b.feature == result["feature"].as_u64().unwrap()).unwrap();
+        let bounds = body.mesh().bounds();
+        assert!((bounds.min.y - min).abs() < 1e-6 && (bounds.max.y - max).abs() < 1e-6, "{label}: {bounds:?}");
+    }
+    // Icon-only controls still have translated names for keyboard/screen-reader users.
+    h.app.preferences.language = "de".into();
+    h.frames(3);
+    let nodes = &h.output.accesskit_update.as_ref().unwrap().nodes;
+    for id in ["ui.gusset.negative", "ui.gusset.center", "ui.gusset.positive"] {
+        assert!(nodes.iter().any(|(_, n)| n.role() == egui::accesskit::Role::Button && n.label() == Some(h.app.tr(id))), "{id}");
+    }
+}

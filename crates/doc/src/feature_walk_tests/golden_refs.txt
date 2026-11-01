@@ -1,3 +1,5 @@
+frame_gusset
+  remap_refs: supports[0].member.feature, supports[0].plane.base.base.feature, supports[1].plane.base.base.feature
 body_transfer
   remap_bodies: bodies[0]
 sketch

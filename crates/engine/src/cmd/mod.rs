@@ -61,6 +61,7 @@ mod config;
 mod design_link;
 mod file;
 mod frame;
+mod frame_gusset;
 pub(crate) mod inspect;
 mod interference;
 pub(crate) mod joints;
@@ -324,6 +325,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sheet::COMMANDS.iter());
     v.extend(plastic::COMMANDS.iter());
     v.extend(frame::COMMANDS.iter());
+    v.extend(frame_gusset::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
     v.extend(component_link::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());

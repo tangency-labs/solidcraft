@@ -508,6 +508,19 @@ pub(super) fn build(
             }
             anchor.author_path = cloned_path(source, &original.author_path, component, &clone_path, &occurrences)?;
         }
+        if let (FeatureKind::FrameGusset { supports, .. }, FeatureKind::FrameGusset { supports: originals, .. }) = (&mut f.kind, &old.kind) {
+            for (support, original) in supports.iter_mut().zip(originals) {
+                if let (Some(anchor), Some(original)) =
+                    (super::sketch::face::anchor_mut(&mut support.plane), super::sketch::face::anchor(&original.plane))
+                {
+                    if bodies.contains_key(&original.target.body) {
+                        anchor.component = *components.get(&original.component).ok_or_else(|| bad(CMD, "gusset source outside copied graph"))?;
+                        anchor.path = cloned_path(&source, &original.path, component, &clone_path, &occurrences)?;
+                    }
+                    anchor.author_path = cloned_path(&source, &original.author_path, component, &clone_path, &occurrences)?;
+                }
+            }
+        }
         if let Some(slot) = scratch.doc_mut().feature_mut(f.id) {
             *slot = f;
         }

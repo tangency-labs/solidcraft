@@ -1677,6 +1677,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "plastic.lip"
                 | "plastic.snap_fit"
                 | "plastic.rest"
+                | "frame.gusset"
                 | "frame.member"
         );
     if !constructor {
@@ -1724,6 +1725,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let shared = kept.clone().unwrap_or_default();
     trial.model.keep(Some(shared.clone()));
     trial.active_component = old.component;
+    if let FeatureKind::FrameGusset { supports, .. } = &old.kind
+        && let Some(anchor) = supports.first().and_then(|s| super::sketch::face::anchor(&s.plane))
+    {
+        trial.active_occurrence_path = (!anchor.author_path.is_empty()).then(|| anchor.author_path.clone());
+    }
     if let FeatureKind::Emboss { face: Some(face), .. } = &old.kind {
         trial.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
     }

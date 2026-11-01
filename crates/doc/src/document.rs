@@ -992,8 +992,24 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         targets: Vec<BodyName>,
     },
-    /// Structural members (#4003): one body per straight line of a frame sketch (2D sketch lines
-    /// and 3D sketch lines), its cross-section the profile, square to the line from end to end.
+    /// A separate fabrication plate attached to two planar support faces.
+    FrameGusset {
+        supports: Vec<crate::gusset::Support>,
+        #[walk(length = "First Leg")]
+        leg1: Expr,
+        #[walk(length = "Second Leg")]
+        leg2: Expr,
+        #[walk(length = "Thickness")]
+        thickness: Expr,
+        #[walk(length = "Corner Relief")]
+        relief: Expr,
+        #[walk(length = "Outer Tip Clip")]
+        clip: Expr,
+        #[walk(length = "Joint Offset")]
+        offset: Expr,
+        placement: crate::gusset::Placement,
+    },
+    /// One structural member per straight line of a 2D or 3D frame sketch.
     FrameMember {
         path_sketch: SketchId,
         /// The lines, by curve id; none: every straight line drawn in the sketch (not
@@ -2387,6 +2403,7 @@ impl FeatureKind {
             FeatureKind::SurfaceOffset { .. } => "OffsetSurfaceFeature",
             FeatureKind::BoundingSolid { .. } => "BoundingSolidFeature",
             FeatureKind::Pipe { .. } => "PipeFeature",
+            FeatureKind::FrameGusset { .. } => "GussetFeature",
             FeatureKind::FrameMember { .. } => "FrameMemberFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
             FeatureKind::Boss { .. } => "BossFeature",
@@ -2470,6 +2487,7 @@ impl FeatureKind {
             FeatureKind::SurfaceOffset { .. } => "OffsetSurface",
             FeatureKind::BoundingSolid { .. } => "BoundingSolid",
             FeatureKind::Pipe { .. } => "Pipe",
+            FeatureKind::FrameGusset { .. } => "Gusset",
             FeatureKind::FrameMember { .. } => "Member",
             FeatureKind::Emboss { .. } => "Emboss",
             FeatureKind::Boss { .. } => "Boss",
