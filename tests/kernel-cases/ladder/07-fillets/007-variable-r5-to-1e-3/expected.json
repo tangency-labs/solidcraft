@@ -2,8 +2,8 @@
  "sources": [],
  "what": "a variable round on the top front edge, r5 down to 1e-3 mm",
  "source": "analytic",
- "method": "as 005 with b = 1e-3: the round's end is a 1e-3 mm quarter circle on the end face",
+ "method": "as 005 with b = 1e-3: the round's end a 1e-3 mm circle on the end face; 107.077487 removed (great circles: 107.322)",
  "body_count": 1,
- "volume_mm3": 47892.677617223,
+ "volume_mm3": 47892.922513,
  "faces": 7
 }
