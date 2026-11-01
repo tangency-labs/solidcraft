@@ -14,8 +14,7 @@ use super::{CommandSpec, not_in_sketch};
 use crate::params::{UNKNOWN_COMMAND, bad, bool_, expr, expr_problem, req_expr, str_, string_list, string_list_or_default, vec2, vec3};
 use crate::schema::features::{
     AppliedRadius, BoundingSolidParams, BoxParams, ConeParams, CylinderParams, ExtrudeParams, FeatureNotice, FeatureResult, FilletParams,
-    FilletResult, MoveParams, MoveResult, NoticeAction, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, ScaleParams, SphereParams,
-    TorusParams,
+    FilletResult, MoveParams, MoveResult, NoticeAction, OffsetPlaneParams, PipeParams, PlaneAtAngleParams, ScaleParams, SphereParams, TorusParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
