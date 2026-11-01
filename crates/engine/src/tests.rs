@@ -3086,6 +3086,79 @@ fn hole_as_deep_as_the_plate() {
     }
 }
 
+/// #7520: a hole that names no bodies leaves hidden ones alone, as a cut does (#3961), and keeps
+/// doing so once they are shown again. Its face is named on the body it drills, not on a hidden
+/// one whose face lies in the same plane; with nothing hidden, it still drills every body.
+#[test]
+fn a_hole_leaves_hidden_bodies_alone() {
+    let setup = |hide: bool| {
+        let mut s = Session::default();
+        // Two bodies whose bottom faces share the plane z = 0, the hidden one made first.
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 20, "body_name": "Block"}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "operation": "new", "body_name": "Plate"}));
+        if hide {
+            run(&mut s, "browser.visibility", json!({"items": ["Block"], "visible": false}));
+        }
+        // The name of the plate's face that is picked, before the hole takes the point away.
+        let picked = solidcraft_doc::naming::face_name_at_body(s.world_state().body("Plate").unwrap(), solidcraft_geom::Vec3::new(20.0, 20.0, 0.0));
+        let r = s.execute("solid.hole", &json!({"position": [20, 20, 0], "diameter": 5, "depth": 10, "name": "Hole1"})).unwrap();
+        (s, r, picked)
+    };
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().body(name).unwrap().body).unwrap().volume;
+    let (block, plate) = (40.0 * 40.0 * 20.0, 40.0 * 40.0 * 5.0);
+    let (mut hidden, r, picked) = setup(true);
+    assert_eq!(r["changed_bodies"], json!(["Plate"]));
+    assert!((vol(&hidden, "Block") - block).abs() < 1e-6, "the hidden body is not drilled");
+    assert!(vol(&hidden, "Plate") < plate - 1.0, "the shown one is");
+    let hole = hidden.doc.find_feature("Hole1").unwrap();
+    assert!(picked.is_some());
+    assert_eq!((hole.participants.clone(), hole.face_names.first().cloned()), (vec!["Plate".to_string()], picked));
+    run(&mut hidden, "browser.visibility", json!({"items": ["Block"], "visible": true}));
+    assert!((vol(&hidden, "Block") - block).abs() < 1e-6, "shown again, it stays as it was");
+    let (shown, r, _) = setup(false);
+    assert_eq!(r["changed_bodies"], json!(["Block", "Plate"]), "with nothing hidden, both are drilled");
+    assert!(vol(&shown, "Block") < block - 1.0 && vol(&shown, "Plate") < plate - 1.0);
+}
+
+/// #7520 (review): the body whose face is picked is drilled even while it is hidden (picked
+/// through Select Other, or hidden with the dialog open), and editing a hole made with nothing
+/// hidden keeps drilling every body, though one is hidden at the time of the edit.
+#[test]
+fn a_hole_drills_its_picked_body_and_an_edit_keeps_its_scope() {
+    let stack = || {
+        let mut s = Session::default();
+        // Two plates stacked: Lower z 0..5, Upper z 5..10.
+        run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "body_name": "Lower"}));
+        run(&mut s, "solid.box", json!({"corner": [0, 0, 5], "length": 40, "width": 40, "height": 5, "operation": "new", "body_name": "Upper"}));
+        s
+    };
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().body(name).unwrap().body).unwrap().volume;
+    let plate = 40.0 * 40.0 * 5.0;
+    let hole = |d: f64| json!({"position": [20, 20, 10], "direction": [0, 0, -1], "diameter": d, "depth": 20, "name": "Hole1"});
+
+    // The picked face is on the hidden Upper: it is drilled, and so is the shown Lower below.
+    let mut s = stack();
+    run(&mut s, "browser.visibility", json!({"items": ["Upper"], "visible": false}));
+    let r = s.execute("solid.hole", &hole(5.0)).unwrap();
+    assert_eq!(r["changed_bodies"], json!(["Lower", "Upper"]), "the picked body is drilled though hidden");
+    assert!(vol(&s, "Upper") < plate - 1.0 && vol(&s, "Lower") < plate - 1.0);
+
+    // Made with nothing hidden, then edited with Lower hidden: both stay drilled, at the new size.
+    let mut s = stack();
+    run(&mut s, "solid.hole", hole(5.0));
+    let small = vol(&s, "Lower");
+    assert!(small < plate - 1.0);
+    run(&mut s, "browser.visibility", json!({"items": ["Lower"], "visible": false}));
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": "Hole1", "command": "solid.hole", "params": {"position": [20, 20, 10], "direction": [0, 0, -1], "diameter": 6, "depth": 20}}),
+    );
+    assert!(s.doc.find_feature("Hole1").unwrap().participants.is_empty(), "the edit keeps the hole's scope");
+    assert!(vol(&s, "Lower") < small - 1.0, "the hidden Lower keeps its hole, now wider");
+    assert!(vol(&s, "Upper") < small - 1.0);
+}
+
 /// Appearances outlive later features: a coloured face keeps its colour after a fillet on a
 /// neighbouring edge; an imported STEP's body and face colours survive a hole.
 #[test]

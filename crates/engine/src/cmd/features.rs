@@ -726,6 +726,8 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
             names
         } else if pts.is_empty() {
             Vec::new()
+        } else if matches!(kind, FeatureKind::Hole { .. }) {
+            hole_face_names(s, p, &kind)
         } else {
             solidcraft_doc::face_point_names(&s.doc, &s.model.state(), &kind, s.active_component)
         }
@@ -1038,6 +1040,22 @@ fn face_body_reached(s: &Session, sketch: u64) -> Result<Option<String>> {
         )));
     }
     Ok(Some(body.name.clone()))
+}
+
+/// A hole's face points, named on the bodies it drills where one of theirs holds the point
+/// (#7520): a face of another body in the same plane, a hidden one the hole leaves alone, would
+/// otherwise take the name of the face that was picked. Over every body, as before, elsewhere.
+fn hole_face_names(s: &Session, p: &Value, kind: &FeatureKind) -> Vec<String> {
+    let st = s.model.state();
+    let all = solidcraft_doc::face_point_names(&s.doc, &st, kind, s.active_component);
+    let drilled = string_list_or_default(p, "participants");
+    if drilled.is_empty() || drilled.iter().any(|b| b == "*") {
+        return all;
+    }
+    let mut scoped = solidcraft_doc::ModelState::default();
+    scoped.bodies = st.bodies.iter().filter(|b| drilled.contains(&b.name)).cloned().collect();
+    let own = solidcraft_doc::face_point_names(&s.doc, &scoped, kind, s.active_component);
+    own.into_iter().zip(all).map(|(own, any)| if own.is_empty() { any } else { own }).collect()
 }
 
 /// The body whose face `sketch` is attached to (on the face itself, not offset from it), when
@@ -2631,6 +2649,19 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             // placed) cuts that body: the pick is already in that body's frame, and the
             // component's own bodies alone would leave nothing to cut.
             p["participants"] = json!([body]);
+        } else if let Some(mut shown) = shown_scope(s) {
+            // Like a cut (#3961), a hole leaves hidden bodies alone (#7520): while some are
+            // hidden, it drills the shown ones, stored so showing the others later changes
+            // nothing. The body whose face was picked is drilled though hidden (picked through
+            // Select Other, or hidden with the dialog open): it is the one the hole is for.
+            if points.is_none()
+                && let Some(body) = hidden_body_picked_at(s, position, &shown)
+            {
+                shown.push(body);
+            }
+            if !shown.is_empty() {
+                p["participants"] = json!(shown);
+            }
         }
     }
     add_feature(
@@ -2698,16 +2729,36 @@ fn hole_reference_params(s: &Session, p: &Value, cmd: &str) -> Result<Vec<solidc
 /// component than the active one.
 fn body_of_other_component_at(s: &Session, p: Vec3) -> Option<String> {
     let st = s.model.state();
-    let (_, body) = st
-        .bodies
+    let body = body_with_face_at(&st, p, |_| true)?;
+    (s.doc.model_body_component(body) != s.active_component).then(|| body.name.clone())
+}
+
+/// The hidden body whose face holds `p`, when no shown body has a face there: a face shared by
+/// a shown and a hidden body is the shown one's, as a pick in the view would take it (#7520).
+fn hidden_body_picked_at(s: &Session, p: Vec3, shown: &[String]) -> Option<String> {
+    let st = s.model.state();
+    if body_with_face_at(&st, p, |b| shown.contains(&b.name)).is_some() {
+        return None;
+    }
+    let scope: Vec<&str> = active_scope(s, &st).into_iter().map(|b| b.name.as_str()).collect();
+    body_with_face_at(&st, p, |b| scope.contains(&b.name.as_str())).map(|b| b.name.clone())
+}
+
+/// The body, among those `keep` takes, with the face nearest `p` within its pick tolerance.
+fn body_with_face_at(
+    st: &solidcraft_doc::ModelState,
+    p: Vec3,
+    keep: impl Fn(&solidcraft_doc::ModelBody) -> bool,
+) -> Option<&solidcraft_doc::ModelBody> {
+    st.bodies
         .iter()
-        .filter(|b| !b.body.is_mesh())
+        .filter(|b| !b.body.is_mesh() && keep(b))
         .filter_map(|b| {
             let (d, _) = solidcraft_doc::appearance::nearest_face(b, p)?;
             (d <= solidcraft_doc::appearance::pick_tolerance(b)).then_some((d, b))
         })
-        .min_by(|a, b| a.0.total_cmp(&b.0))?;
-    (s.doc.model_body_component(body) != s.active_component).then(|| body.name.clone())
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, b)| b)
 }
 
 /// The points of a sketch a hole drills at when only the sketch is given.
