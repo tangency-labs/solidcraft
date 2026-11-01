@@ -51,3 +51,22 @@ gives way to the stitched build, and where stitching fails too the open topology
 is kept with its left-out faces reported. `BuildMode::Strict` returns the stitched
 build's error instead, and `BuildMode::StitchOnly` builds the old way only. The gate is
 `tests/topology_first.rs` (`corpus`, `one_file`, both ignored).
+
+## File pcurves
+
+`step-import` also maps each edge's `PCURVE`s (`Model::file_pcurves`).
+`build_with_file_pcurves` with `BuildOptions::file_pcurves` (off by default) makes a
+stitched face's UV trim curves from them when every edge use's pcurve checks out (a
+body built from its topology does not use them yet): it runs along the edge, lies
+within the B-rep tolerance of the edge's 3D curve, chains around the loop (shifted by
+whole periods on a periodic surface) and stays in the face's UV domain. Other faces keep
+the kernel's projected trims, and `PcurveStats` counts why. `import_with_report_options`
+reports the counts for a file.
+
+The corpus gate, `tests/file_pcurves_corpus.rs`, builds every body of a local corpus
+both ways and fails on a topology, manifold, display-validity or Level-2 regression:
+
+```sh
+SOLIDCORE_STEP_CORPUS=/path/to/corpus cargo test --release -p step-brep \
+    --test file_pcurves_corpus -- --ignored --nocapture
+```

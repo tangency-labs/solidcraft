@@ -22,8 +22,8 @@ use std::fmt;
 
 use crate::geom::{self, build_frame, conic_angle, dist, unit};
 use crate::model::{
-    BSplineCurve, BSplineSurface, Body, BodyKind, Bound, Curve, Diagnostic, Edge, Face, Frame,
-    Loop, Model, OrientedEdge, Shell, Skipped, Surface, Vertex, P3,
+    BSplineCurve, BSplineSurface, Body, BodyKind, Bound, Curve, Curve2d, Diagnostic, Edge, Face,
+    FilePcurves, Frame, Loop, Model, OrientedEdge, Pcurve, Shell, Skipped, Surface, Vertex, P3,
 };
 use crate::part21::{Instance, Limits, Param, Record, StepFile};
 
@@ -320,8 +320,12 @@ impl<'a> Mapper<'a> {
     }
 
     fn curve(&self, id: u64, c: &Ctx, depth: usize) -> R<Curve> {
+        self.curve_scaled(id, c.u.mm, depth)
+    }
+
+    /// [`Self::curve`] with lengths times `s`.
+    fn curve_scaled(&self, id: u64, s: f64, depth: usize) -> R<Curve> {
         self.check_depth(depth)?;
-        let s = c.u.mm;
         let inst = self.inst(id)?;
         match inst {
             Instance::Simple(r) => match r.name.as_str() {
@@ -390,7 +394,7 @@ impl<'a> Mapper<'a> {
                 // As a swept curve: the basis / 3D curve. The trimmed portion only
                 // narrows the swept surface, which the face's loops bound anyway.
                 "TRIMMED_CURVE" | "SURFACE_CURVE" | "SEAM_CURVE" | "INTERSECTION_CURVE" => {
-                    self.curve(ref_of(param(r, 1)?)?, c, depth + 1)
+                    self.curve_scaled(ref_of(param(r, 1)?)?, s, depth + 1)
                 }
                 other => Err(MapError::Unsupported(other.to_string())),
             },
@@ -459,6 +463,173 @@ impl<'a> Mapper<'a> {
         };
         check_bspline_curve(&b)?;
         Ok(Curve::BSpline(b))
+    }
+
+    // ---- pcurves -------------------------------------------------------------------
+
+    /// The pcurves of `EDGE_CURVE` `id`: the `PCURVE`s in the associated geometry of its
+    /// `SURFACE_CURVE` / `SEAM_CURVE` / `INTERSECTION_CURVE` / `BOUNDED_SURFACE_CURVE`
+    /// (through any `TRIMMED_CURVE`s), in the model's units. A pcurve that cannot be
+    /// mapped is reported in `diagnostics` and left out.
+    fn edge_pcurves(&self, id: u64, u: Units, diagnostics: &mut Vec<Diagnostic>) -> R<Vec<Pcurve>> {
+        let edge = self.simple(id)?;
+        let mut geometry = ref_of(param(edge, 3)?)?;
+        let mut depth = 0;
+        let surface_curve = loop {
+            self.check_depth(depth)?;
+            let Instance::Simple(r) = self.inst(geometry)? else {
+                return Ok(Vec::new());
+            };
+            match r.name.as_str() {
+                "TRIMMED_CURVE" => geometry = ref_of(param(r, 1)?)?,
+                "SURFACE_CURVE" | "SEAM_CURVE" | "INTERSECTION_CURVE" | "BOUNDED_SURFACE_CURVE" => {
+                    break r;
+                }
+                _ => return Ok(Vec::new()),
+            }
+            depth += 1;
+        };
+        let mut out = Vec::new();
+        for item in list(param(surface_curve, 2)?)? {
+            let pid = ref_of(item)?;
+            // The associated geometry also lists surfaces; only pcurves are mapped.
+            let Instance::Simple(r) = self.inst(pid)? else {
+                continue;
+            };
+            if r.name != "PCURVE" {
+                continue;
+            }
+            match self.pcurve(r, u) {
+                Ok(pcurve) => out.push(pcurve),
+                Err(error) => diagnostics.push(Diagnostic {
+                    step_id: Some(pid),
+                    message: format!("pcurve not used: {error}"),
+                }),
+            }
+        }
+        Ok(out)
+    }
+
+    /// `PCURVE(name, basis_surface, reference_to_curve)`, its curve scaled to the
+    /// model's parameter units of the basis surface.
+    fn pcurve(&self, r: &Record, u: Units) -> R<Pcurve> {
+        let surface = ref_of(param(r, 1)?)?;
+        let (su, sv) = self.pcurve_scale(surface, u)?;
+        let rep = self.simple(ref_of(param(r, 2)?)?)?;
+        if rep.name != "DEFINITIONAL_REPRESENTATION" {
+            return Err(MapError::Unsupported(rep.name.clone()));
+        }
+        let mut curves = Vec::new();
+        for item in list(param(rep, 1)?)? {
+            let id = ref_of(item)?;
+            if self.inst(id)?.record("AXIS2_PLACEMENT_2D").is_none() {
+                curves.push(id);
+            }
+        }
+        let [id] = curves.as_slice() else {
+            return invalid(format!(
+                "DEFINITIONAL_REPRESENTATION with {} curves",
+                curves.len()
+            ));
+        };
+        let (curve, trim) = self.curve_2d(*id, u, 0)?;
+        Ok(Pcurve {
+            surface,
+            curve: scale_curve_2d(curve, su, sv),
+            trim,
+        })
+    }
+
+    /// The factors from a `PCURVE` basis surface's (u, v) in file units to the model's
+    /// (mm for lengths, degrees for angles; ISO 10303-42 surface parameterisations).
+    fn pcurve_scale(&self, surface: u64, u: Units) -> R<(f64, f64)> {
+        let inst = self.inst(surface)?;
+        let name = match inst {
+            Instance::Simple(r) => r.name.as_str(),
+            Instance::Complex(_) if inst.record("B_SPLINE_SURFACE").is_some() => {
+                return Ok((1.0, 1.0));
+            }
+            Instance::Complex(_) => return Err(MapError::Unsupported(inst.type_name())),
+        };
+        match name {
+            "PLANE" => Ok((u.mm, u.mm)),
+            "CYLINDRICAL_SURFACE" | "CONICAL_SURFACE" => Ok((u.deg, u.mm)),
+            "SPHERICAL_SURFACE" | "TOROIDAL_SURFACE" => Ok((u.deg, u.deg)),
+            "B_SPLINE_SURFACE_WITH_KNOTS"
+            | "QUASI_UNIFORM_SURFACE"
+            | "UNIFORM_SURFACE"
+            | "BEZIER_SURFACE" => Ok((1.0, 1.0)),
+            other => Err(MapError::Unsupported(format!("pcurve on {other}"))),
+        }
+    }
+
+    /// `AXIS2_PLACEMENT_2D(name, location, ref_direction)` as (origin, unit x, unit y),
+    /// in file units.
+    fn placement_2d(&self, p: &Param) -> R<([f64; 2], [f64; 2], [f64; 2])> {
+        let r = self.simple(ref_of(p)?)?;
+        if r.name != "AXIS2_PLACEMENT_2D" {
+            return Err(MapError::Unsupported(r.name.clone()));
+        }
+        let o = self.point(param(r, 1)?, 1.0)?;
+        let x = match r.params.get(2) {
+            None | Some(Param::Null) => [1.0, 0.0, 0.0],
+            Some(q) => self.direction(q)?,
+        };
+        let x = unit([x[0], x[1], 0.0]).map_or_else(|| invalid("zero 2D direction"), Ok)?;
+        Ok(([o[0], o[1]], [x[0], x[1]], [-x[1], x[0]]))
+    }
+
+    /// A pcurve's 2D curve in file units, with the parameter trims of a `TRIMMED_CURVE`
+    /// around it (a conic's converted to degrees).
+    fn curve_2d(&self, id: u64, u: Units, depth: usize) -> R<(Curve2d, Option<(f64, f64)>)> {
+        self.check_depth(depth)?;
+        if let Instance::Simple(r) = self.inst(id)? {
+            match r.name.as_str() {
+                "TRIMMED_CURVE" => {
+                    let (curve, _) = self.curve_2d(ref_of(param(r, 1)?)?, u, depth + 1)?;
+                    let scale = if matches!(curve, Curve2d::Conic { .. }) {
+                        u.deg
+                    } else {
+                        1.0
+                    };
+                    let trim = trim_parameter(param(r, 2)?)
+                        .zip(trim_parameter(param(r, 3)?))
+                        .map(|(a, b)| (a * scale, b * scale));
+                    return Ok((curve, trim));
+                }
+                "CIRCLE" | "ELLIPSE" => {
+                    let (centre, x, y) = self.placement_2d(param(r, 1)?)?;
+                    let a = positive(num(param(r, 2)?)?, "pcurve conic semi axis")?;
+                    let b = if r.name == "ELLIPSE" {
+                        positive(num(param(r, 3)?)?, "pcurve conic semi axis")?
+                    } else {
+                        a
+                    };
+                    let curve = Curve2d::Conic {
+                        centre,
+                        axis1: [x[0] * a, x[1] * a],
+                        axis2: [y[0] * b, y[1] * b],
+                    };
+                    return Ok((curve, None));
+                }
+                _ => {}
+            }
+        }
+        let curve = match self.curve_scaled(id, 1.0, depth + 1)? {
+            Curve::Line {
+                origin,
+                dir,
+                magnitude,
+            } => Curve2d::Line {
+                origin: [origin[0], origin[1]],
+                dir: [dir[0] * magnitude, dir[1] * magnitude],
+            },
+            Curve::BSpline(b) => Curve2d::BSpline(b),
+            Curve::Circle { .. } | Curve::Ellipse { .. } => {
+                return Err(MapError::Unsupported("3D conic in a pcurve".into()));
+            }
+        };
+        Ok((curve, None))
     }
 
     // ---- surfaces ------------------------------------------------------------------
@@ -1272,6 +1443,92 @@ fn positive(x: f64, what: &str) -> R<f64> {
     }
 }
 
+/// The parameter value of a `TRIMMED_CURVE` trim select, when it gives one.
+fn trim_parameter(p: &Param) -> Option<f64> {
+    p.as_list()?
+        .iter()
+        .find_map(|select| match select {
+            Param::Typed(name, value) if name == "PARAMETER_VALUE" => value.as_f64(),
+            Param::Real(_) | Param::Int(_) => select.as_f64(),
+            _ => None,
+        })
+        .filter(|x| x.is_finite())
+}
+
+/// `curve` with its u coordinates times `su` and its v coordinates times `sv`.
+fn scale_curve_2d(curve: Curve2d, su: f64, sv: f64) -> Curve2d {
+    let s = |p: [f64; 2]| [p[0] * su, p[1] * sv];
+    match curve {
+        Curve2d::Line { origin, dir } => Curve2d::Line {
+            origin: s(origin),
+            dir: s(dir),
+        },
+        Curve2d::Conic {
+            centre,
+            axis1,
+            axis2,
+        } => Curve2d::Conic {
+            centre: s(centre),
+            axis1: s(axis1),
+            axis2: s(axis2),
+        },
+        Curve2d::BSpline(mut b) => {
+            for point in &mut b.points {
+                *point = [point[0] * su, point[1] * sv, 0.0];
+            }
+            Curve2d::BSpline(b)
+        }
+    }
+}
+
+/// The `#id` of face `id`'s surface (through `ORIENTED_FACE`s), when it has one.
+fn face_surface_id(file: &StepFile, id: u64, max_depth: usize) -> Option<u64> {
+    let base = resolve_face(file, id, max_depth)?;
+    let Instance::Simple(record) = file.entities.get(&base)? else {
+        return None;
+    };
+    if !matches!(record.name.as_str(), "ADVANCED_FACE" | "FACE_SURFACE") {
+        return None;
+    }
+    record.params.get(2)?.as_ref_id()
+}
+
+/// Fills [`Model::file_pcurves`] for every mapped body, in the units of the body's
+/// representation context (chosen as when the body was mapped).
+fn map_pcurves(m: &Mapper<'_>, contexts: &BTreeMap<u64, u64>, fallback: Units, model: &mut Model) {
+    let mut out = FilePcurves::default();
+    for body in &model.bodies {
+        let units = match contexts.get(&body.step_id) {
+            Some(ctx) => m.context_units(*ctx),
+            None => Ok(fallback),
+        };
+        let Ok(units) = units else {
+            continue;
+        };
+        for edge in &body.edges {
+            if edge.step_id == 0 || out.edges.contains_key(&edge.step_id) {
+                continue;
+            }
+            match m.edge_pcurves(edge.step_id, units, &mut out.diagnostics) {
+                Ok(pcurves) if pcurves.is_empty() => {}
+                Ok(pcurves) => {
+                    out.edges.insert(edge.step_id, pcurves);
+                }
+                Err(error) => out.diagnostics.push(Diagnostic {
+                    step_id: Some(edge.step_id),
+                    message: format!("pcurves not used: {error}"),
+                }),
+            }
+        }
+        for face in &body.faces {
+            if let Some(surface) = face_surface_id(m.file, face.step_id, m.limits.max_ref_depth) {
+                out.face_surfaces.insert(face.step_id, surface);
+            }
+        }
+    }
+    model.file_pcurves = out;
+}
+
 /// Report references that point at no entity in the data section.
 fn collect_dangling_references(file: &StepFile, diagnostics: &mut Vec<Diagnostic>) {
     fn visit(param: &Param, missing: &mut Vec<u64>) {
@@ -1545,6 +1802,7 @@ pub fn map_file(file: &StepFile, limits: &Limits) -> Model {
     }
     map_loose_faces(&m, &contexts, fallback, &mut model);
     model.bodies.sort_by_key(|body| body.step_id);
+    map_pcurves(&m, &contexts, fallback, &mut model);
     if model.assembly_instances > 0 {
         model.diagnostics.push(Diagnostic {
             step_id: None,
@@ -1982,6 +2240,76 @@ mod tests {
         assert!(
             matches!(forward.curve, Curve::Ellipse { semi1, semi2, .. } if (semi1 - 2.0).abs() < 1e-12 && (semi2 - 1.0).abs() < 1e-12)
         );
+    }
+
+    #[test]
+    fn pcurves_map_in_model_units() {
+        let m = model(
+            "#1=CARTESIAN_POINT('',(0.,0.,0.));\
+             #2=DIRECTION('',(0.,0.,1.));\
+             #3=DIRECTION('',(1.,0.,0.));\
+             #4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\
+             #5=CYLINDRICAL_SURFACE('',#4,2.5);\
+             #10=CARTESIAN_POINT('',(2.5,0.,0.));\
+             #11=VERTEX_POINT('',#10);\
+             #12=AXIS2_PLACEMENT_3D('',#1,#2,#3);\
+             #13=CIRCLE('',#12,2.5);\
+             #14=SURFACE_CURVE('',#13,(#56,#66,#71,#5),.CURVE_3D.);\
+             #15=EDGE_CURVE('',#11,#11,#14,.T.);\
+             #16=ORIENTED_EDGE('',*,*,#15,.T.);\
+             #17=EDGE_LOOP('',(#16));\
+             #18=FACE_BOUND('',#17,.T.);\
+             #40=ADVANCED_FACE('',(#18),#5,.T.);\
+             #50=CARTESIAN_POINT('',(0.,0.));\
+             #51=DIRECTION('',(1.,0.));\
+             #52=VECTOR('',#51,1.);\
+             #53=LINE('',#50,#52);\
+             #54=TRIMMED_CURVE('',#53,(PARAMETER_VALUE(0.)),(PARAMETER_VALUE(6.283185307179586)),.T.,.PARAMETER.);\
+             #55=DEFINITIONAL_REPRESENTATION('',(#54),#99);\
+             #56=PCURVE('',#5,#55);\
+             #60=PLANE('',#4);\
+             #61=CARTESIAN_POINT('',(0.,0.));\
+             #62=DIRECTION('',(1.,0.));\
+             #63=AXIS2_PLACEMENT_2D('',#61,#62);\
+             #64=CIRCLE('',#63,2.5);\
+             #65=DEFINITIONAL_REPRESENTATION('',(#64),#99);\
+             #66=PCURVE('',#60,#65);\
+             #70=SURFACE_OF_LINEAR_EXTRUSION('',#13,#52);\
+             #71=PCURVE('',#70,#55);\
+             #99=PARAMETRIC_REPRESENTATION_CONTEXT('','');",
+        );
+        assert!(m.skipped.is_empty(), "{:?}", m.skipped);
+        assert_eq!(m.bodies.len(), 1);
+        let p = &m.file_pcurves;
+        assert_eq!(p.face_surfaces.get(&40), Some(&5));
+        let pcurves = p.edges.get(&15).expect("edge pcurves");
+        assert_eq!(pcurves.len(), 2, "{pcurves:?}");
+        // No unit context: angles are radians, so the cylinder's u is scaled to degrees
+        // and its v (a length) is not. Line trims are line parameters, not angles.
+        let deg = 180.0 / std::f64::consts::PI;
+        assert_eq!(pcurves[0].surface, 5);
+        match &pcurves[0].curve {
+            Curve2d::Line { origin, dir } => {
+                assert_eq!(*origin, [0.0, 0.0]);
+                assert!((dir[0] - deg).abs() < 1e-12 && dir[1] == 0.0, "{dir:?}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(pcurves[0].trim, Some((0.0, std::f64::consts::TAU)));
+        // A plane's u and v are lengths.
+        assert_eq!(pcurves[1].surface, 60);
+        assert!(
+            matches!(pcurves[1].curve, Curve2d::Conic { centre, axis1, axis2 }
+                if centre == [0.0, 0.0] && axis1 == [2.5, 0.0] && axis2 == [0.0, 2.5]),
+            "{:?}",
+            pcurves[1].curve
+        );
+        assert_eq!(pcurves[1].trim, None);
+        // The extrusion's pcurve is reported and left out; the model's own
+        // diagnostics do not change.
+        assert_eq!(p.diagnostics.len(), 1, "{:?}", p.diagnostics);
+        assert_eq!(p.diagnostics[0].step_id, Some(71));
+        assert!(m.diagnostics.iter().all(|d| !d.message.contains("pcurve")));
     }
 
     #[test]

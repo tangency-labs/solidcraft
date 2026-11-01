@@ -37,9 +37,11 @@
 
 pub mod brep_to_model;
 mod constructor;
+mod pcurves;
 
 pub use brep_to_model::{brep_to_model, ExportModelError};
 pub use constructor::FaceFailure;
+pub use pcurves::PcurveStats;
 
 use std::fmt;
 
@@ -646,6 +648,9 @@ pub struct BuildOptions {
     pub skip_cone_seams: bool,
     /// How the build is chosen ([`build_body`]).
     pub mode: BuildMode,
+    /// Make faces' UV trim curves from the file's pcurves ([`build_with_file_pcurves`])
+    /// where they check out, instead of projecting the edges (stitched builds only).
+    pub file_pcurves: bool,
 }
 
 /// Which way [`build_body`] built a body.
@@ -670,6 +675,9 @@ pub struct BuiltBody {
     /// With [`BuildPath::Stitch`]: why the topology-first build was not kept (its
     /// error, or the check it failed); `None` when it did not run.
     pub topology_note: Option<String>,
+    /// What became of the file's pcurves (all zero unless
+    /// [`BuildOptions::file_pcurves`] is set).
+    pub pcurves: PcurveStats,
 }
 
 /// Builds one neutral body into a solidcore B-rep ([`build_body`]: from its topology,
@@ -709,6 +717,17 @@ pub fn build_with_options(body: &Body, options: BuildOptions) -> Result<Brep, Bu
     build_body(body, options).map(|built| built.brep)
 }
 
+/// [`build_with_options`] with the file's pcurves ([`step_import::Model::file_pcurves`]),
+/// used when [`BuildOptions::file_pcurves`] is set; returns what became of them.
+pub fn build_with_file_pcurves(
+    body: &Body,
+    file_pcurves: &sm::FilePcurves,
+    options: BuildOptions,
+) -> Result<(Brep, PcurveStats), BuildError> {
+    build_body_with_file_pcurves(body, file_pcurves, options)
+        .map(|built| (built.brep, built.pcurves))
+}
+
 /// Builds one body, topology first.
 ///
 /// The body is built from the file's topology (the faces' shared edges and vertices
@@ -733,15 +752,40 @@ pub fn build_with_options(body: &Body, options: BuildOptions) -> Result<Brep, Bu
 /// The stitched build's error when it fails and the topology build gives no B-rep
 /// (or in [`BuildMode::Strict`]).
 pub fn build_body(body: &Body, options: BuildOptions) -> Result<BuiltBody, BuildError> {
-    let stitched_body = |brep, topology_note| BuiltBody {
+    build_body_with_file_pcurves(body, &sm::FilePcurves::default(), options)
+}
+
+/// [`build_body`] with the file's pcurves ([`step_import::Model::file_pcurves`]), used
+/// on the stitched build when [`BuildOptions::file_pcurves`] is set. A topology-first
+/// build does not use them yet; its faces count under the pcurve fallback "topology
+/// build".
+///
+/// # Errors
+///
+/// As [`build_body`].
+pub fn build_body_with_file_pcurves(
+    body: &Body,
+    file_pcurves: &sm::FilePcurves,
+    options: BuildOptions,
+) -> Result<BuiltBody, BuildError> {
+    let stitched_body = |(brep, pcurves), topology_note| BuiltBody {
         brep,
         path: BuildPath::Stitch,
         face_failures: Vec::new(),
         topology_note,
+        pcurves,
     };
+    let build_stitched = |body, options| build_stitched(body, file_pcurves, options);
     if options.mode == BuildMode::StitchOnly {
-        return build_stitched(body, options).map(|brep| stitched_body(brep, None));
+        return build_stitched(body, options).map(|built| stitched_body(built, None));
     }
+    let topology_pcurves = || {
+        if options.file_pcurves {
+            pcurves::not_used(body, "topology build")
+        } else {
+            PcurveStats::default()
+        }
+    };
     let topology_built = |heal_first| {
         build_topology(body, options, heal_first).map(|(brep, face_failures, repaired)| {
             let built = BuiltBody {
@@ -749,6 +793,7 @@ pub fn build_body(body: &Body, options: BuildOptions) -> Result<BuiltBody, Build
                 path: BuildPath::Topology,
                 face_failures,
                 topology_note: None,
+                pcurves: topology_pcurves(),
             };
             (built, repaired)
         })
@@ -774,7 +819,7 @@ pub fn build_body(body: &Body, options: BuildOptions) -> Result<BuiltBody, Build
             Err(error) => error.clone(),
         };
         return match stitched {
-            Ok(brep) => Ok(stitched_body(brep, Some(note))),
+            Ok(built) => Ok(stitched_body(built, Some(note))),
             Err(error) if options.mode == BuildMode::Strict => Err(error),
             Err(error) => topology.map_err(|_| error),
         };
@@ -783,7 +828,10 @@ pub fn build_body(body: &Body, options: BuildOptions) -> Result<BuiltBody, Build
     // the file's topology may close with the wrong trims, which the healer mends; the
     // healed topology build is kept when it then agrees with the stitched one, else
     // the topology build (the closer of the two to the reference in most such cases).
-    let stitched_volume = stitched.as_ref().ok().and_then(closed_volume);
+    let stitched_volume = stitched
+        .as_ref()
+        .ok()
+        .and_then(|(brep, _)| closed_volume(brep));
     let agrees = |a: f64, b: f64| (a - b).abs() <= AGREEMENT * a.abs().max(b.abs());
     if let Some(stitched_volume) = stitched_volume {
         if !agrees(topology_volume, stitched_volume) && !options.heal {
@@ -847,6 +895,7 @@ pub fn build_from_topology(body: &Body, options: BuildOptions) -> Result<BuiltBo
             path: BuildPath::Topology,
             face_failures,
             topology_note: None,
+            pcurves: PcurveStats::default(),
         })
         .map_err(|message| BuildError { message })
 }
@@ -919,8 +968,13 @@ fn build_topology(
     Ok((brep, failures, repaired))
 }
 
-/// The stitched build: each face on its own, stitched, seam-fixed and trimmed.
-fn build_stitched(body: &Body, options: BuildOptions) -> Result<Brep, BuildError> {
+/// The stitched build: each face on its own, stitched, seam-fixed and trimmed, with
+/// the file's pcurves as UV trim curves where [`BuildOptions::file_pcurves`] asks.
+fn build_stitched(
+    body: &Body,
+    file_pcurves: &sm::FilePcurves,
+    options: BuildOptions,
+) -> Result<(Brep, PcurveStats), BuildError> {
     let mut kernel = Kernel::default();
     let mut brep = p3::new_brep(
         &mut kernel,
@@ -949,10 +1003,19 @@ fn build_stitched(body: &Body, options: BuildOptions) -> Result<Brep, BuildError
             _ => Some(*frame),
         }
     };
+    let mut built = Vec::new();
     for face in &body.faces {
         let input = face_input(&kernel, body, face)?;
         let points = sample_face_points(body, face);
         let frame = face_frame(face, &points);
+        let u_offset = match (&face.surface, surface_frame(&face.surface), frame.as_ref()) {
+            (
+                sm::Surface::Cylinder { .. } | sm::Surface::Cone { .. },
+                Some(file),
+                Some(rotated),
+            ) => pcurves::u_offset(file, rotated),
+            _ => 0.0,
+        };
         let surface = make_surface(&kernel, &face.surface, frame.as_ref())?;
         let uv_domain = frame
             .as_ref()
@@ -968,7 +1031,7 @@ fn build_stitched(body: &Body, options: BuildOptions) -> Result<Brep, BuildError
         // Build the trimmed face from all of its loops at once. The incremental
         // big-face-then-trim path splits multi-loop faces and lazily fits UV trim
         // curves, which fails for lines projected onto periodic surfaces.
-        p7::make_face_with_curves(
+        let made = p7::make_face_with_curves(
             &mut kernel,
             &mut brep,
             None,
@@ -984,6 +1047,11 @@ fn build_stitched(body: &Body, options: BuildOptions) -> Result<Brep, BuildError
             face_env.this_face,
             face_env.env,
         )?;
+        built.push(pcurves::BuiltFace {
+            face: made.face,
+            u_offset,
+            split: false,
+        });
     }
     drop(state);
     api_stitch_into_solid(&mut kernel, Some(&mut brep))?;
@@ -1000,9 +1068,15 @@ fn build_stitched(body: &Body, options: BuildOptions) -> Result<Brep, BuildError
             && fp2::surface(&brep, face).ok().flatten().is_some_and(
                 |surface| matches!(surface.kind(), SurfaceKind::Cone(cone) if !cone.is_cylinder()),
             );
-        if !cone {
-            trimming_tools::split_at_seams(&mut kernel, &mut brep, face)?;
+        if !cone && !trimming_tools::split_at_seams(&mut kernel, &mut brep, face)?.is_empty() {
+            if let Some(split) = built.iter_mut().find(|built| built.face == Some(face)) {
+                split.split = true;
+            }
         }
+    }
+    let mut stats = PcurveStats::default();
+    if options.file_pcurves {
+        pcurves::apply(&kernel, &mut brep, body, file_pcurves, &built, &mut stats);
     }
     let faces: Vec<FaceId> = brep.face_list().to_vec();
     for face in faces {
@@ -1013,7 +1087,7 @@ fn build_stitched(body: &Body, options: BuildOptions) -> Result<Brep, BuildError
     if options.heal {
         api_heal_brep(&mut kernel, Some(&mut brep))?;
     }
-    Ok(brep)
+    Ok((brep, stats))
 }
 
 /// Whether every face has a UV trim curve (its own or its mate's).
@@ -1063,6 +1137,9 @@ pub struct ImportReport {
     pub constructed: usize,
     /// Faces the topology-first build left out of the bodies it built, in body order.
     pub face_failures: Vec<FaceFailure>,
+    /// What became of the file's pcurves, summed over the bodies (all zero unless
+    /// [`BuildOptions::file_pcurves`] is set).
+    pub pcurves: PcurveStats,
 }
 
 /// Parses STEP bytes and builds every mapped body, preserving mapper findings.
@@ -1072,14 +1149,27 @@ pub fn import_with_report(
     bytes: &[u8],
     limits: &step_import::Limits,
 ) -> Result<ImportReport, BuildError> {
+    import_with_report_options(bytes, limits, BuildOptions::default())
+}
+
+/// [`import_with_report`] building each body with `options`.
+///
+/// Any parse or build failure returns an error, never a partial report.
+pub fn import_with_report_options(
+    bytes: &[u8],
+    limits: &step_import::Limits,
+    options: BuildOptions,
+) -> Result<ImportReport, BuildError> {
     let model = step_import::import(bytes, limits).map_err(|error| BuildError {
         message: error.to_string(),
     })?;
     let mut bodies = Vec::new();
     let mut constructed = 0;
     let mut face_failures = Vec::new();
+    let mut pcurves = PcurveStats::default();
     for body in &model.bodies {
-        let built = build_body(body, BuildOptions::default())?;
+        let built = build_body_with_file_pcurves(body, &model.file_pcurves, options)?;
+        pcurves.add(&built.pcurves);
         bodies.push(built.brep);
         if built.path == BuildPath::Topology {
             constructed += 1;
@@ -1092,6 +1182,7 @@ pub fn import_with_report(
         diagnostics: model.diagnostics,
         constructed,
         face_failures,
+        pcurves,
     })
 }
 
@@ -1445,6 +1536,127 @@ mod tests {
             store: &store,
             key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
         };
+        let volume =
+            solidcore::mass::integrator::properties::brep_volume(&kernel, &mut solid, 1e-9, &attrs)
+                .expect("volume");
+        let expected_volume = std::f64::consts::PI * 10.0 * 10.0 * 20.0;
+        assert!(
+            (volume - expected_volume).abs() <= 1e-6 * expected_volume,
+            "volume {volume} vs {expected_volume}"
+        );
+    }
+
+    /// The triangle's pcurves on its plane (u = x, v = y), the hypotenuse's shifted by
+    /// `offset` in v.
+    fn triangle_pcurves(offset: f64) -> sm::FilePcurves {
+        let line = |origin: [f64; 2], dir: [f64; 2], length: f64| {
+            vec![sm::Pcurve {
+                surface: 7,
+                curve: sm::Curve2d::Line { origin, dir },
+                trim: Some((0.0, length)),
+            }]
+        };
+        let h = std::f64::consts::FRAC_1_SQRT_2;
+        let mut pcurves = sm::FilePcurves::default();
+        pcurves.edges.insert(1, line([0.0, 0.0], [1.0, 0.0], 10.0));
+        pcurves.edges.insert(
+            2,
+            line([10.0, offset], [-h, h], 10.0 * std::f64::consts::SQRT_2),
+        );
+        pcurves
+            .edges
+            .insert(3, line([0.0, 10.0], [0.0, -1.0], 10.0));
+        pcurves.face_surfaces.insert(1, 7);
+        pcurves
+    }
+
+    fn with_pcurves() -> BuildOptions {
+        BuildOptions {
+            file_pcurves: true,
+            ..BuildOptions::default()
+        }
+    }
+
+    #[test]
+    fn file_pcurves_become_the_uv_trims() {
+        let (brep, stats) =
+            build_with_file_pcurves(&triangle(), &triangle_pcurves(0.0), with_pcurves())
+                .expect("build");
+        assert_eq!(
+            stats,
+            PcurveStats {
+                faces: 1,
+                uses: 3,
+                uses_projected: 0,
+                seam_uses: 0,
+                fallbacks: std::collections::BTreeMap::new(),
+                ..PcurveStats::default()
+            }
+        );
+        validate_for_display(&brep).expect("display");
+        let kernel = Kernel::default();
+        let mut sheet = brep.clone();
+        let area = solidcore::mass::integrator::properties::brep_area(&kernel, &mut sheet, 1e-9)
+            .expect("area");
+        assert!((area - 50.0).abs() < 1e-7, "area {area}");
+        // Without the option the same body ignores them.
+        let (_, stats) =
+            build_with_file_pcurves(&triangle(), &triangle_pcurves(0.0), BuildOptions::default())
+                .expect("build");
+        assert_eq!(stats, PcurveStats::default());
+    }
+
+    #[test]
+    fn a_pcurve_off_its_edge_leaves_the_face_to_projection() {
+        let (brep, stats) =
+            build_with_file_pcurves(&triangle(), &triangle_pcurves(1e-3), with_pcurves())
+                .expect("build");
+        assert_eq!(stats.faces, 0);
+        assert_eq!(
+            stats.fallbacks.get("edge off its pcurve"),
+            Some(&1),
+            "{stats:?}"
+        );
+        validate_for_display(&brep).expect("display");
+    }
+
+    #[test]
+    fn file_pcurves_keep_the_closed_cylinder_valid() {
+        let mut pcurves = sm::FilePcurves::default();
+        let line = |v: f64| sm::Pcurve {
+            surface: 100,
+            curve: sm::Curve2d::Line {
+                origin: [0.0, v],
+                dir: [1.0, 0.0],
+            },
+            trim: Some((0.0, 360.0)),
+        };
+        let conic = |surface: u64, flip: f64| sm::Pcurve {
+            surface,
+            curve: sm::Curve2d::Conic {
+                centre: [0.0, 0.0],
+                axis1: [10.0, 0.0],
+                axis2: [0.0, 10.0 * flip],
+            },
+            trim: None,
+        };
+        pcurves.edges.insert(1, vec![line(0.0), conic(101, -1.0)]);
+        pcurves.edges.insert(2, vec![line(20.0), conic(102, 1.0)]);
+        pcurves.face_surfaces.insert(3, 100);
+        pcurves.face_surfaces.insert(4, 101);
+        pcurves.face_surfaces.insert(5, 102);
+        let (brep, stats) =
+            build_with_file_pcurves(&cylinder_solid(), &pcurves, with_pcurves()).expect("build");
+        let fallbacks: usize = stats.fallbacks.values().sum();
+        assert_eq!(stats.faces + fallbacks, 3, "{stats:?}");
+        validate_for_display(&brep).expect("display");
+        let kernel = Kernel::default();
+        let store = solidcore::geom::attribute::AttributeStore::default();
+        let attrs = solidcore::mass::integrator::properties::PropertyAttributes {
+            store: &store,
+            key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
+        };
+        let mut solid = brep.clone();
         let volume =
             solidcore::mass::integrator::properties::brep_volume(&kernel, &mut solid, 1e-9, &attrs)
                 .expect("volume");

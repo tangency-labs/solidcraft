@@ -310,6 +310,60 @@ pub struct Skipped {
 /// A 2D pcurve keyed by `(face step id, loop index, oriented-edge index)`.
 pub type PcurveKey = (u64, usize, usize);
 
+/// A curve in a surface's parameter space: the curve of a `PCURVE`, in the model's
+/// parameter units of its surface (see [`Pcurve::curve`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum Curve2d {
+    /// `LINE`: `origin + t * dir`, `t` the file's line parameter.
+    Line {
+        /// Point at t = 0.
+        origin: [f64; 2],
+        /// Change per unit parameter (the file's direction times its magnitude).
+        dir: [f64; 2],
+    },
+    /// `CIRCLE` / `ELLIPSE`: `centre + cos t * axis1 + sin t * axis2`, t in degrees. The
+    /// axes are scaled to the surface's parameter units, so they need be neither
+    /// perpendicular nor of equal length.
+    Conic {
+        /// Centre.
+        centre: [f64; 2],
+        /// The point at t = 0 relative to the centre.
+        axis1: [f64; 2],
+        /// The point at t = 90 degrees relative to the centre.
+        axis2: [f64; 2],
+    },
+    /// `B_SPLINE_CURVE_WITH_KNOTS` (rational or not), `POLYLINE` and the implied-knot
+    /// forms, as for [`Curve::BSpline`]. Each point's third coordinate is 0.
+    BSpline(BSplineCurve),
+}
+
+/// One `PCURVE` of an edge's `SURFACE_CURVE`, `SEAM_CURVE`, `INTERSECTION_CURVE` or
+/// `BOUNDED_SURFACE_CURVE`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Pcurve {
+    /// `#id` of the surface the curve lies in (`basis_surface`).
+    pub surface: u64,
+    /// The curve in that surface's parameters: a plane's u and v in mm; a cylinder's or
+    /// cone's u in degrees and v in mm; a sphere's or torus's u and v in degrees; a
+    /// B-spline surface's in its knot values.
+    pub curve: Curve2d,
+    /// The parameter values of a `TRIMMED_CURVE` around the curve, when it gives them
+    /// (degrees for a conic), in file order.
+    pub trim: Option<(f64, f64)>,
+}
+
+/// The `PCURVE`s of a file, for builders that make UV trim curves from them.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct FilePcurves {
+    /// By `EDGE_CURVE` `#id` ([`Edge::step_id`]): its pcurves, in file order.
+    pub edges: std::collections::BTreeMap<u64, Vec<Pcurve>>,
+    /// By face `#id` ([`Face::step_id`]): the `#id` of the face's surface.
+    pub face_surfaces: std::collections::BTreeMap<u64, u64>,
+    /// Pcurves that could not be mapped. Each leaves out only that pcurve; the bodies
+    /// and [`Model::diagnostics`] are unaffected.
+    pub diagnostics: Vec<Diagnostic>,
+}
+
 /// Everything imported from one file.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Model {
@@ -332,4 +386,7 @@ pub struct Model {
     /// Surface-space trim curves, keyed by face/loop/edge use. Importers that carry
     /// pcurves populate this; exporters that do not need them leave it empty.
     pub pcurves: std::collections::BTreeMap<PcurveKey, Vec<Vec<[f64; 2]>>>,
+    /// The file's own `PCURVE`s, keyed by edge and face (filled by the importer; an
+    /// exporter ignores it).
+    pub file_pcurves: FilePcurves,
 }

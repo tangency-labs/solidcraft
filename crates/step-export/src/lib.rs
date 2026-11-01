@@ -1516,6 +1516,7 @@ mod tests {
             diagnostics: Vec::new(),
             assembly_instances: 0,
             pcurves: BTreeMap::new(),
+            file_pcurves: step_import::model::FilePcurves::default(),
         }
     }
 
@@ -1645,6 +1646,7 @@ mod tests {
             diagnostics: Vec::new(),
             assembly_instances: 0,
             pcurves: BTreeMap::new(),
+            file_pcurves: step_import::model::FilePcurves::default(),
         }
     }
 
