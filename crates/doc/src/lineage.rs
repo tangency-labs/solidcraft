@@ -129,6 +129,9 @@ impl Lineage {
 pub(crate) struct Traced {
     pub body: Body,
     pub lineage: Option<Lineage>,
+    /// How the feature built it, when that alone fixes it (a primitive from its numbers, a copy
+    /// of one moved): what a cut by it is remembered by (see `ModelBody::cut`).
+    pub recipe: Option<u64>,
 }
 
 impl Traced {
@@ -136,13 +139,13 @@ impl Traced {
     /// geometry, those of the bodies it is combined with by their history.
     pub fn unnamed(body: Body) -> Traced {
         let roles = vec![Vec::new(); body.face_count()];
-        Traced { lineage: Some(Lineage::of(&body, Operand::Made(roles))), body }
+        Traced { lineage: Some(Lineage::of(&body, Operand::Made(roles))), body, recipe: None }
     }
 
     /// A body the feature built, its faces' roles given (one per face), else not known.
     pub fn made(body: Body, roles: Option<Vec<Vec<String>>>) -> Traced {
         match roles.filter(|r| r.len() == body.face_count()) {
-            Some(roles) => Traced { lineage: Some(Lineage::of(&body, Operand::Made(roles))), body },
+            Some(roles) => Traced { lineage: Some(Lineage::of(&body, Operand::Made(roles))), body, recipe: None },
             None => Traced::unnamed(body),
         }
     }
@@ -151,14 +154,19 @@ impl Traced {
     /// which built it.
     pub fn copied(&self, copy: Body, feature: u64, instance: usize) -> Traced {
         let lineage = self.lineage.as_ref().and_then(|l| Lineage::step(&copy, &[&l.copied(feature, instance)]));
-        Traced { body: copy, lineage }
+        Traced { body: copy, lineage, recipe: None }
+    }
+
+    /// This tool, built by `recipe`.
+    pub fn with_recipe(self, recipe: Option<u64>) -> Traced {
+        Traced { recipe, ..self }
     }
 
     /// `result`, made by one kernel operation from `inputs` (in its operand order).
     pub fn step(result: Body, inputs: &[&Traced]) -> Traced {
         let lineages: Option<Vec<&Lineage>> = inputs.iter().map(|t| t.lineage.as_ref()).collect();
         let lineage = lineages.and_then(|l| Lineage::step(&result, &l));
-        Traced { body: result, lineage }
+        Traced { body: result, lineage, recipe: None }
     }
 
     /// `result`, made by one kernel operation from this body alone. Where that operation's
@@ -179,7 +187,7 @@ impl Traced {
             let stage = Arc::new(Operand::Stage(Box::new(Stage { body, lineage: l.clone(), names: OnceLock::new() })));
             Some(Lineage { history, operands: vec![stage] })
         });
-        Traced { body: result, lineage }
+        Traced { body: result, lineage, recipe: None }
     }
 }
 
@@ -531,14 +539,14 @@ impl crate::ModelBody {
             Made::Traced(l) => Some(l.as_ref().clone()),
             Made::Unknown => None,
         };
-        Traced { body: self.body.clone(), lineage }
+        Traced { body: self.body.clone(), lineage, recipe: None }
     }
 
     /// This body, as it was before the feature, as an operand named by `operand` (a moved copy of
     /// it, the cavity side of a shell grown from it); `None` once the feature has changed it.
     pub(crate) fn before_as(&self, operand: Operand) -> Traced {
         let lineage = matches!(self.made, Made::Before).then(|| Lineage::of(&self.body, operand));
-        Traced { body: self.body.clone(), lineage }
+        Traced { body: self.body.clone(), lineage, recipe: None }
     }
 
     /// The lineage a feature left this body with, when it made or changed it with one.

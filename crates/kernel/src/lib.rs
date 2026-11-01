@@ -159,7 +159,9 @@ pub use blend::{ChamferSide, chamfer, chamfer_sides, fillet, fillet_each, fillet
 pub use blend_corner::fillet_radii;
 pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fillet_variable, fillet_variable_points, fillet_variable_spline, taper};
 pub use body::{Body, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, Paint};
-pub use boolean_diagnostics::{BooleanDiagnostics, BooleanFallback, BooleanStrategy, capture_boolean_diagnostics};
+pub use boolean_diagnostics::{
+    BooleanDiagnostics, BooleanFallback, BooleanStrategy, capture_boolean_diagnostics, merge as merge_boolean_diagnostics,
+};
 pub use boundary::{Boundary, boundary_patch};
 pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};
 pub use bridge::{Continuity, Frame, blend_between, bridge, chain, chain_closes, frames, frames_across, sample_grid};
