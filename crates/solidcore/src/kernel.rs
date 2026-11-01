@@ -1131,6 +1131,14 @@ pub struct UpstreamFixes {
     pub ssi_split_curves_at_singular_points: bool,
     /// `MakeDupin` uses `1/sqrt(abs(k1))` for the bottom hyperbola's second axis, matching the top conjugate branch at unequal-curvature saddle points (WR-69).
     pub dupin_bottom_hyperbola_axis: bool,
+    /// `SmPointClassification::GetGap3d(pOptSurface)` returns `Err(SM_ERR)` (and propagates
+    /// object-point, surface-drop, and surface-evaluation failures) when the object point
+    /// has no single drop point on `pOptSurface` even at `100 * sObjZoneTol3d` (WR-58).
+    /// Upstream writes `return SM_ERR;` inside a `double`-returning function (`SmPointClass.cpp:464`)
+    /// and ignores failing `SmStatus` returns along the surface-drop path, so `1001.0` (or
+    /// undefined evaluation geometry) masquerades as a large 3D in-surface gap to callers
+    /// such as `SmCurveClassification::HasNearMisses`. Off by default for pinned C++ parity.
+    pub point_class_gap_3d_propagates_no_drop_error: bool,
     /// `SmFilletIntersector::ComputeNextPoint` rejects a next point that is more than half a step short of where the step aimed, when the step was not clipped: where `StepSolve`'s plane-adjusting retry lands on another root of the sphere equations (a variable round whose law is evaluated past the end of its edge), the span passes the Hermite test along a straight trace, but its rail parameter advances by the whole step over a fraction of it, and the rail doubles back (WR-503).
     pub fillet_trace_rejects_short_step: bool,
     /// `SmFilletIntersector::ComputeNextPoint`, where the solver's offsets change along the trace (`OffsetRadiiCanChange`, a variable round), solves the fillet at the span's five test shares (a step of that share from its start) and rejects the span where a solution's contact lies farther than the approximation tolerance from its Hermite rail. Upstream tests only that the rails lie on the base surfaces, which on a plane every uv curve does, so the step grows to the angle tolerance and the rails cut across the radius law between the traced points (a cubic-law round on planar faces removes the wrong volume, its surface off the law's circle) (WR-646, #1989; the fork's tangency-labs/smlib@4438859).
