@@ -1427,13 +1427,44 @@ mod tests {
                 .filter(|p| p.z > 10.0)
                 .map(|p| p.x.hypot(p.y))
                 .fold(0.0, f64::max);
+            // the rim vertex's distance from the axis
+            let rim = crate::topology::brep::p1::vertices(&b, None)
+                .unwrap()
+                .iter()
+                .map(|&v| crate::topology::vertex::point(&b, v).unwrap())
+                .filter(|p| p.z <= 10.0)
+                .map(|p| p.x.hypot(p.y))
+                .fold(0.0, f64::max);
+            // the fork's c4209ab test: of the NURB's rows at the ends of v, the one at the
+            // top (z 20), its points' farthest from its first
+            let surface = b.face(dome).unwrap().surface.as_ref().unwrap();
+            let spread = match surface.kind() {
+                crate::surface::surface::SurfaceKind::Sphere(s) => {
+                    let nurb = s.base().base().gw_nurb().unwrap();
+                    let point = |i, j| {
+                        let c = nurb.cpt(i, j).unwrap();
+                        if c.w == crate::nurbs::math::NOW {
+                            Vec3::new(c.x, c.y, c.z)
+                        } else {
+                            Vec3::new(c.x / c.w, c.y / c.w, c.z / c.w)
+                        }
+                    };
+                    let j = if point(0, 0).z > 10.0 { 0 } else { nurb.m() };
+                    (1..=nurb.n())
+                        .map(|i| (point(i, j) - point(0, j)).length())
+                        .fold(0.0, f64::max)
+                }
+                _ => f64::INFINITY,
+            };
             let volume = brep_volume(&k, &mut b, 1e-8, &attributes).unwrap();
             // 2/3 pi 20^3
             let want = 2.0 / 3.0 * std::f64::consts::PI * 8000.0;
             if fix {
                 assert_eq!(face_kinds(&b), ["plane", "sphere"]);
                 assert!(stray <= 1e-9, "dome strays {stray} from its sphere");
+                assert!(spread <= 1e-12, "pole row spread {spread}");
                 assert!(pole_off <= 1e-12, "pole {pole_off} off the axis");
+                assert!((rim - 20.0).abs() <= 1e-12, "rim radius {rim}");
                 assert!((volume - want).abs() <= 1e-6 * want, "{volume} vs {want}");
                 assert!(crate::topology::brep::p2::is_manifold_solid(&b).unwrap());
             } else {
@@ -1442,5 +1473,95 @@ mod tests {
                 assert!(stray > 1e-7, "{stray}");
             }
         }
+    }
+
+    /// WR-471 (the fork's c4209ab): a half circle of radius 5 whose centre, and so both
+    /// ends, are 3e-7 off the axis (more than the fit tolerance, less than the B-rep
+    /// tolerance 1e-6, so the sweep takes both ends to be on the axis), turned a whole
+    /// turn, with the flag on.
+    fn wr471_whole_sphere() -> (Kernel, Brep) {
+        let mut k = Kernel::default();
+        k.fixes.revolve_analytic_profile_faces = true;
+        k.fixes.revolve_arc_centre_near_axis_is_sphere = true;
+        let off = 3e-7;
+        let half = Curve::from(
+            BSplineCurve::create_circle_segment(
+                3,
+                &Axis2Placement::new(Vec3::new(off, 0.0, 0.0), -Vec3::Z, Vec3::X),
+                5.0,
+                0.0,
+                180.0,
+                crate::nurbs::b_spline_curve::NurbCircleParam::Quadratic,
+            )
+            .unwrap(),
+        );
+        let b = create_rotational_sweep(&mut k, &[Some(&half)], Vec3::ZERO, Vec3::Z, 360.0, false)
+            .unwrap();
+        (k, b)
+    }
+
+    /// The half circle of `wr471_whole_sphere`: as the fork does, the face is the sphere
+    /// through the ends with its poles on the axis, not the B-spline surface of revolution
+    /// with a 3e-7 parallel at each end. Its volume is checked apart, in
+    /// `wr471_whole_sphere_volume`.
+    #[test]
+    fn wr471_half_circle_ending_within_tolerance_of_the_axis_is_a_whole_sphere() {
+        use crate::mass::integrator::properties::brep_area;
+        use crate::surface::surface::SurfaceKind;
+        let (k, mut b) = wr471_whole_sphere();
+        assert_eq!(face_kinds(&b), ["sphere"]);
+        let counts = (
+            b.face_list().len(),
+            b.edge_list().len(),
+            crate::topology::brep::p1::vertices(&b, None).unwrap().len(),
+        );
+        assert_eq!(counts, (1, 1, 2));
+        let face = *b.face_list().first().unwrap();
+        let surface = b.face(face).unwrap().surface.as_ref().unwrap();
+        let SurfaceKind::Sphere(sphere) = surface.kind() else {
+            panic!("a sphere")
+        };
+        let d = sphere.step_uv_domain();
+        assert_eq!((d.min().y, d.max().y), (-90.0, 90.0));
+        // the surface's poles (its natural corners) on the axis
+        let n = surface.natural_uv_domain_if_built();
+        for (u, v) in [(0.0, 0.0), (0.0, 1.0), (1.0, 0.0), (1.0, 1.0)] {
+            let p = surface.evaluate_point(&k, n.evaluate(u, v)).unwrap();
+            assert!(p.x.hypot(p.y) <= 1e-12, "pole {p:?} off the axis");
+        }
+        // the two vertices are the poles
+        for v in crate::topology::brep::p1::vertices(&b, None).unwrap() {
+            let p = crate::topology::vertex::point(&b, v).unwrap();
+            assert!(p.x.hypot(p.y) <= 1e-12, "vertex {p:?} off the axis");
+            assert!(
+                (p.z.abs() - 5.0).abs() <= 1e-12,
+                "vertex {p:?} not at a pole"
+            );
+        }
+        assert!(crate::topology::brep::p2::is_manifold_solid(&b).unwrap());
+        let area = brep_area(&k, &mut b, 1e-8).unwrap();
+        // 4 pi 5^2
+        let want = 4.0 * std::f64::consts::PI * 25.0;
+        assert!((area - want).abs() <= 1e-6 * want, "{area} vs {want}");
+    }
+
+    /// The volume of `wr471_whole_sphere`, 4/3 pi 5^3. `brep_volume` fails with
+    /// `mass::integrator` `SM_ERR` on this face, and on the whole revolved sphere the same
+    /// profile gives with the flag off, so it is not this flag's (see the finding).
+    #[test]
+    #[ignore = "plan/findings/mass.integrator--whole-revolved-sphere-volume-fails.md"]
+    fn wr471_whole_sphere_volume() {
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+        let store = AttributeStore::default();
+        let key_of = |_| ObjectKey(0);
+        let attributes = PropertyAttributes {
+            store: &store,
+            key_of: &key_of,
+        };
+        let (k, mut b) = wr471_whole_sphere();
+        let volume = brep_volume(&k, &mut b, 1e-8, &attributes).unwrap();
+        let want = 4.0 / 3.0 * std::f64::consts::PI * 125.0;
+        assert!((volume - want).abs() <= 1e-6 * want, "{volume} vs {want}");
     }
 }
