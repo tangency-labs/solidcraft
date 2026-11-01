@@ -858,14 +858,13 @@ mod tests {
         assert!(fillet_variable_spline(&b, at, start, &unclamped).is_err());
         let dips = RadiusSpline { radii: vec![2.0, 0.0, 0.0, 3.0, 2.0], ..law.clone() };
         assert!(fillet_variable_spline(&b, at, start, &dips).is_err());
-        // A middle radius beyond the faces (up to 21.25 on the top 10 wide): the contact on the top
-        // leaves it across its far edge, a cliff, and the round is cut as if the top went on: the
-        // balls' union inside the box's section, 10 along the top and 30 down the side.
+        // A middle radius up to 21.25 (on the top 10 wide), rising and falling so fast that the
+        // balls' envelope folds over itself at the peak: for the balls' family
+        // F(y, p) = |p - c(y)|² - r(y)² the touch arc there has F_yy down to -8.88 (where the touch
+        // circles move back along the edge). Refused, never built folded (the balls' great
+        // circles, which never fold, built it to 726.53 removed against the union's 332.2).
         let big = RadiusSpline { radii: vec![2.0, 2.0, 40.0, 3.0, 2.0], ..law };
-        let wide = fillet_variable_spline(&b, at, start, &big).unwrap();
-        let removed_w = removed_by_balls(20.0, &|u| big.eval(u), &slab, &[10.0]);
-        let vw = fine_volume(&wide);
-        assert!(rel(vw, 6000.0 - removed_w) < 1e-4, "{vw} vs {}", 6000.0 - removed_w);
+        assert!(matches!(fillet_variable_spline(&b, at, start, &big), Err(KernelError::TooLarge(_))));
     }
 
     #[test]
