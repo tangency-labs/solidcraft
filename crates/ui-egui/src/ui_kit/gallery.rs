@@ -1,4 +1,5 @@
 //! Table-driven layout/paint references in both themes. No window or GPU required.
+use super::preferences_figures::{ThemeSample, paint_theme_system, paint_theme_thumbnail};
 use super::*;
 use crate::ui_kit::{Container, Surface};
 use crate::{scenario, theme::Tokens};
@@ -462,6 +463,33 @@ const ELEMENTS: &[Element] = &[
             });
         });
     }),
+    element!("below_row_control", |ui, state| {
+        settings_form(ui, Tokens::get().form_label_width, |ui| {
+            row(ui, "Autosave every", |ui| {
+                field(ui, &mut state.value);
+            });
+            below_row_control(ui, "Autosave every", 260.0, |ui| settings_autosave_timeline(ui, 5.0));
+        });
+    }),
+    element!("named_control", "dialog:widget:Profile name", Some("dialog:Profile name"), |ui, state| {
+        named_control(ui, "Profile name", |ui| {
+            text_field(ui, &mut state.value, "Name this setup");
+        });
+    }),
+    element!("settings_row_card", |ui, _| {
+        let t = Tokens::get();
+        for selected in [true, false] {
+            settings_row_card(ui, selected, t.control_height + t.space_14, |ui| {
+                text(ui, "Default", if selected { Text::SelectedNameCell } else { Text::NameCell(false) });
+                if selected {
+                    settings_badge(ui, "Active", false);
+                } else {
+                    button(ui, "Apply", Button::Normal);
+                }
+            });
+            ui.add_space(t.space_8);
+        }
+    }),
     element!("settings_composition", |ui, _| {
         settings_heading(ui, "Interface", "Appearance and workspace");
         settings_section(ui, "gallery_settings", "Layout", |ui| {
@@ -470,8 +498,40 @@ const ELEMENTS: &[Element] = &[
                 |ui| {
                     text(ui, "Controls", Text::Inline);
                 },
-                |ui, ()| layout_preview(ui, LayoutPreview { compact: true, labels: false, history: 2, translucent: false }),
+                |ui, ()| layout_preview(ui, LayoutPreview { compact: true, labels: false, history: 2, translucent: false, dialog_left: true }),
             )
+        });
+    }),
+    element!("settings_picture_choices", |ui, _| {
+        settings_picture_choices(
+            ui,
+            "gallery_history",
+            "History",
+            &[
+                PictureChoice { key: "bottom", label: "Bottom", figure: paint_history_bottom },
+                PictureChoice { key: "left", label: "Left", figure: paint_history_left },
+                PictureChoice { key: "under_browser", label: "Under browser", figure: paint_history_under_browser },
+                PictureChoice { key: "browser", label: "In browser", figure: paint_history_in_browser },
+            ],
+            2,
+            true,
+        );
+        settings_picture_choices(
+            ui,
+            "gallery_browser",
+            "Browser",
+            &[
+                PictureChoice { key: "column", label: "Column", figure: paint_browser_column },
+                PictureChoice { key: "card", label: "Card", figure: paint_browser_card },
+            ],
+            0,
+            false,
+        );
+    }),
+    element!("settings_tab_chip", |ui, _| {
+        ui.horizontal_wrapped(|ui| {
+            settings_tab_chip(ui, "MODEL", "Model", crate::workspace::tab_icon("MODEL"), true);
+            settings_tab_chip(ui, "SURFACE", "Surface", crate::workspace::tab_icon("SURFACE"), false);
         });
     }),
     element!("settings_permission_choices", |ui, state| {
@@ -501,42 +561,252 @@ const ELEMENTS: &[Element] = &[
         );
         settings_pointer_preview(ui, true, "Normal", true);
     }),
-    element!("preference_theme_rail", |ui, _| {
-        theme_rail(
-            ui,
-            |ui| {
-                for label in ["Light", "Dark", "System"] {
-                    option_card(
-                        ui,
-                        label,
-                        Some("Built in"),
-                        label == "Light",
-                        true,
-                        PreferenceFigure::Theme { palette: Tokens::light().into(), system: label == "System" },
-                    );
-                }
-            },
-            |ui| {
+    element!("preference_theme_carousel", |ui, _| {
+        let light = ThemeSample::from_tokens(&Tokens::light());
+        let dark = ThemeSample::from_tokens(&Tokens::dark());
+        carousel(ui, "gallery_theme_carousel", 4, 88.0, 96.0, |ui, index| {
+            if index == 3 {
                 theme_import_tile(ui, "Import…", "theme file");
-            },
-        );
-    }),
-    element!("preference_option_cards", |ui, _| {
-        ui.horizontal_wrapped(|ui| {
-            for figure in [
-                PreferenceFigure::Theme { palette: Tokens::light().into(), system: true },
-                PreferenceFigure::Pivot(2),
-                PreferenceFigure::Quality(24),
-                PreferenceFigure::Antialiasing(8),
-                PreferenceFigure::ContactShading(true),
-                PreferenceFigure::UpAxis(true),
-            ] {
-                option_card(ui, "Choice", Some("Example"), true, true, figure);
+            } else {
+                let label = ["Light", "Dark", "System"][index];
+                picture_card(
+                    ui,
+                    &Card {
+                        label,
+                        sub: Some(if index == 2 { "Follows the OS" } else { "Built in" }),
+                        selected: index == 0,
+                        enabled: true,
+                        options: None,
+                        check: false,
+                        aspect: 124.0 / 76.0,
+                        figure: &|p, rect| match index {
+                            0 => paint_theme_thumbnail(p, rect, &light),
+                            1 => paint_theme_thumbnail(p, rect, &dark),
+                            _ => paint_theme_system(p, rect, &light, &dark),
+                        },
+                    },
+                    88.0,
+                );
             }
         });
     }),
+    element!("picture_card", |ui, _| {
+        use super::preferences_figure_data as figures;
+        let gap = ui.spacing().item_spacing.x;
+        let width = card_width(ui.available_width(), 4, gap);
+        ui.horizontal(|ui| {
+            picture_card(
+                ui,
+                &Card {
+                    label: "Coarse",
+                    sub: Some("fastest"),
+                    selected: false,
+                    enabled: true,
+                    options: None,
+                    check: false,
+                    aspect: 120.0 / 64.0,
+                    figure: &figures::paint_tess_coarse,
+                },
+                width,
+            );
+            picture_card(
+                ui,
+                &Card {
+                    label: "Normal",
+                    sub: Some("default"),
+                    selected: true,
+                    enabled: true,
+                    options: None,
+                    check: true,
+                    aspect: 120.0 / 64.0,
+                    figure: &figures::paint_tess_normal,
+                },
+                width,
+            );
+            picture_card(
+                ui,
+                &Card {
+                    label: "Fine",
+                    sub: Some("smoother"),
+                    selected: false,
+                    enabled: true,
+                    options: Some("Has options"),
+                    check: false,
+                    aspect: 120.0 / 64.0,
+                    figure: &figures::paint_tess_fine,
+                },
+                width,
+            );
+            picture_card(
+                ui,
+                &Card {
+                    label: "8×",
+                    sub: Some("not on this GPU"),
+                    selected: false,
+                    enabled: false,
+                    options: None,
+                    check: false,
+                    aspect: 120.0 / 64.0,
+                    figure: &figures::paint_aa_8x,
+                },
+                width,
+            );
+        });
+    }),
+    element!("toggle_tile", |ui, _| {
+        use super::preferences_figure_data as figures;
+        let gap = ui.spacing().item_spacing.x;
+        let width = card_width(ui.available_width(), 3, gap);
+        ui.horizontal(|ui| {
+            toggle_tile(
+                ui,
+                &Card {
+                    label: "Grid",
+                    sub: None,
+                    selected: true,
+                    enabled: true,
+                    options: None,
+                    check: false,
+                    aspect: 120.0 / 64.0,
+                    figure: &figures::paint_view_grid,
+                },
+                width,
+            );
+            toggle_tile(
+                ui,
+                &Card {
+                    label: "Ground shadow",
+                    sub: None,
+                    selected: false,
+                    enabled: true,
+                    options: None,
+                    check: false,
+                    aspect: 120.0 / 64.0,
+                    figure: &figures::paint_view_shadow,
+                },
+                width,
+            );
+            toggle_tile(
+                ui,
+                &Card {
+                    label: "Perspective",
+                    sub: None,
+                    selected: false,
+                    enabled: false,
+                    options: None,
+                    check: false,
+                    aspect: 120.0 / 64.0,
+                    figure: &figures::paint_view_perspective,
+                },
+                width,
+            );
+        });
+    }),
+    element!("preset_card", |ui, _| {
+        let icon = |p: &egui::Painter, r: egui::Rect, ink: egui::Color32| crate::icons::paint_ink(p, r, "settings", ink);
+        let width = ui.available_width();
+        for (name, word, selected, enabled) in
+            [("Performance", "Fastest", false, true), ("Quality", "Sharpest", true, true), ("Custom", "Your own mix", false, false)]
+        {
+            preset_card(ui, name, word, selected, enabled, &icon, width);
+        }
+    }),
+    element!("help_icon", |ui, _| {
+        ui.horizontal(|ui| {
+            text(ui, "Anti-aliasing", Text::Hint("gallery_help"));
+            help_icon(ui, "Applies when SolidCraft restarts.");
+        });
+    }),
+    element!("carousel", |ui, _| {
+        let sample = ThemeSample::from_tokens(&Tokens::get());
+        let width = Tokens::get().space_24 * 2.0 + Tokens::get().space_24;
+        carousel(ui, "gallery_carousel", 6, width, width * 0.8, |ui, index| {
+            let label = ["Light", "Dark", "System", "Gruvbox", "Studio", "Mono"][index % 6];
+            picture_card(
+                ui,
+                &Card {
+                    label,
+                    sub: Some("Built in"),
+                    selected: index == 1,
+                    enabled: true,
+                    options: None,
+                    check: false,
+                    aspect: 124.0 / 76.0,
+                    figure: &|p, r| paint_theme_thumbnail(p, r, &sample),
+                },
+                width,
+            );
+        });
+    }),
+    element!("preference_theme_thumbnails", |ui, _| {
+        let (light, dark) = (ThemeSample::from_tokens(&Tokens::light()), ThemeSample::from_tokens(&Tokens::dark()));
+        ui.horizontal(|ui| {
+            for kind in 0..3 {
+                let (rect, _) = ui.allocate_exact_size(vec2(88.0, 88.0 * 76.0 / 124.0), egui::Sense::hover());
+                match kind {
+                    0 => paint_theme_thumbnail(ui.painter(), rect, &light),
+                    1 => paint_theme_thumbnail(ui.painter(), rect, &dark),
+                    _ => paint_theme_system(ui.painter(), rect, &light, &dark),
+                }
+            }
+        });
+    }),
+    element!("preference_figures", |ui, _| {
+        ui.horizontal_wrapped(|ui| {
+            for (name, size, paint) in super::preferences_figure_data::FIGURES {
+                let width = 96.0;
+                let (rect, response) = ui.allocate_exact_size(vec2(width, width * size[1] / size[0]), egui::Sense::hover());
+                paint(ui.painter(), rect);
+                response.on_hover_text(*name);
+            }
+        });
+    }),
+    element!("preference_option_cards", |ui, _| {
+        ui.horizontal_wrapped(|ui| {
+            for figure in [PreferenceFigure::Pivot(2), PreferenceFigure::UpAxis(true)] {
+                option_card(ui, "Choice", Some("Example"), true, true, figure);
+            }
+            let t = Tokens::get();
+            let width = t.space_24 * 5.0 + t.space_10;
+            for (label, figure) in [("Fine", paint_tess_fine as fn(&egui::Painter, egui::Rect)), ("8×", paint_aa_8x)] {
+                picture_card(
+                    ui,
+                    &Card { label, sub: None, selected: true, enabled: true, options: None, check: true, aspect: 120.0 / 64.0, figure: &figure },
+                    width,
+                );
+            }
+            toggle_tile(
+                ui,
+                &Card {
+                    label: "Ambient occlusion",
+                    sub: None,
+                    selected: true,
+                    enabled: true,
+                    options: None,
+                    check: false,
+                    aspect: 120.0 / 64.0,
+                    figure: &paint_ao_on,
+                },
+                width,
+            );
+        });
+    }),
+    element!("settings_font_row", |ui, sample| {
+        settings_page(ui, |ui| {
+            settings_font_row(ui, "Font", |ui, part| {
+                if part == 0 {
+                    named_control(ui, "Interface font", |ui| {
+                        dropdown(ui, "gallery_preferences_font", &mut sample.selected, &["IBM Plex Sans (built in)", "Custom font"]);
+                    });
+                } else {
+                    button(ui, "Choose font file…", Button::Normal);
+                    button(ui, "Reset", Button::Ghost);
+                }
+            });
+            font_specimen(ui, "The quick brown fox · 0123456789");
+        });
+    }),
     element!("preference_specimens", |ui, _| {
-        tab_accent_strip(ui);
         scale_specimen(ui, 1.1);
         status_palette_sample(ui, crate::theme::ColorVision::Deutan);
         colour_vision_sample(ui, &Tokens::get());
@@ -1337,6 +1607,16 @@ const ELEMENTS: &[Element] = &[
             dropdown(ui, "gallery", &mut s.selected, &["One", "Two"]);
         });
     }),
+    element!("dropdown_icons", "dialog:row:Visual style", Some("dialog:Visual style"), |ui, s| {
+        row(ui, "Visual style", |ui| {
+            let options: Vec<_> = crate::navigation_bar::VISUAL_STYLES
+                .iter()
+                .enumerate()
+                .map(|(index, (_, label))| (*label, crate::navigation_bar::visual_style_icon(index as u8)))
+                .collect();
+            dropdown_icons(ui, "gallery_visual_style", &mut s.selected, &options);
+        });
+    }),
     element!("dropdown_previews", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         row(ui, "Gallery", |ui| {
             dropdown_previews(ui, "gallery_previews", &mut s.selected, &["One", "Two"], |ui, index| {
@@ -1666,6 +1946,46 @@ fn every_element_has_geometry_and_stays_in_its_allocation_in_both_themes() {
 }
 
 #[test]
+fn visual_style_dropdown_specimen_selects_real_options_and_paints_their_icons() {
+    let previous = crate::theme::is_dark();
+    let element = ELEMENTS.iter().find(|element| element.name == "dropdown_icons").unwrap();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        let ctx = crate::fonts::test_context();
+        let sample = std::cell::RefCell::new(Sample { value: String::new(), second: String::new(), selected: 0, checked: false });
+        let mut draw = |ui: &mut Ui| {
+            (element.draw)(ui, &mut sample.borrow_mut());
+        };
+        for _ in 0..3 {
+            super::test_support::frame(&ctx, vec![], &mut draw);
+        }
+        for (index, (_, label)) in crate::navigation_bar::VISUAL_STYLES.into_iter().enumerate() {
+            let trigger = scenario::handle_at("dialog:Visual style").unwrap();
+            super::test_support::frame(&ctx, super::test_support::pointer(trigger, true), &mut draw);
+            super::test_support::frame(&ctx, super::test_support::pointer(trigger, false), &mut draw);
+            super::test_support::frame(&ctx, vec![], &mut draw);
+            for (option, (_, name)) in crate::navigation_bar::VISUAL_STYLES.into_iter().enumerate() {
+                let rect = scenario::rect_of(&format!("dialog:Visual style:{name}")).unwrap();
+                let icon = crate::navigation_bar::visual_style_icon(option as u8);
+                let painted = scenario::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
+                let owner = if option == sample.borrow().selected { scenario::rect_of("dialog:Visual style").unwrap() } else { rect };
+                assert!(owner.contains_rect(painted), "{name}: its real icon is in its option or selected trigger");
+            }
+            let option = scenario::handle_at(&format!("dialog:Visual style:{label}")).unwrap();
+            super::test_support::frame(&ctx, super::test_support::pointer(option, true), &mut draw);
+            super::test_support::frame(&ctx, super::test_support::pointer(option, false), &mut draw);
+            super::test_support::frame(&ctx, vec![], &mut draw);
+            assert_eq!(sample.borrow().selected, index, "the specimen edits the real selection index");
+            let icon = crate::navigation_bar::visual_style_icon(index as u8);
+            let trigger = scenario::rect_of("dialog:Visual style").unwrap();
+            assert!(trigger.contains_rect(scenario::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap()));
+            assert!(scenario::handle_at("dialog:Visual style:Wireframe").is_none(), "the native popup closes after selection");
+        }
+    }
+    crate::theme::set_dark(previous);
+}
+
+#[test]
 fn apply_does_not_submit_and_obeys_validation() {
     for enabled in [false, true] {
         let ctx = crate::fonts::test_context();
@@ -1928,6 +2248,7 @@ fn gallery_covers_every_inline_element() {
         "look_chain.rs",
         "menu.rs",
         "metrics.rs",
+        "preferences_cards.rs",
         "radial.rs",
         "reports.rs",
         "sphere.rs",
@@ -2538,4 +2859,178 @@ fn tree_icon_actions_keep_repeated_light_rows_independent() {
         }
     });
     assert_eq!(ids.len(), 3);
+}
+
+#[test]
+fn card_looks_follow_selected_hover_disabled_and_focus() {
+    use super::preferences_cards::{CardFill, CardInk, card_look};
+    let rest = card_look(false, true, false, false);
+    assert_eq!((rest.border, rest.fill, rest.ink, rest.bold, rest.alpha, rest.focus_ring), (1.0, CardFill::Face, CardInk::Text, false, 1.0, false));
+    let hover = card_look(false, true, true, false);
+    assert_eq!(hover.fill, CardFill::Hover);
+    let selected = card_look(true, true, true, false);
+    assert_eq!((selected.border, selected.fill, selected.ink, selected.bold), (2.0, CardFill::Selected, CardInk::Accent, true));
+    let disabled = card_look(false, false, true, true);
+    assert_eq!((disabled.fill, disabled.alpha, disabled.focus_ring), (CardFill::Face, 0.5, false), "a disabled card neither hovers nor shows focus");
+    assert!(card_look(false, true, false, true).focus_ring);
+    assert!(card_look(true, false, false, false).alpha < 1.0, "a selected card can be disabled too");
+}
+
+#[test]
+fn cards_size_to_their_container_and_survive_hostile_sizes() {
+    use super::preferences_cards::{card_width, carousel_window};
+    assert_eq!(card_width(320.0, 4, 10.0), 72.5);
+    assert_eq!(card_width(320.0, 0, 10.0), 320.0);
+    for bad in [0.0, -5.0, f32::NAN, f32::INFINITY, f32::MAX] {
+        let w = card_width(bad, 3, 10.0);
+        assert!(w.is_finite() && w >= 0.0, "{bad}: {w}");
+        let (first, visible) = carousel_window(5, 9, bad, 88.0, 8.0, 26.0);
+        assert!(first + visible <= 5 && visible >= 1, "{bad}: {first} {visible}");
+    }
+    assert_eq!(carousel_window(0, 3, 400.0, 88.0, 8.0, 26.0), (0, 0));
+    // 400 wide: two arrows and their gaps leave 332, which fits three 88-wide items with gaps.
+    assert_eq!(carousel_window(6, 0, 400.0, 88.0, 8.0, 26.0), (0, 3));
+    assert_eq!(carousel_window(6, 5, 400.0, 88.0, 8.0, 26.0), (3, 3), "the offset stops at the last full window");
+}
+
+fn sample_card<'a>(label: &'a str, selected: bool, enabled: bool) -> super::preferences_cards::Card<'a> {
+    super::preferences_cards::Card {
+        label,
+        sub: Some("sub"),
+        selected,
+        enabled,
+        options: None,
+        check: selected,
+        aspect: 120.0 / 64.0,
+        figure: &super::preferences_figure_data::paint_tess_normal,
+    }
+}
+
+#[test]
+fn picture_cards_and_tiles_click_only_when_enabled_and_never_panic() {
+    use super::preferences_cards::{picture_card, toggle_tile};
+    let ctx = crate::fonts::test_context();
+    for tile in [false, true] {
+        for enabled in [true, false] {
+            let mut clicked = false;
+            let mut at = None;
+            for pass in 0..3 {
+                let events = match (pass, at) {
+                    (1, Some(p)) => super::test_support::pointer(p, true),
+                    (2, Some(p)) => super::test_support::pointer(p, false),
+                    _ => vec![],
+                };
+                super::test_support::frame(&ctx, events, |ui| {
+                    let card = sample_card("Normal", false, enabled);
+                    let response = if tile { toggle_tile(ui, &card, 120.0) } else { picture_card(ui, &card, 120.0) };
+                    at = Some(response.rect.center());
+                    assert!(response.rect.width() == 120.0 && response.rect.height() > 40.0);
+                    clicked |= response.clicked();
+                });
+            }
+            assert_eq!(clicked, enabled, "tile {tile}, enabled {enabled}");
+            // Zero, negative and non-finite widths must not panic and must stay finite.
+            super::test_support::frame(&ctx, vec![], |ui| {
+                for width in [0.0, -3.0, f32::NAN, f32::INFINITY, 1.0e6] {
+                    let response = if tile {
+                        toggle_tile(ui, &sample_card("x", true, enabled), width)
+                    } else {
+                        picture_card(ui, &sample_card("x", true, enabled), width)
+                    };
+                    assert!(response.rect.is_finite());
+                }
+            });
+        }
+    }
+}
+
+#[test]
+fn preset_card_help_icon_and_carousel_behave() {
+    use super::preferences_cards::{carousel, help_icon, preset_card};
+    let ctx = crate::fonts::test_context();
+    let icon = |p: &egui::Painter, r: egui::Rect, ink: egui::Color32| crate::icons::paint_ink(p, r, "settings", ink);
+    super::test_support::frame(&ctx, vec![], |ui| {
+        for width in [0.0, 10.0, 204.0, f32::NAN] {
+            let response = preset_card(ui, "Performance", "Fastest", true, true, &icon, width);
+            assert!(response.rect.is_finite());
+        }
+        let help = help_icon(ui, "Help text");
+        assert!(help.rect.width() > 8.0 && help.rect.width() < 20.0);
+    });
+    // The next arrow moves the window by one and stays inert at the end.
+    let mut first = vec![];
+    let mut at = None;
+    for pass in 0..6 {
+        let events = match (pass, at) {
+            (2, Some(p)) => super::test_support::pointer(p, true),
+            (3, Some(p)) => super::test_support::pointer(p, false),
+            _ => vec![],
+        };
+        super::test_support::frame(&ctx, events, |ui| {
+            let (f, visible) = carousel(ui, "carousel_test", 5, 60.0, 40.0, |ui, _| {
+                ui.allocate_exact_size(egui::vec2(60.0, 40.0), egui::Sense::hover());
+            });
+            first.push((f, visible));
+            if let Some(rect) = scenario::rect_of("prefs:carousel:Next") {
+                at = Some(rect.center());
+            }
+        });
+    }
+    let (f0, visible) = first[0];
+    assert_eq!(f0, 0);
+    assert!((1..5).contains(&visible), "{visible}");
+    assert!(first.last().unwrap().0 >= 1, "the next arrow advanced the window: {first:?}");
+}
+
+/// Light and dark boards of the shared Preferences widgets and of every figure, rendered on the CPU.
+/// Set `SOLIDCRAFT_PREFERENCE_WIDGET_EVIDENCE` to a directory to keep the PNGs.
+#[test]
+fn preference_widgets_and_figures_board_in_both_themes() {
+    use super::checks::tests::{raster, textures_update};
+    use std::collections::HashMap;
+    let previous = crate::theme::is_dark();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        for (board, names) in [
+            ("widgets", &["picture_card", "toggle_tile", "preset_card", "help_icon", "carousel", "preference_theme_thumbnails"][..]),
+            ("figures", &["preference_figures"][..]),
+        ] {
+            for scale in [1.0_f32, 2.0] {
+                let ctx = crate::fonts::test_context();
+                ctx.set_pixels_per_point(scale);
+                let bounds = egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    vec2(if board == "figures" { 700.0 } else { 360.0 }, if board == "figures" { 920.0 } else { 800.0 }),
+                );
+                let mut textures = HashMap::new();
+                let mut image = None;
+                for _ in 0..3 {
+                    let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
+                        ui.set_width(bounds.width() - 40.0);
+                        ui.painter().rect_filled(bounds, 0.0, Tokens::get().dialog_body);
+                        ui.add_space(12.0);
+                        scope(ui, |ui| {
+                            for name in names {
+                                example(ui, ELEMENTS.iter().find(|e| e.name == *name).unwrap());
+                                ui.add_space(Tokens::get().space_12);
+                            }
+                        });
+                    });
+                    textures_update(&mut textures, &output.textures_delta);
+                    output.textures_delta.clear();
+                    image = Some(raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures));
+                }
+                let image = image.unwrap();
+                assert!(image.pixels().any(|p| p.0[3] != 0));
+                if let Some(dir) = std::env::var_os("SOLIDCRAFT_PREFERENCE_WIDGET_EVIDENCE") {
+                    std::fs::create_dir_all(&dir).unwrap();
+                    let suffix = if scale > 1.0 { "@2x" } else { "" };
+                    image
+                        .save(std::path::Path::new(&dir).join(format!("preferences-{board}-{}{suffix}.png", if dark { "dark" } else { "light" })))
+                        .unwrap();
+                }
+            }
+        }
+    }
+    crate::theme::set_dark(previous);
 }
