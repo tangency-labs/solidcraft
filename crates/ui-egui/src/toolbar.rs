@@ -2913,7 +2913,7 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
     ui.label(egui::RichText::new(crate::i18n::tr_label("Selection filter")).color(t.text_dim).size(t.font_small));
     // NX's Type Filter, in its order: one kind of object, chosen from the list, nothing to
     // tick. The kinds a design model has no objects of pick nothing, as they do in NX.
-    const FILTERS: [crate::PickFilter; 14] = [
+    const FILTERS: &[crate::PickFilter] = &[
         crate::PickFilter::Any,
         crate::PickFilter::Machining,
         crate::PickFilter::DatumCsys,
@@ -2929,7 +2929,7 @@ pub(crate) fn selection_filter(app: &mut SolveApp, ui: &mut egui::Ui) {
         crate::PickFilter::Edges,
         crate::PickFilter::Faces,
     ];
-    const LABELS: [&str; 14] = [
+    const LABELS: &[&str] = &[
         "No selection filter",
         "Machining feature",
         "Datum coordinate system",

@@ -1158,7 +1158,7 @@ impl SolveApp {
         self.ui.pick_filter = filter;
         self.ui.pick_components = false;
         self.ui.pick_bodies = filter == PickFilter::Bodies;
-        const KINDS: [&str; 11] = [
+        const KINDS: &[&str] = &[
             "faces",
             "edges",
             "vertices",
