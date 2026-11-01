@@ -99,11 +99,11 @@ fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
         CardFill::Hover => t.hover,
         CardFill::Face => t.control_fill,
     };
-    let border = if card.selected { t.figure_accent } else { t.dialog_border };
+    let border = if card.selected { t.form_primary } else { t.dialog_border };
     let radius = f32::from(t.radius_lg);
     p.rect(rect, radius, dim(fill), Stroke::new(look.border, dim(border)), StrokeKind::Inside);
     if look.focus_ring {
-        p.rect_stroke(rect.expand(t.space_2), radius + t.space_2, Stroke::new(t.space_2, t.figure_accent), StrokeKind::Outside);
+        p.rect_stroke(rect.expand(t.space_2), radius + t.space_2, Stroke::new(t.space_2, t.form_primary), StrokeKind::Outside);
     }
     let inset = t.space_6;
     let figure = Rect::from_min_size(
@@ -118,7 +118,7 @@ fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
         }
     }
     let ink = match look.ink {
-        CardInk::Accent => t.figure_accent,
+        CardInk::Accent => t.selected_ink,
         CardInk::Text => t.form_ink,
     };
     let font = if look.bold { crate::fonts::semibold(t.font_label) } else { FontId::proportional(t.font_label) };
@@ -135,20 +135,20 @@ fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
         let size = t.space_14 + 1.0;
         let box_rect = Rect::from_min_size(corner - vec2(size, 0.0), vec2(size, size));
         if card.selected {
-            p.rect_filled(box_rect, t.space_4, dim(t.figure_accent));
-            tick(p, box_rect, dim(t.pref_on_accent));
+            p.rect_filled(box_rect, t.space_4, dim(t.form_primary));
+            tick(p, box_rect, dim(t.on_accent));
         } else {
             p.rect(box_rect, t.space_4, dim(t.control_fill), Stroke::new(1.0, dim(t.control_border)), StrokeKind::Inside);
         }
     } else if card.options.is_some() || card.check {
         let size = t.space_16;
         let centre = pos2(rect.right() - t.space_6 + 1.0 - size * 0.5, rect.top() + t.space_6 - 1.0 + size * 0.5);
-        p.circle_filled(centre, size * 0.5, dim(t.figure_accent));
+        p.circle_filled(centre, size * 0.5, dim(t.form_primary));
         if card.check {
-            tick(p, Rect::from_center_size(centre, vec2(size, size) * 0.75), dim(t.pref_on_accent));
+            tick(p, Rect::from_center_size(centre, vec2(size, size) * 0.75), dim(t.on_accent));
         } else {
             let dot = Rect::from_center_size(centre, vec2(size, size) * 0.6);
-            crate::icons::paint_ink(p, dot, "settings", dim(t.pref_on_accent));
+            crate::icons::paint_ink(p, dot, "settings", dim(t.on_accent));
         }
     }
     let kind = if tile { egui::WidgetType::Checkbox } else { egui::WidgetType::RadioButton };
@@ -202,20 +202,20 @@ pub(crate) fn preset_card(
         CardFill::Face => t.control_fill,
     };
     let radius = f32::from(t.radius_lg) + t.space_2;
-    p.rect(rect, radius, dim(fill), Stroke::new(look.border, dim(if selected { t.figure_accent } else { t.dialog_border })), StrokeKind::Inside);
+    p.rect(rect, radius, dim(fill), Stroke::new(look.border, dim(if selected { t.form_primary } else { t.dialog_border })), StrokeKind::Inside);
     if look.focus_ring {
-        p.rect_stroke(rect.expand(t.space_2), radius + t.space_2, Stroke::new(t.space_2, t.figure_accent), StrokeKind::Outside);
+        p.rect_stroke(rect.expand(t.space_2), radius + t.space_2, Stroke::new(t.space_2, t.form_primary), StrokeKind::Outside);
     }
     let box_size = t.space_24 + t.space_14;
     let box_rect = Rect::from_min_size(pos2(rect.left() + t.space_14, rect.center().y - box_size * 0.5), vec2(box_size, box_size));
-    let box_fill = if selected { t.figure_accent } else { t.pref_well };
-    let box_ink = if selected { t.pref_on_accent } else { t.form_dim };
+    let box_fill = if selected { t.form_primary } else { t.pref_well };
+    let box_ink = if selected { t.on_accent } else { t.form_dim };
     p.rect_filled(box_rect, f32::from(t.radius_lg) + t.space_2, dim(box_fill));
     icon(p, Rect::from_center_size(box_rect.center(), box_rect.size() * 0.55), dim(box_ink));
     let text_left = box_rect.right() + t.space_12;
     let text_width = (rect.right() - t.space_14 - t.space_24 - text_left).max(0.0);
     let name_font = crate::fonts::semibold(t.font_heading.min(15.0));
-    let name_ink = if selected { t.figure_accent } else { t.form_ink };
+    let name_ink = if selected { t.selected_ink } else { t.form_ink };
     let name_rect = Rect::from_min_size(pos2(text_left, rect.center().y - t.space_16), vec2(text_width, t.space_16));
     super::text::paint_text(ui, name_rect, name, name_font, dim(name_ink), false);
     let word_rect = Rect::from_min_size(pos2(text_left, name_rect.bottom()), vec2(text_width, t.space_16));
@@ -223,8 +223,8 @@ pub(crate) fn preset_card(
     let p = ui.painter();
     if selected {
         let centre = pos2(rect.right() - t.space_14 - t.space_8 + 1.0, rect.center().y);
-        p.circle_filled(centre, t.space_8 + 1.0, dim(t.figure_accent));
-        tick(p, Rect::from_center_size(centre, vec2(t.space_12, t.space_12)), dim(t.pref_on_accent));
+        p.circle_filled(centre, t.space_8 + 1.0, dim(t.form_primary));
+        tick(p, Rect::from_center_size(centre, vec2(t.space_12, t.space_12)), dim(t.on_accent));
     }
     response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::RadioButton, enabled, selected, name));
     scenario::publish_target(&format!("prefs:preset:{name}"), rect);
@@ -311,7 +311,7 @@ fn carousel_arrow(ui: &mut Ui, size: egui::Vec2, direction: f32, enabled: bool, 
         crate::icons::paint_ink(p, icon, "chevron_right", ink);
     }
     if enabled && response.has_focus() {
-        p.rect_stroke(rect.expand(t.space_2), f32::from(t.radius_lg) + t.space_2, Stroke::new(t.space_2, t.figure_accent), StrokeKind::Outside);
+        p.rect_stroke(rect.expand(t.space_2), f32::from(t.radius_lg) + t.space_2, Stroke::new(t.space_2, t.form_primary), StrokeKind::Outside);
     }
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
     scenario::publish_target(&format!("prefs:carousel:{label}"), rect);
