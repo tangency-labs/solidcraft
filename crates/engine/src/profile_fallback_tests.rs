@@ -112,6 +112,52 @@ fn exact_matches_stay_quiet_and_nothing_plausible_is_an_error() {
     assert!(s.model.state().bodies.is_empty());
 }
 
+/// The public example of #9368: a 40 x 20 rectangle with a circle tangent to its top and bottom
+/// (radius 10 at (20, 10)), or a ring offset 1 mm around a circle of radius 9 with `offset`.
+/// `Gauche` is the region left of the circle, `Disque` (joined) the disc or the ring.
+fn rectangle_and_circle(offset: bool) -> Session {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S1"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 10], "radius": if offset { 9 } else { 10 }}));
+    if offset {
+        run(&mut s, "sketch.offset", json!({"curves": ["c1"], "distance": 1, "side": [20, 25]}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "10 mm", "profiles": [{"point": [3, 10]}], "name": "Gauche"}));
+    let disque = if offset { [20.0, 19.5] } else { [20.0, 15.0] };
+    run(&mut s, "solid.extrude", json!({"distance": "10 mm", "profiles": [{"point": disque}], "operation": "join", "name": "Disque"}));
+    s
+}
+
+/// A line from the top side to the circle cuts a sliver off the left region and gives the circle
+/// more arcs: the disc is still the same region, so it is found without a word, and the left region
+/// is still found, as its two pieces.
+#[test]
+fn an_extrude_survives_a_line_ending_on_a_circle_split_by_tangents() {
+    let mut s = rectangle_and_circle(false);
+    edit(&mut s, &[("sketch.line", json!({"points": [[14, 20], [14, 18]]}))]);
+    assert_eq!(result(&s, "Disque"), (None, None));
+    let (error, warning) = result(&s, "Gauche");
+    assert_eq!(error, None);
+    assert!(warning.unwrap_or_default().contains("2 pieces"));
+    assert!((volume(&s) - 5570.6).abs() < 0.5, "volume {}", volume(&s));
+}
+
+/// Same sketch with a ring offset from a circle: the loops name the offset's output. The line
+/// cuts the left region (its closed loop is taken as two pieces, with a warning), and the ring,
+/// only given more arcs, is found as it was.
+#[test]
+fn an_extrude_with_an_offset_curve_survives_a_line_splitting_its_profile() {
+    let mut s = rectangle_and_circle(true);
+    edit(&mut s, &[("sketch.line", json!({"points": [[14, 20], [14, 18]]}))]);
+    let (error, warning) = result(&s, "Gauche");
+    assert_eq!(error, None);
+    assert!(warning.unwrap_or_default().contains("2 pieces"));
+    assert_eq!(result(&s, "Disque"), (None, None));
+    assert!((volume(&s) - 3026.2).abs() < 0.5, "volume {}", volume(&s));
+}
+
 /// A block `E1` with a sketch `S2` on its top cap and a hole cut from it, `E2`.
 fn block_with_hole() -> Session {
     let mut s = Session::default();

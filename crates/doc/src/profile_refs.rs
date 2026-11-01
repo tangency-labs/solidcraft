@@ -119,6 +119,22 @@ pub fn profile_fallback_notes(ss: &SolvedSketch, selection: &ProfileSel) -> Vec<
     profile_selection_indices_lenient(ss, selection).map(|(_, notes)| notes).unwrap_or_default()
 }
 
+/// A curve that is a line, an arc or a circle, and not the output of a free-form offset.
+fn is_analytic(sketch: &solidcraft_sketch::Sketch, id: &str) -> bool {
+    sketch.curves.iter().any(|curve| {
+        curve.id == id
+            && matches!(
+                curve.kind,
+                solidcraft_sketch::CurveKind::Line { .. } | solidcraft_sketch::CurveKind::Arc { .. } | solidcraft_sketch::CurveKind::Circle { .. }
+            )
+    }) && !sketch.freeform_offsets.iter().any(|offset| offset.output == id)
+}
+
+/// A loop made only of analytic curves: how many pieces each is cut into does not matter.
+fn is_analytic_loop(sketch: &solidcraft_sketch::Sketch, curves: &[String]) -> bool {
+    !curves.is_empty() && curves.iter().all(|id| is_analytic(sketch, id))
+}
+
 fn quoted(ids: &[String]) -> String {
     ids.iter().map(|id| format!("`{id}`")).collect::<Vec<_>>().join(", ")
 }
@@ -134,17 +150,32 @@ fn quoted(ids: &[String]) -> String {
 ///    them; a tie goes to the one with the fewest curves the loop did not have, and a tie left
 ///    after that is not guessed.
 ///
-/// Loops of offset curves and legacy graph-span multisets (a curve listed once per piece) keep
-/// their exact meaning and never fall back.
+/// Analytic loops (lines, arcs and circles only) may list a curve more than once, as the pieces a
+/// circle was cut into when the loop was saved; the repeats are one curve here, since a sketch
+/// edit changes how many pieces a curve has but not the region it bounds. The outputs of an
+/// analytic offset (`sketch.offsets`) take step 1 only: their loop closes on its own or the pick
+/// is lost, a partial match by identifiers never stands for it. Loops with free-form offset
+/// outputs, free curves (splines, ellipses, conics) and legacy graph-span multisets keep their
+/// exact meaning and never fall back.
 fn fallback_loop(ss: &SolvedSketch, curves: &[String]) -> Option<(Vec<usize>, String)> {
+    let sketch = &ss.sketch;
+    let analytic_loop = is_analytic_loop(sketch, curves);
+    let deduped: Vec<String> = if analytic_loop {
+        let mut seen = BTreeSet::new();
+        curves.iter().filter(|id| seen.insert(id.as_str())).cloned().collect()
+    } else {
+        curves.to_vec()
+    };
+    let curves = deduped.as_slice();
     let stored: BTreeSet<&str> = curves.iter().map(String::as_str).collect();
     if stored.is_empty() || stored.len() != curves.len() || curves.len() > 512 || ss.profiles.len() > 10_000 {
         return None;
     }
-    let sketch = &ss.sketch;
-    let offset =
-        |id: &str| sketch.offsets.iter().any(|offset| offset.owns_output(id)) || sketch.freeform_offsets.iter().any(|offset| offset.output == id);
-    if stored.iter().any(|id| offset(id)) {
+    if stored.iter().any(|id| sketch.freeform_offsets.iter().any(|offset| offset.output == *id)) {
+        return None;
+    }
+    let from_offset = stored.iter().any(|id| sketch.offsets.iter().any(|offset| offset.owns_output(id)));
+    if from_offset && !analytic_loop {
         return None;
     }
     let drawn = |id: &str| sketch.curves.iter().any(|curve| curve.id == id && !curve.construction && !curve.centerline);
@@ -178,6 +209,9 @@ fn fallback_loop(ss: &SolvedSketch, curves: &[String]) -> Option<(Vec<usize>, St
                 return Some((pieces, note));
             }
         }
+    }
+    if from_offset {
+        return None;
     }
     // 2. The closest loop by the curves it shares.
     let count = |profile: &solidcraft_sketch::Profile, inside: bool| {
@@ -230,9 +264,12 @@ fn selection_indices(ss: &SolvedSketch, selection: &ProfileSel, mut notes: Optio
                     }
                     indices.push(unique_profile(ss, &ss.sketch.offset_boundary(id)?)?);
                 } else {
-                    // Repeated saved IDs identify exact graph spans. Their multiplicity
-                    // must not silently turn into a whole-source certificate on resize.
+                    // Repeated saved IDs of free curves identify exact graph spans. Their
+                    // multiplicity must not silently turn into a whole-source certificate on
+                    // resize. Lines, arcs and circles are exempt: how many pieces such a curve is
+                    // cut into changes with every line drawn across it (#9368).
                     if curves.iter().collect::<BTreeSet<_>>().len() != curves.len()
+                        && !is_analytic_loop(&ss.sketch, curves)
                         && !ss.profiles.iter().any(|profile| same_ids(curves, &profile.outer_curves))
                     {
                         return Err(crate::curve_pick_error(solidcraft_sketch::CurvePick::Missing, curves, &ss.name));
