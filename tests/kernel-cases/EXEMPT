@@ -84,6 +84,9 @@ file.save_as                      saving the design
 file.save_mesh                    saving a display mesh
 file.send_to_slicer               hands the file to a slicer
 file.slicers                      a listing of slicers
+file.slicers.add_remote           a network folder for Send to Slicer; crates/engine/src/tests/mesh_convert.rs
+file.slicers.remove_remote        a network folder for Send to Slicer; crates/engine/src/tests/mesh_convert.rs
+file.slicers.test                 a network folder for Send to Slicer; crates/engine/src/tests/mesh_convert.rs
 frame.end_cap                     plates on member ends; tested in crates/engine/src/cmd/frame_tests.rs
 frame.profile.list                a listing of the profile library
 frame.profile.properties          a profile's section properties from the library

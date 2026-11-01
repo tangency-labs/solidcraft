@@ -12,16 +12,41 @@ use serde::{Deserialize, Serialize};
 #[schemars(deny_unknown_fields)]
 pub struct SlicersParams {}
 
-/// What `file.slicers` returns: the slicers found on this machine, known ones in a fixed order
-/// (empty in the browser). Pass an entry's `id`, its `name` or its `program` as
-/// `file.send_to_slicer`'s or `file.save_mesh`'s `slicer`.
+/// What `file.slicers` returns: the network folders the user added, then the slicers found on
+/// this machine, known ones in a fixed order (no slicer in the browser). Pass an entry's `id`,
+/// its `name` or a slicer's `program` as `file.send_to_slicer`'s or `file.save_mesh`'s `slicer`.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SlicersResult {
-    /// The slicers installed on this machine.
-    pub slicers: Vec<SlicerInfo>,
+    /// The network folders, then the slicers installed on this machine.
+    pub slicers: Vec<SlicerEntry>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// One entry of the list: a network folder or an installed slicer.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SlicerEntry {
+    /// A network folder the user added (`file.slicers.add_remote`).
+    Folder(NetworkFolderInfo),
+    /// An installed slicer, or a program the user added under Custom….
+    Slicer(SlicerInfo),
+}
+
+/// One network folder the user added: a send copies the file there and starts no program.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct NetworkFolderInfo {
+    /// `remote:<name>`.
+    pub id: String,
+    /// The name the user gave it.
+    pub name: String,
+    /// Always true: this entry is a network folder, not a slicer.
+    pub remote: bool,
+    /// `folder`: a folder on this computer, usually a mounted share.
+    pub kind: String,
+    /// The folder the files go to.
+    pub folder: String,
 }
 
 /// One installed slicer.

@@ -6,6 +6,10 @@
 //!
 //! It takes a [`TargetKind`], and slicers are the only kind there is; a later Send to App would add
 //! one (see `slicers::TargetKind`) and send through this same function.
+//!
+//! A network folder the user added (`crate::remote_slicers`, #2304) is a target too: the file is
+//! written as for any slicer, then copied into the folder under the design's (and body's) name,
+//! numbered rather than replacing a file there, and no program is started.
 
 use serde_json::{Value, json};
 use solidcraft_io::Format;
@@ -13,6 +17,7 @@ use solidcraft_io::Format;
 use super::easyprint::{Exported, export_bodies};
 use super::export_laid_to;
 use crate::params::bad;
+use crate::remote_slicers::{self, RemoteTarget};
 use crate::schema::save_mesh::SlicerDelivery;
 use crate::slicers::{self, Slicer, TargetKind};
 use crate::{EngineError, Result, Session};
@@ -57,7 +62,7 @@ pub(super) struct Send<'a> {
     /// 3MF objects with parts (`objects: "component"`, #8139). Only for [`Dest::Path`].
     pub parts: Vec<(String, Vec<String>)>,
     pub format: Format,
-    /// Only for [`Dest::Path`]; the slicer folder's file is always standard.
+    /// How closely the mesh follows curved faces.
     pub quality: solidcraft_io::MeshQuality,
     pub dest: Dest<'a>,
     pub single_instance: bool,
@@ -75,6 +80,13 @@ fn format_name(f: Format) -> &'static str {
 /// Send the bodies to the target named by `r.spec`.
 pub(super) fn send(s: &mut Session, r: Send<'_>) -> Result<Value> {
     // The target is found before anything is written, so a name that matches nothing writes nothing.
+    // A network folder's name comes first: the user gave it, so a script naming it means it.
+    if let Some(folder) = remote_slicers::resolve(&s.network_folders, r.spec).cloned() {
+        return send_to_folder(s, &r, &folder);
+    }
+    if remote_slicers::is_id(r.spec) {
+        return Err(bad(r.cmd, format!("no network folder `{}` (see file.slicers)", r.spec)));
+    }
     let target = slicers::resolve_for(r.kind, r.spec).ok_or_else(|| {
         bad(r.cmd, format!("no slicer `{}` (see file.slicers; a program works only once the user has added it under Custom…)", r.spec))
     })?;
@@ -83,23 +95,77 @@ pub(super) fn send(s: &mut Session, r: Send<'_>) -> Result<Value> {
     }
     let mut out = match r.dest {
         Dest::Path(path) => export_laid_to(s, path, r.format, &r.bodies, &r.parts, r.quality)?,
-        Dest::Folder => write_in_folder(s, &r)?,
+        Dest::Folder => write_in_folder(s, &r)?.0,
     };
     let path = out.get("path").and_then(Value::as_str).unwrap_or_default().to_string();
     deliver(&target, &path, r.single_instance, r.wait, &mut out);
     Ok(out)
 }
 
-/// Write the bodies into the slicer folder.
-fn write_in_folder(s: &mut Session, r: &Send<'_>) -> Result<Value> {
+/// Send the bodies to a network folder: write the file as for a slicer, then copy it into the
+/// folder. The name there is the design's (and the body's, for one body) for the slicer folder, and
+/// the file's own name for a path the caller gave.
+fn send_to_folder(s: &mut Session, r: &Send<'_>, folder: &RemoteTarget) -> Result<Value> {
+    // An agent limited to folders (`--allow-path`) sends only into one it was allowed, checked
+    // here, before anything is written or a copy starts in the background.
+    if let Some(dir) = folder.on_this_computer() {
+        solidcraft_io::vfs::check(dir).map_err(|e| bad(r.cmd, e.to_string()))?;
+    }
+    let (mut out, stem) = match r.dest {
+        Dest::Path(path) => {
+            let out = export_laid_to(s, path, r.format, &r.bodies, &r.parts, r.quality)?;
+            let stem = std::path::Path::new(path).file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            (out, remote_slicers::safe_stem(&stem))
+        }
+        Dest::Folder => write_in_folder(s, r)?,
+    };
+    let path = out.get("path").and_then(Value::as_str).unwrap_or_default().to_string();
+    let ext = std::path::Path::new(&path)
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .filter(|e| !e.is_empty())
+        .unwrap_or_else(|| if matches!(r.format, Format::StlBinary | Format::StlAscii) { "stl".into() } else { "3mf".into() });
+    deliver_to_folder(folder, &path, &stem, &ext, r.wait == Wait::Return, &mut out);
+    Ok(out)
+}
+
+/// Copy the file at `path` into a network folder and say what happened in `out`: `slicer` (the
+/// folder's name), `sent_to` and `renamed` when it went, `slicer_error` when it didn't; `remote` either way.
+/// In the background, the answer is `sending`: the ticket to ask `remote_slicers::poll` about.
+fn deliver_to_folder(folder: &RemoteTarget, path: &str, stem: &str, ext: &str, background: bool, out: &mut Value) {
+    let Some(obj) = out.as_object_mut() else { return };
+    let at = SlicerDelivery { remote: true, target: Some(folder.name.clone()), ..Default::default() };
+    let delivery = if background {
+        SlicerDelivery { sending: Some(remote_slicers::deliver_in_background(folder, std::path::Path::new(path), stem, ext)), ..at }
+    } else {
+        // The file is saved either way; a folder that can't be written is reported, not fatal.
+        match remote_slicers::deliver(folder, std::path::Path::new(path), stem, ext) {
+            Ok(sent) => SlicerDelivery {
+                slicer: Some(folder.name.clone()),
+                sent_to: Some(sent.path.to_string_lossy().into_owned()),
+                renamed: Some(sent.numbered),
+                ..at
+            },
+            Err(e) => SlicerDelivery { slicer_error: Some(format!("couldn't send to {}: {e}; the file is saved at {path}", folder.name)), ..at },
+        }
+    };
+    // What happened, as the typed value the reply's schema describes.
+    if let Ok(Value::Object(keys)) = serde_json::to_value(delivery) {
+        obj.extend(keys);
+    }
+}
+
+/// Write the bodies into the slicer folder; the reply, and the readable name for a network folder.
+fn write_in_folder(s: &mut Session, r: &Send<'_>) -> Result<(Value, String)> {
     use crate::slicer_files;
-    let Exported { bytes, ext, fell_back, bodies, laid } = export_bodies(s, r.cmd, &r.bodies, r.format)?;
+    let Exported { bytes, ext, fell_back, bodies, laid } = export_bodies(s, r.cmd, &r.bodies, r.format, r.quality)?;
+    let readable = remote_slicers::readable_stem(&s.doc.name, &bodies);
     let dir = slicer_files::dir().ok_or_else(|| bad(r.cmd, "no per-user folder on this system"))?;
     let stem = slicer_files::stem(&s.doc.name, s.path.as_deref(), s.uid, &bodies);
     let (file, numbered) = slicer_files::write(&dir, &stem, ext, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", dir.display())))?;
     let mut out = json!({"path": file.to_string_lossy(), "bytes": bytes.len(), "format": ext, "numbered": numbered, "stl_fallback": fell_back});
     laid.report(&mut out);
-    Ok(out)
+    Ok((out, readable))
 }
 
 /// Hand the file at `path` to `target`, starting it first if it has to be, and say what happened in

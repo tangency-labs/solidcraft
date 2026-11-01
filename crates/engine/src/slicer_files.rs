@@ -67,7 +67,11 @@ pub fn stem(design: &str, path: Option<&str>, uid: u64, bodies: &[String]) -> St
 /// file the slicer has open locked) the next free `<stem>-2.<ext>`, … is used; the flag says so.
 pub fn write(dir: &Path, stem: &str, ext: &str, bytes: &[u8]) -> io::Result<(PathBuf, bool)> {
     make_private(dir)?;
-    let tmp = dir.join(format!(".{stem}.{ext}.{}.tmp", std::process::id()));
+    // One temporary name per call: two sends at once (on copies of the design, #2304) shared one
+    // and the second found it gone.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = dir.join(format!(".{stem}.{ext}.{}-{n}.tmp", std::process::id()));
     std::fs::write(&tmp, bytes)?;
     let mut failure = None;
     for n in 1..=MAX_COPIES {

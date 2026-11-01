@@ -53,9 +53,10 @@ pub struct SaveMeshKeys {
     pub ascii: Option<bool>,
     /// A slicer to send the saved file to, after it is written where `path` says, through the
     /// same steps as `file.send_to_slicer`: an id or a name from `file.slicers`, the program path
-    /// it lists, or a program the user added under Custom…. A slicer that has to be started first
-    /// is waited for. Kept for scripts; may be deprecated later in favour of `file.send_to_slicer`
-    /// or a Send to App workflow. Default: none.
+    /// it lists, a program the user added under Custom…, or a network folder the user added (a
+    /// copy of the file goes there, under the file's name, numbered rather than replacing one). A
+    /// slicer that has to be started first is waited for. Kept for scripts; may be deprecated later
+    /// in favour of `file.send_to_slicer` or a Send to App workflow. Default: none.
     #[serde(default)]
     pub slicer: Option<String>,
     /// Read only when `slicer` is given: true opens the file in the window the slicer already has
@@ -317,13 +318,15 @@ impl JsonSchema for MeshObjects {
     }
 }
 
-/// What happened when the saved file was handed to `slicer`. Only the one that applies is there.
+/// What happened when the saved file was handed to `slicer`. Only the one that applies is there,
+/// with `remote` and `target` too for a network folder.
 #[derive(Debug, Default, Serialize, JsonSchema)]
 pub struct SlicerDelivery {
-    /// The slicer's name: the file was opened there.
+    /// The slicer's or the network folder's name: the file was opened there, or copied there.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slicer: Option<String>,
-    /// Why the program would not open the file. The file is saved either way.
+    /// Why the program would not open the file, or the copy to a network folder failed. The file
+    /// is saved either way.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slicer_error: Option<String>,
     /// The slicer's name: the slicer had to be started first and was not ready (never for
@@ -334,6 +337,23 @@ pub struct SlicerDelivery {
     /// not sent. The file is saved.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slicer_timeout: Option<String>,
+    /// True when `slicer` named a network folder: the file was copied there, and no program was
+    /// started.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub remote: bool,
+    /// The network folder's name, whether the copy went or not.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    /// Where the copy went in the network folder.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sent_to: Option<String>,
+    /// True when a file of that name was already there, so the copy got a number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub renamed: Option<bool>,
+    /// The copy runs in the background: the ticket that says when it is done (never for
+    /// `file.save_mesh`, which waits for it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sending: Option<u64>,
 }
 
 /// What `file.save_mesh` returns.

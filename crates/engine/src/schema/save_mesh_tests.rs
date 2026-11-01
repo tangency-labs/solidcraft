@@ -271,6 +271,31 @@ fn replies_with_a_slicer_match_the_output_schema() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// With a network folder as the `slicer`: the reply says where the copy went, and the output schema
+/// describes each of its keys.
+#[test]
+fn replies_with_a_network_folder_match_the_output_schema() {
+    let dir = temp_dir("network-folder");
+    let share = dir.join("share");
+    std::fs::create_dir_all(&share).unwrap();
+    let mut s = with_box(ParamCheck::Warn);
+    s.network_folders = vec![crate::remote_slicers::RemoteTarget::folder_target("NAS", &share.to_string_lossy())];
+    let out = dir.join("part.stl").to_string_lossy().into_owned();
+    let first = s.execute("file.save_mesh", &json!({"path": out, "slicer": "NAS"})).unwrap();
+    let again = s.execute("file.save_mesh", &json!({"path": out, "slicer": "NAS"})).unwrap();
+    let schema = output_schema_for::<SaveMeshResult>();
+    let described: BTreeSet<String> = schema.as_value()["properties"].as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
+    for r in [&first, &again] {
+        matches(r);
+        assert_eq!(keys(r), ["bytes", "format", "path", "remote", "renamed", "sent_to", "slicer", "target"].map(String::from).into(), "{r}");
+        assert!(keys(r).is_subset(&described), "{r} has keys {schema:?} doesn't describe");
+        assert_eq!((&r["remote"], &r["slicer"], &r["target"]), (&json!(true), &json!("NAS"), &json!("NAS")), "{r}");
+        assert!(r["sent_to"].as_str().is_some_and(|p| std::path::Path::new(p).starts_with(&share)), "{r}");
+    }
+    assert_eq!((&first["renamed"], &again["renamed"]), (&json!(false), &json!(true)), "the second copy is numbered");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The typed reply serializes to the keys the handler's JSON had, and nothing for what is unset.
 #[test]
 fn the_reply_type_serializes_as_before() {

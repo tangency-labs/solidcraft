@@ -72,6 +72,7 @@ pub mod end_cap;
 pub mod features;
 pub mod features_more;
 pub mod file;
+pub mod file_remote;
 pub mod frame;
 pub mod insert_mesh;
 pub mod inspect;

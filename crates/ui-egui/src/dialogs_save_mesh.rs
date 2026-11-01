@@ -1043,7 +1043,7 @@ mod tests {
             assert_eq!(bodies(&mut h, id), one, "{id}");
         }
         let (_, p) = commands(
-            &SaveMesh { format: 0, quality: 0, open: false, slicer: String::new(), stale: true, shown: None },
+            &SaveMesh { format: 0, send_format: 0, quality: 0, open: false, slicer: String::new(), stale: true, shown: None },
             &h.app.dialog.as_ref().unwrap().inputs,
         )
         .map(|mut c| c.remove(0))

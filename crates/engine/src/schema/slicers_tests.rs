@@ -108,3 +108,27 @@ fn replies_match_the_output_schema() {
     let schema = output_schema_for::<SlicersResult>();
     assert!(conforms(schema.as_value(), schema.as_value(), &warned), "{warned}");
 }
+
+/// A network folder the user added comes first in the list, with its own keys and no program, and
+/// the reply still matches the output schema.
+#[cfg(unix)]
+#[test]
+fn a_network_folder_is_listed_first_and_matches_the_output_schema() {
+    use crate::slicers::{Slicer, TEST_DETECTED};
+    use crate::tests::mesh_convert::{CHOSEN_PROGRAMS, MadeUp};
+    let _turn = CHOSEN_PROGRAMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _reset = MadeUp;
+    *TEST_DETECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(vec![Slicer { id: "prusa".into(), name: "PrusaSlicer".into(), command: vec!["/opt/prusa".into()], icon: None, prusa_major: None }]);
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    s.network_folders = vec![crate::remote_slicers::RemoteTarget::folder_target("NAS", "/mnt/nas")];
+    let listed = s.execute("file.slicers", &json!({})).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(
+        listed,
+        json!({"slicers": [
+            {"id": "remote:NAS", "name": "NAS", "remote": true, "kind": "folder", "folder": "/mnt/nas"},
+            {"id": "prusa", "name": "PrusaSlicer", "program": "/opt/prusa", "icon": null},
+        ]})
+    );
+    matches(&listed);
+}
