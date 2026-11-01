@@ -18,6 +18,19 @@ pub(super) fn paint_check_glyph(painter: &egui::Painter, square: Rect, mixed: bo
     painter.add(egui::Shape::line(points, egui::Stroke::new(t.space_2, ink)));
 }
 
+/// A small action that accepts what is on the canvas, shown by the tick alone.
+/// Tokens: `control_height, space_3/14/24/4, form_primary; inherited control surface tokens`.
+pub(crate) fn check_button(ui: &mut Ui, target: &str, label: &str) -> Response {
+    let t = Tokens::get();
+    let response = ui.add(egui::Button::new("").min_size(vec2(t.space_24 + t.space_4, t.control_height)));
+    paint_check_glyph(ui.painter(), Rect::from_center_size(response.rect.center(), vec2(t.space_14, t.space_14)), false, t.form_primary);
+    t.button_bevel(ui, &response, false);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    crate::scenario::publish_handle(target, response.rect.center());
+    crate::scenario::publish_rect(target, response.rect);
+    response.on_hover_text(label)
+}
+
 /// All states use the same geometry. Disabled opacity is inherited from egui's disabled UI.
 pub(super) fn paint_box(ui: &Ui, square: Rect, response: &Response, on: bool, mixed: bool) {
     let t = Tokens::get();

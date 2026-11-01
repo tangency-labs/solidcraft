@@ -1,8 +1,9 @@
 //! The move/rotate triad shared by Move/Copy and occurrence moves: X/Y/Z arrows, XY/YZ/XZ plane
 //! squares, X/Y/Z rotation rings and a centre ball for a free drag in the view plane. It is a
-//! constant size on screen. A drag reports its change since the drag began (distances snap to
-//! round steps at the current zoom, angles to 5°; hold Alt or Ctrl for a free drag), so the caller
-//! adds it to the values it had when the drag started.
+//! constant size on screen and lies along any axes it is given. A drag reports its change since
+//! the drag began (distances snap to round steps at the current zoom, angles to 5°; hold Alt or
+//! Ctrl for a free drag), so the caller applies it to the values it had when the drag started:
+//! [`ring_order`] says how a turn goes on top of the angles.
 
 use std::cell::RefCell;
 
@@ -29,7 +30,7 @@ pub enum Handle {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Change {
     Translate(Vec3),
-    /// About X, Y or Z through the centre, in radians.
+    /// About the triad's X, Y or Z through the centre, in radians.
     Rotate {
         axis: usize,
         angle: f64,
@@ -50,6 +51,8 @@ pub struct Drag {
 #[derive(Clone, Copy, Debug)]
 pub struct Triad {
     pub center: Vec3,
+    /// Its X, Y and Z in the world (the columns).
+    pub axes: Axes,
     pub translate: bool,
     pub rotate: bool,
 }
@@ -58,6 +61,8 @@ pub struct Triad {
 struct State {
     handle: Handle,
     center: Vec3,
+    /// The axes when the drag began: a ring turns them, and the drag stays on the ones it took.
+    axes: Axes,
     /// Grab point on the plane (planes, ball) or parameter along the axis.
     grab: Vec3,
     t0: f64,
@@ -66,7 +71,16 @@ struct State {
     turned: f64,
 }
 
-const DIRS: [Vec3; 3] = [Vec3::X, Vec3::Y, Vec3::Z];
+/// Three directions as the columns of a rotation (rows, as [`rotation`] gives them).
+pub type Axes = [[f64; 3]; 3];
+
+/// The world's X, Y and Z.
+pub const WORLD: Axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+
+/// The default order of a move's angles, left to right in the product (see [`turn_of`]): about
+/// X first, then Y, then Z.
+pub const ANGLE_ORDER: [usize; 3] = [2, 1, 0];
+
 /// Arrow length on screen (px).
 pub const LEN_PX: f64 = 110.0;
 
@@ -74,16 +88,17 @@ pub const LEN_PX: f64 = 110.0;
 pub const HIT_TOLERANCE: f32 = 9.0;
 
 thread_local! {
-    /// The last triad drawn: centre and arrow length in mm (for scenarios and tests).
-    static LAST: RefCell<Option<(Vec3, f64)>> = const { RefCell::new(None) };
+    /// The last triad drawn: centre, arrow length in mm and axes (for scenarios and tests).
+    static LAST: RefCell<Option<(Vec3, f64, Axes)>> = const { RefCell::new(None) };
 }
 
 /// A world point on a handle of the last triad drawn: "x"/"y"/"z" on an arrow, "xy"/"yz"/"xz"
 /// in a square, "rx"/"ry"/"rz" on a ring, "ball". `by` moves it, `turn` (degrees) turns a ring
 /// point about its axis.
 pub fn handle_point(name: &str, by: Vec3, turn: f64) -> Option<Vec3> {
-    let (c, l) = LAST.with(|x| *x.borrow())?;
-    let axis = |s: &str| match s {
+    let (c, l, axes) = LAST.with(|x| *x.borrow())?;
+    let [ex, ey, ez] = [0, 1, 2].map(|i| axis(&axes, i));
+    let index = |s: &str| match s {
         "x" => Some(0),
         "y" => Some(1),
         "z" => Some(2),
@@ -91,16 +106,16 @@ pub fn handle_point(name: &str, by: Vec3, turn: f64) -> Option<Vec3> {
     };
     let p = match name {
         "ball" => c,
-        "xy" => c + (Vec3::X + Vec3::Y) * (0.35 * l),
-        "yz" => c + (Vec3::Y + Vec3::Z) * (0.35 * l),
-        "xz" => c + (Vec3::X + Vec3::Z) * (0.35 * l),
+        "xy" => c + (ex + ey) * (0.35 * l),
+        "yz" => c + (ey + ez) * (0.35 * l),
+        "xz" => c + (ex + ez) * (0.35 * l),
         r if r.starts_with('r') => {
-            let i = axis(&r[1..])?;
-            let (e1, e2) = ring_basis(i);
+            let i = index(&r[1..])?;
+            let (e1, e2) = ring_basis(&axes, i);
             let th = turn.to_radians();
             return Some(c + (e1 * th.cos() + e2 * th.sin()) * (RING * l) + by);
         }
-        a => c + DIRS[axis(a)?] * (0.75 * l),
+        a => c + axis(&axes, index(a)?) * (0.75 * l),
     };
     Some(p + by)
 }
@@ -109,12 +124,24 @@ pub fn handle_point(name: &str, by: Vec3, turn: f64) -> Option<Vec3> {
 const RING: f64 = 0.62;
 
 /// In-plane directions of the ring about an axis (right-handed: e1 × e2 = axis).
-fn ring_basis(i: usize) -> (Vec3, Vec3) {
+fn ring_basis(axes: &Axes, i: usize) -> (Vec3, Vec3) {
     match i {
-        0 => (Vec3::Y, Vec3::Z),
-        1 => (Vec3::Z, Vec3::X),
-        _ => (Vec3::X, Vec3::Y),
+        0 => (axis(axes, 1), axis(axes, 2)),
+        1 => (axis(axes, 2), axis(axes, 0)),
+        _ => (axis(axes, 0), axis(axes, 1)),
     }
+}
+
+/// Where round a ring (degrees) a press takes that ring, clear of the handles over it.
+#[cfg(test)]
+pub(crate) fn ring_grip(proj: &Proj, t: &Triad, ring: usize) -> Option<f64> {
+    let l = mm_per_px(proj, t.center)? * LEN_PX;
+    let sh = shapes(proj, t, l)?;
+    let (e1, e2) = ring_basis(&t.axes, ring);
+    (0..72).map(|k| f64::from(k) * 5.0).find(|a| {
+        let th = a.to_radians();
+        proj.to_screen(t.center + (e1 * th.cos() + e2 * th.sin()) * (RING * l)).is_some_and(|p| hit(&sh, p) == Some(Handle::Ring(ring)))
+    })
 }
 
 /// Distance from `p` to the screen segment a–b.
@@ -178,13 +205,14 @@ fn shapes(proj: &Proj, t: &Triad, l: f64) -> Option<Shapes> {
     let ball = proj.to_screen(c)?;
     let mut s = Shapes { arrows: Vec::new(), planes: Vec::new(), rings: Vec::new(), ball };
     if t.translate {
-        for (i, d) in DIRS.iter().enumerate() {
-            if let (Some(a), Some(b)) = (proj.to_screen(c + *d * (0.18 * l)), proj.to_screen(c + *d * l)) {
+        for i in 0..3 {
+            let d = axis(&t.axes, i);
+            if let (Some(a), Some(b)) = (proj.to_screen(c + d * (0.18 * l)), proj.to_screen(c + d * l)) {
                 s.arrows.push((i, a, b));
             }
         }
         for i in 0..3 {
-            let (e1, e2) = ring_basis(i);
+            let (e1, e2) = ring_basis(&t.axes, i);
             let q: Ring<Pos2> = [(0.25, 0.25), (0.45, 0.25), (0.45, 0.45), (0.25, 0.45)]
                 .iter()
                 .filter_map(|(a, b)| proj.to_screen(c + e1 * (a * l) + e2 * (b * l)))
@@ -196,7 +224,7 @@ fn shapes(proj: &Proj, t: &Triad, l: f64) -> Option<Shapes> {
     }
     if t.rotate {
         for i in 0..3 {
-            let (e1, e2) = ring_basis(i);
+            let (e1, e2) = ring_basis(&t.axes, i);
             let pts: Vec<Pos2> = (0..=64)
                 .map(|k| k as f64 / 64.0 * std::f64::consts::TAU)
                 .filter_map(|th| proj.to_screen(c + (e1 * th.cos() + e2 * th.sin()) * (RING * l)))
@@ -219,7 +247,9 @@ fn hit(s: &Shapes, p: Pos2) -> Option<Handle> {
     if let Some((i, _)) = s.planes.iter().find(|(_, q)| in_quad(p, q)) {
         return Some(Handle::Plane(*i));
     }
-    s.rings.iter().find(|(_, pts)| pts.windows(2).any(|w| seg_dist(p, w[0], w[1]) < 5.0)).map(|(i, _)| Handle::Ring(*i))
+    // From some views two rings lie almost on top of each other: the nearest takes the press.
+    let near = |pts: &Vec<Pos2>| pts.windows(2).map(|w| seg_dist(p, w[0], w[1])).fold(f32::MAX, f32::min);
+    s.rings.iter().map(|(i, pts)| (*i, near(pts))).filter(|r| r.1 < 5.0).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(i, _)| Handle::Ring(i))
 }
 
 /// Millimetres per screen pixel at a point.
@@ -284,7 +314,7 @@ pub fn handles_region(proj: &Proj, t: &Triad) -> Option<egui::Rect> {
 pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::Id, t: &Triad, step: f64) -> Option<Drag> {
     let tk = Tokens::get();
     let l = mm_per_px(proj, t.center)? * LEN_PX;
-    LAST.with(|x| *x.borrow_mut() = Some((t.center, l)));
+    LAST.with(|x| *x.borrow_mut() = Some((t.center, l, t.axes)));
     let sh = shapes(proj, t, l)?;
     // Handles by name for scenarios ("move_x", "move_rz", "move_ball"…).
     for n in ["x", "y", "z", "xy", "yz", "xz", "rx", "ry", "rz", "ball"] {
@@ -320,8 +350,9 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
         crate::tool_modifiers::set_manipulator_dragging(true);
     }
     let view = proj.ray(sh.ball).1;
+    let axes = state.map_or(t.axes, |s| s.axes);
     let plane_normal = |h: Handle| match h {
-        Handle::Plane(i) | Handle::Ring(i) => DIRS[i],
+        Handle::Plane(i) | Handle::Ring(i) => axis(&axes, i),
         _ => view,
     };
     let mut started = false;
@@ -334,12 +365,12 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
             let h = hovered?;
             let from = ui.input(|i| i.pointer.press_origin()).unwrap_or(p);
             let c = t.center;
-            let mut s = State { handle: h, center: c, grab: c, t0: 0.0, last: 0.0, turned: 0.0 };
+            let mut s = State { handle: h, center: c, axes, grab: c, t0: 0.0, last: 0.0, turned: 0.0 };
             match h {
-                Handle::Axis(i) => s.t0 = along(proj, from, c, DIRS[i])?,
+                Handle::Axis(i) => s.t0 = along(proj, from, c, axis(&axes, i))?,
                 Handle::Ring(i) => {
-                    let q = on_plane(proj, from, c, DIRS[i])? - c;
-                    let (e1, e2) = ring_basis(i);
+                    let q = on_plane(proj, from, c, axis(&axes, i))? - c;
+                    let (e1, e2) = ring_basis(&axes, i);
                     s.last = q.dot(e2).atan2(q.dot(e1));
                 }
                 _ => s.grab = on_plane(proj, from, c, plane_normal(h))?,
@@ -367,12 +398,12 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
     };
     let change = match st.handle {
         Handle::Axis(i) => {
-            let v = along(proj, p, st.center, DIRS[i]).map(|v| v - st.t0).unwrap_or(0.0);
-            Change::Translate(DIRS[i] * snap(v, step, free))
+            let v = along(proj, p, st.center, axis(&axes, i)).map(|v| v - st.t0).unwrap_or(0.0);
+            Change::Translate(axis(&axes, i) * snap(v, step, free))
         }
         Handle::Ring(i) => {
-            if let Some(q) = on_plane(proj, p, st.center, DIRS[i]).map(|q| q - st.center) {
-                let (e1, e2) = ring_basis(i);
+            if let Some(q) = on_plane(proj, p, st.center, axis(&axes, i)).map(|q| q - st.center) {
+                let (e1, e2) = ring_basis(&axes, i);
                 let th = q.dot(e2).atan2(q.dot(e1));
                 let mut d = th - st.last;
                 while d > std::f64::consts::PI {
@@ -388,7 +419,7 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
         }
         h => {
             let d = on_plane(proj, p, st.center, plane_normal(h)).map(|q| q - st.grab).unwrap_or(Vec3::ZERO);
-            Change::Translate(Vec3::new(snap(d.x, step, free), snap(d.y, step, free), snap(d.z, step, free)))
+            Change::Translate((0..3).fold(Vec3::ZERO, |sum, i| sum + axis(&axes, i) * snap(d.dot(axis(&axes, i)), step, free)))
         }
     };
     if done {
@@ -442,6 +473,71 @@ pub fn apply(m: &[[f64; 3]; 3], p: Vec3) -> Vec3 {
     )
 }
 
+/// Direction `i` (X, Y or Z) of `axes`.
+pub fn axis(axes: &Axes, i: usize) -> Vec3 {
+    let i = i.min(2);
+    Vec3::new(axes[0][i], axes[1][i], axes[2][i])
+}
+
+/// The opposite turn.
+pub fn inverse(m: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    [0, 1, 2].map(|r| [0, 1, 2].map(|c| m[c][r]))
+}
+
+/// The same turn with its axes laid along `frame`, in the world.
+pub fn turn_in(frame: &Axes, m: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
+    mul(&mul(frame, m), &inverse(frame))
+}
+
+/// The turn three angles about X, Y and Z make, as the product in `order`: the rightmost goes
+/// first. Read the other way round, each turns about the axes the ones left of it leave.
+pub fn turn_of(a: [f64; 3], order: [usize; 3]) -> [[f64; 3]; 3] {
+    order.iter().fold(WORLD, |m, i| mul(&m, &rotation(axis(&WORLD, *i), a[(*i).min(2)])))
+}
+
+/// The turn a move's X, Y and Z angles make in the default order.
+pub fn angles_rotation(a: [f64; 3]) -> [[f64; 3]; 3] {
+    turn_of(a, ANGLE_ORDER)
+}
+
+/// The X, Y and Z angles that make a turn (see [`angles_rotation`]).
+pub fn rotation_angles(m: &[[f64; 3]; 3]) -> [f64; 3] {
+    // R = Rz(rz) * Ry(ry) * Rx(rx): row 2 is (-sin ry, cos ry sin rx, cos ry cos rx).
+    let ry = (-m[2][0]).clamp(-1.0, 1.0).asin();
+    if m[2][1].abs() + m[2][2].abs() < 1e-9 {
+        // Y at a quarter turn: only rx + rz shows; keep rz at zero.
+        [(-m[1][2]).atan2(m[1][1]), ry, 0.0]
+    } else {
+        [m[2][1].atan2(m[2][2]), ry, m[1][0].atan2(m[0][0])]
+    }
+}
+
+/// An angle within one turn of zero, keeping its sign; a full turn is 0.
+pub fn within_turn(a: f64) -> f64 {
+    let r = a % std::f64::consts::TAU;
+    if std::f64::consts::TAU - r.abs() < 1e-6 { 0.0 } else { r }
+}
+
+/// The order that lets a drag on `ring` add to its own angle, so every angle stays what was
+/// dragged. A ring that turns the triad with the bodies (`local`) adds at the right end of the
+/// product, one that holds still at the left. A ring whose angle is still zero can go to that
+/// end; `None` when it has an angle and a later turn lies on top of it, and no sum of angles
+/// makes the turn: the turns so far have to be kept and its angle start again.
+pub fn ring_order(angles: [f64; 3], order: [usize; 3], ring: usize, local: bool) -> Option<[usize; 3]> {
+    let i = ring.min(2);
+    let at = order.iter().position(|o| *o == i)?;
+    let beyond = if local { &order[at + 1..] } else { &order[..at] };
+    if beyond.iter().all(|o| angles[(*o).min(2)].abs() < 1e-12) {
+        return Some(order);
+    }
+    if angles[i].abs() >= 1e-12 {
+        return None;
+    }
+    let mut rest = order.into_iter().filter(|o| *o != i);
+    let [a, b] = [rest.next()?, rest.next()?];
+    Some(if local { [a, b, i] } else { [i, a, b] })
+}
+
 /// The axis and angle of a rotation (angle 0 for none).
 pub fn axis_angle(m: &[[f64; 3]; 3]) -> (Vec3, f64) {
     let tr = m[0][0] + m[1][1] + m[2][2];
@@ -475,7 +571,7 @@ mod tests {
     #[test]
     fn plane_squares_stay_within_the_triad() {
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
-        let t = Triad { center: Vec3::ZERO, translate: true, rotate: false };
+        let t = Triad { center: Vec3::ZERO, axes: WORLD, translate: true, rotate: false };
         // The squares reach 0.45 √2 of the arrow length from the centre, plus stroke and feathering.
         let limit = (0.45 * 2f64.sqrt() * LEN_PX) as f32 + 3.0;
         let mut worst = 0.0f32;
@@ -491,6 +587,53 @@ mod tests {
             }
         }
         assert!(worst <= limit, "a vertex {worst} px from the centre (limit {limit})");
+    }
+
+    /// An angle adds to what it was exactly when the product can take it at the ring's end, and
+    /// then the turn is about the axis the ring shows: the one the turns leave it on (local), or
+    /// the world's (fixed).
+    #[test]
+    fn a_drag_adds_to_its_own_angle_and_turns_about_the_ring_shown() {
+        let on = |m: &[[f64; 3]; 3], o: &[[f64; 3]; 3]| m.iter().flatten().zip(o.iter().flatten()).all(|(a, b)| (a - b).abs() < 1e-9);
+        for (a, order) in
+            [([0.3, 0.0, 0.0], ANGLE_ORDER), ([0.0, 0.0, 1.5], ANGLE_ORDER), ([0.3, 0.7, 0.0], [2, 0, 1]), ([0.3, 0.7, 1.1], ANGLE_ORDER)]
+        {
+            for ring in 0..3 {
+                for local in [true, false] {
+                    let Some(next) = ring_order(a, order, ring, local) else { continue };
+                    let mut after = a;
+                    after[ring] += 0.4;
+                    let by = rotation(axis(&WORLD, ring), 0.4);
+                    let before = turn_of(a, order);
+                    let want = if local { mul(&before, &by) } else { mul(&by, &before) };
+                    assert!(on(&turn_of(after, next), &want), "{a:?} {order:?} ring {ring} local {local}");
+                }
+            }
+        }
+    }
+
+    /// The second angle dragged reads what was dragged, whichever came first. Only going back to
+    /// an angle with a later one on top has to start over.
+    #[test]
+    fn only_going_back_under_a_later_turn_starts_an_angle_over() {
+        for local in [true, false] {
+            for (first, second) in [(0, 1), (1, 0), (2, 1), (1, 2), (0, 2), (2, 0)] {
+                let mut a = [0.0; 3];
+                a[first] = 1.5;
+                let order = ring_order(a, ANGLE_ORDER, second, local).unwrap();
+                a[second] = 0.4;
+                assert!(ring_order(a, order, second, local).is_some(), "the last ring turned goes on adding");
+                assert!(ring_order(a, order, first, local).is_none(), "{first} lies under {second}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_turn_in_a_frame_is_about_that_frames_axis() {
+        let frame = rotation(Vec3::X, std::f64::consts::FRAC_PI_2);
+        let m = turn_in(&frame, &rotation(Vec3::Z, 0.4));
+        assert!((apply(&m, axis(&frame, 2)) - axis(&frame, 2)).len() < 1e-12);
+        assert_eq!(turn_of([0.3, -0.7, 1.1], ANGLE_ORDER), angles_rotation([0.3, -0.7, 1.1]));
     }
 
     #[test]
