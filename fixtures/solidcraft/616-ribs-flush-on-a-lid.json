@@ -1,0 +1,670 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/616",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/644",
+ "test": "crates/kernel/src/issue_616_tests.rs: ribs_joined_flush_to_the_lid_change_nothing_else, glue_joins_every_face_the_pieces_share",
+ "summary": "Small boxes joined flush to the walls and floor of a part changed it away from the box on SolidCraft's earlier kernel: four ribs joined to a lid left a slit through the far wall (#616). The lid (the issue's public dimensions) is a 76.8 x 89.3 x 2.4 plate with its four vertical corner edges rounded r 3, a skirt ring (outer 71.5 x 84, wall 1.5, 3 tall) on it, a window and a slot cut through, and a notch cut through the skirt's +y wall. Each rib, 1.6 x 6 x 11.7, stands on the plate over the skirt's -x or +x wall, flush with the window's side, and adds exactly its volume less the 1.35 x 6 x 3 inside the skirt. SolidCraft's test measured the lid as 6703.5222 from a mesh; the closed form is used here. The fix's second test cuts a rectangular frame in two along y = 15 and joins the halves back: the glue must join both faces the pieces share. Its guard and random-box tests use SolidCraft's own retry checks and are not ported.",
+ "cases": [
+  {
+   "name": "lid",
+   "note": "Control: the lid alone.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate0",
+     "origin": [
+      100,
+      0,
+      0
+     ],
+     "size": [
+      76.8,
+      89.3,
+      2.4
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "plate",
+     "body": "plate0",
+     "edges": [
+      [
+       100,
+       0,
+       1.2
+      ],
+      [
+       176.8,
+       0,
+       1.2
+      ],
+      [
+       100,
+       89.3,
+       1.2
+      ],
+      [
+       176.8,
+       89.3,
+       1.2
+      ]
+     ],
+     "radius": 3.0
+    },
+    {
+     "op": "box",
+     "id": "ring_out",
+     "origin": [
+      102.65,
+      2.65,
+      2.4
+     ],
+     "size": [
+      71.5,
+      84,
+      3
+     ]
+    },
+    {
+     "op": "box",
+     "id": "ring_in",
+     "origin": [
+      104.15,
+      4.15,
+      2.0
+     ],
+     "size": [
+      68.5,
+      81,
+      4
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "ring",
+     "a": "ring_out",
+     "b": "ring_in"
+    },
+    {
+     "op": "union",
+     "id": "lid",
+     "a": "plate",
+     "b": "ring"
+    },
+    {
+     "op": "box",
+     "id": "cut0",
+     "origin": [
+      104.4,
+      5.4,
+      -1
+     ],
+     "size": [
+      68,
+      61,
+      8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "lid",
+     "a": "lid",
+     "b": "cut0"
+    },
+    {
+     "op": "box",
+     "id": "cut1",
+     "origin": [
+      116.4,
+      72,
+      -1
+     ],
+     "size": [
+      44,
+      10,
+      8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "lid",
+     "a": "lid",
+     "b": "cut1"
+    },
+    {
+     "op": "box",
+     "id": "cut2",
+     "origin": [
+      127.4,
+      84,
+      2.4
+     ],
+     "size": [
+      22,
+      6,
+      4
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "lid",
+     "b": "cut2"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 6703.53440131754,
+     "tol": 0.01,
+     "formula": "76.8*89.3*2.4 (plate) - 4*(1 - pi/4)*3^2*2.4 (rounded corners) + (71.5*84 - 68.5*81)*3 (skirt ring) - 68*61*2.4 (window) - 44*10*2.4 (slot) - 22*1.5*3 (notch through the skirt's +y wall)"
+    }
+   }
+  },
+  {
+   "name": "lid_with_one_rib",
+   "note": "The first rib, at (102.8, 14, 2.4), joined to the lid.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate0",
+     "origin": [
+      100,
+      0,
+      0
+     ],
+     "size": [
+      76.8,
+      89.3,
+      2.4
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "plate",
+     "body": "plate0",
+     "edges": [
+      [
+       100,
+       0,
+       1.2
+      ],
+      [
+       176.8,
+       0,
+       1.2
+      ],
+      [
+       100,
+       89.3,
+       1.2
+      ],
+      [
+       176.8,
+       89.3,
+       1.2
+      ]
+     ],
+     "radius": 3.0
+    },
+    {
+     "op": "box",
+     "id": "ring_out",
+     "origin": [
+      102.65,
+      2.65,
+      2.4
+     ],
+     "size": [
+      71.5,
+      84,
+      3
+     ]
+    },
+    {
+     "op": "box",
+     "id": "ring_in",
+     "origin": [
+      104.15,
+      4.15,
+      2.0
+     ],
+     "size": [
+      68.5,
+      81,
+      4
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "ring",
+     "a": "ring_out",
+     "b": "ring_in"
+    },
+    {
+     "op": "union",
+     "id": "lid",
+     "a": "plate",
+     "b": "ring"
+    },
+    {
+     "op": "box",
+     "id": "cut0",
+     "origin": [
+      104.4,
+      5.4,
+      -1
+     ],
+     "size": [
+      68,
+      61,
+      8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "lid",
+     "a": "lid",
+     "b": "cut0"
+    },
+    {
+     "op": "box",
+     "id": "cut1",
+     "origin": [
+      116.4,
+      72,
+      -1
+     ],
+     "size": [
+      44,
+      10,
+      8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "lid",
+     "a": "lid",
+     "b": "cut1"
+    },
+    {
+     "op": "box",
+     "id": "cut2",
+     "origin": [
+      127.4,
+      84,
+      2.4
+     ],
+     "size": [
+      22,
+      6,
+      4
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "lid",
+     "a": "lid",
+     "b": "cut2"
+    },
+    {
+     "op": "box",
+     "id": "rib0",
+     "origin": [
+      102.8,
+      14,
+      2.4
+     ],
+     "size": [
+      1.6,
+      6,
+      11.7
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "lid",
+     "b": "rib0"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 6791.55440131754,
+     "tol": 0.01,
+     "formula": "the lid + 1.6*6*11.7 - 1.35*6*3"
+    }
+   }
+  },
+  {
+   "name": "lid_with_four_ribs",
+   "note": "All four ribs joined one after the other, as in the issue.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "plate0",
+     "origin": [
+      100,
+      0,
+      0
+     ],
+     "size": [
+      76.8,
+      89.3,
+      2.4
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "plate",
+     "body": "plate0",
+     "edges": [
+      [
+       100,
+       0,
+       1.2
+      ],
+      [
+       176.8,
+       0,
+       1.2
+      ],
+      [
+       100,
+       89.3,
+       1.2
+      ],
+      [
+       176.8,
+       89.3,
+       1.2
+      ]
+     ],
+     "radius": 3.0
+    },
+    {
+     "op": "box",
+     "id": "ring_out",
+     "origin": [
+      102.65,
+      2.65,
+      2.4
+     ],
+     "size": [
+      71.5,
+      84,
+      3
+     ]
+    },
+    {
+     "op": "box",
+     "id": "ring_in",
+     "origin": [
+      104.15,
+      4.15,
+      2.0
+     ],
+     "size": [
+      68.5,
+      81,
+      4
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "ring",
+     "a": "ring_out",
+     "b": "ring_in"
+    },
+    {
+     "op": "union",
+     "id": "lid",
+     "a": "plate",
+     "b": "ring"
+    },
+    {
+     "op": "box",
+     "id": "cut0",
+     "origin": [
+      104.4,
+      5.4,
+      -1
+     ],
+     "size": [
+      68,
+      61,
+      8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "lid",
+     "a": "lid",
+     "b": "cut0"
+    },
+    {
+     "op": "box",
+     "id": "cut1",
+     "origin": [
+      116.4,
+      72,
+      -1
+     ],
+     "size": [
+      44,
+      10,
+      8
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "lid",
+     "a": "lid",
+     "b": "cut1"
+    },
+    {
+     "op": "box",
+     "id": "cut2",
+     "origin": [
+      127.4,
+      84,
+      2.4
+     ],
+     "size": [
+      22,
+      6,
+      4
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "lid",
+     "a": "lid",
+     "b": "cut2"
+    },
+    {
+     "op": "box",
+     "id": "rib0",
+     "origin": [
+      102.8,
+      14,
+      2.4
+     ],
+     "size": [
+      1.6,
+      6,
+      11.7
+     ]
+    },
+    {
+     "op": "union",
+     "id": "lid",
+     "a": "lid",
+     "b": "rib0"
+    },
+    {
+     "op": "box",
+     "id": "rib1",
+     "origin": [
+      102.8,
+      48,
+      2.4
+     ],
+     "size": [
+      1.6,
+      6,
+      11.7
+     ]
+    },
+    {
+     "op": "union",
+     "id": "lid",
+     "a": "lid",
+     "b": "rib1"
+    },
+    {
+     "op": "box",
+     "id": "rib2",
+     "origin": [
+      172.4,
+      14,
+      2.4
+     ],
+     "size": [
+      1.6,
+      6,
+      11.7
+     ]
+    },
+    {
+     "op": "union",
+     "id": "lid",
+     "a": "lid",
+     "b": "rib2"
+    },
+    {
+     "op": "box",
+     "id": "rib3",
+     "origin": [
+      172.4,
+      48,
+      2.4
+     ],
+     "size": [
+      1.6,
+      6,
+      11.7
+     ]
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "lid",
+     "b": "rib3"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 7055.61440131754,
+     "tol": 0.01,
+     "formula": "the lid + 4*(1.6*6*11.7 - 1.35*6*3)"
+    }
+   }
+  },
+  {
+   "name": "frame_halves_joined_back",
+   "note": "A 40 x 30 x 5 frame (a 30 x 20 window through it) cut into the halves y < 15 and y > 15 by intersecting it with two boxes, then the halves joined: they share two faces at y = 15, both must be glued.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "frame_out",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      40,
+      30,
+      5
+     ]
+    },
+    {
+     "op": "box",
+     "id": "frame_in",
+     "origin": [
+      5,
+      5,
+      -1
+     ],
+     "size": [
+      30,
+      20,
+      7
+     ]
+    },
+    {
+     "op": "difference",
+     "id": "frame",
+     "a": "frame_out",
+     "b": "frame_in"
+    },
+    {
+     "op": "box",
+     "id": "lo_box",
+     "origin": [
+      -1,
+      -1,
+      -1
+     ],
+     "size": [
+      42,
+      16,
+      7
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "low",
+     "a": "frame",
+     "b": "lo_box"
+    },
+    {
+     "op": "box",
+     "id": "hi_box",
+     "origin": [
+      -1,
+      15,
+      -1
+     ],
+     "size": [
+      42,
+      16,
+      7
+     ]
+    },
+    {
+     "op": "intersection",
+     "id": "high",
+     "a": "frame",
+     "b": "hi_box"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "low",
+     "b": "high"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 3000,
+     "tol": 1e-06,
+     "formula": "40*30*5 - 30*20*5"
+    }
+   }
+  }
+ ]
+}
