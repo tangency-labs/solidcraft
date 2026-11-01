@@ -105,3 +105,27 @@ fn issue_948_difference_of_two_ruled_skins_fails_as_upstream() {
         ),
     }
 }
+
+/// WR-663 with the fork's tangency-labs/smlib@8ea6a20: a refined end past a curve/curve range
+/// no longer aborts the intersection. The difference still fails, as the pinned C++ and the
+/// fork do, but where the default path does, not in `Extent1d::inversion`.
+#[test]
+fn a_refined_parameter_outside_the_range_does_not_abort_the_intersection() {
+    let data = sections(MIN7);
+    let mut k = Kernel::default();
+    k.fixes.query_statuses_pass_on = true;
+    let outer = ruled_skin(&mut k, &data[0].1);
+    let inner = ruled_skin(&mut k, &data[1].1);
+    match boolean_difference(&mut k, outer, inner) {
+        Err(SolidError::Upstream {
+            operation, code, ..
+        }) => {
+            assert_eq!(code, SM_ERR);
+            assert_eq!(operation, "topology::brep::p6");
+        }
+        other => panic!(
+            "expected the default path's SM_ERR, got {:?}",
+            other.map(|_| "a body")
+        ),
+    }
+}

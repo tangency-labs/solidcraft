@@ -201,12 +201,12 @@ use crate::curve::offset_curve::OffsetCurve;
 use crate::curve::parabola::Parabola;
 use crate::curve::projected_curve::ProjectedCurve;
 use crate::curve::tangent_field::TangentFieldCurve;
-use crate::error::{ignore_or_pass_on, ignored, ignored_or_pass_on, Result, SolidError, SM_ERR};
+use crate::error::{ignore_or_pass_on, ignored, ignored_or_pass_on, Result, SolidError};
 use crate::geom::a_object::{self, AObject, CacheStore};
 use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::context::{Context, IdentitySlot};
-use crate::geom::extent1d::{Extent1d, Inversion};
+use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{
@@ -2279,22 +2279,6 @@ pub fn base_ends<C: CurveEvaluate + ?Sized>(k: &Kernel, curve: &C) -> Result<End
         start_weight: 1.0,
         end_weight: 1.0,
     })
-}
-
-/// The status of `Inversion` (`SM_ERR` when `v` is outside the interval or the
-/// interval has no length) at a site where SMLib drops it and the fork passes it on
-/// (`SER`, tangency-labs/smlib 8311f8e): with the opt-in
-/// [`crate::kernel::UpstreamFixes::query_statuses_pass_on`] (`pass_on`) a failed
-/// inversion is returned; without it the status is dropped, as upstream.
-pub(crate) fn inversion_passed_on(inv: &Inversion, pass_on: bool) -> Result<()> {
-    if pass_on && !inv.is_success() {
-        return Err(SolidError::Upstream {
-            operation: "geom::extent1d::Extent1d::inversion",
-            code: SM_ERR,
-            entity: None,
-        });
-    }
-    Ok(())
 }
 
 /// The outcome of [`ignored_or_soft`].
@@ -4475,19 +4459,6 @@ mod tests {
             panic!("expected B-spline");
         };
         b
-    }
-
-    #[test]
-    fn issue_2009_inversion_status_is_passed_on() {
-        // tangency-labs/smlib 8311f8e (sm_RefineCCSolutions `SER(Inversion)`): a value
-        // outside the interval (or one that a zero-length interval cannot map) is
-        // SM_ERR with the opt-in fix and dropped without it.
-        let ivl = Extent1d::from_min_max(0.0, 1.0);
-        assert!(inversion_passed_on(&ivl.inversion(0.5), true).is_ok());
-        assert!(inversion_passed_on(&ivl.inversion(2.0), true).is_err());
-        assert!(inversion_passed_on(&ivl.inversion(2.0), false).is_ok());
-        let flat = Extent1d::from_min_max(1.0, 1.0);
-        assert!(inversion_passed_on(&flat.inversion(2.0), true).is_err());
     }
 
     #[test]

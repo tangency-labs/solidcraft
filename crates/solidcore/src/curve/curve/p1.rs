@@ -78,16 +78,16 @@
 //!   are wired; [`SolidError::Unported`] is propagated from what they reach.
 //! - **Statuses passed on (WR-663).** With the opt-in
 //!   `Kernel::fixes.query_statuses_pass_on` the statuses SMLib drops are passed on, as the
-//!   fork (tangency-labs/smlib 8311f8e): `sm_RefineCCSolutions` (its local intersections
-//!   and `Inversion`s), the degenerate `ApproximateCurve`'s `EditParameterization`,
+//!   fork (tangency-labs/smlib 8311f8e): `sm_RefineCCSolutions` (its local intersections;
+//!   its `Inversion`s not, tangency-labs/smlib 8ea6a20), the degenerate `ApproximateCurve`'s `EditParameterization`,
 //!   `ClassifyIntersectingRangeSolution`, `SmCPGlobalSolver::LocalSolve` and
 //!   `GlobalPointSolve`'s `SolveIt`.
 
 use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p2::{
-    add_to_curve, evaluate_continuity, find_test_params, flush_crv, inversion_passed_on, output,
-    pop_stack, proj_signed_angle, push_point, stack_look, test_step, CpGlobalSolver, Curve,
-    CurveKind, CurvePropertyType, TessStepResult, BSPLINE_CURVE_TYPE, CRV_ON_SURF_TYPE,
+    add_to_curve, evaluate_continuity, find_test_params, flush_crv, output, pop_stack,
+    proj_signed_angle, push_point, stack_look, test_step, CpGlobalSolver, Curve, CurveKind,
+    CurvePropertyType, TessStepResult, BSPLINE_CURVE_TYPE, CRV_ON_SURF_TYPE,
 };
 use crate::curve::curve::p3::{eval_n, local_curve_intersect, PointSolveOptions};
 use crate::curve::curve::p4::proj_dist;
@@ -249,9 +249,13 @@ where
                 if x.deviation < end.solution_value {
                     // Do not allow big shifts.  [140915b]
                     let inv1 = sol_ivl1.inversion(x.my_param);
-                    inversion_passed_on(&inv1, pass_on)?;
                     let inv2 = sol_ivl2.inversion(x.other_param);
-                    inversion_passed_on(&inv2, pass_on)?;
+                    // The fork (tangency-labs/smlib 8ea6a20): a refined parameter outside the
+                    // range is an answer, which the shift limit judges. Only a zero-length
+                    // range gives no fraction, and then the end stays where it is.
+                    if pass_on && (inv1.parameter.is_none() || inv2.parameter.is_none()) {
+                        continue;
+                    }
                     let mut frac1 = inv1.parameter.unwrap_or(UNDEF_DOUBLE);
                     let mut frac2 = inv2.parameter.unwrap_or(UNDEF_DOUBLE);
                     if reverse1 {
