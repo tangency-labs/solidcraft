@@ -516,7 +516,8 @@ fn two_distance_chamfer_takes_both_distances_and_flip_swaps_the_legs() {
         retype(&mut h, "dialog:Distance 1", "12");
         retype(&mut h, "dialog:Distance 2", "4");
         if flip {
-            h.step(&json!({"click":{"handle":"dialog:Flip"}})).unwrap();
+            // Each corner row has its own Flip, so turning one leg round leaves the others as they are.
+            h.step(&json!({"click":{"handle":"dialog:Corner 0:Flip"}})).unwrap();
             h.frames(2);
         }
         apply(&mut h);
@@ -957,4 +958,316 @@ fn corner_candidates_agree_with_engine_spatial_curve_filter() {
         }
         h.app.dialog = None;
     }
+}
+
+/// The picks the corner window's input holds for the ids given.
+fn line_picks(h: &crate::scenario::Harness, ids: &[&str]) -> Vec<solidcraft_engine::Sel> {
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.model.state();
+    let sk = &state.sketch(sid).unwrap().sketch;
+    ids.iter()
+        .map(|id| {
+            if sk.curve_index(id).is_some() {
+                solidcraft_engine::Sel::SketchCurve { id: (*id).to_string(), sketch: None }
+            } else {
+                solidcraft_engine::Sel::SketchPoint { id: (*id).to_string() }
+            }
+        })
+        .collect()
+}
+
+/// The corner rows a set of picks makes, as their labels and corner points.
+fn corner_rows(h: &crate::scenario::Harness, ids: &[&str]) -> Vec<(String, Option<String>)> {
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.model.state();
+    let sk = &state.sketch(sid).unwrap().sketch;
+    crate::sketch_corner_rows::rows(sk, &line_picks(h, ids), &serde_json::Map::new()).into_iter().map(|row| (row.label(), row.point)).collect()
+}
+
+/// A square of named sides a, b, c, d, each meeting its neighbour at a corner.
+fn square() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({ "plane": "XY" })).unwrap();
+    h.app.run("sketch.line", json!({ "points": [[0, 0], [10, 0]], "ids": ["a"] })).unwrap();
+    h.app.run("sketch.line", json!({ "points": ["a.end", [10, 10]], "ids": ["b"] })).unwrap();
+    h.app.run("sketch.line", json!({ "points": ["b.end", [0, 10]], "ids": ["c"] })).unwrap();
+    h.app.run("sketch.line", json!({ "points": ["c.end", "a.start"], "ids": ["d"] })).unwrap();
+    h.settle();
+    h
+}
+
+fn labels(h: &crate::scenario::Harness, ids: &[&str]) -> Vec<String> {
+    corner_rows(h, ids).into_iter().map(|(label, _)| label).collect()
+}
+
+/// A picked line looks for an earlier line with a free end at one of its own. The shared end
+/// becomes that corner, the row stays if its line is unpicked, and a line at 180 degrees to
+/// another keeps a row of its own.
+#[test]
+fn picked_lines_pair_into_corners_and_unpicking_one_leaves_its_neighbours() {
+    let h = square();
+    assert_eq!(labels(&h, &["a"]), ["a"]);
+    assert_eq!(labels(&h, &["a", "b"]), ["a-b"]);
+    assert_eq!(labels(&h, &["a", "b", "c"]), ["a-b", "b-c"]);
+    // b is gone from both rows; a and c are each left on their own.
+    assert_eq!(labels(&h, &["a", "c"]), ["a", "c"]);
+    // d then makes a corner with each of them, at its two ends.
+    let rows = labels(&h, &["a", "c", "d"]);
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert!(rows.contains(&"a-d".to_string()) && rows.contains(&"c-d".to_string()), "{rows:?}");
+    // All four sides make four corners.
+    assert_eq!(labels(&h, &["a", "b", "c", "d"]).len(), 4);
+}
+
+/// Two lines in line with each other make no corner: each keeps a row, so a 180 degree pair
+/// shows two rows rather than one.
+#[test]
+fn lines_in_line_with_each_other_keep_rows_of_their_own() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({ "plane": "XY" })).unwrap();
+    h.app.run("sketch.line", json!({ "points": [[0, 0], [10, 0]], "ids": ["left"] })).unwrap();
+    h.app.run("sketch.line", json!({ "points": ["left.end", [20, 0]], "ids": ["right"] })).unwrap();
+    h.settle();
+    assert_eq!(labels(&h, &["left", "right"]), ["left", "right"]);
+}
+
+/// Four lines meeting at one point pair in the order they were picked, each end used up once:
+/// A-B then C, C takes B's free end when A goes, and B joins the first line with a free corner.
+#[test]
+fn lines_meeting_at_one_point_pair_in_pick_order() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({ "plane": "XY" })).unwrap();
+    h.app.run("sketch.line", json!({ "points": [[-10, 0], "origin"], "ids": ["a"] })).unwrap();
+    h.app.run("sketch.line", json!({ "points": ["origin", [0, 10]], "ids": ["b"] })).unwrap();
+    h.app.run("sketch.line", json!({ "points": ["origin", [10, 0]], "ids": ["c"] })).unwrap();
+    h.app.run("sketch.line", json!({ "points": [[0, -10], "origin"], "ids": ["d"] })).unwrap();
+    h.settle();
+    assert_eq!(labels(&h, &["a", "b", "c"]), ["a-b", "c"]);
+    assert_eq!(labels(&h, &["b", "c"]), ["b-c"]);
+    // a and c are 180 degrees apart, so neither takes the other.
+    assert_eq!(labels(&h, &["a", "c"]), ["a", "c"]);
+    // b takes the first line with a free corner, a, and uses that end up.
+    assert_eq!(labels(&h, &["a", "c", "b"]), ["a-b", "c"]);
+}
+
+/// A picked point joins the row of the line it ends: the corner is that line's row, and the
+/// command gets both of its sides rather than the bare point.
+#[test]
+fn a_picked_point_joins_the_row_of_the_line_that_ends_there() {
+    let h = square();
+    let rows = corner_rows(&h, &["a", "a.start"]);
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(rows[0].0, "a");
+    assert!(rows[0].1.is_some(), "the row now names the corner point");
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.model.state();
+    let sk = &state.sketch(sid).unwrap().sketch;
+    let picks = crate::sketch_corner_rows::rows(sk, &line_picks(&h, &["a", "a.start"]), &serde_json::Map::new());
+    let params = crate::sketch_corner_rows::params(sk, &picks[0]);
+    assert_eq!(params["a"], json!("a"));
+    assert_eq!(params["b"], json!("d"), "the other line ending at a's start: {:?}", picks);
+}
+
+/// Two distances with two corners: each row's Flip swaps only its own legs, and a row turned
+/// off is not cut while it stays in the list.
+#[test]
+fn each_corner_row_flips_and_turns_off_on_its_own() {
+    let h = square();
+    let picks = line_picks(&h, &["a", "b", "c", "d"]);
+    let sid = h.app.session.active_sketch.unwrap();
+    let inputs = {
+        let mut input = crate::selection::SelInput::new("Corner", crate::selection::CURVES, true);
+        input.items = picks.clone();
+        vec![input]
+    };
+    let mut extra = serde_json::Map::new();
+    {
+        let state = h.app.session.model.state();
+        let sk = &state.sketch(sid).unwrap().sketch;
+        let rows = crate::sketch_corner_rows::rows(sk, &picks, &extra);
+        assert_eq!(rows.len(), 4, "{:?}", rows.iter().map(|r| r.label()).collect::<Vec<_>>());
+        crate::sketch_corner_rows::set_flip(&mut extra, &rows[1].key, true);
+        crate::sketch_corner_rows::set_off(&mut extra, &rows[2].key, true);
+        let kept = crate::sketch_corner_rows::rows(sk, &picks, &extra);
+        assert_eq!(kept.len(), 4, "a row turned off stays in the list");
+        assert!(!kept[2].enabled);
+        let k = crate::sketch_modify_ui::Mod::Corner { chamfer: true, ctype: 1, size: "2".into(), distance2: "1".into(), angle: "45 deg".into() };
+        // One command cuts them all, so OK is one undo step: each corner keeps its own legs.
+        let cmds = crate::sketch_modify_ui::commands(&h.app, &k, &inputs, &extra).unwrap();
+        assert_eq!(cmds.len(), 1, "{cmds:?}");
+        assert_eq!(cmds[0].0, "sketch.chamfer.two_distance");
+        let points = cmds[0].1["points"].as_array().expect("the corners are a list").clone();
+        assert_eq!(points.len(), 3, "the corner turned off is not cut: {points:?}");
+        assert_eq!(points[0]["a"], json!(rows[0].lines[0]));
+        assert_eq!(points[0]["b"], json!(rows[0].lines[1]));
+        assert_eq!(points[1]["a"], json!(rows[1].lines[1]), "only the second row is flipped");
+        assert_eq!(points[1]["b"], json!(rows[1].lines[0]));
+        assert_eq!(points[2]["a"], json!(rows[3].lines[0]), "the fourth row follows the third");
+    }
+}
+
+/// Two profiles drawn apart have a corner point each where they meet (both held on the origin),
+/// as `sketch.rectangle.two_point` draws them. Picking the two lines that meet there makes one
+/// row, and the command receives those two lines.
+#[test]
+fn lines_of_two_profiles_meeting_at_one_place_make_one_corner() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[-26.2,-18.8],"p1":[0,0]})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[24.8,27.8]})).unwrap();
+    h.settle();
+    assert_eq!(labels(&h, &["l2"]), ["l2"]);
+    assert_eq!(labels(&h, &["l2", "l5"]), ["l2-l5"], "the two lines meet at one place");
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.model.state();
+    let sk = &state.sketch(sid).unwrap().sketch;
+    let rows = crate::sketch_corner_rows::rows(sk, &line_picks(&h, &["l2", "l5"]), &serde_json::Map::new());
+    assert_eq!(crate::sketch_corner_rows::params(sk, &rows[0]), json!({"a": "l2", "b": "l5"}));
+}
+
+/// A corner cut between two profiles drawn apart repaints its own two lines and the arc it makes,
+/// not the rest of the sketch (the whole sketch used to show in the preview colour).
+#[test]
+fn a_corner_cut_between_two_profiles_repaints_only_its_own_lines() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[-26.2,-18.8],"p1":[0,0]})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[24.8,27.8]})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.fillet"})).unwrap();
+    h.frames(2);
+    // The two lines that meet at the shared corner, picked away from the corner itself.
+    for at in [[0.0, -9.4, 0.0], [12.4, 0.0, 0.0]] {
+        h.step(&json!({"click":{"world":at}})).unwrap();
+        h.frames(2);
+    }
+    let rows = crate::sketch_modify_ui::dialog_rows(&h.app.session, h.app.dialog.as_ref().unwrap());
+    assert_eq!(rows.len(), 1, "one corner: {:?}", rows.iter().map(|r| r.label()).collect::<Vec<_>>());
+    assert_eq!(rows[0].label(), "l2-l5");
+    // The two trimmed lines and the arc, not the six lines the cut leaves alone.
+    assert_eq!(crate::scenario::count_of("sketch_preview_curves"), Some(3.0), "only the cut curves are drawn as changed");
+    // The row's X takes the arc away and leaves the two lines picked: the selection stays.
+    h.step(&json!({"click":{"handle":"dialog:list:corner:0:remove"}})).unwrap();
+    h.step(&json!({"until":{"count":{"name":"sketch_preview_curves","value":2}}})).unwrap();
+    let rows = crate::sketch_modify_ui::dialog_rows(&h.app.session, h.app.dialog.as_ref().unwrap());
+    assert_eq!(rows.len(), 1, "the row stays in the list, with the V that brings it back");
+    assert!(!rows[0].enabled, "its corner is no longer cut");
+    assert_eq!(crate::scenario::count_of("sketch_preview_curves"), Some(2.0), "the arc is gone, its two lines stay picked");
+    // The same button shows the cut again.
+    h.step(&json!({"click":{"handle":"dialog:list:corner:0:remove"}})).unwrap();
+    h.step(&json!({"until":{"count":{"name":"sketch_preview_curves","value":3}}})).unwrap();
+}
+
+/// Each row's X sits in one column whatever the row is called and however many rows there are,
+/// and clicking it turns that row's cut off (the row stays, with the V that brings it back)
+/// without touching the others.
+#[test]
+fn a_corner_rows_x_turns_its_own_cut_off_and_the_buttons_line_up() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.chamfer.two_distance"})).unwrap();
+    h.frames(2);
+    // The four corners picked straight into the window: a click on the canvas would land under
+    // the window, which sits over the middle of the view.
+    let picks = line_picks(&h, &["l1", "l2", "l3", "l4"]);
+    if let Some(input) = h.app.dialog.as_mut().and_then(|d| d.inputs.first_mut()) {
+        input.items = picks;
+    }
+    h.frames(2);
+    let rows = crate::sketch_modify_ui::dialog_rows(&h.app.session, h.app.dialog.as_ref().unwrap());
+    assert_eq!(rows.len(), 4, "{:?}", rows.iter().map(|r| r.label()).collect::<Vec<_>>());
+    let at = |name: &str| crate::scenario::handle_at(name).unwrap_or_else(|| panic!("missing {name}"));
+    let first = at("dialog:list:corner:0:remove");
+    let flip = at("dialog:Corner 0:Flip");
+    let card = crate::scenario::rect_of("dialog:card").unwrap();
+    assert!(card.expand(1.0).contains(first), "the X at {first:?} must be inside the card {card:?}");
+    for index in 1..rows.len() {
+        let x = at(&format!("dialog:list:corner:{index}:remove"));
+        assert!((x.x - first.x).abs() < 0.5, "row {index}'s X moved to {} from {}", x.x, first.x);
+        let f = at(&format!("dialog:Corner {index}:Flip"));
+        assert!((f.x - flip.x).abs() < 0.5, "row {index}'s Flip moved to {} from {}", f.x, flip.x);
+        assert!(f.x < x.x, "the Flip sits before the X");
+    }
+    let enabled = |h: &crate::scenario::Harness| {
+        crate::sketch_modify_ui::dialog_rows(&h.app.session, h.app.dialog.as_ref().unwrap()).iter().filter(|r| r.enabled).count()
+    };
+    assert_eq!(enabled(&h), 4, "four corners are cut before any click");
+    // The X takes the cut away and leaves the row; the same button brings it back.
+    h.step(&json!({"click":{"handle":"dialog:list:corner:0:remove"}})).unwrap();
+    h.frames(2);
+    let now = crate::sketch_modify_ui::dialog_rows(&h.app.session, h.app.dialog.as_ref().unwrap());
+    assert_eq!(now.len(), 4, "a row turned off stays in the list");
+    assert!(!now[0].enabled, "the clicked row is off");
+    assert!(now[1..].iter().all(|row| row.enabled), "the other rows keep their cuts");
+    let d = h.app.dialog.as_ref().unwrap().clone();
+    let cmds = crate::dialogs::preview_commands(&h.app, &d).unwrap();
+    assert_eq!(cmds.len(), 1, "one command cuts every corner: {cmds:?}");
+    assert_eq!(cmds[0].1["points"].as_array().map(Vec::len), Some(3), "the corner turned off is not cut: {cmds:?}");
+    assert!(crate::scenario::handle_at("dialog:list:corner:0:remove").is_some(), "the row keeps its Show button");
+    h.step(&json!({"click":{"handle":"dialog:list:corner:0:remove"}})).unwrap();
+    h.frames(2);
+    assert_eq!(enabled(&h), 4, "the same button shows the cut again");
+}
+
+/// Two profiles meeting at one point have a corner each: the lines of one pair give their ends
+/// at the place, and the lines of the other pair still have theirs, so both corners are cut. Four
+/// lines at one point make two rows of two, not one row and two lines waiting.
+#[test]
+fn two_profiles_meeting_at_one_place_make_a_corner_for_each_pair() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    // Two profiles' corners on the origin, the way two rectangles drawn from it meet there.
+    for (id, points) in [
+        ("left", [[-10.0, -10.0], [0.0, 0.0]]),
+        ("up", [[0.0, 0.0], [0.0, 10.0]]),
+        ("down", [[0.0, 0.0], [0.0, -10.0]]),
+        ("right", [[10.0, 0.0], [0.0, 0.0]]),
+    ] {
+        h.app.run("sketch.line", json!({"points": points, "ids": [id]})).unwrap();
+    }
+    h.settle();
+    assert_eq!(labels(&h, &["left", "up"]), ["left-up"]);
+    assert_eq!(labels(&h, &["left", "up", "down", "right"]), ["left-up", "down-right"]);
+    // Each row is a corner of its own two lines, in the order they were picked.
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.model.state();
+    let sk = &state.sketch(sid).unwrap().sketch;
+    let rows = crate::sketch_corner_rows::rows(sk, &line_picks(&h, &["left", "up", "down", "right"]), &serde_json::Map::new());
+    assert_eq!(crate::sketch_corner_rows::params(sk, &rows[0]), json!({"a": "left", "b": "up"}));
+    assert_eq!(crate::sketch_corner_rows::params(sk, &rows[1]), json!({"a": "down", "b": "right"}));
+}
+
+/// A corner row's X hides its cut, and that hiding outlives the row: when the lines leave the
+/// list and are picked again the row comes back as the user left it, rather than cutting again.
+#[test]
+fn a_hidden_corner_stays_hidden_when_its_lines_leave_the_list_and_come_back() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.fillet"})).unwrap();
+    h.frames(2);
+    let rows = |h: &crate::scenario::Harness| crate::sketch_modify_ui::dialog_rows(&h.app.session, h.app.dialog.as_ref().unwrap());
+    let set = |h: &mut crate::scenario::Harness, picks: Vec<solidcraft_engine::Sel>| {
+        if let Some(input) = h.app.dialog.as_mut().and_then(|d| d.inputs.first_mut()) {
+            input.items = picks;
+        }
+        h.frames(2);
+    };
+    let picks = line_picks(&h, &["l1", "l2"]);
+    set(&mut h, picks.clone());
+    assert_eq!(rows(&h).len(), 1);
+    h.step(&json!({"click":{"handle":"dialog:list:corner:0:remove"}})).unwrap();
+    h.frames(2);
+    assert!(!rows(&h)[0].enabled, "the X takes the cut away");
+    // The lines leave the list, so no corner is shown...
+    set(&mut h, Vec::new());
+    assert!(rows(&h).is_empty());
+    // ...and come back: the corner is still the one the user left.
+    set(&mut h, picks);
+    let back = rows(&h);
+    assert_eq!(back.len(), 1);
+    assert!(!back[0].enabled, "a corner the user hid stays hidden");
 }

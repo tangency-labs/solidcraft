@@ -30,10 +30,10 @@ to screen coordinates, and `ui.click {x,y}` sends the pick. Cancel between cases
 | Move/Copy | same | S; Start `sketch.move` with no text selected | Entities, Center, X Distance, Y Distance, Angle, Create Copy | OK, Cancel |
 | Rectangular Pattern | same; edits from `sketch_pattern_tree.rs` | S; Start `sketch.pattern.rectangular` | Entities; Direction, Quantity, Spacing, Alignment icons; Direction 2, Quantity 2, Spacing 2, Alignment 2 icons; guidance | OK, Cancel |
 | Circular Pattern | same; edits from `sketch_pattern_tree.rs` | S; Start `sketch.pattern.circular` | Entities, Center, Quantity, Total angle, Alignment icons, guidance | OK, Cancel |
-| Fillet | same | S; Start `sketch.fillet` | Corners, Radius | OK, Cancel |
-| Equal-distance Chamfer | same | S; Start `sketch.chamfer.equal_distance` | Corners, Chamfer Type icons, Distance | OK, Cancel |
-| Two-distance Chamfer | same | S; Start `sketch.chamfer.two_distance` | Corners, Chamfer Type icons, Distance 1, Distance 2, Flip | OK, Cancel |
-| Distance-angle Chamfer | same | S; Start `sketch.chamfer.distance_angle` | Corners, Chamfer Type icons, Distance 1, Angle, Flip | OK, Cancel |
+| Fillet | same | S; Start `sketch.fillet` | Corner rows (picked lines paired into corners; a row's X turns its corner off), Radius | OK, Cancel |
+| Equal-distance Chamfer | same | S; Start `sketch.chamfer.equal_distance` | Corner rows, Chamfer Type icons, Distance | OK, Cancel |
+| Two-distance Chamfer | same | S; Start `sketch.chamfer.two_distance` | Corner rows, Chamfer Type icons, Distance 1, Distance 2, Flip on each row | OK, Cancel |
+| Distance-angle Chamfer | same | S; Start `sketch.chamfer.distance_angle` | Corner rows, Chamfer Type icons, Distance 1, Angle, Flip on each row | OK, Cancel |
 | Text / Edit Text | `sketch_text.rs`, shared window | S; Start `sketch.text`, then `ui.at {"world":[50,20,0]}` and `ui.click` the returned position; editing uses Start `sketch.edit_text`, then pick a text outline | Text (multiline), Font (search/list/file), Style, Alignment, X, Y, Height, Angle, Letter Spacing, Line Spacing, Path, Reverse (on path) | OK, Cancel; live edits collapse into one undo step |
 | Move/Copy Text | `sketch_text_move.rs`, shared window | Create text as above; close its editor with OK; select a text outline; Start `sketch.move` | Distance X, Distance Y, Angle, Create Copy | OK, Cancel |
 | Edit Dimension (panel form) | `dialogs.rs` | `Dialog::edit_param`; legacy programmatic UI constructor, no current control-channel entry point. Interactive dimensions use the inline editor below | Parameter name, expression | OK, Cancel |
