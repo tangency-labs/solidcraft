@@ -572,6 +572,16 @@ pub struct UpstreamFixes {
     pub taper_pivot_nearest_corner: bool,
     /// A taper extrude with linear-extension (tangent) corners of a profile of lines and circular arcs with a sharp corner continues each wall as its tangent plane to meet its neighbour along their exact seam (a line's wall is its own plane, so two lines meet at a corner edge), and refuses a corner it cannot close (`create_taper_extrude_with_corner` reports why and where), instead of ruling separate corner faces from offset extension lines; with fillet corners, or a profile with another curve kind, nothing changes (WR-521, #1449; SolidCraft change, tangency-labs/smlib e8f23e0).
     pub taper_tangent_corner_planes: bool,
+    /// `SmCurve::CurveMaxDistanceBetween` and `SmCrvOnSurf::SurfaceCurveMaxDistanceBetween`
+    /// with `num_samples == 1` sample the interval midpoints (`per = 0.5`) when the
+    /// single-span line/line two-sample override does not apply, instead of dividing
+    /// `0.0 / (num_samples - 1) = 0.0 / 0.0 = NaN` (WR-36, #2203; see
+    /// `plan/upstream-issues/WR-36--addendum-2026-11-01-single-sample-midpoint.md`).
+    /// `SmCrvOnSurf::SurfaceCurveMaxDistanceBetween`'s `bDoPrecise = FALSE` guard before
+    /// its disabled `LocalCurveSolve` refinement stays unchanged, as upstream intentionally
+    /// turned those broken solver calls off (`num_samples == 0` still takes the dense
+    /// `22 + this_knots + other_knots` sample pass). Off by default for C++ parity.
+    pub curve_max_distance_single_sample_midpoint: bool,
     /// The curvature-keeping and tangent corner rules of `create_taper_extrude` (`sm_CreateCurvatureKeepingWalls`) follow the section up the height: a wall whose section shrinks to nothing below the far end ends at that apex and its neighbours meet from there up (two lines brought face to face close together along their common line, and the walls beyond them meet from its other end), where the fork's first version refused the draft (`SM_TCR_WALL_CLOSES`) though the solid exists. A wall closing at the far end, the whole section closing, and an arc shrinking to its centre are still refused (WR-571; the fork's tangency-labs/smlib@183ea65).
     pub taper_wall_closes_at_apex: bool,
     /// A full-turn rotational sweep makes a closed shell inside another solid its cavity (WR-403, #478).

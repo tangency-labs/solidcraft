@@ -83,6 +83,11 @@
 //!   boxes, `CurveMaxDistanceBetween`'s knots, `DeformToEndPointTargets`' drops (a target
 //!   that does not drop is `SM_ERR`) and `ConvertTo2D` (before the UV curve is replaced);
 //!   `IsPlanar` is `FALSE` without its box.
+//! - **Single-sample midpoint (WR-36, opt-in).** With
+//!   `Kernel::fixes.curve_max_distance_single_sample_midpoint`,
+//!   [`Curve::curve_max_distance_between`] with `num_samples == 1` (when not overridden
+//!   to two samples by the single-span line/line check) samples the interval midpoints
+//!   (`per = 0.5`) instead of dividing `0 / 0 = NaN`. Off, it matches upstream.
 
 use crate::curve::curve::knots_ignoring_status;
 use crate::curve::curve::p1::{ApproximateCurveOptions, GlobalPointSolveOptions};
@@ -1002,8 +1007,11 @@ impl Curve {
     /// of `other` dropped onto this curve by local solves (global solves for
     /// unborrowed B-splines when they fail). `num_samples == 0` samples by the knot
     /// counts and refines the largest gap with a local curve/curve maximisation; two
-    /// lines take two samples. With `max_needed` the search stops at the first gap
-    /// larger than it. The same curve over the same interval has no gap.
+    /// lines take two samples. With `num_samples == 1` on non-line pairs, upstream
+    /// divides `0 / 0 = NaN` (WR-36); enabling
+    /// `Kernel::fixes.curve_max_distance_single_sample_midpoint` samples the interval
+    /// midpoints (`per = 0.5`) instead. With `max_needed` the search stops at the first
+    /// gap larger than it. The same curve over the same interval has no gap.
     ///
     /// # Errors
     ///
@@ -1083,7 +1091,11 @@ impl Curve {
 
         // Uniformly sample OtherCurve from beginning to end
         for ii in 0..num_samples {
-            let per = ii as f64 / (num_samples - 1) as f64;
+            let per = if k.fixes.curve_max_distance_single_sample_midpoint && num_samples == 1 {
+                0.5
+            } else {
+                ii as f64 / (num_samples - 1) as f64
+            };
             let t_guess1 = interval.evaluate(per);
             let mut t_guess2 = if orientation > 0.0 {
                 other_interval.evaluate(per)
@@ -2747,5 +2759,213 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(e, SolidError::InvalidInput { .. }));
+    }
+
+    #[test]
+    fn wr36_flag_lookup_and_toggle() {
+        let mut k = Kernel::default();
+        assert!(!k.fixes.curve_max_distance_single_sample_midpoint);
+        assert!(crate::kernel::UpstreamFixes::NAMES
+            .contains(&"curve_max_distance_single_sample_midpoint"));
+        let slot = k
+            .fixes
+            .flag_mut("curve_max_distance_single_sample_midpoint")
+            .unwrap();
+        assert!(!*slot);
+        *slot = true;
+        assert!(k.fixes.curve_max_distance_single_sample_midpoint);
+    }
+
+    #[test]
+    fn wr36_curve_max_distance_single_sample_hermite_default_vs_midpoint() {
+        let off = Kernel::default();
+        let mut on = Kernel::default();
+        on.fixes.curve_max_distance_single_sample_midpoint = true;
+
+        // `P(t) = (t, 0, 0)` on `[0, 1]` as a cubic Hermite (not degree 1, and not an
+        // unborrowed B-spline, so failed local solves do not fall back to global solve).
+        let base = Curve::from(HermiteCurve::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            3,
+        ));
+        // `Q(t) = (t, 0, 2t(1 - t))`: agrees at the ends, peaks at `Q(0.5) = (0.5, 0, 0.5)`.
+        let arch = Curve::from(HermiteCurve::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 2.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, -2.0),
+            3,
+        ));
+        // `S(t) = (t, 0, 3)`: constant gap of `3.0` everywhere.
+        let shifted = Curve::from(HermiteCurve::new(
+            Vec3::new(0.0, 0.0, 3.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 3.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            3,
+        ));
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+
+        // Default (`false`): `0 / 0 = NaN` leaves `t_guess1 = NaN`, every local solve
+        // fails, and `distance == 0.0` is returned even for `shifted` (`3.0` away).
+        let arch_off = base
+            .curve_max_distance_between(&off, &ivl, &arch, 0.0, 1.0, 1, None)
+            .unwrap();
+        assert_eq!(arch_off.distance, 0.0, "{arch_off:?}");
+        assert_eq!(arch_off.incorrect_dir, Some(false));
+        let shifted_off = base
+            .curve_max_distance_between(&off, &ivl, &shifted, 0.0, 1.0, 1, None)
+            .unwrap();
+        assert_eq!(shifted_off.distance, 0.0, "{shifted_off:?}");
+
+        // Opt-in (`true`): `per = 0.5` evaluates the midpoint gap for both orientations.
+        for (start, end) in [(0.0, 1.0), (1.0, 0.0)] {
+            let arch_on = base
+                .curve_max_distance_between(&on, &ivl, &arch, start, end, 1, None)
+                .unwrap();
+            assert!((arch_on.distance - 0.5).abs() < 1.0e-12, "{arch_on:?}");
+            assert!((arch_on.this_t - 0.5).abs() < 1.0e-12, "{arch_on:?}");
+            assert!((arch_on.other_t - 0.5).abs() < 1.0e-12, "{arch_on:?}");
+            assert_eq!(arch_on.incorrect_dir, Some(false));
+        }
+
+        let shifted_on = base
+            .curve_max_distance_between(&on, &ivl, &shifted, 0.0, 1.0, 1, None)
+            .unwrap();
+        assert!(
+            (shifted_on.distance - 3.0).abs() < 1.0e-12,
+            "{shifted_on:?}"
+        );
+        assert!((shifted_on.this_t - 0.5).abs() < 1.0e-12, "{shifted_on:?}");
+        assert!((shifted_on.other_t - 0.5).abs() < 1.0e-12, "{shifted_on:?}");
+
+        // `max_needed` early-exit triggers at the midpoint under opt-in (`incorrect_dir: None`).
+        let limited_off = base
+            .curve_max_distance_between(&off, &ivl, &arch, 0.0, 1.0, 1, Some(0.25))
+            .unwrap();
+        assert_eq!(limited_off.distance, 0.0);
+        assert_eq!(limited_off.incorrect_dir, Some(false));
+        let limited_on = base
+            .curve_max_distance_between(&on, &ivl, &arch, 0.0, 1.0, 1, Some(0.25))
+            .unwrap();
+        assert!(
+            (limited_on.distance - 0.5).abs() < 1.0e-12,
+            "{limited_on:?}"
+        );
+        assert_eq!(limited_on.incorrect_dir, None);
+    }
+
+    #[test]
+    fn wr36_curve_max_distance_single_sample_bspline_default_vs_midpoint() {
+        let off = Kernel::default();
+        let mut on = Kernel::default();
+        on.fixes.curve_max_distance_single_sample_midpoint = true;
+
+        // `base` is an unborrowed degree-1 B-spline `(t, 0, 0)` on `[0, 1]`; `arch` is
+        // degree 3 `(t, 0, 2t(1 - t))`, so the line/line override does not apply.
+        let base = Curve::from(
+            BSplineCurve::create_line_segment(
+                3,
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let arch = Curve::from(HermiteCurve::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 2.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, -2.0),
+            3,
+        ));
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+
+        // Default (`false`): `t_guess1 = NaN` fails local solves and falls back to
+        // `global_point_solve` on the `0.999` retry point (`2 * 0.999 * 0.001 = 0.001998`).
+        let d_off = base
+            .curve_max_distance_between(&off, &ivl, &arch, 0.0, 1.0, 1, None)
+            .unwrap();
+        assert!((d_off.other_t - 0.999).abs() < 1.0e-12, "{d_off:?}");
+        assert!((d_off.distance - 0.001998).abs() < 1.0e-9, "{d_off:?}");
+
+        // Opt-in (`true`): samples the midpoint `0.5` -> gap `0.5`.
+        for (start, end) in [(0.0, 1.0), (1.0, 0.0)] {
+            let d_on = base
+                .curve_max_distance_between(&on, &ivl, &arch, start, end, 1, None)
+                .unwrap();
+            assert!((d_on.distance - 0.5).abs() < 1.0e-12, "{d_on:?}");
+            assert!((d_on.this_t - 0.5).abs() < 1.0e-12, "{d_on:?}");
+            assert!((d_on.other_t - 0.5).abs() < 1.0e-12, "{d_on:?}");
+        }
+
+        // Sub-interval `[0.0, 0.5]`: midpoint is `0.25`, where `2 * 0.25 * 0.75 = 0.375`.
+        let sub = Extent1d::from_min_max(0.0, 0.5);
+        let sub_on = base
+            .curve_max_distance_between(&on, &sub, &arch, 0.0, 0.5, 1, None)
+            .unwrap();
+        assert!((sub_on.distance - 0.375).abs() < 1.0e-12, "{sub_on:?}");
+        assert!((sub_on.this_t - 0.25).abs() < 1.0e-12, "{sub_on:?}");
+        assert!((sub_on.other_t - 0.25).abs() < 1.0e-12, "{sub_on:?}");
+    }
+
+    #[test]
+    fn wr36_curve_max_distance_other_sample_counts_unchanged() {
+        let off = Kernel::default();
+        let mut on = Kernel::default();
+        on.fixes.curve_max_distance_single_sample_midpoint = true;
+
+        let base = Curve::from(
+            BSplineCurve::create_line_segment(
+                3,
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let other_line = Curve::from(
+            BSplineCurve::create_line_segment(
+                3,
+                Vec3::new(0.0, 0.0, 1.0),
+                Vec3::new(1.0, 0.0, 2.0),
+            )
+            .unwrap(),
+        );
+        let arch = Curve::from(HermiteCurve::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 2.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, -2.0),
+            3,
+        ));
+        let ivl = Extent1d::from_min_max(0.0, 1.0);
+
+        for samples in [0, 2, 5, 11] {
+            let a = base
+                .curve_max_distance_between(&off, &ivl, &arch, 0.0, 1.0, samples, None)
+                .unwrap();
+            let b = base
+                .curve_max_distance_between(&on, &ivl, &arch, 0.0, 1.0, samples, None)
+                .unwrap();
+            assert_eq!(format!("{a:?}"), format!("{b:?}"), "samples {samples}");
+        }
+
+        // Single-span degree-1 line/line overrides `num_samples = 1` to `2` in both modes.
+        let line_off = base
+            .curve_max_distance_between(&off, &ivl, &other_line, 0.0, 1.0, 1, None)
+            .unwrap();
+        let line_on = base
+            .curve_max_distance_between(&on, &ivl, &other_line, 0.0, 1.0, 1, None)
+            .unwrap();
+        assert_eq!(format!("{line_off:?}"), format!("{line_on:?}"));
+
+        // Same curve over matching interval returns early before sampling.
+        let same_on = arch
+            .curve_max_distance_between(&on, &ivl, &arch, 0.0, 1.0, 1, None)
+            .unwrap();
+        assert_eq!(same_on.distance, 0.0);
+        assert_eq!(same_on.incorrect_dir, None);
     }
 }
