@@ -325,7 +325,7 @@ pub(super) fn edit_solved<T>(
     };
     sketch_store::checked(&sk)?;
     sketch_store::write(&mut doc, id, sk)?;
-    *s.doc_mut() = doc;
+    s.set_doc(doc);
     Ok((out, rep))
 }
 

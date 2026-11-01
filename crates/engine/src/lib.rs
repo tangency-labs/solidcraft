@@ -918,15 +918,34 @@ impl Session {
 
     /// Mutable document (copy-on-write).
     pub fn doc_mut(&mut self) -> &mut Document {
-        // The placement index keeps the document alive with its answers; let it go before an
-        // in-place edit, so the edit stays in place (a shared handle would clone the document
-        // to a new address behind the crash journal's back, #7502) and no stale lookup outlives it.
+        self.forget_document_caches();
+        #[cfg(test)]
+        if Arc::strong_count(&self.doc) > 1 {
+            tests::doc_copies::record();
+        }
+        Arc::make_mut(&mut self.doc)
+    }
+
+    /// Make `doc` the design, as `*doc_mut() = doc` does, without first copying a shared
+    /// document only to overwrite the copy: a command's undo step still holds the design it
+    /// started from, so `doc_mut` would copy all of it (every feature and sketch) on each
+    /// sketch drag frame. The design lands at a new address either way, and the command's end
+    /// tells the crash journal that address (#7502).
+    pub(crate) fn set_doc(&mut self, doc: Document) {
+        self.forget_document_caches();
+        self.doc = Arc::new(doc);
+    }
+
+    /// Before the document changes: the placement index keeps the document alive with its
+    /// answers; let it go, so an in-place edit stays in place (a shared handle would clone the
+    /// document to a new address behind the crash journal's back, #7502) and no stale lookup
+    /// outlives it.
+    fn forget_document_caches(&mut self) {
         if let Ok(mut index) = self.placement_index_cache.lock() {
             *index = None;
         }
         self.forget_dirty_answer();
         self.model.forget_fingerprints();
-        Arc::make_mut(&mut self.doc)
     }
 
     /// Prepared placements only: optional save caches must not compute a cold world.

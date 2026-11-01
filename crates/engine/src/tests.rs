@@ -6,6 +6,24 @@ use crate::*;
 
 mod mesh_convert;
 
+/// Counts the copies `Session::doc_mut` makes of a shared document.
+pub(crate) mod doc_copies {
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNT: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub fn record() {
+        COUNT.with(|c| c.set(c.get() + 1));
+    }
+
+    /// The count since the last call.
+    pub fn take() -> usize {
+        COUNT.with(|c| c.replace(0))
+    }
+}
+
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     match s.execute(id, &p) {
         Ok(v) => v,
