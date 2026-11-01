@@ -6,6 +6,7 @@
 //! plan units (`intersect.surface_drop_lib_p1`, `_p2`, `_p3`); each lives in its own
 //! submodule.
 
+pub(crate) mod cylinder_section;
 pub mod p1;
 pub mod p2;
 pub mod p3;

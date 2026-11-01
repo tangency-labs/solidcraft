@@ -536,6 +536,20 @@ pub struct UpstreamFixes {
     pub volume_lift_third_derivative_terms: bool,
     /// `SmSurface::DropCurve` tests the drop domain's own V length for `bDegenSurfV`, not the U length again, so a surface whose natural domain is degenerate only in V reports `SM_ERR_DEGENERATE_SURFACE` (`SM_CTC_DEGENSURFACE_FAIL`) and its failure record sets `bDegenSurfV` from V; upstream copies the U test, misses the early exit and goes on to drop (WR-100, 2026-10-31 addendum). Off by default for pinned C++ parity.
     pub drop_curve_v_domain_degeneracy: bool,
+    /// `SmSurface::DropCurve` gives a curve lying on a cylinder (an `SmCylinder`, or an
+    /// `SmCone` of zero semi-angle) its exact UV curve: a plane section (the ellipse,
+    /// circle or line a plane cuts from the cylinder, as the boolean's plane/cylinder
+    /// edges and an exact round's rails are) is a rational B-spline in the cylinder's
+    /// rational parameters, built in the curve's own parameter with twice its degree,
+    /// where upstream traces and fits a cubic within the drop tolerance: the trims of
+    /// a tilted peg's rim sat 2e-6 to 1e-5 off their edge, and the cylinder face's area
+    /// and the body's volume carried that error (WR-680, #2109; see
+    /// `plan/upstream-issues/WR-680--cylinder-plane-section-uv-trims-are-fits.md`). It
+    /// is used only where the UV curve lifts onto the curve within round-off and stays
+    /// in the domain; an iso-parameter curve keeps the drop's own exact line, and a
+    /// curve that crosses the seam or is not on the cylinder is traced as upstream.
+    /// Off by default for pinned C++ parity.
+    pub cylinder_plane_section_trims_exact: bool,
     /// `SmTorus::AssertValid` tests its V (minor) interval, not the U interval twice, and reports its U and V overlap tests as 3 and 4 (and `SmSurfOfRevolution`'s U test as 13), the ids their labels give them, where upstream reports them as 2 and 3 (and 2) (WR-538, #482; the fork's tangency-labs/smlib@0cd9d08).
     pub torus_check_reads_v_interval: bool,
     /// `SmTorus::AssertValid` reports a spindle torus whose V interval runs through an apex (`V = ±(90 + asin(R/r))`) as test 5, "Self Intersection", where upstream clears its result with no report and tests the U interval against `90 + acos(R/r)`, failing every spindle torus with a whole turn of U (WR-539; the fork's tangency-labs/smlib@daba678).

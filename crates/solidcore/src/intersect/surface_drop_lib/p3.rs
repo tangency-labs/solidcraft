@@ -46,6 +46,13 @@
 //! - **`bDegenSurfV`** tests the domain's `XLength`, as upstream (WR-100); with
 //!   `Kernel::fixes.drop_curve_v_domain_degeneracy` it tests `YLength` instead (WR-100
 //!   addendum 2026-10-31).
+//! - **Exact UV curve on a cylinder (opt-in).** With
+//!   `Kernel::fixes.cylinder_plane_section_trims_exact` (WR-680, #2109), a curve lying
+//!   on a cylinder (a plane section) gets its exact rational UV curve in its own
+//!   parameter (`surface_drop_lib::cylinder_section`) once the domain checks pass,
+//!   before the start point is dropped; the outputs and the record are those of a
+//!   successful drop of that one curve. A curve it does not apply to is traced as
+//!   upstream.
 //! - **Temporary state.** The out-of-bounds convergence upstream enables on the surface
 //!   for the call (`SmTemporaryChangeValue`) runs on an evaluation copy with the flag
 //!   set. The surface cache flags (`m_bPointTestEnabled` off, `m_bProcessBoundaryCurves`
@@ -749,6 +756,39 @@ impl Surface {
         fs.pole_normals = Some(&pole_normals);
         fs.singularities = u64::from(singularities);
         fs.approx_singularities = u64::from(sings.approx_singular);
+
+        // Opt-in (#2109, WR-680): a curve lying on a cylinder (a plane section) gets its
+        // exact rational UV curve in its own parameter instead of the traced fit; one
+        // that does not check out is traced below as upstream.
+        if k.fixes.cylinder_plane_section_trims_exact {
+            if let Some(uv_curve) =
+                super::cylinder_section::exact_uv_curve(k, this, &s_uv_domain, curve, &s_interval)?
+            {
+                let (drop_to_surf, approx_dev) =
+                    uv_curve_gap(k, this, &uv_curve, curve, approx_tol_3d)?;
+                out.max_drop_to_surf = drop_to_surf;
+                out.max_approx_dev = approx_dev;
+                out.uv_curves.push(uv_curve);
+                let path = path_of(record.as_ref());
+                fs.set(
+                    &mut record,
+                    4,
+                    SM_SUCCESS,
+                    path,
+                    &FailOut {
+                        rd_max_drop: out.max_drop_to_surf,
+                        rd_max_dev: out.max_approx_dev,
+                        max_drop: out.max_drop_to_surf,
+                        solutions: None,
+                        ctrl_poly: None,
+                        knots: None,
+                        uv_curves: Some(&out.uv_curves),
+                    },
+                );
+                default_path(&mut record, CreateUvTrimCurvePathType::DropCurveOkay);
+                return Ok(out);
+            }
+        }
 
         // set sStart's Curve Start Point, 1stDeriv, and 2nd Deriv
         let pd = curve.evaluate(k, start.t, 2, true, true)?;
