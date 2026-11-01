@@ -1918,6 +1918,8 @@
   "motion.track_name": "Rãnh {number}",
   "nav.alias.help": "Shift+Alt+kéo chuột trái để xoay, Shift+Alt+chuột giữa để trượt, Shift+Alt+chuột phải để thu phóng; kéo chuột giữa cũng trượt và kéo chuột phải xoay",
   "nav.blender.help": "Kéo chuột giữa để xoay, Shift+chuột giữa để trượt, Ctrl+chuột giữa để thu phóng; kéo chuột phải giữ nguyên camera",
+  "nav.creo.help": "Kéo nút giữa để xoay, Shift+nút giữa để di chuyển, Ctrl+kéo nút giữa theo chiều dọc để thu phóng (kéo xuống để phóng to); lăn con lăn để thu phóng",
+  "nav.creo.label": "Creo",
   "nav.free_orbit.help": "Chuột và chuột 3D xoay tự do qua cả hai cực và giữ nguyên độ lăn nghiêng (Roll). Bắt dính trục bằng phím Shift sẽ bị tắt.",
   "nav.free_orbit.label": "Xoay góc nhìn tự do",
   "nav.free_orbit.snap_help": "Chuột và chuột 3D xoay qua cả hai cực và giữ nguyên góc nghiêng cuộn. Giữ Shift trong khi kéo xoay quỹ đạo để bắt dính hướng nhìn và góc nghiêng cuộn.",

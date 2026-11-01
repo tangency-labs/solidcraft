@@ -286,37 +286,47 @@ fn blends_take_a_size_per_edge() {
     assert!(c.blend(Blend::Round, &tops, &[2.0], 0.1).is_err());
 }
 
-/// A radius running linearly from 3 to 1 along a cube edge: (1 - pi/4) L (r0² + r0 r1 + r1²) / 3
-/// taken away, whichever end is the start.
+/// A variable round is the union of its balls: in each plane square to the edge, the corner cut off
+/// by rays from it, each meeting the union first at the least entry over the balls, integrated
+/// along the edge (a linear law's balls envelop a cone). The balls' great circles, (1 - pi/4) r²
+/// per unit length, take more: 18.5988 for 3 -> 1, 39.0796 for 4, 1, 4 and 22.8945 for 4 -> 0.
+/// On the 20 cube's edge y = z = 20, 3 -> 1 takes 18.5377834 whichever end is the start.
 #[test]
 fn a_variable_round_follows_its_law() {
     let c = cube(20.0);
-    let q = 1.0 - std::f64::consts::FRAC_PI_4;
     let knots = [0.0, 0.0, 1.0, 1.0];
     let r = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 1, &knots, &[3.0, 1.0]).unwrap();
     shot(&r, "variable-3-1");
-    assert_close(volume(&r), 8000.0 - q * 20.0 * 13.0 / 3.0, 1e-5, "linear law");
+    assert_close(volume(&r), 8000.0 - 18.5377834, 1e-5, "linear law");
     let back = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [20.0, 20.0, 20.0], 1, &knots, &[1.0, 3.0]).unwrap();
     assert_close(volume(&back), volume(&r), 1e-7, "reversed");
     assert!(c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 1, &[0.0, 0.5, 1.0, 1.0], &[3.0, 1.0]).is_err());
     assert!(matches!(c.fillet_variable([90.0, 90.0, 90.0], 0.1, [0.0; 3], 1, &knots, &[3.0, 1.0]), Err(Error::NoMatch { .. })));
-    // A quadratic law with control radii 4, 1, 4: r(t) = 4(1 − t)² + 2t(1 − t) + 4t².
-    let law = |t: f64| 4.0 * (1.0 - t).powi(2) + 2.0 * t * (1.0 - t) + 4.0 * t * t;
-    let n = 4000;
-    let r2 = (0..n).map(|i| law((i as f64 + 0.5) / n as f64).powi(2)).sum::<f64>() / n as f64;
+    // A quadratic law with control radii 4, 1, 4, r(t) = 4(1 − t)² + 2t(1 − t) + 4t²: 39.019820.
     let quad = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 2, &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0], &[4.0, 1.0, 4.0]).unwrap();
     shot(&quad, "variable-quadratic");
-    assert_close(volume(&quad), 8000.0 - q * 20.0 * r2, 1e-5, "quadratic law");
-    // Down to zero at the far end: the round closes to the edge's end point.
+    assert_close(volume(&quad), 8000.0 - 39.019820, 1e-5, "quadratic law");
+    // Down to zero at the far end: the round closes to the edge's end point, 22.594877.
     let zero = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 1, &knots, &[4.0, 0.0]).unwrap();
     shot(&zero, "variable-to-zero");
-    assert_close(volume(&zero), 8000.0 - q * 20.0 * 16.0 / 3.0, 1e-5, "down to zero");
+    assert_close(volume(&zero), 8000.0 - 22.594877, 1e-5, "down to zero");
     // A law down to zero inside the edge would pinch the round to a point: refused.
     let pinch = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 1, &[0.0, 0.0, 0.5, 1.0, 1.0], &[4.0, 0.0, 4.0]);
     assert!(pinch.is_err(), "a law pinching to zero inside the edge");
     let smooth_knots = [0.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 1.0, 1.0, 1.0, 1.0];
     let smooth = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 3, &smooth_knots, &[4.0, 10.0 / 3.0, 2.0, 2.0, 2.0, 10.0 / 3.0, 4.0]);
     shot(&smooth.unwrap(), "variable-smooth-4-2-4");
+}
+
+/// A law with a corner (4 → 2 → 4, straight on both halves) on the 20 cube's edge y = z = 20: the
+/// union of the balls, where the two halves' rounds cross and each ends, takes 39.542073 (the
+/// halves' great circles would take 40.0590).
+#[test]
+fn a_variable_round_with_a_corner_in_its_law_is_its_balls_union() {
+    let c = cube(20.0);
+    let corner = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 1, &[0.0, 0.0, 0.5, 1.0, 1.0], &[4.0, 2.0, 4.0]).unwrap();
+    shot(&corner, "variable-corner-4-2-4");
+    assert_close(volume(&corner), 8000.0 - 39.542073, 1e-5, "corner law");
 }
 
 /// Unequal chamfers of a cube's top edge y = 20: 5 back along the face facing `first` most and 2
@@ -377,30 +387,6 @@ fn draft_tilts_a_side_about_its_line_on_the_neutral_plane() {
     assert_eq!(c.draft(&side, 0.1, [0.0; 3], up, up, 0.0).unwrap_err(), Error::Argument);
     assert_eq!(c.draft(&[], 0.1, [0.0; 3], up, up, 5.0 * deg).unwrap_err(), Error::Argument);
     assert_untouched(&c, 8000.0, [6, 12, 8]);
-}
-
-/// A law with a corner (4 → 2 → 4, straight on both halves): the round turns at the corner, each
-/// half taking away (1 - pi/4) (L / 2) (16 + 8 + 4) / 3; the same points joined smoothly (C1 cubic
-/// pieces, as RadiusSpline::through makes them) are built too. solidcore has no splitting of the
-/// round at the corner (default-solidcore/bugs/variable-fillet-law-with-a-corner.md), and says so.
-#[test]
-#[ignore = "solidcore: no SplitFilletFacesAtRadiusCorners, so a law with a corner is refused"]
-fn a_variable_round_turns_at_a_law_corner() {
-    variable_round_with_a_corner();
-}
-
-#[test]
-fn a_variable_round_turns_at_a_law_corner_on_the_cpp_kernel() {
-    let _cpp = crate::route::on_cpp();
-    variable_round_with_a_corner();
-}
-
-fn variable_round_with_a_corner() {
-    let c = cube(20.0);
-    let q = 1.0 - std::f64::consts::FRAC_PI_4;
-    let corner = c.fillet_variable([10.0, 20.0, 20.0], 0.1, [0.0, 20.0, 20.0], 1, &[0.0, 0.0, 0.5, 1.0, 1.0], &[4.0, 2.0, 4.0]).unwrap();
-    shot(&corner, "variable-corner-4-2-4");
-    assert_close(volume(&corner), 8000.0 - q * 20.0 * 28.0 / 3.0, 1e-6, "corner law");
 }
 
 /// The corner of r5 rounds at (60, 40, 20) on a 60 x 40 x 20 box, set back 8 and left open: the

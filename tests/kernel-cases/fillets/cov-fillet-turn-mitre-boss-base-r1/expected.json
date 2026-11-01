@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "a square boss 10 x 10 x 5 on a plate, its base edges rounded R1, its vertical corners sharp: the default turn, Mitre: at each convex corner the two base rounds run on past it to the bisector plane and meet there",
+ "source": "analytic",
+ "method": "plate 40x30x10 and boss 10x10x5: V0 = 12500. Each base round adds A along its edge and runs on past both corners to the bisector planes: the integral of (L + 2u) dA = L A + 2 M. Four edges of 10: 40 A + 8 M. V = 12508.967554824. Graded to 1e-7 relative: the Mitre and Swept turns differ by (8 - 2 pi) M = 0.0823 mm^3 at these four corners, 6.6e-6 of the volume.",
+ "body_count": 1,
+ "volume_mm3": 12508.96755482359,
+ "tolerance": {
+  "rel": 1e-07
+ }
+}

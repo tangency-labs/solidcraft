@@ -4,9 +4,9 @@
  ],
  "what": "a curvature-continuous (G2) fillet of size 6 on one edge of a 20 mm cube",
  "source": "analytic",
- "method": "type curvature: the section is the quintic Bezier with control points p+s t1, p+(2s/3) t1, p+(s/3) t1, p+(s/3) t2, p+(2s/3) t2, p+s t2 with setback s = radius = 6 (perpendicular faces), as documented for the feature (zero curvature where it meets the faces). The area between the corner and that curve, by Green on the Bezier polygon (200000 points), is 5.38095 mm^2; the edge is 20 long between two planar end faces square to it: V = 8000 - 20*5.38095 = 7892.3810. Faces: 6 + 1 = 7.",
+ "method": "type curvature: the curvature section: the order-2 section at the equal-area thumbweight between the contacts set back s along two planes square to each other (cov-fillet-section-curvature-box-edge-r3), S(t) = f(t) (e + (1 - t) (rho1 - e)) + (1 - f(t)) (e + t (rho2 - e)), f = (1-t)^3 / ((1-t)^3 + t^3), e the corner: it cuts A = 0.214601836603 s^2 off the corner, its first moment about either face M = 0.0474559669443 s^3 (Green's theorem on S), here s = radius = 6 (perpendicular faces): A = 5.55093559 mm^2; the edge is 20 long between two planar end faces square to it: V = 8000 - 20*5.55093559 = 7888.9813. Faces: 6 + 1 = 7. [the curvature section at the equal-area thumbweight (the default): on the same rails it takes off what the ball's circle does, so between square planes w = -0.5252123889 and it cuts A = (1 - pi/4) s^2 = 0.214601836603 s^2, first moment about either face M = 0.0474559669443 s^3 (Green's theorem on S); V = 7845.486678]",
  "body_count": 1,
- "volume_mm3": 7892.380952374643,
+ "volume_mm3": 7845.486677646163,
  "faces": 7,
  "continuity": {
   "order": "g2"

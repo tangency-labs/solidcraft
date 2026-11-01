@@ -2,8 +2,11 @@
  "sources": [],
  "what": "a variable round on the top front edge, r5 at x=0 down to 0 at the x=60 vertex",
  "source": "analytic",
- "method": "as 005 with b=0 (tests/oracle/78): the round closes to the corner, which stays",
+ "method": "as 005 with b=0 (tests/oracle/78): the cone's apex at the x=60 vertex, which stays; 107.055974 removed (great circles: 107.301)",
  "body_count": 1,
- "volume_mm3": 47892.699081699,
- "faces": 7
+ "volume_mm3": 47892.944026,
+ "faces": 7,
+ "tolerance": {
+  "rel": 1e-06
+ }
 }

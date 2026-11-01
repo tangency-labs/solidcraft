@@ -2,9 +2,9 @@
  "sources": [],
  "what": "a vertical r5 round, then a variable round r1 -> r5 along the top back edge into it",
  "source": "analytic",
- "method": "a variable round takes only its picked edge (no tangent chain: crates/doc/src/eval.rs), y = 40 from x = 0 (r1) to x = 55 (r5), where it meets the vertical r5 round's tangent line: removed (1-pi/4) 55 (1 + 5 + 25)/3 (005) and (1-pi/4) 5^2 20. Past x = 55 the round's end runs on into the vertical round's quarter column, trimmed by its cylinder: as a constant r5 tube that takes int_0^5 sqrt(25 - v^2)(5 - sqrt(25 - v^2)) dv = 125 pi/4 - 250/3 = 14.841437; with its radius still growing at 4/55 per mm, 15.854054 (numerical, the round's section against the cylinder). V lies between: graded as the interval's middle with its half width as the tolerance. Faces 6 + 2; edges 18, vertices 12 (5 round the bottom, 5 vertical, 5 round the top face, the round's line on the back wall, its end arc on x = 0, its trim on the cylinder)",
+ "method": "a variable round takes only its picked edge (no tangent chain: crates/doc/src/eval.rs), y = 40 from x = 0 (r1) to x = 55 (r5), where it meets the vertical r5 round's tangent line. The linear law's balls envelop a cone (union of the balls: in each plane x = const the corner cut off by rays from it, each meeting the union first at the least entry over the balls, integrated over x): 121.753137 removed along 55 (the great circles' (1-pi/4) 55 (1 + 5 + 25)/3 would take 121.965377), and (1-pi/4) 5^2 20 by the vertical round. Past x = 55 the round's end runs on into the vertical round's quarter column, trimmed by its cylinder, its radius still growing at 4/55 per mm as the law goes on past the edge's end (SMLib's variable round; capi ops_kernel, the R5 corner case): the cone going on, 15.820019 (the union of the balls, cut by the cylinder). V = 48000 - 121.753137 - 107.300918 - 15.820019 = 47755.125926 (a constant r5 tube past x = 55 would take 14.841437). Faces 6 + 2; edges 18, vertices 12 (5 round the bottom, 5 vertical, 5 round the top face, the round's line on the back wall, its end arc on x = 0, its trim on the cylinder)",
  "body_count": 1,
- "volume_mm3": 47755.385959062,
+ "volume_mm3": 47755.125926,
  "faces": 8,
  "edges": 18,
  "vertices": 12,
@@ -21,6 +21,6 @@
   ]
  },
  "tolerance": {
-  "rel": 1.1602121611875055e-05
+  "rel": 1e-06
  }
 }

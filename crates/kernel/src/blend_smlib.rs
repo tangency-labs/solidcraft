@@ -668,14 +668,15 @@ mod tests {
 
     #[test]
     fn a_linear_radius_runs_from_the_start_end() {
-        // 3 at x = 0 to 1 at x = 20: (1 - pi/4) L (r0^2 + r0 r1 + r1^2) / 3 taken away, from
-        // either end given as the start with the law reversed.
+        // 3 at x = 0 to 1 at x = 20: the balls' union, a cone, takes 18.5377834 (their great
+        // circles, (1 - pi/4) L (r0^2 + r0 r1 + r1^2) / 3, would take 18.5988), from either end
+        // given as the start with the law reversed.
         let b = cube();
         let at = Vec3::new(10.0, 20.0, 20.0);
         let law = RadiusSpline { degree: 1, knots: vec![0.0, 0.0, 1.0, 1.0], radii: vec![3.0, 1.0] };
         let r = imp::variable(&b, at, Vec3::new(0.0, 20.0, 20.0), &law).unwrap();
-        let want = 8000.0 - QUARTER * 20.0 * 13.0 / 3.0;
-        assert!((volume(&r) - want).abs() < 0.05, "{}", volume(&r));
+        let want = 8000.0 - 18.5377834;
+        assert!((volume(&r) - want).abs() < 0.01, "{}", volume(&r));
         let back = imp::variable(&b, at, Vec3::new(20.0, 20.0, 20.0), &law.reversed()).unwrap();
         assert!((volume(&back) - volume(&r)).abs() < 1e-6 * 8000.0);
     }

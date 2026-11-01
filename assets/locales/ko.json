@@ -1353,6 +1353,8 @@
   "motion.track_name": "트랙 {number}",
   "nav.alias.help": "Shift+Alt+왼쪽 드래그는 회전, Shift+Alt+가운데 드래그는 이동, Shift+Alt+오른쪽 드래그는 확대/축소입니다. 가운데 드래그로도 이동하고 오른쪽 드래그로도 회전합니다",
   "nav.blender.help": "가운데 드래그는 회전, Shift+가운데 드래그는 이동, Ctrl+가운데 드래그는 확대/축소입니다. 오른쪽 드래그는 카메라에 영향을 주지 않습니다",
+  "nav.creo.help": "가운데 버튼을 끌면 회전, Shift+가운데 버튼은 이동, Ctrl+가운데 버튼을 위아래로 끌면 확대/축소합니다(아래로 끌면 확대). 휠을 굴려도 확대/축소합니다",
+  "nav.creo.label": "Creo",
   "nav.free_orbit.help": "마우스와 3D 마우스로 롤을 유지하며 양 극점을 넘어 회전합니다. Shift 축 스냅은 비활성화됩니다.",
   "nav.free_orbit.label": "자유 회전",
   "nav.free_orbit.snap_help": "마우스와 3D 마우스로 양쪽 극점을 지나 회전할 수 있으며 롤 각도가 유지됩니다. 궤도 회전 드래그 중 Shift를 누르면 보기 방향과 롤 각도가 스냅됩니다.",

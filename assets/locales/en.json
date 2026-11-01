@@ -1918,6 +1918,8 @@
   "motion.track_name": "Track {number}",
   "nav.alias.help": "Shift+Alt+left drag orbits, Shift+Alt+middle pans, Shift+Alt+right zooms; middle drag also pans and right drag orbits",
   "nav.blender.help": "Middle drag orbits, Shift+middle pans, Ctrl+middle zooms; right drag leaves the camera alone",
+  "nav.creo.help": "Middle drag orbits, Shift+middle pans, Ctrl+middle drag vertically zooms (down to zoom in); scroll the wheel to zoom",
+  "nav.creo.label": "Creo",
   "nav.free_orbit.help": "Mouse and 3D mouse rotate through both poles and preserve roll. Shift axis snapping is disabled.",
   "nav.free_orbit.label": "Free orbit",
   "nav.free_orbit.snap_help": "Mouse and 3D mouse rotate through both poles and preserve roll. Hold Shift during an orbit drag to snap the view direction and roll.",

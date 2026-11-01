@@ -1,6 +1,5 @@
 {
   "source": "analytic",
-  "known_failure": "SMLib variable fillet: STEP export finds edges 4.6e-5 to 6.1e-5 off their surfaces against 2e-5",
   "method": "as 77 with the radius running from 4 (x=0) down to 0 (x=40), where the round closes to the corner: V = abc - (1 - pi/4) L a^2 / 3; the round is three-sided and the corner at x=40 stays",
   "body_count": 1,
   "volume_mm3": 23954.21827485812,

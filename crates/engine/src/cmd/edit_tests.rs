@@ -251,7 +251,9 @@ fn redefining_a_fillet_as_g2_on_sloped_ends_survives_undo_and_reopen() {
         assert_eq!(bodies.len(), 1);
         bodies.first().unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.0001)).unwrap().measure().volume
     };
-    let expected = |r: f64| 12000.0 - 40.0 * 113.0 / 756.0 * r.powi(2) + 13711.0 / 486486.0 * r.powi(3);
+    // The curvature section at its equal-area thumbweight removes (1 - pi/4) r² at the square
+    // corner, first moment 0.0474559669443 r³ (Green's theorem on the section).
+    let expected = |r: f64| 12000.0 - 40.0 * (1.0 - std::f64::consts::FRAC_PI_4) * r.powi(2) + 0.0474559669443 * r.powi(3);
     let actual = volume(&s);
     assert!((actual - expected(5.0)).abs() < 0.05, "{actual} vs {}", expected(5.0));
     let edited = s.doc.clone();
