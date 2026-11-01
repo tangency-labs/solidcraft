@@ -470,6 +470,24 @@ fn find_in_browser_reaches_a_folded_body() {
     assert!(crate::scenario::handle_at("fold:Bodies").is_none(), "with no folder row");
 }
 
+/// #8120: Isolate on an occurrence menu becomes Unisolate and restores sibling placements.
+#[test]
+fn occurrence_isolate_toggles_unisolate_on_the_same_menu() {
+    let (mut h, _, first, second) = fixture();
+    let first_body = h.app.session.occurrence_bodies(&[first], true).unwrap()[0].clone();
+    let second_body = h.app.session.occurrence_bodies(&[second], true).unwrap()[0].clone();
+    let target = Target::Occurrence { path: vec![second] };
+    let isolate = context_menu::items(&h.app, &target).into_iter().find(|i| i.label == "Isolate").expect("Isolate");
+    context_menu::run_item(&mut h.app, &isolate, egui::Pos2::ZERO);
+    assert!(!h.app.session.body_visible(&first_body));
+    assert!(h.app.session.body_visible(&second_body));
+    let unisolate = context_menu::items(&h.app, &target).into_iter().find(|i| i.label == "Unisolate").expect("Unisolate");
+    assert!(!context_menu::items(&h.app, &target).iter().any(|i| i.label == "Isolate"));
+    context_menu::run_item(&mut h.app, &unisolate, egui::Pos2::ZERO);
+    assert!(h.app.session.body_visible(&first_body) && h.app.session.body_visible(&second_body));
+    assert!(h.app.session.visibility.hidden_occurrences.is_empty());
+}
+
 /// #4217: while a placement's Bodies folder is folded away, the placement's menu takes the
 /// folder's items it lacks: Create Components from Bodies (the folder's bodies) and, with several
 /// of them selected, Group Selected. With the folder drawn they stay on the folder's own menu.
