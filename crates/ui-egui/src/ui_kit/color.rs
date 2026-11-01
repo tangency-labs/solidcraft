@@ -76,7 +76,7 @@ fn color_field_inner(ui: &mut Ui, rgb: &mut [u8; 3], opacity: Option<&mut f64>, 
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ColorButton, ui.is_enabled(), i18n::tr("color.edit")));
     publish(&format!("dialog:color:{}", label(ui)), &response);
     let mut edited = false;
-    Container::new(ui.ctx(), Surface::Popup)
+    let popup = Container::new(ui.ctx(), Surface::Popup)
         .menu(&response)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .width(t.form_card_width + t.space_24 + t.space_12)
@@ -92,6 +92,9 @@ fn color_field_inner(ui: &mut Ui, rgb: &mut [u8; 3], opacity: Option<&mut f64>, 
                 edited = if opacity.is_some() || mixed { color_popover_with_opacity(ui, rgb, opacity, mixed) } else { color_popover(ui, rgb) };
             });
         });
+    if popup.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        response.request_focus();
+    }
     if edited {
         response.mark_changed();
     }

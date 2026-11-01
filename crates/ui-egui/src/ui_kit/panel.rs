@@ -41,7 +41,7 @@ fn header_actions(
     collapsed: Option<&mut bool>,
     closeable: bool,
     on_close: impl FnOnce(),
-    actions: Option<&mut dyn FnMut(&mut Ui)>,
+    actions: Option<(f32, &mut dyn FnMut(&mut Ui))>,
 ) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), header_height()), egui::Sense::hover());
@@ -68,13 +68,21 @@ fn header_actions(
             on_close();
         }
     }
-    let right = if let Some(actions) = actions {
+    let right = if let Some((width, actions)) = actions {
+        let end = if closeable { close_rect.left() - t.space_8 } else { rect.right() - t.space_8 };
+        let width = if closeable { width.min((end - icon_rect.right() - t.space_24 * 4.0).max(0.0)) } else { width };
         let action_rect = egui::Rect::from_center_size(
-            egui::pos2(rect.right() - t.space_8 - t.control_height, rect.center().y),
-            vec2(t.control_height * 2.0, t.control_height),
+            egui::pos2(end - width / 2.0, rect.center().y),
+            vec2(width, if closeable { t.form_close_size } else { t.control_height }),
         );
-        let mut action_ui = ui.new_child(egui::UiBuilder::new().max_rect(action_rect));
+        let builder = egui::UiBuilder::new().max_rect(action_rect);
+        let builder = if closeable { builder.layout(egui::Layout::left_to_right(egui::Align::Center)) } else { builder };
+        let mut action_ui = ui.new_child(builder);
+        if closeable {
+            action_ui.set_clip_rect(ui.clip_rect().intersect(action_rect));
+        }
         actions(&mut action_ui);
+        scenario::publish_rect("dialog:header:accessory", action_rect);
         action_rect.left() - t.space_8
     } else if let Some(collapsed) = collapsed {
         let fold = egui::Rect::from_min_size(egui::pos2(close_rect.left() - t.form_close_size - t.space_4, close_rect.top()), close_rect.size());
@@ -431,7 +439,15 @@ impl<'a> Panel<'a> {
             width,
             false,
             |ui, options| {
-                header_actions(ui, (options.icon, None), options.title, None, false, || {}, actions);
+                header_actions(
+                    ui,
+                    (options.icon, None),
+                    options.title,
+                    None,
+                    false,
+                    || {},
+                    actions.map(|actions| (Tokens::get().control_height * 2.0, actions)),
+                );
             },
             add,
         )
@@ -927,6 +943,7 @@ pub struct Window<'a> {
     page_padding: egui::Margin,
     page_chrome: bool,
     left_slot: bool,
+    page_header_in_titlebar: bool,
 }
 
 impl<'a> Window<'a> {
@@ -951,6 +968,7 @@ impl<'a> Window<'a> {
             page_padding: egui::Margin::same(Tokens::get().space_16 as i8),
             page_chrome: false,
             left_slot: false,
+            page_header_in_titlebar: false,
         }
     }
 
@@ -1018,6 +1036,12 @@ impl<'a> Window<'a> {
         self
     }
 
+    /// Place the existing page-header callback beside the title; other windows retain their body header.
+    pub(crate) fn page_header_in_titlebar(mut self) -> Self {
+        self.page_header_in_titlebar = true;
+        self
+    }
+
     /// A required choice, such as web recovery, has no dismiss action. Existing data remains
     /// pending until the body explicitly handles a choice.
     pub fn required(mut self) -> Self {
@@ -1055,7 +1079,9 @@ impl<'a> Window<'a> {
             let t = Tokens::get();
             ui.spacing_mut().item_spacing.y = 0.0;
             let mut close = false;
-            header_impl(ui, (self.icon, self.page_chrome.then_some(t.form_primary)), self.title, None, self.closeable, || close = true);
+            if !self.page_header_in_titlebar {
+                header_impl(ui, (self.icon, self.page_chrome.then_some(t.form_primary)), self.title, None, self.closeable, || close = true);
+            }
             egui::Frame::NONE.inner_margin(if self.body_padding { t.space_12 } else { 0.0 }).show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = t.form_gap_y;
                 if self.body_padding {
@@ -1141,7 +1167,46 @@ impl<'a> Window<'a> {
         self.page_chrome = true;
         let rows = self.page_rows;
         let padding = self.page_padding;
-        self.show_with_left(ctx, true, |ui| page_list_sized(ui, selected, pages, state, rows, padding, header, on_select, sidebar_footer), left)
+        let in_titlebar = self.page_header_in_titlebar;
+        let (icon, title, closeable) = (self.icon, self.title, self.closeable);
+        let header_closed = std::cell::Cell::new(false);
+        let result = self.show_with_left(
+            ctx,
+            true,
+            |ui| {
+                if in_titlebar {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    let mut accessory = |ui: &mut Ui| {
+                        if let Some(header) = header {
+                            header(ui, state);
+                        }
+                    };
+                    header_actions(
+                        ui,
+                        (icon, Some(Tokens::get().form_primary)),
+                        title,
+                        None,
+                        closeable,
+                        || header_closed.set(true),
+                        Some((Tokens::get().space_24 * 9.0 + Tokens::get().space_14, &mut accessory)),
+                    );
+                }
+                page_list_sized(
+                    ui,
+                    selected,
+                    pages,
+                    state,
+                    rows,
+                    padding,
+                    if in_titlebar { None } else { header },
+                    on_select,
+                    sidebar_footer,
+                    header.is_some(),
+                );
+            },
+            left,
+        );
+        (result.0 || header_closed.get(), result.1)
     }
 
     /// The same bounded card frame, either movable or an input-blocking modal.
@@ -1209,7 +1274,7 @@ pub(crate) struct WindowPage<S> {
 
 #[cfg(test)]
 pub(super) fn page_list<S>(ui: &mut Ui, selected: &mut usize, pages: &[WindowPage<S>], state: &mut S) {
-    page_list_sized(ui, selected, pages, state, 16.0, egui::Margin::same(Tokens::get().space_16 as i8), None, None, None);
+    page_list_sized(ui, selected, pages, state, 16.0, egui::Margin::same(Tokens::get().space_16 as i8), None, None, None, false);
 }
 
 fn page_list_sized<S>(
@@ -1222,6 +1287,7 @@ fn page_list_sized<S>(
     header: Option<fn(&mut Ui, &mut S)>,
     on_select: Option<fn(&mut S)>,
     sidebar_footer: Option<(f32, fn(&mut Ui, &mut S))>,
+    search_scroll: bool,
 ) {
     let t = Tokens::get();
     // The search strip, the gap under it, and the following item spacing sit above the page.
@@ -1241,7 +1307,11 @@ fn page_list_sized<S>(
     t.secondary_vline(ui.painter(), nav.right(), nav.y_range(), t.dialog_rule);
     scenario::publish_rect("dialog:pages", nav);
     *selected = (*selected).min(pages.len().saturating_sub(1));
-    let nav_inner = nav.shrink2(vec2(t.space_8, t.space_6));
+    let nav_inner = if sidebar_footer.is_some() {
+        egui::Rect::from_min_max(nav.min + vec2(t.space_8, t.space_6), nav.max - vec2(t.space_8, t.space_10))
+    } else {
+        nav.shrink2(vec2(t.space_8, t.space_6))
+    };
     let footer_height = sidebar_footer.map_or(0.0, |(height, _)| dimension(height).min(nav_inner.height()));
     let list = egui::Rect::from_min_max(nav_inner.min, egui::pos2(nav_inner.right(), nav_inner.bottom() - footer_height));
     ui.scope_builder(egui::UiBuilder::new().max_rect(list), |ui| {
@@ -1326,7 +1396,7 @@ fn page_list_sized<S>(
             if let Some(header) = header {
                 header(ui, state);
             }
-            let force_scroll = header.is_some() && crate::prefs_search::force_scroll(ui.ctx());
+            let force_scroll = search_scroll && crate::prefs_search::force_scroll(ui.ctx());
             if let Some(page) = pages.get(*selected) {
                 if page.scroll || force_scroll {
                     let scroll = super::settings_scroll(ui, ("sc_prefs_page", *selected), |ui| (page.draw)(ui, state));
