@@ -52,6 +52,11 @@
 //!   `NL_INP_ERR` (14) for `ur <= ul`: [`NlibCode::Input`]. `sm_BasisEval` returns
 //!   its flag at the domain ends after filling `N` (so `sm_CrvEval` fails there):
 //!   [`SolidError::Unsupported`].
+//! - `sm_CrvEval` reads `Pw[spn - p + i]` unchecked. At a NaN parameter on a curve
+//!   with fewer than `p + 1` control points (an edge whose limits were never set)
+//!   `N_BasisFindSpan` returns a span below `p` and upstream reads before `Pw`
+//!   (UB-288): [`crv_eval`] returns [`SolidError::Upstream`] `SM_ERR` there, and past
+//!   the end of `Pw`, instead of reading.
 //! - Arrays sized by a caller count (the rows of [`basis_derivs`],
 //!   [`crv_rational_basis_derivs`] and [`basis_i_derivs`] for `der`, the storage of
 //!   [`allocate_nurb_curve`]) are allocated fallibly: `InvalidInput` when they do not
@@ -1153,9 +1158,14 @@ pub fn crv_eval(cur: &Curve, u: f64, side: Side) -> Result<Vec3> {
 
     // Compute the point on the curve.
     let mut cw = CPoint::new(0.0, 0.0, 0.0, 0.0);
-    let spn_p = span.checked_sub(p).ok_or_else(|| oob(OP))?;
+    // Upstream reads Pw[spn - p + i] unchecked; a span below p (a NaN u on a curve
+    // with fewer than p + 1 control points) reads before Pw (UB-288): SM_ERR instead.
+    let spn_p = span.checked_sub(p).ok_or_else(|| SolidError::sm_err(OP))?;
     for (i, &alpha) in values.iter().enumerate().take(p + 1) {
-        let aw = pw.get(spn_p + i).copied().ok_or_else(|| oob(OP))?;
+        let aw = pw
+            .get(spn_p + i)
+            .copied()
+            .ok_or_else(|| SolidError::sm_err(OP))?;
         // MAC_A_updcpt: skip zero weights, add without multiplying for one.
         if alpha == 1.0 {
             cw.x += aw.x;
@@ -2116,6 +2126,33 @@ mod tests {
         assert!(k[4] - k[3] > 1e-6);
         assert_eq!(k[0], 0.0);
         assert_eq!(k[6], 1.0);
+    }
+
+    #[test]
+    fn eval_at_nan_below_p_plus_one_control_points_is_sm_err() {
+        // An edge whose limits were never set: degree 3, 2 control points, every
+        // knot 1e20. At u = NaN the span search stops at span 2 < p, where upstream
+        // reads Pw[-1].
+        let pw = vec![
+            CPoint::new(0.0, 0.0, 0.0, NOW),
+            CPoint::new(1.0, 0.0, 0.0, NOW),
+        ];
+        let c = Curve::new(pw, 3, vec![1e20; 6]).unwrap();
+        let knt = c.knot_vector().unwrap();
+        assert_eq!(basis_eval(&knt, 3, f64::NAN, Side::Left).unwrap().span, 2);
+        for side in [Side::Left, Side::Right] {
+            match crv_eval(&c, f64::NAN, side) {
+                Err(SolidError::Upstream {
+                    operation,
+                    code,
+                    entity: None,
+                }) => {
+                    assert_eq!(operation, OP_CEVAL);
+                    assert_eq!(code, crate::error::SM_ERR);
+                }
+                other => panic!("{other:?}"),
+            }
+        }
     }
 
     #[test]
