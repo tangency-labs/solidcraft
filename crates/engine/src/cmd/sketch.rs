@@ -2842,6 +2842,8 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
         let is_round = |c: usize| matches!(sk.curves.get(c).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Arc { .. }));
         // The other reading of an angle between two lines (see below).
         let mut alt: Option<(ConstraintKind, f64)> = None;
+        // A free line measured to a linked one (an origin axis, a projected edge): (line, link).
+        let mut keep_parallel: Option<(usize, usize)> = None;
         let (mut k, mut cur): (ConstraintKind, f64) = match (e0, e1) {
             ((None, Some(c)), None) if ty == "sweep" => {
                 let angle = arc_len(sk, c).zip(sk.radius(c)).map(|(len, r)| len / r).ok_or_else(|| bad(cmd, "sweep needs an arc"))?;
@@ -2930,6 +2932,10 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
                     if diameter_about(sk, a, &ty) {
                         (ConstraintKind::LinearDiameter { p: bq, l: a, value: 2.0 * d }, 2.0 * d)
                     } else {
+                        let linked = |c: usize| sk.curves.get(c).is_some_and(|c| c.link.is_some());
+                        if linked(a) && !linked(b) {
+                            keep_parallel = Some((b, a));
+                        }
                         (ConstraintKind::PointLineDistance { p: bq, l: a, value: d }, d)
                     }
                 } else {
@@ -3068,6 +3074,21 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
         let name = k.name();
         let id = sk.add_constraint(k, Some(pname.clone()))?;
         new_id = id.clone();
+        // The distance holds one end of the line; it stays parallel to the linked line so the
+        // whole line keeps that distance, unless something already sets its direction.
+        if let Some((l, r)) = keep_parallel {
+            let directed = sk.constraints.iter().any(|c| match c.kind {
+                ConstraintKind::Horizontal { l: x } | ConstraintKind::Vertical { l: x } => x == l,
+                ConstraintKind::Parallel { a, b }
+                | ConstraintKind::Collinear { a, b }
+                | ConstraintKind::Perpendicular { a, b }
+                | ConstraintKind::Angle { a, b, .. } => a == l || b == l,
+                _ => false,
+            });
+            if !directed {
+                sk.add_constraint(ConstraintKind::Parallel { a: l, b: r }, None)?;
+            }
+        }
         place_text(sk, &id, text_at);
         Ok((pname, name, measured(is_angle, cur)))
     })?;

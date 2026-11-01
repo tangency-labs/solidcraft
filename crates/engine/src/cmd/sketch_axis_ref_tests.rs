@@ -214,6 +214,19 @@ fn coincident_takes_an_origin_axis_reference() {
     assert!(pt(&sketch(&s), "u").y.abs() < 1e-7, "still on X after a drag");
 }
 
+/// A line dimensioned to an origin axis is their distance, not the line's length, and the
+/// line stays parallel to the axis.
+#[test]
+fn dimension_measures_a_line_to_an_origin_axis() {
+    let mut s = on(json!("XY"));
+    run(&mut s, "sketch.line", json!({"points": [[-4, 7], [10, 7]], "ids": ["l"]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["l", {"axis": "X"}], "value": "12"}));
+    let sk = sketch(&s);
+    assert!((pt(&sk, "l.start").y.abs() - 12.0).abs() < 1e-7, "12 from X");
+    assert!((pt(&sk, "l.end").y - pt(&sk, "l.start").y).abs() < 1e-7, "kept parallel to X, so all of it is 12 from X");
+    assert!((pt(&sk, "l.end").dist(pt(&sk, "l.start")) - 12.0).abs() > 1.0, "not the line's length");
+}
+
 #[test]
 fn the_axis_survives_save_and_load() {
     let mut s = on(json!("YZ"));

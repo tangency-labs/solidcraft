@@ -413,6 +413,9 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                     hits.iter().find_map(|h| match h {
                         Hit::Edge { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), true, false)),
                         Hit::Vertex { .. } => crate::sketch_tools::model_ref(app, h).map(|r| (r.to_string(), false, false)),
+                        // An origin axis is projected too; it has no length of its own, so it
+                        // waits for the entity measured to it (a line's distance to the axis).
+                        Hit::Axis { name } if matches!(name.as_str(), "X" | "Y" | "Z") => Some((json!({"axis": name}).to_string(), false, false)),
                         _ => None,
                     })
                 });
@@ -856,6 +859,22 @@ fn axis_pick(app: &SolveApp, tool: &Tool, name: &str) -> Option<String> {
 /// clicking it in the view. False when there is no such tool.
 pub(crate) fn pick_axis_from_browser(app: &mut SolveApp, name: &str) -> bool {
     let Some(mut tool) = app.tool.take() else { return false };
+    // A dimension measures the axis's projection against the other pick, as a click in the view does.
+    if matches!(tool.kind, Kind::Dimension) && matches!(name, "X" | "Y" | "Z") && tool.picks.len() < 2 {
+        let id = json!({"axis": name}).to_string();
+        if !tool.picks.contains(&id) {
+            tool.picks.push(id);
+            if tool.picks.len() == 2 {
+                match crate::dim_view::begin_live(app, tool.picks.clone(), None) {
+                    Ok(true) => {}
+                    Ok(false) => crate::dim_view::cancel(),
+                    Err(error) => app.set_status(error, true),
+                }
+            }
+        }
+        app.tool = Some(tool);
+        return true;
+    }
     let picked = match tool.kind {
         Kind::Pick(n) => axis_pick(app, &tool, name).map(|id| (n, id)),
         _ => None,
