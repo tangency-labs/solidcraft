@@ -1478,6 +1478,9 @@ fn visuals(dark: bool) -> egui::Visuals {
     v
 }
 
+/// Seconds the pointer rests on a widget before its tooltip opens.
+const TOOLTIP_DELAY: f32 = 0.25;
+
 pub fn apply(ctx: &egui::Context) {
     let dark = is_dark();
     ctx.set_theme(if dark { egui::Theme::Dark } else { egui::Theme::Light });
@@ -1486,6 +1489,11 @@ pub fn apply(ctx: &egui::Context) {
     ctx.global_style_mut(|s| {
         s.spacing.item_spacing = egui::vec2(t.space_6, t.space_4);
         s.spacing.button_padding = egui::vec2(t.space_6, t.space_3);
+        // egui waits for the pointer to come to a full stop (its velocity settles over 0.1 s)
+        // and then 0.5 s more, so a tooltip felt slow and never showed while the hand still
+        // drifted over a button (#7679). Count only the short delay since the last movement.
+        s.interaction.show_tooltips_only_when_still = false;
+        s.interaction.tooltip_delay = TOOLTIP_DELAY;
     });
     // The new visuals are painted on the next pass: without a repaint request the widgets
     // keep the previous theme's colours until some other event schedules a pass (#5802).
@@ -1746,6 +1754,47 @@ mod tests {
         assert!(ctx.has_requested_repaint(), "a theme change must leave a repaint pending");
         let theme = if dark { egui::Theme::Dark } else { egui::Theme::Light };
         assert_eq!(ctx.style_of(theme).visuals, expected, "the new theme's visuals must be in place");
+    }
+
+    /// Seconds from the pointer's last step onto a button until its tooltip opens, at 60 fps.
+    fn seconds_until_tooltip(ctx: &egui::Context) -> Option<f64> {
+        let frame = 1.0 / 60.0;
+        let mut shown_at = None;
+        for step in 0..180 {
+            let time = f64::from(step) * frame;
+            // The pointer drifts onto the button for a third of a second, then rests.
+            let events = match u8::try_from(step) {
+                Ok(step) if step <= 20 => vec![egui::Event::PointerMoved(egui::pos2(20.0 + f32::from(step), 20.0))],
+                _ => Vec::new(),
+            };
+            let input = egui::RawInput { time: Some(time), events, ..Default::default() };
+            let _ = ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
+                    ui.add_sized([120.0, 40.0], egui::Button::new("Extrude")).on_hover_ui(|ui| {
+                        ui.label("tip");
+                        shown_at.get_or_insert(time);
+                    });
+                });
+            });
+            if let Some(at) = shown_at {
+                return Some(at - 20.0 * frame);
+            }
+        }
+        None
+    }
+
+    /// A tooltip opens a quarter second after the pointer settles on a button, not after
+    /// egui's full stop plus half a second (#7679).
+    #[test]
+    fn tooltips_open_soon_after_the_pointer_rests() {
+        let ctx = egui::Context::default();
+        super::apply(&ctx);
+        let wait = seconds_until_tooltip(&ctx);
+        assert!(wait.is_some_and(|s| s < 0.45), "the tooltip must open promptly, waited {wait:?} s");
+        // egui's own timing, for comparison: well over half a second.
+        let stock = egui::Context::default();
+        let stock_wait = seconds_until_tooltip(&stock);
+        assert!(stock_wait.is_none_or(|s| s > 0.55), "egui's default waits longer, waited {stock_wait:?} s");
     }
 
     #[test]
