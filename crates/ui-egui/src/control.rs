@@ -697,6 +697,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             ok(json!({"busy": app.file_load.busy()}))
         }
         "ui.documents" => ok(crate::documents::control(app, p)),
+        "ui.operations" => wrap(crate::operations::control(app, p)),
         "ui.home" => {
             match p.get("open").and_then(Value::as_bool) {
                 Some(true) => {
