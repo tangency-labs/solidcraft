@@ -3722,6 +3722,14 @@ fn light_whole_body(
 /// How wide an edge lit in `hover_edge_lit` is drawn: thin, the colour sets it apart.
 const LIT_EDGE_W: f32 = 1.0;
 
+/// The palette entries of an edge lit in `hover_edge_lit`. Where the model hides it (a hidden edge
+/// Select Other offers), it stays clear to see: most hidden highlights are dimmed to 45%.
+fn lit_edge_colours(sc: &mut GpuScene, t: &Tokens) -> EdgeColours {
+    let mut c = EdgeColours::new(sc, t.hover_edge_lit, t.hover_edge_halo);
+    c.hidden = sc.color(c4(t.hover_edge_lit.gamma_multiply(0.8)));
+    c
+}
+
 /// Whether an edge under the pointer is lit in `hover_edge_lit`: in Fillet and Chamfer, whose
 /// edge input also takes faces, so the edge a click takes stands out from the face around it, and
 /// a face under the pointer lights the edges a click on it takes instead of itself. Off in
@@ -4077,7 +4085,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         // up, not the face, also on a body the preview stands in for.
         Some(Hit::Face { body, index, .. }) if lights_hovered_edge(app) && !moving(body) => {
             if let Some(b) = st.body(body) {
-                let lit = EdgeColours::new(&mut feedback, t.hover_edge_lit, t.hover_edge_halo);
+                let lit = lit_edge_colours(&mut feedback, &t);
                 let m = drawn(b);
                 for e in m.face_edges(u32::try_from(*index).unwrap_or(u32::MAX)) {
                     if !m.seams.get(e).copied().unwrap_or(false)
@@ -4115,11 +4123,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         Some(Hit::Edge { body, index, mid, .. }) if !moving(body) => {
             if let Some(b) = st.body(body) {
                 // Lit over the drawn edges (finer away from Normal display quality).
-                let (lit, w) = if lights_hovered_edge(app) {
-                    (EdgeColours::new(&mut feedback, t.hover_edge_lit, t.hover_edge_halo), LIT_EDGE_W)
-                } else {
-                    (hover_edge, 2.0)
-                };
+                let (lit, w) = if lights_hovered_edge(app) { (lit_edge_colours(&mut feedback, &t), LIT_EDGE_W) } else { (hover_edge, 2.0) };
                 let m = drawn(b);
                 for i in m.circular_rim(*index) {
                     let selected = sel.iter().any(|x| matches!(x, Sel::Edge { body: b, index: j, .. } if b == body && *j == i));
@@ -10010,6 +10014,7 @@ mod tests {
             assert!(app.dialog.is_some(), "{command}");
             app.preferences.hover_edge_lit = true;
             assert!(has(&app, t.hover_edge_lit), "{command}");
+            assert!(has(&app, t.hover_edge_lit.gamma_multiply(0.8)), "{command}: where hidden, still clear to see");
             assert_eq!(build_highlight(&app).merged().lines.len(), lines, "{command}: the same edge, only its colour and width differ");
             app.preferences.hover_edge_lit = false;
             assert!(!has(&app, t.hover_edge_lit), "{command}: off, the edge is drawn as before");
