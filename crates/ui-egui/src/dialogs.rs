@@ -125,6 +125,11 @@ crate::dialog_descriptor::dialog_descriptors! {
             FeatureKind::ConstructionPlane { plane: PlaneRef::AtAngle { angle, .. } }) {
             angle: String = "45 deg".into() => shown_expr(angle, ValueKind::Angle),
         } => json!({"angle": angle});
+        // With a reference plane, the plane touches where the face turns towards it (#8822).
+        TangentPlane("construct.plane.tangent", "TANGENT PLANE", [("Face", FACES, false), ("Reference plane", PLANES | PLANAR_FACES, false)],
+            FeatureKind::ConstructionPlane { plane: PlaneRef::Tangent { angle, .. } }) {
+            angle: String = "0 deg".into() => angle.as_ref().map_or_else(|| "0 deg".to_string(), ToString::to_string),
+        } => json!({"angle": angle});
         Scale("solid.scale", "SCALE", [("Bodies", BODIES, true)],
             FeatureKind::Scale { factor, .. }) {
             factor: String = "2".into() => factor.to_string(),
@@ -1308,6 +1313,7 @@ impl Dialog {
                 | Kind::Loft { .. }
                 | Kind::Sweep { .. }
                 | Kind::AnglePlane { .. }
+                | Kind::TangentPlane { .. }
                 | Kind::PathPlane { .. }
                 | Kind::Midplane
                 | Kind::Construct { .. }
@@ -4748,6 +4754,15 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             ("construct.plane.along_path", json!({"path": path, "t": t}))
         }
+        Kind::TangentPlane { .. } => {
+            need(0, "a curved face")?;
+            let face = construct_ref(app, sels(d, 0).first().ok_or("pick a curved face")?)?;
+            match sels(d, 1).first() {
+                Some(reference) => ("construct.plane.tangent", json!({"face": face, "reference": plane_arg(app, Some(reference))?})),
+                // A null `angle` keeps the descriptor's angle out: it turns the plane from a reference.
+                None => ("construct.plane.tangent", json!({"face": face, "angle": null})),
+            }
+        }
         Kind::AnglePlane { .. } => {
             need(0, "a plane")?;
             let base = plane_arg(app, sels(d, 0).first())?;
@@ -5612,7 +5627,6 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
             "PLANE THROUGH THREE POINTS",
             &[("First point", POINT, "a"), ("Second point", POINT, "b"), ("Third point", POINT, "c")],
         ),
-        "construct.plane.tangent" => ("construct.plane.tangent", "TANGENT PLANE", &[("Face", FACES, "face")]),
         "construct.plane.perpendicular" => {
             ("construct.plane.perpendicular", "PERPENDICULAR PLANE", &[("Plane", PLANE, "plane"), ("Line", LINE, "line")])
         }
@@ -6469,6 +6483,17 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.extra.insert("point".into(), serde_json::to_value(point).ok()?);
             d
         }
+        FeatureKind::ConstructionPlane { plane: PlaneRef::Tangent { face, reference, .. } } => {
+            let mut d = start("construct.plane.tangent")?;
+            d.kind = Kind::simple_restore(&f.kind)?;
+            if let Some(inp) = d.inputs.first_mut() {
+                inp.items = geo_sel(s, face).into_iter().collect();
+            }
+            if let Some(inp) = d.inputs.get_mut(1) {
+                inp.items = reference.as_deref().and_then(|r| geo_sel(s, r)).into_iter().collect();
+            }
+            d
+        }
         FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a, b } } => {
             let mut d = start("construct.plane.midplane")?;
             if let Some(inp) = d.inputs.first_mut() {
@@ -7285,6 +7310,34 @@ mod construct_ask_tests {
         assert!(h.app.dialog.is_none(), "Create closes the dialog: {:?}", status_error(&h.app));
         assert!(status_error(&h.app).is_none(), "{:?}", status_error(&h.app));
         assert!(!solidcraft_engine::view::construction_planes(&h.app.session).is_empty(), "the tangent plane is created");
+    }
+
+    /// #8822: a reference plane and an angle place the tangent plane, and editing it brings both back.
+    #[test]
+    fn tangent_plane_lines_up_with_a_reference_plane() {
+        let mut h = Harness::new();
+        cylinder(&mut h);
+        h.step(&json!({"click": {"world": [10, 0, 10]}})).unwrap(); // the outer cylindrical face
+        h.step(&json!({"start": "construct.plane.tangent"})).unwrap();
+        h.frames(2);
+        let d = h.app.dialog.as_mut().expect("the dialog opens");
+        assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), ["Face", "Reference plane"]);
+        d.inputs[1].items = vec![Sel::Plane { name: "XZ".into() }];
+        if let Kind::TangentPlane { angle } = &mut d.kind {
+            *angle = "30 deg".into();
+        }
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(h.app.dialog.is_none(), "Create closes the dialog: {:?}", status_error(&h.app));
+        let planes = solidcraft_engine::view::construction_planes(&h.app.session);
+        let (id, _, pl) = planes.last().expect("the tangent plane is created");
+        // XZ faces ±Y; turned 30° about the axis (Z), on the side of the pick (+X).
+        let n = Vec3::new(0.5, -(3f64.sqrt()) / 2.0, 0.0);
+        assert!(pl.normal().cross(n).len() < 1e-6 && (pl.origin - n * 10.0).dot(n).abs() < 1e-6, "{pl:?}");
+        let reopened = for_feature(&h.app, *id, None).expect("the plane opens for editing");
+        assert!(matches!(&reopened.kind, Kind::TangentPlane { angle } if angle == "30 deg"), "{:?}", reopened.kind);
+        assert_eq!(reopened.inputs[1].items, vec![Sel::Plane { name: "XZ".into() }]);
+        assert_eq!(reopened.inputs[0].items.len(), 1, "the face is picked again");
     }
 }
 

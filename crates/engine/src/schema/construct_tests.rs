@@ -27,7 +27,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<PlaneAxisPointParams>(), &["axis", "name", "participants", "point"]);
     assert_keys(input_schema_for::<PlaneTwoEdgesParams>(), &["a", "b", "name", "participants"]);
     assert_keys(input_schema_for::<PlaneThreePointsParams>(), &["a", "b", "c", "name", "participants"]);
-    assert_keys(input_schema_for::<PlaneTangentParams>(), &["at", "face", "name", "participants"]);
+    assert_keys(input_schema_for::<PlaneTangentParams>(), &["angle", "at", "face", "name", "participants", "reference"]);
     assert_keys(input_schema_for::<PlaneAlongPathParams>(), &["name", "participants", "path", "t"]);
     assert_keys(input_schema_for::<PlanePerpendicularParams>(), &["line", "name", "participants", "plane"]);
 }
