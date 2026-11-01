@@ -2270,6 +2270,7 @@
   "prefs.placement": "配置",
   "prefs.prefer_free_sketch_points": "スケッチ点が重なったときは移動可能な点を優先する",
   "prefs.preview_choices": "選択した設定のプレビュー",
+  "prefs.preview_reselect_modifier": "再選択のためにプレビューを非表示",
   "prefs.print_face_highlight": "造形面の強調",
   "prefs.print_face_highlight_tip": "ビューでボディの造形面を色付けし輪郭を描く強さ。0 % で強調しません。",
   "prefs.profile_active": "使用中のプロファイル",

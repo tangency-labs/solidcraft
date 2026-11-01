@@ -2270,6 +2270,7 @@
   "prefs.placement": "Vị trí đặt",
   "prefs.prefer_free_sketch_points": "Ưu tiên điểm phác thảo có thể di chuyển khi các điểm chồng lên nhau",
   "prefs.preview_choices": "Xem trước các lựa chọn của bạn",
+  "prefs.preview_reselect_modifier": "Ẩn bản xem trước để chọn lại",
   "prefs.print_face_highlight": "Tô sáng mặt in",
   "prefs.print_face_highlight_tip": "Mức tô màu và viền mặt in của thân trong khung nhìn. 0 % không tô sáng.",
   "prefs.profile_active": "Hồ sơ đang dùng",

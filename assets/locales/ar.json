@@ -2270,6 +2270,7 @@
   "prefs.placement": "الموضع",
   "prefs.prefer_free_sketch_points": "تفضيل نقاط الرسم القابلة للتحريك عند تداخل النقاط",
   "prefs.preview_choices": "معاينة اختياراتك",
+  "prefs.preview_reselect_modifier": "إخفاء المعاينة لإعادة التحديد",
   "prefs.print_face_highlight": "إبراز وجه الطباعة",
   "prefs.print_face_highlight_tip": "مدى قوة تلوين وجه الطباعة للجسم ورسم حدوده في العرض. القيمة 0 % لا تُظهر أي إبراز.",
   "prefs.profile_active": "ملف التعريف النشط",

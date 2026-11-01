@@ -539,8 +539,59 @@ fn set_keys(app: &mut SolveApp, id: &str, keys: Vec<String>) {
 pub fn reset(app: &mut SolveApp, id: Option<&str>) {
     match id {
         Some(id) => drop(app.keymap.custom.remove(id)),
-        None => app.keymap.custom.clear(),
+        None => {
+            app.keymap.custom.clear();
+            app.preferences.preview_reselect_modifier = Default::default();
+        }
     }
+}
+
+fn modifier_keys(app: &mut SolveApp, ui: &mut egui::Ui, query: &str) {
+    use crate::tool_modifiers::{Platform, PreviewModifier};
+    let platform = Platform::of(ui.ctx());
+    let label = crate::i18n::tr_label("Hide preview for reselect");
+    let binding = app.preferences.preview_reselect_modifier;
+    let key = binding.label(platform);
+    if !query.is_empty() && ![label, "preview_reselect", key, "Modifier Keys"].iter().any(|text| text.to_lowercase().contains(query)) {
+        return;
+    }
+    ui.strong(app.tr_label("Modifier Keys"));
+    ui.horizontal_wrapped(|ui| {
+        ui.label(label);
+        if app.keymap.read_only {
+            ui.label(egui::RichText::new(app.tr_label(key)).strong());
+            return;
+        }
+        let combo = ui.allocate_ui(egui::vec2(110.0, ui_kit::row_height()), |ui| {
+            ui_kit::dropdown_menu(ui, "preview_reselect_modifier", app.tr_label(key), |ui| {
+                for choice in PreviewModifier::CHOICES {
+                    if platform != Platform::Mac && choice == PreviewModifier::Primary {
+                        continue;
+                    }
+                    let handle = format!("prefs:preview_modifier:{choice:?}");
+                    let response = ui_kit::list_picker(
+                        ui,
+                        &handle,
+                        crate::i18n::tr_label(choice.label(platform)),
+                        app.preferences.preview_reselect_modifier == choice,
+                    );
+                    if response.clicked() {
+                        app.preferences.preview_reselect_modifier = choice;
+                        ui.close();
+                    }
+                    crate::scenario::publish_handle(&handle, response.rect.center());
+                }
+            })
+        });
+        crate::scenario::publish_handle("prefs:preview_modifier", combo.inner.rect.center());
+        let reset =
+            ui.add_enabled_ui(binding != PreviewModifier::default(), |ui| ui_kit::button(ui, app.tr_label("Reset"), ui_kit::Button::Small)).inner;
+        crate::scenario::publish_handle("prefs:preview_modifier_reset", reset.rect.center());
+        if reset.clicked() {
+            app.preferences.preview_reselect_modifier = PreviewModifier::default();
+        }
+    });
+    ui.separator();
 }
 
 /// The Keyboard Shortcuts page of Preferences: search, rebind (click, then press the key), clear,
@@ -657,6 +708,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
         let q = if filtering { app.prefs_window.filter.trim().to_lowercase() } else { app.keymap.filter.to_lowercase() };
+        modifier_keys(app, ui, &q);
         let commands: Vec<_> = command_specs()
             .into_iter()
             .filter_map(|c| {
@@ -1539,6 +1591,83 @@ mod tests {
         h.step(&json!({"key": "R", "shift": true})).unwrap();
         h.frames(1);
         assert!(h.app.ui.palette_open && h.app.dialog.is_none(), "typing in a field never repeats");
+    }
+
+    #[test]
+    fn preview_modifier_picker_changes_resets_and_cancels() {
+        use crate::tool_modifiers::PreviewModifier;
+        let mut harness = crate::scenario::Harness::new();
+        harness.call("ui.prefs", json!({"open":"Keyboard Shortcuts"}));
+        harness.step(&json!({"shot":"preview-modifier-settings"})).unwrap();
+        for (choice, binding) in [("Alt", PreviewModifier::Alt), ("Disabled", PreviewModifier::Disabled)] {
+            harness.step(&json!({"click":{"handle":"prefs:preview_modifier"}})).unwrap();
+            harness.step(&json!({"click":{"handle":format!("prefs:preview_modifier:{choice}")}})).unwrap();
+            assert_eq!(harness.app.preferences.preview_reselect_modifier, binding);
+        }
+        harness.step(&json!({"widget":"Reset", "near":"Hide preview for reselect"})).unwrap();
+        assert_eq!(harness.app.preferences.preview_reselect_modifier, PreviewModifier::Control);
+        harness.app.preferences.preview_reselect_modifier = PreviewModifier::Shift;
+        harness.step(&json!({"widget":"Reset All"})).unwrap();
+        assert_eq!(harness.app.preferences.preview_reselect_modifier, PreviewModifier::Control);
+        harness.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(harness.app.preferences.preview_reselect_modifier, PreviewModifier::Control);
+    }
+
+    #[test]
+    fn preview_modifier_filter_and_read_only_help() {
+        let mut harness = crate::scenario::Harness::new();
+        harness.call("ui.prefs", json!({"open":"Keyboard Shortcuts"}));
+        harness.app.keymap.filter = "preview".into();
+        harness.frame();
+        assert!(crate::scenario::handle_at("prefs:preview_modifier").is_some());
+        harness.app.keymap.filter = "not a shortcut".into();
+        harness.frame();
+        assert!(crate::scenario::handle_at("prefs:preview_modifier").is_none());
+        harness.app.keymap.filter.clear();
+        harness.app.keymap.read_only = true;
+        harness.frame();
+        assert!(crate::scenario::handle_at("prefs:preview_modifier").is_none());
+        assert!(harness.widget("Hide preview for reselect").is_some());
+    }
+
+    #[test]
+    fn preview_modifier_exports_imports_and_rejects_invalid_settings_atomically() {
+        use crate::tool_modifiers::PreviewModifier;
+        let mut source = app();
+        for binding in PreviewModifier::CHOICES {
+            source.preferences.preview_reselect_modifier = binding;
+            let mut restored = app();
+            let exported = crate::toolbar_custom::export(&source);
+            assert_eq!(exported["navigation_bar"], json!(source.preferences.navigation_bar));
+            crate::toolbar_custom::import(&mut restored, &exported).unwrap();
+            assert_eq!(restored.preferences.preview_reselect_modifier, binding);
+            assert_eq!(json!(restored.preferences.navigation_bar), exported["navigation_bar"]);
+        }
+        let mut restored = app();
+        restored.preferences.preview_reselect_modifier = PreviewModifier::Alt;
+        crate::toolbar_custom::import(&mut restored, &json!({"format":"solidcraft-shortcuts/1", "shortcuts":{}})).unwrap();
+        assert_eq!(restored.preferences.preview_reselect_modifier, PreviewModifier::Alt);
+        let before = crate::toolbar_custom::export(&restored);
+        assert!(
+            crate::toolbar_custom::import(
+                &mut restored,
+                &json!({
+                    "format":"solidcraft-shortcuts/1", "preview_reselect_modifier":"unknown", "shortcuts":{"solid.extrude":"Shift+E"},
+                    "navigation_bar": source.preferences.navigation_bar
+                })
+            )
+            .is_err()
+        );
+        assert_eq!(crate::toolbar_custom::export(&restored), before);
+        assert!(
+            crate::toolbar_custom::import(
+                &mut restored,
+                &json!({"format":"solidcraft-shortcuts/1", "preview_reselect_modifier":"shift", "navigation_bar":"invalid"})
+            )
+            .is_err()
+        );
+        assert_eq!(crate::toolbar_custom::export(&restored), before);
+        assert_eq!(restored.preferences.preview_reselect_modifier, PreviewModifier::Alt);
     }
 }
 

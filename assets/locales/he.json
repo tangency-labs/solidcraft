@@ -2270,6 +2270,7 @@
   "prefs.placement": "מיקום",
   "prefs.prefer_free_sketch_points": "העדפת נקודות סקיצה ניתנות להזזה כשנקודות חופפות",
   "prefs.preview_choices": "תצוגה מקדימה של הבחירות שלך",
+  "prefs.preview_reselect_modifier": "הסתרת תצוגה מקדימה לבחירה מחדש",
   "prefs.print_face_highlight": "הדגשת פאת ההדפסה",
   "prefs.print_face_highlight_tip": "עד כמה חזק צובעים ומקיפים את פאת ההדפסה של גוף בתצוגה. ‏0 % אינו מציג הדגשה.",
   "prefs.profile_active": "פרופיל פעיל",
