@@ -20,6 +20,7 @@ pub mod catmull_rom;
 pub mod cell;
 mod chain;
 pub mod compare;
+pub mod convex_parts;
 pub mod drawing_arrange;
 pub mod drawing_break;
 pub mod drawing_detail;

@@ -2,7 +2,8 @@
 
 A live link sends the design you are working on to another program and keeps it up to date. The
 other program gets every visible body as a mesh it can work with: welded and closed, one polygon
-for each flat face where it can be, quads on cylinders, cones, fillets and other curved faces,
+for each flat face (a few convex polygons when the face has holes), quads on cylinders, cones,
+fillets and other curved faces,
 and every polygon tagged with the face it came from. Each time the design changes (an edit, a
 parameter, undo or redo, a body shown or hidden), the bodies that changed are sent again.
 
