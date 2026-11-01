@@ -8,6 +8,8 @@
 solidcraft-cli::action_matrix::action_matrix_sample 3 baseline actions fail, the same 3 as on C++: 2 shells (Bad Loop Orient on issue-616-lid-ribs; status 1001 on filleted-shelled-box), 1 fillet (SmSurfOfRevolution Test #7 on oblique_cut_of_cylinder)
 solidcraft-cli::naming_corpus::corpus_designs_name_alike_every_build_and_fail_where_a_reference_is_gone oracle/83-boundary-loop-thicken does not load: step 8, thicken status 1001, as on C++
 solidcraft-engine::cmd::edit::tests::inserting_variable_fillet_control_preserves_parameters_at_existing_positions solidcore refuses a variable fillet whose law has a corner (solidcore#430)
+solidcraft-engine::cmd::sketch::face::tests::a_sketch_on_the_ring_of_a_lid_underside_parted_by_its_lip_keeps_the_cap main's test: the ring is named F14:start#[...], the lid's own start, not F2:top, the case's top it rests on, so the lookup finds no ring, as on C++
+solidcraft-engine::cmd::sketch::ids_tests::a_curve_id_that_cannot_be_written_into_a_name_is_refused main's test: an extruded circle has a seam edge, the side face on both its sides, named F2:side:c1 with no second face, as on C++
 solidcraft-engine::tests::chord_and_variable_fillets solidcore refuses a variable fillet whose law has a corner (solidcore#430)
 solidcraft-engine::tests::fillet_fit_taper_closes_to_a_point fillet status 1001 on the taper fit (radius 16 closing to 0), as on C++
 solidcraft-kernel::blend::corner_tests::a_round_ending_in_an_earlier_round_matches_both_together fillet status 1001 on the round that ends in the earlier one, as on C++
@@ -21,3 +23,5 @@ solidcraft-kernel::surfaces::tests::thicken_a_bspline_patch_by_its_sampled_offse
 solidcraft-kernel::surfaces::tests::thicken_curved_faces_onto_fitted_surfaces thickening a spherical cap fails with status 1001 (solidcore#2174)
 solidcraft-kernel::tests::fillet_tabbed_plate_outer_loop_and_partial_selection_after_hole not a closed solid on one tab round on solidcore (solidcore#2176); on C++ the rounds together miss by 3.8e-4
 solidcraft-ui-egui::dialogs::dense::all_tests::extrude_builds_the_one_region_clicked_where_the_face_outline_cuts_a_profile reading the extrude's result back: a UV trim with too few points for its order (solidcore#2177)
+solidcraft-ui-egui::timeline::tests::each_chip_finds_its_own_result main's test: its radius 20 fillet with fit reduce on a 10 mm box builds without a reduced-radius warning, so the fixture has no warned feature, as on C++
+solidcraft-ui-egui::viewport::appearance_tests::bodies_out_of_the_view_are_not_drawn main's test counts 12 triangles a box; the kernel's mesher gives a 10 mm box more, so the count is wrong before it reaches the culling, as on C++
