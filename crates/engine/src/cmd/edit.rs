@@ -1775,6 +1775,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         })
         .collect();
     trial.doc_mut().features.retain(|f| f.id != made);
+    // Made right after the edited feature, the trial joined the timeline folder holding both:
+    // it leaves it too, or its id stays there, and is given out again below (#9373).
+    for group in &mut trial.doc_mut().timeline_groups {
+        group.features.retain(|f| *f != made);
+    }
     let added = trial.doc.features.len().saturating_sub(s.doc.features.len());
     trial.doc_mut().marker = s.doc.marker.map(|marker| if marker > idx { marker.saturating_add(added) } else { marker });
     if made == s.doc.next_id && trial.doc.next_id == made.saturating_add(1) {
