@@ -692,85 +692,23 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
 /// the point with the line's midpoint, in the mode the line's dominant axis suggests. None when
 /// the curve is not a line.
 pub(crate) fn point_line_alignment(sk: &solidcraft_engine::sketch::Sketch, point: &Value, line: &str) -> Option<Value> {
-    let points = point_line_points(sk, point, line)?;
-    let mode = line_axis_mode(sk, line)?;
-    Some(json!({"points": points, "mode": mode}))
+    solidcraft_engine::sketch_selection::point_line_alignment(sk, point, line)
 }
 
 /// The `points` pair aligning `point` with the midpoint of `line`; None when `line` is not a line.
 pub(crate) fn point_line_points(sk: &solidcraft_engine::sketch::Sketch, point: &Value, line: &str) -> Option<[Value; 2]> {
-    let l = sk.curve_index(line)?;
-    matches!(sk.shape(l)?, solidcraft_engine::sketch::Shape::Line { .. }).then(|| [point.clone(), json!({"midpoint": line})])
+    solidcraft_engine::sketch_selection::point_line_points(sk, point, line)
 }
 
-/// The axis a straight line is closest to: the alignment mode when a point is aligned with it (#617).
-fn line_axis_mode(sk: &solidcraft_engine::sketch::Sketch, line: &str) -> Option<&'static str> {
-    let solidcraft_engine::sketch::Shape::Line { a, b } = sk.shape(sk.curve_index(line)?)? else { return None };
-    let d = b - a;
-    Some(if d.x.abs() >= d.y.abs() { "horizontal" } else { "vertical" })
-}
-
-/// Only consume a complete, unambiguous selection; command validation owns geometry.
+/// Only consume a complete, unambiguous selection; command validation owns geometry. The rules
+/// are the commands' own (`CommandSpec::for_selection`).
+#[cfg(test)]
 pub(crate) fn constraint_preselection(
     command: &str,
     selection: &[solidcraft_engine::Sel],
     sketch: Option<&solidcraft_engine::sketch::Sketch>,
 ) -> Option<Value> {
-    use solidcraft_engine::Sel::{SketchCurve, SketchPoint};
-    let selected_ids = |curves_only: bool, minimum: usize| -> Option<Vec<&str>> {
-        if !(minimum..=200).contains(&selection.len()) {
-            return None;
-        }
-        let ids: Vec<&str> = selection
-            .iter()
-            .map(|s| match s {
-                SketchCurve { id, .. } => Some(id.as_str()),
-                SketchPoint { id } if !curves_only => Some(id.as_str()),
-                _ => None,
-            })
-            .collect::<Option<_>>()?;
-        let unique: std::collections::BTreeSet<_> = ids.iter().copied().collect();
-        (unique.len() == ids.len()).then_some(ids)
-    };
-    match (command, selection) {
-        ("sketch.constraint.fix", _) => selected_ids(false, 1).map(|ids| json!({"entities":ids})),
-        ("sketch.constraint.polygon", _) => selected_ids(true, 3).map(|ids| json!({"lines":ids})),
-        // Three or more curves: all of them equal, in pick order (#4985). Two keep the `a, b` form.
-        ("sketch.constraint.equal", _) if selection.len() >= 3 => selected_ids(true, 3).map(|ids| json!({"curves":ids})),
-        ("sketch.constraint.curvature", [SketchCurve { id: a, .. }, SketchCurve { id: b, .. }]) if a != b => Some(json!({"a":a,"b":b})),
-        ("sketch.constraint.horizontal_vertical", [SketchCurve { id, .. }]) => Some(json!({"line":id})),
-        // A point and a straight line (a circle's centre and a square's edge, #617): align the
-        // point with the line, in the mode the line's own axis suggests.
-        ("sketch.constraint.horizontal_vertical", [SketchPoint { id }, SketchCurve { id: line, .. }]) => {
-            point_line_alignment(sketch?, &json!(id), line)
-        }
-        ("sketch.constraint.horizontal_vertical", [SketchCurve { id: line, .. }, SketchPoint { id }]) => {
-            point_line_alignment(sketch?, &json!(id), line)
-        }
-        ("sketch.constraint.horizontal_vertical", _) => crate::selection::alignment_points(selection).map(|points| json!({"points": points})),
-        ("sketch.constraint.coincident", [_, _]) => crate::selection::coincident_operands(selection),
-        ("sketch.constraint.concentric", [SketchCurve { id: a, .. }, SketchPoint { id: b }] | [SketchPoint { id: a }, SketchCurve { id: b, .. }])
-            if a != b =>
-        {
-            Some(json!({"a":a,"b":b}))
-        }
-        (
-            "sketch.constraint.midpoint",
-            [SketchPoint { id: point }, SketchCurve { id: line, .. }] | [SketchCurve { id: line, .. }, SketchPoint { id: point }],
-        ) => Some(json!({"point":point,"line":line})),
-        ("sketch.constraint.midpoint", [SketchCurve { id: a, .. }, SketchCurve { id: b, .. }]) if a != b => Some(json!({"a":a,"b":b})),
-        ("sketch.constraint.symmetry", [a, b, c]) => {
-            let picks = [a, b, c]
-                .into_iter()
-                .map(|entity| match entity {
-                    SketchPoint { id } | SketchCurve { id, .. } => Some(json!(id)),
-                    _ => None,
-                })
-                .collect::<Option<Vec<_>>>()?;
-            symmetry_args(&picks, sketch)
-        }
-        _ => None,
-    }
+    solidcraft_engine::sketch_selection::constraint_params(command, selection, sketch)
 }
 
 pub(crate) fn projection_preselection(selection: &[solidcraft_engine::Sel]) -> Option<Vec<Value>> {
@@ -822,27 +760,8 @@ pub(crate) fn sketch_axis_of(app: &SolveApp, name: &str) -> Option<&'static str>
     }
 }
 
-/// Symmetry's arguments from three picked sketch ids in any order (#1796): with two points and
-/// a line, the line; with three lines, the only construction line or centerline among them (the
-/// line drawn between the two it mirrors); otherwise the last pick, as before.
 fn symmetry_args(picks: &[Value], sketch: Option<&solidcraft_engine::sketch::Sketch>) -> Option<Value> {
-    let curve = |v: &Value| match v.as_str() {
-        Some(id) => sketch.and_then(|sk| sk.curve_index(id).and_then(|i| sk.curves.get(i))),
-        None => None,
-    };
-    let is_line = |v: &Value| matches!(v.as_str(), Some("x" | "y")) || curve(v).is_some();
-    let is_axis = |v: &Value| matches!(v.as_str(), Some("x" | "y")) || curve(v).is_some_and(|c| c.construction || c.centerline);
-    let only = |f: &dyn Fn(&Value) -> bool| {
-        let hits: Vec<usize> = (0..picks.len()).filter(|i| picks.get(*i).is_some_and(f)).collect();
-        hits.first().copied().filter(|_| hits.len() == 1)
-    };
-    if picks.len() != 3 {
-        return None;
-    }
-    let line = only(&is_line).or_else(|| only(&is_axis)).unwrap_or(2);
-    let mut rest = (0..3).filter(|i| *i != line).filter_map(|i| picks.get(i));
-    let (a, b, line) = (rest.next()?, rest.next()?, picks.get(line)?);
-    (a != b).then(|| json!({"a": a, "b": b, "line": line}))
+    solidcraft_engine::sketch_selection::symmetry_args(picks, sketch)
 }
 
 fn run_pick(app: &mut SolveApp, t: &Tool) {
