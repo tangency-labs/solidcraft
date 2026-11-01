@@ -222,6 +222,41 @@ fn completed_sketch_copies_and_pastes_into_a_new_design() {
     assert!(h.app.session.model.result(copied.id).unwrap().error.is_none());
 }
 
+/// Sketch geometry copied in a sketch pastes into a sketch of another design (tab) with Ctrl+V,
+/// at the cursor, with its constraints and dimensions, in one undo step; the context menu offers
+/// it there too. A copy made since in that design is what pastes back in the first (#9258).
+#[test]
+fn sketch_geometry_copies_into_a_sketch_of_another_design() {
+    let (mut h, _) = rectangle();
+    clipboard_event(&mut h, egui::Event::Copy, Some([10.0, 5.0]));
+    crate::documents::new_tab(&mut h.app);
+    assert!(!super::can_paste(&h.app), "outside a sketch, sketch geometry has nowhere to go");
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.call("ui.camera", json!({"target": [20, 10, 0], "distance": 150}));
+    h.frames(4);
+    assert!(super::can_paste(&h.app));
+    let menu = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    assert!(menu.iter().any(|i| i.id == "ui.paste" && i.enabled), "the sketch menu's Paste is on");
+    let undo = h.app.session.undo.len();
+    clipboard_event(&mut h, egui::Event::Paste("SolidCraft sketch geometry".into()), Some([60.0, 40.0]));
+    let pasted = curves(&h);
+    assert_eq!(pasted.len(), 4, "{:?}", h.app.status);
+    let corner = start(&h, &pasted[0]);
+    assert!(corner.dist(Vec2::new(50.0, 35.0)) < 1.0, "{corner:?}");
+    let sk = h.app.session.doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+    assert_eq!(sk.constraints.iter().filter(|c| c.param.is_some()).count(), 2, "both dimensions came along");
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    // A copy in this design is now the last: the first design pastes it.
+    let items: Vec<Value> = pasted.iter().take(1).map(|id| json!({"type": "sketch_curve", "id": id})).collect();
+    h.app.run("select.set", json!({ "items": items })).unwrap();
+    assert!(super::copy(&mut h.app));
+    crate::documents::switch(&mut h.app, 0);
+    let before = curves(&h).len();
+    assert!(super::paste(&mut h.app, None), "{:?}", h.app.status);
+    assert_eq!(curves(&h).len(), before + 1, "the one line copied last, not the rectangle copied here before");
+}
+
 #[test]
 fn copied_sketch_survives_source_close_and_pastes_from_a_sketch_group_menu() {
     use crate::context_menu::{Target, items, run_item};

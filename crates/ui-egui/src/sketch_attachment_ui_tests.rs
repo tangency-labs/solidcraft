@@ -421,3 +421,35 @@ fn redefine_panel_names_the_plane_a_sketch_is_on() {
     assert_eq!(plane_description(&h.app.session.doc, &offset), "The XY plane, offset by 12 mm");
     assert_eq!(plane_description(&h.app.session.doc, &PlaneRef::Flipped { base: xy, about_y: false }), "The XY plane, from its other side");
 }
+
+/// Preferences › Sketch › "Sketching on a part's face makes that part active" (#10215): a face of
+/// a part's body picked for Create Sketch while the design is active puts the sketch in the part,
+/// which stays active; off, the sketch belongs to the design.
+#[test]
+fn face_pick_makes_its_part_active_only_with_the_preference() {
+    for on in [true, false] {
+        let mut h = Harness::new();
+        h.app.set_origin_shown(false);
+        h.app.session.auto_project = false;
+        h.app.preferences.sketch_face_activates_part = on;
+        let part = h.app.run("component.create", json!({"name":"Part"})).unwrap();
+        let (component, occurrence) = (part["component"].as_u64().unwrap(), part["occurrence"].as_u64().unwrap());
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"PartBox"})).unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.call("ui.view", json!({"view":"fit"}));
+        h.settle();
+        h.step(&json!({"start":"sketch.create"})).unwrap();
+        h.step(&json!({"click":{"world":[3,4,10]}})).unwrap();
+        let sketch = h.app.session.active_sketch.expect("the picked face takes a sketch");
+        let owner = h.app.session.doc.feature(sketch).unwrap().component;
+        if on {
+            assert_eq!(owner, component);
+            assert_eq!((h.app.session.active_component, h.app.session.active_occurrence_path.clone()), (component, Some(vec![occurrence])));
+        } else {
+            assert_eq!((owner, h.app.session.active_component), (0, 0));
+        }
+        h.app.finish_sketch();
+        assert_eq!(h.app.session.active_component, if on { component } else { 0 }, "the part stays active as after Activate");
+    }
+}

@@ -1,0 +1,34 @@
+{
+  "dark": {
+    "format": "solidcraft-theme/1",
+    "name": "Tabs dark",
+    "base": "dark",
+    "colors": {"panel":"#18202a", "text":"#f5f7fa", "text_dim":"#dce3ec", "form_ink":"#f5f7fa", "dialog_label":"#f5f7fa"},
+    "options": [
+      {"id":"tab_colours", "type":"bool", "default":true},
+      {"id":"tab_fade_ms", "type":"range", "default":240},
+      {"id":"opacity", "type":"range", "default":100}
+    ],
+    "tabs": {
+      "MODEL": {"panel":"#18202a", "viewport_top":"#182430", "viewport_bottom":"#29394a"},
+      "SKETCH": {"panel":"#123028", "viewport_top":"#103128", "viewport_bottom":"#204a3c"},
+      "RENDER": {"panel":"#302039", "viewport_top":"#30203d", "viewport_bottom":"#493252"}
+    }
+  },
+  "light": {
+    "format": "solidcraft-theme/1",
+    "name": "Tabs light",
+    "base": "light",
+    "colors": {"panel":"#fafbfc", "text":"#172333", "text_dim":"#334155", "form_ink":"#172333", "dialog_label":"#172333"},
+    "options": [
+      {"id":"tab_colours", "type":"bool", "default":true},
+      {"id":"tab_fade_ms", "type":"range", "default":240},
+      {"id":"opacity", "type":"range", "default":100}
+    ],
+    "tabs": {
+      "MODEL": {"panel":"#fafbfc", "viewport_top":"#e6f0fa", "viewport_bottom":"#ffffff"},
+      "SKETCH": {"panel":"#e0f5e8", "viewport_top":"#cceddb", "viewport_bottom":"#f0fff7"},
+      "RENDER": {"panel":"#f8e5f5", "viewport_top":"#ead1ef", "viewport_bottom":"#fff4ff"}
+    }
+  }
+}

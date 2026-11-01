@@ -245,6 +245,7 @@ fn editing_programmatic_sections_keeps_actual_plane_flip_hatch_and_cancel_then_m
 #[test]
 fn section_ribbon_toggle_and_setting_edit_have_separate_intent_and_compatibility() {
     let mut h = harness();
+    h.app.preferences.viewport_status_details = false;
     h.app.run("inspect.zebra", json!({})).unwrap();
     h.app.run("inspect.section", json!({"plane":"YZ","offset":3})).unwrap();
     h.frames(3);

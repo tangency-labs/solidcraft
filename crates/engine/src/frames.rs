@@ -90,7 +90,9 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "sketch.project_to_surface" | "sketch.isoparametric_curve" => &[("face", Here)],
         "sketch.intersection_curve" => &[("a", Here), ("b", Here)],
         "inspect.curvature_comb" | "inspect.minimum_radius" | "inspect.isocurve" => &[("edges", Picks), ("faces", Picks)],
-        "parts.insert" | "parts.fastener" => &[("at", Picks), ("point", Make), ("direction", Dir)],
+        // A fastener's `at` picks locate host occurrences and feed joint.create in world
+        // coordinates. Only free placement belongs in the active component's frame.
+        "parts.insert" | "parts.fastener" => &[("point", Make), ("direction", Dir)],
         "appearance.assign" => &[("faces", Picks), ("bodies", Body), ("body", Body)],
         "solid.move" => &[("bodies", Body), ("translate", Delta), ("axis", Dir), ("origin", Moved)],
         "solid.combine" => &[("target", Body), ("tools", Body)],
@@ -404,7 +406,7 @@ impl Nested {
         });
         if outer {
             let inner = if id == "timeline.redefine" { None } else { Some(id) };
-            MAPPED.with(|m| m.set(inner.is_none_or(|i| !table(i).is_empty())));
+            MAPPED.with(|m| m.set(inner.is_none_or(|i| !table(i).is_empty() || i == "construct.plane.axis_point")));
         }
         (Nested, outer)
     }
@@ -486,6 +488,20 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
         && (params.get("plane").and_then(|plane| plane.get("face")).is_some() || params.get("frame").and_then(Value::as_str) == Some("component"))
     {
         return None;
+    }
+    if id == "construct.plane.axis_point" && placed(s) {
+        // Construction references include tagged saved forms as well as pick wrappers.
+        // Map the parsed definition once at the boundary, including a nested Edit Feature.
+        // The constructor can then name local model picks and retain their exact references.
+        let mut kind = crate::cmd::plane_axis_point_kind(s, params).ok()?;
+        kind.transform_geometry(&mat_inverse(&s.active_component_frame())?);
+        let solidcraft_doc::FeatureKind::ConstructionPlane { plane: solidcraft_doc::PlaneRef::AxisPoint { axis, point } } = kind else {
+            return None;
+        };
+        let mut out = params.clone();
+        out["axis"] = serde_json::to_value(axis).ok()?;
+        out["point"] = serde_json::to_value(point).ok()?;
+        return Some(out);
     }
     let keys = table(id);
     if keys.is_empty() || !placed(s) {

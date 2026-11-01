@@ -31,6 +31,7 @@ pub fn dimension_roles(creator: &str) -> Option<&'static [&'static str]> {
         // A circle is dimensioned by its diameter unless a radius is given.
         "sketch.circle.center" | "sketch.circle.two_point" | "sketch.circle.three_point" => &["diameter", "radius"],
         "sketch.arc.center_point" => &["radius", "sweep"],
+        "sketch.ellipse" => &["major_radius", "minor_radius"],
         "sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point" => &["length", "width"],
         "sketch.slot.arc_center" => &["radius", "sweep", "width"],
         "sketch.slot.arc_three_point" => &["width"],
@@ -152,6 +153,9 @@ pub(super) fn draw(s: &mut Session, p: &Value) -> Result<Value> {
             (c, "width" | "height") if c.starts_with("sketch.rectangle.") => (vec![curve(usize::from(role == "height"))?], "length"),
             (c, "radius" | "diameter") if c.starts_with("sketch.circle.") => (vec![curve(0)?], role),
             ("sketch.arc.center_point", "radius" | "sweep") => (vec![curve(0)?], role),
+            // `sketch.dimension` gives an ellipse its major radius as `major`, else its minor one.
+            ("sketch.ellipse", "major_radius") => (vec![curve(0)?], "major"),
+            ("sketch.ellipse", "minor_radius") => (vec![curve(0)?], "radius"),
             ("sketch.slot.center_to_center" | "sketch.slot.center_point", "length") => (vec![curve(0)?], "length"),
             ("sketch.slot.overall", "length") => (vec![curve(1)?, curve(3)?], "overall_length"),
             (c, "width") if c.starts_with("sketch.slot.") => (vec![curve(1)?], "diameter"),

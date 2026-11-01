@@ -147,6 +147,8 @@ pub trait ChatBackend {
     fn set_mode(&mut self, _mode: &str) {}
     /// An endpoint's new request timeout, in seconds, from the next request on.
     fn set_request_timeout(&mut self, _secs: u64) {}
+    /// An endpoint's new reasoning effort (empty: send nothing), from the next request on.
+    fn set_reasoning_effort(&mut self, _effort: &str) {}
     fn set_config_option(&mut self, _id: &str, _value: &str) {}
     /// Its process, for status and tests.
     fn pid(&self) -> Option<u32> {

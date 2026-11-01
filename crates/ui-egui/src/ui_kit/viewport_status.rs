@@ -35,15 +35,52 @@ pub(crate) struct StatusItem {
 #[derive(Default)]
 pub(crate) struct StatusPresentation {
     pub open_key: Option<String>,
+    pub focus_field: Option<String>,
+    pub selected_record: Option<String>,
+    pub live_details: bool,
+    return_focus: Option<Id>,
+    return_pending: bool,
+    card_owner: Option<String>,
+    opened_frame: Option<u64>,
+    session_uid: Option<u64>,
     focus_ids: Vec<Id>,
     summary_popup: Option<Id>,
     summary_members: Vec<String>,
+    summary_suspended: bool,
 }
 
 impl StatusPresentation {
+    /// A card and its focus/popup identities never follow a different document's equal slot ID.
+    pub(crate) fn reconcile_session(&mut self, ctx: &egui::Context, uid: u64) {
+        if self.session_uid.is_some_and(|previous| previous != uid) {
+            super::dismiss_details_popups(ctx);
+            if let Some(popup) = self.summary_popup {
+                egui::Popup::close_id(ctx, popup);
+            }
+            if self.owns_focus(ctx) || super::details_field_owns_focus(ctx) {
+                ctx.memory_mut(|memory| {
+                    if let Some(id) = memory.focused() {
+                        memory.surrender_focus(id);
+                    }
+                });
+            }
+            *self = Self::default();
+        }
+        self.session_uid = Some(uid);
+    }
     /// Only popup/focus identities are retained; every displayed value comes from this frame.
     pub(crate) fn reconcile_summary(&mut self, ctx: &egui::Context, members: Vec<String>) {
         if self.summary_members != members {
+            super::dismiss_details_popups(ctx);
+            if self.open_key.is_some() && (super::details_field_owns_focus(ctx) || super::details_control_owns_focus(ctx)) {
+                ctx.memory_mut(|memory| {
+                    if let Some(id) = memory.focused() {
+                        memory.surrender_focus(id);
+                    }
+                });
+            }
+            self.return_pending = false;
+            self.card_owner = None;
             if let Some(id) = self.summary_popup.take() {
                 egui::Popup::close_id(ctx, id);
             }
@@ -56,12 +93,53 @@ impl StatusPresentation {
             }
             self.focus_ids.clear();
             self.open_key = None;
+            self.focus_field = None;
             self.summary_members = members;
+        }
+    }
+
+    /// A higher owner dismisses only this popup, without returning focus to its badge.
+    pub(crate) fn suspend_summary(&mut self, ctx: &egui::Context, suspended: bool) {
+        if suspended {
+            if self.live_details {
+                super::dismiss_details_popups(ctx);
+            }
+            if self.open_key.is_some() && (super::details_field_owns_focus(ctx) || super::details_control_owns_focus(ctx)) {
+                ctx.memory_mut(|memory| {
+                    if let Some(id) = memory.focused() {
+                        memory.surrender_focus(id);
+                    }
+                });
+            }
+            self.focus_field = None;
+            self.return_pending = false;
+        }
+        self.summary_suspended = suspended;
+        if suspended && !self.summary_members.is_empty() {
+            if let Some(id) = self.summary_popup.take() {
+                egui::Popup::close_id(ctx, id);
+            }
+            if self.owns_focus(ctx) {
+                ctx.memory_mut(|memory| {
+                    if let Some(id) = memory.focused() {
+                        memory.surrender_focus(id);
+                    }
+                });
+            }
+            self.focus_ids.clear();
         }
     }
 
     pub(crate) fn owns_focus(&self, ctx: &egui::Context) -> bool {
         ctx.memory(|memory| memory.focused().is_some_and(|id| self.focus_ids.contains(&id)))
+            || (self.open_key.is_some() && super::details_control_owns_focus(ctx))
+    }
+
+    pub(crate) fn close_details(&mut self) {
+        self.open_key = None;
+        self.focus_field = None;
+        self.return_pending = true;
+        self.card_owner = None;
     }
 }
 
@@ -150,6 +228,13 @@ pub(crate) fn viewport_status_item(ui: &mut Ui, item: &StatusItem, state: &mut S
                     let label = crate::i18n::format("ui.viewport_status_key", &[("name", &item.name)]);
                     let response = icon_action(ui, item, "key", "chevron", &label, &label, open);
                     state.focus_ids.push(response.id);
+                    if open || response.clicked() || matches!(&action, Some(StatusAction::Edit(id)) if id == &item.id) {
+                        state.return_focus = Some(response.id);
+                    }
+                    if state.return_pending && state.return_focus == Some(response.id) && !egui::Popup::is_any_open(ui.ctx()) {
+                        response.request_focus();
+                        state.return_pending = false;
+                    }
                     if response.clicked() {
                         state.open_key = if open { None } else { Some(item.id.clone()) };
                     }
@@ -215,18 +300,15 @@ pub(crate) fn viewport_status_row(
         });
     scenario::publish_rect("viewport_status:row", row.response.rect);
     scenario::publish_count("viewport_status:count", items.len() as f64);
+    if state.return_pending && state.return_focus.is_none_or(|id| !state.focus_ids.contains(&id)) {
+        state.return_pending = false;
+        state.return_focus = None;
+    }
     if let Some((anchor, id)) = key_anchor {
-        let card = Container::new(ctx, Surface::Popup);
-        // The key belongs to viewport chrome, not to the system-window/popup layer.
-        let result =
-            card.area(Id::new("viewport_status_key")).order(egui::Order::Background).movable(false).fixed_pos(anchor + vec2(0.0, t.space_6)).show(
-                ctx,
-                |ui| {
-                    let frame = card.frame(ctx, t.overlay, crate::frame::Side::Left).inner_margin(t.space_12);
-                    card.show_frame(ui, frame, free, |ui| key_contents(ui, id));
-                },
-            );
-        scenario::publish_target("viewport_status:card", result.response.rect);
+        show_card(ctx, free, anchor, row.response.rect, id, state, &mut key_contents);
+    } else {
+        state.card_owner = None;
+        state.focus_field = None;
     }
     actions
 }
@@ -262,6 +344,10 @@ pub(crate) fn viewport_status_summary(
             };
             let frame = container.frame(ctx, t.overlay, crate::frame::Side::Left).stroke(t.primary_border(outline)).inner_margin(t.space_4);
             container.show_frame(ui, frame, free, |ui| {
+                // The background badge cannot open a foreground popup above a higher owner.
+                if state.summary_suspended {
+                    ui.disable();
+                }
                 let mut button_id = None;
                 let mut summary_popup = None;
                 let menu = super::Menu::button_with(
@@ -379,6 +465,13 @@ pub(crate) fn viewport_status_summary(
                 );
                 state.summary_popup = summary_popup;
                 state.focus_ids.extend(button_id);
+                if state.open_key.is_some() {
+                    state.return_focus = button_id;
+                }
+                if state.return_pending && state.return_focus == button_id && !egui::Popup::is_any_open(ctx) {
+                    menu.response.request_focus();
+                    state.return_pending = false;
+                }
                 if was_open && !summary_popup.is_some_and(|id| egui::Popup::is_id_open(ctx, id)) && actions.is_empty() {
                     menu.response.request_focus();
                 }
@@ -389,42 +482,51 @@ pub(crate) fn viewport_status_summary(
         });
     scenario::publish_rect("viewport_status:row", row.response.rect);
     scenario::publish_count("viewport_status:count", items.len() as f64);
-    if let Some(id) = state.open_key.as_deref() {
-        let card = Container::new(ctx, Surface::Popup);
-        let result = card
-            .area(Id::new("viewport_status_key"))
-            .order(egui::Order::Background)
-            .movable(false)
-            .fixed_pos(row.response.rect.left_bottom() + vec2(0.0, t.space_6))
-            .show(ctx, |ui| {
-                let frame = card.frame(ctx, t.overlay, crate::frame::Side::Left).inner_margin(t.space_12);
-                card.show_frame(ui, frame, free, |ui| key_contents(ui, id));
-            });
-        scenario::publish_target("viewport_status:card", result.response.rect);
+    if let Some(id) = state.open_key.clone() {
+        show_card(ctx, free, row.response.rect.left_bottom(), row.response.rect, &id, state, &mut key_contents);
+    } else {
+        state.card_owner = None;
+        state.focus_field = None;
     }
     actions
 }
 
-/// Shared legend content; the caller supplies the existing analysis-token swatches and text.
-pub(crate) fn analysis_key(ui: &mut Ui, title: &str, along: Option<&str>, rows: &[(egui::Color32, String, bool)]) {
-    let t = Tokens::get();
-    ui.label(RichText::new(title).semibold().size(t.font_label).color(t.text));
-    if let Some(along) = along {
-        ui.label(RichText::new(along).monospace().size(t.font_small).color(t.text_dim));
+fn show_card(
+    ctx: &egui::Context,
+    free: Rect,
+    anchor: egui::Pos2,
+    owner: Rect,
+    id: &str,
+    state: &mut StatusPresentation,
+    contents: &mut impl FnMut(&mut Ui, &str),
+) {
+    if state.live_details && state.summary_suspended {
+        return;
     }
-    for (colour, label, hatched) in rows {
-        ui.horizontal(|ui| {
-            let (rect, _) = ui.allocate_exact_size(vec2(t.space_12, t.space_12), egui::Sense::hover());
-            ui.painter().rect_filled(rect, t.radius_sm, *colour);
-            if *hatched {
-                let painter = ui.painter().with_clip_rect(rect);
-                for offset in [-t.space_8, -t.space_4, 0.0, t.space_4, t.space_8] {
-                    let from = rect.left_bottom() + vec2(offset, 0.0);
-                    painter
-                        .line_segment([from, from + vec2(rect.height(), -rect.height())], egui::Stroke::new(t.primary_border(t.text).width, t.text));
-                }
-            }
-            ui.label(RichText::new(label).size(t.font_label).color(t.text));
-        });
+    if state.card_owner.as_deref() != Some(id) {
+        state.card_owner = Some(id.to_owned());
+        state.opened_frame = Some(ctx.cumulative_frame_nr());
+    }
+    let popup_was_open = egui::Popup::is_any_open(ctx);
+    let t = Tokens::get();
+    let card = Container::new(ctx, Surface::Popup);
+    let result =
+        card.area(Id::new("viewport_status_key")).order(egui::Order::Background).movable(false).fixed_pos(anchor + vec2(0.0, t.space_6)).show(
+            ctx,
+            |ui| {
+                let frame = card.frame(ctx, t.overlay, crate::frame::Side::Left).inner_margin(t.space_12);
+                card.show_frame(ui, frame, free, |ui| contents(ui, id));
+            },
+        );
+    scenario::publish_target("viewport_status:card", result.response.rect);
+    if state.opened_frame != Some(ctx.cumulative_frame_nr())
+        && !popup_was_open
+        && !egui::Popup::is_any_open(ctx)
+        && ctx.input(|input| {
+            input.pointer.any_pressed()
+                && input.pointer.interact_pos().is_some_and(|point| !result.response.rect.contains(point) && !owner.contains(point))
+        })
+    {
+        state.close_details();
     }
 }

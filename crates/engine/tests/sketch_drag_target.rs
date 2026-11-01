@@ -29,6 +29,52 @@ fn angular_drag_keeps_the_horizontal_construction_line() {
     }
 }
 
+/// A line's end on a horizontal construction line through the origin, dragged up off it in
+/// small frames (#9062): the end can only slide along the construction line, so it stays on it
+/// and the construction line keeps its length. A line's horizontal row is `b.y - a.y`, which a
+/// line a hair long meets at any tilt: the drag's solves shrank the construction line to 1e-5 mm
+/// on the first frame and to 1e-7 mm by the tenth, so it vanished and the end went up.
+#[test]
+fn an_end_dragged_off_a_horizontal_construction_line_leaves_it_whole() {
+    let through_origin = [
+        // Drawn from the origin (inferred horizontal).
+        vec![("sketch.line", json!({"points":["origin",[20,0]],"construction":true,"infer":true,"ids":["c"]}))],
+        // Drawn across the origin, then the origin made coincident with it.
+        vec![
+            ("sketch.line", json!({"points":[[-10,0.2],[20,0.2]],"construction":true,"infer":true,"ids":["c"]})),
+            ("sketch.constraint.coincident", json!({"a":"origin","b":"c"})),
+        ],
+    ];
+    for construction in through_origin {
+        for live in [false, true] {
+            let mut s = solidcraft_engine::Session::default();
+            s.execute("sketch.create", &json!({"plane":"XY"})).unwrap();
+            for (id, params) in construction.iter().cloned().chain([
+                ("sketch.line", json!({"points":[[10,0],[10,10]],"ids":["l"],"infer":false})),
+                ("sketch.constraint.coincident", json!({"a":"l.start","b":"c"})),
+            ]) {
+                s.execute(id, &params).unwrap();
+            }
+            let point = |s: &solidcraft_engine::Session, id| four_bar::point(s, id).unwrap();
+            let length = |s: &solidcraft_engine::Session| point(s, "c.start").dist(point(s, "c.end"));
+            let before = length(&s);
+            let mut at = point(&s, "l.start");
+            for _ in 0..10 {
+                let to = Vec2::new(at.x, at.y + 0.1);
+                s.execute("sketch.drag", &json!({"entity":"l.start","from":[at.x,at.y],"to":[to.x,to.y],"live":live})).unwrap();
+                assert!((length(&s) - before).abs() < 1e-6, "(live {live}) the construction line went from {before} mm to {} mm", length(&s));
+                at = to;
+            }
+            if live {
+                s.execute("sketch.drag_end", &json!({})).unwrap();
+            }
+            let end = point(&s, "l.start");
+            assert!(end.y.abs() < 1e-6, "(live {live}) l.start left the construction line: {end:?}");
+            assert!((length(&s) - before).abs() < 1e-6, "(live {live}) the construction line went to {} mm", length(&s));
+        }
+    }
+}
+
 /// A line held at its midpoint, with an angle to a horizontal line from that point (#8944):
 /// dragging one of its ends off that angle slides the end along the line as far as it can go,
 /// and the horizontal line keeps its length. That line's far end is free only along it, which
@@ -398,5 +444,55 @@ fn a_linkage_held_by_redundant_parallelograms_follows_the_cursor() {
         let at = four_bar::point(&s, "bot.end").unwrap();
         assert!(at.dist(to * (80.0 / to.len())) < 1e-4, "live {live}: {at:?}");
         assert!(parallelogram_error(&s) < 1e-6);
+    }
+}
+
+#[test]
+fn a_drag_that_would_fling_points_far_away_leaves_them_near_the_sketch() {
+    let mut s = solidcraft_engine::Session::default();
+    for (id, params) in [
+        ("sketch.create", json!({"plane":"XY"})),
+        ("sketch.line", json!({"points":[[2,-27],[-2,22],[-10,-10],[2,13]]})),
+        ("sketch.rectangle.two_point", json!({"p0":[-12,1],"p1":[-18,28]})),
+        ("sketch.line", json!({"points":[[6,-21],[-12,-27],[-25,-29],[16,5]]})),
+        ("sketch.rectangle.two_point", json!({"p0":[-21,0],"p1":[-23,-3]})),
+        ("sketch.line", json!({"points":[[24,23],[-7,7],[0,29],[-6,-7]]})),
+        ("sketch.dimension", json!({"entities":["l16","l12"],"type":"angle","value":31})),
+    ] {
+        s.execute(id, &params).unwrap();
+    }
+    s.execute("sketch.drag", &json!({"entity":"p8","from":[-23.0,-0.534780330115472],"to":[23,-8]})).unwrap();
+    for i in 0..30 {
+        let Ok(p) = four_bar::point(&s, &format!("p{i}")) else { continue };
+        assert!(p.len() < 1000.0, "p{i} was thrown to {p:?}");
+    }
+}
+
+/// A line held at its midpoint, with an angle to a horizontal line from there: its end dragged
+/// past the midpoint, where the line would have to turn over, pressed it to no length (the angle
+/// then held no direction). The drag now stops just short of that, the line still pointing the
+/// way the angle says.
+#[test]
+fn an_end_dragged_past_its_lines_midpoint_leaves_the_line_a_length() {
+    for live in [false, true] {
+        let mut s = solidcraft_engine::Session::default();
+        for (id, params) in [
+            ("sketch.create", json!({"plane":"XY"})),
+            ("sketch.line", json!({"points":[[-10,-6],[10,6]],"infer":false})),
+            ("sketch.constraint.midpoint", json!({"line":"l1","point":"origin"})),
+            ("sketch.line", json!({"points":["origin",[15,0]],"infer":false})),
+            ("sketch.constraint.horizontal_vertical", json!({"line":"l2"})),
+            ("sketch.dimension", json!({"entities":["l1","l2"],"type":"angle"})),
+            ("sketch.drag", json!({"entity":"l1.start","from":[-10,-6],"to":[12,4],"live":live})),
+        ] {
+            s.execute(id, &params).unwrap();
+        }
+        if live {
+            s.execute("sketch.drag_end", &json!({})).unwrap();
+        }
+        let (a, b) = (four_bar::point(&s, "l1.start").unwrap(), four_bar::point(&s, "l1.end").unwrap());
+        assert!(a.dist(b) > 1e-3, "l1 is left {} mm long (live {live})", a.dist(b));
+        let d = b - a;
+        assert!((d.y.atan2(d.x) - 6f64.atan2(10.0)).abs() < 1e-6, "l1 turned to {d:?} (live {live})");
     }
 }

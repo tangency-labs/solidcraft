@@ -73,7 +73,15 @@ const ANSWERED_ON_A_COPY: &[&str] = &["file.export", "file.save_mesh"];
 /// body, an inspection that measures them, #4604; a clearance or interference check of every pair
 /// of bodies, minutes on an assembly of 150): they run on a copy too, whatever the preference,
 /// since an answer from the design as it was when asked has no order to keep.
-const READ_ON_A_COPY: &[&str] = &["inspect.measure", "document.inspect", "inspect.clearance", "inspect.interference"];
+const READ_ON_A_COPY: &[&str] = &[
+    "inspect.measure",
+    "document.inspect",
+    "inspect.clearance",
+    "inspect.interference",
+    // Physical properties of a component or placement: every body of every placement (#8706).
+    "component.properties",
+    "occurrence.properties",
+];
 
 /// Exports and readings computing at once; more run here.
 const MAX_ANSWERING: usize = 4;
@@ -413,9 +421,19 @@ impl SolveApp {
         if let Some(level) = level {
             copy.param_check = level;
         }
+        // The copy has no history and no file (#9624): an inspection reports the design's own.
+        let s = &self.session;
+        let own = (id == "document.inspect").then(|| (s.undo.len(), s.redo.len(), s.path.clone()));
         let rx = spawn(scope, move || {
             let mut reply = match copy.execute(id, &params) {
-                Ok(v) => json!({"ok": true, "result": v}),
+                Ok(mut v) => {
+                    if let (Some((undo, redo, path)), Some(o)) = (own, v.as_object_mut()) {
+                        o.insert("undo".into(), json!(undo));
+                        o.insert("redo".into(), json!(redo));
+                        o.insert("path".into(), json!(path));
+                    }
+                    json!({"ok": true, "result": v})
+                }
                 Err(e) => json!({"ok": false, "error": e.to_string()}),
             };
             if let Some(level) = level {

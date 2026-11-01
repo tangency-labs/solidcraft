@@ -378,6 +378,93 @@ fn a_level_is_read_back_from_its_name() {
     }
 }
 
+#[test]
+fn ui_prefs_theme_options_input_schema_covers_updates_and_resets() {
+    use super::ui_prefs::PrefsParams;
+    let schema = input_schema_for::<PrefsParams>();
+    let schema = schema.as_value();
+    assert!(schema["properties"]["theme_options"].is_object());
+    for value in [
+        json!({}),
+        json!({"theme_options":{}}),
+        json!({"theme_options":{"a":{}}}),
+        json!({"theme_options":{"a":{"enabled":true,"amount":3.5,"style":"cool","reset":null}},"theme":"a"}),
+    ] {
+        assert!(serde_json::from_value::<PrefsParams>(value.clone()).is_ok(), "{value}");
+        assert!(conforms(schema, schema, &value), "{value}");
+    }
+    for value in [
+        json!({"theme_options":null}),
+        json!({"theme_options":[]}),
+        json!({"theme_options":{"a":true}}),
+        json!({"theme_options":{"a":{"enabled":{}}}}),
+        json!({"theme_options":{"a":{"amount":[]}}}),
+    ] {
+        assert!(serde_json::from_value::<PrefsParams>(value.clone()).is_err(), "{value}");
+    }
+}
+
+#[test]
+fn ui_prefs_theme_options_output_schema_matches_serialized_reply() {
+    use super::ui_prefs::*;
+    let options = ThemeOptionsReply {
+        theme_option_defs: vec![
+            ThemeOptionDef {
+                id: "enabled".into(),
+                kind: ThemeOptionKind::Bool { default: false },
+                label: "Enabled".into(),
+                help: String::new(),
+                parent: None,
+                advanced: false,
+                section: None,
+                standard: false,
+                available: true,
+                reason: None,
+            },
+            ThemeOptionDef {
+                id: "blur".into(),
+                kind: ThemeOptionKind::Range { default: 0.0, min: 0.0, max: 100.0, step: 1.0, unit: Some("px".into()) },
+                label: "blur".into(),
+                help: String::new(),
+                parent: None,
+                advanced: false,
+                section: None,
+                standard: true,
+                available: false,
+                reason: Some("not implemented".into()),
+            },
+            ThemeOptionDef {
+                id: "style".into(),
+                kind: ThemeOptionKind::Choice { default: "warm".into(), values: vec![ThemeChoice { id: "warm".into(), label: "Warm".into() }] },
+                label: "Style".into(),
+                help: String::new(),
+                parent: Some("enabled".into()),
+                advanced: true,
+                section: Some("Details".into()),
+                standard: false,
+                available: true,
+                reason: None,
+            },
+        ],
+        theme_option_values: [
+            ("enabled".into(), ThemeOptionValue::Bool(true)),
+            ("blur".into(), ThemeOptionValue::Num(0.0)),
+            ("style".into(), ThemeOptionValue::Choice("warm".into())),
+        ]
+        .into(),
+        theme_option_notices: vec![ThemeOptionNotice { id: "removed".into(), kind: ThemeOptionNoticeKind::UnknownOption }],
+    };
+    let reply = PrefsReply { options, settings: [("theme".into(), json!("a")), ("theme_options".into(), json!({"a":{"enabled":true}}))].into() };
+    let value = serde_json::to_value(&reply).unwrap();
+    let schema = output_schema_for::<PrefsReply>();
+    let schema = schema.as_value();
+    for field in ["theme_option_defs", "theme_option_values", "theme_option_notices"] {
+        assert!(schema["properties"][field].is_object(), "{schema}");
+    }
+    assert!(conforms(schema, schema, &value), "{schema}\n{value}");
+    assert_eq!(serde_json::to_value(serde_json::from_value::<PrefsReply>(value.clone()).unwrap()).unwrap(), value);
+}
+
 /// Whether `v` conforms to `node` of the schema `root`, for the keywords these schemas use
 /// apart from `pattern`: `type`, `properties`, `required`, `additionalProperties: false`,
 /// `items`, `minItems`, `maxItems`, `uniqueItems`, `enum`, `minLength`, `maxLength`, `minimum`,

@@ -17,6 +17,8 @@ fn app_with_discovered_login() -> SolveApp {
             argv: vec!["qwen".into(), "--acp".into()],
             version: None,
             login: discover::Login::LooksLoggedIn,
+            problem: None,
+            install: "npm install -g @qwen-code/qwen-code",
         }],
         ..Default::default()
     });
@@ -96,6 +98,38 @@ fn agent_login_refresh_returns_to_unverified_discovery() {
     frame(&mut app);
     assert_eq!(agents::current(&app).unwrap().login, "login_found");
     assert!(!app.agent_chat.settings.tests.contains_key("qwen"));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_sign_in_proven_in_one_tab_holds_in_every_tab() {
+    // #9293: discovery found no login file before the user signed in from the panel. The chat's
+    // proof of the sign-in belongs to the window, so a new tab doesn't ask for it again.
+    let mut app = app_with_discovered_login();
+    if let Some(d) = app.agent_chat.detection.as_mut() {
+        d.found[0].login = discover::Login::NotLoggedIn;
+    }
+    assert_eq!(assistant_mark(&app), AssistantMark::NeedsAuth);
+    app.agent_chat.on_event(Event::Ready { agent: "Qwen Code".into(), images: false });
+    assert_eq!(agents::current(&app).unwrap().login, "signed_in");
+
+    crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+    assert_eq!(app.agent_chat.state(), State::Off, "a new tab starts its own conversation");
+    assert_eq!(agents::current(&app).unwrap().login, "signed_in");
+    assert_eq!(assistant_mark(&app), AssistantMark::Ready, "no sign-in mark in the new tab");
+
+    // Evidence from the new tab is the newest, also back in the first one.
+    app.agent_chat.running_id = "qwen".into();
+    app.agent_chat.on_event(Event::AuthRequired { methods: vec![] });
+    crate::documents::switch(&mut app, 0);
+    assert_eq!(agents::current(&app).unwrap().login, "signed_out");
+    app.agent_chat.on_event(Event::Ready { agent: "Qwen Code".into(), images: false });
+
+    // A replacement design starts a fresh conversation, not a fresh sign-in.
+    crate::documents::reset_chat(&mut app);
+    assert_eq!(agents::current(&app).unwrap().login, "signed_in");
+    crate::documents::close(&mut app, 0, true);
+    assert_eq!(agents::current(&app).unwrap().login, "signed_in", "closing a tab keeps the window's evidence");
 }
 
 #[test]
@@ -678,6 +712,203 @@ fn a_late_sign_in_retry_or_permission_cannot_restart_a_departed_turn() {
     assert!(app.agent_chat.turn.is_none() && app.agent_chat.queued.is_none());
 }
 
+/// Exercise the chat endpoint's gate and the real dispatch paths, including the animated
+/// pointer and asynchronous file loads. The scripted backend never needs a model account.
+fn chat_tool(app: &mut SolveApp, tx: &Sender<ControlRequest>, ctx: &egui::Context, method: &str, params: Value) -> Value {
+    let reply = ask(tx, method, params);
+    pump_tools(app);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        app.drain_control(ctx);
+        app.now += 1.0;
+        crate::agent_cursor::step(app, ctx);
+        crate::file_load::tick(app, ctx);
+        app.poll_control_jobs(ctx);
+        match reply.try_recv() {
+            Ok(response) => return response,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => panic!("the chat's tool reply was dropped"),
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+        assert!(std::time::Instant::now() < deadline, "the chat's tool did not finish");
+        std::thread::yield_now();
+    }
+}
+
+#[test]
+fn an_agents_new_design_keeps_its_conversation_and_continues() {
+    // #7526: the old reset disconnected the backend inside its own file.new request.
+    for (method, params, animate) in [
+        ("engine.execute", json!({"command": "file.new"}), false),
+        ("engine.execute", json!({"command": "FILE.NEW"}), false),
+        ("engine.execute", json!({"command": "file.new"}), true),
+        ("engine.batch", json!({"commands": [{"command": "file.new"}, boxed(0.0)]}), false),
+        ("engine.batch", json!({"commands": [{"command": "file.new"}, boxed(0.0)]}), true),
+    ] {
+        let (mut app, script, ctx) = app_with_script();
+        let (tx, rx) = channel();
+        app.agent_chat.tools_rx = Some(rx);
+        app.preferences.ai_permissions = agents::Mode::All;
+        app.run("solid.box", boxed(0.0)["params"].clone()).unwrap();
+        send(&mut app, &ctx, "create another design".into());
+        let active = app.agent_chat.turn.as_ref().unwrap().active.clone();
+        app.ui.agent_cursor.show = animate;
+        crate::scenario::publish_handle("toolbar:file.new", egui::pos2(80.0, 100.0));
+        crate::scenario::publish_handle("toolbar:solid.box", egui::pos2(100.0, 100.0));
+        let response = chat_tool(&mut app, &tx, &ctx, method, params);
+        assert_eq!(response["ok"], true, "{response}");
+        assert!(app.agent_chat.backend.is_some(), "the agent must receive its own replacement's reply");
+        assert!(active.load(std::sync::atomic::Ordering::Relaxed));
+        assert!(app.agent_chat.items.iter().any(|i| matches!(i, Item::User { text, .. } if text == "create another design")));
+        assert!(!script.calls().iter().any(|call| matches!(call.as_str(), "cancel" | "new_session")));
+        let response = chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(30.0));
+        assert_eq!(response["ok"], true, "the same agent continues: {response}");
+        assert_eq!(app.agent_chat.turn.as_ref().unwrap().changes, 2, "a replacement does not reset the turn's change budget");
+        let count = if method == "engine.batch" { 2 } else { 1 };
+        assert_eq!(app.session.doc.features.len(), count);
+        ended(&script, "");
+        poll(&mut app, &ctx);
+        assert_eq!(app.session.undo.len(), 1, "only the new design's edits form this turn's undo step");
+        app.run("edit.undo", json!({})).unwrap();
+        assert!(app.session.doc.features.is_empty(), "undo must not resurrect the previous design");
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_agents_opened_design_keeps_its_conversation_and_undo_ownership() {
+    for blank in [true, false] {
+        let dir = std::env::temp_dir().join(format!("solidcraft-chat-open-{}-{blank}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("next.solidcraft");
+        let mut next = solidcraft_engine::Session::default();
+        next.execute("solid.box", &boxed(100.0)["params"]).unwrap();
+        next.execute("file.save_as", &json!({"path": path})).unwrap();
+        let (mut app, script, ctx) = app_with_script();
+        let (tx, rx) = channel();
+        app.agent_chat.tools_rx = Some(rx);
+        app.preferences.ai_permissions = agents::Mode::All;
+        if !blank {
+            app.run("solid.box", boxed(0.0)["params"].clone()).unwrap();
+            app.run("file.save_as", json!({"path": dir.join("first.solidcraft")})).unwrap();
+        }
+        send(&mut app, &ctx, "open another design and add a box".into());
+        let active = app.agent_chat.turn.as_ref().unwrap().active.clone();
+        if !blank {
+            assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(20.0))["ok"], true);
+            assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(40.0))["ok"], true);
+        }
+        let response =
+            chat_tool(&mut app, &tx, &ctx, "engine.execute", json!({"command": "doc.open", "params": {"path": path}, "allow_paths": [dir]}));
+        assert_eq!(response["ok"], true, "{response}");
+        assert!(app.agent_chat.backend.is_some(), "opening the file must carry the initiating chat");
+        assert!(active.load(std::sync::atomic::Ordering::Relaxed));
+        assert_eq!(app.docs.count(), if blank { 1 } else { 2 });
+        if !blank {
+            let response = chat_tool(
+                &mut app,
+                &tx,
+                &ctx,
+                "engine.execute",
+                json!({
+                    "command": "doc.open", "params": {"path": dir.join("first.solidcraft")}, "allow_paths": [dir]
+                }),
+            );
+            assert_eq!(response["ok"], false, "another tab must keep its own conversation: {response}");
+            assert!(response["error"].as_str().unwrap().contains("already open in another tab"));
+            assert_eq!(app.docs.active, 1);
+        }
+        assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(130.0))["ok"], true);
+        assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(150.0))["ok"], true);
+        assert_eq!(app.session.doc.features.len(), 3);
+        ended(&script, "");
+        poll(&mut app, &ctx);
+        assert!(!script.calls().iter().any(|call| matches!(call.as_str(), "cancel" | "new_session")));
+        assert_eq!(app.session.undo.len(), 1);
+        app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(app.session.doc.features.len(), 1, "the opened design's existing body survives undo");
+        if !blank {
+            crate::documents::switch(&mut app, 0);
+            assert_eq!(app.session.doc.features.len(), 3);
+            assert_eq!(app.session.undo.len(), 2, "the first design keeps its own grouped agent edits");
+            app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(app.session.doc.features.len(), 1);
+            assert!(app.agent_chat.backend.is_none(), "the endpoint moved with the conversation");
+            crate::documents::switch(&mut app, 1);
+            assert!(app.agent_chat.backend.is_some());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[test]
+fn an_agents_failed_new_design_batch_restores_its_undo_boundary() {
+    let (mut app, script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    app.preferences.ai_permissions = agents::Mode::All;
+    app.run("solid.box", boxed(0.0)["params"].clone()).unwrap();
+    send(&mut app, &ctx, "try another design".into());
+    assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(20.0))["ok"], true);
+    let before = app.session.doc.clone();
+    let response = chat_tool(
+        &mut app,
+        &tx,
+        &ctx,
+        "engine.batch",
+        json!({"commands": [
+            {"command": "file.new"},
+            {"command": "sketch.line", "params": {"points": [[0, 0], [10, 10]]}}
+        ]}),
+    );
+    assert_eq!(response["result"]["completed"], 1, "the new design ran before the failure: {response}");
+    assert_eq!(response["result"]["rolled_back"], true);
+    assert!(Arc::ptr_eq(&app.session.doc, &before));
+    assert!(app.agent_chat.backend.is_some());
+    assert_eq!(chat_tool(&mut app, &tx, &ctx, "engine.execute", boxed(40.0))["ok"], true);
+    ended(&script, "");
+    poll(&mut app, &ctx);
+    assert_eq!(app.session.undo.len(), 2, "edits before and after the failed batch share one turn");
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(app.session.doc.features.len(), 1);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_agents_cancelled_open_cannot_replace_the_design_later() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-chat-cancel-open-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("next.solidcraft");
+    solidcraft_engine::Session::default().execute("file.save_as", &json!({"path": path})).unwrap();
+    let (mut app, script, ctx) = app_with_script();
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    app.preferences.ai_permissions = agents::Mode::All;
+    app.run("solid.box", boxed(0.0)["params"].clone()).unwrap();
+    let original = app.session.doc.clone();
+    send(&mut app, &ctx, "open another design".into());
+    let (started_tx, started_rx) = channel();
+    let (release_tx, release_rx) = channel();
+    app.file_load.worker_gate = Some((started_tx, release_rx));
+    let reply = ask(&tx, "engine.execute", json!({"command": "doc.open", "params": {"path": path}, "allow_paths": [dir]}));
+    pump_tools(&mut app);
+    app.drain_control(&ctx);
+    started_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    cancel(&mut app);
+    ended(&script, "cancelled");
+    poll(&mut app, &ctx);
+    release_tx.send(()).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !app.file_load.idle() && std::time::Instant::now() < deadline {
+        crate::file_load::tick(&mut app, &ctx);
+        std::thread::yield_now();
+    }
+    assert!(app.file_load.idle());
+    assert_eq!(reply.try_recv().unwrap()["ok"], false, "a stopped turn cannot finish its pending open");
+    assert!(Arc::ptr_eq(&app.session.doc, &original));
+    assert_eq!(app.docs.count(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn programmatic_replacement_clears_the_conversation_and_invalidates_its_requests() {
     for command in ["file.new", "FILE.NEW"] {
@@ -1110,6 +1341,56 @@ done
         log_text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter_map(|v| v["method"].as_str().map(String::from)).collect();
     assert_eq!(methods, ["initialize", "session/new", "session/prompt", "session/new", "session/prompt"]);
     assert!(log_text.lines().last().is_some_and(|l| l.contains("\"s2\"")), "the prompt goes to the new session: {log_text}");
+    disconnect(&mut app);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// #9811: an agent that offers the standard `systemPrompt` field gets the note in it, on the first
+/// session and on the one New chat opens.
+#[cfg(unix)]
+#[test]
+fn an_acp_agent_offering_the_standard_field_gets_the_system_note_in_every_session() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-note-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let log = dir.join("received.log");
+    let script = r#"
+log="$1"; n=0
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$log"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"agentCapabilities":{"sessionCapabilities":{"systemPrompt":{}}},"agentInfo":{"name":"fake","version":"1"}}}\n' "$id" ;;
+    *'"method":"session/new"'*) n=$((n+1)); printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"s%s"}}\n' "$id" "$n" ;;
+  esac
+done
+"#;
+    let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
+    app.agent_chat.state = Some(State::Starting);
+    let ctx = crate::fonts::test_context();
+    let until = |app: &mut SolveApp, done: &dyn Fn(&SolveApp) -> bool| {
+        let t = std::time::Instant::now();
+        while !done(app) {
+            assert!(t.elapsed() < std::time::Duration::from_secs(20), "timed out");
+            poll(app, &ctx);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    };
+    until(&mut app, &|a| a.agent_chat.state() == State::Ready);
+    new_chat(&mut app);
+    until(&mut app, &|a| a.agent_chat.state() == State::Ready);
+    let sessions: Vec<Value> = std::fs::read_to_string(&log)
+        .unwrap()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|v| v["method"] == "session/new")
+        .collect();
+    assert_eq!(sessions.len(), 2);
+    for session in &sessions {
+        assert_eq!(session.pointer("/params/systemPrompt/content/0/text").and_then(Value::as_str), Some(acp::SYSTEM_NOTE));
+    }
     disconnect(&mut app);
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -1662,6 +1943,61 @@ done
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An agent that lists `models` but does not serve the unstable `session/set_model` answers
+/// "method not found": the choice stays and no error shows (#9970). Other errors still show.
+#[cfg(unix)]
+#[test]
+fn set_model_method_not_found_shows_no_error() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-model-unserved-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let log = dir.join("received.log");
+    let script = r#"
+log="$1"; n=0
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$log"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"agentInfo":{"name":"fake","version":"1"}}}\n' "$id" ;;
+    *'"method":"session/new"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"s1","models":{"currentModelId":"fast","availableModels":[{"modelId":"fast","name":"Fast"},{"modelId":"smart","name":"Smart"}]}}}\n' "$id" ;;
+    *'"method":"session/set_model"'*)
+      n=$((n+1))
+      if [ "$n" = 1 ]; then printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"\\"Method not found\\": session/set_model"}}\n' "$id"
+      else printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32001,"message":"model unavailable"}}\n' "$id"; fi ;;
+  esac
+done
+"#;
+    let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
+    app.agent_chat.state = Some(State::Starting);
+    app.agent_chat.running_id = "fake".into();
+    let ctx = crate::fonts::test_context();
+    let errors = |app: &SolveApp| -> Vec<String> {
+        app.agent_chat.items.iter().filter_map(|i| if let Item::Notice { text, error: true } = i { Some(text.clone()) } else { None }).collect()
+    };
+    let t = std::time::Instant::now();
+    while !(app.agent_chat.state() == State::Ready && models_shown(&app)) {
+        poll(&mut app, &ctx);
+        assert!(t.elapsed() < std::time::Duration::from_secs(20), "agent not ready: {}", status(&app));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    set_model(&mut app, "smart");
+    set_model(&mut app, "fast");
+    // Replies come in order: once the second one's error shows, the first reply was handled too.
+    let t = std::time::Instant::now();
+    while !errors(&app).iter().any(|e| e == "model unavailable") {
+        poll(&mut app, &ctx);
+        assert!(t.elapsed() < std::time::Duration::from_secs(20), "no error for the second choice: {:?}", errors(&app));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(errors(&app), ["model unavailable"], "method not found is no error to show");
+    assert!(app.agent_chat.state().running(), "the chat goes on");
+    assert_eq!(std::fs::read_to_string(&log).unwrap().matches("session/set_model").count(), 2);
+    disconnect(&mut app);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // ---- Files attached to a message ----
 
 /// A folder of files to attach: a picture and a text file.
@@ -1898,6 +2234,35 @@ fn narrow_chat() -> crate::scenario::Harness {
     h.app.agent_chat.open = true;
     h.app.agent_chat.detection = Some(Default::default());
     h
+}
+
+/// #10172: before a connection, what the panel draws under the agent switcher (the Agent row
+/// with Add agent and Refresh) keeps the panel's side margin, docked and floating: nothing starts
+/// at the panel's edge or is cut off at the other one.
+#[test]
+fn the_agent_list_keeps_the_panels_side_margin() {
+    use crate::shell::LayoutMode;
+    for layout in [LayoutMode::Docked, LayoutMode::Floating] {
+        let mut h = narrow_chat();
+        h.app.ui.layout = layout;
+        h.frames(3);
+        h.frame();
+        let panel = crate::scenario::rect_of("agent_chat:panel").expect("the panel");
+        let mut texts = Vec::new();
+        for clipped in &h.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |s| {
+                if let egui::Shape::Text(t) = s {
+                    texts.push((t.galley.text().to_string(), egui::Rect::from_min_size(t.pos, t.galley.rect.size())));
+                }
+            });
+        }
+        let at = |label: &str| texts.iter().find(|(text, r)| text == label && panel.contains(r.center())).map(|(_, r)| *r);
+        let margin = crate::theme::Tokens::get().space_12 - 0.5;
+        let agent = at(tr("ui.agent_chat_pick")).expect("the Agent row");
+        assert!(agent.left() >= panel.left() + margin, "{layout:?}: Agent at {agent:?} in {panel:?}");
+        let refresh = at(tr("ui.agent_chat_refresh")).expect("Refresh");
+        assert!(refresh.right() <= panel.right() - margin, "{layout:?}: Refresh at {refresh:?} in {panel:?}");
+    }
 }
 
 /// Every chip and the text box sit inside the panel.
@@ -2434,6 +2799,34 @@ fn a_connection_that_never_gets_ready_says_connection_failed_and_offers_retry() 
     connect(&mut app, &ctx);
     assert_eq!(app.agent_chat.state(), State::Failed);
     assert!(app.preferences.agent_last.is_empty(), "only an agent that started is remembered");
+
+    // A found agent that failed its version check (#9034): the picker says it doesn't start, and
+    // connecting says why and how to install it again, besides the system's own message.
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    let reason = "This version of opencode.exe is not compatible with the version of Windows you're running.";
+    app.agent_chat.detection = Some(discover::Detection {
+        found: vec![discover::Found {
+            id: "opencode",
+            name: "OpenCode",
+            argv: vec!["solidcraft-no-such-agent-9034".into(), "acp".into()],
+            version: None,
+            login: discover::Login::Unknown,
+            problem: Some(reason.into()),
+            install: "npm install -g opencode-ai",
+        }],
+        ..Default::default()
+    });
+    let entry = agents::current(&app).unwrap();
+    assert!(entry.detail().contains(reason), "{}", entry.detail());
+    connect(&mut app, &ctx);
+    assert_eq!(app.agent_chat.state(), State::Failed);
+    let told = |needle: &str| app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, error: true } if text.contains(needle)));
+    assert!(told(reason) && told("npm install -g opencode-ai") && told("OpenCode"), "{:?}", app.agent_chat.items);
+    assert_eq!(status(&app)["agents"][0]["problem"], reason);
+    // One that answered has nothing to say.
+    let mut fine = entry.clone();
+    fine.problem = None;
+    assert_eq!(fine.problem_hint(), None);
 
     // No agent at all: the picker opens on what to install.
     let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());

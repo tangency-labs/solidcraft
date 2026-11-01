@@ -27,7 +27,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("measure")
         .key("I")
         .noundo()
-        .params("bodies?: [names] (default all) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, point; index optional) → length/area/volume; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
+        .params("bodies?: [names] (default all); names_only?: bool (each world body's name and its definition's, nothing measured) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, point; index optional) → length/area/volume; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
     CommandSpec::new("document.inspect", "Inspect Design", inspect).icon("inspect").noundo().params("measure?: bool (include body measurements)"),
     CommandSpec::new("document.revision", "Design Revision", revision).icon("inspect").noundo().params(
         "→ document_id (this open design's id: kept while it stays open, another for each design started or opened), \
@@ -59,17 +59,17 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("appearance.favorite", "Favorite Look", appearance_gestures::favorite).icon("star").noundo().doc_only()
         .params("look: appearance.assign look; favorite: bool → validated look and preference request; UI library preference only, no document change or dialogs."),
     CommandSpec::new("appearance.chain", "Appearance Chain", appearance_chain::chain).icon("inspect").noundo().params(
-        "target: {body: name} | {body: name, face: zero-based model.faces index} | {component: name or id}. Returns steps [{step: face|body|component|material, look: {name,color,opacity,pbr?} or null}] in precedence order and active (step or null). Component material is the common default look of its directly owned bodies, null if mixed/empty. Imported paint is a display fallback outside the four steps. Read-only; no dialogs",
+        "target: {body: name} | {body: name, face: zero-based model.faces index} | {component: name or id}; a placed copy's name (`KB (K:2)`, `K:2`) means the body or component it shows. Returns steps [{step: face|body|component|material, look: {name,color,opacity,pbr?} or null}] in precedence order and active (step or null). Component material is the common default look of its directly owned bodies, null if mixed/empty. Imported paint is a display fallback outside the four steps. Read-only; no dialogs",
     ),
     CommandSpec::new("appearance.replace", "Replace Appearance", appearance_chain::replace).icon("appearance").params(
-        "from: library name | saved look {name,color,opacity,pbr?} (copy appearance.list in_design); to: library name | assignment look {appearance? | color, name?, opacity?, pbr?} (appearance.assign rules; no clear). Matches the full look including name and PBR. scope?: {bodies?: [names], components?: [names or ids]}, at most 10000 targets; body scope includes face overrides, component scope selects only the component override. Omitted scope means all overrides, including hidden/suppressed ones; physical defaults are unchanged. Duplicate targets count once. Returns count of rewritten overrides; zero adds no history. One undo step, atomic; no dialogs. Designs above 100000 overrides refuse",
+        "from: library name | saved look {name,color,opacity,pbr?} (copy appearance.list in_design); to: library name | assignment look {appearance? | color, name?, opacity?, pbr?} (appearance.assign rules; no clear). Matches the full look including name and PBR. scope?: {bodies?: [names], components?: [names or ids]} (a placed copy's name means the body or component it shows), at most 10000 targets; body scope includes face overrides, component scope selects only the component override. Omitted scope means all overrides, including hidden/suppressed ones; physical defaults are unchanged. Duplicate targets count once. Returns count of rewritten overrides; zero adds no history. One undo step, atomic; no dialogs. Designs above 100000 overrides refuse",
     ),
     CommandSpec::new("appearance.library", "Appearance Library", appearance_library).icon("library")
         .noundo()
         .params("→ 20 legacy scalar appearances, six opaque PBR finishes and 40 starter recipes with IDs, categories, provenance, requirements and availability; six starter glass recipes are unavailable"),
     CommandSpec::new("appearance.list", "List Appearances", appearance_list).icon("list")
         .noundo()
-        .params("body?: name → assigned appearances; with body, its resolved look and its faces' (face index, look)"),
+        .params("body?: name (or a placed copy's, `KB (K:2)`: the body it shows) → assigned appearances; with body, its resolved look and its faces' (face index, look)"),
     CommandSpec::new("material.list", "List Materials", material_list).icon("list")
         .noundo()
         .doc_only()
@@ -123,6 +123,13 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
     let want = string_list(cmd, p, "bodies")?;
     let st = s.world_state();
     let selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
+    if !want.is_empty() && selected.len() != want.len() {
+        return Err(bad(cmd, "unknown body name"));
+    }
+    if bool_(p, "names_only").unwrap_or(false) {
+        let bodies: Vec<_> = selected.iter().map(|b| json!({"name": b.name, "definition": b.definition_name()})).collect();
+        return Ok(json!({"body_count": bodies.len(), "bodies": bodies}));
+    }
     // Each body is measured on its own: on all cores, in body order.
     let mut bodies: Vec<Value> = solidcraft_kernel::map_on_threads(&selected, 16, |b| measure_json(b))
         .into_iter()
@@ -139,9 +146,6 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
             b["density_g_cm3"] = json!(rho);
             b["mass_g"] = json!(v * rho / 1000.0);
         }
-    }
-    if !want.is_empty() && bodies.len() != want.len() {
-        return Err(bad(cmd, "unknown body name"));
     }
     // Sheet metal keeps the edges where bends meet flat faces (so bends stay visible): count its
     // B-rep faces as they are, without merging coplanar neighbours.
@@ -519,12 +523,7 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut comps: Vec<u64> = Vec::new();
     for c in string_list(cmd, p, "components")? {
-        let id = s
-            .doc
-            .find_component(&c)
-            .or_else(|| s.doc.occurrences.iter().find(|o| o.name == c).map(|o| o.component))
-            .filter(|id| *id != 0)
-            .ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
+        let id = s.component_or_placement(&c).ok_or_else(|| bad(cmd, format!("no component `{c}`")))?;
         comps.push(id);
     }
     if bodies.is_empty() && faces.is_empty() && comps.is_empty() {
@@ -791,9 +790,12 @@ fn appearance_list(s: &mut Session, p: &Value) -> Result<Value> {
     });
     if let Some(name) = str_(p, "body") {
         let st = s.model.state();
-        let b = st.body(name).ok_or_else(|| bad("appearance.list", format!("no body `{name}`")))?;
+        // A placed copy's name (`KB (K:2)`) means the body it shows, as appearance.assign takes
+        // it (#9740): the reply names that body.
+        let own = s.own_body_name(name);
+        let b = own.as_deref().and_then(|n| st.body(n)).ok_or_else(|| bad("appearance.list", format!("no body `{name}`")))?;
         out["body"] = json!({
-            "name": name,
+            "name": b.name,
             "appearance": s.doc.model_body_look(b).map(|l| look_json(&l)),
             "color": s.doc.body_color(b),
             "faces": s.doc.face_colors(b).iter().map(|(i, l)| json!({"face": i, "appearance": look_json(l)})).collect::<Vec<_>>(),

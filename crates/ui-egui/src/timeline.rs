@@ -43,11 +43,18 @@ pub(crate) fn transport_response(app: &mut SolveApp, control: crate::ui_kit::His
     }
 }
 
-/// The History controls' menu: shows or hides the Play button.
+/// The History controls' menu: shows or hides the Play button, and — when the design marks any
+/// component out of the bar — shows or hides those components' entries (#10393).
 pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::context_menu::Item> {
     let show = !app.preferences.history_play_button;
     let label = crate::i18n::tr(if show { "ui.history_play_button_show" } else { "ui.history_play_button_hide" });
-    vec![crate::context_menu::Item::action("ui.historyPlayButton", label, "timeline_play").with(json!({ "show": show }))]
+    let mut items = vec![crate::context_menu::Item::action("ui.historyPlayButton", label, "timeline_play").with(json!({ "show": show }))];
+    if app.session.doc.components.iter().any(|c| c.history_hidden) {
+        let show_hidden = !app.tree.history_show_hidden;
+        let label = crate::i18n::tr(if show_hidden { "ui.history_show_hidden" } else { "ui.history_hide_hidden" });
+        items.push(crate::context_menu::Item::action("ui.historyShowHidden", label, "eye").with(json!({ "show": show_hidden })));
+    }
+    items
 }
 
 /// The feature that made a face, edge or vertex of `body` (its world name): a face's own creator,
@@ -200,6 +207,7 @@ fn construction_plane_icon(plane: &PlaneRef) -> &'static str {
         PlaneRef::AtAngle { .. } => "plane_angle",
         PlaneRef::Midplane { .. } => "plane_midplane",
         PlaneRef::TwoEdges { .. } => "plane_two_edges",
+        PlaneRef::AxisPoint { .. } => "plane_axis_point",
         PlaneRef::ThreePoints { .. } => "plane_three_points",
         PlaneRef::Tangent { .. } => "plane_tangent",
         PlaneRef::AlongPath { .. } => "plane_along_path",
@@ -231,9 +239,16 @@ pub(crate) fn timeline_component(app: &SolveApp, show_all: bool) -> Option<u64> 
 }
 
 /// Indices into the design's features that the timeline shows for `component` (all of them for
-/// `None`): the features of that component and of the components inside it.
-pub(crate) fn shown_feature_indices(doc: &solidcraft_engine::doc::Document, component: Option<u64>) -> Vec<usize> {
-    doc.features.iter().enumerate().filter(|(_, f)| component.is_none_or(|c| doc.component_within(f.component, c))).map(|(i, _)| i).collect()
+/// `None`): the features of that component and of the components inside it, leaving out the
+/// components marked out of the History bar unless `show_hidden` asks for them (#10393).
+pub(crate) fn shown_feature_indices(doc: &solidcraft_engine::doc::Document, component: Option<u64>, show_hidden: bool) -> Vec<usize> {
+    doc.features
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| component.is_none_or(|c| doc.component_within(f.component, c)))
+        .filter(|(_, f)| show_hidden || !doc.component_history_hidden(f.component))
+        .map(|(i, _)| i)
+        .collect()
 }
 
 /// The design's feature position for a slot among the shown features: before the shown feature
@@ -384,7 +399,7 @@ pub(crate) fn clipboard_buttons(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) 
 
 /// Where each feature's result is in `results`, by feature id: the first result of an id, as
 /// `Model::result` finds it.
-fn result_index(results: &[solidcraft_engine::doc::FeatureResult]) -> std::collections::HashMap<u64, usize> {
+pub(crate) fn result_index(results: &[solidcraft_engine::doc::FeatureResult]) -> std::collections::HashMap<u64, usize> {
     results.iter().enumerate().rev().map(|(k, r)| (r.id, k)).collect()
 }
 
@@ -500,6 +515,10 @@ fn select_range(app: &mut SolveApp, order: &[u64], id: u64, add: bool) {
 /// Give a History feature click to a compatible active dialog input in any layout.
 /// Plain clicks keep an existing pick; Ctrl/Command clicks toggle it off.
 pub(crate) fn pick_feature_into_dialog(app: &mut SolveApp, id: u64, modifiers: egui::Modifiers) -> bool {
+    // A pattern or Mirror says why it does not take a sketch (#10057).
+    if app.dialog.as_mut().is_some_and(|d| d.refuse_sketch(&app.session, id)) {
+        return true;
+    }
     let Some(d) = app.dialog.as_mut().filter(|d| d.active_input().is_some_and(|i| i.accept & crate::selection::FEATURES != 0)) else {
         return false;
     };
@@ -664,18 +683,19 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.shell.history = Some(rect);
         crate::scenario::publish_rect("history:card", rect);
         let mut child = ui.new_child(UiBuilder::new().id_salt("sc_timeline").max_rect(rect));
-        Container::paint_frame(ui.painter(), Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), t.timeline, crate::frame::Side::Left), rect);
+        Container::paint_panel_frame(
+            ui.painter(),
+            Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), t.timeline, crate::frame::Side::Left),
+            rect,
+        );
         child.set_clip_rect(rect);
         timeline_contents(app, &mut child, true);
     } else {
-        let response = Container::new(ui.ctx(), Surface::Panel)
-            .edge("sc_timeline", Edge::Bottom)
-            .exact_size(40.0)
-            .frame(Container::new(ui.ctx(), Surface::Panel).edge_frame(t.timeline))
-            .show(ui, |ui| {
-                timeline_contents(app, ui, false);
-            });
-        let frame = Container::new(ui.ctx(), Surface::Panel).edge_frame(t.timeline);
+        let host = Container::new(ui.ctx(), Surface::Panel);
+        let response = host.show_edge(ui, host.edge("sc_timeline", Edge::Bottom).exact_size(40.0), host.edge_frame(t.timeline), |ui| {
+            timeline_contents(app, ui, false);
+        });
+        let frame = host.edge_frame(t.timeline);
         Container::paint_inset(ui.painter(), response.response.rect - frame.outer_margin, frame);
         app.shell.history = Some(response.response.rect);
         crate::scenario::publish_rect("history:strip", response.response.rect);
@@ -835,7 +855,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             let show_all = ui.data(|d| d.get_temp::<bool>(show_all_id)).unwrap_or(false);
             let only = timeline_component(app, show_all);
             let filtering = only.is_some() || show_all;
-            let shown = shown_feature_indices(&app.session.doc, only);
+            let shown = shown_feature_indices(&app.session.doc, only, app.tree.history_show_hidden);
             if filtering || app.session.doc.features.iter().any(|f| f.component != 0) {
                 // A toggle ahead of the features: this part only, or the whole design.
                 let label = match only {
@@ -884,6 +904,19 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             // Each feature's result, found once for the strip: a search per chip made a long
             // timeline cost the square of its length every frame.
             let results = result_index(&app.session.model.results);
+            // The features picked in the design or in the open dialog, collected once for the
+            // strip: the dialog built its item list again for every chip.
+            let feature_of = |selection: &solidcraft_engine::Sel| match selection {
+                solidcraft_engine::Sel::Feature { id } => Some(*id),
+                _ => None,
+            };
+            let picked: std::collections::HashSet<u64> = app
+                .session
+                .selection
+                .iter()
+                .filter_map(feature_of)
+                .chain(app.dialog.as_ref().map(|dialog| dialog.items()).unwrap_or_default().iter().filter_map(feature_of))
+                .collect();
             for tile in folder_tiles(app, &order) {
                 let i = match tile {
                     FolderTile::Folder(id) => {
@@ -950,8 +983,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 let err = res.and_then(|r| r.error.clone());
                 let warn = res.and_then(|r| r.warning.clone());
                 let rolled = i >= marker;
-                let is_it = |s: &solidcraft_engine::Sel| matches!(s, solidcraft_engine::Sel::Feature { id: f } if f == id);
-                let sel = app.session.selection.iter().any(is_it) || app.dialog.as_ref().is_some_and(|d| d.items().iter().any(is_it));
+                let sel = picked.contains(id);
                 if resp.hovered() {
                     hovered = Some(*id);
                 }
@@ -974,25 +1006,30 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 if floating && marker > 0 && i == marker - 1 {
                     p.circle_filled(pos2(br.center().x, br.bottom() + t.space_3), t.space_2, accent.color);
                 }
-                let mut tip = status_text(name, ty, err.as_deref(), warn.as_deref());
-                // Greyed out says only "not shown": say why (#8100).
-                if rolled {
-                    tip.push('\n');
-                    tip.push_str(crate::i18n::tr("timeline.feature_rolled_back"));
-                }
-                if let Some(state) = sketch_state {
-                    tip.push('\n');
-                    tip.push_str(&state.text());
-                }
-                if let Some(r) = res {
-                    tip += &format!("\n{:.1} ms", r.ms);
-                }
-                tip.push('\n');
-                tip.push_str(crate::i18n::tr("timeline.feature_hint"));
+                let ms = res.map(|r| r.ms);
                 if resp.drag_started() {
                     drag = Some(Drag::Feature(*id));
                 }
-                let resp = resp.on_hover_text(tip);
+                // The tip is written only while it shows (as `on_hover_text` would lay it out).
+                let resp = resp.on_hover_ui(|ui| {
+                    let mut tip = status_text(name, ty, err.as_deref(), warn.as_deref());
+                    // Greyed out says only "not shown": say why (#8100).
+                    if rolled {
+                        tip.push('\n');
+                        tip.push_str(crate::i18n::tr("timeline.feature_rolled_back"));
+                    }
+                    if let Some(state) = sketch_state {
+                        tip.push('\n');
+                        tip.push_str(&state.text());
+                    }
+                    if let Some(ms) = ms {
+                        tip += &format!("\n{ms:.1} ms");
+                    }
+                    tip.push('\n');
+                    tip.push_str(crate::i18n::tr("timeline.feature_hint"));
+                    ui.set_max_width(ui.spacing().tooltip_width);
+                    ui.add(egui::Label::new(tip));
+                });
                 if resp.clicked() && !pick_feature_into_dialog(app, *id, ui.input(|i| i.modifiers)) {
                     let modifiers = ui.input(|i| i.modifiers);
                     if modifiers.shift {
@@ -1199,6 +1236,69 @@ mod tests {
     }
 
     #[test]
+    fn history_hiding_a_component_leaves_its_features_out_of_the_bar() {
+        use crate::context_menu::{self, Target};
+        use crate::scenario::handle_at;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.run("component.create", json!({ "name": "Copy" })).unwrap();
+        h.app.run("solid.box", json!({ "length": 10, "width": 10, "height": 10, "name": "CopyBox" })).unwrap();
+        h.app.run("component.activate", json!({ "component": "root" })).unwrap();
+        h.app.run("component.create", json!({ "name": "Part" })).unwrap();
+        h.app.run("solid.box", json!({ "length": 5, "width": 5, "height": 5, "name": "PartBox" })).unwrap();
+        h.app.run("component.activate", json!({ "component": "root" })).unwrap();
+        h.frames(4);
+        assert!(handle_at("timeline:CopyBox").is_some() && handle_at("timeline:PartBox").is_some(), "both parts' features start in the bar");
+        // The Browser menu offers to hide the copy's History, and running it leaves its entries out.
+        let copy = h.app.session.doc.components.iter().find(|c| c.name == "Copy").unwrap().id;
+        let menu = context_menu::items(&h.app, &Target::Component { id: copy });
+        let hide = menu.iter().find(|i| i.id == "component.hide_history").expect("the component menu offers Hide its History");
+        context_menu::run_item(&mut h.app, hide, egui::Pos2::ZERO);
+        h.frames(4);
+        assert!(handle_at("timeline:CopyBox").is_none(), "the hidden copy leaves the bar");
+        assert!(handle_at("timeline:PartBox").is_some(), "the rest of the design stays");
+        // The History controls' menu shows them anyway, and hides them again (#10393).
+        fn toggle(h: &Harness) -> context_menu::Item {
+            let items = context_menu::items(&h.app, &Target::HistoryControls);
+            items.into_iter().find(|i| i.id == "ui.historyShowHidden").expect("the bar offers to show hidden entries").clone()
+        }
+        let item = toggle(&h);
+        context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+        h.frames(4);
+        assert!(handle_at("timeline:CopyBox").is_some(), "the toggle brings the hidden entries back");
+        let item = toggle(&h);
+        context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+        h.frames(4);
+        assert!(handle_at("timeline:CopyBox").is_none(), "and hides them again");
+        // The component menu now offers to show its History back.
+        let menu = context_menu::items(&h.app, &Target::Component { id: copy });
+        assert!(menu.iter().any(|i| i.id == "component.show_history"), "the menu flips to Show its History");
+    }
+
+    #[test]
+    fn shown_feature_indices_leave_out_hidden_components_and_their_children() {
+        let mut h = Harness::new();
+        h.app.run("component.create", json!({ "name": "Copy" })).unwrap();
+        h.app.run("solid.box", json!({ "length": 1, "width": 1, "height": 1, "name": "CopyBox" })).unwrap();
+        h.app.run("component.create", json!({ "name": "Inner" })).unwrap();
+        h.app.run("solid.box", json!({ "length": 1, "width": 1, "height": 1, "name": "InnerBox" })).unwrap();
+        h.app.run("component.activate", json!({ "component": "root" })).unwrap();
+        h.app.run("component.create", json!({ "name": "Part" })).unwrap();
+        h.app.run("solid.box", json!({ "length": 1, "width": 1, "height": 1, "name": "PartBox" })).unwrap();
+        h.app.run("component.activate", json!({ "component": "root" })).unwrap();
+        h.app.run("component.hide_history", json!({ "component": "Copy" })).unwrap();
+        let doc = &h.app.session.doc;
+        let shown = |show_hidden: bool| super::shown_feature_indices(doc, None, show_hidden);
+        let names = |idx: Vec<usize>| idx.iter().map(|i| doc.features[*i].name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(shown(false)), ["PartBox"], "a hidden component takes its own and its children's rows out");
+        assert_eq!(names(shown(true)), ["CopyBox", "InnerBox", "PartBox"], "show-hidden lists everything again");
+        // The same filter applies when the bar narrows to one component.
+        let copy = doc.components.iter().find(|c| c.name == "Copy").unwrap().id;
+        assert!(super::shown_feature_indices(doc, Some(copy), false).is_empty(), "the component filter shows nothing of a hidden component");
+        assert_eq!(super::shown_feature_indices(doc, Some(copy), true).len(), 2, "Copy owns CopyBox and InnerBox");
+    }
+
+    #[test]
     fn history_status_translates_prefixes_and_both_diagnostics() {
         let diagnostic = "there is no body to cut or intersect in component 'Mount'; the tool may overlap 'Plate' in component 'Base' — activate that component or pick the body as a target";
         let _language = crate::i18n::scope("ja");
@@ -1303,6 +1403,7 @@ mod tests {
         }
         for (id, plane) in [
             ("midplane", PlaneRef::Midplane { a: reference(), b: reference() }),
+            ("axis_point", PlaneRef::AxisPoint { axis: reference(), point: reference() }),
             ("two_edges", PlaneRef::TwoEdges { a: reference(), b: reference() }),
             ("three_points", PlaneRef::ThreePoints { a: reference(), b: reference(), c: reference() }),
             ("tangent", PlaneRef::Tangent { face: reference(), at: Vec3::ZERO }),

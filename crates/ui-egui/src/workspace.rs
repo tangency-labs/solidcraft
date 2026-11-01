@@ -1050,8 +1050,8 @@ mod tests {
         assert!(crate::scenario::handle_at("tab:MODEL").is_none());
         assert_eq!(h.app.ui.tab, "SURFACE", "the first tab still shown is selected");
 
-        // Settings › Interface lists the standard tabs too.
-        h.call("ui.prefs", json!({"open":"Interface"}));
+        // Settings › Layout lists the standard tabs too.
+        h.call("ui.prefs", json!({"open":"Layout"}));
         crate::prefs::reveal_preference(&mut h, "prefs:toolbar_tab:MODEL");
         h.step(&json!({"click":{"handle":"prefs:toolbar_tab:MODEL"}})).unwrap();
         assert!(h.app.preferences.hidden_toolbar_tabs.is_empty());
@@ -1177,7 +1177,7 @@ mod tests {
         assert_eq!(visible_tabs(&h.app), ["SKETCH"]);
         assert_eq!(h.app.ui.tab, "SKETCH");
 
-        h.call("ui.prefs", json!({"open":"Interface"}));
+        h.call("ui.prefs", json!({"open":"Layout"}));
         h.call("ui.prefs", json!({"button":"defaults"}));
         h.call("ui.prefs", json!({"button":"ok"}));
         assert!(h.app.preferences.hidden_toolbar_tabs.is_empty());

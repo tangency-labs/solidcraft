@@ -133,10 +133,18 @@ clears the files waiting on the chips too.
 ## Typing while the agent works
 
 Each design tab has its own conversation, agent session, draft, attachments and queued messages.
-A new tab starts with an empty chat. Switching away stops the current turn and keeps its
+A new tab starts with an empty chat and a session of its own; a sign-in the chat confirmed in one
+tab still counts in the others, so a new tab doesn't mark the agent as signed out. Switching away stops the current turn and keeps its
 completed changes in that design's undo history. Returning restores the conversation; queued
 messages wait for **Send**. Closing a design closes its conversation. Conversations are kept
 only while the tabs remain open.
+
+When the agent itself creates a new design or opens a file, its conversation follows the new
+design and the same turn continues. Its completed changes stay in each design's own undo
+history. The original tab starts a fresh conversation if you return to it. Opening a file that
+is already in another tab returns an error instead of displacing that tab's conversation;
+select that tab yourself to continue there. Your own New, Open and tab switches still stop
+the current turn. Stop also cancels a file the agent is still opening.
 
 The input stays enabled during a turn. **Enter** queues the message: it shows in the conversation
 as a **Queued** bubble that you can **Edit** or remove (×) until it is sent. Several queued
@@ -157,7 +165,7 @@ messages go as one prompt, in order, when the turn ends normally.
 
 Preferences → AI → **Agents** lists every agent the chat can use, each with its kind (a program or
 an endpoint), version or model, whether it looks signed in, **Test**, **Default** (the one a new
-conversation starts with), its own permission setting, and **Remove** for the ones you added.
+conversation starts with), its own permission setting, and **Edit** and **Remove** for the ones you added.
 
 ### Found by themselves
 
@@ -187,7 +195,12 @@ doesn't change the last known login state.
 | GitHub Copilot CLI, Qwen Code, goose | listed with their install command when missing |
 
 The panel lists agents that aren't installed with their install command and a **Copy** button.
-**Refresh** looks again after you install one. **Test** starts an agent briefly, asks it for a
+**Refresh** looks again after you install one. An agent whose program is there but fails its
+`--version` check without printing a version (an install that didn't finish, such as an npm
+install whose setup script didn't run, or a program built for another kind of computer) is
+still listed, marked **does not start** with the system's reason. Connecting to it first says
+why and gives its install command; reinstall it until `--version` works in a terminal, then
+press **Refresh**. A check that runs out of time is not counted as a failure. **Test** starts an agent briefly, asks it for a
 session and ends it again.
 
 ### Flatpak
@@ -252,7 +265,20 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   take: 300 s by default, from 30 s to an hour. A slow local model (a large model on modest
   hardware, or a long message with many tool results) may need more; raise it here or in the
   endpoint's entry under **Agents**, where a change applies from the next request. A request that
-  runs out of time ends the message with the limit it hit and where to raise it.
+  runs out of time ends the message with the limit it hit and where to raise it. **Reasoning
+  effort** is optional and empty by default: nothing is sent and the provider's own default
+  applies. When set, the value goes out as `reasoning_effort` on each `/chat/completions`
+  request; accepted values differ per provider and model (for example `low`, `high` or `max`).
+  A value you set is never replaced by SolidCraft: if the endpoint refuses it, the refusal is
+  shown instead of being retried with `none`.
+
+**Edit** on an agent you added opens the same dialog filled with its name and command, or its
+protocol, endpoint, model and request timeout, and **Save** changes it in place: it keeps its id,
+its permission setting and the tools you always allow for it. A stored key is never shown: leave
+the key field empty to keep it, or type a new one to replace it. A saved key still only goes to
+HTTPS or this computer, so moving an endpoint with a key to a plain `http://` address elsewhere is
+refused. The running conversation takes a new request timeout at once; a new command, endpoint
+or model applies the next time the agent connects.
 
 For Ollama, choosing a model checks its reported capabilities in the background. If its
 capabilities list lacks `tools`, a warning below the model picker explains that the model can

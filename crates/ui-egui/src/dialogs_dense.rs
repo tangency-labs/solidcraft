@@ -219,11 +219,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::SketchIntersect { bodies, projection_link } => {
             let mut selected = if *bodies { 1 } else { 0 };
             let changed = ui_kit::row(ui, tr("ui.sketch_intersect_selection_filter"), |ui| {
-                ui_kit::segmented(ui, &mut selected, &[tr("Faces"), tr("Bodies")], Default::default())
+                ui_kit::segmented(ui, &mut selected, &[tr("Geometry"), tr("Bodies")], Default::default())
             });
             if changed && let Some(input) = d.inputs.first_mut() {
                 *bodies = selected == 1;
-                input.accept = if *bodies { BODIES } else { FACES };
+                input.accept = if *bodies { BODIES } else { super::INTERSECT_GEOMETRY };
                 input.items.clear();
             }
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
@@ -769,7 +769,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             });
             ui.add(egui::Label::new(crate::i18n::tr("ui.emboss_wrap_note")).wrap());
         }
-        Kind::Align { flip, components } => {
+        Kind::Align { flip, components, axes: [ax, ay, az] } => {
             // Where on the picked face or edge to snap: as picked (a face turns to meet
             // the other, an edge at its middle), its centre, or a round one's centre.
             for (label, key) in [("From Snap", "from_snap"), ("To Snap", "to_snap")] {
@@ -777,7 +777,11 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                     extra_choice(ui, &mut d.extra, key, key, &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle")]);
                 });
             }
-            ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
+            if *components {
+                ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
+            } else {
+                ui_kit::options(ui, "feature_options", &mut [("Flip", flip), ("X", ax), ("Y", ay), ("Z", az)]);
+            }
             // A part inside a subassembly placed more than once sits where that shared
             // definition says: aligning it moves it in every placement.
             if *components && align_moves_shared(&app.session, d.inputs.first().map_or(&[], |i| i.items.as_slice())) {

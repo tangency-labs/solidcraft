@@ -1,12 +1,20 @@
 //! Surface analyses: zebra stripes, draft angle and curvature map shading of the model's faces.
 //! View state only: no geometry changes and no undo step.
 
-use serde_json::{Value, json};
+use serde_json::Value;
 use solidcraft_geom::Vec3;
 
 use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, vec3};
+use crate::schema::{TypedContract, output_schema_for, surface_analysis as contract};
 use crate::{ContinuitySeam, Result, Session, SurfaceAnalysis, kernel};
+
+const ZEBRA: TypedContract<contract::ZebraParams> = TypedContract::new();
+const DRAFT: TypedContract<contract::DraftParams> = TypedContract::new();
+const ENVIRONMENT: TypedContract<contract::EnvironmentParams> = TypedContract::new();
+const ACCESSIBILITY: TypedContract<contract::AccessibilityParams> = TypedContract::new();
+const CURVATURE: TypedContract<contract::CurvatureParams> = TypedContract::new();
+const CONTINUITY: TypedContract<contract::ContinuityParams> = TypedContract::new();
 
 /// Stations along each edge when the call does not say (`samples`).
 const DEFAULT_SAMPLES: usize = 33;
@@ -20,41 +28,61 @@ const MAX_PICKS: usize = 512;
 const MAX_BODIES: usize = 64;
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("inspect.zebra", "Zebra Analysis", zebra)
+    CommandSpec::new("inspect.zebra", "Zebra Analysis", crate::checked!("inspect.zebra", zebra))
+        .contract(&ZEBRA)
+        .output(output_schema_for::<contract::AnalysisResult>)
         .at("SKETCH", "INSPECT")
         .icon("zebra")
         .noundo()
         .params("stripes?: number across the view (default 12); clear?: true turns the analysis off"),
-    CommandSpec::new("inspect.draft", "Draft Analysis", draft)
+    CommandSpec::new("inspect.draft", "Draft Analysis", crate::checked!("inspect.draft", draft))
+        .contract(&DRAFT)
+        .output(output_schema_for::<contract::AnalysisResult>)
         .at("SKETCH", "INSPECT")
         .icon("draft_analysis")
         .noundo()
         .params("pull?: [x,y,z] direction (default Z); angle?: degrees (default 1); clear?: true turns the analysis off"),
-    CommandSpec::new("inspect.environment_map", "Environment Map Analysis", |s, p| set(s, p, SurfaceAnalysis::Environment))
+    CommandSpec::new("inspect.environment_map", "Environment Map Analysis", crate::checked!("inspect.environment_map", environment))
+        .contract(&ENVIRONMENT)
+        .output(output_schema_for::<contract::AnalysisResult>)
         .at("SKETCH", "INSPECT")
         .icon("environment_map")
         .noundo()
         .params("clear?: true turns the analysis off"),
-    CommandSpec::new("inspect.accessibility", "Accessibility Analysis", accessibility)
+    CommandSpec::new("inspect.accessibility", "Accessibility Analysis", crate::checked!("inspect.accessibility", accessibility))
+        .contract(&ACCESSIBILITY)
+        .output(output_schema_for::<contract::AnalysisResult>)
         .at("SKETCH", "INSPECT")
         .icon("accessibility")
         .noundo()
         .params("direction?: [x,y,z] the tool comes from (default Z, from above); clear?: true turns the analysis off"),
-    CommandSpec::new("inspect.curvature_map", "Curvature Map Analysis", curvature_map)
+    CommandSpec::new("inspect.curvature_map", "Curvature Map Analysis", crate::checked!("inspect.curvature_map", curvature_map))
+        .contract(&CURVATURE)
+        .output(output_schema_for::<contract::AnalysisResult>)
         .at("SKETCH", "INSPECT")
         .icon("curvature_map")
         .noundo()
         .params("radius?: mm shown red (default: a tenth of the model's size); clear?: true turns the analysis off"),
-    CommandSpec::new("inspect.continuity", "Continuity Analysis", continuity).at("SURFACE", "INSPECT").icon("continuity").noundo().params(
-        "body?: name (default: the visible bodies); edges?: [x,y,z] points or {\"index\": i} (default: every edge of the body; \
+    CommandSpec::new("inspect.continuity", "Continuity Analysis", crate::checked!("inspect.continuity", continuity))
+        .contract(&CONTINUITY)
+        .output(output_schema_for::<contract::ContinuityResult>)
+        .at("SURFACE", "INSPECT")
+        .icon("continuity")
+        .noundo()
+        .params(
+            "body?: name (default: the visible bodies); edges?: [x,y,z] points or {\"index\": i} (default: every edge of the body; \
              a pick must match one body); samples?: 3…257 stations along each edge, ends included (default 33); \
              gap_tolerance_mm? (default 0.001), angle_tolerance_deg? (default 1), curvature_tolerance_per_mm? (default 0.01); \
              add?: true keeps the seams already shaded and adds these (measuring an edge again replaces it); \
              clear?: true turns the analysis off. → each edge's worst gap (G0), normal angle (G1) and curvature jump (G2) as \
              {value, at: [x,y,z], edge_fraction}, its verdict (smooth, curvature_jump, sharp or gap) and a summary; \
              the seams are shaded in the viewport",
-    ),
+        ),
 ];
+
+fn environment(s: &mut Session, p: &Value) -> Result<Value> {
+    set(s, p, SurfaceAnalysis::Environment)
+}
 
 fn set(s: &mut Session, p: &Value, a: SurfaceAnalysis) -> Result<Value> {
     if bool_(p, "clear").unwrap_or(false) {
@@ -64,7 +92,15 @@ fn set(s: &mut Session, p: &Value, a: SurfaceAnalysis) -> Result<Value> {
     }
     s.status_analysis_changed((!bool_(p, "clear").unwrap_or(false)).then_some(crate::status_items::StatusId::SurfaceAnalysis));
     s.revision += 1;
-    Ok(json!({ "analysis": s.analysis }))
+    let vector = |v: Vec3| [v.x, v.y, v.z];
+    let analysis = s.analysis.map(|a| match a {
+        SurfaceAnalysis::Zebra { stripes } => contract::Analysis::Zebra { stripes },
+        SurfaceAnalysis::Draft { pull, angle } => contract::Analysis::Draft { pull: vector(pull), angle },
+        SurfaceAnalysis::Curvature { radius } => contract::Analysis::Curvature { radius },
+        SurfaceAnalysis::Environment => contract::Analysis::Environment,
+        SurfaceAnalysis::Access { dir } => contract::Analysis::Access { dir: vector(dir) },
+    });
+    serde_json::to_value(contract::AnalysisResult { analysis, param_warnings: Vec::new() }).map_err(|e| bad("surface analysis", e.to_string()))
 }
 
 fn zebra(s: &mut Session, p: &Value) -> Result<Value> {
@@ -120,7 +156,12 @@ fn continuity(s: &mut Session, p: &Value) -> Result<Value> {
         s.continuity.clear();
         s.status_analysis_changed(None);
         s.revision += 1;
-        return Ok(json!({ "analysis": "continuity", "cleared": true }));
+        return serde_json::to_value(contract::ContinuityResult::Cleared {
+            analysis: "continuity".into(),
+            cleared: true,
+            param_warnings: Vec::new(),
+        })
+        .map_err(|e| bad(cmd, e.to_string()));
     }
     let samples = match p.get("samples") {
         None => DEFAULT_SAMPLES,
@@ -180,25 +221,49 @@ fn continuity(s: &mut Session, p: &Value) -> Result<Value> {
         let mut rows = Vec::new();
         for seam in &report.seams {
             summary.count(seam.verdict);
-            seams.push(ContinuitySeam { body: body.name.clone(), edge: seam.edge, points: seam.points.clone(), verdict: seam.verdict });
-            rows.push(json!({
-                "edge": seam.edge,
-                "length_mm": seam.length,
-                "samples": seam.samples,
-                "gap_mm": seam.gap_mm,
-                "normal_angle_deg": seam.normal_angle_deg,
-                "curvature_jump_per_mm": seam.curvature_jump_per_mm,
-                "verdict": seam.verdict,
-            }));
+            seams.push(ContinuitySeam {
+                body: body.name.clone(),
+                edge: seam.edge,
+                points: seam.points.clone(),
+                verdict: seam.verdict,
+                details: crate::status_details::ContinuityDetail {
+                    body: body.name.clone(),
+                    edge: seam.edge,
+                    samples: seam.samples,
+                    gap_tolerance_mm: tolerances.gap_mm,
+                    angle_tolerance_deg: tolerances.angle_deg,
+                    curvature_tolerance_per_mm: tolerances.curvature_per_mm,
+                    gap_mm: seam.gap_mm.value,
+                    normal_angle_deg: seam.normal_angle_deg.value,
+                    curvature_jump_per_mm: seam.curvature_jump_per_mm.value,
+                    length_mm: seam.length,
+                    verdict: seam.verdict.into(),
+                    gap_at: [seam.gap_mm.at.x, seam.gap_mm.at.y, seam.gap_mm.at.z],
+                    gap_fraction: seam.gap_mm.edge_fraction,
+                    normal_angle_at: [seam.normal_angle_deg.at.x, seam.normal_angle_deg.at.y, seam.normal_angle_deg.at.z],
+                    normal_angle_fraction: seam.normal_angle_deg.edge_fraction,
+                    curvature_jump_at: [seam.curvature_jump_per_mm.at.x, seam.curvature_jump_per_mm.at.y, seam.curvature_jump_per_mm.at.z],
+                    curvature_jump_fraction: seam.curvature_jump_per_mm.edge_fraction,
+                    skipped: report.skipped,
+                    unmeasured: report.unmeasured,
+                    current: true,
+                    geometry_key: body.geometry_key(),
+                    feature: body.feature,
+                },
+            });
+            rows.push(contract::EdgeReport {
+                edge: seam.edge,
+                length_mm: seam.length,
+                samples: seam.samples,
+                gap_mm: metric(seam.gap_mm),
+                normal_angle_deg: metric(seam.normal_angle_deg),
+                curvature_jump_per_mm: metric(seam.curvature_jump_per_mm),
+                verdict: verdict(seam.verdict),
+            });
         }
         summary.skipped += report.skipped;
         summary.unmeasured += report.unmeasured;
-        bodies.push(json!({
-            "body": body.name,
-            "edges": rows,
-            "skipped": report.skipped,
-            "unmeasured": report.unmeasured,
-        }));
+        bodies.push(contract::BodyReport { body: body.name.clone(), edges: rows, skipped: report.skipped, unmeasured: report.unmeasured });
     }
     if bool_(p, "add").unwrap_or(false) {
         // The seams shown stay; an edge measured again takes its new reading.
@@ -209,26 +274,40 @@ fn continuity(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.status_analysis_changed(Some(crate::status_items::StatusId::Continuity));
     s.revision += 1;
-    Ok(json!({
-        "analysis": "continuity",
-        "samples": samples,
-        "tolerances": {
-            "gap_mm": tolerances.gap_mm,
-            "angle_deg": tolerances.angle_deg,
-            "curvature_per_mm": tolerances.curvature_per_mm,
+    serde_json::to_value(contract::ContinuityResult::Measured {
+        analysis: "continuity".into(),
+        samples,
+        tolerances: contract::Tolerances {
+            gap_mm: tolerances.gap_mm,
+            angle_deg: tolerances.angle_deg,
+            curvature_per_mm: tolerances.curvature_per_mm,
         },
-        "bodies": bodies,
-        "summary": {
-            "edges": summary.edges,
-            "smooth": summary.smooth,
-            "curvature_jump": summary.curvature_jump,
-            "sharp": summary.sharp,
-            "gap": summary.gap,
-            "skipped": summary.skipped,
-            "unmeasured": summary.unmeasured,
-            "worst": summary.worst(),
+        bodies,
+        summary: contract::Summary {
+            edges: summary.edges,
+            smooth: summary.smooth,
+            curvature_jump: summary.curvature_jump,
+            sharp: summary.sharp,
+            gap: summary.gap,
+            skipped: summary.skipped,
+            unmeasured: summary.unmeasured,
+            worst: summary.worst().map(verdict),
         },
-    }))
+        param_warnings: Vec::new(),
+    })
+    .map_err(|e| bad(cmd, e.to_string()))
+}
+
+fn verdict(value: kernel::SeamVerdict) -> contract::Verdict {
+    match value {
+        kernel::SeamVerdict::Smooth => contract::Verdict::Smooth,
+        kernel::SeamVerdict::CurvatureJump => contract::Verdict::CurvatureJump,
+        kernel::SeamVerdict::Sharp => contract::Verdict::Sharp,
+        kernel::SeamVerdict::Gap => contract::Verdict::Gap,
+    }
+}
+fn metric(value: kernel::SeamWorst) -> contract::Metric {
+    contract::Metric { value: value.value, at: [value.at.x, value.at.y, value.at.z], edge_fraction: value.edge_fraction }
 }
 
 /// A tolerance parameter. A value that is given but unusable (NaN, infinity, negative, a
@@ -682,6 +761,59 @@ mod tests {
         assert!(s.status_order.is_empty(), "new design resets transient chronology");
     }
 
+    #[test]
+    fn continuity_details_never_validate_old_matching_geometry_during_a_live_drag() {
+        use std::sync::Arc;
+        let mut s = Session::default();
+        for (command, params) in [
+            ("sketch.create", json!({"plane":"XY"})),
+            ("sketch.rectangle.two_point", json!({"p0":[5,5],"p1":[25,20]})),
+            ("sketch.dimension", json!({"entities":["l1"],"value":20})),
+            ("sketch.dimension", json!({"entities":["l2"],"value":15})),
+            ("sketch.finish", json!({})),
+            ("solid.extrude", json!({"distance":5})),
+            ("inspect.continuity", json!({"samples":5})),
+            ("sketch.edit", json!({"sketch":"Sketch1"})),
+        ] {
+            s.execute(command, &params).unwrap();
+        }
+        let records = s.continuity.clone();
+        assert!(!records.is_empty());
+        assert!(s.continuity_details().iter().all(|row| row.current));
+        let before_drag = s.model.state();
+        s.execute("sketch.drag", &json!({"entity":"l1.start","from":[5,5],"to":[4,5],"live":true})).unwrap();
+        assert!(s.model.is_stale());
+        // The live solver replaces ModelState to show the moved sketch, while retaining
+        // its old downstream B-rep body. That body/key, not the whole container Arc,
+        // is the misleading geometry the pure descriptor must refuse.
+        let retained_model = s.model.state();
+        assert!(before_drag.body(&records[0].body).unwrap().body.same_shape(&retained_model.body(&records[0].body).unwrap().body));
+        assert_eq!(
+            retained_model.body(&records[0].body).unwrap().geometry_key(),
+            records[0].details.geometry_key,
+            "this real pending edit retains exactly the misleading old matching geometry key"
+        );
+        let document = s.doc.clone();
+        let before = (s.revision, s.undo.len(), s.redo.len(), s.is_dirty(), s.evaluations, s.status_order.clone());
+        for _ in 0..3 {
+            let reply = s.execute("view.status_details", &json!({})).unwrap();
+            assert!(reply["continuity"].as_array().unwrap().iter().all(|row| row["current"] == false));
+            assert!(s.continuity_target_points(&records[0].body, records[0].edge).is_none());
+        }
+        assert!(s.model.is_stale());
+        assert!(Arc::ptr_eq(&document, &s.doc));
+        assert!(Arc::ptr_eq(&retained_model, &s.model.state()));
+        assert_eq!(s.continuity, records, "query does not clean or fabricate measurements");
+        assert_eq!((s.revision, s.undo.len(), s.redo.len(), s.is_dirty(), s.evaluations, s.status_order.clone()), before);
+        s.execute("sketch.drag_end", &json!({})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("inspect.continuity", &json!({"samples":5})).unwrap();
+        assert!(!s.model.is_stale());
+        assert!(s.continuity_details().iter().all(|row| row.current));
+        let fresh = &s.continuity[0];
+        assert!(s.continuity_target_points(&fresh.body, fresh.edge).is_some(), "normal fresh evaluation/measurement restores valid targets");
+    }
+
     /// The edges of the first body of a continuity reply.
     fn edges(v: &Value) -> &Vec<Value> {
         v["bodies"][0]["edges"].as_array().unwrap_or_else(|| panic!("no edges in {v}"))
@@ -827,6 +959,112 @@ mod tests {
     }
 
     /// Hostile parameters are refused with an error, never a panic.
+    #[test]
+    fn continuity_details_keep_successful_per_record_settings_and_query_is_pure() {
+        let mut s = Session::default();
+        boxed(&mut s, 10.0);
+        let first = s
+            .execute(
+                "inspect.continuity",
+                &json!({"edges":[[5,0,0]],"samples":5,"gap_tolerance_mm":0.002,"angle_tolerance_deg":2,"curvature_tolerance_per_mm":0.03}),
+            )
+            .unwrap();
+        let old = s.continuity[0].clone();
+        s.execute(
+            "inspect.continuity",
+            &json!({"edges":[[0,5,0]],"samples":9,"gap_tolerance_mm":0.007,"angle_tolerance_deg":4,"curvature_tolerance_per_mm":0.06,"add":true}),
+        )
+        .unwrap();
+        let rows = s.continuity_details();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].samples, 5);
+        assert_eq!(rows[0].gap_tolerance_mm, 0.002);
+        assert_eq!(rows[1].samples, 9);
+        assert_eq!(rows[1].angle_tolerance_deg, 4.0);
+        assert!(rows.iter().all(|row| row.current));
+        assert_eq!(rows[0].gap_mm, first["bodies"][0]["edges"][0]["gap_mm"]["value"].as_f64().unwrap());
+        assert_eq!(rows[0].gap_at, serde_json::from_value::<[f64; 3]>(first["bodies"][0]["edges"][0]["gap_mm"]["at"].clone()).unwrap());
+        let before = (s.revision, s.doc.to_json(), s.undo.len(), s.status_activation.clone(), s.continuity.clone(), s.is_dirty());
+        for _ in 0..3 {
+            let query = s.execute("view.status_details", &json!({})).unwrap();
+            assert_eq!(query["continuity"][0]["samples"], 5);
+            assert_eq!(query["continuity"][1]["samples"], 9);
+        }
+        assert_eq!((s.revision, s.doc.to_json(), s.undo.len(), s.status_activation.clone(), s.continuity.clone(), s.is_dirty()), before);
+        assert!(s.execute("view.status_details", &json!({"extra":true})).is_err());
+        assert!(s.execute("inspect.continuity", &json!({"body":old.body,"edges":[{"index":old.edge}],"samples":2,"add":true})).is_err());
+        assert_eq!(s.continuity, before.4, "failed live update is atomic across mixed settings");
+        s.execute("inspect.continuity",&json!({"body":old.body,"edges":[{"index":old.edge}],"samples":7,"gap_tolerance_mm":old.details.gap_tolerance_mm,"angle_tolerance_deg":old.details.angle_tolerance_deg,"curvature_tolerance_per_mm":old.details.curvature_tolerance_per_mm,"add":true})).unwrap();
+        let remaining = s.continuity.iter().find(|row| row.edge != old.edge).unwrap();
+        assert_eq!(remaining.details, rows[1]);
+        assert_eq!(s.continuity.iter().find(|row| row.edge == old.edge).unwrap().details.samples, 7);
+    }
+
+    #[test]
+    fn continuity_targets_follow_geometry_identity_rather_than_view_revision() {
+        let mut s = Session::default();
+        boxed(&mut s, 10.0);
+        s.execute("inspect.continuity", &json!({"edges":[[5,0,0]],"samples":5})).unwrap();
+        let seam = s.continuity[0].clone();
+        let revision = s.revision;
+        s.execute("view.apply", &json!({"camera":{"target":[1,2,3],"yaw":0,"pitch":0,"distance":40}})).unwrap();
+        assert_eq!(s.camera.unwrap().target, solidcraft_geom::Vec3::new(1.0, 2.0, 3.0));
+        // Camera apply is an echo; these real display changes advance Session's view revision.
+        s.execute("browser.visibility", &json!({"items":[seam.body],"visible":false})).unwrap();
+        s.execute("browser.visibility", &json!({"items":[seam.body],"visible":true})).unwrap();
+        assert!(s.revision > revision);
+        assert!(s.continuity_target_points(&seam.body, seam.edge).is_some());
+        s.execute("body.rename", &json!({"body":seam.body,"name":"Renamed"})).unwrap();
+        assert!(!s.continuity_details()[0].current);
+        assert!(s.continuity_target_points(&seam.body, seam.edge).is_none());
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.continuity_details()[0].current, "restored matching geometry may be targeted again");
+        let feature = s.doc.features[0].id;
+        s.execute("timeline.redefine", &json!({"feature":feature,"command":"solid.box","params":{"length":20,"width":10,"height":10}})).unwrap();
+        assert!(!s.continuity_details()[0].current);
+        assert!(s.continuity_target_points(&seam.body, seam.edge).is_none());
+        s.execute("edit.undo", &json!({})).unwrap();
+        let restored_key = s.model.state().body(&seam.body).unwrap().geometry_key();
+        assert_ne!(
+            restored_key, seam.details.geometry_key,
+            "feature redefinition undo produces a new evaluated generation, despite restoring dimensions"
+        );
+        assert!(!s.continuity_details()[0].current);
+        assert!(s.continuity_target_points(&seam.body, seam.edge).is_none());
+        s.execute("inspect.continuity",&json!({"body":seam.body,"edges":[{"index":seam.edge}],"samples":seam.details.samples,
+            "gap_tolerance_mm":seam.details.gap_tolerance_mm,"angle_tolerance_deg":seam.details.angle_tolerance_deg,"curvature_tolerance_per_mm":seam.details.curvature_tolerance_per_mm})).unwrap();
+        assert!(s.continuity_details()[0].current, "a real fresh report validates the restored geometry generation");
+        assert!(s.continuity_target_points(&seam.body, seam.edge).is_some());
+        s.execute("edit.redo", &json!({})).unwrap();
+        assert!(!s.continuity_details()[0].current);
+        s.execute("inspect.continuity", &json!({"clear":true})).unwrap();
+        assert!(s.continuity_details().is_empty());
+    }
+
+    #[test]
+    fn continuity_details_reject_changed_occurrence_placement_without_query_evaluation() {
+        let mut s = Session::default();
+        let component = s.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap();
+        let occurrence = component["occurrence"].as_u64().unwrap();
+        s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"body_name":"PartBody"})).unwrap();
+        s.execute("component.activate", &json!({"component":0})).unwrap();
+        s.execute("inspect.continuity", &json!({"body":"PartBody","edges":[[5,0,0]],"samples":5})).unwrap();
+        let record = s.continuity[0].clone();
+        assert!(s.continuity_details()[0].current);
+        s.execute("occurrence.move", &json!({"occurrence":occurrence,"translate":[0,20,0],"capture":false})).unwrap();
+        assert!(s.pending_moves.contains_key(&occurrence), "this test intentionally exercises a pending, revertible placement");
+        let revision = s.revision;
+        assert!(!s.continuity_details()[0].current);
+        assert_eq!(s.revision, revision, "descriptor does not prepare a stale world or mutate it");
+        let _placed = s.world_state();
+        assert!(!s.continuity_details()[0].current, "a warmed moved occurrence is still different geometry placement");
+        assert!(s.continuity_target_points(&record.body, record.edge).is_none());
+        s.execute("component.revert_position", &json!({"occurrences":[occurrence]})).unwrap();
+        assert!(!s.pending_moves.contains_key(&occurrence));
+        let _restored = s.world_state();
+        assert!(s.continuity_details()[0].current, "matching restored placement is validated by real geometry identity");
+    }
+
     #[test]
     fn hostile_continuity_params_are_refused() {
         let mut s = Session::default();

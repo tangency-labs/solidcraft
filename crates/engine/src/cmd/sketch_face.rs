@@ -275,6 +275,27 @@ pub(in crate::cmd) fn capture_positions(s: &mut Session, plane: &PlaneRef) -> Re
     Ok(())
 }
 
+/// The component and placement (occurrence path, empty for the design) whose body a face pick
+/// `value` lies on: the pick's `path`, else its `body`'s first placement, else the exact
+/// attachment `captured` from it. `None` when none of them names one (a sheet metal panel
+/// face picked by its point alone, or a fixed plane picked by its point alone).
+pub(in crate::cmd) fn pick_owner(s: &Session, value: &Value, captured: &PlaneRef, cmd: &str) -> Result<Option<(u64, Vec<u64>)>> {
+    let form = face_pick_form(value).map_err(|why| bad(cmd, why))?;
+    if let Some(path) = form.path {
+        if path.is_empty() {
+            return Ok(Some((0, path)));
+        }
+        let component = s.occurrence_placement(&path)?.component;
+        return Ok(Some((component, path)));
+    }
+    if let Some(body) = form.body {
+        let state = s.model.state();
+        let doc = s.placed_document();
+        return Ok(state.body(body).map(|body| doc.model_body_component(body)).map(|component| (component, doc.first_path(component))));
+    }
+    Ok(anchor(captured).map(|anchor| (anchor.component, anchor.path.clone())))
+}
+
 #[cfg(test)]
 #[path = "sketch_face_tests.rs"]
 mod tests;
