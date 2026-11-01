@@ -1272,6 +1272,16 @@ impl Cone {
     /// or degenerate B-spline at the apex) through the cone point at that height in the
     /// point's direction (the X axis for a point on the axis).
     ///
+    /// With `Kernel::fixes.cone_iso_circle_at_axial_height` (WR-704) the function is the
+    /// SolidCraft fork's (tangency-labs/smlib 1279539, with the `SER` of 672a437 on the NURB
+    /// conversion): the circle's STEP point is the sweep start and the point's projection
+    /// onto the axis, clamped to the height interval, with no inversion, and a failed NURB
+    /// conversion is returned. A point within `tol_3d` past either end gives that end's
+    /// circle. Upstream inverts the point moved onto the cone at that height; past the apex
+    /// end of a cone with its apex at an end, that point is on the far nappe, the inversion
+    /// mirrors it through the apex and succeeds with a height outside the interval, and the
+    /// iso curve there fails with `SM_ERR`.
+    ///
     /// # Errors
     ///
     /// Those of [`Self::step_inversion`] that leave no parameters (status ignored
@@ -1295,37 +1305,55 @@ impl Cone {
             return Ok(None);
         }
 
-        // build Step Point on Surface for Point
-        let radius = self.radius(param);
-        let center = origin + param * z_axis;
-        let mut vec = reference_point - center;
-        if vec.length_squared() < 2.0 * EFF_ZERO_SQ {
-            // Given point is on our axis.
-            vec = self.rev.position.x_axis();
-        }
-        let vec = vec.unitize_or_z();
-        let point_on_surface = center + radius * vec;
-
-        // map Point to StepUV. Upstream ignores the status. When the generator drop finds no
-        // solution (a point beyond the end by up to `tol_3d`, #1067) the height of its
-        // StepUV is never written and the circle is built there (UB-87); the port uses the
-        // height of the point, clamped to the end, which is where the point lies within
-        // `tol_3d`. Every point whose inversion succeeds is unchanged.
-        let step_uv = match self.step_inversion(k, point_on_surface, tol_3d, None) {
-            Ok(inv) => inv.uv,
-            Err(SolidError::Upstream { code, .. }) if code == SM_ERR => Point2::new(
+        let step_uv = if k.fixes.cone_iso_circle_at_axial_height {
+            // the circle's StepV is its height (the cone's v is the distance along its
+            // axis, see GetRadius): a point within d3DTolerance beyond an end is on that
+            // end's circle (WR-704; tangency-labs/smlib 1279539)
+            Point2::new(
                 self.rev.anal_uv_domain.min().x,
                 height_step_ivl.clamp_value(param),
-            ),
-            Err(e) => return Err(e),
+            )
+        } else {
+            // build Step Point on Surface for Point
+            let radius = self.radius(param);
+            let center = origin + param * z_axis;
+            let mut vec = reference_point - center;
+            if vec.length_squared() < 2.0 * EFF_ZERO_SQ {
+                // Given point is on our axis.
+                vec = self.rev.position.x_axis();
+            }
+            let vec = vec.unitize_or_z();
+            let point_on_surface = center + radius * vec;
+
+            // map Point to StepUV. Upstream ignores the status. When the generator drop finds
+            // no solution (a point beyond the end by up to `tol_3d`, #1067) the height of its
+            // StepUV is never written and the circle is built there (UB-87); the port uses
+            // the height of the point, clamped to the end, which is where the point lies
+            // within `tol_3d`. Every point whose inversion succeeds is unchanged.
+            match self.step_inversion(k, point_on_surface, tol_3d, None) {
+                Ok(inv) => inv.uv,
+                Err(SolidError::Upstream { code, .. }) if code == SM_ERR => Point2::new(
+                    self.rev.anal_uv_domain.min().x,
+                    height_step_ivl.clamp_value(param),
+                ),
+                Err(e) => return Err(e),
+            }
         };
 
         // map StepUV to NurbUV (status ignored: after a failed polar conversion
-        // rNURBSUV.x holds what the converter wrote and rNURBSUV.y is unset)
+        // rNURBSUV.x holds what the converter wrote and rNURBSUV.y is unset; with the
+        // fork's rule the status is passed on, as the fork's SER does, tangency-labs/smlib
+        // 672a437)
         let (param_type, iso) = match self.convert_uv_from_step_to_nurbs(k, step_uv) {
             Ok(nurb_uv) if self.rev.swap_uv => (SurfParamType::U, nurb_uv.x),
             Ok(nurb_uv) => (SurfParamType::V, nurb_uv.y),
-            Err(e) if e.is_unported_or_cancelled() || !self.rev.swap_uv => return Err(e),
+            Err(e)
+                if e.is_unported_or_cancelled()
+                    || !self.rev.swap_uv
+                    || k.fixes.cone_iso_circle_at_axial_height =>
+            {
+                return Err(e)
+            }
             Err(e) => match self.sweep_nurbs_param_written(k, step_uv.x)? {
                 Some(x) => (SurfParamType::U, x),
                 None => return Err(e),

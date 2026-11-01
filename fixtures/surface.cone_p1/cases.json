@@ -8738,6 +8738,366 @@
     ],
     "tol": 1e-06
    }
+  },
+  {
+   "name": "iso_circle_past_apex_1e-6_on",
+   "upstream_ref": "edge case (WR-704, smlib fork 1279539): a point within tol below a cone's apex end",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 0.0,
+      "top": 2.7474774194546216,
+      "height": 1.0
+     }
+    },
+    "p": [
+     -1.648486451672773e-06,
+     -2.1979819355636972e-06,
+     -1e-06
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "iso_circle_past_apex_1e-6_outside",
+   "upstream_ref": "edge case (WR-704, smlib fork 1279539): a point within tol below a cone's apex end",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 0.0,
+      "top": 2.7474774194546216,
+      "height": 1.0
+     }
+    },
+    "p": [
+     0.17999835151354832,
+     0.23999780201806442,
+     -1e-06
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "iso_circle_past_apex_1e-6_axis",
+   "upstream_ref": "edge case (WR-704, smlib fork 1279539): a point within tol below a cone's apex end",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 0.0,
+      "top": 2.7474774194546216,
+      "height": 1.0
+     }
+    },
+    "p": [
+     0.0,
+     0.0,
+     -1e-06
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "iso_circle_past_apex_5e-4_on",
+   "upstream_ref": "edge case (WR-704, smlib fork 1279539): a point within tol below a cone's apex end",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 0.0,
+      "top": 2.7474774194546216,
+      "height": 1.0
+     }
+    },
+    "p": [
+     -0.0008242432258363865,
+     -0.0010989909677818486,
+     -0.0005
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "iso_circle_past_apex_5e-4_outside",
+   "upstream_ref": "edge case (WR-704, smlib fork 1279539): a point within tol below a cone's apex end",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 0.0,
+      "top": 2.7474774194546216,
+      "height": 1.0
+     }
+    },
+    "p": [
+     0.1791757567741636,
+     0.23890100903221817,
+     -0.0005
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "iso_circle_past_apex_5e-4_axis",
+   "upstream_ref": "edge case (WR-704, smlib fork 1279539): a point within tol below a cone's apex end",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 0.0,
+      "top": 2.7474774194546216,
+      "height": 1.0
+     }
+    },
+    "p": [
+     0.0,
+     0.0,
+     -0.0005
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "iso_circle_past_apex_9e-4_on",
+   "upstream_ref": "edge case (WR-704, smlib fork 1279539): a point within tol below a cone's apex end",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 0.0,
+      "top": 2.7474774194546216,
+      "height": 1.0
+     }
+    },
+    "p": [
+     -0.0014836378065054955,
+     -0.0019781837420073277,
+     -0.0009
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "iso_circle_past_apex_9e-4_outside",
+   "upstream_ref": "edge case (WR-704, smlib fork 1279539): a point within tol below a cone's apex end",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 0.0,
+      "top": 2.7474774194546216,
+      "height": 1.0
+     }
+    },
+    "p": [
+     0.17851636219349448,
+     0.23802181625799268,
+     -0.0009
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "iso_circle_past_apex_9e-4_axis",
+   "upstream_ref": "edge case (WR-704, smlib fork 1279539): a point within tol below a cone's apex end",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 0.0,
+      "top": 2.7474774194546216,
+      "height": 1.0
+     }
+    },
+    "p": [
+     0.0,
+     0.0,
+     -0.0009
+    ],
+    "tol": 0.001
+   }
+  },
+  {
+   "name": "iso_circle_at_apex",
+   "upstream_ref": "edge case (WR-704): the apex circle the fork's rule builds past the apex",
+   "inputs": {
+    "op": "iso_circle",
+    "cone": {
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "x": [
+      1.0,
+      0.0,
+      0.0
+     ],
+     "y": [
+      0.0,
+      1.0,
+      0.0
+     ],
+     "mode": {
+      "kind": "canonical",
+      "bot": 0.0,
+      "top": 2.7474774194546216,
+      "height": 1.0
+     }
+    },
+    "p": [
+     0.3,
+     0.4,
+     0.0
+    ],
+    "tol": 0.001
+   }
   }
  ]
 }
