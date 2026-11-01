@@ -306,9 +306,9 @@ impl Sketch {
         if self.patterns.is_empty() {
             return;
         }
-        let curves: std::collections::BTreeSet<_> = self.curves.iter().map(|c| c.id.as_str()).collect();
-        let points: std::collections::BTreeSet<_> = self.points.iter().map(|p| p.id.as_str()).collect();
-        let constraint_ids: std::collections::BTreeSet<_> = self.constraints.iter().map(|c| c.id.as_str()).collect();
+        let curves: std::collections::HashSet<_> = self.curves.iter().map(|c| c.id.as_str()).collect();
+        let points: std::collections::HashSet<_> = self.points.iter().map(|p| p.id.as_str()).collect();
+        let constraint_ids: std::collections::HashSet<_> = self.constraints.iter().map(|c| c.id.as_str()).collect();
         let retired: Vec<_> = self
             .patterns
             .iter()
