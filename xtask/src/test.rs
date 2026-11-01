@@ -2,6 +2,8 @@
 //! By default they all run at once, with sequential doc/wasm `side` jobs alongside.
 //! SOLIDCRAFT_TEST_JOBS opts into a shared bound for test binaries and those side jobs, and
 //! splits each binary's libtest threads and action-matrix workers across the binaries in flight.
+//! Like CI on pull requests and pushes to `main`, it skips the nightly-only property tests
+//! ([`NIGHTLY_ONLY`]) unless asked for them.
 
 use std::ffi::OsStr;
 use std::process::{Command, Stdio};
@@ -10,9 +12,35 @@ use std::time::Instant;
 
 use crate::{cargo, root};
 
+/// Test binaries that CI runs only in the nightly "Property tests" job, as (package folder under
+/// `crates/`, integration test target). Their inputs are random on every run, so a known kernel
+/// bug would fail them at random: pull requests and pushes to `main` skip them
+/// (.config/nextest.toml, .github/workflows/ci.yml), and so does the local gate.
+/// `cargo xtask test --property-tests` runs them.
+pub const NIGHTLY_ONLY: &[(&str, &str)] = &[("kernel", "boolean_props")];
+
+/// Whether CI runs this test target only nightly.
+fn nightly_only(pkg: &str, kind: &str, name: &str) -> bool {
+    kind == "test" && NIGHTLY_ONLY.iter().any(|(p, n)| *p == pkg && *n == name)
+}
+
+/// The nextest filter that leaves out [`NIGHTLY_ONLY`], the one ci.yml uses on pushes to `main`.
+pub fn without_nightly_only() -> String {
+    filter_without(NIGHTLY_ONLY)
+}
+
+fn filter_without(skip: &[(&str, &str)]) -> String {
+    if skip.is_empty() {
+        return "all()".into();
+    }
+    skip.iter().map(|(pkg, name)| format!("not (package(solidcraft-{pkg}) & binary({name}))")).collect::<Vec<_>>().join(" & ")
+}
+
 /// A test executable from `cargo test --no-run`.
 struct TestBin {
     label: String,
+    /// Skipped unless the caller asks for the property tests ([`NIGHTLY_ONLY`]).
+    nightly_only: bool,
     exe: String,
     dir: String,
 }
@@ -20,10 +48,17 @@ struct TestBin {
 /// Build the tests with `cargo_args` (e.g. `--locked`), run each binary with `test_args`, and run
 /// the `side` jobs in order. A configured job bound includes the sequential side-job worker.
 /// Each prints a line when it ends; a failure prints its whole output and does not cancel work.
-pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>) -> Result<(), String> {
+/// The [`NIGHTLY_ONLY`] binaries run only with `property_tests`.
+pub fn run(cargo_args: &[&str], test_args: &[&str], property_tests: bool, side: Vec<(String, Command)>) -> Result<(), String> {
     let limit = job_limit(std::env::var_os("SOLIDCRAFT_TEST_JOBS").as_deref())?;
     let split = thread_split(limit, std::thread::available_parallelism().map_or(1, |n| n.get()));
-    let bins = build(cargo_args)?;
+    let (bins, skipped): (Vec<TestBin>, Vec<TestBin>) = build(cargo_args)?.into_iter().partition(|b| property_tests || !b.nightly_only);
+    for b in &skipped {
+        println!("skip  {:<44}          nightly-only property tests, as in CI; --property-tests runs them", b.label);
+    }
+    if bins.is_empty() {
+        return Err("every selected test binary is a nightly-only property test; add --property-tests to run them".into());
+    }
     let start = Instant::now();
     let side_count = side.len();
     let mut batches = Vec::with_capacity(bins.len() + 1);
@@ -154,8 +189,10 @@ fn build(cargo_args: &[&str]) -> Result<Vec<TestBin>, String> {
         let dir = manifest.parent().map(|d| d.to_path_buf()).unwrap_or_else(root);
         let pkg = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let kind = m["target"]["kind"][0].as_str().unwrap_or("");
-        let label = format!("{pkg} {kind} {}", m["target"]["name"].as_str().unwrap_or(""));
-        bins.push(TestBin { label, exe: exe.to_string(), dir: dir.to_string_lossy().into_owned() });
+        let name = m["target"]["name"].as_str().unwrap_or("");
+        let label = format!("{pkg} {kind} {name}");
+        let nightly_only = nightly_only(&pkg, kind, name);
+        bins.push(TestBin { label, nightly_only, exe: exe.to_string(), dir: dir.to_string_lossy().into_owned() });
     }
     if bins.is_empty() {
         return Err("cargo test --no-run built no test executables".into());
@@ -172,7 +209,9 @@ pub fn doc_tests(cargo_args: &[&str], test_args: &[&str]) -> (String, Command) {
 
 #[cfg(test)]
 mod tests {
-    use super::{TestBin, binary_command, budget_env, job_limit, run_bounded, thread_split};
+    use super::{
+        NIGHTLY_ONLY, TestBin, binary_command, budget_env, filter_without, job_limit, nightly_only, run_bounded, thread_split, without_nightly_only,
+    };
     use std::ffi::OsStr;
     use std::path::Path;
     use std::sync::Barrier;
@@ -284,7 +323,7 @@ mod tests {
 
     #[test]
     fn binary_command_bounds_threads_and_matrix_workers_only_under_a_budget() {
-        let bin = TestBin { label: "pkg test t".into(), exe: "true".into(), dir: ".".into() };
+        let bin = TestBin { label: "pkg test t".into(), nightly_only: false, exe: "true".into(), dir: ".".into() };
         let env_of = |c: &std::process::Command, name: &str| {
             c.get_envs().find(|(k, _)| *k == OsStr::new(name)).and_then(|(_, v)| v).map(|v| v.to_string_lossy().into_owned())
         };
@@ -298,5 +337,37 @@ mod tests {
         assert_eq!(c.get_current_dir(), Some(Path::new(".")));
         assert_eq!(env_of(&c, "CARGO_MANIFEST_DIR").as_deref(), Some("."));
         assert_eq!(c.get_args().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>(), ["--exact", "x"]);
+    }
+
+    #[test]
+    fn only_the_nightly_property_test_binaries_are_skipped() {
+        assert!(nightly_only("kernel", "test", "boolean_props"));
+        assert!(!nightly_only("kernel", "lib", "boolean_props"));
+        assert!(!nightly_only("kernel", "lib", "solidcraft_kernel"));
+        assert!(!nightly_only("engine", "test", "boolean_props"));
+        assert!(!nightly_only("engine", "test", "atomic_commands"));
+        assert_eq!(without_nightly_only(), "not (package(solidcraft-kernel) & binary(boolean_props))");
+        assert_eq!(filter_without(&[]), "all()");
+        assert_eq!(
+            filter_without(&[("kernel", "a"), ("engine", "b")]),
+            "not (package(solidcraft-kernel) & binary(a)) & not (package(solidcraft-engine) & binary(b))"
+        );
+    }
+
+    /// The local gate leaves out exactly what CI leaves out of pull requests and pushes to `main`,
+    /// so the lists cannot drift apart (#7212).
+    #[test]
+    fn the_local_gate_skips_what_ci_skips() {
+        let read = |p: &str| std::fs::read_to_string(crate::root().join(p)).unwrap_or_else(|e| panic!("{p}: {e}"));
+        let nextest = read(".config/nextest.toml");
+        let ci = read(".github/workflows/ci.yml");
+        for (pkg, name) in NIGHTLY_ONLY {
+            let manifest = read(&format!("crates/{pkg}/Cargo.toml"));
+            assert!(manifest.contains(&format!("name = \"solidcraft-{pkg}\"")), "crates/{pkg} is not solidcraft-{pkg}");
+            assert!(crate::root().join(format!("crates/{pkg}/tests/{name}.rs")).is_file(), "no test target {name} in crates/{pkg}");
+            let filter = format!("package(solidcraft-{pkg}) & binary({name})");
+            assert!(nextest.contains(&format!("({filter})")), ".config/nextest.toml's default-filter does not skip {filter}");
+            assert!(ci.contains(&format!("not ({filter})")), "ci.yml's push-to-main filter does not skip {filter}");
+        }
     }
 }

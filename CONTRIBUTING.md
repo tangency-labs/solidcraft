@@ -192,7 +192,10 @@ no LTO, and debug assertions off (truck has debug-only assertions that reject va
 builds several times faster than `--release`. If a test fails only in a plain debug build, say so
 in the PR. `cargo xtask test` builds the tests with it and then runs every test binary at once
 (`cargo test` runs them one after another); arguments after `--` go to each binary, e.g.
-`cargo xtask test -- shell`. Set `SOLIDCRAFT_TEST_JOBS` to a positive integer to opt into a
+`cargo xtask test -- shell`. Like CI on pull requests and pushes to `main`, `cargo xtask test`
+and `cargo xtask ci` skip the kernel's `boolean_props` property tests, whose random inputs can
+land on a known kernel bug; `cargo xtask test --property-tests` runs them too. Set
+`SOLIDCRAFT_TEST_JOBS` to a positive integer to opt into a
 shared bound on top-level test/side commands for `cargo xtask test` and `cargo xtask ci`.
 For example, `SOLIDCRAFT_TEST_JOBS=2` allows two commands at once; the sequential wasm/doc
 worker consumes one of those slots. Every binary and side check still runs after failures.
@@ -227,7 +230,8 @@ Check that validation after merging. They are listed in
   `pattern_suppress_tests::enclosure_datums_follow_wall_height_and_board_depth_with_material_proofs`,
   `cmd::plastic::tests::enclosure_snap_fit_follows_resized_front_wall`, the `atomic_commands` contract tests
 - `solidcraft-kernel`: `tests::boolean_identity_on_tangent_primitives`, `tspline::tests::hostile_tsplines_never_panic`, and the `boolean_props` property tests
-  (these run only in the nightly "Property tests" job: their inputs are random, so main skips them too)
+  (these run only in the nightly "Property tests" job: their inputs are random, so main and the local
+  gate skip them too; `cargo xtask test --property-tests` runs them)
 - `solidcraft-ui-egui` scenarios: `acceptance_sensor_enclosure`
 
 **The action matrix** tries every ordinary action on every face, edge, vertex and body of a

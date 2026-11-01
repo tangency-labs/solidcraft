@@ -72,9 +72,11 @@ commands:
   skills          check that AGENTS.md and skills/*/SKILL.md cite files, `cargo xtask` commands and skills
                   that exist, that the router table lists exactly the skills there are, and that
                   AGENTS.md and new skills stay short
-  test [CARGO ARGS] [-- TEST ARGS]
+  test [--property-tests] [CARGO ARGS] [-- TEST ARGS]
                   build the tests with the ci profile, then run every test binary at once
-                  (and the doc tests alongside); SOLIDCRAFT_TEST_JOBS=N bounds concurrent test
+                  (and the doc tests alongside); like CI on pull requests and pushes to main,
+                  it and ci skip the nightly-only boolean_props property tests unless
+                  --property-tests; SOLIDCRAFT_TEST_JOBS=N bounds concurrent test
                   and side commands for test/ci and splits each binary's test threads and action
                   matrix workers across the binaries in flight; explicit RUST_TEST_THREADS and
                   ACTION_MATRIX_JOBS overrides still win
@@ -115,7 +117,10 @@ fn main() -> ExitCode {
         Some("lists") => lists::run(&root(), rest.contains(&"--fix")),
         Some("test") => {
             let (cargo_args, test_args) = rest.iter().position(|a| *a == "--").map_or((&rest[..], &[][..]), |i| (&rest[..i], &rest[i + 1..]));
-            test::run(cargo_args, test_args, vec![test::doc_tests(cargo_args, test_args)])
+            let property_tests = rest.contains(&"--property-tests");
+            let cargo_args: Vec<&str> = cargo_args.iter().copied().filter(|a| *a != "--property-tests").collect();
+            let test_args: Vec<&str> = test_args.iter().copied().filter(|a| *a != "--property-tests").collect();
+            test::run(&cargo_args, &test_args, property_tests, vec![test::doc_tests(&cargo_args, &test_args)])
         }
         Some("ci") => cmd_ci(),
         Some("wasm") => cmd_wasm(),
