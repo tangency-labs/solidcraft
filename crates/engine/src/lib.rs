@@ -289,6 +289,21 @@ pub struct Snapshot {
     pub visibility: Visibility,
 }
 
+/// A joint drag's frame, drawn before the drag applies it (#6325): the transforms (in their
+/// parents) its solve gave the occurrences it moved, which the world state places them by.
+/// Running `joint.reach` on every pointer move evaluated, re-placed and redrew the whole design
+/// and pushed an undo step each frame; the drag now solves on a copy of the design and shows the
+/// result here, and its release applies the last frame as one `joint.reach`. It is no part of
+/// the design, its history or a save, and stands only while the design is the one it was
+/// worked out for: any change to the design leaves it out.
+#[derive(Clone, Debug)]
+pub struct DragPreview {
+    /// The design the frame was worked out for.
+    pub design: Arc<Document>,
+    /// The occurrences the frame moved, and where it moved them (in their parents).
+    pub moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+}
+
 /// Where the open sketch was entered (`sketch.create`, `sketch.edit`): the design before it and
 /// the undo history then, so `sketch.cancel` can tell the entry still describes the history.
 #[derive(Clone)]
@@ -357,6 +372,7 @@ struct WorldCache {
     doc: Arc<Document>,
     model: Arc<solidcraft_doc::ModelState>,
     pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    drag_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
     active_component: u64,
     active_occurrence_path: Option<Vec<u64>>,
     world: Arc<solidcraft_doc::ModelState>,
@@ -375,6 +391,7 @@ impl WorldCache {
         Arc::ptr_eq(&self.doc, &session.doc)
             && Arc::ptr_eq(&self.model, model)
             && self.pending_moves == session.pending_moves
+            && &self.drag_moves == session.drag_moves()
             && self.active_component == session.active_component
             && self.active_occurrence_path == session.active_occurrence_path
     }
@@ -491,10 +508,15 @@ pub struct Session {
     pub active_occurrence_path: Option<Vec<u64>>,
     /// Occurrence moves not captured yet (Capture Position keeps them, a recompute drops them).
     pub pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
+    /// A joint drag's frame, drawn before the drag applies it (#6325): see [`DragPreview`].
+    pub drag_preview: Option<DragPreview>,
     world_cache: std::sync::Mutex<Option<WorldCache>>,
     /// The design the joints were last solved for, as the solve left it, and the model it read
     /// (see [`Session::solve_joints`]).
     joints_settled: Option<(Arc<Document>, std::sync::Weak<solidcraft_doc::ModelState>)>,
+    /// The design and model the last body-name pinning pass saw: a command that changes neither
+    /// the features nor the model's results (a joint drag frame) has no new body to pin.
+    names_pinned: Option<(Arc<Document>, std::sync::Weak<solidcraft_doc::ModelState>)>,
     occurrence_visibility_cache: std::sync::Mutex<Option<occurrences::VisibilityCache>>,
     /// The hidden joints, folders and bodies of the view, as sets: the browser asks about every
     /// joint of the design on every frame (#3892), the viewport about every body, and an answer
@@ -575,6 +597,9 @@ pub struct Session {
     /// Full model evaluations (`refresh`), for tests.
     #[cfg(test)]
     pub(crate) evaluations: usize,
+    /// Body-name pinning passes that walked the features (`pin_body_names`), for tests.
+    #[cfg(test)]
+    pub(crate) body_name_passes: usize,
     /// Resolved associative trace inputs, independent of the document revision and view state.
     pub(crate) motion_traces: cmd::motion::associative::Cache,
 }
@@ -722,8 +747,10 @@ impl Session {
             active_component: 0,
             active_occurrence_path: None,
             pending_moves: Default::default(),
+            drag_preview: None,
             world_cache: Default::default(),
             joints_settled: None,
+            names_pinned: None,
             occurrence_visibility_cache: Default::default(),
             visibility_index_cache: Default::default(),
             consumed_sketches_cache: Default::default(),
@@ -758,6 +785,8 @@ impl Session {
             render_jobs: Default::default(),
             #[cfg(test)]
             evaluations: 0,
+            #[cfg(test)]
+            body_name_passes: 0,
             motion_traces: Default::default(),
             crash_journal: false,
         }
@@ -963,13 +992,21 @@ impl Session {
         self.model.forget_fingerprints();
     }
 
-    /// Prepared placements only: optional save caches must not compute a cold world.
-    pub(crate) fn cached_world_state(&self) -> Option<Arc<solidcraft_doc::ModelState>> {
+    /// Prepared placements only: optional save caches must not compute a cold world, and a
+    /// joint drag's frame drawn in layers checks it placed nothing.
+    pub fn cached_world_state(&self) -> Option<Arc<solidcraft_doc::ModelState>> {
         let state = self.model.state();
         if self.doc.occurrences.is_empty() {
             return Some(state);
         }
         self.world_cache.lock().ok()?.as_ref().filter(|cache| cache.matches(self, &state)).map(|cache| cache.world.clone())
+    }
+
+    /// The moves of the joint drag's frame shown ([`DragPreview`]); none once the design is not
+    /// the one it was worked out for.
+    pub fn drag_moves(&self) -> &std::collections::BTreeMap<u64, solidcraft_doc::Mat> {
+        static NONE: std::collections::BTreeMap<u64, solidcraft_doc::Mat> = std::collections::BTreeMap::new();
+        self.drag_preview.as_ref().filter(|p| Arc::ptr_eq(&p.design, &self.doc)).map_or(&NONE, |p| &p.moves)
     }
 
     /// Re-evaluate the model after a document change.
@@ -991,18 +1028,14 @@ impl Session {
         let placed = self.world_cache.lock().ok().and_then(|c| c.as_ref().map(|c| c.placed.clone())).unwrap_or_default();
         // Taken out while placing, so a scratch copy of the session sharing it never waits.
         let mut reuse = placed.lock().map(|mut p| std::mem::take(&mut *p)).unwrap_or_default();
-        let mut w = {
-            if self.pending_moves.is_empty() {
-                solidcraft_doc::world_state_reusing(&self.doc, &st, &mut reuse)
-            } else {
-                let mut d = (*self.doc).clone();
-                for o in &mut d.occurrences {
-                    if let Some(m) = self.pending_moves.get(&o.id) {
-                        o.transform = *m;
-                    }
-                }
-                solidcraft_doc::world_state_reusing(&d, &st, &mut reuse)
-            }
+        let drag = self.drag_moves();
+        let mut w = if drag.is_empty() {
+            solidcraft_doc::world_state_moved_reusing(&self.doc, &st, &self.pending_moves, &mut reuse)
+        } else {
+            // A drag's frame places its occurrences over any move not captured yet.
+            let mut moves = self.pending_moves.clone();
+            moves.extend(drag.iter().map(|(o, m)| (*o, *m)));
+            solidcraft_doc::world_state_moved_reusing(&self.doc, &st, &moves, &mut reuse)
         };
         if let Ok(mut p) = placed.lock() {
             *p = reuse;
@@ -1036,6 +1069,7 @@ impl Session {
                 doc: self.doc.clone(),
                 model: st,
                 pending_moves: self.pending_moves.clone(),
+                drag_moves: drag.clone(),
                 active_component: self.active_component,
                 active_occurrence_path: self.active_occurrence_path.clone(),
                 world: w.clone(),
@@ -1134,6 +1168,14 @@ impl Session {
             return;
         }
         cmd::joints::place(self);
+        self.joints_placed();
+    }
+
+    /// The joints were just solved for this design and model and the design moved to the
+    /// solution: the refresh after the command need not solve them again unless the model
+    /// changes (see [`Session::solve_joints`]). `joint.reach` says so after its own solve, which
+    /// every frame of a joint drag runs.
+    pub(crate) fn joints_placed(&mut self) {
         self.joints_settled = Some((self.doc.clone(), Arc::downgrade(&self.model.state())));
     }
 
@@ -1182,10 +1224,33 @@ impl Session {
     /// with; one made in memory ([`Self::new`]) by its first command that changes it, with the
     /// names it has after that command (a delete, reorder, suppress or rollback renumbers the
     /// later counted bodies once).
+    ///
+    /// Skipped when nothing the pass reads changed since the last one: the features (with the
+    /// names they pin), the reserved names and the model's results. A joint drag frame changes
+    /// only where occurrences are and the joints' values; walking every feature's result for it
+    /// took 40 ms a frame in a 5,484-feature assembly. The model is compared by allocation: the
+    /// weak reference keeps the allocation, so a later model can't be mistaken for it.
     fn pin_body_names(&mut self) {
         if self.model.is_stale() {
             return;
         }
+        let state = self.model.state();
+        let unchanged = self.names_pinned.as_ref().is_some_and(|(doc, model)| {
+            std::sync::Weak::as_ptr(model) == Arc::as_ptr(&state)
+                && (Arc::ptr_eq(doc, &self.doc) || (doc.features == self.doc.features && doc.reserved_body_names == self.doc.reserved_body_names))
+        });
+        if unchanged {
+            return;
+        }
+        #[cfg(test)]
+        {
+            self.body_name_passes += 1;
+        }
+        self.pin_body_names_pass();
+        self.names_pinned = Some((self.doc.clone(), Arc::downgrade(&self.model.state())));
+    }
+
+    fn pin_body_names_pass(&mut self) {
         let mut pins: Vec<(u64, Vec<String>)> = Vec::new();
         let mut reserve: Vec<String> = Vec::new();
         // The names of the bodies each feature made, kept with the state they were read from:
@@ -1718,11 +1783,13 @@ impl Session {
             active_component: self.active_component,
             active_occurrence_path: self.active_occurrence_path.clone(),
             pending_moves: self.pending_moves.clone(),
+            drag_preview: None,
             world_cache: std::sync::Mutex::new(self.world_cache.lock().ok().and_then(|cache| cache.clone())),
             joints_settled: self.joints_settled.clone(),
             // Read again by the copy: handing it these references measured more peak memory on a
             // large design (the rover, evaluated ahead) for no change in what it pins.
             made_bodies: MadeBodies::new(),
+            names_pinned: None,
             occurrence_visibility_cache: Default::default(),
             visibility_index_cache: Default::default(),
             consumed_sketches_cache: Default::default(),
@@ -1756,6 +1823,8 @@ impl Session {
             saved_visibility: self.saved_visibility.clone(),
             #[cfg(test)]
             evaluations: 0,
+            #[cfg(test)]
+            body_name_passes: 0,
             motion_traces: self.motion_traces.clone(),
             crash_journal: false,
         }

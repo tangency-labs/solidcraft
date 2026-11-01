@@ -236,6 +236,10 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 /// far (the picture grows a few times a second), then all of them, in the order they came, until
 /// the design changes; otherwise the session's.
 pub(crate) fn shown_world(app: &SolveApp) -> Arc<ModelState> {
+    // A joint drag drawn in layers shows the world it began on, its moving parts moved on the GPU.
+    if let Some(w) = crate::viewport::layers::world(app) {
+        return w;
+    }
     let Some(m) = app.open_meshing.as_ref() else { return app.session.world_state() };
     if !Arc::ptr_eq(&app.session.world_state(), &m.world) {
         return app.session.world_state();

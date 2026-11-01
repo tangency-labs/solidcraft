@@ -128,11 +128,10 @@ impl Resources {
         &mut self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
-        binds: [&wgpu::BindGroup; 2],
+        scenes: &[(&Batches, &wgpu::BindGroup)],
         radius: f32,
         size_px: [f32; 2],
         reversed: bool,
-        batches: [&Batches; 2],
     ) {
         let enabled = radius.is_finite() && radius > 0.0;
         // Bound memory at large window sizes; normalized coordinates also handle downsampling.
@@ -164,7 +163,7 @@ impl Resources {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        for (batch, bind) in batches.into_iter().zip(binds) {
+        for &(batch, bind) in scenes {
             pass.set_bind_group(0, bind, &[]);
             pass.set_pipeline(&self.pipeline);
             if let Some(tris) = &batch.tris {

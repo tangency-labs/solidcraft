@@ -47,6 +47,7 @@ pub(crate) use features::{EdgeRefForm, PLANE_FORMS, axis_dir_form, axis_line_obj
 pub use features::{auto_operation, extrude_reach, shown_scope};
 pub use file::open_steps::OpenSteps;
 pub use join_pieces::{Addition, addition};
+pub use joints::{reach_from, reach_preview};
 pub use sketch::dimension_roles;
 pub(crate) use sketch::face::face_pick_form;
 pub use sketch_construction::{

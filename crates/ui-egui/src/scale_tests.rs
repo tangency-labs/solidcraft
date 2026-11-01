@@ -295,6 +295,7 @@ pub(crate) fn view_frame(
         ssaa: 1.0,
         hover_tint: [f32::from(t.hover_face_lift) / 255.0; 3],
         selection_tint: [0.4, 0.6, 0.9],
+        layers: Vec::new(),
     }
 }
 

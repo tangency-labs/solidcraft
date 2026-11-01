@@ -297,6 +297,10 @@ fn reach_refuses_bad_params_and_says_why_nothing_moves() {
         json!({"occurrence": "Fore", "point": [0, 0, 0], "joints": "Elbow"}),
         json!({"occurrence": "Fore", "point": [0, 0, 0], "joints": ["Nope"]}),
         json!({"occurrence": "Fore", "point": [0, 0, 0], "at": [f64::MAX, 0, 0]}),
+        json!({"occurrence": "Fore", "point": [0, 0, 0], "from": {"joint": "Elbow", "values": [10]}}),
+        json!({"occurrence": "Fore", "point": [0, 0, 0], "from": [{"joint": "Nope", "values": [10]}]}),
+        json!({"occurrence": "Fore", "point": [0, 0, 0], "from": [{"joint": "Elbow", "values": [10, 20]}]}),
+        json!({"occurrence": "Fore", "point": [0, 0, 0], "from": [{"joint": "Elbow", "values": ["x"]}]}),
     ] {
         assert!(s.execute("joint.reach", &bad).is_err(), "{bad}");
     }
@@ -344,6 +348,84 @@ fn reach_preserves_full_diagnostics_without_repeating_dof_analysis() {
         for part in ["Crank", "Coupler", "Rocker"] {
             assert_eq!(full.dof.get(&occ(&s, part)), Some(&1), "{command}: {part}");
         }
+    }
+}
+
+/// A joint drag frame (a quiet, continuous reach) solves the joints once and does not walk every
+/// feature again to pin body names: the refresh after it keeps the reach's own solve, and the
+/// pinning pass finds the features and the model as it left them (#6325). A body made after the
+/// frames is still pinned, and so is a renamed one.
+#[test]
+fn reach_frames_solve_once_and_skip_body_name_pinning() {
+    let (mut s, _, q0) = four_bar();
+    let o4 = Vec3::new(45.0, 0.0, 0.0);
+    let start = q0.y.atan2(q0.x - 45.0);
+    let passes = s.body_name_passes;
+    for angle in [-4.0_f64, -8.0, -12.0] {
+        let a = start + angle.to_radians();
+        let to = o4 + Vec3::new(40.0 * a.cos(), 40.0 * a.sin(), 0.0);
+        let evaluations = s.evaluations;
+        super::solve_counts::take();
+        let r = reach(&mut s, "Rocker", q0, json!({"point":pt(to), "continuous":true, "quiet":true}));
+        assert_eq!((&r["reached"], &r["moved"]), (&json!(true), &json!(true)), "{r}");
+        assert_eq!(s.evaluations, evaluations, "a placement change keeps the model");
+        assert_eq!(super::solve_counts::take(), (1, 0), "the refresh keeps the reach's solve");
+        assert_eq!(s.body_name_passes, passes, "nothing new to pin");
+        // The kept solve is the one a fresh solve gives.
+        let full = solidcraft_doc::joints::solve(&s.doc, &s.model.state());
+        let mut next = (*s.doc).clone();
+        next.apply_joint_solution(&full);
+        for part in ["Crank", "Coupler", "Rocker"] {
+            let at = |d: &solidcraft_doc::Document| solidcraft_doc::apply_point(&solidcraft_doc::joints::occurrence_world(d, occ(&s, part)), q0);
+            assert!(at(&s.doc).dist(at(&next)) < 1e-9, "{angle}°: {part} is where a new solve puts it");
+        }
+    }
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0], "name": "Late"}));
+    assert_eq!(s.body_name_passes, passes + 1);
+    let late = s.doc.find_feature("Late").map(|f| f.body_names.clone()).unwrap_or_default();
+    assert_eq!(late.len(), 1, "the new body's name is pinned: {late:?}");
+    assert!(s.doc.reserved_body_names.contains(&late[0]), "{late:?}");
+    run(&mut s, "body.rename", json!({"body": late[0].clone(), "name": "Renamed"}));
+    assert_eq!(s.doc.find_feature("Late").map(|f| f.body_names.clone()), Some(vec!["Renamed".to_string()]));
+    assert!(s.model.state().body("Renamed").is_some());
+}
+
+/// #6325: a joint drag's frames reach on a copy of the design (`reach_preview`), and its release
+/// applies the last one as `joint.reach` from the values that frame started from: the design
+/// ends where the frames showed it, closed loop and all, in one undo step.
+#[test]
+fn a_reach_from_the_last_frames_start_ends_where_the_frames_showed() {
+    let (mut s, _, q0) = four_bar();
+    let o4 = Vec3::new(45.0, 0.0, 0.0);
+    let start = q0.y.atan2(q0.x - 45.0);
+    let design = s.doc.clone();
+    let rocker = occ(&s, "Rocker");
+    let local = solidcraft_doc::apply_point(&solidcraft_doc::mat_inverse(&solidcraft_doc::joints::occurrence_world(&s.doc, rocker)).unwrap(), q0);
+    let mut pose = (*s.doc).clone();
+    let mut last = None;
+    for angle in [-6.0_f64, -12.0, -18.0] {
+        let a = start + angle.to_radians();
+        let to = o4 + Vec3::new(40.0 * a.cos(), 40.0 * a.sin(), 0.0);
+        let before = pose.assembly.joints.iter().map(|j| (j.id, j.values.clone())).collect();
+        let r = solidcraft_doc::joints::Reach { occurrence: rocker, point: local, to, axis: None, joints: None };
+        assert!(super::reach_preview(&mut pose, &s.model.state(), &r).is_ok());
+        last = Some((before, to));
+    }
+    assert!(std::sync::Arc::ptr_eq(&design, &s.doc), "frames leave the design alone");
+    let (before, to) = last.unwrap();
+    let from = super::reach_from(&s.doc, &before);
+    assert!(from.as_array().is_some_and(|f| !f.is_empty()), "{from}");
+    let steps = s.undo.len();
+    let r = reach(&mut s, "Rocker", q0, json!({"point": pt(to), "quiet": true, "continuous": true, "from": from}));
+    assert_eq!((&r["reached"], &r["moved"]), (&json!(true), &json!(true)), "{r}");
+    assert_eq!(s.undo.len(), steps + 1);
+    for part in ["Crank", "Coupler", "Rocker"] {
+        let at = |d: &solidcraft_doc::Document| solidcraft_doc::apply_point(&solidcraft_doc::joints::occurrence_world(d, occ(&s, part)), q0);
+        assert!(at(&s.doc).dist(at(&pose)) < 1e-6, "{part}: {:?} vs the frame's {:?}", at(&s.doc), at(&pose));
+    }
+    for j in &s.doc.assembly.joints {
+        let shown = pose.assembly.joints.iter().find(|k| k.id == j.id).map(|k| k.values.clone()).unwrap_or_default();
+        assert!(j.values.iter().zip(&shown).all(|(a, b)| (a - b).abs() < 1e-6), "{}: {:?} vs {shown:?}", j.name, j.values);
     }
 }
 
