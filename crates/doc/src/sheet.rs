@@ -45,7 +45,9 @@ const TORN_ZONE_TOL: f64 = 0.01;
 /// A fold's bend zone (`strip`, from `s0` to `s0 + ba` along `n`) as the run of its start line
 /// and the run of its far edge along `d`, when it ends square across or on a straight line from
 /// the one to the other (within `TORN_ZONE_TOL`): such an end turns evenly along the bend as it
-/// folds, as a torn end does (`SheetFlange::tear`). None for any other shape.
+/// folds, as a torn end does (`SheetFlange::tear`). None for any other shape, and for an end
+/// whose far edge stops short of its start line: a torn end only runs the moving side on, so the
+/// material outside such an end's square would be lost.
 fn torn_zone(strip: &[Vec2], n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<((f64, f64), (f64, f64))> {
     let run = |s: f64| {
         strip
@@ -55,7 +57,7 @@ fn torn_zone(strip: &[Vec2], n: Vec2, d: Vec2, s0: f64, ba: f64) -> Option<((f64
             .fold(None, |r: Option<(f64, f64)>, u| Some(r.map_or((u, u), |(lo, hi)| (lo.min(u), hi.max(u)))))
     };
     let (start, far) = (run(s0)?, run(s0 + ba)?);
-    if start.1 - start.0 < 1e-6 || far.1 - far.0 < 1e-6 {
+    if start.1 - start.0 < 1e-6 || far.1 - far.0 < 1e-6 || far.0 > start.0 + TORN_ZONE_TOL || far.1 < start.1 - TORN_ZONE_TOL {
         return None;
     }
     let quad = [n * s0 + d * start.0, n * s0 + d * start.1, n * (s0 + ba) + d * far.1, n * (s0 + ba) + d * far.0];
@@ -195,8 +197,7 @@ fn run_at(p: &[Vec2], n: Vec2, d: Vec2, level: f64) -> Option<(f64, f64)> {
 }
 
 /// A fold's `ext` and `tear` from its zone's start and far runs (`torn_zone`): an end whose far
-/// edge stops elsewhere than its start line is torn, the panel running on (or cut back) by the
-/// difference.
+/// edge runs on past its start line is torn, the moving side running on by the difference.
 fn torn_ends(start: (f64, f64), far: (f64, f64)) -> ((f64, f64), (bool, bool)) {
     let (e0, e1) = (start.0 - far.0, far.1 - start.1);
     let (t0, t1) = (e0.abs() > 1e-6, e1.abs() > 1e-6);

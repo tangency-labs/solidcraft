@@ -3263,6 +3263,26 @@ fn a_fold_beside_a_relief_ending_on_an_outline_corner_sews() {
     fold_torn_tray(&on_corner, 1.5, &walls, &[2, 3, 0, 1], 1e-9);
 }
 
+/// A blank whose slanted sides cross a fold's zone: the side that moves may run on past the
+/// zone's start line (a torn end), but where it narrows instead the fold either refuses or keeps
+/// every bit of the material, never dropping the slivers outside a square end.
+#[test]
+fn a_torn_fold_never_drops_material_where_the_blank_narrows() {
+    let blank = [[0.0, 0.0], [200.0, 10.0], [200.0, 90.0], [0.0, 100.0]];
+    // Fixed on the narrow end, the wide end folds; fixed on the wide end, the narrow end folds.
+    for (fixed, must_fold) in [(180.0, true), (20.0, false)] {
+        let mut s = torn_tray_session(&blank, 1.5);
+        let flat = volume(&mut s);
+        match s.execute("sheet.fold", &json!({"points": [[100.0, -10.0, 1.5], [100.0, 110.0, 1.5]], "fixed": [fixed, 50.0, 1.5]})) {
+            Ok(_) => {
+                run(&mut s, "sheet.unfold", json!({}));
+                assert!(rel(volume(&mut s), flat) < 1e-9, "fixed at {fixed}: unfolded {} vs {flat}", volume(&mut s));
+            }
+            Err(e) => assert!(!must_fold, "fixed at {fixed}: {e}"),
+        }
+    }
+}
+
 /// A flange on another wall's end beyond a torn zone stays where it stands when the zone folds:
 /// that end does not hang from the zone. The left wall's end runs on past the bottom wall's zone
 /// and carries an ear, which must not go round with the bottom wall.
