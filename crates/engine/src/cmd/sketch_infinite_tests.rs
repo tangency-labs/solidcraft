@@ -247,9 +247,9 @@ fn construction_tools_keep_profiles_and_undo_and_save_as_one_edit() {
     let mut s = new_sketch();
     run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,10]}));
     let before = s.doc.to_json();
-    let depth = s.undo.len();
+    let depth = s.history.len();
     let r = run(&mut s, "sketch.construction_line", json!({"at":[-5,5],"through":[30,5]}));
-    assert_eq!(s.undo.len(), depth + 1);
+    assert_eq!(s.history.len(), depth + 1);
     assert_eq!(profiles(&s), 1);
     let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
     let id = r["curves"][0].as_str().unwrap();

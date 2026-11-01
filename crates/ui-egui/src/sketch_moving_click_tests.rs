@@ -421,12 +421,12 @@ fn esc_and_right_click_end_a_chain_drawing_arcs_as_they_end_a_line_chain() {
 #[test]
 fn undo_takes_back_one_arc_as_it_takes_back_one_segment() {
     let mut h = chain_with_a_line(true);
-    let undo_before = h.app.session.undo.len();
+    let undo_before = h.app.session.history.len();
     leave_and_rest(&mut h, [0.0, 0.0], REST);
-    assert_eq!(h.app.session.undo.len(), undo_before, "switching changes nothing in the design");
+    assert_eq!(h.app.session.history.len(), undo_before, "switching changes nothing in the design");
     click_at(&mut h, [10.0, 10.0]);
     assert_eq!(curves(&h), 2);
-    assert_eq!(h.app.session.undo.len(), undo_before + 1, "the arc is one undo step");
+    assert_eq!(h.app.session.history.len(), undo_before + 1, "the arc is one undo step");
     h.app.run("edit.undo", json!({})).unwrap();
     h.frames(2);
     assert_eq!(curves(&h), 1, "only the arc goes");

@@ -176,13 +176,13 @@ fn unknown_pending_concepts_preserve_the_open_design_and_output_files() {
             session.execute("solid.box", &json!({"length": 2, "width": 3, "height": 4})).unwrap();
             let original = session.doc.clone();
             let original_path = session.path.clone();
-            let undo = session.undo.len();
+            let undo = session.history.len();
             let dirty = session.is_dirty();
             let err = session.execute("doc.open", &json!({"path": source})).unwrap_err().to_string();
             assert!(err.contains("experimental-card") && err.contains("update SolidCraft"), "{err}");
             assert_eq!(session.doc, original);
             assert_eq!(session.path, original_path);
-            assert_eq!(session.undo.len(), undo);
+            assert_eq!(session.history.len(), undo);
             assert_eq!(session.is_dirty(), dirty);
 
             for existing in [false, true] {

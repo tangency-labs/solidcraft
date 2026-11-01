@@ -1019,7 +1019,7 @@ mod tests {
         };
         json!({
             "document":h.app.session.doc.to_json(), "revision":h.app.session.revision,
-            "undo":history(&h.app.session.undo), "redo":history(&h.app.session.redo),
+            "undo":history(h.app.session.history.steps()), "redo":history(h.app.session.history.redo_steps()),
             "dirty":h.app.session.is_dirty(), "selection":h.app.session.selection
         })
     }
@@ -1065,7 +1065,7 @@ mod tests {
         h.app.run("edit.undo", json!({})).unwrap();
         h.app.session.selection = vec![solidcraft_engine::Sel::Plane { name: "XY".into() }];
         h.step(&json!({"click":{"handle":"params:title"}})).unwrap();
-        assert!(!h.app.session.undo.is_empty() && !h.app.session.redo.is_empty());
+        assert!(!h.app.session.history.is_empty() && !h.app.session.history.redo_steps().is_empty());
         let before = escape_state(&h);
         escape_closed(&mut h, &before, "10 mm");
     }
@@ -1220,17 +1220,17 @@ mod tests {
     #[test]
     fn held_edits_wait_for_apply_and_go_in_together_as_one_undo_step() {
         let mut h = held_dialog();
-        let (revision, undo) = (h.app.session.revision, h.app.session.undo.len());
+        let (revision, undo) = (h.app.session.revision, h.app.session.history.len());
         hold(&mut h, "w", "30 mm");
         hold(&mut h, "h", "w * 2");
         assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("10 mm", "20 mm"), "leaving a field changes nothing yet");
-        assert_eq!((h.app.session.revision, h.app.session.undo.len()), (revision, undo), "no rebuild and no undo step while held");
+        assert_eq!((h.app.session.revision, h.app.session.history.len()), (revision, undo), "no rebuild and no undo step while held");
         let d = h.app.params.as_ref().unwrap();
         assert!(d.preview.is_none() && d.error.is_none());
         assert_eq!(d.editing.len(), 2);
         h.step(&json!({"click":{"handle":"dialog:Apply"}})).unwrap();
         assert_eq!((expression(&h, "w").as_str(), expression(&h, "h").as_str()), ("30 mm", "w * 2"));
-        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step for both");
+        assert_eq!(h.app.session.history.len(), undo + 1, "one undo step for both");
         let d = h.app.params.as_ref().expect("Apply keeps the dialog open");
         assert!(d.editing.is_empty() && d.error.is_none());
         h.app.run("edit.undo", json!({})).unwrap();

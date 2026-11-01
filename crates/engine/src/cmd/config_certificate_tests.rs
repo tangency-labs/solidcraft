@@ -163,10 +163,10 @@ fn certified_side_refuses_reused_body_name_from_a_new_producer() {
     assert!(s.doc.configuration_face_indices(body, &target).is_err());
     assert!(s.doc.face_colors(body).is_empty());
     let before = s.doc.clone();
-    let history = s.undo.len();
+    let history = s.history.len();
     assert!(s.execute("config.activate", &json!({"row":"Painted"})).is_err());
     assert_eq!(s.doc, before);
-    assert_eq!(s.undo.len(), history);
+    assert_eq!(s.history.len(), history);
 }
 
 #[test]
@@ -237,11 +237,11 @@ fn certified_side_transfer_preserves_geometry_and_unsupported_taper_refuses_atom
     assert!(s.model.result(source).unwrap().error.is_none());
     assert!(s.doc.face_colors(s.model.state().body("Round").unwrap()).is_empty());
     let document = s.doc.clone();
-    let history = s.undo.len();
+    let history = s.history.len();
     assert!(s.execute("config.preview", &json!({"row":"Painted"})).is_err());
     assert!(s.execute("config.activate", &json!({"row":"Painted"})).is_err());
     assert_eq!(s.doc, document);
-    assert_eq!(s.undo.len(), history);
+    assert_eq!(s.history.len(), history);
 }
 
 #[test]
@@ -272,9 +272,9 @@ fn certified_import_payload_binding_roundtrip_clone_and_replacement_refusal() {
     assert!(s.doc.face_colors(s.model.state().body("Imported").unwrap()).is_empty());
     assert_eq!(painted_radius(&s, "Imported (2)", 10.), pieces);
     let before = s.doc.clone();
-    let history = s.undo.len();
+    let history = s.history.len();
     assert!(s.execute("config.preview", &json!({"row":"Painted"})).is_err());
     assert!(s.execute("config.activate", &json!({"row":"Painted"})).is_err());
     assert_eq!(s.doc, before);
-    assert_eq!(s.undo.len(), history);
+    assert_eq!(s.history.len(), history);
 }

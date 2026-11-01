@@ -132,13 +132,13 @@ fn a_live_frame_solves_once_and_leaves_the_features_after_the_sketch_stale() {
 fn a_live_frame_copies_the_design_once_and_its_undo_step_keeps_the_design_before() {
     let (mut s, _) = extruded();
     let before = s.doc.clone();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     crate::tests::doc_copies::take();
     frames(&mut s, 1, true);
     assert_eq!(crate::tests::doc_copies::take(), 0, "the edited design is stored, not copied again");
     assert!(corner(&s).dist(solidcraft_geom::Vec2::new(4.0, 5.0)) < 1e-9);
-    assert_eq!(s.undo.len(), undo + 1);
-    assert!(s.undo.last().is_some_and(|u| std::sync::Arc::ptr_eq(&u.doc, &before)), "undo goes back to the design before");
+    assert_eq!(s.history.len(), undo + 1);
+    assert!(s.history.last().is_some_and(|u| std::sync::Arc::ptr_eq(&u.doc, &before)), "undo goes back to the design before");
     run(&mut s, "edit.undo", json!({}));
     assert!(std::sync::Arc::ptr_eq(&s.doc, &before));
 }

@@ -249,7 +249,7 @@ mod tests {
         h.frames(2);
         assert!(h.widget("Export CSV…").is_some());
         assert!(h.widget("1 rows, 2 placed").is_some());
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"widget": "1"})).unwrap();
         let d = h.app.bom.as_mut().unwrap();
         assert_eq!(d.picked, Some(0));
@@ -258,7 +258,7 @@ mod tests {
         h.step(&json!({"widget": "Apply"})).unwrap();
         let m = h.app.session.execute("component.metadata", &json!({"component": "Plate"})).unwrap();
         assert_eq!(m["part_number"], "PL-100");
-        assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+        assert_eq!(h.app.session.history.len(), undo + 1, "one undo step");
         h.frames(2);
         assert!(h.widget("PL-100").is_some(), "the list follows the change");
     }

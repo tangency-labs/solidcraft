@@ -101,7 +101,7 @@ fn wire_frame_hostile_inputs_rollback_full_session() {
     let doc = s.doc.to_json();
     let pending = s.pending_moves.clone();
     let selection = s.selection.clone();
-    let history = (s.undo.len(), s.redo.len());
+    let history = (s.history.len(), s.history.redo_steps().len());
     for (cmd, p) in [
         ("sketch.move3d", json!({"wire":id,"index":u64::MAX,"to":[0,0,0]})),
         ("sketch.move3d", json!({"wire":id,"index":-1,"to":[0,0,0]})),
@@ -115,7 +115,7 @@ fn wire_frame_hostile_inputs_rollback_full_session() {
         assert_eq!(s.doc.to_json(), doc);
         assert_eq!(s.pending_moves, pending);
         assert_eq!(s.selection, selection);
-        assert_eq!((s.undo.len(), s.redo.len()), history);
+        assert_eq!((s.history.len(), s.history.redo_steps().len()), history);
     }
 }
 
@@ -385,7 +385,7 @@ fn arc3d_hostile_inputs_rollback_full_session() {
     run(&mut s, "sketch.create", json!({"plane":"XY"}));
     run(&mut s, "sketch.options", json!({"sketch_3d":true}));
     let doc = s.doc.to_json();
-    let history = (s.undo.len(), s.redo.len());
+    let history = (s.history.len(), s.history.redo_steps().len());
     for (cmd, p) in [
         ("sketch.arc3d", json!({"start":[0,0,0],"through":[1,0,0],"end":[2,0,0]})), // collinear
         ("sketch.arc3d", json!({"start":[0,0,0],"through":[0,0,0],"end":[0,10,0]})), // coincident
@@ -397,7 +397,7 @@ fn arc3d_hostile_inputs_rollback_full_session() {
     ] {
         assert!(s.execute(cmd, &p).is_err(), "{cmd}: {p}");
         assert_eq!(s.doc.to_json(), doc);
-        assert_eq!((s.undo.len(), s.redo.len()), history);
+        assert_eq!((s.history.len(), s.history.redo_steps().len()), history);
     }
 }
 

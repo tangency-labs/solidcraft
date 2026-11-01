@@ -516,7 +516,7 @@ pub(crate) fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
         app.viewport.joint_handles = Some(mode);
         return;
     };
-    if d.step.as_ref().is_some_and(|doc| !app.session.undo.last().is_some_and(|s| Arc::ptr_eq(&s.doc, doc))) {
+    if d.step.as_ref().is_some_and(|doc| !app.session.history.last().is_some_and(|s| Arc::ptr_eq(&s.doc, doc))) {
         mode.drag = Some(d);
         app.viewport.joint_handles = Some(mode);
         end_drag(app);
@@ -539,17 +539,17 @@ pub(crate) fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
             let changed = values.get(d.axis.index).is_some_and(|v| (v - wanted).abs() > 1e-10);
             if changed {
                 let value = if joint.kind.is_angle(d.axis.index) { wanted.to_degrees() } else { wanted };
-                let own = if d.step.is_some() { app.session.undo.pop() } else { None };
+                let mark = app.session.history.mark();
                 let before = app.session.doc.clone();
                 let reply = app.run("joint.drive", json!({"joint":d.axis.joint,"index":d.axis.index,"value":value,"quiet":true,"continuous":true}));
                 let pushed = reply.is_ok() && !Arc::ptr_eq(&before, &app.session.doc);
-                if let Some(step) = own {
+                if d.step.is_some() {
+                    // The drag's first step holds the state before it: one undo step for the drag.
                     if pushed {
-                        app.session.undo.pop();
+                        app.session.history.drop_since(mark);
                     }
-                    app.session.undo.push(step);
                 } else if pushed {
-                    d.step = app.session.undo.last().map(|s| s.doc.clone());
+                    d.step = app.session.history.last().map(|s| s.doc.clone());
                 }
                 if let Ok(reply) = reply
                     && let Some(why) = crate::dialogs_assembly::drive_stop(&reply)
@@ -789,7 +789,7 @@ mod tests {
         let from = proj.to_screen(start).unwrap();
         let to = proj.to_screen(start + a.axis * 30.).unwrap();
         let before = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let camera = h.app.cam;
         pointer(&mut h, from, true);
         for k in 1..=12 {
@@ -801,7 +801,7 @@ mod tests {
         assert!(h.app.viewport.boxsel.is_none());
         pointer(&mut h, to, false);
         assert!(!active(&h.app));
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         assert!(!h.app.session.log.iter().any(|s| s.contains("Drive Joints")), "no echo for every frame");
         let moved = h.app.session.doc.to_json();
         h.app.run("edit.undo", json!({})).unwrap();
@@ -822,7 +822,7 @@ mod tests {
             let from = angle_point(&h, &a, r, 180.);
             let near = angle_point(&h, &a, r, 180. + coarse * 0.7);
             let before = h.app.session.doc.to_json();
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             pointer(&mut h, from, true);
             move_to(&mut h, near);
             assert!(active(&h.app), "the visible ring starts a drag");
@@ -841,7 +841,7 @@ mod tests {
             h.step(&json!({"key":"Escape"})).unwrap();
             assert!(!active(&h.app));
             assert_eq!(h.app.session.doc.to_json(), before);
-            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(h.app.session.history.len(), undo);
             pointer(&mut h, boundary, false);
             h.step(&json!({"key":"Escape"})).unwrap();
             assert!(h.app.viewport.joint_handles.is_none());
@@ -971,7 +971,7 @@ mod tests {
     fn disabling_handles_restores_the_previous_move_panel_from_both_entry_points() {
         let (mut h, _) = assembly("revolute", Vec3::Z, false);
         let before = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.app.start("occurrence.move");
         h.frames(2);
         assert!(visible(&h.app));
@@ -994,7 +994,7 @@ mod tests {
             assert!(h.app.viewport.joint_handles.is_none());
             assert!(h.app.tree.occurrence_move.is_some());
             assert_eq!(h.app.session.doc.to_json(), before);
-            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(h.app.session.history.len(), undo);
         }
         h.app.tree.occurrence_move = None;
         crate::prefs::set(&mut h.app, &json!({"assembly_move_handles":true})).unwrap();
@@ -1096,7 +1096,7 @@ mod tests {
             h.frames(3);
             let before = h.app.session.doc.to_json();
             let selection = h.app.session.selection.clone();
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             h.step(&json!({"click":{"handle":"tab:ASSEMBLE"}})).unwrap();
             h.step(&json!({"click":{"handle":"button:occurrence.move"}})).unwrap();
             h.frames(3);
@@ -1116,7 +1116,7 @@ mod tests {
             assert!(h.app.menu.joint_move_warning.is_none());
             assert_eq!(h.app.session.doc.to_json(), before);
             assert_eq!(h.app.session.selection, selection);
-            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(h.app.session.history.len(), undo);
         }
     }
 }

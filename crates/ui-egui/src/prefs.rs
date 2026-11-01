@@ -2289,8 +2289,9 @@ fn default_units_changed(app: &mut SolveApp) {
 pub(crate) fn apply_new_design_units(app: &mut SolveApp, units: &str) {
     if app.session.doc.features.is_empty() && app.session.doc.units != units {
         let saved = !app.session.is_dirty();
+        let mark = app.session.history.mark();
         if app.session.execute("document.units", &json!({ "units": units })).is_ok() {
-            app.session.undo.pop();
+            app.session.history.drop_since(mark);
             if saved {
                 app.session.mark_saved();
             }
@@ -4806,12 +4807,12 @@ mod tests {
                 _ => {}
             }
             let dirty = app.session.is_dirty();
-            let undo = app.session.undo.len();
+            let undo = app.session.history.len();
             super::set(&mut app, &serde_json::json!({"default_units": "in"})).unwrap();
             assert_eq!(app.preferences.default_units, "in");
             assert_eq!(app.session.doc.units, if design == "new" { "in" } else { "mm" }, "{design}");
             assert_eq!(app.session.is_dirty(), dirty, "{design}");
-            assert_eq!(app.session.undo.len(), undo, "{design}");
+            assert_eq!(app.session.history.len(), undo, "{design}");
             if design == "new" {
                 super::control(&mut app, &serde_json::json!({"open": "Design"})).unwrap();
                 super::set(&mut app, &serde_json::json!({"default_units": "ft"})).unwrap();
@@ -4821,7 +4822,7 @@ mod tests {
                 super::defaults(&mut app, super::PAGE_DESIGN);
                 assert_eq!(app.session.doc.units, "mm");
                 assert!(!app.session.is_dirty());
-                assert!(app.session.undo.is_empty());
+                assert!(app.session.history.is_empty());
             }
         }
     }
@@ -8118,7 +8119,7 @@ mod tests {
         }
         app.session.mark_saved();
         let doc = app.session.doc.clone();
-        let undo = app.session.undo.len();
+        let undo = app.session.history.len();
         assert_eq!(app.session.status_items().len(), 3);
         super::control(&mut app, &json!({"open":"Graphics"})).unwrap();
         super::control(&mut app, &json!({"single_surface_analysis":true})).unwrap();
@@ -8135,7 +8136,7 @@ mod tests {
         assert_eq!(app.session.status_items().len(), 3, "the restored legacy policy permits reactivation");
         assert!(std::sync::Arc::ptr_eq(&doc, &app.session.doc));
         assert!(!app.session.is_dirty());
-        assert_eq!(app.session.undo.len(), undo);
+        assert_eq!(app.session.history.len(), undo);
     }
 
     #[test]
@@ -8211,7 +8212,7 @@ mod tests {
         other.execute("inspect.draft", &json!({})).unwrap();
         crate::documents::open_tab(&mut app, other).unwrap();
         let before: Vec<_> =
-            std::iter::once(&app.session).chain(app.docs.background()).map(|s| (s.status_items(), s.revision, s.undo.len())).collect();
+            std::iter::once(&app.session).chain(app.docs.background()).map(|s| (s.status_items(), s.revision, s.history.len())).collect();
         super::control(&mut app, &json!({"open":"Graphics","viewport_analysis_status":false})).unwrap();
         assert!(!app.preferences.viewport_analysis_status);
         assert!(!app.preferences.persistent_ribbon_pressed);
@@ -8219,7 +8220,7 @@ mod tests {
         super::control(&mut app, &json!({"button":"cancel"})).unwrap();
         assert!(app.preferences.viewport_analysis_status);
         let after: Vec<_> =
-            std::iter::once(&app.session).chain(app.docs.background()).map(|s| (s.status_items(), s.revision, s.undo.len())).collect();
+            std::iter::once(&app.session).chain(app.docs.background()).map(|s| (s.status_items(), s.revision, s.history.len())).collect();
         assert_eq!(before, after, "a presentation preference never changes effects in any document");
     }
 
@@ -8330,7 +8331,7 @@ mod tests {
         other.execute("inspect.section", &json!({"plane":"XZ","at":-3})).unwrap();
         crate::documents::open_tab(&mut app, other).unwrap();
         let before: Vec<_> =
-            std::iter::once(&app.session).chain(app.docs.background()).map(|s| (s.status_items(), s.revision, s.undo.len())).collect();
+            std::iter::once(&app.session).chain(app.docs.background()).map(|s| (s.status_items(), s.revision, s.history.len())).collect();
         super::control(&mut app, &json!({"open":"Graphics","viewport_section_status":false})).unwrap();
         assert!(!app.preferences.viewport_section_status);
         assert!(!app.preferences.persistent_ribbon_pressed);
@@ -8338,7 +8339,7 @@ mod tests {
         super::control(&mut app, &json!({"button":"cancel"})).unwrap();
         assert!(app.preferences.viewport_section_status);
         let after: Vec<_> =
-            std::iter::once(&app.session).chain(app.docs.background()).map(|s| (s.status_items(), s.revision, s.undo.len())).collect();
+            std::iter::once(&app.session).chain(app.docs.background()).map(|s| (s.status_items(), s.revision, s.history.len())).collect();
         assert_eq!(before, after, "a presentation preference never changes effects in any document");
     }
 
@@ -8375,7 +8376,7 @@ mod tests {
         assert_eq!(h.app.session.revision, revision, "policy-only edits with no effects need no view revision");
         assert_eq!(h.app.session.doc.to_json(), design);
         assert!(!h.app.session.is_dirty());
-        assert!(h.app.session.undo.is_empty());
+        assert!(h.app.session.history.is_empty());
     }
 
     #[test]
@@ -8399,7 +8400,7 @@ mod tests {
         assert_eq!(app.session.status_items().len(), 3);
         assert!(app.docs.background().all(|s| !s.single_surface_analysis() && s.status_items().len() == 3));
         let doc = app.session.doc.clone();
-        let undo = app.session.undo.len();
+        let undo = app.session.history.len();
         let declarations = app.session.status_items();
         let revision = app.session.revision;
         app.preferences.single_surface_analysis = true;
@@ -8423,7 +8424,7 @@ mod tests {
             assert!(!s.is_dirty());
         }
         assert!(std::sync::Arc::ptr_eq(&doc, &app.session.doc));
-        assert_eq!(app.session.undo.len(), undo);
+        assert_eq!(app.session.history.len(), undo);
         // Query entry never applies a pending policy change; the explicit frame hook does.
         app.preferences.single_surface_analysis = false;
         app.run("view.status_items", json!({})).unwrap();
@@ -8465,7 +8466,7 @@ mod tests {
         restored.load_prefs(&h.app.prefs());
         assert!(!restored.preferences.cosmetic_threads, "an explicitly disabled value also survives reload");
         assert_eq!(h.app.session.doc.to_json(), design);
-        assert!(h.app.session.undo.is_empty());
+        assert!(h.app.session.history.is_empty());
     }
 
     #[test]
@@ -9226,7 +9227,7 @@ mod ambient_occlusion_tests {
         assert!(h.app.preferences.ambient_occlusion);
         assert_eq!(h.app.cam, camera);
         assert_eq!(h.app.session.doc.to_json(), design);
-        assert!(h.app.session.undo.is_empty());
+        assert!(h.app.session.history.is_empty());
     }
 
     /// #7974: shading dark parts in linear light with a sky fill is off for older and new
@@ -9337,7 +9338,7 @@ mod graphics_preset_tests {
         assert_eq!(h.app.preferences.msaa, msaa);
         assert_eq!(h.app.cam, camera);
         assert_eq!(h.app.session.doc.to_json(), design);
-        assert!(h.app.session.undo.is_empty());
+        assert!(h.app.session.history.is_empty());
     }
 }
 

@@ -854,10 +854,10 @@ fn bench_ops(mut s: Session, script: &str) -> Result<Session, String> {
     for op in ops {
         let id = op.get("command").and_then(Value::as_str).ok_or("--ops: each step needs a `command`")?;
         let p = op.get("params").cloned().unwrap_or(Value::Null);
-        let steps = s.undo.len();
+        let steps = s.history.len();
         time(&mut s, id, &p)?;
         // Commands that are no undo step (showing and hiding) have nothing to undo.
-        if op.get("undo").and_then(Value::as_bool) != Some(false) && s.undo.len() > steps {
+        if op.get("undo").and_then(Value::as_bool) != Some(false) && s.history.len() > steps {
             time(&mut s, "edit.undo", &json!({}))?;
         }
     }

@@ -75,8 +75,8 @@ struct Drag {
     grab: Grab,
     /// The text as it was when the drag started.
     start: Frame,
-    /// Undo depth at the start: every frame folds into one step.
-    depth: usize,
+    /// The undo history's mark at the start: every frame folds into one step.
+    mark: solidcraft_engine::Mark,
     /// Where the pointer went down (sketch coordinates).
     press: Vec2,
 }
@@ -209,7 +209,7 @@ pub(crate) fn drag_start(app: &mut SolveApp, proj: &Proj, press: Pos2) -> bool {
     let Ok(result) = app.session.execute("edit.checkpoint", &json!({})) else { return false };
     let Some(checkpoint) = result["checkpoint"].as_u64() else { return false };
     app.viewport.text_drag = Some((checkpoint, start.link.clone()));
-    DRAG.with(|d| *d.borrow_mut() = Some(Drag { grab, start, depth: app.session.undo.len(), press: at }));
+    DRAG.with(|d| *d.borrow_mut() = Some(Drag { grab, start, mark: app.session.history.mark(), press: at }));
     true
 }
 
@@ -272,7 +272,7 @@ pub(crate) fn drag_to(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
         params["height"] = json!(height);
     }
     if app.session.execute("sketch.edit_text", &params).is_ok() {
-        app.session.undo.truncate(d.depth + 1);
+        app.session.history.fold_since(d.mark);
     }
 }
 
@@ -280,7 +280,7 @@ pub(crate) fn drag_to(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
 pub(crate) fn drag_end(app: &mut SolveApp) {
     let Some(d) = DRAG.with(|d| d.borrow_mut().take()) else { return };
     let _ = app.session.execute("sketch.drag_end", &json!({}));
-    app.session.undo.truncate(d.depth + 1);
+    app.session.history.fold_since(d.mark);
     crate::sketch_text_move::end_drag(app);
 }
 
@@ -339,7 +339,7 @@ mod tests {
     }
 
     fn drag(grab: Grab, start: Frame, press: Vec2) -> Drag {
-        Drag { grab, start, depth: 0, press }
+        Drag { grab, start, mark: solidcraft_engine::Session::default().history.mark(), press }
     }
 
     #[test]
@@ -454,7 +454,7 @@ mod tests {
         // Both the initial handle and the doubled text must stay below the floating ribbon.
         h.app.cam.distance = 90.0;
         h.frames(3);
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len());
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len());
         let f = frame(&h.app, &link).unwrap();
         // Pull the top right corner out to twice the frame: the bottom left stays put.
         let pivot = f.to_sketch(f.min);
@@ -468,7 +468,7 @@ mod tests {
         assert!(after.to_sketch(after.min).dist(pivot) < 0.3, "the opposite corner stays where it was");
         assert!(!h.app.session.model.is_stale(), "the model follows when the drag ends");
         assert!(h.app.viewport.text_drag.is_none());
-        assert_eq!(h.app.session.undo.len(), before.1 + 1);
+        assert_eq!(h.app.session.history.len(), before.1 + 1);
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), before.0);
     }

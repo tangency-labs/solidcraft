@@ -549,11 +549,11 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
                     } else {
                         // Endpoint inference is part of this drawing. Preserve its original
                         // undo history even when the history is already at the engine's cap.
-                        let history = dimensioned.then(|| std::mem::take(&mut app.session.undo));
+                        let history = dimensioned.then(|| std::mem::take(&mut app.session.history));
                         crate::inference::commit(app, id, b.0);
                         crate::sketch_tools::constrain_lined(app, &mut tool, &[a.0, b.0], &before);
                         if let Some(history) = history {
-                            app.session.undo = history;
+                            app.session.history = history;
                         }
                     }
                     let last = tool.pts.len() - 1;
@@ -603,9 +603,9 @@ pub(crate) fn draw(app: &mut SolveApp, t: &Tool, params: Value) -> Result<Value,
         let result = app.run("sketch.draw.dimensioned", request)?;
         // The internal wrapper has no toolbar category; apply the original creator's line
         // type while retaining the draw's undo history, including at the history limit.
-        let history = std::mem::take(&mut app.session.undo);
+        let history = std::mem::take(&mut app.session.history);
         crate::sketch_palette::apply_mode(app, t.cmd, &result);
-        app.session.undo = history;
+        app.session.history = history;
         // A box typed `name = expression` defined the parameter `name` (#7567).
         let defined: Vec<_> = result["defined"].as_array().into_iter().flatten().filter_map(Value::as_str).map(|name| format!("`{name}`")).collect();
         match defined.as_slice() {

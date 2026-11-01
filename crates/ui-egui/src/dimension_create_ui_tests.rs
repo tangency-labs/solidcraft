@@ -228,14 +228,14 @@ fn edge_and_endpoint_creation_commit_once_and_undo_restores_exact_design() {
     ] {
         let mut h = line(end);
         let original = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         place(&mut h, &picks, at);
         assert_eq!(h.app.session.doc.to_json(), original);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         type_value(&mut h, "30 mm");
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(!crate::dim_view::editing());
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         let state = h.app.session.world_state();
         let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert!(
@@ -254,27 +254,27 @@ fn edge_and_endpoint_creation_commit_once_and_undo_restores_exact_design() {
 fn escape_invalid_correction_and_seed_enter_do_not_create_partial_dimensions() {
     let mut h = line([20., 0.]);
     let original = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     place(&mut h, &[[10., 0.]], [10., 5.]);
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(!crate::dim_view::editing());
     assert_eq!(h.app.session.doc.to_json(), original);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     place(&mut h, &[[0., 0.], [20., 0.]], [10., 5.]);
     type_value(&mut h, "unknown_length");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(crate::dim_view::editing());
     assert_eq!(h.app.session.doc.to_json(), original);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     type_value(&mut h, "25 mm");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(!crate::dim_view::editing());
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     h.app.run("edit.undo", json!({})).unwrap();
     h.settle();
     place(&mut h, &[[10., 0.]], [10., 5.]);
     h.step(&json!({"key":"Enter"})).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert!(!crate::dim_view::editing());
 }
 #[test]
@@ -288,12 +288,12 @@ fn switching_documents_cancels_creation_and_existing_parameter_edit_is_separate(
     assert_eq!(h.app.session.doc.to_json(), original);
     place(&mut h, &[[10., 0.]], [10., 5.]);
     h.step(&json!({"key":"Enter"})).unwrap();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     crate::dim_view::edit_param(&h.app, "d1");
     h.settle();
     type_value(&mut h, "24 mm");
     h.step(&json!({"key":"Enter"})).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     h.app.run("edit.undo", json!({})).unwrap();
     assert!(h.app.session.doc.param("d1").unwrap().expr.starts_with("20"));
 }
@@ -305,7 +305,7 @@ fn rectangle_side_and_fixed_origin_line_dimensions_preserve_other_constraints() 
         h.app.run("sketch.constraint.fix", json!({"entity":"l1.start"})).unwrap();
         h.settle();
         let original = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let picks = if edge { vec![[10., 0.]] } else { vec![[0., 0.], [20., 0.]] };
         place(&mut h, &picks, [10., 5.]);
         type_value(&mut h, "30 mm");
@@ -314,7 +314,7 @@ fn rectangle_side_and_fixed_origin_line_dimensions_preserve_other_constraints() 
         let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert!(sk.point(sk.resolve_point("l1.start").unwrap()).unwrap().len() < 1e-8, "fixed origin remains fixed");
         assert!((sk.point(sk.resolve_point("l1.end").unwrap()).unwrap().x - 30.).abs() < 1e-6);
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), original);
     }
@@ -330,7 +330,7 @@ fn rectangle_side_and_fixed_origin_line_dimensions_preserve_other_constraints() 
         h.app.cam.target = solidcraft_engine::geom::Vec3::new(10., 5., 0.);
         h.settle();
         let baseline = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         place(&mut h, &picks, at);
         type_value(&mut h, "12 mm");
         h.step(&json!({"key":"Enter"})).unwrap();
@@ -338,7 +338,7 @@ fn rectangle_side_and_fixed_origin_line_dimensions_preserve_other_constraints() 
         let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         // The sketch's first dimension scales it (#1365): 20 × 10 becomes 24 × 12.
         assert!((solved.profiles[0].area - 288.).abs() < 1e-5, "the first dimension scales the rectangle: {}", solved.profiles[0].area);
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), baseline);
     }
@@ -370,7 +370,7 @@ fn pending_second_nested_plane_uses_world_picks_but_one_local_dimension() {
     h.app.cam.target = plane.to_world(Vec2::new(10., 0.));
     h.settle();
     let baseline = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let pending = h.app.session.pending_moves.clone();
     h.step(&json!({"start":"sketch.dimension"})).unwrap();
     for p in [Vec2::ZERO, Vec2::new(20., 0.), Vec2::new(10., 5.)] {
@@ -381,7 +381,7 @@ fn pending_second_nested_plane_uses_world_picks_but_one_local_dimension() {
     assert_eq!(h.app.session.doc.to_json(), baseline);
     type_value(&mut h, "30 mm");
     h.step(&json!({"key":"Enter"})).unwrap();
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert_eq!(h.app.session.active_occurrence_path, Some(vec![second, leaf]));
     assert_eq!(h.app.session.pending_moves, pending);
     let state = h.app.session.model.state();
@@ -401,14 +401,14 @@ fn pending_second_nested_plane_uses_world_picks_but_one_local_dimension() {
 fn invalid_zero_negative_failed_open_and_click_away_leave_no_dimension() {
     let mut h = line([20., 0.]);
     let baseline = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     for invalid in ["0 mm", "-2 mm"] {
         place(&mut h, &[[10., 0.]], [10., 5.]);
         type_value(&mut h, invalid);
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(crate::dim_view::editing());
         assert_eq!(h.app.session.doc.to_json(), baseline);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         h.step(&json!({"key":"Escape"})).unwrap();
     }
     place(&mut h, &[[10., 0.]], [10., 5.]);
@@ -419,7 +419,7 @@ fn invalid_zero_negative_failed_open_and_click_away_leave_no_dimension() {
     h.step(&json!({"click":{"world":[12,-10,0]}})).unwrap();
     assert!(!crate::dim_view::editing());
     assert_eq!(h.app.session.doc.to_json(), baseline);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
 }
 
 #[test]
@@ -441,12 +441,12 @@ fn dimension_to_fillet_virtual_sharp_keeps_the_arc_and_fixed_origin() {
     h.app.cam.target = solidcraft_engine::geom::Vec3::new(5., 10., 0.);
     h.settle();
     let baseline = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     place(&mut h, &[[0., 0.], [0., 20.]], [-5., 10.]);
     type_value(&mut h, "30 mm");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(!crate::dim_view::editing());
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     let state = h.app.session.world_state();
     let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert!(solved.report.ok());
@@ -553,7 +553,7 @@ fn an_over_constraining_dimension_is_placed_as_a_driven_one() {
     h.app.run("sketch.dimension", json!({"entities":["l1"],"value":"20 mm"})).unwrap();
     h.settle();
     let original = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let params = h.app.session.doc.params.len();
     h.step(&json!({"start":"sketch.dimension"})).unwrap();
     h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
@@ -562,7 +562,7 @@ fn an_over_constraining_dimension_is_placed_as_a_driven_one() {
     assert_eq!(crate::dim_view::drawn().len(), 1, "the preview is not a selectable dimension");
     h.step(&json!({"click":{"world":[10,6,0]}})).unwrap();
     assert!(!crate::dim_view::editing(), "a driven dimension has no value to edit");
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert_eq!(h.app.session.doc.params.len(), params, "a driven dimension adds no parameter");
     let state = h.app.session.world_state();
     let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
@@ -619,7 +619,7 @@ fn a_driven_dimension_nothing_fixes_any_more_takes_a_value() {
     h.app.run("sketch.delete", json!({"entities":[coincident]})).unwrap();
     h.settle();
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let name = h.app.session.doc.next_d_name();
     let measured = dim(&h).kind.value().unwrap();
     double_click(&mut h);
@@ -631,7 +631,7 @@ fn a_driven_dimension_nothing_fixes_any_more_takes_a_value() {
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(crate::dim_view::editing(), "a refused value keeps the box open");
     assert_eq!(h.app.session.doc.to_json(), before);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
 
     // A value it takes makes it driving at that value.
     type_value(&mut h, "30");
@@ -644,7 +644,7 @@ fn a_driven_dimension_nothing_fixes_any_more_takes_a_value() {
     assert!(h.app.session.world_state().sketch(sketch).unwrap().report.ok());
 
     // One undo step puts the driven dimension back.
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(h.app.session.doc.to_json(), before);
     crate::dim_view::cancel();
@@ -731,7 +731,7 @@ fn type_first_line_circle_arc_distance_and_angle_commit_one_undo_step_each() {
     for (setup, centre, picks, typed, check) in cases {
         let mut h = sketch_with(setup, centre);
         let original = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let dims = dimension_count(&h);
         for p in &picks {
             h.step(&json!({"click":{"world":[p[0],p[1],0]}})).unwrap();
@@ -749,7 +749,7 @@ fn type_first_line_circle_arc_distance_and_angle_commit_one_undo_step_each() {
         keys(&mut h, typed);
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(!crate::dim_view::editing(), "{picks:?}");
-        assert_eq!(h.app.session.undo.len(), undo + 1, "{picks:?}");
+        assert_eq!(h.app.session.history.len(), undo + 1, "{picks:?}");
         let new = added(&h, dims);
         assert_eq!(new.len(), 1, "{picks:?}: {new:?}");
         assert!(check(&new[0].kind), "{picks:?}: {:?}", new[0].kind);
@@ -808,7 +808,7 @@ fn type_first_parameter_names_are_not_taken_by_shortcuts() {
 fn type_first_escape_cancels_with_no_change() {
     let mut h = sketch_with(&[("sketch.line", json!({"points":[[0,0],[20,0]],"infer":false}))], [10., 0.]);
     let original = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     for typed in ["", "25"] {
         h.step(&json!({"click":{"world":[10,0,0]}})).unwrap();
         assert_live(&h);
@@ -816,7 +816,7 @@ fn type_first_escape_cancels_with_no_change() {
         h.step(&json!({"key":"Escape"})).unwrap();
         assert!(!crate::dim_view::editing());
         assert_eq!(h.app.session.doc.to_json(), original);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         assert_eq!(h.app.tool.as_ref().map(|t| (t.cmd, t.picks.len())), Some(("sketch.dimension", 0)), "Esc drops the picks too");
     }
     crate::dim_view::cancel();
@@ -883,7 +883,7 @@ fn type_first_switching_between_aligned_horizontal_and_vertical_keeps_the_picked
     for picks in picks {
         for (commit_at, commit_kind, commit_value) in [(above, horizontal, 12.), (beside, vertical, 16.), (across, aligned, 20.)] {
             let mut h = sketch_with(&[("sketch.line", json!({"points":[[0,0],end],"infer":false}))], mid);
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             for p in &picks {
                 h.step(&json!({"click":{"world":[p[0],p[1],0]}})).unwrap();
             }
@@ -911,7 +911,7 @@ fn type_first_switching_between_aligned_horizontal_and_vertical_keeps_the_picked
             }
             h.step(&json!({"key":"Enter"})).unwrap();
             assert!(!crate::dim_view::editing());
-            assert_eq!(h.app.session.undo.len(), undo + 1);
+            assert_eq!(h.app.session.history.len(), undo + 1);
             let sk = solved(&h);
             let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
             let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
@@ -942,7 +942,7 @@ fn midpoint_then_edge_creates_a_distance_in_one_undo_step() {
     h.app.run("sketch.constraint.fix", json!({"entity":"l2"})).unwrap();
     h.settle();
     let baseline = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     for accept in [false, true] {
         place(&mut h, &[[10., 0.], [-10., -5.]], [0., -8.]);
         let (_, c, sk) = crate::dim_view::draft_preview().unwrap();
@@ -958,7 +958,7 @@ fn midpoint_then_edge_creates_a_distance_in_one_undo_step() {
         type_value(&mut h, "25 mm");
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(!crate::dim_view::editing());
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         let state = h.app.session.world_state();
         let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         assert!(solved.report.ok());
@@ -1011,7 +1011,7 @@ fn overlapping_sketch_midpoint_to_model_edge_dimensions_the_snapped_point() {
     use solidcraft_engine::sketch::{ConstraintKind, Shape};
     let mut h = midpoint_face_sketch();
     let baseline = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"start":"sketch.dimension"})).unwrap();
     for p in [[-3., -5.], [10., 2.], [4., -10.]] {
         h.step(&json!({"click":{"world":[p[0],p[1],10.]}})).unwrap();
@@ -1035,7 +1035,7 @@ fn overlapping_sketch_midpoint_to_model_edge_dimensions_the_snapped_point() {
     type_value(&mut h, "12 mm");
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(!crate::dim_view::editing());
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(h.app.session.doc.to_json(), baseline);
     crate::dim_view::cancel();
@@ -1052,7 +1052,7 @@ fn midpoint_pairs_dimension_sketch_and_projected_model_edges() {
     ] {
         let mut h = midpoint_face_sketch();
         let baseline = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"start":"sketch.dimension"})).unwrap();
         for p in [first, second] {
             h.step(&json!({"click":{"world":[p[0],p[1],10.]}})).unwrap();
@@ -1080,7 +1080,7 @@ fn midpoint_pairs_dimension_sketch_and_projected_model_edges() {
         }
         let measured = ((first[0] - second[0]).powi(2) + (first[1] - second[1]).powi(2)).sqrt();
         assert!((solidcraft_engine::sketch::measure_dimension(sk, &c.kind).unwrap() - measured).abs() < 1e-6);
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), baseline);
         crate::dim_view::cancel();
@@ -1160,7 +1160,7 @@ fn midpoint_dimension_orientation_follows_the_pointer_before_placement() {
                 h.settle();
             }
             let baseline = h.app.session.doc.to_json();
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             h.step(&json!({"start":"sketch.dimension"})).unwrap();
             for p in [first, second] {
                 h.step(&json!({"click":{"world":[p[0],p[1],10.]}})).unwrap();
@@ -1203,7 +1203,7 @@ fn midpoint_dimension_orientation_follows_the_pointer_before_placement() {
                 2,
                 "reuse the picked midpoint points"
             );
-            assert_eq!(h.app.session.undo.len(), undo + 1);
+            assert_eq!(h.app.session.history.len(), undo + 1);
             h.app.run("edit.undo", json!({})).unwrap();
             assert_eq!(h.app.session.doc.to_json(), baseline);
             crate::dim_view::cancel();
@@ -1258,7 +1258,7 @@ fn plate_max(h: &Harness) -> [f64; 2] {
 fn double_clicking_a_shown_dimension_edits_it_without_editing_the_sketch() {
     let (mut h, _) = shown_dimensions();
     let camera = (h.app.cam.target, h.app.cam.distance);
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     assert!((plate_max(&h)[1] - 10.0).abs() < 1e-6);
     let at = model_text(&h, "d2");
     h.step(&json!({"click":at,"double":true})).unwrap();
@@ -1271,7 +1271,7 @@ fn double_clicking_a_shown_dimension_edits_it_without_editing_the_sketch() {
     assert!(!crate::dim_view::editing());
     assert_eq!(h.app.session.active_sketch, None);
     assert_eq!((h.app.cam.target, h.app.cam.distance), camera, "the view stays put");
-    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    assert_eq!(h.app.session.history.len(), undo + 1, "one undo step");
     assert!((plate_max(&h)[1] - 14.0).abs() < 1e-6, "the extrude follows: {:?}", plate_max(&h));
     h.app.run("edit.undo", json!({})).unwrap();
     h.settle();
@@ -1361,7 +1361,7 @@ fn editing_a_dimension_to_a_definition_names_its_parameter() {
     h.step(&json!({"key":"Enter"})).unwrap();
     h.settle();
     let params = h.app.session.doc.params.len();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     crate::dim_view::edit_param(&h.app, "d1");
     h.settle();
     type_value(&mut h, "width = 30");
@@ -1370,7 +1370,7 @@ fn editing_a_dimension_to_a_definition_names_its_parameter() {
     assert!(doc.param("d1").is_none(), "{:?}", h.app.status);
     assert_eq!(doc.param("width").map(|p| p.expr.as_str()), Some("30"));
     assert_eq!(doc.params.len(), params, "renamed, not added");
-    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    assert_eq!(h.app.session.history.len(), undo + 1, "one undo step");
     assert!(h.app.status.as_ref().is_some_and(|s| !s.2 && s.0.contains("`width`")), "{:?}", h.app.status);
     let sk = doc.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert!(sk.constraints.iter().any(|c| c.param.as_deref() == Some("width") && c.kind.value().is_some_and(|v| (v - 30.0).abs() < 1e-6)));

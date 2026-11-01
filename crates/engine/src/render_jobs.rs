@@ -355,7 +355,7 @@ mod displayed_result_tests {
         let host = CpuHost::cooperative();
         s.set_render_job_host(Some(host.clone())).unwrap();
         let before = s.doc.to_json();
-        let undo = s.undo.len();
+        let undo = s.history.len();
         let old = complete(&mut s, [10, 20, 30]);
         let bytes = s.render_job_handle(old).unwrap().frame().unwrap().unwrap().png().to_vec();
         s.execute("render.result.pin", &json!({"job":old})).unwrap();
@@ -373,7 +373,7 @@ mod displayed_result_tests {
         assert!(s.render_job_handle(old).is_err());
         assert!(host.admitted_bytes() < retained);
         assert_eq!(s.doc.to_json(), before);
-        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.history.len(), undo);
         let reply = s.execute("render.start", &json!({"settings":{"width":8,"height":8}})).unwrap();
         assert!(s.execute("render.result.pin", &json!({"job":reply["job"]})).is_err(), "a pending result is never exportable");
     }

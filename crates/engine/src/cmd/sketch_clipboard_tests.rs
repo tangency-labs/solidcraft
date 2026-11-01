@@ -45,9 +45,9 @@ fn copy_paste_keeps_internal_constraints_and_dimensions_and_drops_outside_ones()
     assert_eq!(copied["curves"], 5);
     let before = sketch(&s, sid).clone();
     let params_before = s.doc.params.len();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let out = run(&mut s, "sketch.paste", json!({"at": [100, 50]}));
-    assert_eq!(s.undo.len(), undo + 1, "one paste, one undo step");
+    assert_eq!(s.history.len(), undo + 1, "one paste, one undo step");
     let pasted = strs(&out["curves"]);
     assert_eq!(pasted.len(), 5);
     let sk = sketch(&s, sid);
@@ -219,9 +219,9 @@ fn cut_copies_and_deletes_in_one_step_and_pastes_back_in_place() {
     let (mut s, rect, circle) = drawing();
     let sid = s.active_sketch.unwrap();
     let before = sketch(&s, sid).clone();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     run(&mut s, "sketch.cut", json!({"entities": [circle]}));
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     assert!(sketch(&s, sid).curve_index(&circle).is_none());
     // Pasted back without a position: where it was, with its diameter.
     let pasted = strs(&run(&mut s, "sketch.paste", json!({}))["curves"]);

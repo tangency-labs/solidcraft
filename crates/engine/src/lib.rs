@@ -19,6 +19,7 @@ pub mod crash;
 pub mod easyprint;
 pub mod frames;
 pub mod fuzz;
+pub mod history;
 pub mod licences;
 pub mod occurrences;
 pub mod params;
@@ -50,6 +51,7 @@ pub use cmd::{
     Addition, CommandInfo, CommandSpec, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach, find_command,
     resolve_design_links, shown_scope, standard_view,
 };
+pub use history::{History, MAX_UNDO, Mark};
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
 pub use solidcraft_geom as geom;
@@ -430,8 +432,7 @@ type MadeBodies = std::collections::HashMap<u64, (std::sync::Weak<ModelState>, V
 pub struct Session {
     pub doc: Arc<Document>,
     pub model: Model,
-    pub undo: Vec<Snapshot>,
-    pub redo: Vec<Snapshot>,
+    pub history: History,
     /// Sketch feature being edited (sketch mode).
     pub active_sketch: Option<u64>,
     /// The design as it was when the open sketch was entered, for Cancel Sketch.
@@ -597,8 +598,7 @@ pub(crate) struct Checkpoint {
     pub active_sketch: Option<u64>,
     pub pending_moves: std::collections::BTreeMap<u64, solidcraft_doc::Mat>,
     pub visibility: Visibility,
-    pub undo: Vec<Snapshot>,
-    pub redo: Vec<Snapshot>,
+    pub history: History,
 }
 
 /// A way of shading the model's faces to judge their shape (view state, not part of the design).
@@ -648,7 +648,6 @@ impl SurfaceAnalysis {
     }
 }
 
-const MAX_UNDO: usize = 200;
 /// Checkpoints kept (the oldest go first).
 const MAX_CHECKPOINTS: usize = 16;
 const MAX_LOG: usize = 2000;
@@ -697,8 +696,7 @@ impl Session {
             saved: doc.clone(),
             doc,
             model,
-            undo: Vec::new(),
-            redo: Vec::new(),
+            history: History::default(),
             active_sketch: None,
             sketch_entry: None,
             feature_edit_sketch: None,
@@ -1547,11 +1545,7 @@ impl Session {
                     let display_only = !changed && hidden;
                     let previous_doc = before.doc.clone();
                     if spec.undoable {
-                        self.undo.push(before);
-                        if self.undo.len() > MAX_UNDO {
-                            self.undo.remove(0);
-                        }
-                        self.redo.clear();
+                        self.history.push(before);
                     }
                     let pin = outermost && live_edit.is_none() && !render_only;
                     match live_edit {
@@ -1634,10 +1628,9 @@ impl Session {
             id,
             doc: self.doc.clone(),
             active_sketch: self.active_sketch,
-            undo: self.undo.clone(),
             pending_moves: self.pending_moves.clone(),
             visibility: self.visibility.clone(),
-            redo: self.redo.clone(),
+            history: self.history.clone(),
         });
         if self.checkpoints.len() > MAX_CHECKPOINTS {
             self.checkpoints.remove(0);
@@ -1666,8 +1659,7 @@ impl Session {
         self.active_sketch = c.active_sketch;
         self.pending_moves = c.pending_moves;
         self.visibility = c.visibility;
-        self.undo = c.undo;
-        self.redo = c.redo;
+        self.history = c.history;
         self.selection.clear();
         if self.render_only_change(&before) {
             self.refresh_render(&before.doc);
@@ -1692,8 +1684,7 @@ impl Session {
         Session {
             doc: self.doc.clone(),
             model: self.model.clone(),
-            undo: Vec::new(),
-            redo: Vec::new(),
+            history: History::default(),
             active_sketch: self.active_sketch,
             sketch_entry: None,
             feature_edit_sketch: self.feature_edit_sketch,
@@ -1800,12 +1791,10 @@ impl Session {
                 computed.world_cache = original.world_cache;
                 serde_json::json!({"marker":marker.unwrap_or(computed.doc.features.len()),"features":computed.doc.features.len()})
             } else {
-                let undo = std::mem::take(&mut computed.undo);
-                let redo = std::mem::take(&mut computed.redo);
+                let history = std::mem::take(&mut computed.history);
                 let selection = computed.selection.clone();
                 let reply = computed.execute("timeline.roll_to", &params)?;
-                computed.undo = undo;
-                computed.redo = redo;
+                computed.history = history;
                 computed.selection = selection;
                 reply
             };
@@ -1839,7 +1828,7 @@ impl Session {
         }
         // Visibility may have changed while the worker ran. Undoing its first command must
         // restore that current view, including sketches, folders and joint glyphs.
-        if let Some(before) = prepared.computed.undo.first_mut() {
+        if let Some(before) = prepared.computed.history.first_mut() {
             before.visibility.clone_from(&self.visibility);
         }
         // Only joints newly hidden by the computation (e.g. an import's rigid group) join
@@ -1874,13 +1863,11 @@ impl Session {
         let params = original.doc.marker.map(|position| serde_json::json!({"position":position})).unwrap_or_else(|| serde_json::json!({}));
         crash::accepted_command(self, &self.doc, &original.doc, "timeline.roll_to", &params, !Arc::ptr_eq(&self.doc, &original.doc));
         self.restore_editor_history(&source.doc, &original.doc);
-        let undo = std::mem::take(&mut self.undo);
-        let redo = std::mem::take(&mut self.redo);
+        let history = std::mem::take(&mut self.history);
         let selection = std::mem::take(&mut self.selection);
         original.visibility.hidden_joints.clear();
         self.accept_computed(original);
-        self.undo = undo;
-        self.redo = redo;
+        self.history = history;
         self.selection = selection;
         Ok(())
     }
@@ -1888,11 +1875,11 @@ impl Session {
     /// Hide/show steps taken in an editor belong to the complete design, not its temporary
     /// rollback. Keep each step's visibility and ordering, on both sides of the history.
     fn restore_editor_history(&mut self, source: &Arc<Document>, original: &Arc<Document>) {
-        for snapshot in self.undo.iter_mut().chain(&mut self.redo) {
+        self.history.for_each_step(|snapshot| {
             if Arc::ptr_eq(&snapshot.doc, source) {
                 snapshot.doc = original.clone();
             }
-        }
+        });
     }
 
     /// Refresh UI caches when adopting a session or switching tabs, without discarding its
@@ -1921,7 +1908,7 @@ impl Session {
         let previous_revision = self.revision;
         // The first computed step starts from this document. Its undo must restore the view
         // at acceptance, including a body hidden while the computation was running.
-        if let Some(before) = computed.undo.first_mut()
+        if let Some(before) = computed.history.first_mut()
             && Arc::ptr_eq(&before.doc, &self.doc)
         {
             before.visibility.hidden_bodies.clone_from(&self.visibility.hidden_bodies);
@@ -1934,11 +1921,7 @@ impl Session {
         self.doc = computed.doc;
         self.model = computed.model;
         self.world_cache = computed.world_cache;
-        self.undo.append(&mut computed.undo);
-        if self.undo.len() > MAX_UNDO {
-            self.undo.drain(..self.undo.len() - MAX_UNDO);
-        }
-        self.redo = computed.redo;
+        self.history.append(computed.history);
         self.active_sketch = computed.active_sketch;
         self.selection = computed.selection;
         self.revision = computed.revision;
@@ -1995,8 +1978,7 @@ impl Session {
     /// take a while (undo, the history marker moved) off its window thread first.
     pub fn ahead(&self) -> Ahead {
         let mut copy = self.scratch();
-        copy.undo.clone_from(&self.undo);
-        copy.redo.clone_from(&self.redo);
+        copy.history.clone_from(&self.history);
         copy.model.keep(Some(Arc::default()));
         Ahead(copy)
     }

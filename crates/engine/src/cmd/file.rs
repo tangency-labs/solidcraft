@@ -288,7 +288,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         let stem = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| "Untitled".into());
         let mut fresh = Session::new(Document::new(&stem));
         let mut out = fresh.execute(command, &json!({"path": path}))?;
-        fresh.undo.clear();
+        fresh.history.clear();
         s.replace_design(fresh);
         out["path"] = json!(path);
         out["name"] = json!(s.doc.name);
@@ -308,7 +308,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
         let r = fresh.execute("pointcloud.insert", &Value::Object(q))?;
-        fresh.undo.clear();
+        fresh.history.clear();
         s.replace_design(fresh);
         return Ok(
             json!({"path": path, "features": 0, "errors": 0, "cloud": r["cloud"], "points": r["points"], "source_points": r["source_points"], "bounds": r["bounds"], "warnings": r["warnings"]}),
@@ -328,7 +328,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
             fresh.active_component = c;
             fresh.active_occurrence_path = Some(fresh.doc.first_path(c));
         }
-        fresh.undo.clear();
+        fresh.history.clear();
         s.replace_design(fresh);
         let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
         let mut out = json!({"path": path, "features": s.doc.features.len(), "errors": errors, "bodies": r["bodies"], "warnings": r["warnings"]});
@@ -420,11 +420,11 @@ fn rename_design(s: &mut Session, from: &str, to: &str) {
     let model = s.model.state();
     let keep_world = s.world_cache.lock().ok().is_some_and(|cache| cache.as_ref().is_some_and(|cache| cache.matches(s, &model)));
     s.doc_mut().name = to.to_string();
-    for snap in s.undo.iter_mut().chain(s.redo.iter_mut()) {
+    s.history.for_each_step(|snap| {
         if snap.doc.name == from {
             std::sync::Arc::make_mut(&mut snap.doc).name = to.to_string();
         }
-    }
+    });
     if keep_world
         && let Ok(mut cache) = s.world_cache.lock()
         && let Some(cache) = cache.as_mut()
@@ -1105,7 +1105,7 @@ mod tests {
             assert_eq!(s.doc.name, "outline");
             assert!(s.path.is_none(), "Save must ask for a design path");
             assert!(s.is_dirty());
-            assert!(s.undo.is_empty());
+            assert!(s.history.is_empty());
             let before = s.doc.clone();
             std::fs::write(&path, "invalid drawing").unwrap();
             assert!(s.execute("doc.open", &json!({"path":path})).is_err());
@@ -1137,7 +1137,10 @@ mod tests {
         assert_eq!(adopted.path.as_deref(), b.to_str());
         assert_eq!(adopted.doc.name, "Bracket copy");
         assert_eq!(direct.doc.name, "Bracket");
-        assert_eq!(adopted.undo.iter().map(|u| u.doc.name.clone()).collect::<Vec<_>>(), vec!["Bracket copy".to_string(); adopted.undo.len()]);
+        assert_eq!(
+            adopted.history.steps().iter().map(|u| u.doc.name.clone()).collect::<Vec<_>>(),
+            vec!["Bracket copy".to_string(); adopted.history.len()]
+        );
         assert_eq!(solidcraft_io::read_design(&std::fs::read(&b).unwrap()).unwrap(), *adopted.doc);
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -120,12 +120,12 @@ fn confirming_coplanar_body_faces_uses_one_atomic_extrusion() {
     assert_eq!(commands.first().unwrap().1["face_body"], "Plate");
     assert_eq!(commands.first().unwrap().1["operation"], "cut");
     assert!(h.app.preview.error.is_none(), "{:?}", h.app.preview.error);
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.frames(3);
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(h.app.dialog.is_none(), "busy={}, dialog={:?}", h.app.applying.is_some(), h.app.dialog);
     assert_eq!(h.app.session.doc.features.len(), 5);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     let volume = solidcraft_engine::doc::kernel::measure(&h.app.session.model.state().body("Plate").unwrap().body).unwrap().volume;
     assert!((volume - 11_968.0).abs() < 1e-5, "{volume}");
 }
@@ -237,7 +237,7 @@ fn feature_pattern_controls_preview_without_committing_and_cancel_cleanly() {
             d.inputs[2].items = vec![Sel::Axis { name: "Y".into() }];
         }
         let saved = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.frames(3);
         for handle in ["dialog:Alignment:Center", "dialog:Alignment:Flip direction"] {
             h.step(&json!({"click":{"handle":handle}})).unwrap();
@@ -256,7 +256,7 @@ fn feature_pattern_controls_preview_without_committing_and_cancel_cleanly() {
             assert_eq!(p["reversed2"], json!(true));
         }
         assert_eq!(h.app.session.doc.to_json(), saved);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         wait_feature_preview(&mut h);
         h.step(&json!({"key":"Escape"})).unwrap();
         h.frames(3);
@@ -329,7 +329,7 @@ fn feature_mirror_picks_clear_preview_and_replay_the_source_cut() {
     h.app.session.selection = vec![source.clone()];
     h.step(&json!({"start":"solid.mirror"})).unwrap();
     let saved = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let d = h.app.dialog.as_mut().unwrap();
     d.active = 0;
     d.pick(&h.app.session, source.clone());
@@ -339,7 +339,7 @@ fn feature_mirror_picks_clear_preview_and_replay_the_source_cut() {
     d.pick(&h.app.session, Sel::Plane { name: "Mid".into() });
     wait_feature_preview(&mut h);
     assert_eq!(h.app.session.doc.to_json(), saved);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     h.step(&json!({"click":{"handle":"dialog:clear:Mirror Plane"}})).unwrap();
     assert!(h.app.dialog.as_ref().unwrap().inputs[1].items.is_empty());
     assert!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err());
@@ -397,7 +397,7 @@ fn path_plane_click_retains_source_and_previews_then_edits_in_place() {
     let d = h.app.dialog.as_ref().unwrap();
     let commands = apply_commands(&h.app, d).unwrap();
     assert_eq!(commands[0].1["path"]["sketch"], json!(source));
-    let history = h.app.session.undo.len();
+    let history = h.app.session.history.len();
     let count = h.app.session.doc.features.len();
     let preview = h.app.session.preview_visible_world(&commands).unwrap();
     let built = crate::preview::compute(&h.app.session, &commands, crate::preview::Colors::from_tokens(&crate::theme::Tokens::dark())).unwrap();
@@ -406,11 +406,11 @@ fn path_plane_click_retains_source_and_previews_then_edits_in_place() {
     let solidcraft_engine::doc::construct::ConstructGeom::Plane(pl) = plane.geom else { panic!("plane") };
     assert!(pl.origin.dist(Vec3::new(20.0, 27.5, 25.0)) < 1e-6);
     assert_eq!(h.app.session.doc.features.len(), count);
-    assert_eq!(h.app.session.undo.len(), history);
+    assert_eq!(h.app.session.history.len(), history);
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
     let feature = h.app.session.doc.features.last().unwrap().clone();
-    assert_eq!(h.app.session.undo.len(), history + 1);
+    assert_eq!(h.app.session.history.len(), history + 1);
     h.app.edit_feature(feature.id);
     h.frames(2);
     let d = h.app.dialog.as_mut().unwrap();
@@ -586,7 +586,7 @@ fn cylinder_emboss_edit_retains_second_source_and_author_paths_and_all_profiles(
     assert_eq!(added.len(), 1, "{:?}", added.iter().map(|body| &body.name).collect::<Vec<_>>());
     assert!(added[0].name.contains("Source:2"), "{}", added[0].name);
     let doc = h.app.session.doc.to_json();
-    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    let history = (h.app.session.history.len(), h.app.session.history.redo_steps().len());
     let selection = h.app.session.selection.clone();
     let Kind::Emboss { depth, .. } = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("Emboss editor") };
     *depth = "2 mm".into();
@@ -597,7 +597,7 @@ fn cylinder_emboss_edit_retains_second_source_and_author_paths_and_all_profiles(
     invalid[0].1["params"]["depth"] = json!("unknown_depth");
     assert!(h.app.session.preview_world(&invalid).is_err());
     assert_eq!(h.app.session.doc.to_json(), doc);
-    assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
+    assert_eq!((h.app.session.history.len(), h.app.session.history.redo_steps().len()), history);
     assert_eq!(h.app.session.selection, selection);
     h.step(&json!({"key":"Escape"})).unwrap();
     assert!(h.app.dialog.is_none());
@@ -1105,7 +1105,7 @@ fn path_pattern_editor_applies_in_place_cancels_and_undoes() {
         let mut h = path_pattern_editor(p);
         let original = h.app.session.doc.find_feature("Copies").unwrap().clone();
         let feature_count = h.app.session.doc.features.len();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         for cancel in [true, false] {
             h.step(&json!({"call":"ui.editFeature","params":{"feature":"Copies"}})).unwrap();
             h.frames(8);
@@ -1122,7 +1122,7 @@ fn path_pattern_editor_applies_in_place_cancels_and_undoes() {
             assert_eq!(edited.param_names, original.param_names);
             if cancel {
                 assert_eq!(edited.kind, original.kind);
-                assert_eq!(h.app.session.undo.len(), undo);
+                assert_eq!(h.app.session.history.len(), undo);
                 assert_eq!(h.app.session.world_state().bodies.len(), 3);
             } else {
                 assert_eq!(h.app.session.world_state().bodies.len(), 5);
@@ -1749,7 +1749,7 @@ fn modelled_thread_preview_updates_reports_errors_and_cancels_without_changes() 
     let mut h = crate::scenario::Harness::new();
     h.app.run("solid.cylinder", json!({"radius":4,"height":2})).unwrap();
     let saved = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.app.session.selection = vec![thread_face(&h.app, "Body1")];
     h.step(&json!({"start":"solid.thread"})).unwrap();
     designation(&mut h, "M8x1");
@@ -1795,7 +1795,7 @@ fn modelled_thread_preview_updates_reports_errors_and_cancels_without_changes() 
     wait_feature_preview(&mut h);
     assert!(h.app.preview.error.is_none());
     assert_eq!(h.app.session.doc.to_json(), saved);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     h.step(&json!({"click":{"handle":"dialog:Modeled"}})).unwrap();
     h.frames(2);
     assert!(!h.app.preview.active && h.app.preview.replaced.is_empty(), "cosmetic threads leave the original body visible");
@@ -1805,7 +1805,7 @@ fn modelled_thread_preview_updates_reports_errors_and_cancels_without_changes() 
     h.frames(2);
     assert!(h.app.dialog.is_none() && !h.app.preview.active && h.app.preview.replaced.is_empty());
     assert_eq!(h.app.session.doc.to_json(), saved);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
 }
 
 #[test]

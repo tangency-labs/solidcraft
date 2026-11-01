@@ -381,7 +381,7 @@ mod tests {
         assert_eq!(crate::scenario::count_of("axis_view_highlights"), Some(0.0));
         assert_eq!(h.app.cam, camera);
         assert_eq!(h.app.session.doc.to_json(), design);
-        assert!(h.app.session.undo.is_empty());
+        assert!(h.app.session.history.is_empty());
     }
 
     #[test]
@@ -569,7 +569,7 @@ mod tests {
         assert!(!h.app.preferences.navigator_fit, "off by default");
         h.app.run("solid.box", json!({"corner":[100,0,0],"length":20,"width":20,"height":20})).unwrap();
         h.settle();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let away = |h: &mut crate::scenario::Harness| {
             h.call("ui.view", json!({"view":"iso"}));
             h.app.cam.pan(600.0, 400.0, 500.0);
@@ -611,7 +611,7 @@ mod tests {
             assert!((h.app.cam.distance - home.distance).abs() < 1e-6, "{handle}: {} vs Home's {}", h.app.cam.distance, home.distance);
             assert!(h.app.cam.target.dist(home.target) < 1e-6, "{handle}: {:?} vs Home's {:?}", h.app.cam.target, home.target);
         }
-        assert_eq!(h.app.session.undo.len(), undo, "a view change edits nothing");
+        assert_eq!(h.app.session.history.len(), undo, "a view change edits nothing");
     }
 
     /// #10254: with Preferences › Navigation "Invert the view cube rotation arrows" on, the
@@ -810,6 +810,6 @@ mod tests {
         h.call("ui.click", json!({"x":p.x,"y":p.y}));
         assert!(h.app.cam.back().dist(Camera::default().back()) < 1e-6);
         assert_eq!(h.app.session.doc.to_json(), before);
-        assert!(h.app.session.undo.is_empty());
+        assert!(h.app.session.history.is_empty());
     }
 }

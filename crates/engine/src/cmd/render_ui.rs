@@ -110,7 +110,7 @@ fn render_lights_remaining_planned_commands_refuse_without_mutation() {
     session.execute("render.settings.set", &json!({"name":"Studio","set":{"width":900}})).unwrap();
     session.execute("edit.undo", &json!({})).unwrap();
     let document = session.doc.clone();
-    let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
+    let before = (session.history.len(), session.history.redo_steps().len(), session.revision, session.evaluations, session.is_dirty());
     for command in COMMANDS {
         if command.planned.is_none() {
             continue;
@@ -120,7 +120,10 @@ fn render_lights_remaining_planned_commands_refuse_without_mutation() {
             let error = session.execute(command.id, &params).unwrap_err().to_string();
             assert!(error.contains("not supported yet"), "{error}");
             assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
-            assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+            assert_eq!(
+                before,
+                (session.history.len(), session.history.redo_steps().len(), session.revision, session.evaluations, session.is_dirty())
+            );
         }
     }
 }
@@ -168,7 +171,7 @@ fn close_result(_: &mut Session, params: &Value) -> Result<Value> {
 fn output_viewer_requests_are_validated_headless_echoes() {
     let mut s = Session::default();
     let document = s.doc.clone();
-    let before = (s.revision, s.undo.len(), s.evaluations);
+    let before = (s.revision, s.history.len(), s.evaluations);
     for size in [json!({"width":1280,"height":720}), json!({"width":1920,"height":1080})] {
         assert_eq!(s.execute("render.output.size", &size).unwrap(), size);
     }
@@ -193,7 +196,7 @@ fn output_viewer_requests_are_validated_headless_echoes() {
         }
     }
     assert!(std::sync::Arc::ptr_eq(&document, &s.doc));
-    assert_eq!(before, (s.revision, s.undo.len(), s.evaluations));
+    assert_eq!(before, (s.revision, s.history.len(), s.evaluations));
 }
 
 #[cfg(test)]
@@ -201,12 +204,12 @@ fn output_viewer_requests_are_validated_headless_echoes() {
 fn output_sections_copy_report_validates_without_design_history_or_job_changes() {
     let mut s = Session::default();
     let doc = s.doc.clone();
-    let before = (s.revision, s.undo.len(), s.redo.len(), s.evaluations, s.is_dirty());
+    let before = (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations, s.is_dirty());
     let report = json!({"text":"Check\n✓ Size is within the renderer limit"});
     assert_eq!(s.execute("render.preflight.copy", &report).unwrap(), report);
     for request in [json!({}), json!({"text":""}), json!({"text":true}), json!({"text":"check","job":1}), json!({"text":"x".repeat(65537)})] {
         assert!(s.execute("render.preflight.copy", &request).is_err());
     }
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.evaluations, s.is_dirty()));
+    assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations, s.is_dirty()));
 }

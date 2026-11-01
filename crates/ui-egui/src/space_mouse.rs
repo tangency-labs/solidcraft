@@ -846,7 +846,7 @@ mod tests {
         press(&mut app, &ctx, 0, vec![]);
         press(&mut app, &ctx, 0b10, vec![]);
         assert_eq!(app.ui.perspective, before);
-        assert!(app.session.undo.is_empty(), "a view setting, not an edit");
+        assert!(app.session.history.is_empty(), "a view setting, not an edit");
     }
 
     /// The keyboard and a button hold the same modifier: it stays down until both let go, whichever
@@ -871,14 +871,14 @@ mod tests {
         // A document change that Undo would take back.
         app.run("document.metadata.set", serde_json::json!({"values": {"author": "Jane"}})).unwrap();
         app.issue_report.draft = Some(crate::issue_report::draft_for(&app, None, None));
-        let (cam, undo, dialog) = (app.cam, app.session.undo.len(), app.dialog.is_some());
+        let (cam, undo, dialog) = (app.cam, app.session.history.len(), app.dialog.is_some());
         assert!(undo > 0 && app.session.doc.metadata.author() == Some("Jane"));
         let raw = press(&mut app, &ctx, 0b11111, vec![]);
         assert_eq!(app.session.doc.metadata.author(), Some("Jane"), "the mapped Undo did not run");
         assert_eq!(escapes(&raw), 0, "no Esc");
         assert!(!app.prefs_window.open, "no Preferences");
         assert!(!ctx.input(|i| i.modifiers.shift), "no held Shift");
-        assert_eq!((app.cam, app.session.undo.len(), app.dialog.is_some()), (cam, undo, dialog));
+        assert_eq!((app.cam, app.session.history.len(), app.dialog.is_some()), (cam, undo, dialog));
         // Once the draft is closed the same buttons work again (a fresh press).
         app.issue_report.draft = None;
         press(&mut app, &ctx, 0, vec![]);

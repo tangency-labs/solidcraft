@@ -1852,10 +1852,10 @@ mod studio_browser_tests {
         let blue = h.app.render_workspace.view.library.entries.iter().find(|e| e["name"] == "ABS - Blue").unwrap().clone();
         h.app.render_workspace.view.library.query = "ABS - Blue".into();
         h.frames(3);
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"click":{"handle":format!("render:library:{}",appearance_id(&blue))}})).unwrap();
         assert_eq!(h.app.session.doc.appearances.bodies["Sample"].name, "ABS - Blue");
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         h.app.run("edit.undo", json!({})).unwrap();
         assert!(!h.app.session.doc.appearances.bodies.contains_key("Sample"));
     }
@@ -1870,15 +1870,15 @@ mod studio_browser_tests {
         super::super::select_image_method(&mut h.app, ImageMethod::GpuRaytrace);
         h.app.run("view.render_stage", json!({"stage":"light"})).unwrap();
         h.frames(4);
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"click":{"handle":"render:light:NATIVE-STUDIO-001"}})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), unchanged);
         h.step(&json!({"click":{"handle":"render:light:review"}})).unwrap();
         assert!(h.app.render_workspace.view.library.review.is_some());
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         h.step(&json!({"click":{"handle":"render:review:acknowledge"}})).unwrap();
         h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
-        assert_eq!(h.app.session.undo.len(), undo + 1);
+        assert_eq!(h.app.session.history.len(), undo + 1);
         assert!(!h.app.render_workspace.view.draft.stage.is_empty());
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), unchanged);
@@ -1977,7 +1977,7 @@ mod studio_browser_tests {
         assert_eq!(view.statuses.len(), 33);
         assert_eq!(view.statuses.get(&native).map(String::as_str), Some("native_composition"));
         assert_eq!(h.app.session.doc.to_json(), before);
-        assert!(h.app.session.undo.is_empty());
+        assert!(h.app.session.history.is_empty());
     }
     #[test]
     fn physical_reference_navigation_uses_the_same_category_history() {
@@ -2030,7 +2030,7 @@ mod studio_browser_tests {
         }
         assert_eq!(h.app.preferences.render_library_recent.len(), 32);
         assert_eq!(h.app.session.doc.to_json(), before);
-        assert!(h.app.session.undo.is_empty());
+        assert!(h.app.session.history.is_empty());
         choose(&mut h.app, &mut view, "surfaces", "SURF-048").unwrap();
         assert_eq!(h.app.preferences.render_library_recent.len(), 32);
         assert_eq!(h.app.render_workspace.view.inspector.page, super::super::inspector::Page::Appearance);

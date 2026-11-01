@@ -105,7 +105,7 @@ fn measured_palette_fit_exposes_endpoints_and_layout_changes_preserve_manual_vie
             h.call("ui.resize", json!({"width":width,"height":height}));
             h.settle();
             let before = h.app.session.doc.to_json();
-            let undo = h.app.session.undo.len();
+            let undo = h.app.session.history.len();
             h.app.fit_view();
             h.settle();
             let layout = h.app.viewport.layout.as_ref().unwrap();
@@ -140,7 +140,7 @@ fn measured_palette_fit_exposes_endpoints_and_layout_changes_preserve_manual_vie
             h.settle();
             assert_eq!(h.app.cam, manual);
             assert_eq!(h.app.session.doc.to_json(), before);
-            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(h.app.session.history.len(), undo);
         }
     }
 }
@@ -203,7 +203,7 @@ fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
                 h.app.fit_view();
                 h.settle();
                 let baseline = h.app.session.doc.to_json();
-                let undo = h.app.session.undo.len();
+                let undo = h.app.session.history.len();
                 h.call("ui.view", json!({"view":"front"}));
                 let layout = h.app.viewport.layout.as_ref().unwrap().clone();
                 let palette = h.app.viewport.palette_rect.unwrap();
@@ -214,7 +214,7 @@ fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
                     assert!(layout.navigation.is_positive());
                     assert!(crate::scenario::rect_of("axis_view:outer").is_none());
                     assert_eq!(h.app.session.doc.to_json(), baseline);
-                    assert_eq!(h.app.session.undo.len(), undo);
+                    assert_eq!(h.app.session.history.len(), undo);
                     continue;
                 }
                 let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
@@ -232,7 +232,7 @@ fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
                     assert!(h.app.viewport.axis_drag.is_none());
                     assert_eq!(crate::scenario::rect_of("axis_view:outer").unwrap(), outer);
                     assert_eq!(h.app.session.doc.to_json(), baseline);
-                    assert_eq!(h.app.session.undo.len(), undo);
+                    assert_eq!(h.app.session.history.len(), undo);
                     continue;
                 }
                 assert!(!layout.navigation.intersect(outer).is_positive());
@@ -271,7 +271,7 @@ fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
                 iso.set_view(StandardView::Iso);
                 assert_eq!((h.app.cam.yaw, h.app.cam.pitch), (iso.yaw, iso.pitch));
                 assert_eq!(h.app.session.doc.to_json(), baseline);
-                assert_eq!(h.app.session.undo.len(), undo);
+                assert_eq!(h.app.session.history.len(), undo);
                 assert!(h.app.session.selection.is_empty());
             }
         }
@@ -285,7 +285,7 @@ fn immediate_standard_view_cancels_fit_before_the_measured_frame() {
         h.call("ui.set", json!({"layout":mode}));
         h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
         let baseline = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.app.cam.set_view(StandardView::Iso);
         h.app.fit_view();
         assert!(h.app.pending_fit.is_some(), "Fit awaits the measured overlay frame");
@@ -296,7 +296,7 @@ fn immediate_standard_view_cancels_fit_before_the_measured_frame() {
         assert!(h.app.pending_fit.is_none());
         assert_eq!(h.app.cam, front, "the later frame must keep the explicitly requested view");
         assert_eq!(h.app.session.doc.to_json(), baseline);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
     }
 }
 
@@ -336,7 +336,7 @@ fn opening_different_command_dialogs_keeps_published_navigation_positions() {
         let nav = crate::scenario::rect_of("nav:outer").unwrap();
         let camera = h.app.cam;
         let baseline = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         for command in ["solid.extrude", "solid.fillet", "inspect.measure"] {
             h.app.start(command);
             h.settle();
@@ -356,7 +356,7 @@ fn opening_different_command_dialogs_keeps_published_navigation_positions() {
             assert_eq!(crate::scenario::rect_of("nav:outer").unwrap(), nav);
         }
         assert_eq!(h.app.session.doc.to_json(), baseline);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
     }
 }
 

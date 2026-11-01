@@ -309,10 +309,10 @@ fn apply_commits_once_keeps_values_and_waits_for_new_selection_ok_closes() {
         h.settle();
         let before = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
         assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(1.0), "{command}");
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"click":{"handle":"dialog:apply"}})).unwrap();
         h.settle();
-        assert_eq!(h.app.session.undo.len(), undo + 1, "{command}: one Apply, one undo");
+        assert_eq!(h.app.session.history.len(), undo + 1, "{command}: one Apply, one undo");
         let d = h.app.dialog.as_ref().unwrap();
         assert!(d.inputs.iter().all(|i| i.items.is_empty()));
         assert_eq!(d.active, 0);
@@ -342,10 +342,10 @@ fn apply_in_the_header_row_commits_once_and_keeps_the_dialog() {
         (scenario::rect_of("dialog:cancel").unwrap(), scenario::rect_of("dialog:apply").unwrap(), scenario::rect_of("dialog:ok").unwrap());
     assert!(header.contains_rect(cancel) && header.contains_rect(apply) && header.contains_rect(ok));
     assert!(cancel.right() < apply.left() && apply.right() < ok.left());
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"click":{"handle":"dialog:apply"}})).unwrap();
     h.settle();
-    assert_eq!(h.app.session.undo.len(), undo + 1, "one Apply, one undo");
+    assert_eq!(h.app.session.history.len(), undo + 1, "one Apply, one undo");
     assert!(h.app.dialog.is_some(), "Apply keeps the dialog");
     assert_eq!(scenario::rect_of("dialog:apply"), Some(apply), "the buttons stay where they were");
 }
@@ -439,14 +439,14 @@ fn apply_keeps_the_panel_open_after_asynchronous_evaluation() {
     let (finish, done) = std::sync::mpsc::channel();
     h.app.applying =
         Some(Applying { done, ready: None, started: crate::now_ms(), cmds, seen: true, progress: Default::default(), quality: Default::default() });
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.frames(2);
-    assert_eq!(h.app.session.undo.len(), undo);
+    assert_eq!(h.app.session.history.len(), undo);
     finish.send(Ok(prepared)).ok().unwrap();
     h.frames(3);
     assert!(h.app.applying.is_none());
     let d = h.app.dialog.as_ref().unwrap();
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     assert!(d.inputs.iter().all(|i| i.items.is_empty()));
     assert!(!d.repeat_after_apply);
 }

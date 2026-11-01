@@ -54,10 +54,10 @@ fn occurrence_gizmo_drag_matches_numeric_input_and_preserves_joints_capture_and_
     h.frames(3);
     let numeric = doc::apply_point(&h.app.session.occurrence_placement(&[first]).unwrap().world, Vec3::ZERO);
     assert!((numeric - arrow).len() < 1e-6, "numeric and arrow routes must agree: {numeric:?}, {arrow:?}");
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.app.run("component.capture_position", json!({})).unwrap();
     h.app.tree.occurrence_move = None;
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(h.app.session.doc.to_json(), original);
     h.app.run("edit.redo", json!({})).unwrap();

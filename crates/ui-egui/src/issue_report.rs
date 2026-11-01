@@ -993,14 +993,14 @@ mod tests {
         ] {
             assert!(h.widget(label).is_some(), "missing submission action or explanation: {label}");
         }
-        let before = (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len());
+        let before = (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.history.len());
         let commands = click_commands(&mut h, "Copy report");
         assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::CopyText(text) if text == &reviewed)));
         assert!(!commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(_))));
         let draft = h.app.issue_report.draft.as_ref().unwrap();
         assert!(!draft.missing_description && !draft.opened_github);
         assert_eq!(draft.note, "Report copied. Keep this text to submit on GitHub when you are online.");
-        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len()));
+        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.history.len()));
     }
 
     #[test]
@@ -1111,7 +1111,7 @@ mod tests {
             h.call("ui.resize", json!({"width":size[0],"height":size[1]}));
             h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
             h.frames(16);
-            let before = (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len());
+            let before = (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.history.len());
             let commands = open_commands(&mut h);
             assert!(!commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(_))));
             assert!(h.app.issue_report.draft.as_ref().unwrap().missing_description);
@@ -1120,7 +1120,7 @@ mod tests {
             let commands = open_commands(&mut h);
             assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if url.url.starts_with(ISSUE_URL))));
             assert!(h.app.issue_report.draft.as_ref().unwrap().description.contains("The preview disappeared"));
-            assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len()));
+            assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.history.len()));
         }
     }
 
@@ -1300,14 +1300,17 @@ mod tests {
     fn issue_report_actual_pending_boolean_settings_and_failure_are_read_only() {
         let mut app = app();
         combine(&mut app);
-        let before = (app.session.doc.to_json(), app.session.revision, app.session.undo.len(), app.session.redo.len(), app.cam);
+        let before = (app.session.doc.to_json(), app.session.revision, app.session.history.len(), app.session.history.redo_steps().len(), app.cam);
         let draft = draft_for(&app, app.dialog.as_ref(), Some("Boolean tool is outside target"));
         for expected in
             ["solid.combine", "Stock", "Cutter", "cut", "keep_tools", "true", "Boolean tool is outside target", help::VERSION, "last valid geometry"]
         {
             assert!(draft.body.contains(expected), "missing {expected}: {}", draft.body);
         }
-        assert_eq!(before, (app.session.doc.to_json(), app.session.revision, app.session.undo.len(), app.session.redo.len(), app.cam));
+        assert_eq!(
+            before,
+            (app.session.doc.to_json(), app.session.revision, app.session.history.len(), app.session.history.redo_steps().len(), app.cam)
+        );
     }
 
     /// The sample with Fillet1 failing (the plate made narrower than its fillets).
@@ -1402,7 +1405,7 @@ mod tests {
         app.run("solid.box", json!({"length":5,"width":5,"height":5,"body_name":"Cutter"})).unwrap();
         app.run("solid.combine", json!({"target":"Stock","tools":["Cutter"],"operation":"cut","keep_tools":true})).unwrap();
         assert!(app.session.model.results.iter().all(|r| r.error.is_none()));
-        let before = (app.session.doc.to_json(), app.session.undo.len(), app.session.redo.len(), app.cam);
+        let before = (app.session.doc.to_json(), app.session.history.len(), app.session.history.redo_steps().len(), app.cam);
         let ctx = crate::fonts::test_context();
         help::run(&mut app, &ctx, "report");
         let draft = app.issue_report.draft.as_ref().unwrap();
@@ -1410,7 +1413,7 @@ mod tests {
         assert!(draft.body.contains(help::COMMIT));
         assert!(draft.body.contains("combine") && draft.body.contains("keep_tools") && draft.body.contains("Cutter"));
         assert!(pending(&app), "Help must request real evidence, not just copy generic text");
-        assert_eq!(before, (app.session.doc.to_json(), app.session.undo.len(), app.session.redo.len(), app.cam));
+        assert_eq!(before, (app.session.doc.to_json(), app.session.history.len(), app.session.history.redo_steps().len(), app.cam));
     }
 
     #[test]
@@ -1444,12 +1447,12 @@ mod tests {
         let error = h.app.run("solid.combine", json!({"target":"Stock","tools":["Cutter"],"operation":"cut","keep_tools":true})).unwrap_err();
         h.app.dialog.as_mut().unwrap().error = Some(error.clone());
         h.frames(3);
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len());
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len());
         h.step(&json!({"widget":"Create Issue…"})).unwrap();
         let draft = h.app.issue_report.draft.as_ref().unwrap();
         assert!(draft.body.contains("solid.combine") && draft.body.contains("Cutter") && draft.body.contains(&format!("{error:?}")));
         assert!(h.app.dialog.is_some(), "reporting must not cancel the live feature dialog");
-        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len()));
+        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len()));
     }
 
     #[test]
@@ -1596,7 +1599,7 @@ mod tests {
         combine(&mut h.app);
         h.app.issue_report.draft = Some(draft_for(&h.app, h.app.dialog.as_ref(), None));
         h.frames(4);
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision);
         for field in ["issue_report_title", "issue_report_body"] {
             let id = egui::Id::new(field);
             h.ctx.memory_mut(|m| m.request_focus(id));
@@ -1604,7 +1607,10 @@ mod tests {
             h.step(&json!({"text":"edited-report-marker"})).unwrap();
             h.step(&json!({"key":"Enter"})).unwrap();
             assert!(h.app.dialog.is_some(), "Enter in {field} must not apply the valid Boolean");
-            assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision));
+            assert_eq!(
+                before,
+                (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision)
+            );
             h.ctx.memory_mut(|m| m.surrender_focus(id));
         }
         let draft = h.app.issue_report.draft.as_ref().unwrap();
@@ -1612,7 +1618,10 @@ mod tests {
         for key in [json!({"key":"Enter"}), json!({"key":"Escape"}), json!({"key":"Z","cmd":true})] {
             h.step(&key).unwrap();
             assert!(h.app.dialog.is_some() && h.app.issue_report.draft.is_some());
-            assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision));
+            assert_eq!(
+                before,
+                (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision)
+            );
         }
     }
 
@@ -1621,13 +1630,13 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
-        let start = h.app.session.undo.len();
+        let start = h.app.session.history.len();
         h.app.start("sketch.text");
         h.frames(3);
         h.step(&json!({"click":{"sketch":[0,0]}})).unwrap();
         h.step(&json!({"text":"Pending CAD text"})).unwrap();
         assert!(h.widget("Pending CAD text").is_some(), "the real placed Text editor must be open");
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision);
         h.app.help.menu = true;
         h.frames(2);
         h.step(&json!({"click":{"handle":"menu:report"}})).unwrap();
@@ -1644,7 +1653,10 @@ mod tests {
             h.step(&json!({"text":"report-only-marker"})).unwrap();
             h.step(&json!({"key":"Enter"})).unwrap();
             h.step(&json!({"key":"Escape"})).unwrap();
-            assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision));
+            assert_eq!(
+                before,
+                (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision)
+            );
             assert!(h.widget("Pending CAD text").is_some(), "report keys must not apply, edit or cancel the Text editor");
         }
         let draft = h.app.issue_report.draft.as_ref().unwrap();
@@ -1652,11 +1664,14 @@ mod tests {
         h.step(&json!({"widget":"Close draft"})).unwrap();
         assert!(h.app.issue_report.draft.is_none());
         h.frames(2);
-        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision));
+        assert_eq!(
+            before,
+            (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision)
+        );
         assert!(h.widget("Pending CAD text").is_some());
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(!crate::sketch_text::editing(&h.app), "closing the report must return control to the preserved CAD text");
-        assert_eq!(h.app.session.undo.len(), start + 1, "placing and typing the text is one undo step");
+        assert_eq!(h.app.session.history.len(), start + 1, "placing and typing the text is one undo step");
         let sid = h.app.session.active_sketch.unwrap();
         let sk = h.app.session.doc.sketch(sid).unwrap();
         assert!(sk.links.iter().any(|l| matches!(&l.source, solidcraft_engine::sketch::LinkSource::Text { text, .. } if text == "Pending CAD text")));
@@ -1720,7 +1735,7 @@ mod tests {
         h.frames(2);
         let drag = h.app.viewport.point_drag.clone();
         assert!(drag.is_some(), "real viewport point drag must have started");
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision);
         help::run(&mut h.app, &h.ctx, "report");
         // egui calculates this release before the CAD input barrier begins.
         h.app.synthetic.push(egui::Event::PointerButton {
@@ -1731,13 +1746,19 @@ mod tests {
         });
         h.frame();
         assert_eq!(h.app.viewport.point_drag, drag, "cached release must not clear or constrain the CAD drag");
-        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision));
+        assert_eq!(
+            before,
+            (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision)
+        );
         let token = h.app.issue_report.pending.as_ref().unwrap().token;
         receive(&mut h.app, token, Arc::new(ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4])));
         h.frames(16);
         h.step(&json!({"widget":"Close draft"})).unwrap();
         assert!(h.app.viewport.point_drag.is_none());
-        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision));
+        assert_eq!(
+            before,
+            (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision)
+        );
     }
 
     #[test]
@@ -1757,7 +1778,7 @@ mod tests {
         }
         h.step(&json!({"text":"30 mm"})).unwrap();
         assert!(crate::dim_view::editing());
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision);
         help::run(&mut h.app, &h.ctx, "report");
         h.frames(3);
         let token = h.app.issue_report.pending.as_ref().unwrap().token;
@@ -1767,7 +1788,10 @@ mod tests {
         h.step(&json!({"text":"Typing here describes the bug, not a CAD dimension."})).unwrap();
         h.step(&json!({"key":"Enter"})).unwrap();
         h.step(&json!({"key":"Escape"})).unwrap();
-        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision));
+        assert_eq!(
+            before,
+            (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision)
+        );
         assert!(crate::dim_view::editing() && h.widget("30 mm").is_some());
         assert!(h.app.issue_report.draft.as_ref().unwrap().description.contains("Typing here describes"));
         h.step(&json!({"widget":"Close draft"})).unwrap();
@@ -1775,7 +1799,7 @@ mod tests {
         assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")));
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(!crate::dim_view::editing());
-        assert_eq!(h.app.session.undo.len(), before.1 + 1);
+        assert_eq!(h.app.session.history.len(), before.1 + 1);
         assert_eq!(h.app.session.doc.param("d1").unwrap().expr, "30 mm");
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), before.0);
@@ -1794,7 +1818,7 @@ mod tests {
         h.frames(2);
         h.step(&json!({"text":"12"})).unwrap();
         assert!(crate::dim_view::editing() && h.widget("12").is_some());
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision);
         help::run(&mut h.app, &h.ctx, "report");
         h.frames(3);
         let token = h.app.issue_report.pending.as_ref().unwrap().token;
@@ -1804,16 +1828,22 @@ mod tests {
         h.step(&json!({"text":"report only"})).unwrap();
         h.step(&json!({"key":"Enter"})).unwrap();
         h.step(&json!({"key":"Escape"})).unwrap();
-        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision));
+        assert_eq!(
+            before,
+            (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision)
+        );
         assert!(crate::dim_view::editing() && h.widget("12").is_some());
         h.step(&json!({"widget":"Close draft"})).unwrap();
         h.frames(2);
-        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision));
+        assert_eq!(
+            before,
+            (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision)
+        );
         assert!(crate::dim_view::editing() && h.widget("12").is_some());
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(!crate::dim_view::editing());
         assert_eq!(h.app.session.doc.param(&param).unwrap().expr, "12");
-        assert_eq!(h.app.session.undo.len(), before.1 + 1);
+        assert_eq!(h.app.session.history.len(), before.1 + 1);
     }
 
     #[test]
@@ -1825,7 +1855,7 @@ mod tests {
         h.frames(3);
         let tabs_before = h.app.docs.count();
         assert!(!h.app.file_load.busy());
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision);
         help::run(&mut h.app, &h.ctx, "report");
         let path = h.dir.join("private-design.json");
         std::fs::write(&path, h.app.session.doc.to_json()).unwrap();
@@ -1851,7 +1881,10 @@ mod tests {
             app.ui(ui);
         });
         output.textures_delta.clear();
-        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision));
+        assert_eq!(
+            before,
+            (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.history.redo_steps().len(), h.app.session.revision)
+        );
         assert!(h.app.issue_report.draft.is_some());
         assert!(!h.app.file_load.busy(), "native drop must not queue an asynchronous open behind the draft");
         assert_eq!(h.app.docs.count(), tabs_before);

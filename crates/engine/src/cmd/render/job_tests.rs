@@ -36,7 +36,7 @@ fn saved_raster_jobs_and_legacy_requests_share_output_without_runtime_overrides(
     let legacy = json!({"settings":{"width":16,"height":16,"job":null},"transparent_background":true});
     assert_eq!(checked, s.execute("render.preflight", &legacy).unwrap());
     let doc = s.doc.clone();
-    let before = (s.revision, s.undo.len(), s.redo.len(), s.evaluations);
+    let before = (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations);
     for command in ["render.preflight", "render.start"] {
         for (key, value) in [
             ("progressive", json!(false)),
@@ -52,7 +52,7 @@ fn saved_raster_jobs_and_legacy_requests_share_output_without_runtime_overrides(
             assert!(error.contains("cannot override"), "{error}");
             assert_eq!(host.admitted_bytes(), 0);
             assert!(Arc::ptr_eq(&doc, &s.doc));
-            assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.evaluations));
+            assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations));
         }
     }
     let started = s.execute("render.start", &named).unwrap();
@@ -63,7 +63,7 @@ fn saved_raster_jobs_and_legacy_requests_share_output_without_runtime_overrides(
     assert_eq!(status["resolved"]["executor"], "cpu-product");
     assert_eq!(status["progress"]["phase"], "completed");
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.evaluations));
+    assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len(), s.evaluations));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -120,7 +120,7 @@ fn saved_gpu_job_routes_before_dispatch_and_reaches_preflight_and_start_without_
     let gpu = ImageHost::with_executor(Arc::new(NumericalGpu("gpu-path"))).unwrap();
     s.register_render_job_host(gpu.clone()).unwrap();
     let doc = s.doc.clone();
-    let before = (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.is_dirty());
+    let before = (s.revision, s.evaluations, s.history.len(), s.history.redo_steps().len(), s.is_dirty());
     let checked = s.execute("render.preflight", &named).unwrap();
     let inline = s.execute("render.preflight", &json!({"settings":saved})).unwrap();
     assert_eq!(checked, inline);
@@ -140,7 +140,7 @@ fn saved_gpu_job_routes_before_dispatch_and_reaches_preflight_and_start_without_
     assert_eq!(json!(status.request), checked["request"]);
     assert_eq!(json!(status.environment), checked["environment"]);
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(before, (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.is_dirty()));
+    assert_eq!(before, (s.revision, s.evaluations, s.history.len(), s.history.redo_steps().len(), s.is_dirty()));
 
     // The same protocol executor exercises saved HDR lowering after source removal.
     // It verifies admission and immutable inputs, not physical GPU image quality.
@@ -170,7 +170,7 @@ fn saved_gpu_job_routes_before_dispatch_and_reaches_preflight_and_start_without_
     s = Session::new(reopened);
     s.register_render_job_host(gpu.clone()).unwrap();
     let doc = s.doc.clone();
-    let before = (s.revision, s.undo.len(), s.redo.len(), s.is_dirty());
+    let before = (s.revision, s.history.len(), s.history.redo_steps().len(), s.is_dirty());
     let checked = s.execute("render.preflight", &json!({"setup":"HDR"})).unwrap();
     assert_eq!(checked, s.execute("render.preflight", &json!({"settings":captured["setup"]})).unwrap());
     assert_eq!(checked["environment"]["source_sha256"], info["sha256"]);
@@ -189,7 +189,7 @@ fn saved_gpu_job_routes_before_dispatch_and_reaches_preflight_and_start_without_
     assert_eq!(json!(status.environment), checked["environment"]);
     assert_eq!(json!(status.options), checked["options"]);
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.is_dirty()));
+    assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len(), s.is_dirty()));
 }
 
 #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
@@ -213,7 +213,7 @@ fn saved_cpu_job_reopens_and_supplies_exact_options_and_one_exposure_to_check_an
     s.set_render_job_host(Some(CpuHost::for_platform().unwrap())).unwrap();
     s.execute("render.scene", &json!({})).unwrap();
     let doc = s.doc.clone();
-    let before = (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.is_dirty());
+    let before = (s.revision, s.evaluations, s.history.len(), s.history.redo_steps().len(), s.is_dirty());
     let named = json!({"setup":"CPU"});
     let checked = s.execute("render.preflight", &named).unwrap();
     assert_eq!(checked, s.execute("render.preflight", &json!({"settings":saved})).unwrap());
@@ -230,7 +230,7 @@ fn saved_cpu_job_reopens_and_supplies_exact_options_and_one_exposure_to_check_an
     assert_eq!(status.options.exposure_ev, 0.0, "GPU options must not introduce a second CPU exposure");
     assert_eq!(s.doc.render.setups["CPU"], saved);
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(before, (s.revision, s.evaluations, s.undo.len(), s.redo.len(), s.is_dirty()));
+    assert_eq!(before, (s.revision, s.evaluations, s.history.len(), s.history.redo_steps().len(), s.is_dirty()));
 }
 
 #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
@@ -261,7 +261,7 @@ fn saved_cpu_hdr_reopens_without_source_and_drives_identical_check_start_and_rea
     s.set_render_job_host(Some(host.clone())).unwrap();
     s.execute("render.scene", &json!({})).unwrap();
     let doc = s.doc.clone();
-    let before = (s.revision, s.undo.len(), s.redo.len(), s.is_dirty());
+    let before = (s.revision, s.history.len(), s.history.redo_steps().len(), s.is_dirty());
     let checked = s.execute("render.preflight", &json!({"setup":"HDR"})).unwrap();
     assert_eq!(checked, s.execute("render.preflight", &json!({"settings":captured["setup"]})).unwrap());
     assert_eq!(checked["request"]["raytrace"]["exposure_ev"], 1.25);
@@ -300,7 +300,7 @@ fn saved_cpu_hdr_reopens_without_source_and_drives_identical_check_start_and_rea
     assert_eq!(status.options.exposure_ev, 0.0);
     assert_ne!(handle.frame().unwrap().unwrap().png(), baseline.as_slice(), "saved bytes must illuminate geometry after reopen");
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.is_dirty()));
+    assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len(), s.is_dirty()));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -412,13 +412,13 @@ fn missing_image_host_is_rejected_before_stale_scene_capture() {
     }
     assert!(s.model.is_stale());
     let doc = s.doc.clone();
-    let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
+    let before = (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len());
     for command in ["render.preflight", "render.start"] {
         let error = s.execute(command, &request()).unwrap_err().to_string();
         assert!(error.contains("no image host is installed"), "{error}");
         assert!(s.model.is_stale());
         assert!(Arc::ptr_eq(&doc, &s.doc));
-        assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len()));
+        assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len()));
     }
 }
 
@@ -426,7 +426,7 @@ fn missing_image_host_is_rejected_before_stale_scene_capture() {
 fn runtime_commands_preserve_document_history_and_evaluation() {
     let (mut s, host) = session();
     let doc = s.doc.clone();
-    let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
+    let before = (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len());
     s.execute("render.preflight", &request()).unwrap();
     assert_eq!(host.admitted_bytes(), 0);
     let id = start(&mut s);
@@ -436,7 +436,7 @@ fn runtime_commands_preserve_document_history_and_evaluation() {
     assert_eq!(status["progress"]["phase"], "completed");
     assert_eq!(status["frame"]["job"], json!(id));
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len()));
+    assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len()));
     assert_eq!(s.execute("render.cancel", &json!({"job":id})).unwrap()["progress"]["phase"], "completed");
 }
 
@@ -469,13 +469,13 @@ fn compiled_out_raytrace_is_rejected_before_scene_capture() {
     }
     assert!(s.model.is_stale());
     let doc = s.doc.clone();
-    let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
+    let before = (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len());
     for command in ["render.preflight", "render.start"] {
         let error = s.execute(command, &json!({"integrator":"raytrace","replace":true})).unwrap_err().to_string();
         assert!(error.contains("not compiled in"), "{error}");
         assert!(s.model.is_stale());
         assert!(Arc::ptr_eq(&doc, &s.doc));
-        assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len()));
+        assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len()));
         assert_eq!(host.admitted_bytes(), 0);
     }
 }
@@ -490,14 +490,14 @@ fn preflight_and_start_reject_excessive_pixel_work_without_reserving_a_job() {
     camera.set_view(solidcraft_render::StandardView::Front);
     let params = json!({"settings":{"width":1024,"height":1024,"camera":camera}});
     let doc = s.doc.clone();
-    let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
+    let before = (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len());
     for command in ["render.preflight", "render.start"] {
         let error = s.execute(command, &params).unwrap_err().to_string();
         assert!(error.contains("128000000 pixel tests"), "{error}");
         assert_eq!(host.admitted_bytes(), 0);
     }
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len()));
+    assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len()));
 
     #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
     {
@@ -521,7 +521,7 @@ fn preflight_and_start_reject_excessive_pixel_work_without_reserving_a_job() {
             std::thread::yield_now();
         }
         assert!(Arc::ptr_eq(&doc, &s.doc));
-        assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len()));
+        assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len()));
         s.set_render_job_host(Some(host.clone())).unwrap();
     }
 
@@ -569,7 +569,7 @@ fn saved_cpu_progressive_check_start_and_export_preserve_the_exact_final() {
     s.set_render_job_host(Some(host)).unwrap();
     s.execute("render.scene", &json!({})).unwrap();
     let doc = s.doc.clone();
-    let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
+    let before = (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len());
     let params = json!({"setup":"Film"});
     let checked = s.execute("render.preflight", &params).unwrap();
     assert_eq!(checked["resolved"]["executor"], "cpu-raytrace");
@@ -590,7 +590,7 @@ fn saved_cpu_progressive_check_start_and_export_preserve_the_exact_final() {
     assert_eq!(frame.info.png_sha256.len(), 64);
     std::fs::remove_file(path).unwrap();
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len()));
+    assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len()));
 }
 
 #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
@@ -600,7 +600,7 @@ fn progressive_limits_and_incompatibilities_fail_before_hdr_or_scene_capture() {
     let mut s = Session::default();
     s.set_render_job_host(Some(host.clone())).unwrap();
     let doc = s.doc.clone();
-    let before = (s.revision, s.evaluations, s.undo.len(), s.redo.len());
+    let before = (s.revision, s.evaluations, s.history.len(), s.history.redo_steps().len());
     for (width, height, samples, primary) in [(2048, 1024, 1, 1), (1024, 1024, 17, 1), (16, 16, 65, 1), (16, 16, 4, 4)] {
         let params = json!({"integrator":"raytrace","settings":{"width":width,"height":height},
             "raytrace":{"primary_samples":primary,"progressive":{"samples_per_pixel":samples}},
@@ -616,7 +616,7 @@ fn progressive_limits_and_incompatibilities_fail_before_hdr_or_scene_capture() {
     let wrong_method = json!({"progressive":true,"raytrace":{"progressive":{"samples_per_pixel":4}}});
     assert!(s.execute("render.preflight", &wrong_method).is_err(), "CPU sampling must not fall back to the GPU method");
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(before, (s.revision, s.evaluations, s.undo.len(), s.redo.len()));
+    assert_eq!(before, (s.revision, s.evaluations, s.history.len(), s.history.redo_steps().len()));
 }
 
 #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
@@ -831,7 +831,7 @@ fn native_raytrace_preflight_start_and_frame_preserve_document_and_roundtrip_req
     s.execute("solid.box", &json!({"length":20,"width":15,"height":10})).unwrap();
     s.execute("render.scene", &json!({})).unwrap();
     let doc = s.doc.clone();
-    let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
+    let before = (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len());
     let params = json!({"integrator":"raytrace","settings":{"width":32,"height":32},"raytrace":{"preset":"neutral","shadows":true}});
     let preflight = s.execute("render.preflight", &params).unwrap();
     let request: solidcraft_render::job::ImageRequest = serde_json::from_value(preflight["request"].clone()).unwrap();
@@ -851,7 +851,7 @@ fn native_raytrace_preflight_start_and_frame_preserve_document_and_roundtrip_req
     assert_eq!(frame.info.png_sha256.len(), 64);
     assert_eq!(status.frame.unwrap().png_sha256, frame.info.png_sha256);
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len()));
+    assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len()));
 }
 
 #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
@@ -876,7 +876,7 @@ fn captured_hdr_input_lights_geometry_after_source_removal_and_preserves_history
     std::fs::write(&source, bytes("")).unwrap();
     let params = json!({"integrator":"raytrace","raytrace":{"lights":[]},"settings":{"width":9,"height":9,"background":[13,27,41]},"environment":{"path":source.to_str().unwrap(),"samples":64}});
     let doc = s.doc.clone();
-    let before = (s.revision, s.undo.len(), s.redo.len(), s.is_dirty());
+    let before = (s.revision, s.history.len(), s.history.redo_steps().len(), s.is_dirty());
     assert!(s.execute("render.preflight", &params).unwrap_err().to_string().contains("primaries"));
     assert_eq!(host.admitted_bytes(), 0);
     std::fs::write(&source, bytes("PRIMARIES=0.64 0.33 0.30 0.60 0.15 0.06 0.3127 0.3290\n")).unwrap();
@@ -907,7 +907,7 @@ fn captured_hdr_input_lights_geometry_after_source_removal_and_preserves_history
     s.execute("render.export", &json!({"job":id,"path":output.to_str().unwrap()})).unwrap();
     assert!(std::fs::metadata(output).unwrap().len() > 0);
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.is_dirty()));
+    assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len(), s.is_dirty()));
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -926,7 +926,7 @@ fn native_spatial_aa_preflight_and_host_forwarding_change_actual_edge_png() {
     camera.set_view(solidcraft_render::StandardView::Top);
     camera.target = solidcraft_geom::Vec3::new(scene.bounds.min.x, center.y, center.z);
     let doc = s.doc.clone();
-    let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
+    let before = (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len());
     let mut legacy: Option<Vec<u8>> = None;
     let mut spatial: Option<Vec<u8>> = None;
     for samples in [1, 4, 16] {
@@ -961,7 +961,7 @@ fn native_spatial_aa_preflight_and_host_forwarding_change_actual_edge_png() {
             spatial = Some(png);
         }
         assert!(Arc::ptr_eq(&doc, &s.doc));
-        assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len()));
+        assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len()));
     }
 }
 
@@ -983,7 +983,7 @@ fn spatial_aa_invalid_or_compiled_out_requests_refuse_before_stale_capture_and_r
     }
     assert!(s.model.is_stale());
     let doc = s.doc.clone();
-    let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
+    let before = (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len());
     #[cfg(feature = "raytrace-cpu")]
     let counts: &[u8] = &[0, 2, 8, 17, 255];
     #[cfg(not(feature = "raytrace-cpu"))]
@@ -998,7 +998,7 @@ fn spatial_aa_invalid_or_compiled_out_requests_refuse_before_stale_capture_and_r
             assert!(error.contains("not compiled in"), "{error}");
             assert!(s.model.is_stale());
             assert!(Arc::ptr_eq(&doc, &s.doc));
-            assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len()));
+            assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len()));
             assert_eq!(host.admitted_bytes(), 0);
         }
     }
@@ -1012,7 +1012,7 @@ fn completed_png_content_identity_matches_status_and_exact_retained_export() {
     s.execute("render.scene", &json!({})).unwrap();
     let physical = s.execute("component.properties", &json!({})).unwrap();
     let doc = s.doc.clone();
-    let history = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
+    let history = (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len());
     // The ID is the actual command reply, not a fabricated counter.
     let id = start(&mut s);
     finish(&host);
@@ -1044,7 +1044,7 @@ fn completed_png_content_identity_matches_status_and_exact_retained_export() {
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
     assert_eq!(s.execute("component.properties", &json!({})).unwrap(), physical);
     assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!((s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len()), history);
+    assert_eq!((s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len()), history);
     // A later completed image has a different identity. An evicted old ID must
     // never export the newer PNG, even while this test retains its old Arc.
     let replacement: JobId =
@@ -1063,7 +1063,7 @@ fn completed_png_content_identity_matches_status_and_exact_retained_export() {
 fn progressive_refuses_cpu_runtime_options_before_capture_or_hdr_read() {
     let mut s = Session::default();
     let document = s.doc.clone();
-    let state = (s.revision, s.evaluations, s.undo.len(), s.redo.len());
+    let state = (s.revision, s.evaluations, s.history.len(), s.history.redo_steps().len());
     for cpu in [
         json!({"integrator":"raytrace"}),
         json!({"raytrace":{"primary_samples":4}}),
@@ -1078,7 +1078,7 @@ fn progressive_refuses_cpu_runtime_options_before_capture_or_hdr_read() {
         }
     }
     assert!(Arc::ptr_eq(&document, &s.doc));
-    assert_eq!(state, (s.revision, s.evaluations, s.undo.len(), s.redo.len()));
+    assert_eq!(state, (s.revision, s.evaluations, s.history.len(), s.history.redo_steps().len()));
 }
 
 #[test]
@@ -1103,7 +1103,7 @@ fn dielectric_preflight_and_start_resolve_refraction_without_broadening_boundari
     // whether the cancel below beats the render thread, so view the glass off-axis.
     let camera = solidcraft_render::Camera { yaw: 0.3, pitch: 0.4, ..Default::default() };
     let document = s.doc.clone();
-    let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
+    let before = (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len());
     let params = json!({"integrator":"raytrace","settings":{"width":1,"height":1,"camera":camera},"raytrace":{"dielectrics":[{
         "body_index":0,"body_name":"Glass","boundary":"closed_box","ior":1.5,"absorption_per_mm":[0,0,0],"thickness_mm":0
     }]}});
@@ -1143,7 +1143,7 @@ fn dielectric_preflight_and_start_resolve_refraction_without_broadening_boundari
     assert_eq!(reply["transparency"], "opaque_only");
     assert_eq!(reply["dielectric_boundaries"], json!([]));
     assert!(Arc::ptr_eq(&document, &s.doc));
-    assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len()));
+    assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len()));
 }
 
 #[cfg(all(feature = "raytrace-cpu", not(target_arch = "wasm32")))]
@@ -1154,7 +1154,7 @@ fn dielectric_preflight_refuses_wrong_captured_identity_without_changing_design(
     s.set_render_job_host(Some(host.clone())).unwrap();
     s.execute("solid.box", &json!({"length":20,"width":20,"height":2})).unwrap();
     let document = s.doc.clone();
-    let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len());
+    let before = (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len());
     let params = json!({"integrator":"raytrace","settings":{"width":1,"height":1},"raytrace":{"dielectrics":[{
         "body_index":0,"body_name":"wrong captured occurrence","boundary":"closed_box","ior":1.5,"absorption_per_mm":[0,0,0],"thickness_mm":0
     }]}});
@@ -1162,7 +1162,7 @@ fn dielectric_preflight_refuses_wrong_captured_identity_without_changing_design(
         let error = s.execute(command, &params).unwrap_err().to_string();
         assert!(error.contains("identity mismatch"), "{error}");
         assert!(Arc::ptr_eq(&document, &s.doc));
-        assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len()));
+        assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len()));
         assert_eq!(host.admitted_bytes(), 0);
     }
 }
@@ -1174,7 +1174,7 @@ fn registered_product_camera_fit_changes_only_view_and_keeps_orientation() {
     let camera = solidcraft_render::Camera { yaw: 0.2, pitch: 0.3, roll: 0.1, ..Default::default() };
     s.execute("render.camera.set", &json!({"camera":camera})).unwrap();
     let doc = s.doc.to_json();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let inspected = s.execute("render.camera.get", &json!({})).unwrap();
     assert_eq!(inspected["camera"], json!(camera));
     assert_eq!(inspected["document_changed"], false);
@@ -1193,7 +1193,7 @@ fn registered_product_camera_fit_changes_only_view_and_keeps_orientation() {
     s.execute("render.camera.fit", &json!({"aspect":2.0})).unwrap();
     assert_eq!(s.camera.unwrap(), after);
     assert_eq!(s.doc.to_json(), doc);
-    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.history.len(), undo);
     // Hostile aspects are refused and leave the finite camera, the document and undo alone:
     // a subnormal one would otherwise divide the fitted distance into infinity.
     for aspect in [json!(0), json!(-1), json!(1e-320), json!(1e-7), json!(1e7), json!("tall")] {
@@ -1202,14 +1202,14 @@ fn registered_product_camera_fit_changes_only_view_and_keeps_orientation() {
     }
     assert!(s.execute("render.camera.fit", &json!({"scale":0})).is_err());
     assert_eq!(s.doc.to_json(), doc);
-    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.history.len(), undo);
 }
 
 #[test]
 fn explicit_render_camera_preserves_orientation_and_refuses_invalid_state_atomically() {
     let mut s = Session::default();
     let document = s.doc.clone();
-    let before = (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len(), s.model.is_stale());
+    let before = (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len(), s.model.is_stale());
     for up in [solidcraft_render::UpAxis::Z, solidcraft_render::UpAxis::Y] {
         let camera = solidcraft_render::Camera { roll: 0.41, yaw: -0.3, pitch: 0.5, up, ..Default::default() };
         let reply = s.execute("render.camera.set", &json!({"camera":camera})).unwrap();
@@ -1239,7 +1239,7 @@ fn explicit_render_camera_preserves_orientation_and_refuses_invalid_state_atomic
             assert_eq!(s.camera, Some(camera));
         }
         assert!(Arc::ptr_eq(&document, &s.doc));
-        assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len(), s.model.is_stale()));
+        assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len(), s.model.is_stale()));
     }
     s.execute("render.camera.set", &json!({"camera":{"target":[0,0,0],"yaw":0.2,"pitch":0.3,"distance":100,"fov":0}})).unwrap();
     assert_eq!(s.camera.unwrap().roll, 0.0);
@@ -1249,7 +1249,7 @@ fn explicit_render_camera_preserves_orientation_and_refuses_invalid_state_atomic
     assert!(s.execute("view.apply", &json!({"camera":before_camera.unwrap()})).is_err());
     assert_eq!(s.camera, before_camera);
     assert!(Arc::ptr_eq(&document, &s.doc));
-    assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.undo.len(), s.redo.len(), s.model.is_stale()));
+    assert_eq!(before, (s.revision, s.evaluations, s.is_dirty(), s.history.len(), s.history.redo_steps().len(), s.model.is_stale()));
 }
 
 /// #5089: a setup saved with exposure (the render workspace and the other executors use it)
@@ -1276,7 +1276,7 @@ fn output_viewer_copy_validates_completed_job_without_mutation_or_pixel_payloads
     assert!(s.execute("render.result.copy", &json!({"job":job})).is_err());
     finish(&host);
     let document = s.doc.clone();
-    let before = (s.revision, s.undo.len(), s.redo.len(), host.admitted_bytes());
+    let before = (s.revision, s.history.len(), s.history.redo_steps().len(), host.admitted_bytes());
     let copied = s.execute("render.result.copy", &json!({"job":job})).unwrap();
     assert_eq!(copied["frame"]["job"], json!(job));
     assert_eq!(copied["frame"]["width"], 16);
@@ -1285,5 +1285,5 @@ fn output_viewer_copy_validates_completed_job_without_mutation_or_pixel_payloads
         assert!(s.execute("render.result.copy", &params).is_err());
     }
     assert!(Arc::ptr_eq(&document, &s.doc));
-    assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), host.admitted_bytes()));
+    assert_eq!(before, (s.revision, s.history.len(), s.history.redo_steps().len(), host.admitted_bytes()));
 }

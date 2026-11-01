@@ -48,7 +48,7 @@ fn view_dxf_cancellation_at_each_stage_preserves_the_destination_and_document() 
     let path = dir.join("drawing.dxf");
     let mut s = sample();
     let doc = s.doc.clone();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for stage in ["dxf_meshes", "dxf_index", "dxf_projection", "dxf_occlusion", "dxf_write"] {
         std::fs::write(&path, b"previous drawing").unwrap();
         let watch = Arc::new(CancelAt { stage, cancelled: AtomicBool::new(false), reached: AtomicBool::new(false) });
@@ -59,7 +59,7 @@ fn view_dxf_cancellation_at_each_stage_preserves_the_destination_and_document() 
         assert!(watch.reached.load(Ordering::Relaxed), "{stage}");
         assert_eq!(std::fs::read(&path).unwrap(), b"previous drawing", "{stage}");
         assert!(Arc::ptr_eq(&doc, &s.doc));
-        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.history.len(), undo);
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
@@ -67,7 +67,7 @@ fn view_dxf_cancellation_at_each_stage_preserves_the_destination_and_document() 
 #[test]
 fn view_dxf_blind_back_hole_is_omitted_or_dashed_and_front_hole_is_visible() {
     let mut s = sample();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let doc = s.doc.clone();
     let top = export(&mut s, camera(StandardView::Top), "omit");
     let dashed = export(&mut s, camera(StandardView::Top), "dashed");
@@ -80,7 +80,7 @@ fn view_dxf_blind_back_hole_is_omitted_or_dashed_and_front_hole_is_visible() {
     assert!(dashed["dxf"].as_str().unwrap().contains("128\n"));
     let bottom = export(&mut s, camera(StandardView::Bottom), "omit");
     assert!(bottom["visible"].as_u64().unwrap() > top["visible"].as_u64().unwrap());
-    assert_eq!(s.undo.len(), undo);
+    assert_eq!(s.history.len(), undo);
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
 }
 

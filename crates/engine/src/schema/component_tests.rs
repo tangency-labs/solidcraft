@@ -51,10 +51,10 @@ fn editing_in_place_outside_the_window_only_checks_the_component() {
 fn finishing_an_edit_outside_the_window_changes_nothing() {
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap_or_else(|e| panic!("{e}"));
-    let (doc, undo) = (s.doc.clone(), s.undo.len());
+    let (doc, undo) = (s.doc.clone(), s.history.len());
     let r = s.execute("component.finish_edit", &json!({})).unwrap_or_else(|e| panic!("{e}"));
     assert!(r.as_object().is_some_and(serde_json::Map::is_empty), "{r}");
-    assert!(Arc::ptr_eq(&doc, &s.doc) && s.undo.len() == undo);
+    assert!(Arc::ptr_eq(&doc, &s.doc) && s.history.len() == undo);
 }
 
 #[test]

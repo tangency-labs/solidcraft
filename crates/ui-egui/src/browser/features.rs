@@ -491,7 +491,7 @@ mod tests {
         h.app.run("sketch.finish", json!({})).unwrap();
         h.app.tree.expanded.insert("c0/features".into());
         let saved = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.frames(2);
         let labels: Vec<_> = drawn_rows().into_iter().map(|(label, ..)| label).collect();
         assert_eq!(labels.iter().filter(|label| *label == "Sketch1").count(), 1, "{labels:?}");
@@ -500,7 +500,7 @@ mod tests {
             assert!(feature_rows(&mut h, cache).is_empty(), "{cache}: sketch-only document has no Features folder");
         }
         assert_eq!(h.app.session.doc.to_json(), saved);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
     }
 
     #[test]
@@ -512,7 +512,7 @@ mod tests {
         let extrude = h.app.run("solid.extrude", json!({"distance":10,"body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
         let name = h.app.session.doc.feature(extrude).unwrap().name.clone();
         let saved = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         for cache in ["current", "missing", "stale"] {
             assert_eq!(feature_rows(&mut h, cache), ["Features".to_owned(), name.clone()], "{cache}");
         }
@@ -526,7 +526,7 @@ mod tests {
         let at = h.call("ui.at", json!({"handle":format!("row:browser-feature:c0:{extrude}")}));
         assert_eq!(at["ok"], true, "{at}");
         assert_eq!(h.app.session.doc.to_json(), saved);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
     }
 
     #[test]
@@ -616,7 +616,7 @@ mod tests {
         h.app.tree.collapsed.insert("c0".into());
         h.app.tree.collapsed.insert(occurrence_key(&path));
         h.app.preferences.timeline_left_browser_collapsed = true;
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         for id in [base, hole, fillet] {
             find_in_timeline(&mut h.app, id, &world_body);
             assert_eq!(h.app.tree.reveal_feature.as_ref().unwrap().path, path);
@@ -629,7 +629,7 @@ mod tests {
             assert!(at["ok"].as_bool().unwrap_or(false), "{at}");
         }
         assert_eq!(h.app.session.doc.to_json(), saved);
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         assert_eq!(h.app.session.active_component, 0);
     }
 

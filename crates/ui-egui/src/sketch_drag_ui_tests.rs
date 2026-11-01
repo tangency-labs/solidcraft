@@ -20,7 +20,7 @@ fn text_move_drag_is_one_editable_unit_and_escape_restores_the_gesture() {
         h.app.cam.distance = 35.0;
         h.frames(3);
         let before = h.app.session.doc.to_json();
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         let sk = h.app.session.doc.sketch(1).unwrap();
         let line = sk.curves.last().unwrap().id.clone();
         let neighbor = point(&h, &format!("{line}.start"));
@@ -42,9 +42,9 @@ fn text_move_drag_is_one_editable_unit_and_escape_restores_the_gesture() {
         assert!(point(&h, &format!("{line}.start")).dist(neighbor) < 1e-9);
         if cancel {
             assert_eq!(h.app.session.doc.to_json(), before);
-            assert_eq!(h.app.session.undo.len(), undo);
+            assert_eq!(h.app.session.history.len(), undo);
         } else {
-            assert_eq!(h.app.session.undo.len(), undo + 1);
+            assert_eq!(h.app.session.history.len(), undo + 1);
             let sk = h.app.session.doc.sketch(1).unwrap();
             let solidcraft_engine::sketch::LinkSource::Text { at, .. } = &sk.links[0].source else { panic!() };
             assert!(at.dist(Vec2::new(3.0, 2.0)) < 0.02, "{at:?}");
@@ -59,7 +59,7 @@ fn text_move_drag_is_one_editable_unit_and_escape_restores_the_gesture() {
 #[test]
 fn a_selected_text_moves_when_dragged_from_between_its_letters() {
     let (mut h, gap) = two_letters(true);
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let a = screen(&mut h, gap.x, gap.y);
     let b = screen(&mut h, gap.x + 3.0, gap.y + 2.0);
     let mut path = vec![a];
@@ -68,7 +68,7 @@ fn a_selected_text_moves_when_dragged_from_between_its_letters() {
     assert!(h.app.viewport.text_drag.is_some() && h.app.viewport.boxsel.is_none());
     release(&mut h, b);
     assert!(text_at(&h).dist(Vec2::new(3.0, 2.0)) < 0.02, "{:?}", text_at(&h));
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
 }
 
 /// Empty space outside a selected text's frame, and between the letters of a text that isn't
@@ -176,7 +176,7 @@ fn a_four_bar_edge_follows_a_stationary_pointer_and_keeps_the_grab() {
     let mut h = four_bar();
     let a = screen(&mut h, -7.0, 0.0);
     let b = screen(&mut h, -7.0, 11.2);
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     press_and_move(&mut h, &[a, b]);
     assert_eq!(h.app.viewport.point_drag.as_ref().map(|(id, _, _)| id.as_str()), Some("crank"), "grabbed the edge, not an endpoint");
     h.frames(8);
@@ -184,7 +184,7 @@ fn a_four_bar_edge_follows_a_stationary_pointer_and_keeps_the_grab() {
     assert!(point(&h, "crank.end").dist(nearest) < 0.05, "{:?}", point(&h, "crank.end"));
     release(&mut h, b);
     assert!(point(&h, "crank.end").dist(nearest) < 0.05);
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     run(&mut h, "edit.undo", json!({}));
     assert!(point(&h, "crank.end").dist(Vec2::new(-10.0, 0.0)) < 1e-7);
 }
@@ -232,7 +232,7 @@ fn a_viewport_drag_solves_the_sketch_live_and_rebuilds_the_model_on_release() {
     let sketch = h.app.session.doc.features.first().map(|f| f.id).expect("the sketch");
     h.app.edit_sketch(sketch);
     h.settle();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let a = screen(&mut h, 5.0, 5.0);
     let b = screen(&mut h, -3.0, -6.0);
     let mut path = vec![a];
@@ -244,7 +244,7 @@ fn a_viewport_drag_solves_the_sketch_live_and_rebuilds_the_model_on_release() {
     release(&mut h, b);
     assert!(h.app.viewport.point_drag.is_none());
     assert!(!h.app.session.model.is_stale(), "letting go evaluated the model");
-    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step for the drag");
+    assert_eq!(h.app.session.history.len(), undo + 1, "one undo step for the drag");
     assert!(point(&h, "l1.start").dist(Vec2::new(-3.0, -6.0)) < 0.1);
     run(&mut h, "edit.undo", json!({}));
     assert!(point(&h, "l1.start").dist(Vec2::new(5.0, 5.0)) < 1e-9);
@@ -331,7 +331,7 @@ fn associated_spline_offset_hides_fit_nodes_and_follows_a_source_drag_live() {
     crate::drag_snap::clear();
 
     let before = h.app.session.doc.to_json();
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     let a = screen(&mut h, 0.0, 8.0);
     let b = screen(&mut h, 1.0, 9.0);
     let c = screen(&mut h, 2.0, 10.0);
@@ -361,7 +361,7 @@ fn associated_spline_offset_hides_fit_nodes_and_follows_a_source_drag_live() {
     }
     release(&mut h, c);
     assert!(!h.app.session.model.is_stale());
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     run(&mut h, "edit.undo", json!({}));
     assert_eq!(h.app.session.doc.to_json(), before);
     run(&mut h, "edit.redo", json!({}));

@@ -24,8 +24,8 @@ thread_local! {
     static CHAIN: RefCell<(Option<&'static str>, Vec<Vec3>)> = const { RefCell::new((None, Vec::new())) };
     /// The drawn point with the triad: wire id and fit index.
     static TRIAD: RefCell<Option<(String, usize)>> = const { RefCell::new(None) };
-    /// A triad drag: axis (None: in the sketch plane), undo depth, grab offset.
-    static DRAG: RefCell<Option<(Option<Vec3>, usize, Vec3)>> = const { RefCell::new(None) };
+    /// A triad drag: axis (None: in the sketch plane), the undo history's mark, grab offset.
+    static DRAG: RefCell<Option<(Option<Vec3>, solidcraft_engine::Mark, Vec3)>> = const { RefCell::new(None) };
     /// Where the cursor would put a point (for the rubber band), and its snap label.
     static HOVER: RefCell<Option<(Vec3, &'static str)>> = const { RefCell::new(None) };
 }
@@ -359,7 +359,7 @@ pub fn drag_start(app: &SolveApp, proj: &Proj, press: Pos2) -> bool {
     let Some((axis, _, _)) = handles(app, proj).into_iter().find(|(_, tip, _)| tip.distance(press) < 9.0) else { return false };
     let Some((_, _, p)) = triad_point(app) else { return false };
     let grab = target(app, proj, press, axis, p).map(|g| p - g).unwrap_or(Vec3::ZERO);
-    DRAG.with(|d| *d.borrow_mut() = Some((axis, app.session.undo.len(), grab)));
+    DRAG.with(|d| *d.borrow_mut() = Some((axis, app.session.history.mark(), grab)));
     true
 }
 
@@ -391,11 +391,11 @@ pub fn dragging() -> bool {
 }
 
 pub fn drag_to(app: &mut SolveApp, proj: &Proj, pos: Pos2) {
-    let Some((axis, depth, grab)) = DRAG.with(|d| *d.borrow()) else { return };
+    let Some((axis, mark, grab)) = DRAG.with(|d| *d.borrow()) else { return };
     let Some((w, i, p)) = triad_point(app) else { return };
     let Some(to) = target(app, proj, pos, axis, p).map(|t| t + grab) else { return };
     if app.session.execute("sketch.move3d", &json!({"wire": w, "index": i, "to": [to.x, to.y, to.z]})).is_ok() {
-        app.session.undo.truncate(depth + 1);
+        app.session.history.fold_since(mark);
     }
 }
 

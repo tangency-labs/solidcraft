@@ -652,10 +652,10 @@ fn hidden_placements_and_bodies_are_saved_with_the_design() {
     run(&mut s, "file.save", json!({"path": path}));
     assert!(!s.is_dirty());
 
-    let undo = s.undo.len();
+    let undo = s.history.len();
     run(&mut s, "browser.visibility", json!({"visible":false,"paths":[[second]]}));
     run(&mut s, "browser.visibility", json!({"visible":false,"items":["Base"]}));
-    assert_eq!(s.undo.len(), undo + 2, "each hide is one undo step");
+    assert_eq!(s.history.len(), undo + 2, "each hide is one undo step");
     assert!(s.is_dirty(), "hiding leaves the design with unsaved changes");
     run(&mut s, "solid.box", json!({"length":1,"width":1,"height":1,"corner":[50,0,0],"operation":"new","body_name":"Later"}));
     run(&mut s, "edit.undo", json!({}));
@@ -670,7 +670,7 @@ fn hidden_placements_and_bodies_are_saved_with_the_design() {
     assert!(s.occurrence_visible(&[first]));
     assert!(s.doc.components.iter().any(|c| c.id == component));
     assert!(!s.is_dirty(), "an opened design has no unsaved changes");
-    assert!(s.undo.is_empty());
+    assert!(s.history.is_empty());
 
     run(&mut s, "browser.visibility", json!({"visible":true,"folder":"bodies"}));
     assert!(s.is_dirty());
@@ -1190,10 +1190,10 @@ fn pasted_bodies_go_into_the_component_where_the_body_is() {
     run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Cube"}));
     let (component, occurrence) = created(&mut s, "A");
     run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [100,0,0]}));
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let out = run(&mut s, "component.copy_bodies", json!({"bodies": ["Cube"]}));
     let copy = out["bodies"][0].as_str().unwrap().to_string();
-    assert_eq!(s.undo.len(), undo + 1, "one step to undo");
+    assert_eq!(s.history.len(), undo + 1, "one step to undo");
     let state = s.model.state();
     assert_eq!(s.doc.model_body_component(state.body(&copy).unwrap()), component);
     let placed = run(&mut s, "occurrence.properties", json!({"occurrence": occurrence, "path": [occurrence]}));
@@ -1689,11 +1689,11 @@ fn a_body_copied_in_another_design_pastes_as_an_imported_body() {
     let (a, a_at) = created(&mut s, "A");
     run(&mut s, "occurrence.move", json!({"occurrence": a_at, "translate": [100,0,0]}));
     s.foreign_copy = Some(std::sync::Arc::new(copy));
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let out = run(&mut s, "component.paste_from_design", json!({"component": a, "component_path": [a_at]}));
     assert_eq!(out["bodies"], json!(["Cube (2)"]));
     assert_eq!(out["feature"], "Import1");
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     let is = s.world_state().body("Cube (2)").unwrap().mesh().bounds();
     assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
     let state = s.model.state();

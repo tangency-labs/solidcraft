@@ -247,10 +247,10 @@ fn an_imported_assembly_moves_as_one_until_it_is_unlocked() {
     assert!(r["conflicts"].as_array().unwrap().is_empty(), "{r}");
 
     // Unlocked (one undo step), the parts move one by one.
-    let undo = s.undo.len();
+    let undo = s.history.len();
     let r = run(&mut s, "component.unlock", json!({"component": "rig"}));
     assert_eq!(r["joints"].as_array().unwrap().len(), 6, "{r}");
-    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.history.len(), undo + 1);
     run(&mut s, "occurrence.move", json!({"occurrence": "Pin:2", "translate": [30, 0, 0]}));
     assert!(close(corner_of(&s, "Pin:2"), pin + Vec3::new(30.0, 0.0, 50.0)), "{:?}", corner_of(&s, "Pin:2"));
     assert!(close(corner_of(&s, "Arm:1"), arm + Vec3::new(0.0, 0.0, 50.0)), "the others stay");
@@ -282,9 +282,9 @@ fn undo_takes_the_whole_import_away() {
     let dir = temp_dir("undo");
     let path = rig_file(&dir);
     let mut s = Session::default();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     run(&mut s, "file.insert_step", json!({"path": path}));
-    assert_eq!(s.undo.len(), undo + 1, "one step");
+    assert_eq!(s.history.len(), undo + 1, "one step");
     run(&mut s, "edit.undo", json!({}));
     assert!(s.doc.features.is_empty() && s.doc.components.is_empty() && s.doc.occurrences.is_empty(), "nothing left");
     assert!(s.doc.assembly.joints.is_empty() && s.doc.body_components.is_empty() && s.doc.body_offsets.is_empty());

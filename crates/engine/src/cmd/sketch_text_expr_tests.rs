@@ -181,7 +181,7 @@ fn a_text_expression_that_cannot_be_used_is_refused_and_changes_nothing() {
     let r = run(&mut s, "sketch.text", json!({"text": "A", "at": [0, 0]}));
     let link = r["link"].as_str().unwrap().to_string();
     let before = s.doc.to_json();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for (extra, error) in [
         (json!({"at": ["nope", 0]}), "`at` x"),
         (json!({"at": [0, "turn"]}), "`at` y"),
@@ -210,7 +210,7 @@ fn a_text_expression_that_cannot_be_used_is_refused_and_changes_nothing() {
             assert!(e.contains(error), "{edit}: {e}");
         }
         assert_eq!(s.doc.to_json(), before, "{extra}");
-        assert_eq!(s.undo.len(), undo, "{extra}");
+        assert_eq!(s.history.len(), undo, "{extra}");
     }
 }
 

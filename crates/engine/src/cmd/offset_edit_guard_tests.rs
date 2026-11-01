@@ -38,13 +38,13 @@ fn history(stack: &[Snapshot]) -> Vec<(String, String, Option<u64>, String)> {
 }
 fn refuses_atomically(s: &mut Session, command: &str, params: Value) -> String {
     let document = s.doc.to_json();
-    let undo = history(&s.undo);
-    let redo = history(&s.redo);
+    let undo = history(s.history.steps());
+    let redo = history(s.history.redo_steps());
     let active = s.active_sketch;
     let error = s.execute(command, &params).unwrap_err().to_string();
     assert_eq!(s.doc.to_json(), document);
-    assert_eq!(history(&s.undo), undo);
-    assert_eq!(history(&s.redo), redo);
+    assert_eq!(history(s.history.steps()), undo);
+    assert_eq!(history(s.history.redo_steps()), redo);
     assert_eq!(s.active_sketch, active);
     error
 }
@@ -57,7 +57,7 @@ fn offset_guard_retired_parent_refuses_new_child_without_destroying_redo() {
     assert_eq!(solved(&s, sketch).offsets[0].topology.as_ref().unwrap().roles.iter().filter(|r| r.retired).count(), 4);
     run(&mut s, "sketch.point", json!({"point":[100,100]}));
     run(&mut s, "edit.undo", json!({}));
-    assert!(!s.redo.is_empty());
+    assert!(!s.history.redo_steps().is_empty());
     let error = refuses_atomically(&mut s, "sketch.offset", json!({"curves":[outputs[0]],"distance":0.2,"side":[0,0]}));
     assert!(error.contains("retired corner") && error.contains("break its offset association"), "{error}");
 }
@@ -89,14 +89,14 @@ fn offset_guard_live_child_follows_radius_then_retirement_is_honest() {
         json!({"sketch":sketch,"profiles":{"offset_boundaries":[child_association]},"distance":2,"operation":"new","body_name":"Child"}),
     );
     let before = s.doc.to_json();
-    let undo = history(&s.undo);
-    let redo = history(&s.redo);
+    let undo = history(s.history.steps());
+    let redo = history(s.history.redo_steps());
     match s.execute("parameters.change", &json!({"name":radius,"expression":"0.1 mm"})) {
         Err(error) => {
             assert!(error.to_string().contains("offset"), "{error}");
             assert_eq!(s.doc.to_json(), before);
-            assert_eq!(history(&s.undo), undo);
-            assert_eq!(history(&s.redo), redo);
+            assert_eq!(history(s.history.steps()), undo);
+            assert_eq!(history(s.history.redo_steps()), redo);
         }
         Ok(_) => {
             assert!(s.model.results.iter().any(|r| r.error.is_some()), "retired parent must not keep a stale successful child");

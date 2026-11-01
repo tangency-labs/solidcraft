@@ -563,8 +563,8 @@ impl FileAction {
         // with unsaved changes under the report, and ask about it where it can't be answered.
         let behind_report = app.issue_report.draft.is_some();
         let available = match self {
-            Self::Undo => !app.session.undo.is_empty(),
-            Self::Redo => !app.session.redo.is_empty(),
+            Self::Undo => !app.session.history.is_empty(),
+            Self::Redo => !app.session.history.redo_steps().is_empty(),
             Self::ClearRecent => !app.home.recent.is_empty(),
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
             _ => true,
@@ -3281,10 +3281,10 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     // A sketch left blank is taken away instead, in one undo step, so no empty
                     // sketch stays behind.
                     let blank = app.session.doc.sketch(sketch).is_ok_and(crate::sketch_palette::is_blank);
-                    let depth = app.session.undo.len();
+                    let mark = app.session.history.mark();
                     app.finish_sketch();
                     if blank && app.session.active_sketch.is_none() && app.run("timeline.delete", json!({ "feature": sketch })).is_ok() {
-                        app.session.undo.truncate(depth + 1);
+                        app.session.history.fold_since(mark);
                     }
                     continue;
                 }
@@ -3366,16 +3366,16 @@ mod header_report_tests {
         h.app.run("parameters.change", json!({"name":"width","expression":"10 mm"})).unwrap();
         h.app.session.selection = vec![solidcraft_engine::Sel::Plane { name: "XY".into() }];
         h.step(&json!({"start":"parameters.change"})).unwrap();
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.selection.clone());
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.selection.clone());
         h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
         assert!(h.ctx.data(|d| d.get_temp::<bool>(egui::Id::new("sc_file_menu")).unwrap_or(false)));
         h.step(&json!({"key":"Escape"})).unwrap();
         assert!(!h.ctx.data(|d| d.get_temp::<bool>(egui::Id::new("sc_file_menu")).unwrap_or(false)));
         assert!(h.app.params.is_some(), "the first Escape belongs to File");
-        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.selection.clone()));
+        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.selection.clone()));
         h.step(&json!({"key":"Escape"})).unwrap();
         assert!(h.app.params.is_none(), "the next Escape still closes Parameters");
-        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.selection.clone()));
+        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.selection.clone()));
     }
 
     #[test]
@@ -3402,11 +3402,11 @@ mod header_report_tests {
             let tabs = crate::scenario::rect_of("tab:design:0").unwrap();
             let assistant = crate::scenario::rect_of("titlebar:assistant").unwrap();
             assert!(tabs.right() < assistant.left(), "tabs leave room for the right controls");
-            let depth = h.app.session.undo.len();
+            let depth = h.app.session.history.len();
             h.step(&json!({"click":{"handle":"appbar:undo"}})).unwrap();
-            assert_eq!(h.app.session.undo.len(), depth - 1);
+            assert_eq!(h.app.session.history.len(), depth - 1);
             h.step(&json!({"click":{"handle":"appbar:redo"}})).unwrap();
-            assert_eq!(h.app.session.undo.len(), depth);
+            assert_eq!(h.app.session.history.len(), depth);
             h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
             assert!(h.widget("Save As JSON…").is_some(), "the in-window File menu still opens");
             h.step(&json!({"click":{"handle":"appbar:file"}})).unwrap();
@@ -3428,13 +3428,13 @@ mod header_report_tests {
         assert!(!FileAction::Undo.enabled(&h.app));
         assert!(!FileAction::Redo.enabled(&h.app));
         h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
-        let depth = h.app.session.undo.len();
+        let depth = h.app.session.history.len();
         assert!(FileAction::Undo.enabled(&h.app));
         FileAction::Undo.run(&mut h.app);
-        assert_eq!(h.app.session.undo.len(), depth - 1);
+        assert_eq!(h.app.session.history.len(), depth - 1);
         assert!(FileAction::Redo.enabled(&h.app));
         FileAction::Redo.run(&mut h.app);
-        assert_eq!(h.app.session.undo.len(), depth);
+        assert_eq!(h.app.session.history.len(), depth);
         assert!(!FileAction::Redo.enabled(&h.app));
     }
 
@@ -3553,7 +3553,7 @@ mod header_report_tests {
         h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
         h.app.home.recent = vec!["elsewhere.solidcraft".into()];
         h.app.issue_report.draft = Some(crate::issue_report::draft_for(&h.app, None, None));
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.docs.count(), h.app.home.recent.clone());
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.docs.count(), h.app.home.recent.clone());
         for action in [
             FileAction::Undo,
             FileAction::New,
@@ -3575,7 +3575,7 @@ mod header_report_tests {
             assert!(!action.enabled(&h.app), "{action:?} behind the report");
             action.run(&mut h.app);
         }
-        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.docs.count(), h.app.home.recent.clone()));
+        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.docs.count(), h.app.home.recent.clone()));
         assert!(h.app.dialog.is_none() && h.app.file_picker.is_none() && !h.app.prefs_window.open && !h.app.keymap.open && !h.app.agent_chat.open);
         // A focused report field still gets the menu's Undo and Redo.
         assert!(FileAction::Undo.menu_enabled(&h.app, true) && !FileAction::Undo.menu_enabled(&h.app, false));
@@ -4023,12 +4023,12 @@ mod header_report_tests {
             h.app.run("solid.box", json!({"length":35,"width":12,"height":4})).unwrap();
             h.call("ui.resize", json!({"width":width,"height":720}));
             h.frames(3);
-            let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision);
+            let before = (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.revision);
             let point = h.widget("Report a bug").expect("compact and full buttons retain an accessible name");
             h.step(&json!({"click":point})).unwrap();
             assert!(h.app.issue_report.draft.is_some(), "width {width}: header click must reach the report");
             assert!(crate::issue_report::pending(&h.app));
-            assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision));
+            assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.revision));
             captured_frame(&mut h);
             // The report card takes a few frames to reach its full height.
             h.frames(16);
@@ -4044,7 +4044,7 @@ mod header_report_tests {
             assert!(h.app.issue_report.draft.is_none(), "width {width}: review closes through its actual button");
             h.step(&json!({"click":{"handle":"tab:home"}})).unwrap();
             assert!(h.app.home.open, "width {width}: the Home tab remains reachable beside Report");
-            assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision));
+            assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.revision));
         }
     }
 
@@ -4064,7 +4064,7 @@ mod header_report_tests {
             h.step(&json!({"click":{"world":point}})).unwrap();
         }
         h.step(&json!({"text":"30 mm"})).unwrap();
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision);
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.revision);
         h.step(&json!({"widget":"Report a bug"})).unwrap();
         h.frames(3);
         assert!(h.app.issue_report.draft.is_some() && crate::dim_view::editing());
@@ -4072,13 +4072,13 @@ mod header_report_tests {
         h.ctx.memory_mut(|m| m.request_focus(egui::Id::new("issue_report_body")));
         h.step(&json!({"text":"Describe this dimension problem."})).unwrap();
         h.step(&json!({"key":"Enter"})).unwrap();
-        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision));
+        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.revision));
         h.step(&json!({"widget":"Close draft"})).unwrap();
         h.frames(2);
         assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")));
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(!crate::dim_view::editing());
-        assert_eq!(h.app.session.undo.len(), before.1 + 1);
+        assert_eq!(h.app.session.history.len(), before.1 + 1);
         assert_eq!(h.app.session.doc.param("d1").unwrap().expr, "30 mm");
         h.app.run("edit.undo", json!({})).unwrap();
         assert_eq!(h.app.session.doc.to_json(), before.0);
@@ -4116,8 +4116,8 @@ mod home_tests {
             let busy = (h.app.tool.is_some(), h.app.dialog.is_some(), h.app.ui.palette_open);
             (
                 doc,
-                h.app.session.undo.len(),
-                h.app.session.redo.len(),
+                h.app.session.history.len(),
+                h.app.session.history.redo_steps().len(),
                 h.app.session.path.clone(),
                 files,
                 h.app.session.selection.clone(),
@@ -4169,10 +4169,10 @@ mod home_tests {
         h.frames(2);
         let at = crate::scenario::handle_at("appbar:redo").unwrap();
         h.call("ui.click", json!({"x": at.x, "y": at.y}));
-        assert_eq!(h.app.session.redo.len(), 0, "Redo works once Home is closed");
+        assert_eq!(h.app.session.history.redo_steps().len(), 0, "Redo works once Home is closed");
         h.call("ui.key", json!({"key": "Z", "cmd": true}));
         h.settle();
-        assert_eq!(h.app.session.redo.len(), 1, "Ctrl+Z works once Home is closed");
+        assert_eq!(h.app.session.history.redo_steps().len(), 1, "Ctrl+Z works once Home is closed");
         h.ctx.data_mut(|d| d.insert_temp(egui::Id::new("sc_file_menu"), false));
         click(&mut h, "appbar:file");
         h.step(&json!({"widget": "Save"})).unwrap();

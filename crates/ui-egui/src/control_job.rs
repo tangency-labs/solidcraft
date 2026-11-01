@@ -423,7 +423,7 @@ impl SolveApp {
         }
         // The copy has no history and no file (#9624): an inspection reports the design's own.
         let s = &self.session;
-        let own = (id == "document.inspect").then(|| (s.undo.len(), s.redo.len(), s.path.clone()));
+        let own = (id == "document.inspect").then(|| (s.history.len(), s.history.redo_steps().len(), s.path.clone()));
         let rx = spawn(scope, move || {
             let mut reply = match copy.execute(id, &params) {
                 Ok(mut v) => {
@@ -503,7 +503,7 @@ impl SolveApp {
         let s = &self.session;
         let same = Arc::ptr_eq(&s.doc, &doc);
         // The design it was computed for is still this one, edited since (an undo step away).
-        let edited = !same && s.undo.iter().chain(&s.redo).any(|snap| Arc::ptr_eq(&snap.doc, &doc));
+        let edited = !same && s.history.steps().iter().chain(s.history.redo_steps()).any(|snap| Arc::ptr_eq(&snap.doc, &doc));
         if !same && !edited {
             let _ = job.req.reply.send(json!({
                 "ok": false,

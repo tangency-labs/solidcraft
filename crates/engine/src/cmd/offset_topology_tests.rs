@@ -21,9 +21,9 @@ fn breaking_offset_preserves_downstream_material_history_and_source_independence
         let before_volume = session.world_state().bodies.last().unwrap().mesh().measure().volume.abs();
         run(&mut session, "sketch.edit", json!({"sketch":sketch}));
         let before = session.doc.to_json();
-        let history = session.undo.len();
+        let history = session.history.len();
         run(&mut session, "sketch.offset.break", json!({"curve":association}));
-        assert_eq!(session.undo.len(), history + 1);
+        assert_eq!(session.history.len(), history + 1);
         assert!(session.model.results.iter().all(|result| result.error.is_none()));
         assert!(
             matches!(&session.doc.features.last().unwrap().kind, FeatureKind::Extrude { profiles: ProfileSel::Curves { loops }, .. } if loops == &vec![curves.clone()])
@@ -90,8 +90,8 @@ fn inset_past_corner_radius_creates_a_real_boundary_and_saved_profile_identity()
     let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
     check(&reopened);
     assert_eq!(reopened.doc.to_json(), saved);
-    let undo = session.undo.len();
-    let redo = session.redo.len();
+    let undo = session.history.len();
+    let redo = session.history.redo_steps().len();
     for params in [
         json!({"profiles":{"offset_boundaries":[]}}),
         json!({"profiles":{"offset_boundaries":["missing"]}}),
@@ -103,7 +103,7 @@ fn inset_past_corner_radius_creates_a_real_boundary_and_saved_profile_identity()
         params["distance"] = json!(1);
         assert!(session.execute("solid.extrude", &params).is_err());
         assert_eq!(session.doc.to_json(), saved);
-        assert_eq!(session.undo.len(), undo);
-        assert_eq!(session.redo.len(), redo);
+        assert_eq!(session.history.len(), undo);
+        assert_eq!(session.history.redo_steps().len(), redo);
     }
 }

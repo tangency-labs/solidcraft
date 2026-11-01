@@ -1232,13 +1232,13 @@ mod tests {
         a.cam.distance = 123.0;
         a.session.visibility.hidden_profiles = vec![7];
         let doc = a.session.doc.clone();
-        let undo = a.session.undo.len();
+        let undo = a.session.history.len();
         let cam = a.cam;
         a.open_path(&path);
         assert_eq!(a.docs.count(), 1);
         assert!(std::sync::Arc::ptr_eq(&doc, &a.session.doc));
         assert!(a.session.is_dirty());
-        assert_eq!(a.session.undo.len(), undo);
+        assert_eq!(a.session.history.len(), undo);
         assert_eq!(a.cam, cam);
         assert_eq!(a.session.selection.len(), 1);
         assert_eq!(a.session.visibility.hidden_profiles, vec![7]);
@@ -1250,7 +1250,7 @@ mod tests {
         assert_eq!(a.cam, cam);
         assert_eq!(a.session.selection.len(), 1);
         assert_eq!(a.session.visibility.hidden_profiles, vec![7]);
-        assert_eq!(a.session.undo.len(), undo);
+        assert_eq!(a.session.history.len(), undo);
         assert!(a.session.is_dirty());
         std::fs::remove_file(&path).unwrap();
         a.open_path(&path);

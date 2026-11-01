@@ -24,9 +24,9 @@ fn copied_catalog_id_labels_survive_clicked_editor_reopen_and_retargeting() {
         h.step(&json!({"click":{"handle":"library:entry:0"}})).unwrap();
         h.step(&json!({"widget":"Apply library appearance"})).unwrap();
         assert_eq!(h.app.session.doc.appearances.bodies["Body1"], expected);
-        let undo = h.app.session.undo.len();
+        let undo = h.app.session.history.len();
         h.step(&json!({"widget":"OK"})).unwrap();
-        assert_eq!(h.app.session.undo.len(), undo);
+        assert_eq!(h.app.session.history.len(), undo);
         h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
         h.app.start("appearance.assign");
         h.frames(3);
@@ -80,7 +80,7 @@ fn clicked_catalog(pbr: Option<solidcraft_engine::doc::pbr_appearance::PbrParame
         state.local.path = path;
     }
     h.frames(3);
-    let undo = h.app.session.undo.len();
+    let undo = h.app.session.history.len();
     h.step(&json!({"widget":"Load library"}))?;
     for handle in [
         "library:path",
@@ -116,7 +116,7 @@ fn clicked_catalog(pbr: Option<solidcraft_engine::doc::pbr_appearance::PbrParame
         assert_eq!(state.pbr, pbr);
     }
 
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     let revision = h.app.session.revision;
     h.step(&json!({"widget":"Export design library..."}))?;
     let exported = h.dir.join("my-library.solidcraft-library.json");
@@ -129,7 +129,7 @@ fn clicked_catalog(pbr: Option<solidcraft_engine::doc::pbr_appearance::PbrParame
     assert_eq!(h.app.session.revision, revision);
     h.step(&json!({"widget":"OK"}))?;
     assert!(h.app.dialog.is_none());
-    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.history.len(), undo + 1);
     Ok(())
 }
 
@@ -242,12 +242,12 @@ fn delayed_library_export_refuses_an_internally_changed_design_without_overwriti
     save_library(&mut h.app, token, true);
     h.app.session.execute("appearance.assign", &json!({"bodies":["Body1"],"color":[1,2,3]})).unwrap();
     let changed = h.app.session.doc.clone();
-    let history = (h.app.session.undo.len(), h.app.session.revision);
+    let history = (h.app.session.history.len(), h.app.session.revision);
     *slot.borrow_mut() = Some(Some(path.to_string_lossy().into_owned()));
     crate::file_picker::tick(&mut h.app, &crate::fonts::test_context());
     assert_eq!(std::fs::read(path).unwrap(), b"keep library");
     assert!(Arc::ptr_eq(&changed, &h.app.session.doc));
-    assert_eq!((h.app.session.undo.len(), h.app.session.revision), history);
+    assert_eq!((h.app.session.history.len(), h.app.session.revision), history);
     assert!(matches!(&h.app.status, Some((_, _, true))));
 }
 
@@ -287,10 +287,10 @@ fn catalog_clicked_material_import_renames_conflicts_and_closing_never_assigns_b
         h.step(&json!({"widget":"Load library"})).unwrap();
         h.step(&json!({"click":{"handle":"library:materials"}})).unwrap();
         h.step(&json!({"click":{"handle":"library:entry:0"}})).unwrap();
-        let history = (h.app.session.undo.len(), h.app.session.revision);
+        let history = (h.app.session.history.len(), h.app.session.revision);
         h.step(&json!({"click":{"handle":"library:material-import"}})).unwrap();
         assert_eq!(h.app.session.doc, before, "conflicting name must not mutate the design");
-        assert_eq!((h.app.session.undo.len(), h.app.session.revision), history);
+        assert_eq!((h.app.session.history.len(), h.app.session.revision), history);
         h.step(&json!({"click":{"handle":"library:material-name"}})).unwrap();
         h.step(&json!({"key":"A","cmd":true})).unwrap();
         h.step(&json!({"text":"Copied substrate"})).unwrap();
@@ -301,10 +301,10 @@ fn catalog_clicked_material_import_renames_conflicts_and_closing_never_assigns_b
         assert_eq!(h.app.session.doc.appearances, before.appearances);
         assert_eq!(h.app.session.doc.materials, before.materials);
         assert_eq!(h.app.run("component.properties", json!({})).unwrap(), mass);
-        assert_eq!(h.app.session.undo.len(), history.0 + 1);
+        assert_eq!(h.app.session.history.len(), history.0 + 1);
         h.step(&json!({"widget":close})).unwrap();
         assert!(h.app.dialog.is_none());
-        assert_eq!(h.app.session.undo.len(), history.0 + 1);
+        assert_eq!(h.app.session.history.len(), history.0 + 1);
         assert_eq!(h.app.session.doc.appearances, before.appearances);
         assert_eq!(h.app.session.doc.materials, before.materials);
         let saved = solidcraft_engine::io::write_design_container(&h.app.session.doc).unwrap();

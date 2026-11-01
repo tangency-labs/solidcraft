@@ -605,7 +605,7 @@ mod tests {
             }
         }
         assert_eq!(s.doc.to_json(), before);
-        assert!(s.undo.is_empty());
+        assert!(s.history.is_empty());
         assert!(s.camera.is_none());
     }
 
@@ -623,7 +623,7 @@ mod tests {
             assert!(to.back().dist(normal) < 2e-6);
             assert_eq!((to.target, to.distance, to.fov), (Vec3::ZERO, original.distance, original.fov));
         }
-        assert!(s.undo.is_empty());
+        assert!(s.history.is_empty());
     }
 
     #[test]
@@ -634,7 +634,7 @@ mod tests {
         let body = state.bodies.first().unwrap();
         let faces = body.body.faces(0.01).unwrap();
         let document = s.doc.to_json();
-        let undo = s.undo.len();
+        let undo = s.history.len();
         for up in [UpAxis::Z, UpAxis::Y] {
             for fov in [0.0, 0.6] {
                 let cam = Camera { up, fov, roll: 1.2, distance: 123.0, ..Default::default() };
@@ -652,7 +652,7 @@ mod tests {
             }
         }
         assert_eq!(s.doc.to_json(), document);
-        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.history.len(), undo);
     }
 
     #[test]
@@ -677,7 +677,7 @@ mod tests {
             assert_eq!((to.target, to.distance, to.fov), (cam.target, cam.distance, cam.fov), "{id}");
             assert_eq!(s.camera, Some(to));
         }
-        assert!(s.undo.is_empty());
+        assert!(s.history.is_empty());
         assert!(s.execute("view.top", &json!({"camera": Camera { distance: -1.0, ..Default::default() }})).is_err());
     }
 
@@ -817,7 +817,7 @@ mod tests {
             }
         }
         assert_eq!(s.doc.to_json(), before);
-        assert!(s.undo.is_empty());
+        assert!(s.history.is_empty());
     }
 
     #[test]
@@ -838,7 +838,7 @@ mod tests {
             assert!((free.back().dot(cam.back()) - 0.64_f64.cos()).abs() < 1e-8);
             assert_eq!((free.target, free.distance, free.fov), (cam.target, cam.distance, cam.fov));
             assert_eq!(s.doc.to_json(), design);
-            assert!(s.undo.is_empty() && s.selection.is_empty());
+            assert!(s.history.is_empty() && s.selection.is_empty());
         }
     }
 
@@ -928,7 +928,7 @@ mod tests {
                 }
             }
             assert_eq!(s.doc.to_json(), before);
-            assert!(s.undo.is_empty());
+            assert!(s.history.is_empty());
         }
     }
 
@@ -1007,7 +1007,7 @@ mod ambient_occlusion_tests {
             assert!(s.execute("view.angle_readout", &p).is_err(), "{p}");
         }
         assert_eq!(s.doc.to_json(), before);
-        assert!(s.undo.is_empty());
+        assert!(s.history.is_empty());
         assert!(s.camera.is_none(), "a display setting leaves the view where it is");
     }
     #[test]
@@ -1021,7 +1021,7 @@ mod ambient_occlusion_tests {
             assert!(s.execute("view.ambient_occlusion", &p).is_err());
         }
         assert_eq!(s.doc.to_json(), before);
-        assert!(s.undo.is_empty());
+        assert!(s.history.is_empty());
     }
 
     #[test]
@@ -1035,7 +1035,7 @@ mod ambient_occlusion_tests {
             assert!(s.execute("view.perspective", &p).is_err());
         }
         assert_eq!(s.doc.to_json(), before);
-        assert!(s.undo.is_empty());
+        assert!(s.history.is_empty());
     }
 }
 
@@ -1070,7 +1070,7 @@ mod graphics_preset_tests {
             assert!(s.execute("view.graphics_preset", &params).is_err());
         }
         assert_eq!(s.doc.to_json(), before);
-        assert!(s.undo.is_empty());
+        assert!(s.history.is_empty());
     }
 }
 
@@ -1085,7 +1085,7 @@ fn history_layout_validates_geometry_without_changing_the_design() {
         assert!(s.execute("view.history_layout", &p).is_err());
     }
     assert_eq!(s.doc, doc);
-    assert!(s.undo.is_empty());
+    assert!(s.history.is_empty());
 }
 
 #[cfg(test)]
@@ -1100,7 +1100,7 @@ fn workspace_layout_validates_modes_without_mutating_the_design() {
         assert!(session.execute("view.layout", &params).is_err());
     }
     assert_eq!(session.doc.to_json(), before);
-    assert!(session.undo.is_empty());
+    assert!(session.history.is_empty());
 }
 
 #[cfg(test)]
@@ -1109,7 +1109,7 @@ fn render_workspace_focus_and_browser_validate_without_side_effects() {
     let mut session = Session { camera: Some(Camera::default()), ..Default::default() };
     let camera = session.camera;
     let document = session.doc.clone();
-    let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
+    let before = (session.history.len(), session.history.redo_steps().len(), session.revision, session.evaluations, session.is_dirty());
     for (id, field) in [("view.render_focus", "on"), ("view.render_browser", "open")] {
         let command = crate::find_command(id).unwrap();
         assert!(command.contract.is_some() && command.output.is_some());
@@ -1132,7 +1132,7 @@ fn render_workspace_focus_and_browser_validate_without_side_effects() {
     }
     assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
     assert_eq!(session.camera, camera);
-    assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+    assert_eq!(before, (session.history.len(), session.history.redo_steps().len(), session.revision, session.evaluations, session.is_dirty()));
 }
 
 #[cfg(test)]
@@ -1140,7 +1140,7 @@ fn render_workspace_focus_and_browser_validate_without_side_effects() {
 fn render_workspace_shots_strip_is_a_validated_headless_preference_request() {
     let mut session = Session::default();
     let document = session.doc.clone();
-    let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
+    let before = (session.history.len(), session.history.redo_steps().len(), session.revision, session.evaluations, session.is_dirty());
     for visible in [false, true] {
         assert_eq!(session.execute("view.shots_strip", &json!({"visible":visible})).unwrap(), json!({"visible":visible}));
     }
@@ -1156,7 +1156,7 @@ fn render_workspace_shots_strip_is_a_validated_headless_preference_request() {
         assert!(session.execute("view.shots_strip", &params).is_err());
     }
     assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
-    assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+    assert_eq!(before, (session.history.len(), session.history.redo_steps().len(), session.revision, session.evaluations, session.is_dirty()));
 }
 
 #[cfg(test)]
@@ -1164,7 +1164,7 @@ fn render_workspace_shots_strip_is_a_validated_headless_preference_request() {
 fn render_frame_validates_hostile_requests_without_saving_guides_or_evaluating() {
     let mut s = Session::default();
     let document = s.doc.clone();
-    let before = (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty());
+    let before = (s.history.len(), s.history.redo_steps().len(), s.revision, s.evaluations, s.is_dirty());
     for mode in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Strict] {
         s.param_check = mode;
         for aspect in ["16:9", "3:2", "1:1", "4:5", "9:16", "custom"] {
@@ -1191,7 +1191,7 @@ fn render_frame_validates_hostile_requests_without_saving_guides_or_evaluating()
         }
     }
     assert!(std::sync::Arc::ptr_eq(&document, &s.doc));
-    assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty()));
+    assert_eq!(before, (s.history.len(), s.history.redo_steps().len(), s.revision, s.evaluations, s.is_dirty()));
     let command = crate::find_command("view.render_frame").unwrap();
     assert!(command.contract.is_some() && command.output.is_some());
 }
@@ -1201,7 +1201,7 @@ fn render_frame_validates_hostile_requests_without_saving_guides_or_evaluating()
 fn render_workspace_stage_validates_without_document_changes_or_evaluation() {
     let mut session = Session::default();
     let document = session.doc.clone();
-    let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
+    let before = (session.history.len(), session.history.redo_steps().len(), session.revision, session.evaluations, session.is_dirty());
     for stage in ["look", "light", "frame", "output"] {
         assert_eq!(session.execute("view.render_stage", &json!({"stage":stage})).unwrap(), json!({"stage":stage}));
     }
@@ -1217,7 +1217,7 @@ fn render_workspace_stage_validates_without_document_changes_or_evaluation() {
         assert!(session.execute("view.render_stage", &params).is_err());
     }
     assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
-    assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+    assert_eq!(before, (session.history.len(), session.history.redo_steps().len(), session.revision, session.evaluations, session.is_dirty()));
 }
 
 #[cfg(test)]
@@ -1227,7 +1227,8 @@ fn render_workspace_dock_validates_without_mutation() {
     session.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
     session.execute("edit.undo", &json!({})).unwrap();
     let document = session.doc.clone();
-    let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty(), session.camera);
+    let before =
+        (session.history.len(), session.history.redo_steps().len(), session.revision, session.evaluations, session.is_dirty(), session.camera);
     for panel in ["inspector", "browser"] {
         for side in ["left", "right"] {
             let params = json!({"panel":panel,"side":side});
@@ -1250,7 +1251,10 @@ fn render_workspace_dock_validates_without_mutation() {
         assert!(session.execute("view.render_dock", &params).is_err(), "{params}");
     }
     assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
-    assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty(), session.camera));
+    assert_eq!(
+        before,
+        (session.history.len(), session.history.redo_steps().len(), session.revision, session.evaluations, session.is_dirty(), session.camera)
+    );
 }
 
 #[cfg(test)]
@@ -1258,7 +1262,7 @@ fn render_workspace_dock_validates_without_mutation() {
 fn render_browser_focus_validates_without_document_changes_or_evaluation() {
     let mut session = Session::default();
     let doc = session.doc.clone();
-    let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
+    let before = (session.history.len(), session.history.redo_steps().len(), session.revision, session.evaluations, session.is_dirty());
     for request in [
         json!({"kind":"nothing"}),
         json!({"kind":"environment"}),
@@ -1295,7 +1299,7 @@ fn render_browser_focus_validates_without_document_changes_or_evaluation() {
         assert!(session.execute("view.render_select", &request).is_err(), "{request}");
     }
     assert!(std::sync::Arc::ptr_eq(&doc, &session.doc));
-    assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+    assert_eq!(before, (session.history.len(), session.history.redo_steps().len(), session.revision, session.evaluations, session.is_dirty()));
     let description = session.execute("engine.describe", &json!({"command":"view.render_select"})).unwrap();
     for key in ["input", "output"] {
         assert!(description[key].is_object());
@@ -1323,7 +1327,7 @@ fn render_select_wear_schema_and_strict_contract_agree() {
         assert!(!contract.check(&request).is_empty());
         assert!(session.execute("view.render_select", &request).is_err());
     }
-    assert!(session.undo.is_empty() && session.redo.is_empty());
+    assert!(session.history.is_empty() && session.history.redo_steps().is_empty());
     assert_eq!(session.evaluations, 0);
 }
 
@@ -1332,7 +1336,7 @@ fn render_select_wear_schema_and_strict_contract_agree() {
 fn render_browser_controls_validate_without_document_changes_or_evaluation() {
     let mut session = Session::default();
     let document = session.doc.clone();
-    let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
+    let before = (session.history.len(), session.history.redo_steps().len(), session.revision, session.evaluations, session.is_dirty());
     for request in [json!({"by_look":true}), json!({"search":true,"query":"Copper"}), json!({"query":""})] {
         assert_eq!(session.execute("view.render_browser", &request).unwrap(), request);
     }
@@ -1348,7 +1352,7 @@ fn render_browser_controls_validate_without_document_changes_or_evaluation() {
         assert!(session.execute("view.render_browser", &request).is_err());
     }
     assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
-    assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+    assert_eq!(before, (session.history.len(), session.history.redo_steps().len(), session.revision, session.evaluations, session.is_dirty()));
 }
 
 #[test]
@@ -1364,5 +1368,5 @@ fn render_inspector_visibility_is_validated_without_mutation() {
     }
     assert_eq!(session.doc.to_json(), before);
     assert_eq!(session.revision, revision);
-    assert!(session.undo.is_empty());
+    assert!(session.history.is_empty());
 }

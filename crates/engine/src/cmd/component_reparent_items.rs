@@ -142,7 +142,7 @@ pub(super) fn reparent_items(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "already in that component"));
     }
     // The steps above are this command's one undo step.
-    sc.undo.clear();
+    sc.history.clear();
     s.accept_computed(sc);
     for (old, new) in &followed {
         follow_visibility(s, old, new);

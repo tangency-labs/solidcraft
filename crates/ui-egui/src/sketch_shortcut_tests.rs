@@ -30,17 +30,17 @@ fn spline_undo_removes_pending_points_before_sketch_history() {
         }
         let points = h.app.tool.as_ref().unwrap().pts.clone();
         assert_eq!(points.len(), 3);
-        let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision);
+        let before = (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.revision);
         for remaining in (0..3).rev() {
             h.step(&json!({"key":"Z","cmd":true})).unwrap();
             h.settle();
             assert_eq!(h.app.tool.as_ref().unwrap().pts, points[..remaining], "{cmd}");
-            assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision), before, "{cmd}");
+            assert_eq!((h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.revision), before, "{cmd}");
         }
         assert_eq!(tool(&h), Some(cmd));
         h.step(&json!({"key":"Z","cmd":true})).unwrap();
         h.settle();
-        assert_eq!(h.app.session.undo.len(), before.1 - 1, "history resumes once the spline is empty");
+        assert_eq!(h.app.session.history.len(), before.1 - 1, "history resumes once the spline is empty");
         let sketch = h.app.session.active_sketch.unwrap();
         assert!(h.app.session.model.state().sketch(sketch).unwrap().sketch.curves.is_empty());
     }
@@ -58,16 +58,16 @@ fn spline_backspace_removes_pending_points_and_keeps_the_tool_ready() {
     }
     let points = h.app.tool.as_ref().unwrap().pts.clone();
     assert_eq!(points.len(), 3);
-    let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision);
+    let before = (h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.revision);
     for remaining in (0..3).rev() {
         press(&mut h, "Backspace");
         assert_eq!(h.app.tool.as_ref().unwrap().pts, points[..remaining]);
-        assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision), before);
+        assert_eq!((h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.revision), before);
     }
     assert_eq!(tool(&h), Some("sketch.spline.fit_point"));
     press(&mut h, "Escape");
     assert!(tool(&h).is_none());
-    assert_eq!((h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.session.revision), before);
+    assert_eq!((h.app.session.doc.to_json(), h.app.session.history.len(), h.app.session.revision), before);
 }
 
 #[test]

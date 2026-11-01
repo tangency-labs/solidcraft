@@ -464,12 +464,12 @@ fn coincident_refuses_invalid_curve_pairs_atomically() {
     run(&mut s, "sketch.line", json!({"points":[[10,10],[30,10]],"infer":false,"connect":false}));
     run(&mut s, "sketch.circle.center", json!({"center":[40,40],"radius":5}));
     let before = serde_json::to_value(&s.doc).unwrap();
-    let undo = s.undo.len();
+    let undo = s.history.len();
     for (a, b, message) in [("l1", "l1", "distinct lines"), ("l1", "c1", "straight lines"), ("c1", "l1", "straight lines")] {
         let error = s.execute("sketch.constraint.coincident", &json!({"a":a,"b":b})).unwrap_err();
         assert!(error.to_string().contains(message), "{error}");
         assert_eq!(serde_json::to_value(&s.doc).unwrap(), before);
-        assert_eq!(s.undo.len(), undo);
+        assert_eq!(s.history.len(), undo);
     }
 }
 

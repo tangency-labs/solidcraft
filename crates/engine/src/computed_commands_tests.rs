@@ -14,7 +14,7 @@ fn acceptance_preserves_file_history_and_prepared_world_without_evaluation() {
     session.path = Some("working.solidcraft".into());
     let saved = session.saved.clone();
     let checkpoint = session.checkpoint();
-    let history = session.undo.len();
+    let history = session.history.len();
     let prepared = session.scratch().compute_commands(&commands(), None).unwrap();
     prepared.warm_meshes(|| true);
     let world = prepared.computed.world_state();
@@ -23,10 +23,10 @@ fn acceptance_preserves_file_history_and_prepared_world_without_evaluation() {
     assert_eq!(session.evaluations, before);
     assert_eq!(session.path.as_deref(), Some("working.solidcraft"));
     assert!(Arc::ptr_eq(&saved, &session.saved));
-    assert_eq!(session.undo.len(), history + 1);
+    assert_eq!(session.history.len(), history + 1);
     assert!(Arc::ptr_eq(&world, &session.world_state()));
     session.restore_checkpoint(checkpoint).unwrap();
-    assert_eq!(session.undo.len(), history);
+    assert_eq!(session.history.len(), history);
     assert_eq!(session.doc.features.len(), 1);
 }
 
@@ -38,7 +38,7 @@ fn failure_discards_the_entire_batch() {
     batch.push(("solid.box".into(), json!({"length":-1})));
     assert!(session.scratch().compute_commands(&batch, None).is_err());
     assert!(Arc::ptr_eq(&document, &session.doc));
-    assert!(session.undo.is_empty());
+    assert!(session.history.is_empty());
 }
 
 #[test]
@@ -57,7 +57,7 @@ fn revision_context_selection_and_replaced_document_reject_old_work() {
         assert!(!prepared.is_current(&session));
         assert!(session.accept_commands(prepared).is_err());
         assert!(Arc::ptr_eq(&document, &session.doc));
-        assert!(session.undo.is_empty());
+        assert!(session.history.is_empty());
     }
 }
 
@@ -97,9 +97,9 @@ fn extrusion_editor() -> (Session, Session, Session, Vec<(String, serde_json::Va
     let feature = session.execute("solid.extrude", &json!({"distance":10,"operation":"new"})).unwrap()["feature"].as_u64().unwrap();
     let original = session.scratch();
     // The UI's temporary rollback does not create an undo step.
-    let undo = std::mem::take(&mut session.undo);
+    let undo = std::mem::take(&mut session.history);
     session.execute("timeline.roll_to", &json!({"position":2})).unwrap();
-    session.undo = undo;
+    session.history = undo;
     let source = session.scratch();
     let commands = vec![(
         "timeline.redefine".into(),
@@ -124,14 +124,14 @@ fn editor_visibility_changes_allow_apply_and_preserve_separate_undo_steps() {
     ] {
         let (mut session, source, original, commands) = extrusion_editor();
         let shown = session.visibility.clone();
-        let history = session.undo.len();
+        let history = session.history.len();
         session.execute("browser.visibility", &params).unwrap();
         let hidden = session.visibility.clone();
         assert_ne!(hidden, shown, "{params}");
         assert!(Arc::ptr_eq(&source.doc, &session.doc));
         let prepared = session.scratch().compute_editor_commands(&commands, &source, original).unwrap();
         session.accept_commands(prepared).unwrap();
-        assert_eq!(session.undo.len(), history + 2, "hide and edit are separate undo steps");
+        assert_eq!(session.history.len(), history + 2, "hide and edit are separate undo steps");
         assert_eq!(session.visibility, hidden);
         assert_editor_volume(&mut session, 12024.0);
         session.execute("edit.undo", &json!({})).unwrap();
@@ -159,14 +159,14 @@ fn editor_visibility_changes_allow_cancel_and_keep_undo_and_redo_at_the_original
         if undo_hide {
             session.execute("edit.undo", &json!({})).unwrap();
         }
-        let history = (session.undo.len(), session.redo.len());
+        let history = (session.history.len(), session.history.redo_steps().len());
         let live = session.visibility.clone();
         *session.model.cache.lock().unwrap() = Default::default();
         let evaluations = session.evaluations;
         session.restore_editor(&source, original).unwrap();
         assert_eq!(session.evaluations, evaluations, "Cancel reuses the pinned model");
         assert_eq!(session.visibility, live);
-        assert_eq!((session.undo.len(), session.redo.len()), history);
+        assert_eq!((session.history.len(), session.history.redo_steps().len()), history);
         assert_editor_volume(&mut session, 6024.0);
         if undo_hide {
             session.execute("edit.redo", &json!({})).unwrap();
