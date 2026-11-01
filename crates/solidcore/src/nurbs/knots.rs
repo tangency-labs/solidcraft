@@ -13,7 +13,7 @@
 //! | [`KnotVector::set_last_index`]         | `N_SetKnotIndex`                  |
 //! | [`KnotVector::is_param_out_of_bounds`] | `N_KnotVectorIsParamOutOfBounds`  |
 //! | [`KnotVector::is_end_param`]           | `N_KnotVectorIsEndParam`          |
-//! | [`KnotVector::validate`]               | `N_KnotVectorIsValid`             |
+//! | [`KnotVector::validate`], [`KnotVector::validate_with_kernel`], [`KnotVector::validate_opt_in`] | `N_KnotVectorIsValid` |
 //! | [`KnotVector::find_span`]              | `N_BasisFindSpan`                 |
 //! | [`KnotVector::find_span_and_mult`]     | `N_BasisFindSpanAndMult`          |
 //! | [`KnotVector::span_count`]             | `N_BasisGetSpanCount`             |
@@ -42,8 +42,13 @@
 //!   where upstream would overflow them.
 //! - On `NL_NUM_ERR` upstream leaves `N` partly computed; [`KnotVector::basis_eval`]
 //!   returns only the error.
+//! - [`KnotVector::validate`] matches upstream `N_KnotVectorIsValid` (which accepts
+//!   degenerate `(p + 1)`-knot vectors with no span, `WR-24`);
+//!   [`KnotVector::validate_with_kernel`] and [`KnotVector::validate_opt_in`] add the
+//!   opt-in span check ([`crate::kernel::UpstreamFixes::knot_vector_valid_requires_span`]).
 
 use crate::error::{NlibCode, Result, SolidError};
+use crate::kernel::Kernel;
 
 /// Upstream `NL_MAXDEG`: the largest degree NLib supports.
 pub const MAX_DEGREE: usize = 17;
@@ -234,8 +239,36 @@ impl<'a> KnotVector<'a> {
     /// `p + 1`, the knots do not decrease, and no interior knot has multiplicity
     /// above `p`.
     ///
+    /// Matches pinned C++ parity (`require_span = false`); see
+    /// [`KnotVector::validate_with_kernel`] and [`KnotVector::validate_opt_in`] for
+    /// the opt-in `WR-24` span check.
+    ///
     /// Errors with [`NlibCode::Knot`] (`NL_KNT_ERR`) when a check fails.
     pub fn validate(&self, p: usize) -> Result<()> {
+        self.validate_opt_in(p, false)
+    }
+
+    /// Checks that this is a valid clamped knot vector for degree `p` using `k`'s
+    /// [`crate::kernel::UpstreamFixes::knot_vector_valid_requires_span`] setting
+    /// (upstream `N_KnotVectorIsValid`, `WR-24`).
+    ///
+    /// Errors with [`NlibCode::Knot`] (`NL_KNT_ERR`) when a check fails.
+    pub fn validate_with_kernel(&self, k: &Kernel, p: usize) -> Result<()> {
+        self.validate_opt_in(p, k.fixes.knot_vector_valid_requires_span)
+    }
+
+    /// Checks that this is a valid clamped knot vector for degree `p`
+    /// (upstream `N_KnotVectorIsValid`), optionally requiring at least one strictly
+    /// positive parameter span (`WR-24`).
+    ///
+    /// When `require_span` is `true`, additionally requires `m >= 2 * p + 1` (at least
+    /// `2 * p + 2` knots so the start and end `(p + 1)`-knot clamps do not overlap) and
+    /// `U[0] < U[m]` (rejecting all-equal and `NaN` end knots), and checks interior-knot
+    /// multiplicity (`<= p`) only on interior knots (`i < m - p`, so degree-`0` vectors
+    /// such as `[0.0, 1.0]` with no interior knots pass).
+    ///
+    /// Errors with [`NlibCode::Knot`] (`NL_KNT_ERR`) when a check fails.
+    pub fn validate_opt_in(&self, p: usize, require_span: bool) -> Result<()> {
         const OP: &str = OP_VALIDATE;
         let knot_err = SolidError::Nlib {
             operation: OP,
@@ -243,6 +276,20 @@ impl<'a> KnotVector<'a> {
         };
         let u = self.knots;
         let m = self.last_index();
+
+        if require_span {
+            if p.checked_mul(2)
+                .and_then(|v| v.checked_add(1))
+                .is_none_or(|min_m| m < min_m)
+            {
+                return Err(knot_err);
+            }
+            let u0 = rd(u, 0, OP)?;
+            let um = rd(u, m, OP)?;
+            if u0.is_nan() || um.is_nan() || u0 >= um {
+                return Err(knot_err);
+            }
+        }
 
         // Check end knots.
         let mut i = 0;
@@ -273,7 +320,7 @@ impl<'a> KnotVector<'a> {
             while ie < end && rd(u, ie, OP)? == rd(u, ie + 1, OP)? {
                 ie += 1;
             }
-            if ie - i + 1 > p {
+            if (!require_span || i < end) && ie - i + 1 > p {
                 return Err(knot_err);
             }
             is = ie;
@@ -763,6 +810,9 @@ impl<'a> KnotVector<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kernel::UpstreamFixes;
+    use crate::nurbs::math::{CPoint, NOW};
+    use crate::nurbs::srf_basic::Surface;
 
     /// The NURBS Book, example 2.3: U = {0,0,0,1,2,3,4,4,5,5,5}, p = 2.
     const EX23: [f64; 11] = [0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0, 4.0, 5.0, 5.0, 5.0];
@@ -1036,5 +1086,166 @@ mod tests {
         assert!(kv(&big)
             .basis_eval(MAX_DEGREE + 2, 0.5, Side::Left)
             .is_err());
+    }
+
+    #[test]
+    fn wr24_degenerate_clamped_vectors_rejected_under_opt_in() {
+        let k_def = Kernel::default();
+        assert!(!k_def.fixes.knot_vector_valid_requires_span);
+        let mut k_opt = Kernel::default();
+        k_opt.fixes.knot_vector_valid_requires_span = true;
+
+        let expected_err = Err(SolidError::Nlib {
+            operation: OP_VALIDATE,
+            code: NlibCode::Knot,
+        });
+        let degen_cases: [(&[f64], usize); 5] = [
+            (&[2.0, 2.0, 2.0, 2.0], 3),
+            (&[2.0, 2.0], 1),
+            (&[1.0], 0),
+            (&[0.0, 0.0, 0.0], 2),
+            (&[f64::NAN], 0),
+        ];
+        for (knots, p) in degen_cases {
+            let v = kv(knots);
+            assert_eq!(v.span_count(p), 0, "{knots:?} p={p}");
+            assert_eq!(v.validate(p), Ok(()), "{knots:?} p={p}");
+            assert_eq!(v.validate_opt_in(p, false), Ok(()), "{knots:?} p={p}");
+            assert_eq!(v.validate_with_kernel(&k_def, p), Ok(()), "{knots:?} p={p}");
+            assert_eq!(v.validate_opt_in(p, true), expected_err, "{knots:?} p={p}");
+            assert_eq!(
+                v.validate_with_kernel(&k_opt, p),
+                expected_err,
+                "{knots:?} p={p}"
+            );
+        }
+    }
+
+    #[test]
+    fn wr24_valid_and_invalid_vectors_and_extreme_degree() {
+        let k_def = Kernel::default();
+        let mut k_opt = Kernel::default();
+        k_opt.fixes.knot_vector_valid_requires_span = true;
+
+        let expected_err = Err(SolidError::Nlib {
+            operation: OP_VALIDATE,
+            code: NlibCode::Knot,
+        });
+
+        // Valid clamped vectors of degree >= 1 pass in both modes.
+        let valid_both: [(&[f64], usize); 3] = [
+            (&[0.0, 0.0, 1.0, 1.0], 1),
+            (&[0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0], 2),
+            (&[0.0, 0.0, 0.0, 0.0, 2.0, 2.0, 2.0, 2.0], 3),
+        ];
+        for (knots, p) in valid_both {
+            let v = kv(knots);
+            assert_eq!(v.validate(p), Ok(()), "{knots:?} p={p}");
+            assert_eq!(v.validate_with_kernel(&k_def, p), Ok(()), "{knots:?} p={p}");
+            assert_eq!(v.validate_opt_in(p, true), Ok(()), "{knots:?} p={p}");
+            assert_eq!(v.validate_with_kernel(&k_opt, p), Ok(()), "{knots:?} p={p}");
+        }
+
+        // Degree 0 single-span `[0.0, 1.0]` has no interior knots (`m = 1`): opt-in
+        // accepts it, whereas upstream's `ie <= m - p` loop runs `1 > p` at `i == m - p`.
+        let v_deg0 = kv(&[0.0, 1.0]);
+        assert_eq!(v_deg0.span_count(0), 1);
+        assert_eq!(v_deg0.validate(0), expected_err);
+        assert_eq!(v_deg0.validate_with_kernel(&k_def, 0), expected_err);
+        assert_eq!(v_deg0.validate_opt_in(0, true), Ok(()));
+        assert_eq!(v_deg0.validate_with_kernel(&k_opt, 0), Ok(()));
+
+        // Invalid multiplicity, unclamped, unsorted, and NaN end-knot vectors fail in both modes.
+        let invalid_both: [(&[f64], usize); 8] = [
+            (&[0.0, 0.5, 1.0], 0),
+            (&[0.0, 1.0, 2.0, 3.0], 1),
+            (&[0.0, 0.0, 0.0, 1.0, 1.0], 1),
+            (&[0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0], 2),
+            (&[0.0, 0.0, 0.0, 2.0, 1.0, 3.0, 3.0, 3.0], 2),
+            (&[f64::NAN, f64::NAN, 1.0, 1.0], 1),
+            (&[0.0, 0.0, f64::NAN, f64::NAN], 1),
+            (&[f64::NAN, 1.0], 0),
+        ];
+        for (knots, p) in invalid_both {
+            let v = kv(knots);
+            assert_eq!(v.validate(p), expected_err, "{knots:?} p={p}");
+            assert_eq!(
+                v.validate_with_kernel(&k_def, p),
+                expected_err,
+                "{knots:?} p={p}"
+            );
+            assert_eq!(v.validate_opt_in(p, true), expected_err, "{knots:?} p={p}");
+            assert_eq!(
+                v.validate_with_kernel(&k_opt, p),
+                expected_err,
+                "{knots:?} p={p}"
+            );
+        }
+
+        // Extreme degrees fail cleanly with `NlibCode::Knot` without arithmetic overflow.
+        for p in [usize::MAX / 2, usize::MAX - 1, usize::MAX] {
+            let v = kv(&[0.0, 0.0, 1.0, 1.0]);
+            assert_eq!(v.validate(p), expected_err, "p={p}");
+            assert_eq!(v.validate_with_kernel(&k_def, p), expected_err, "p={p}");
+            assert_eq!(v.validate_opt_in(p, true), expected_err, "p={p}");
+            assert_eq!(v.validate_with_kernel(&k_opt, p), expected_err, "p={p}");
+        }
+
+        // `nurbs::srf_basic::Surface::is_valid_with_kernel` forwards the kernel setting.
+        let bilinear = Surface::new(
+            vec![
+                vec![
+                    CPoint::new(0.0, 0.0, 0.0, NOW),
+                    CPoint::new(0.0, 1.0, 0.0, NOW),
+                ],
+                vec![
+                    CPoint::new(1.0, 0.0, 0.0, NOW),
+                    CPoint::new(1.0, 1.0, 0.0, NOW),
+                ],
+            ],
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        assert_eq!(bilinear.is_valid(), Ok(()));
+        assert_eq!(bilinear.is_valid_with_kernel(&k_def), Ok(()));
+        assert_eq!(bilinear.is_valid_with_kernel(&k_opt), Ok(()));
+
+        let constant_patch = Surface::new(
+            vec![vec![CPoint::new(0.0, 0.0, 0.0, NOW)]],
+            0,
+            0,
+            vec![0.0, 1.0],
+            vec![0.0, 1.0],
+        )
+        .unwrap();
+        assert_eq!(constant_patch.is_valid(), expected_err);
+        assert_eq!(constant_patch.is_valid_with_kernel(&k_def), expected_err);
+        assert_eq!(constant_patch.is_valid_with_kernel(&k_opt), Ok(()));
+
+        let bad_surface = Surface::new(
+            vec![vec![
+                CPoint::new(0.0, 0.0, 0.0, NOW),
+                CPoint::new(0.0, 1.0, 0.0, NOW),
+            ]],
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        assert_eq!(bad_surface.is_valid(), expected_err);
+        assert_eq!(bad_surface.is_valid_with_kernel(&k_def), expected_err);
+        assert_eq!(bad_surface.is_valid_with_kernel(&k_opt), expected_err);
+
+        // `UpstreamFixes::flag_mut` toggles `knot_vector_valid_requires_span`.
+        let mut fixes = UpstreamFixes::default();
+        assert!(!fixes.knot_vector_valid_requires_span);
+        *fixes.flag_mut("knot_vector_valid_requires_span").unwrap() = true;
+        assert!(fixes.knot_vector_valid_requires_span);
+        *fixes.flag_mut("knot_vector_valid_requires_span").unwrap() = false;
+        assert!(!fixes.knot_vector_valid_requires_span);
     }
 }
