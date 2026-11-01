@@ -18,7 +18,7 @@ use solidcore_record::Vec3;
 use super::check::whole;
 use super::motion::require;
 use super::sketch_ends::SketchTarget;
-use super::types::Point3;
+use super::types::{Point3, SketchRef, present};
 use crate::params;
 
 /// Draw 3D lines through world points, one line per segment, joined end to end. Needs 3D Sketch
@@ -253,6 +253,8 @@ impl JsonSchema for FitIndex {
 pub struct Curves3dResult {
     /// The ids of the curves drawn: one per segment for a line, one for a spline.
     pub curves: Vec<String>,
+    /// The Coincident constraints that join what was drawn to the drawn 3D ends it meets (#10608).
+    pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
@@ -265,6 +267,8 @@ pub struct Curves3dResult {
 pub struct Point3dResult {
     /// The id of the point drawn.
     pub point: String,
+    /// The Coincident constraints that join what was drawn to the drawn 3D ends it meets (#10608).
+    pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
@@ -277,6 +281,45 @@ pub struct Point3dResult {
 pub struct Move3dResult {
     /// How many fit points moved: the one asked for and the points joined to it.
     pub moved: usize,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// An axis of the sketch's 3D space.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AxisName {
+    X,
+    Y,
+    Z,
+}
+
+/// Make drawn 3D lines parallel to an axis.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct AlongAxisParams {
+    /// A drawn 3D line's id.
+    #[serde(default)]
+    pub line: Option<String>,
+    /// Several drawn 3D lines' ids, each made parallel to the axis.
+    #[serde(default)]
+    pub lines: Option<Vec<String>>,
+    /// The axis of the sketch's 3D space (its component's, for a sketch in a component).
+    pub axis: AxisName,
+    /// The sketch (default: the one being edited).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+}
+
+/// What `sketch.constraint.along_axis` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AlongAxisResult {
+    /// The constraint ids, one per line (an existing one when the line already had it).
+    pub constraints: Vec<String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

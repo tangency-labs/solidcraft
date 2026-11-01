@@ -814,6 +814,9 @@ pub struct Sketch {
     /// 3D curves (world coordinates) carried by the sketch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub wires: Vec<crate::wire::Wire>,
+    /// Constraints among the drawn 3D curves' fit points, solved after the planar sketch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wire_constraints: Vec<crate::wire_solve::WireConstraint>,
     /// Curves drawn from formulas (#8352): the fit point splines they place, with their formulas.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub equations: Vec<crate::equation::EquationCurve>,
@@ -846,6 +849,7 @@ impl Sketch {
             offsets: Vec::new(),
             freeform_offsets: Vec::new(),
             wires: Vec::new(),
+            wire_constraints: Vec::new(),
             equations: Vec::new(),
             counters: Default::default(),
             view: SketchView::default(),
@@ -883,6 +887,7 @@ impl Sketch {
             .saturating_add(self.patterns.len())
             .saturating_add(self.links.len())
             .saturating_add(self.wires.len())
+            .saturating_add(self.wire_constraints.len())
             .saturating_add(
                 self.offsets.iter().filter_map(|r| r.topology.as_ref()).fold(0usize, |n, r| n.saturating_add(r.roles.len()).saturating_add(1)),
             )
@@ -910,7 +915,8 @@ impl Sketch {
     }
 
     /// Every id the sketch holds: its points, curves, constraints, patterns, links, wires and
-    /// offset topologies with their outputs (what [`Sketch::id_taken`] searches).
+    /// their 3D constraints, and offset topologies with their outputs (what
+    /// [`Sketch::id_taken`] searches).
     fn all_ids(&self) -> impl Iterator<Item = &str> {
         self.points
             .iter()
@@ -920,6 +926,7 @@ impl Sketch {
             .chain(self.patterns.iter().map(|p| p.id.as_str()))
             .chain(self.links.iter().map(|l| l.id.as_str()))
             .chain(self.wires.iter().map(|w| w.id.as_str()))
+            .chain(self.wire_constraints.iter().map(|c| c.id.as_str()))
             .chain(
                 self.offsets
                     .iter()
@@ -943,6 +950,7 @@ impl Sketch {
             || self.patterns.iter().any(|p| p.id == id)
             || self.links.iter().any(|l| l.id == id)
             || self.wires.iter().any(|w| w.id == id)
+            || self.wire_constraints.iter().any(|c| c.id == id)
             || self.offsets.iter().filter_map(|r| r.topology.as_ref()).any(|r| r.id == id || r.roles.iter().any(|role| role.output == id))
     }
 
