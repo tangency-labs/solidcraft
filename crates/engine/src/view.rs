@@ -1030,12 +1030,12 @@ pub fn sketch_shown(s: &Session, id: u64) -> bool {
     v.shown_sketches.contains(&id) || !sketch_consumed(s, id)
 }
 
-/// Is a sketch used by a later feature? A sheet metal base or contour flange uses its sketch as
-/// an Extrude does: shown, its lines lie on the sheet's edges and take the clicks meant for
-/// them (#6804). So does a Hole at sketch points: shown, its points are drawn in the holes
-/// (#9082). A Single hole snapped to one point (#2110) does not: it was placed on a face, not
-/// built from the sketch, and hiding the sketch would take its other points from the next
-/// Single hole's snap.
+/// Is a sketch used by a later feature? A sheet metal base or contour flange, or a perforation's
+/// outline, uses its sketch as an Extrude does: shown, its lines lie on the sheet's edges and
+/// faces and take the clicks meant for them (#6804). So does a Hole at sketch points: shown, its
+/// points are drawn in the holes (#9082). A Single hole snapped to one point (#2110) does not: it
+/// was placed on a face, not built from the sketch, and hiding the sketch would take its other
+/// points from the next Single hole's snap.
 pub fn sketch_consumed(s: &Session, id: u64) -> bool {
     if let Ok(mut cache) = s.consumed_sketches_cache.lock() {
         if cache.as_ref().is_none_or(|c| !std::ptr::eq(c.doc.as_ptr(), Arc::as_ptr(&s.doc))) {
@@ -1065,7 +1065,8 @@ fn consumed_sketches(doc: &solidcraft_doc::Document) -> impl Iterator<Item = u64
         | FeatureKind::Revolve { sketch, .. }
         | FeatureKind::SheetBase { sketch, .. }
         | FeatureKind::SheetContour { sketch, .. }
-        | FeatureKind::Hole { points: Some(SketchPoints { sketch, single: false, .. }), .. } => Some(sketch.0),
+        | FeatureKind::Hole { points: Some(SketchPoints { sketch, single: false, .. }), .. }
+        | FeatureKind::SheetPerforate { sketch: Some(sketch), .. } => Some(sketch.0),
         _ => None,
     })
 }

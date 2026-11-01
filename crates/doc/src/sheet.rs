@@ -688,6 +688,10 @@ pub struct SheetPerforation {
     /// copy, whose holes are the mirror image of its source's.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub from_right: bool,
+    /// The field's outline in flat coordinates (see [`SheetBody::perforation_outline`]): holes only inside these
+    /// regions, margin clear of their edges, on a grid that starts from their bounding box. None: the whole flat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outline: Option<Vec<Region2>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2104,9 +2108,45 @@ impl SheetBody {
         self.flanges.iter().map(|f| self.zone(f)).collect()
     }
 
+    /// A perforation field's outline (#732) in flat coordinates: closed regions of a sketch in `plane` (world). An
+    /// unfolded sheet takes them as drawn on the flat; a folded one through each panel whose material the plane lies
+    /// in, clipped to that panel, so an outline on one face never reaches a flange in the flat. Refused when the
+    /// plane lies in no panel.
+    pub fn perforation_outline(&self, plane: &Plane, regions: &[Region2]) -> Result<Vec<Region2>> {
+        let on = |pi: Option<usize>| {
+            let w = self.world(pi);
+            let n = apply_vector(&w, Vec3::Z);
+            let z = (plane.origin - apply_point(&w, Vec3::ZERO)).dot(n);
+            n.cross(plane.normal()).len() < 1e-6 && (-LINEAR_TOL..=self.t + LINEAR_TOL).contains(&z)
+        };
+        if self.flat {
+            if !on(None) {
+                return Err(DocError::Invalid("the perforation's outline sketch must lie on the flat sheet".into()));
+            }
+            return regions.iter().map(|r| self.region_to_flat(None, plane, r)).collect();
+        }
+        let mut work = FlatWork::new();
+        let mut out = Vec::new();
+        let mut found = false;
+        for (pi, panel) in self.parallel_panels(plane) {
+            if !on(pi) {
+                continue;
+            }
+            found = true;
+            let mapped = regions.iter().map(|r| self.region_to_flat(pi, plane, r)).collect::<Result<Vec<_>>>()?;
+            out.extend(material_boolean(std::slice::from_ref(&panel), &mapped, kernel::BoolOp::Intersect, &mut work)?);
+        }
+        if !found {
+            return Err(DocError::Invalid("the perforation's outline sketch must lie on a face of the sheet".into()));
+        }
+        Ok(out)
+    }
+
     /// Hole centres of a perforation field (#732), flat coordinates: a staggered (60°, odd rows shifted half a pitch)
     /// or square grid from the flat bounding box's lower-left corner plus margin + radius; a hole is kept where it is
-    /// at least margin clear of the material's edges and cut-outs and of every bend zone.
+    /// at least margin clear of the material's edges and cut-outs and of every bend zone. A field with an outline
+    /// keeps its holes inside the outline and margin clear of its edges too, on a grid from the lower-left corner of
+    /// the outline's bounding box (within the flat's).
     pub fn perforation_holes(&self, p: &SheetPerforation) -> Result<Vec<Vec2>> {
         let regions = self.flat_regions()?;
         let zones = self.bend_zones();
@@ -2126,6 +2166,20 @@ impl SheetBody {
         let Aabb2 { min: lo, max: hi } = segs.iter().map(|(a, _)| *a).collect();
         if !(lo.x <= hi.x) || !(p.pitch > 0.0) {
             return Ok(Vec::new());
+        }
+        // The rows and columns span the flat, or the outline's part of it; the bucket grid below stays the flat's.
+        let mut field = Aabb2 { min: lo, max: hi };
+        if let Some(outline) = &p.outline {
+            let n = segs.len();
+            for r in outline {
+                for l in std::iter::once(&r.outer).chain(&r.holes) {
+                    segs.extend(l.polyline(1e-3).edges().map(|(&a, &b)| (a, b)));
+                }
+            }
+            field = field.intersection(&segs.get(n..).unwrap_or(&[]).iter().map(|(a, _)| *a).collect::<Aabb2>());
+            if !(field.min.x <= field.max.x && field.min.y <= field.max.y) {
+                return Ok(Vec::new());
+            }
         }
         // Segments bucketed in a grid, so each hole only checks the edges near it.
         let cell = (2.0 * clear).max(p.pitch).max(1.0);
@@ -2153,20 +2207,22 @@ impl SheetBody {
         let dy = if p.square { p.pitch } else { p.pitch * 3f64.sqrt() / 2.0 };
         let mut out = Vec::new();
         let mut row = 0usize;
+        let Aabb2 { min: flo, max: fhi } = field;
         loop {
-            let y = lo.y + clear + row as f64 * dy;
-            if y > hi.y - clear + 1e-9 {
+            let y = flo.y + clear + row as f64 * dy;
+            if y > fhi.y - clear + 1e-9 {
                 break;
             }
             let shift = if !p.square && row % 2 == 1 { p.pitch / 2.0 } else { 0.0 };
             // Steps across the row from its first hole; a mirrored field counts from the right.
             let mut step = 0.0;
-            while lo.x + clear + shift + step <= hi.x - clear + 1e-9 {
-                let x = if p.from_right { hi.x - clear - shift - step } else { lo.x + clear + shift + step };
+            while flo.x + clear + shift + step <= fhi.x - clear + 1e-9 {
+                let x = if p.from_right { fhi.x - clear - shift - step } else { flo.x + clear + shift + step };
                 let c = Vec2::new(x, y);
                 let (i, j) = idx(x, y);
                 let near = grid.get(j * nx + i).map(Vec::as_slice).unwrap_or(&[]);
                 if regions.iter().any(|r| r.contains(c))
+                    && p.outline.as_ref().is_none_or(|o| o.iter().any(|r| r.contains(c)))
                     && !zones.iter().any(|z| z.contains(c))
                     && near.iter().all(|&k| segs.get(k).is_none_or(|&s| dist(c, s) >= clear - 1e-9))
                 {
@@ -4733,6 +4789,9 @@ impl SheetBody {
         }
         for p in &mut self.perforations {
             p.from_right = !p.from_right;
+            for r in p.outline.iter_mut().flatten() {
+                *r = flip_x_region(r);
+            }
         }
         for (_, a, b) in &mut self.base_curves {
             (*a, *b) = (flip_x(*b), flip_x(*a));

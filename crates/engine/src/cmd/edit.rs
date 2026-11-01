@@ -1748,6 +1748,15 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         *after = before.clone();
     }
+    // A perforation keeps its outline through an edit that names no sketch (the Perforate dialog has no outline).
+    if let (FeatureKind::SheetPerforate { sketch: Some(before), profiles: picked, .. }, FeatureKind::SheetPerforate { sketch, profiles, .. }) =
+        (&old.kind, &mut new.kind)
+        && sketch.is_none()
+        && params.get("sketch").is_none()
+    {
+        *sketch = Some(*before);
+        *profiles = picked.clone();
+    }
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.
     let boundary = |k: &FeatureKind| matches!(k, FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. });
