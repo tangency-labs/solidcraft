@@ -135,13 +135,16 @@ impl Painter {
         let width = surface_state.width;
         let height = surface_state.height;
 
-        // SolidCraft: an unsupported surface is a refused configure, not a panic.
-        let Some(default_config) = surface_state
-            .surface
-            .get_default_config(&render_state.adapter, width, height)
-        else {
-            return Err(crate::ConfigureError::Unsupported);
-        };
+        // SolidCraft: an unsupported surface is a refused configure, not a panic, and not taken
+        // as configured either (#3321, [`crate::unsupported_surface`]).
+        let default_config = crate::supported_surface(
+            surface_state
+                .surface
+                .get_default_config(&render_state.adapter, width, height),
+            width,
+            height,
+        )
+        .map_err(crate::ConfigureError::Refused)?;
         // SolidCraft: a window other than the main one presents without waiting for the display
         // where its surface can (`crate::viewport_present_mode`).
         let supported = surface_state
@@ -687,6 +690,9 @@ impl Painter {
             && let Err(err) = self.recreate_surface(viewport_id, window)
         {
             log::error!("Failed to recreate surface for {viewport_id:?}: {err}");
+            if viewport_id == ViewportId::ROOT {
+                crate::note_refused(now);
+            }
             return vsync_sec;
         }
 
@@ -741,6 +747,10 @@ impl Painter {
                 now,
             )
         {
+            // SolidCraft: the main window's time without a texture (#3321, `refused_for`).
+            if viewport_id == ViewportId::ROOT {
+                crate::note_refused(now);
+            }
             return vsync_sec;
         }
 
@@ -761,7 +771,12 @@ impl Painter {
             if let Some(error) = failed {
                 log::warn!("The surface gave no frame: {error}");
             }
-            vsync_sec += start.elapsed().as_secs_f32();
+            let elapsed = start.elapsed();
+            vsync_sec += elapsed.as_secs_f32();
+            // SolidCraft: only the main window's acquire waits count toward a GPU hang.
+            if viewport_id == ViewportId::ROOT {
+                crate::note_acquire(elapsed);
+            }
             output_frame
         };
 
