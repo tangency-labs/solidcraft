@@ -2653,7 +2653,6 @@ fn folder_rows_at(
         }
         if r.hovered {
             acts.hover(data.entries().flat_map(|e| &e.bodies));
-            acts.hover_target = Some(Target::Folder { component: comp, folder: fstatic.to_string(), scope: prefix.to_owned() });
         }
         if let Some(p) = r.secondary {
             acts.menu = Some((p, Target::Folder { component: comp, folder: fstatic.to_string(), scope: prefix.to_owned() }));
@@ -2760,7 +2759,6 @@ fn folder_level(
         }
         if r.hovered {
             acts.hover(group.entries().into_iter().flat_map(|e| &e.bodies));
-            acts.hover_target = Some(Target::Group { id, scope: prefix.to_owned() });
         }
         if let Some(p) = r.secondary {
             acts.menu = Some((p, Target::Group { id, scope: prefix.to_owned() }));

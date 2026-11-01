@@ -2179,6 +2179,8 @@
   "prefs.graphics_presets_note": "プリセットは以下の設定をまとめて変更します。",
   "prefs.hide_constraint_glyphs_zoomed_out": "ズームアウト時に拘束グリフを隠す",
   "prefs.hide_constraint_glyphs_zoomed_out_note": "スケッチを十分にズームアウトすると、拘束グリフは表示されず画面を散らかしません。オフ: ズームに関係なく固定の画面サイズのままです。",
+  "prefs.hide_under_cursor": "カーソルの下の要素に V を作用させる",
+  "prefs.hide_under_cursor_note": "オン（既定）: V は、先に選択せずに、ビューまたは Browser の行でカーソルの下の要素を非表示または表示にします。カーソルが何もない場所、または現在の選択範囲の要素の上にある場合、V は以前どおり選択範囲に作用します。",
   "prefs.history": "履歴",
   "prefs.history_origin_bodies": "原点とボディを先頭に表示",
   "prefs.history_origin_bodies_note": "左側またはブラウザー下の履歴の先頭に、アクティブなコンポーネントのボディフォルダーと原点を、ブラウザーと同じ表示切り替えとメニュー付きで表示します。下部の履歴は変わりません。",
