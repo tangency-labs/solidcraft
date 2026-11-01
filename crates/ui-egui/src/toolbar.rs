@@ -50,27 +50,52 @@ pub struct ButtonSize {
     pub min_width: f32,
 }
 
-/// One panel as [`fit`] sees it, in button order (the gallery, if present, is last).
+/// One panel as [`fit`] sees it, in button order (the grid, if present, is last).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PanelSize {
     pub buttons: Vec<ButtonSize>,
+    /// The last button is the panel's grid of small icons.
+    pub grid: bool,
 }
 
-/// Where [`fit`] put a panel: its first buttons and their individual fitted widths.
+/// Where [`fit`] put a panel: how many of its buttons show and their individual fitted widths.
+/// A panel with a grid keeps it while it hands its large buttons to the drop-down, so `shown`
+/// counts the first `shown - 1` large buttons and the grid.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Plan {
     pub fit: Fit,
     pub shown: usize,
     pub widths: Vec<f32>,
+    pub grid: bool,
 }
 
 impl Plan {
     fn full(panel: &PanelSize) -> Self {
-        Self { fit: Fit::Buttons, shown: panel.buttons.len(), widths: panel.buttons.iter().map(|b| b.width).collect() }
+        Self { fit: Fit::Buttons, shown: panel.buttons.len(), widths: panel.buttons.iter().map(|b| b.width).collect(), grid: panel.grid }
     }
 
     fn more() -> Self {
-        Self { fit: Fit::More, shown: 0, widths: Vec::new() }
+        Self { fit: Fit::More, shown: 0, widths: Vec::new(), grid: false }
+    }
+
+    /// The grid is on the toolbar: with at least one large button, or on its own.
+    pub fn grid_shown(&self) -> bool {
+        self.grid && self.fit == Fit::Buttons && (self.shown >= 2 || self.widths.len() == 1)
+    }
+
+    /// The widths of the buttons on the toolbar, in order (the grid last).
+    pub fn visible(&self) -> Vec<f32> {
+        if self.fit != Fit::Buttons {
+            return Vec::new();
+        }
+        let mut out: Vec<f32> = self.widths.iter().copied().take(self.shown).collect();
+        if self.grid_shown()
+            && self.shown < self.widths.len()
+            && let (Some(slot), Some(grid)) = (out.last_mut(), self.widths.last())
+        {
+            *slot = *grid;
+        }
+        out
     }
 
     /// The panel's width on the toolbar (0 in the » menu).
@@ -78,7 +103,7 @@ impl Plan {
         match self.fit {
             Fit::More => 0.0,
             Fit::Collapsed => COLLAPSED_WIDTH,
-            Fit::Buttons => panel_width(self.widths.get(..self.shown).unwrap_or_default()),
+            Fit::Buttons => panel_width(&self.visible()),
         }
     }
 }
@@ -115,15 +140,15 @@ const BUTTON_LABEL_PADDING: f32 = 10.0;
 const BUTTON_LABEL_TOP: f32 = 32.0;
 /// Room kept below a button's label, inside its highlight.
 const BUTTON_LABEL_BOTTOM: f32 = 2.0;
-const SECTION_HEIGHT: f32 = 20.0;
 
 /// The » button's room at the end of the panels, kept only while some panel is in it.
 pub const MORE_ROOM: f32 = 40.0;
 
 /// Fit panels into `room`, giving up as little as it takes, one small step at a time:
 /// 1. buttons narrow from their measured label widths to their minimum, wrapping and truncating;
-/// 2. panels hand their last buttons to their drop-down one at a time, the panel showing the
-///    most buttons first (the rightmost of equals), down to one button (collapsed);
+/// 2. panels hand their last large buttons to their drop-down one at a time, the panel showing
+///    the most buttons first (the rightmost of equals), keeping their grids of small icons and
+///    one large button beside them; then the grids go, then panels collapse to one button;
 /// 3. the last panels go into the » menu, and any room that frees goes back to buttons.
 ///
 /// Each removal frees at most one button (or the fixed-width constraint gallery), so the toolbar
@@ -170,13 +195,11 @@ fn shrink(panels: &[PanelSize], room: f32) -> Option<Vec<Plan>> {
         }
     }
     // 2. One button at a time into the drop-downs: from the panel showing the most (the
-    // rightmost of equals), down to one button each.
+    // rightmost of equals), down to one button each. Grids stay while any large button can go.
     while used(&plans) > room {
-        let pick = plans
-            .iter()
-            .enumerate()
-            .filter(|(_, p)| p.fit == Fit::Buttons && (p.shown > 1 || p.width() > COLLAPSED_WIDTH))
-            .max_by(|(i, a), (j, b)| a.shown.cmp(&b.shown).then(i.cmp(j)));
+        let candidates = || plans.iter().enumerate().filter(|(_, p)| p.fit == Fit::Buttons && (p.shown > 1 || p.width() > COLLAPSED_WIDTH));
+        let most = |(i, a): &(usize, &Plan), (j, b): &(usize, &Plan)| a.shown.cmp(&b.shown).then(i.cmp(j));
+        let pick = candidates().filter(|(_, p)| !p.grid_shown() || p.shown > 2).max_by(most).or_else(|| candidates().max_by(most));
         let (i, _) = pick?;
         if let Some(p) = plans.get_mut(i) {
             p.shown = p.shown.saturating_sub(1).max(1);
@@ -1380,10 +1403,10 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let layout = shell_layout(app);
     let floating = Container::for_layout(layout, Surface::Panel).floating();
     let labels = app.preferences.ribbon_labels;
+    let small_icons = app.preferences.ribbon_small_icons;
     let button_height = if labels { BUTTON_HEIGHT } else { ICON_BUTTON_HEIGHT };
     let group_height = if labels { GROUP_HEIGHT } else { ICON_GROUP_HEIGHT };
     let ribbon_height = ribbon_height(labels);
-    let gallery_width = if labels { CONSTRAINT_GRID_WIDTH } else { 6.0 * 27.0 };
     let cards = shell_cards(app, ui.available_rect_before_wrap());
     let height = if floating { cards.bottom - ui.available_rect_before_wrap().top() } else { ribbon_height };
     let fill = if floating { Color32::TRANSPARENT } else { t.toolbar };
@@ -1523,25 +1546,18 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     cmds.retain(|c| solidcraft_engine::cmd::construction_line_mode(c.id).is_none());
                 }
                 let mut shown = crate::toolbar_custom::buttons(app, &tab, panel, &cmds, promote);
-                // Gallery cells are painted together after the large buttons, in reading order.
-                if tab == "SKETCH" && panel == "CONSTRAIN" {
-                    shown.sort_by_key(|c| {
-                        if app.toolbar_custom.in_gallery(&tab, panel, c.id) {
-                            crate::workspace::CONSTRAINT_GALLERY.iter().position(|id| *id == c.id).map(|i| i + 1).unwrap_or(0)
-                        } else {
-                            0
-                        }
-                    });
-                }
-                (panel, cmds, shown)
+                // Grid cells are painted together after the large buttons, in their order.
+                let cells = crate::toolbar_custom::grid_cells(app, &tab, panel, &shown);
+                shown.sort_by_key(|c| cells.iter().position(|g| g.id == c.id).map_or(0, |i| i + 1));
+                (panel, cmds, shown, cells)
             })
             .collect();
         let sizes: Vec<PanelSize> = lists
             .iter()
-            .map(|(panel, _, shown)| {
+            .map(|(panel, _, shown, cells)| {
                 let mut widths: Vec<_> = shown
                     .iter()
-                    .filter(|c| !app.toolbar_custom.in_gallery(&tab, panel, c.id))
+                    .filter(|c| !cells.iter().any(|g| g.id == c.id))
                     .map(|c| {
                         let family = crate::sketch_families::family(c.id)
                             .filter(|f| tab == "SKETCH" && *panel == "CREATE" && f.commands.first().copied() == Some(c.id));
@@ -1554,10 +1570,11 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         }
                     })
                     .collect();
-                if shown.iter().any(|c| app.toolbar_custom.in_gallery(&tab, panel, c.id)) {
-                    widths.push(ButtonSize { width: gallery_width, min_width: gallery_width });
+                if !cells.is_empty() {
+                    let width = grid_width(cells.len(), labels, small_icons);
+                    widths.push(ButtonSize { width, min_width: width });
                 }
-                PanelSize { buttons: widths }
+                PanelSize { buttons: widths, grid: !cells.is_empty() }
             })
             .collect();
         let right = r.right();
@@ -1585,7 +1602,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             "toolbar_trimmed",
             plans.iter().zip(&sizes).filter(|(p, s)| p.fit == Fit::Buttons && p.shown < s.buttons.len()).count() as f64,
         );
-        for ((panel, cmds, shown), plan) in lists.into_iter().zip(plans) {
+        for ((panel, cmds, shown, gallery), plan) in lists.into_iter().zip(plans) {
             let panel: &&str = &panel;
             if plan.fit == Fit::More {
                 overflow.push((*panel, menu_commands(&cmds, &shown)));
@@ -1603,7 +1620,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 px = right - finish_width;
                 painter.line_segment([pos2(px, top), pos2(px, r.bottom() - 1.0)], t.tertiary_border(t.border));
             }
-            let button_widths = &plan.widths;
+            let button_widths = plan.visible();
             let sketch_create = tab == "SKETCH" && *panel == "CREATE";
             let enabled_panel = !cmds.is_empty() || *panel == "SELECT";
             // Per tab: panels of the same name on other tabs (MODIFY, CREATE…) list other commands,
@@ -1611,13 +1628,15 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let popup_id = ui.id().with(("panel_menu", &tab, panel));
             // Dropped on the panel's free space (all of a collapsed panel): the button goes to
             // its end.
-            let gallery: Vec<_> = shown.iter().copied().filter(|c| app.toolbar_custom.in_gallery(&tab, panel, c.id)).collect();
             let large: Vec<_> = shown.iter().copied().filter(|c| !gallery.iter().any(|g| g.id == c.id)).collect();
-            let drawn = if collapsed { 0 } else { plan.shown.min(button_widths.len()) };
-            // The commands the ribbon shows as buttons now (a narrow window shows fewer), which
-            // `ribbon_menus_skip_pinned` leaves out of the drop-down.
+            let drawn = if collapsed { 0 } else { button_widths.len() };
+            let large_drawn = drawn.saturating_sub(usize::from(plan.grid_shown()));
+            // The grid keeps its place while large buttons go to the drop-down.
+            let grid_drawn = !collapsed && plan.grid_shown();
+            // The commands the ribbon shows as buttons or cells now (a narrow window shows fewer),
+            // which `ribbon_menus_skip_pinned` leaves out of the drop-down.
             let on_ribbon: Vec<&str> =
-                large.iter().take(drawn).map(|c| c.id).chain(gallery.iter().filter(|_| !collapsed && drawn > large.len()).map(|c| c.id)).collect();
+                large.iter().take(large_drawn).map(|c| c.id).chain(gallery.iter().filter(|_| grid_drawn).map(|c| c.id)).collect();
             // Buttons narrower than the panel's minimum width (a one-button panel) are centred.
             let buttons_width = button_widths.iter().take(drawn).sum::<f32>() + drawn.saturating_sub(1) as f32 * BUTTON_GAP;
             let inset = if drawn == 0 { 0.0 } else { ((width - 8.0 - buttons_width) / 2.0).max(0.0).floor() };
@@ -1651,7 +1670,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
             let mut button_x = bx;
-            for (c, button_width) in large.iter().zip(button_widths.iter().copied()).take(drawn) {
+            for (c, button_width) in large.iter().zip(button_widths.iter().copied()).take(large_drawn) {
                 // Only the family's default pin follows the part's choice. Explicitly pinned
                 // variants remain exact commands, including in customised toolbars.
                 let family = crate::sketch_families::family(c.id).filter(|f| sketch_create && f.commands.first().copied() == Some(c.id));
@@ -1798,7 +1817,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     painter.galley(pos2(whole.center().x, ribbon_label_top(whole, galley.size().y)), galley, t.text);
                 }
             }
-            if !collapsed && drawn > large.len() {
+            if plan.grid_shown() {
                 if !gallery.is_empty() {
                     // A quiet rule sets the grid apart from the large button before it.
                     t.secondary_line(
@@ -1808,11 +1827,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     );
                 }
                 for (index, c) in gallery.iter().enumerate() {
-                    let columns = if labels { 3 } else { 6 };
-                    let cell = Rect::from_min_size(
-                        pos2(button_x + (index % columns) as f32 * 27.0, top + 6.0 + (index / columns) as f32 * 23.0),
-                        vec2(24.0, 20.0),
-                    );
+                    let cell = grid_cell(pos2(button_x, top), index, gallery.len(), labels, small_icons);
                     let info = crate::render_workspace::interactive_command_info(app, c);
                     let resp = ui.interact(cell, ui.id().with(("cmd", c.id)), Sense::click_and_drag());
                     let active = running.as_deref() == Some(c.id);
@@ -1871,8 +1886,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             // RIBBON_TAB_INSET from the card's bottom edge (and from its left edge in the first
             // section): its corner is concentric with the card's.
             let lr = Rect::from_min_size(
-                pos2(px + RIBBON_TAB_INSET, top + group_height - SECTION_HEIGHT - (RIBBON_TAB_INSET - 1.0)),
-                vec2((width - 2.0 * RIBBON_TAB_INSET).max(0.0), SECTION_HEIGHT),
+                pos2(px + RIBBON_TAB_INSET, top + group_height - section_height(small_icons) - (RIBBON_TAB_INSET - 1.0)),
+                vec2((width - 2.0 * RIBBON_TAB_INSET).max(0.0), section_height(small_icons)),
             );
             let lresp = ui.interact(lr, ui.id().with(("panel", panel)), Sense::click());
             crate::scenario::publish_handle(&format!("panel:{tab}:{panel}"), lr.center());
@@ -1880,9 +1895,9 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             // Commands this panel has only in its drop-down (not drawn as a button or cell).
             let drawn_ids: Vec<&str> = large
                 .iter()
-                .take(drawn)
+                .take(large_drawn)
                 .flat_map(|c| crate::sketch_families::family(c.id).filter(|_| sketch_create).map_or_else(|| vec![c.id], |f| f.commands.to_vec()))
-                .chain(gallery.iter().filter(|_| !collapsed && drawn > large.len()).map(|c| c.id))
+                .chain(gallery.iter().filter(|_| grid_drawn).map(|c| c.id))
                 .collect();
             let hidden = |id: &str| cmds.iter().any(|c| c.id == id) && !drawn_ids.contains(&id);
             let hidden_running = app.preferences.ribbon_reveal && running.as_deref().is_some_and(hidden);
@@ -2174,7 +2189,44 @@ enum RowAction {
 
 const ROW_H: f32 = 30.0;
 
-const CONSTRAINT_GRID_WIDTH: f32 = 82.0;
+/// A small icon cell of a panel's grid.
+const CELL: egui::Vec2 = vec2(24.0, 20.0);
+
+/// The section label row under a panel's buttons; the small-icon ribbon's is lower, leaving room
+/// for three rows of cells.
+fn section_height(small_icons: bool) -> f32 {
+    if small_icons { 16.0 } else { 20.0 }
+}
+
+/// The width of a grid of `cells` cells. The standard ribbon keeps the constraint gallery's
+/// rows (two under labelled buttons, one in the icon-only ribbon); the small-icon ribbon's grids
+/// are three rows high, filled column by column.
+fn grid_width(cells: usize, labels: bool, small_icons: bool) -> f32 {
+    if small_icons {
+        let rows = if labels { crate::workspace::GRID_ROWS } else { 1 };
+        cells.div_ceil(rows).max(1) as f32 * 26.0 - 2.0
+    } else if labels {
+        cells.div_ceil(2).max(1) as f32 * 27.0 + 1.0
+    } else {
+        cells.max(1) as f32 * 27.0
+    }
+}
+
+/// Cell `index` of a grid of `cells` cells whose top left corner is `at` (the group's top).
+fn grid_cell(at: egui::Pos2, index: usize, cells: usize, labels: bool, small_icons: bool) -> Rect {
+    let (column, row, offset) = if small_icons {
+        let rows = if labels { crate::workspace::GRID_ROWS } else { 1 };
+        (index / rows, index % rows, vec2(0.0, if labels { 3.0 } else { 10.0 }))
+    } else {
+        // Reading order, row by row.
+        let columns = if labels { cells.div_ceil(2).max(1) } else { cells.max(1) };
+        (index % columns, index / columns, vec2(0.0, 6.0))
+    };
+    let step = if small_icons { vec2(26.0, 21.0) } else { vec2(27.0, 23.0) };
+    Rect::from_min_size(at + offset + vec2(column as f32 * step.x, row as f32 * step.y), CELL)
+}
+
+const TOOLTIP_ICON: f32 = 32.0;
 
 /// Registry parameter syntax is not a user-facing description. Reuse existing catalog prose
 /// where present; other commands intentionally show only their name and registered shortcut.
@@ -2192,8 +2244,12 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
                 ui.painter().layout_no_wrap(key.to_string(), FontId::monospace(crate::theme::Tokens::get().font_body), t.text_dim).size().x + 24.0
             })
             .unwrap_or(0.0);
-        ui.set_width(280.0_f32.max(name_width + key_width + 12.0));
+        ui.set_width(280.0_f32.max(TOOLTIP_ICON + 8.0 + name_width + key_width + 12.0));
         ui.horizontal(|ui| {
+            // The command's icon at full size, also for the small grid cells.
+            let (icon, _) = ui.allocate_exact_size(vec2(TOOLTIP_ICON, TOOLTIP_ICON), Sense::hover());
+            icons::paint_icon(ui.painter(), icon, command.icon, 1.0);
+            ui.add_space(4.0);
             let (rect, _) = ui.allocate_exact_size(vec2(name_width, 20.0), Sense::hover());
             ribbon_text(ui, rect.center(), name, t.font_heading, t.text, true);
             if let Some(key) = crate::keymap::display_for(app, command.id) {
@@ -2209,6 +2265,7 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
                 });
             }
         });
+        let help = app.preferences.ribbon_help;
         let description = match command.id {
             "render.scene" => Some(app.tr("render.preview_help")),
             "render.start" => Some(app.tr("render.image_help")),
@@ -2222,11 +2279,11 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
             "render.export" => Some(app.tr("render.output_format_status")),
             _ => None,
         };
-        if let Some(description) = description {
+        if let Some(description) = description.filter(|_| help) {
             ui.add(egui::Label::new(description).wrap());
         }
         // The tool's own help, when it has one (#2758).
-        if let Some(help) = crate::command_help::help(command.id) {
+        if let Some(help) = crate::command_help::help(command.id).filter(|_| help) {
             ui.add(egui::Label::new(egui::RichText::new(help).color(t.text_dim)).wrap());
         }
         if let Some(reason) = disabled {
@@ -3770,7 +3827,10 @@ mod header_report_tests {
     }
 
     fn sizes(buttons: &[usize]) -> Vec<PanelSize> {
-        buttons.iter().map(|&b| PanelSize { buttons: vec![ButtonSize { width: BUTTON_MIN_WIDTH, min_width: BUTTON_MIN_WIDTH }; b] }).collect()
+        buttons
+            .iter()
+            .map(|&b| PanelSize { buttons: vec![ButtonSize { width: BUTTON_MIN_WIDTH, min_width: BUTTON_MIN_WIDTH }; b], grid: false })
+            .collect()
     }
 
     fn used_with_more(plans: &[Plan]) -> f32 {
@@ -3826,6 +3886,7 @@ mod header_report_tests {
                             min_width: BUTTON_MIN_WIDTH,
                         })
                         .collect(),
+                    grid: false,
                 })
                 .collect();
             let mut last: Option<(f32, usize)> = None;
@@ -3868,6 +3929,7 @@ mod header_report_tests {
                 ButtonSize { width: 63.0, min_width: BUTTON_MIN_WIDTH },
                 ButtonSize { width: 54.0, min_width: BUTTON_MIN_WIDTH },
             ],
+            grid: false,
         }];
         let full = used(&panels.iter().map(Plan::full).collect::<Vec<_>>());
         let narrow = fit(&panels, full - 1.0);
@@ -3886,11 +3948,15 @@ mod header_report_tests {
 
     #[test]
     fn constraint_gallery_stays_fixed_and_hands_all_cells_to_the_menu_together() {
+        const CONSTRAINT_GRID_WIDTH: f32 = 82.0;
+        assert_eq!(grid_width(6, true, false), CONSTRAINT_GRID_WIDTH);
+        assert_eq!(grid_width(12, true, true), 102.0);
         let panels = vec![PanelSize {
             buttons: vec![
                 ButtonSize { width: BUTTON_MAX_WIDTH, min_width: BUTTON_MIN_WIDTH },
                 ButtonSize { width: CONSTRAINT_GRID_WIDTH, min_width: CONSTRAINT_GRID_WIDTH },
             ],
+            grid: true,
         }];
         let minimum = panel_width(&[BUTTON_MIN_WIDTH, CONSTRAINT_GRID_WIDTH]) + PANEL_GAP;
         let narrow = fit(&panels, minimum);
@@ -3898,6 +3964,25 @@ mod header_report_tests {
         assert_eq!(narrow[0].widths, [BUTTON_MIN_WIDTH, CONSTRAINT_GRID_WIDTH]);
         let collapsed = fit(&panels, minimum - 1.0);
         assert_eq!((collapsed[0].fit, collapsed[0].shown), (Fit::Collapsed, 1));
+    }
+
+    #[test]
+    fn grids_stay_while_large_buttons_go_to_the_drop_down() {
+        let large = ButtonSize { width: BUTTON_MIN_WIDTH, min_width: BUTTON_MIN_WIDTH };
+        let grid = ButtonSize { width: 102.0, min_width: 102.0 };
+        let panels = vec![PanelSize { buttons: vec![large, large, large, grid], grid: true }, PanelSize { buttons: vec![large, large], grid: false }];
+        let full = used(&panels.iter().map(Plan::full).collect::<Vec<_>>());
+        // A little short: the grid panel's last large button goes, its grid stays.
+        let short = fit(&panels, full - 1.0);
+        assert_eq!((short[0].shown, short[0].grid_shown()), (3, true));
+        assert_eq!(short[0].visible(), [BUTTON_MIN_WIDTH, BUTTON_MIN_WIDTH, 102.0]);
+        // Shorter: every large button that can go goes before any grid does.
+        let room = panel_width(&[BUTTON_MIN_WIDTH, 102.0]) + COLLAPSED_WIDTH + 2.0 * PANEL_GAP;
+        let tight = fit(&panels, room);
+        assert_eq!((tight[0].shown, tight[0].grid_shown()), (2, true));
+        assert_eq!(tight[1].fit, Fit::Collapsed);
+        // Shorter still: the grid goes, and the panel collapses.
+        assert_eq!(fit(&panels, room - 1.0)[0].fit, Fit::Collapsed);
     }
 
     fn captured_frame(h: &mut crate::scenario::Harness) {
@@ -5051,7 +5136,9 @@ mod ribbon_label_tests {
             let specs = solidcraft_engine::command_specs();
             for section in crate::workspace::SECTIONS {
                 let (commands, count) = crate::workspace::layout(section.tab, section.panel, &specs).unwrap();
-                for command in commands.iter().take(count) {
+                // Grid cells are icon-only.
+                for command in commands.iter().take(count).filter(|c| crate::workspace::grid_index(section.tab, section.panel, c.id, false).is_none())
+                {
                     for catalog in crate::i18n::LOCALES {
                         let locale = crate::i18n::Locale::for_language(catalog.id);
                         let label = locale.label(crate::workspace::ribbon_button_label(command));
@@ -5203,11 +5290,16 @@ mod ribbon_gallery_tests {
         assert_eq!(rect_of(&button).unwrap().height(), full.height());
         // Settings saved before the gallery could change load with the default gallery.
         let mut older = h.app.toolbar_custom.prefs();
-        older.as_object_mut().unwrap().remove("gallery_buttons");
+        older.as_object_mut().unwrap().remove("small");
         let mut loaded = crate::toolbar_custom::ToolbarCustom::default();
         loaded.load(&older);
         assert_eq!(loaded.panels, h.app.toolbar_custom.panels);
-        assert!(loaded.in_gallery("SKETCH", "CONSTRAIN", id));
+        assert!(loaded.is_small("SKETCH", "CONSTRAIN", id, false));
+        // Settings saved when only the constraint gallery could change keep its large buttons.
+        older["gallery_buttons"] = json!({"DESIGN/SKETCH": [id]});
+        loaded.load(&older);
+        assert!(!loaded.is_small("SKETCH", "CONSTRAIN", id, false));
+        assert_eq!(loaded.small, h.app.toolbar_custom.small);
         crate::toolbar_custom::reset(&mut h.app, "MODEL");
         h.frames(2);
         assert!(rect_of(&cell_handle).is_none());
@@ -5248,6 +5340,54 @@ mod ribbon_gallery_tests {
         crate::toolbar_custom::pin(&mut h.app, "SKETCH", "sketch.constraint.equal").unwrap();
         h.frames(2);
         assert!(rect_of("ribbon:constraint:sketch.constraint.equal").is_some());
+    }
+
+    #[test]
+    fn the_small_icon_ribbon_adds_grids_and_the_standard_one_stays_as_it_was() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1800,"height":900}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(3);
+        // Standard: the large buttons and the constraint gallery people know, nothing else.
+        assert!(rect_of("button:sketch.ellipse").is_none());
+        assert!(rect_of("button:sketch.constraint.concentric").is_none());
+        assert_eq!(rect_of("button:sketch.trim").map(|r| r.height()), Some(BUTTON_HEIGHT));
+        h.app.preferences.ribbon_small_icons = true;
+        h.frames(3);
+        for id in ["sketch.ellipse", "sketch.extend", "sketch.constraint.concentric", "sketch.intersect"] {
+            assert_eq!(rect_of(&format!("button:{id}")).map(|r| r.size()), Some(CELL), "{id}");
+        }
+        assert_eq!(rect_of("button:sketch.trim").map(|r| r.height()), Some(BUTTON_HEIGHT));
+        // Every command of a grid is pinned, so its menu offers Show Large.
+        assert!(crate::toolbar_custom::pinned_on(&h.app, "SKETCH", "sketch.ellipse").is_some());
+    }
+
+    #[test]
+    fn a_button_switches_between_large_and_small_and_reset_restores_it() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1800,"height":900}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(3);
+        assert_eq!(rect_of("button:sketch.constraint.equal").map(|r| r.size()), Some(CELL));
+        let items = crate::toolbar_custom::command_items(&h.app, "sketch.constraint.equal");
+        let size = items.iter().find(|i| i.id == "ui.toolbarSize").and_then(|i| i.params.clone());
+        assert_eq!(size, Some(json!({"command": "sketch.constraint.equal", "small": false})));
+        crate::toolbar_custom::run(&mut h.app, "ui.toolbarSize", &json!({"command": "sketch.constraint.equal", "small": false}));
+        h.frames(2);
+        assert!(rect_of("ribbon:constraint:sketch.constraint.equal").is_none());
+        assert_eq!(rect_of("button:sketch.constraint.equal").map(|r| r.height()), Some(BUTTON_HEIGHT));
+        // A large button made small joins the grid after its fixed cells.
+        crate::toolbar_custom::set_small(&mut h.app, "SKETCH", "sketch.dimension", true);
+        h.frames(2);
+        assert_eq!(rect_of("button:sketch.dimension").map(|r| r.size()), Some(CELL));
+        // Kept with the preferences.
+        let mut loaded = crate::toolbar_custom::ToolbarCustom::default();
+        loaded.load(&h.app.toolbar_custom.prefs());
+        assert_eq!(loaded, h.app.toolbar_custom);
+        crate::toolbar_custom::reset(&mut h.app, "SKETCH");
+        h.frames(2);
+        assert_eq!(rect_of("button:sketch.constraint.equal").map(|r| r.size()), Some(CELL));
+        assert!(h.app.toolbar_custom.small.is_empty());
     }
 }
 
@@ -5307,7 +5447,7 @@ mod fill_width_tests {
                 let button = if more > 0.0 {
                     COLLAPSED_WIDTH + PANEL_GAP
                 } else if sketch {
-                    CONSTRAINT_GRID_WIDTH + BUTTON_GAP
+                    grid_width(crate::workspace::CONSTRAINT_GALLERY.len(), true, false) + BUTTON_GAP
                 } else {
                     BUTTON_MIN_WIDTH + BUTTON_GAP
                 };
