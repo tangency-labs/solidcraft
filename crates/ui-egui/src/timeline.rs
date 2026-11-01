@@ -600,8 +600,9 @@ fn playback_ready(app: &SolveApp) -> Result<(), String> {
     if app.computing_since().is_some() || playback_blocked(app) {
         return Err(crate::i18n::tr("ui.history_play_finish_action").into());
     }
-    let n = app.session.doc.features.len();
-    if app.session.doc.marker.unwrap_or(n) >= n {
+    // An empty History has nothing to step through. At the end of a non-empty History, Play
+    // rewinds to the start (#10798) rather than staying disabled.
+    if app.session.doc.features.is_empty() {
         return Err(crate::i18n::tr("ui.history_play_roll_back").into());
     }
     Ok(())
@@ -617,7 +618,13 @@ pub(crate) fn request_playback(app: &mut SolveApp, action: PlaybackAction) -> Re
     }
     playback_ready(app)?;
     let n = app.session.doc.features.len();
-    let position = app.session.doc.marker.unwrap_or(n);
+    let mut position = app.session.doc.marker.unwrap_or(n);
+    if position >= n {
+        // Marker at the end (the usual place after modelling): go to the start, then play
+        // through like a Play that began there (#10798).
+        app.run("timeline.roll_to", json!({"position": 0}))?;
+        position = 0;
+    }
     app.timeline_playback = Some(Playback { revision: app.session.revision, position, waiting: false, next_at: 0.0 });
     Ok(())
 }
@@ -1617,16 +1624,37 @@ mod tests {
     }
 
     #[test]
-    fn playback_at_the_end_or_in_an_empty_design_leaves_history_unchanged() {
-        for mut h in [Harness::new(), two_boxes(false)] {
-            h.frames(2);
-            let revision = h.app.session.revision;
-            h.app.start("timeline.play");
-            h.frames(2);
-            h.frames(60);
-            assert_eq!(h.app.session.revision, revision);
-            assert!(h.app.timeline_playback.is_none());
-        }
+    fn playback_in_an_empty_design_leaves_history_unchanged() {
+        let mut h = Harness::new();
+        h.frames(2);
+        let revision = h.app.session.revision;
+        h.app.start("timeline.play");
+        h.frames(2);
+        h.frames(60);
+        assert_eq!(h.app.session.revision, revision);
+        assert!(h.app.timeline_playback.is_none());
+        let command = solidcraft_engine::find_command("timeline.play").unwrap();
+        let info = super::playback_command_info(&h.app, command);
+        assert!(!info.enabled);
+    }
+
+    #[test]
+    fn playback_from_the_end_rewinds_then_plays_through() {
+        let mut h = two_boxes(false);
+        h.frames(2);
+        assert_eq!(h.app.session.doc.marker, None, "finished model: marker at the end");
+        let command = solidcraft_engine::find_command("timeline.play").unwrap();
+        assert!(super::playback_command_info(&h.app, command).enabled, "Play stays available at the end");
+        h.app.start("timeline.play");
+        assert_eq!(h.app.session.doc.marker, Some(0), "Play at the end rewinds before the first step");
+        assert!(h.app.timeline_playback.is_some());
+        h.frames(2);
+        assert_eq!(h.app.session.doc.marker, Some(1));
+        assert_eq!(h.app.session.model.state().bodies.len(), 1);
+        h.frames(60);
+        assert_eq!(h.app.session.doc.marker, None);
+        assert_eq!(h.app.session.model.state().bodies.len(), 2);
+        assert!(h.app.timeline_playback.is_none());
     }
 
     #[test]
