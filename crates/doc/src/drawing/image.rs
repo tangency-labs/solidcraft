@@ -2,7 +2,8 @@
 //!
 //! - **A file and its placements are two records.** A logo sits on every sheet: [`Drawing::images`]
 //!   holds it once, and each [`SheetImage`] in [`Drawing::sheet_images`] says where one sits. A file
-//!   goes with the last thing that uses it ([`Drawing::images_in_use`]).
+//!   goes with the last thing that uses it ([`Drawing::images_in_use`]): a placement, or a title
+//!   block's cell that shows it in place of its text ([`Drawing::set_logo`]).
 //! - **The bytes** travel in the drawing's record (base64, as a canvas's do), so the design opens
 //!   without the original file, and the file's path is never saved.
 //! - **The caps** are checked from the file's bytes and header, before anything decodes its pixels:
@@ -16,10 +17,12 @@
 //! [`MAX_SHEET_IMAGES`] placements; each list by id.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::drawing_view::is_paper_coordinate;
 use solidcraft_geom::paper::{MAX_IMAGE_PIXELS, MAX_SIDE_MM};
+use solidcraft_geom::title_block::CellKind;
 
 use super::by_id::Record;
 use super::{Drawing, require};
@@ -103,11 +106,44 @@ impl Drawing {
     /// The image files something in the drawing uses: the one list of what keeps a file. Anything new
     /// that shows a file adds its own here.
     pub fn images_in_use(&self) -> BTreeSet<u64> {
-        self.sheet_images.iter().map(|placement| placement.image).collect()
+        let logos = self.sheets.iter().filter_map(|sheet| sheet.title_block.as_ref()).flat_map(|block| block.logos());
+        self.sheet_images.iter().map(|placement| placement.image).chain(logos).collect()
+    }
+
+    /// The id of the file with `file`'s bytes: one the drawing has, or `file`, added. The same bytes
+    /// are the same file, so a logo on every sheet is stored once.
+    pub fn keep_file(&mut self, file: ImageFile) -> u64 {
+        if let Some(known) = self.images.iter().find(|known| known.data == file.data) {
+            return known.id;
+        }
+        let id = file.id;
+        self.images.add([Arc::new(file)]);
+        id
+    }
+
+    /// Text cell `cell` of the title blocks of `sheets`, or of every sheet whose block has it, shows
+    /// `file` in place of its text; with none, its text again. Answers the sheets it set and the file's id.
+    pub fn set_logo(&mut self, sheets: Option<&[u64]>, cell: &str, file: Option<ImageFile>) -> Result<(Vec<u64>, Option<u64>)> {
+        let has = |sheet: &super::Sheet| sheet.title_block.as_ref().is_some_and(|block| block.cells.iter().any(|c| c.name == cell));
+        let chosen: Vec<u64> = sheets.map_or_else(|| self.sheets.iter().filter(|sheet| has(sheet)).map(|sheet| sheet.id).collect(), <[u64]>::to_vec);
+        require(!chosen.is_empty(), || format!("no sheet's title block has a cell named `{cell}`"))?;
+        let shown = file.map(|file| self.keep_file(file));
+        for id in &chosen {
+            let sheet =
+                self.sheets.iter_mut().find(|sheet| sheet.id == *id).ok_or_else(|| DocError::Invalid(format!("no sheet {}", ids::encode(*id))))?;
+            let found = Arc::make_mut(sheet).title_block.as_mut().and_then(|block| block.cells.iter_mut().find(|c| c.name == cell));
+            match found.map(|c| &mut c.kind) {
+                Some(CellKind::Text(text)) => text.image = shown,
+                Some(CellKind::ProjectionSymbol) => return Err(DocError::Invalid(format!("`{cell}` isn't a text cell"))),
+                None => return Err(DocError::Invalid(format!("sheet {} has no title block cell named `{cell}`", ids::encode(*id)))),
+            }
+        }
+        self.drop_unused_images();
+        Ok((chosen, shown))
     }
 
     /// Takes out each image file nothing uses now.
-    pub(super) fn drop_unused_images(&mut self) {
+    pub fn drop_unused_images(&mut self) {
         let used = self.images_in_use();
         self.images.retain(|file| used.contains(&file.id));
     }
@@ -116,6 +152,11 @@ impl Drawing {
         // The placements first: one that names no file says so, before its file reads as unused.
         self.sheet_images.check(MAX_SHEET_IMAGES, "placed image", |placement| self.check_sheet_image(placement))?;
         let used = self.images_in_use();
+        for logo in self.sheets.iter().filter_map(|sheet| sheet.title_block.as_ref()).flat_map(|block| block.logos()) {
+            require(self.images.by_id(logo).is_some(), || {
+                format!("a title block shows image {}, which the drawing doesn't have", ids::encode(logo))
+            })?;
+        }
         self.images.check(MAX_IMAGES, "image", |file| {
             check_image(file)?;
             require(used.contains(&file.id), || "nothing uses it".into())
