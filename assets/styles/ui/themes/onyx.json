@@ -235,98 +235,6 @@
       "default": 240
     },
     {
-      "id": "contrast",
-      "type": "choice",
-      "default": "soft",
-      "label": {
-        "en": "Contrast",
-        "de": "Kontrast",
-        "ja": "コントラスト",
-        "ko": "대비",
-        "zh": "对比度"
-      },
-      "help": {
-        "en": "Soft stone layers or stronger separation between panels and fields.",
-        "de": "Weiche Steinschichten oder stärkere Trennung von Flächen und Feldern.",
-        "ja": "柔らかな石の階調か、パネルと入力欄を明確に分ける階調を選びます。",
-        "ko": "부드러운 석재 톤 또는 패널과 입력란을 더 뚜렷하게 구분합니다.",
-        "zh": "选择柔和的石色层次，或增强面板与输入框的区分。"
-      },
-      "values": [
-        {
-          "id": "soft",
-          "label": {
-            "en": "Soft",
-            "de": "Weich",
-            "ja": "ソフト",
-            "ko": "부드럽게",
-            "zh": "柔和"
-          }
-        },
-        {
-          "id": "defined",
-          "label": {
-            "en": "Defined",
-            "de": "Deutlich",
-            "ja": "くっきり",
-            "ko": "뚜렷하게",
-            "zh": "分明"
-          }
-        }
-      ]
-    },
-    {
-      "id": "edge_finish",
-      "type": "choice",
-      "default": "etched",
-      "label": {
-        "en": "Edge finish",
-        "de": "Kanten",
-        "ja": "縁の仕上げ",
-        "ko": "가장자리",
-        "zh": "边缘质感"
-      },
-      "help": {
-        "en": "Flat outlines, a fine etched inner line, or a subtle raised bevel.",
-        "de": "Flache Konturen, eine feine innere Gravurlinie oder eine dezente erhöhte Fase.",
-        "ja": "平らな輪郭、細い内側の線、控えめな立体的な縁から選びます。",
-        "ko": "평평한 윤곽, 얇은 안쪽 선 또는 은은하게 솟은 모서리를 선택합니다.",
-        "zh": "选择平面轮廓、细致的内刻线或轻微凸起的斜边。"
-      },
-      "values": [
-        {
-          "id": "flat",
-          "label": {
-            "en": "Flat",
-            "de": "Flach",
-            "ja": "フラット",
-            "ko": "평면",
-            "zh": "平面"
-          }
-        },
-        {
-          "id": "etched",
-          "label": {
-            "en": "Etched",
-            "de": "Graviert",
-            "ja": "刻み線",
-            "ko": "새김",
-            "zh": "内刻"
-          }
-        },
-        {
-          "id": "bevel",
-          "label": {
-            "en": "Soft bevel",
-            "de": "Sanfte Fase",
-            "ja": "柔らかな面取り",
-            "ko": "부드러운 모서리",
-            "zh": "柔和斜边"
-          }
-        }
-      ]
-    },
-    {
       "id": "accent",
       "type": "choice",
       "default": "slate",
@@ -376,6 +284,71 @@
           }
         }
       ]
+    },
+    {
+      "id": "contrast",
+      "type": "choice",
+      "default": "soft",
+      "label": {
+        "en": "Contrast",
+        "de": "Kontrast",
+        "ja": "コントラスト",
+        "ko": "대비",
+        "zh": "对比度"
+      },
+      "help": {
+        "en": "Soft stone layers or stronger separation between panels and fields.",
+        "de": "Weiche Steinschichten oder stärkere Trennung von Flächen und Feldern.",
+        "ja": "柔らかな石の階調か、パネルと入力欄を明確に分ける階調を選びます。",
+        "ko": "부드러운 석재 톤 또는 패널과 입력란을 더 뚜렷하게 구분합니다.",
+        "zh": "选择柔和的石色层次，或增强面板与输入框的区分。"
+      },
+      "values": [
+        {
+          "id": "soft",
+          "label": {
+            "en": "Soft",
+            "de": "Weich",
+            "ja": "ソフト",
+            "ko": "부드럽게",
+            "zh": "柔和"
+          }
+        },
+        {
+          "id": "defined",
+          "label": {
+            "en": "Defined",
+            "de": "Deutlich",
+            "ja": "くっきり",
+            "ko": "뚜렷하게",
+            "zh": "分明"
+          }
+        }
+      ]
+    },
+    {
+      "id": "brightness",
+      "type": "range",
+      "effect": "surface_brightness",
+      "default": 100,
+      "min": 60,
+      "max": 120,
+      "step": 1,
+      "unit": "%",
+      "label": {
+        "en": "Brightness",
+        "de": "Helligkeit",
+        "ja": "明るさ",
+        "ko": "밝기",
+        "zh": "亮度"
+      },
+      "help": {
+        "en": "Adjust stone surfaces, viewport backgrounds and grid brightness. 100% keeps the authored tones; text and semantic colours stay unchanged.",
+        "de": "Helligkeit von Steinflächen, Ansichtsflächen und Raster. 100% erhält die ursprünglichen Töne; Text und Bedeutungsfarben bleiben unverändert.",
+        "ja": "石調の面・ビューポート背景・グリッドの明るさを調整します。100%は元の階調です。文字と意味のある色は変えません。",
+        "ko": "석재 표면·뷰포트 배경·격자의 밝기를 조절합니다. 100%는 원래 톤을 유지하며 글자와 의미 색상은 바꾸지 않습니다.",
+        "zh": "调整石色表面、视口背景和网格的亮度。100%保留原有色调；文字和语义颜色保持不变。"
+      }
     },
     {
       "id": "foreground_colours",
@@ -445,34 +418,6 @@
         "dialog_label": "#eeeeec",
         "toolbar": "#25282a",
         "timeline": "#25282a"
-      }
-    },
-    {
-      "when": {
-        "opt": "edge_finish",
-        "eq": "etched"
-      },
-      "borders": {
-        "primary_inset": {
-          "width": 0.5,
-          "gap": 1,
-          "color": "#dce2e70e"
-        }
-      }
-    },
-    {
-      "when": {
-        "opt": "edge_finish",
-        "eq": "bevel"
-      },
-      "borders": {
-        "bevel": {
-          "width": 0.5,
-          "highlight": "#70777d33",
-          "light": "#454c512b",
-          "shadow": "#1b1e2144",
-          "dark_shadow": "#1013153d"
-        }
       }
     },
     {
@@ -710,5 +655,13 @@
       "viewport_bottom": "#1d211a",
       "panel": "#33362f"
     }
-  }
+  },
+  "borders": {
+    "primary_inset": {
+      "width": 0.5,
+      "gap": 1,
+      "color": "#dce2e70e"
+    }
+  },
+  "requires": 2
 }
