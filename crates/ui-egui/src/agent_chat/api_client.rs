@@ -643,6 +643,10 @@ pub struct ApiConfig {
     pub http: HttpFn,
     /// How long one model request may take, in seconds (the endpoint's setting).
     pub request_timeout_s: u64,
+    /// The reasoning effort to send as `reasoning_effort`; empty sends nothing and the
+    /// provider's own default applies. A set value wins over the `none` retry (#3817): that
+    /// retry only runs when no effort was chosen.
+    pub reasoning_effort: String,
 }
 
 enum Cmd {
@@ -650,6 +654,7 @@ enum Cmd {
     NewChat,
     SetModel(String),
     SetRequestTimeout(u64),
+    SetReasoningEffort(String),
 }
 
 pub struct ApiBackend {
@@ -722,6 +727,11 @@ impl ChatBackend for ApiBackend {
     fn set_request_timeout(&mut self, secs: u64) {
         if let Some(c) = &self.cmds {
             let _ = c.send(Cmd::SetRequestTimeout(secs));
+        }
+    }
+    fn set_reasoning_effort(&mut self, effort: &str) {
+        if let Some(c) = &self.cmds {
+            let _ = c.send(Cmd::SetReasoningEffort(effort.to_string()));
         }
     }
     fn new_session(&mut self) {
@@ -800,6 +810,12 @@ impl Worker {
                 Cmd::Prompt(parts) => self.turn(parts),
                 Cmd::SetModel(m) => self.cfg.model = m,
                 Cmd::SetRequestTimeout(secs) => self.cfg.request_timeout_s = secs,
+                Cmd::SetReasoningEffort(effort) => {
+                    self.cfg.reasoning_effort = super::agents::reasoning_effort(&effort);
+                    // A new choice starts the refusal dance again: an earlier `none` answer was
+                    // the endpoint's, not the user's, and must not silently override the choice.
+                    self.no_reasoning.set(false);
+                }
                 Cmd::NewChat => {
                     self.history.clear();
                     // A new conversation gets a fresh Go session ID for routing and caching.
@@ -980,6 +996,12 @@ impl Worker {
         self.history.len() != before
     }
 
+    /// The reasoning effort the user chose for this endpoint, or `None` to send nothing and let
+    /// the provider apply its own default.
+    fn reasoning_effort(&self) -> Option<&str> {
+        (!self.cfg.reasoning_effort.trim().is_empty()).then(|| self.cfg.reasoning_effort.trim())
+    }
+
     fn request(&self) -> Result<Reply, String> {
         // OpenCode Go serves one protocol per model family behind a single base URL.
         if self.cfg.protocol == Protocol::OpenAi && is_opencode_go(&self.cfg.base_url) {
@@ -989,11 +1011,13 @@ impl Worker {
         let (status, v) = self.post(&body)?;
         // Some OpenAI models refuse function tools on this endpoint unless the reasoning effort is
         // "none" (HTTP 400 naming `reasoning_effort`): ask again once with it, and keep it for the
-        // next requests. Anthropic has no such parameter.
+        // next requests. Anthropic has no such parameter. A reasoning effort the user chose wins:
+        // the refusal is shown instead of being replaced silently (#10241).
         let refused = self.cfg.protocol == Protocol::OpenAi
             && status == 400
             && !self.tools.is_empty()
             && !self.no_reasoning.get()
+            && self.reasoning_effort().is_none()
             && http_error(status, &v).contains("reasoning_effort");
         if refused {
             self.no_reasoning.set(true);
@@ -1021,15 +1045,19 @@ impl Worker {
         let mut first_err: Option<String> = None;
         for protocol in order {
             let mut body = self.go_body(protocol);
-            if protocol == GoProtocol::Chat && !self.tools.is_empty() && self.no_reasoning.get() {
+            if protocol == GoProtocol::Chat && !self.tools.is_empty() && self.no_reasoning.get() && self.reasoning_effort().is_none() {
                 body["reasoning_effort"] = json!("none");
             }
             let (status, v) = self.go_post(protocol, &body)?;
             if protocol == GoProtocol::Chat {
                 // As on plain OpenAI endpoints: ask again once with reasoning effort
-                // "none" when the refusal names it.
-                let refused =
-                    status == 400 && !self.tools.is_empty() && !self.no_reasoning.get() && http_error(status, &v).contains("reasoning_effort");
+                // "none" when the refusal names it — unless the user chose an effort, whose
+                // refusal is shown instead (#10241).
+                let refused = status == 400
+                    && !self.tools.is_empty()
+                    && !self.no_reasoning.get()
+                    && self.reasoning_effort().is_none()
+                    && http_error(status, &v).contains("reasoning_effort");
                 if refused {
                     self.no_reasoning.set(true);
                     body["reasoning_effort"] = json!("none");
@@ -1143,9 +1171,14 @@ impl Worker {
                 messages.push(json!({"role": "system", "content": super::acp::SYSTEM_NOTE}));
                 messages.extend(self.history.iter().cloned());
                 let mut body = json!({"model": self.cfg.model, "messages": messages});
+                if let Some(effort) = self.reasoning_effort() {
+                    // The user's choice goes out on every request, ahead of any `none` the
+                    // endpoint once asked for (#10241).
+                    body["reasoning_effort"] = json!(effort);
+                }
                 if !self.tools.is_empty() {
                     body["tools"] = Value::Array(self.tools.clone());
-                    if self.no_reasoning.get() {
+                    if self.no_reasoning.get() && self.reasoning_effort().is_none() {
                         body["reasoning_effort"] = json!("none");
                     }
                 }
@@ -1861,6 +1894,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -1911,6 +1945,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -1964,6 +1999,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2010,6 +2046,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2093,6 +2130,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         }
     }
 
@@ -2166,6 +2204,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let mut b = ApiBackend::start(cfg, go_ctx()).unwrap();
         b.prompt(&[PromptPart::Text("hi".into())]);
@@ -2484,6 +2523,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let mut b = ApiBackend::start(cfg, go_ctx()).unwrap();
         b.prompt(&[PromptPart::Text("hi".into())]);
@@ -2556,6 +2596,7 @@ mod tests {
             key: None,
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2585,6 +2626,7 @@ mod tests {
             key: Some("k".into()),
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         assert!(ApiBackend::start(cfg, ctx).is_err());
@@ -2593,6 +2635,11 @@ mod tests {
     /// A worker with one function tool whose endpoint answers each POST with the next scripted
     /// (status, body); the requests it received are returned too.
     fn scripted_worker(answers: Vec<(u16, Value)>) -> (Worker, Arc<std::sync::Mutex<Vec<Value>>>) {
+        scripted_worker_effort(answers, "")
+    }
+
+    /// [`scripted_worker`] with the endpoint's reasoning effort set (empty: send nothing).
+    fn scripted_worker_effort(answers: Vec<(u16, Value)>, effort: &str) -> (Worker, Arc<std::sync::Mutex<Vec<Value>>>) {
         let answers = std::sync::Mutex::new(answers.into_iter().rev().collect::<Vec<_>>());
         let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
         let log = seen.clone();
@@ -2609,6 +2656,7 @@ mod tests {
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,
+            reasoning_effort: effort.to_string(),
         };
         let (events, _rx) = channel();
         let w = Worker {
@@ -2658,6 +2706,37 @@ mod tests {
         let (w, seen) = scripted_worker(vec![(400, json!({"error": {"message": "context length exceeded"}}))]);
         assert!(w.request().unwrap_err().contains("context length"));
         assert_eq!(seen.lock().unwrap().len(), 1);
+    }
+
+    /// A reasoning effort the user chose goes out as `reasoning_effort` on every request; empty
+    /// sends nothing, so existing agents are untouched (#10241).
+    #[test]
+    fn a_chosen_reasoning_effort_goes_out_on_every_request() {
+        let ok = json!({"choices": [{"message": {"role": "assistant", "content": "Done."}}]});
+        let (w, seen) = scripted_worker_effort(vec![(200, ok.clone()), (200, ok.clone())], "high");
+        assert_eq!(w.request().unwrap().assistant, ok["choices"][0]["message"]);
+        assert_eq!(w.request().unwrap().assistant, ok["choices"][0]["message"]);
+        let sent = seen.lock().unwrap();
+        assert_eq!(sent.len(), 2);
+        assert_eq!(sent[0]["reasoning_effort"], "high");
+        assert_eq!(sent[1]["reasoning_effort"], "high");
+        drop(sent);
+        // Empty effort: nothing is sent at all.
+        let (w, seen) = scripted_worker(vec![(200, ok)]);
+        assert!(w.request().is_ok());
+        assert!(seen.lock().unwrap()[0].get("reasoning_effort").is_none());
+    }
+
+    /// A chosen effort wins over the #3817 `none` retry: the endpoint's refusal of the effort is
+    /// shown to the user after exactly one request, never silently replaced by `none` (#10241).
+    #[test]
+    fn a_chosen_reasoning_effort_wins_over_the_none_retry() {
+        let (w, seen) = scripted_worker_effort(vec![refusal()], "max");
+        let e = w.request().unwrap_err();
+        assert!(e.starts_with("HTTP 400") && e.contains("reasoning_effort"), "{e}");
+        let sent = seen.lock().unwrap();
+        assert_eq!(sent.len(), 1, "the refusal is shown, not replayed with none");
+        assert_eq!(sent[0]["reasoning_effort"], "max");
     }
 
     #[test]
@@ -2742,6 +2821,7 @@ mod tests {
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2791,6 +2871,7 @@ mod tests {
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
@@ -2841,6 +2922,7 @@ mod tests {
             key: Some("sk-secret".into()),
             http,
             request_timeout_s: 300,
+            reasoning_effort: String::new(),
         };
         let ctx = StartContext { cwd: std::env::temp_dir(), bridge: None, tools: None, wake: Box::new(|| {}) };
         let mut b = ApiBackend::start(cfg, ctx).unwrap();

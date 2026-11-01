@@ -4814,6 +4814,7 @@
   "ui.properties.inertia_y": "Iyx, Iyy, Iyz",
   "ui.properties.inertia_z": "Izx, Izy, Izz",
   "ui.properties.measuring": "Mengukur…",
+  "ui.properties.measuring_bodies": "Mengukur… {done} dari {total} bodi",
   "ui.properties.measuring_failed": "Pengukuran berhenti sebelum selesai.",
   "ui.properties.principal_axis": "Sumbu utama {number}",
   "ui.properties.principal_moments": "Momen utama",

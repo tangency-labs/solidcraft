@@ -4814,6 +4814,7 @@
   "ui.properties.inertia_y": "Iyx, Iyy, Iyz",
   "ui.properties.inertia_z": "Izx, Izy, Izz",
   "ui.properties.measuring": "Měření…",
+  "ui.properties.measuring_bodies": "Měření… {done} z {total} těles",
   "ui.properties.measuring_failed": "Měření se zastavilo před dokončením.",
   "ui.properties.principal_axis": "Hlavní osa {number}",
   "ui.properties.principal_moments": "Hlavní momenty setrvačnosti",

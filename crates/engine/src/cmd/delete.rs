@@ -36,6 +36,9 @@ fn keys(p: &Value, k: &str) -> Vec<String> {
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     if bool_(p, "dry_run").unwrap_or(false) {
         let mut t = s.scratch();
+        // What the check computes is kept where this session keeps it (a check run ahead, off a
+        // front end's window thread), so the delete itself finds it there (#9917).
+        t.model.keep(s.model.kept());
         return apply(&mut t, p);
     }
     let r = apply(s, p)?;
@@ -334,6 +337,69 @@ mod tests {
         assert!(dry["would_fail"].as_array().unwrap().contains(&json!("Plate")), "{dry}");
         run(&mut s, "selection.delete", json!({"items": items}));
         assert!(s.model.state().sketch(sk).unwrap().sketch.constraints.iter().all(|c| c.id != angle));
+    }
+
+    /// #9917: the check before a delete in a sketch with a rolled-back history after it builds the
+    /// history before the delete only when a feature fails after it. Deleting a hole in the plate
+    /// changes the plate and every cut after it and breaks none of them: the check reports
+    /// nothing. Deleting a side of the plate's outline breaks the plate, and the check still says
+    /// so, with the cache too small to keep a state (as on a large design).
+    #[test]
+    fn a_delete_in_a_rolled_back_history_reports_what_breaks_after_the_marker_and_nothing_else() {
+        let mut s = Session::default();
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        let outline = run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [30, 20], [10, 20]], "closed": true}))["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let hole = run(&mut s, "sketch.circle.center", json!({"center": [30, 15], "radius": 2}))["curves"][0].as_str().unwrap().to_string();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 5, "name": "Plate"}));
+        for i in 0..6 {
+            run(&mut s, "solid.cylinder", json!({"base": [12 + 3 * i, 8, -1], "radius": 1, "height": 10, "operation": "cut"}));
+        }
+        run(&mut s, "timeline.roll_to", json!({"position": 1}));
+        run(&mut s, "sketch.edit", json!({"sketch": sk}));
+        *s.model.cache.lock().unwrap() = solidcraft_doc::EvalCache::with_budget(1);
+        let doc = s.doc.clone();
+        let dry = run(&mut s, "selection.delete", json!({"items": [{"type": "sketch_curve", "id": hole}], "dry_run": true}));
+        assert_eq!(dry["would_fail"], json!([]), "{dry}");
+        let dry = run(&mut s, "selection.delete", json!({"items": [{"type": "sketch_curve", "id": outline}], "dry_run": true}));
+        assert!(dry["would_fail"].as_array().unwrap().contains(&json!("Plate")), "{dry}");
+        assert_eq!(*s.doc, *doc, "the checks change nothing");
+    }
+
+    /// #9917: a delete checked ahead (off a front end's window thread) keeps what its dry run
+    /// builds of the history after the marker, and the delete run with that finds all of it:
+    /// nothing is built again on the window thread, where it took half a minute.
+    #[test]
+    fn a_delete_checked_ahead_keeps_the_history_it_builds_for_the_delete() {
+        let mut s = Session::default();
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [40, 0], [30, 20], [10, 20]], "closed": true}));
+        let hole = run(&mut s, "sketch.circle.center", json!({"center": [30, 15], "radius": 2}))["curves"][0].as_str().unwrap().to_string();
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 5, "name": "Plate"}));
+        let later = 6;
+        for i in 0..later {
+            run(&mut s, "solid.cylinder", json!({"base": [12 + 3 * i, 8, -1], "radius": 1, "height": 10, "operation": "cut"}));
+        }
+        run(&mut s, "timeline.roll_to", json!({"position": 1}));
+        run(&mut s, "sketch.edit", json!({"sketch": sk}));
+        // A cache too small to keep a state, as on a large design: only what is kept carries over.
+        *s.model.cache.lock().unwrap() = solidcraft_doc::EvalCache::with_budget(1);
+        let items = json!([{"type": "sketch_curve", "id": hole}]);
+        let ahead = s.ahead();
+        let kept = ahead.kept();
+        let replies = ahead.replies(&[("selection.delete".to_string(), json!({"items": items, "dry_run": true}))]);
+        assert!(replies.iter().all(Result::is_ok), "{replies:?}");
+        let built = kept.len();
+        assert!(built > later, "the check kept the history after the marker: {built} results");
+        s.model.keep(Some(kept.clone()));
+        run(&mut s, "selection.delete", json!({"items": items}));
+        s.model.keep(None);
+        assert_eq!(kept.len(), built, "the delete found everything it builds among what the check kept");
+        assert!(s.model.state().sketch(sk).unwrap().sketch.curves.iter().all(|c| c.id != hole));
     }
 
     #[test]

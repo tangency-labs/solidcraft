@@ -319,6 +319,11 @@ board test captures both strip widths with expanded and collapsed browsers
 | `Text::Inline` | Native truncated label; rect/handle `dialog:inline:TEXT` |
 | `Text::Cell` | Fixed-height clipped clickable cell with tooltip; rect/handle `dialog:cell:TEXT` |
 
+`name_cell_with_hint(ui, name, strong, hint)` keeps the name cell's allocation and
+scenario identity, but owns its single tooltip: the action hint alone when the
+name fits, or the full name followed by the hint when it is clipped. Use it instead
+of adding a second hover tooltip to `Text::NameCell`.
+
 Examples:
 
 ```rust

@@ -809,6 +809,13 @@ fn batch_stops_at_first_error_and_rolls_back() {
     assert_eq!(r["result"]["isError"], true);
     assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("solid.extrude"));
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 2);
+    // `names_only` passes through, directly and as a batch step.
+    let n = tool(&mut s, "measure", json!({"names_only": true}));
+    assert_eq!(n["body_count"], 2, "{n}");
+    assert!(n["bodies"][0]["name"].is_string() && n["bodies"][0].get("volume_mm3").is_none(), "{n}");
+    assert_eq!(tool(&mut s, "measure", json!({"names_only": true, "summary": true})), n, "summary has nothing to narrow in a names list");
+    let r = tool(&mut s, "batch", json!({"commands": [{"command": "measure", "params": {"names_only": true, "summary": true}}]}));
+    assert!(r.to_string().contains("\"definition\""), "{r}");
 }
 
 /// #5853: a misspelled command, however late in the batch, refuses the batch before its first
@@ -826,6 +833,23 @@ fn batch_refuses_an_unknown_command_before_the_first_step() {
     assert_eq!((body["applied"].clone(), body["not_run"].as_array().map(Vec::len)), (json!([]), Some(21)), "{body}");
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "no step ran");
     assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["undo"], 0);
+}
+
+/// A step with its parameters under another key (`args`) refuses the batch before its first
+/// step, naming the key, instead of running the command without them.
+#[test]
+fn batch_refuses_a_step_with_an_unknown_key() {
+    let mut s = server();
+    let steps = json!([
+        {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}},
+        {"command": "sketch.create", "args": {"plane": "XY"}},
+    ]);
+    let r = raw_tool(&mut s, "batch", json!({"commands": steps}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((body["completed"].clone(), body["failed"]["index"].clone()), (json!(0), json!(1)), "{body}");
+    assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("unknown key `args`") && e.contains("`params`")), "{body}");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "no step ran");
 }
 
 /// #5822: with `coalesce_parameters` a batch of parameter edits, one per step, rebuilds the
@@ -988,12 +1012,15 @@ fn a_batch_with_a_matching_expect_reports_the_expectation_met() {
     let box40 = json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20, "corner": [0, 0, 0]}});
     let r = tool(&mut s, "batch", json!({"commands": [box40]}));
     assert!(r.get("expectation").is_none(), "{r}");
-    // `expect` is the tool's argument, not a step key: a step carrying one runs as any step with
-    // a stray key does, and nothing is checked.
+    // `expect` is the tool's argument, not a step key: a step carrying one is refused, as any step
+    // with a stray key is, saying where `expect` goes, instead of running with nothing checked.
     let sphere = json!({"command": "solid.sphere", "params": {"radius": 5, "center": [100, 0, 0]}, "expect": {"bodies": 7}});
-    let r = tool(&mut s, "batch", json!({"commands": [sphere]}));
-    assert_eq!(r["completed"], 1, "{r}");
-    assert!(r.get("expectation").is_none() && r["results"][0].get("expectation").is_none(), "{r}");
+    let r = raw_tool(&mut s, "batch", json!({"commands": [sphere]}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((body["completed"].clone(), body["failed"]["index"].clone()), (json!(0), json!(0)), "{body}");
+    assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("`expect` is the batch's argument")), "{body}");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1, "the sphere did not run");
 }
 
 /// A volume the design does not match flags the reply as an error that names the mismatch

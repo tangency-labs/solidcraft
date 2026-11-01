@@ -2054,6 +2054,7 @@
   "prefs.status_error": "Virhe",
   "prefs.status_selected": "Valittu",
   "prefs.status_warning": "Varoitus",
+  "prefs.structure.scale_percent": "{percent} %",
   "prefs.supersampling_brief": "Piirtää näkymän suurempana ja suodattaa sen pienemmäksi: erittäin terävä ja raskaampi.",
   "prefs.tab_accent_note": "Korostusväri seuraa aktiivista välilehteä",
   "prefs.theme_file": "teematiedosto",

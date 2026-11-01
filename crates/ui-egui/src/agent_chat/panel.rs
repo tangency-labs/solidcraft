@@ -106,24 +106,22 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.agent_chat.dock_space = Some(Rect::from_x_y_ranges(screen.x_range(), available.y_range()));
     let t = Tokens::get();
     let left = app.preferences.agent_chat_side == "left";
-    let side = |id: Id| Container::new(ui.ctx(), Surface::Panel).edge(id, if left { Edge::Left } else { Edge::Right });
+    let host = Container::new(ui.ctx(), Surface::Panel);
+    let side = |id: Id| host.edge(id, if left { Edge::Left } else { Edge::Right });
     if app.preferences.agent_chat_minimized {
-        let r = side(Id::new("sc_agent_chat_strip"))
-            .exact_size(STRIP)
-            .resizable(false)
-            .frame(Container::new(ui.ctx(), Surface::Panel).edge_frame(t.panel))
-            .show(ui, |ui| strip(app, ui));
+        let r = host
+            .show_edge(ui, side(Id::new("sc_agent_chat_strip")).exact_size(STRIP).resizable(false), host.edge_frame(t.panel), |ui| strip(app, ui));
         app.agent_chat.drop_rect = Some(r.response.rect);
         show_drop_hint(app, &ctx);
         return;
     }
     let width = app.preferences.agent_chat_width.clamp(MIN_WIDTH, MAX_WIDTH);
-    let r = side(panel_id(left))
-        .default_size(width)
-        .size_range(MIN_WIDTH..=MAX_WIDTH)
-        .resizable(true)
-        .frame(Container::new(ui.ctx(), Surface::Panel).edge_frame(t.dialog_body))
-        .show(ui, |ui| ui_kit::scope(ui, |ui| body(app, ui, left)));
+    let r = host.show_edge(
+        ui,
+        side(panel_id(left)).default_size(width).size_range(MIN_WIDTH..=MAX_WIDTH).resizable(true),
+        host.edge_frame(t.dialog_body),
+        |ui| ui_kit::scope(ui, |ui| body(app, ui, left)),
+    );
     crate::scenario::publish_rect("agent_chat:panel", r.response.rect);
     app.agent_chat.panel_rect = Some(r.response.rect);
     #[cfg(not(target_arch = "wasm32"))]
@@ -804,17 +802,19 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let state = app.agent_chat.state();
     if app.agent_chat.confirm_new {
         ui_kit::scope(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui_kit::text(ui, tr("ui.agent_chat_new_confirm"), ui_kit::Text::Report("new_chat", false));
-            ui.horizontal(|ui| {
-                let yes = ui_kit::button(ui, tr("ui.agent_chat_new"), ui_kit::Button::Normal);
-                crate::scenario::publish_handle("agent_chat:new_confirm", yes.rect.center());
-                if yes.clicked() {
-                    new_chat(app);
-                }
-                if ui_kit::button(ui, tr("ui.agent_chat_cancel"), ui_kit::Button::Normal).clicked() {
-                    app.agent_chat.confirm_new = false;
-                }
+            inset(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui_kit::text(ui, tr("ui.agent_chat_new_confirm"), ui_kit::Text::Report("new_chat", false));
+                ui.horizontal(|ui| {
+                    let yes = ui_kit::button(ui, tr("ui.agent_chat_new"), ui_kit::Button::Normal);
+                    crate::scenario::publish_handle("agent_chat:new_confirm", yes.rect.center());
+                    if yes.clicked() {
+                        new_chat(app);
+                    }
+                    if ui_kit::button(ui, tr("ui.agent_chat_cancel"), ui_kit::Button::Normal).clicked() {
+                        app.agent_chat.confirm_new = false;
+                    }
+                });
             });
         });
     }
@@ -826,7 +826,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         .auto_shrink([false, true])
         .show(ui, |ui| picker(app, ui));
     if state == State::NeedsAuth {
-        auth_box(app, ui);
+        inset(ui, |ui| auth_box(app, ui));
     }
     // The input sits at the bottom of the panel and grows upwards: a long message makes its box
     // taller up to `edit_max`, then it scrolls, and the conversation takes what is left above. It
@@ -1068,7 +1068,7 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                         add = true;
                     }
                     if ui_kit::list_picker(ui, "settings", tr("ui.ai_settings"), false).clicked() {
-                        crate::prefs::open_at(app, crate::prefs::PAGE_AI);
+                        crate::prefs::open_at(app, crate::prefs::PAGE_ASSISTANT);
                     }
                 })
             })
@@ -1444,6 +1444,13 @@ mod config_ui_tests {
     }
 }
 
+/// What is drawn under the agent switcher keeps the switcher's side margin (#10172): it starts
+/// where the switcher's fields start, not at the panel's edge.
+#[cfg(not(target_arch = "wasm32"))]
+fn inset<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    egui::Frame::NONE.inner_margin(egui::Margin::symmetric(Tokens::get().space_12 as i8, 0)).show(ui, add).inner
+}
+
 /// Before the first connection: what's installed, how to install the rest, and Add agent.
 #[cfg(not(target_arch = "wasm32"))]
 fn picker(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -1451,6 +1458,12 @@ fn picker(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !open {
         return;
     }
+    inset(ui, |ui| agent_list(app, ui));
+}
+
+/// [`picker`]'s content: the agents found, Refresh and Add agent, and what isn't installed.
+#[cfg(not(target_arch = "wasm32"))]
+fn agent_list(app: &mut SolveApp, ui: &mut egui::Ui) {
     let all = agents::entries(app);
     let current = agents::current(app);
     ui.horizontal(|ui| {
@@ -1793,7 +1806,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
         if agents::entries(app).is_empty() && app.agent_chat.detecting.is_none() {
             ui_kit::assistant_empty(ui, tr("ui.agent_chat_setup_title"), tr("ui.agent_chat_setup_body"), |ui| {
                 if ui_kit::primary_button(ui, tr("ui.agent_chat_open_settings")).clicked() {
-                    crate::prefs::open_at(app, crate::prefs::PAGE_AI);
+                    crate::prefs::open_at(app, crate::prefs::PAGE_ASSISTANT);
                 }
             });
         } else {

@@ -289,14 +289,42 @@ impl Encoded {
             slices.push(json!([data.len(), bytes.len()]));
             data.extend_from_slice(bytes);
         }
-        let manifest = serde_json::to_vec(&json!({
-            "format": FORMAT, "producer": PRODUCER, "app": env!("CARGO_PKG_VERSION"), "build": build(),
-            "evaluation": evaluation(), "document": digest(document), "payload": digest(&data),
-            "slices": slices, "shares": shares, "bodies": table, "model": records,
-        }))
+        let manifest = serde_json::to_vec(&Manifest {
+            app: env!("CARGO_PKG_VERSION"),
+            bodies: table,
+            build: build(),
+            document: digest(document),
+            evaluation: evaluation(),
+            format: FORMAT,
+            model: records,
+            payload: digest(&data),
+            producer: PRODUCER,
+            shares,
+            slices,
+        })
         .map_err(invalid)?;
         Ok((manifest, data))
     }
+}
+
+/// A model cache's manifest as written: the model's records are written where they are, not
+/// copied into a JSON tree first (copying a large model's records took as long as writing them,
+/// and a cache too big for the file is written again for each try at fewer states). The fields
+/// are in the order a JSON object keeps its keys (sorted), so the manifest is the one a tree
+/// wrote, byte for byte.
+#[derive(serde::Serialize)]
+struct Manifest<'a> {
+    app: &'a str,
+    bodies: Vec<Value>,
+    build: String,
+    document: String,
+    evaluation: String,
+    format: &'a str,
+    model: &'a Value,
+    payload: String,
+    producer: &'a str,
+    shares: Vec<usize>,
+    slices: Vec<Value>,
 }
 
 /// The final state of the model a design keeps, when this build's evaluation source computed it

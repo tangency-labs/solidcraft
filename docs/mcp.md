@@ -343,6 +343,15 @@ the top level. With two items:
 
 Earlier fields are unchanged, so older scripts keep working.
 
+To select geometry in the view, use `execute` `select.set` with
+`{"items":[{"type":"face","body":"Body1","point":[5,5,10]}]}` (or `"type":"edge"`).
+The point is in world millimetres and uses the same proximity tolerance as Measure. An
+`index` can replace the point; the command then supplies a point on that face or edge,
+including curved faces and placed components. Existing selections with both fields keep
+their index and point. Missing geometry or an invalid partial pick leaves the entire
+selection unchanged, including with `"add":true`. `inspect_design` reports the completed
+selections with both fields.
+
 To change a feature after it is made, read its definition with `execute` `timeline.inspect`
 (`{feature}`: id or name) and change fields with `timeline.edit` (`{feature, set}`; e.g.
 `{"extent": {"distance": "30"}}`). The fields per feature type are listed in the book's

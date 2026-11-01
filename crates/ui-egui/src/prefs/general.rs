@@ -4,7 +4,8 @@ use super::*;
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let labels = t.space_24 * 6.0 + t.space_6;
-    ui_kit::settings_heading(ui, app.tr("prefs.general"), app.tr("prefs.general_note"));
+    ui_kit::settings_heading_with_tag(ui, app.tr("prefs.general"), app.tr("prefs.general_note"), Some(crate::settings_profiles::tag));
+    crate::settings_profiles::section(app, ui, labels);
     ui_kit::settings_section(ui, "startup", app.tr("ui.on_startup"), |ui| {
         ui_kit::settings_form(ui, labels, |ui| {
             ui_kit::row(ui, app.tr("ui.on_startup"), |ui| {
@@ -28,18 +29,36 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::settings_form(ui, labels, |ui| {
             ui_kit::row(ui, app.tr("prefs.interface_language"), |ui| {
                 ui_kit::settings_control_width(ui, t.form_card_width - t.space_4, |ui| {
-                    ui_kit::dropdown_menu(ui, "pref_language", &crate::i18n::Locale::for_language(&app.preferences.language).display_name(), |ui| {
-                        for locale in crate::i18n::LOCALES {
-                            if ui_kit::list_picker(ui, locale.id, &locale.display_name(), app.preferences.language == locale.id).clicked() {
-                                app.preferences.language = locale.id.into();
+                    ui_kit::dropdown_menu(
+                        ui,
+                        "pref_language",
+                        &if app.preferences.language == crate::i18n::SYSTEM {
+                            app.tr("prefs.language_system").to_owned()
+                        } else {
+                            crate::i18n::Locale::for_language(&app.preferences.language).display_name().into_owned()
+                        },
+                        |ui| {
+                            if ui_kit::list_picker(
+                                ui,
+                                crate::i18n::SYSTEM,
+                                app.tr("prefs.language_system"),
+                                app.preferences.language == crate::i18n::SYSTEM,
+                            )
+                            .clicked()
+                            {
+                                app.preferences.language = crate::i18n::SYSTEM.into();
                             }
-                        }
-                    });
+                            for locale in crate::i18n::LOCALES {
+                                if ui_kit::list_picker(ui, locale.id, &locale.display_name(), app.preferences.language == locale.id).clicked() {
+                                    app.preferences.language = locale.id.into();
+                                }
+                            }
+                        },
+                    );
                 });
             });
         });
     });
-    crate::settings_profiles::section(app, ui, labels);
     ui_kit::settings_section(ui, "saving", app.tr("prefs.saving"), |ui| {
         ui_kit::settings_block_hint(ui, app.tr("ui.autosave_every"), crate::i18n::tr_label("0 turns it off"), labels, |ui| {
             ui.horizontal(|ui| {
@@ -70,6 +89,23 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         });
     });
     ui_kit::settings_section(ui, "file_size", app.tr("prefs.max_file_size"), |ui| file_size_rows(app, ui, labels));
+    // Where the files a design names may be: never a network location the user hasn't allowed.
+    ui_kit::settings_section(ui, "network_locations", app.tr("prefs.network_locations_section"), |ui| {
+        setting::network_locations(app, ui);
+        ui_kit::text(ui, app.tr("prefs.network_locations_note"), ui_kit::Text::Hint("network_locations"));
+        let mut remove = None;
+        for (i, host) in app.preferences.network_hosts.iter().enumerate() {
+            ui.horizontal(|ui| {
+                ui_kit::text(ui, &format!("\\\\{host}"), ui_kit::Text::Hint("network_host"));
+                if ui_kit::button(ui, app.tr("prefs.network_host_remove"), ui_kit::Button::Small).clicked() {
+                    remove = Some(i);
+                }
+            });
+        }
+        if let Some(i) = remove.filter(|i| *i < app.preferences.network_hosts.len()) {
+            app.preferences.network_hosts.remove(i);
+        }
+    });
     ui_kit::settings_section(ui, "slicer", app.tr("ui.slicer"), |ui| {
         ui_kit::settings_block(ui, app.tr("ui.slicer"), labels, |ui| {
             let (single, tip) = (app.tr("ui.slicer_single_instance").to_string(), app.tr("ui.slicer_single_instance_tip").to_string());

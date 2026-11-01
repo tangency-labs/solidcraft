@@ -4814,6 +4814,7 @@
   "ui.properties.inertia_y": "Iyx, Iyy, Iyz",
   "ui.properties.inertia_z": "Izx, Izy, Izz",
   "ui.properties.measuring": "Se măsoară…",
+  "ui.properties.measuring_bodies": "Se măsoară… {done} din {total} corpuri",
   "ui.properties.measuring_failed": "Măsurarea s-a oprit înainte de a se termina.",
   "ui.properties.principal_axis": "Axa principală {number}",
   "ui.properties.principal_moments": "Momente principale",

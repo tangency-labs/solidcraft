@@ -47,8 +47,8 @@ use solidcraft_geom::Vec3;
 
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
 pub use cmd::{
-    Addition, CommandInfo, CommandSpec, addition, auto_operation, command_specs, dimension_roles, extrude_reach, find_command, resolve_design_links,
-    shown_scope, standard_view,
+    Addition, CommandInfo, CommandSpec, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach, find_command,
+    resolve_design_links, shown_scope, standard_view,
 };
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
@@ -450,6 +450,11 @@ pub struct Session {
     /// Opened read-only (`doc.open {read_only}`, the "open elsewhere" notice): saving to its own
     /// file is refused; Save As to another file is how its changes are kept.
     pub read_only: bool,
+    /// Whether the design's name is one its user chose for it (`file.new {name}`) rather than
+    /// one it borrowed — from a file's name, a sample's name, or a file that stored another
+    /// design's name. A borrowed name follows Save As to the new file's name (#4907); a name
+    /// the user chose is kept.
+    pub user_named: bool,
     /// One-shot display-only notification during doc.open, before authoritative evaluation.
     /// Interactive loaders may show it provisionally; it never becomes model state.
     pub open_preview: Option<Box<dyn Fn(solidcraft_io::DesignPreview) + Send + Sync>>,
@@ -666,14 +671,23 @@ impl Session {
         // The session keeps what is hidden (an undo step of its own); the design file carries it.
         let visibility = std::mem::take(&mut doc.visibility);
         let doc = Arc::new(doc);
-        let adopted = saved
-            .filter(|_| solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none())
-            .and_then(|saved| Model::adopt(&doc, saved).map_err(|e| log::info!("the saved model is not used: {e}")).ok());
-        let model = adopted.unwrap_or_else(|| {
+        let model = Self::saved_model(&doc, saved).unwrap_or_else(|| {
             let mut model = Model::new();
             model.evaluate_shared(&doc);
             model
         });
+        Self::with_model(doc, visibility, model)
+    }
+
+    /// The model `doc`'s file kept, when it is `doc`'s evaluation and the cache is not turned off.
+    pub(crate) fn saved_model(doc: &Arc<Document>, saved: Option<&solidcraft_doc::SavedModel>) -> Option<Model> {
+        saved
+            .filter(|_| solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none())
+            .and_then(|saved| Model::adopt(doc, saved).map_err(|e| log::info!("the saved model is not used: {e}")).ok())
+    }
+
+    /// A session on `doc` evaluated as `model`, with what it hides.
+    pub(crate) fn with_model(doc: Arc<Document>, visibility: Visibility, model: Model) -> Self {
         Session {
             saved: doc.clone(),
             doc,
@@ -688,6 +702,7 @@ impl Session {
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             disk: None,
             read_only: false,
+            user_named: false,
             open_preview: None,
             log: Vec::new(),
             revision: 1,
@@ -1091,16 +1106,19 @@ impl Session {
     /// [`Session::refresh`] after the design changed from `previous`; a change that only renamed
     /// a body or a feature (or undid or redid such a rename) renames it in the model instead,
     /// which keeps every result and mesh (#3044).
-    fn refresh_from(&mut self, previous: &Arc<Document>) {
-        self.follow_plane_renames(previous);
-        self.follow_axis_point_renames(previous);
+    fn refresh_from(&mut self, previous: &Arc<Document>, visibility_restored: bool) {
         let rename = self.body_rename(previous);
-        self.remap_hidden_bodies(previous, &self.model.state(), rename.as_ref().map(|(old, new, _)| (old.as_str(), new.as_str())));
-        // Locked bodies follow the rename here rather than in `body.rename`, so a rename that
-        // reaches the design any other way (undo, an outside edit) is covered too (#9737).
-        if let Some((old, new, _)) = &rename {
-            for b in self.visibility.locked_bodies.iter_mut().filter(|b| **b == *old) {
-                *b = new.clone();
+        // Undo/redo restored visibility in the target document's names already. Remapping
+        // those names again can transfer a deleted body's stale hide to the restored body.
+        if !visibility_restored {
+            self.follow_plane_renames(previous);
+            self.follow_axis_point_renames(previous);
+            self.remap_hidden_bodies(previous, &self.model.state(), rename.as_ref().map(|(old, new, _)| (old.as_str(), new.as_str())));
+            // Locked bodies follow explicit renames and outside edits too (#9737).
+            if let Some((old, new, _)) = &rename {
+                for b in self.visibility.locked_bodies.iter_mut().filter(|b| **b == *old) {
+                    *b = new.clone();
+                }
             }
         }
         if let Some((old, new, names_only)) = rename
@@ -1509,7 +1527,7 @@ impl Session {
                         }
                         None if render_only => self.refresh_render(&previous_doc),
                         None if display_only => self.refresh_display(),
-                        None => self.refresh_from(&previous_doc),
+                        None => self.refresh_from(&previous_doc, matches!(spec.id, "edit.undo" | "edit.redo")),
                     }
                     if pin {
                         self.pin_body_names();
@@ -1649,6 +1667,7 @@ impl Session {
             uid: self.uid,
             disk: self.disk,
             read_only: self.read_only,
+            user_named: self.user_named,
             open_preview: None,
             saved: self.saved.clone(),
             log: Vec::new(),

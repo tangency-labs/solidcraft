@@ -1438,3 +1438,36 @@ fn rounded_rectangles_sharing_their_sides_leave_every_profile_closed() {
         }
     }
 }
+
+/// A drag step that cannot succeed gives up once the iteration has stalled (#6606). Holding
+/// the two right corners of a rectangle further apart than its dimensioned left side leaves the
+/// left corners a least-squares valley (the perpendicular repeats what horizontal and vertical
+/// already say), along which the iteration crawled for its whole allowance.
+#[test]
+fn a_held_solve_that_cannot_succeed_stops_once_it_stalls() {
+    let mut sk = Sketch::new();
+    let [bottom, right, top, left] = rect(&mut sk, [v(-6.0, -20.0), v(23.5, -20.8), v(23.5, 0.0), v(-6.0, 0.0)]);
+    for kind in [
+        ConstraintKind::Horizontal { l: bottom },
+        ConstraintKind::Horizontal { l: top },
+        ConstraintKind::Vertical { l: right },
+        ConstraintKind::Vertical { l: left },
+        ConstraintKind::Length { l: left, value: 20.0 },
+        ConstraintKind::Perpendicular { a: top, b: left },
+    ] {
+        sk.add_constraint(kind, None).unwrap();
+    }
+    let hold = Hold { points: sk.curves[right].kind.point_ids(), radii: vec![] };
+    let reference: Vec<Vec2> = sk.points.iter().map(|p| p.pos).collect();
+    let solve = |analysis| {
+        let mut moved = sk.clone();
+        let rep = solve_with(&mut moved, &hold, Some(&reference), analysis, None);
+        assert!(!rep.ok());
+        assert_eq!(moved.points, sk.points, "a failed solve leaves the geometry as it was");
+        rep.iterations
+    };
+    let stalled = solve(Analysis::StatusOnly);
+    assert!(stalled < 100, "a held solve gives up once stalled: {stalled} iterations");
+    // A solve whose report names the violated constraints still iterates to the end.
+    assert!(solve(Analysis::Full) >= 500);
+}

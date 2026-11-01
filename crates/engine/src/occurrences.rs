@@ -297,21 +297,31 @@ impl Session {
         }
         let hidden: std::collections::BTreeSet<_> = self.visibility.hidden_bodies.iter().map(String::as_str).collect();
         let mut names = std::collections::BTreeMap::new();
+        let mut destinations = std::collections::BTreeSet::new();
         let (before, after) = (solidcraft_doc::WorldNames::new(previous, state), solidcraft_doc::WorldNames::new(&self.doc, &renamed));
         for (component, path, _) in previous.placements() {
             for body in state.bodies.iter().filter(|body| previous.model_body_component(body) == component) {
                 let old = before.name(&body.name, component, &path);
+                let source = rename.filter(|(old, _)| *old == body.name).map_or(body.name.as_str(), |(_, new)| new);
+                let new = after.name(source, component, &path);
+                if old != new {
+                    destinations.insert(new.clone());
+                }
                 if hidden.contains(old.as_str()) || selected.contains(old.as_str()) {
-                    let source = rename.filter(|(old, _)| *old == body.name).map_or(body.name.as_str(), |(_, new)| new);
-                    names.insert(old, after.name(source, component, &path));
+                    names.insert(old, new);
                 }
             }
         }
-        for hidden in &mut self.visibility.hidden_bodies {
+        self.visibility.hidden_bodies.retain_mut(|hidden| {
             if let Some(new) = names.get(hidden) {
                 hidden.clone_from(new);
+                true
+            } else {
+                // A deleted body's hidden name can be reused (#10163). Only a current
+                // body's hide follows into that name; a stale entry must not hide it.
+                !destinations.contains(hidden)
             }
-        }
+        });
         for sel in &mut self.selection {
             let name = match sel {
                 Sel::Body { name } => name,

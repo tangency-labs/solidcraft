@@ -4814,6 +4814,7 @@
   "ui.properties.inertia_y": "Iyx, Iyy, Iyz",
   "ui.properties.inertia_z": "Izx, Izy, Izz",
   "ui.properties.measuring": "Mäter…",
+  "ui.properties.measuring_bodies": "Mäter… {done} av {total} kroppar",
   "ui.properties.measuring_failed": "Mätningen avbröts innan den var klar.",
   "ui.properties.principal_axis": "Huvudaxel {number}",
   "ui.properties.principal_moments": "Huvudtröghetsmoment",

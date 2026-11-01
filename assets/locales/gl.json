@@ -4814,6 +4814,7 @@
   "ui.properties.inertia_y": "Iyx, Iyy, Iyz",
   "ui.properties.inertia_z": "Izx, Izy, Izz",
   "ui.properties.measuring": "Medindo…",
+  "ui.properties.measuring_bodies": "Medindo… {done} de {total} corpos",
   "ui.properties.measuring_failed": "A medición detívose antes de rematar.",
   "ui.properties.principal_axis": "Eixe principal {number}",
   "ui.properties.principal_moments": "Momentos principais",

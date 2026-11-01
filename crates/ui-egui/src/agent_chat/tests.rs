@@ -1943,6 +1943,61 @@ done
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// An agent that lists `models` but does not serve the unstable `session/set_model` answers
+/// "method not found": the choice stays and no error shows (#9970). Other errors still show.
+#[cfg(unix)]
+#[test]
+fn set_model_method_not_found_shows_no_error() {
+    let dir = std::env::temp_dir().join(format!("sc-agent-chat-model-unserved-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let log = dir.join("received.log");
+    let script = r#"
+log="$1"; n=0
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$log"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"agentInfo":{"name":"fake","version":"1"}}}\n' "$id" ;;
+    *'"method":"session/new"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"s1","models":{"currentModelId":"fast","availableModels":[{"modelId":"fast","name":"Fast"},{"modelId":"smart","name":"Smart"}]}}}\n' "$id" ;;
+    *'"method":"session/set_model"'*)
+      n=$((n+1))
+      if [ "$n" = 1 ]; then printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"\\"Method not found\\": session/set_model"}}\n' "$id"
+      else printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32001,"message":"model unavailable"}}\n' "$id"; fi ;;
+  esac
+done
+"#;
+    let argv = vec!["sh".to_string(), "-c".to_string(), script.to_string(), "fake-agent".to_string(), log.to_string_lossy().into_owned()];
+    let start = backend::StartContext { cwd: dir.clone(), bridge: None, tools: None, wake: Box::new(|| {}) };
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.agent_chat.backend = Some(Box::new(acp_client::AcpBackend::start(&argv, start).unwrap()));
+    app.agent_chat.state = Some(State::Starting);
+    app.agent_chat.running_id = "fake".into();
+    let ctx = crate::fonts::test_context();
+    let errors = |app: &SolveApp| -> Vec<String> {
+        app.agent_chat.items.iter().filter_map(|i| if let Item::Notice { text, error: true } = i { Some(text.clone()) } else { None }).collect()
+    };
+    let t = std::time::Instant::now();
+    while !(app.agent_chat.state() == State::Ready && models_shown(&app)) {
+        poll(&mut app, &ctx);
+        assert!(t.elapsed() < std::time::Duration::from_secs(20), "agent not ready: {}", status(&app));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    set_model(&mut app, "smart");
+    set_model(&mut app, "fast");
+    // Replies come in order: once the second one's error shows, the first reply was handled too.
+    let t = std::time::Instant::now();
+    while !errors(&app).iter().any(|e| e == "model unavailable") {
+        poll(&mut app, &ctx);
+        assert!(t.elapsed() < std::time::Duration::from_secs(20), "no error for the second choice: {:?}", errors(&app));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(errors(&app), ["model unavailable"], "method not found is no error to show");
+    assert!(app.agent_chat.state().running(), "the chat goes on");
+    assert_eq!(std::fs::read_to_string(&log).unwrap().matches("session/set_model").count(), 2);
+    disconnect(&mut app);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 // ---- Files attached to a message ----
 
 /// A folder of files to attach: a picture and a text file.
@@ -2179,6 +2234,35 @@ fn narrow_chat() -> crate::scenario::Harness {
     h.app.agent_chat.open = true;
     h.app.agent_chat.detection = Some(Default::default());
     h
+}
+
+/// #10172: before a connection, what the panel draws under the agent switcher (the Agent row
+/// with Add agent and Refresh) keeps the panel's side margin, docked and floating: nothing starts
+/// at the panel's edge or is cut off at the other one.
+#[test]
+fn the_agent_list_keeps_the_panels_side_margin() {
+    use crate::shell::LayoutMode;
+    for layout in [LayoutMode::Docked, LayoutMode::Floating] {
+        let mut h = narrow_chat();
+        h.app.ui.layout = layout;
+        h.frames(3);
+        h.frame();
+        let panel = crate::scenario::rect_of("agent_chat:panel").expect("the panel");
+        let mut texts = Vec::new();
+        for clipped in &h.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |s| {
+                if let egui::Shape::Text(t) = s {
+                    texts.push((t.galley.text().to_string(), egui::Rect::from_min_size(t.pos, t.galley.rect.size())));
+                }
+            });
+        }
+        let at = |label: &str| texts.iter().find(|(text, r)| text == label && panel.contains(r.center())).map(|(_, r)| *r);
+        let margin = crate::theme::Tokens::get().space_12 - 0.5;
+        let agent = at(tr("ui.agent_chat_pick")).expect("the Agent row");
+        assert!(agent.left() >= panel.left() + margin, "{layout:?}: Agent at {agent:?} in {panel:?}");
+        let refresh = at(tr("ui.agent_chat_refresh")).expect("Refresh");
+        assert!(refresh.right() <= panel.right() - margin, "{layout:?}: Refresh at {refresh:?} in {panel:?}");
+    }
 }
 
 /// Every chip and the text box sit inside the panel.
