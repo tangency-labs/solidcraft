@@ -23,9 +23,9 @@ pub(super) struct Exported {
     pub laid: super::print_face::Laid,
 }
 
-/// Export the bodies (the selected ones when none are named), each laid on its print face. A
-/// 3MF that can't be written is written as an STL, and `fell_back` says so.
-pub(super) fn export_bodies(s: &Session, cmd: &str, named: &[String], format: Format) -> Result<Exported> {
+/// Export the bodies (the selected ones when none are named), each laid on its print face and
+/// meshed at `quality`. A 3MF that can't be written is written as an STL, and `fell_back` says so.
+pub(super) fn export_bodies(s: &Session, cmd: &str, named: &[String], format: Format, quality: solidcraft_io::MeshQuality) -> Result<Exported> {
     let mut bodies = named.to_vec();
     if bodies.is_empty() {
         bodies = s.selection.iter().filter_map(|x| if let crate::Sel::Body { name } = x { Some(name.clone()) } else { None }).collect();
@@ -35,10 +35,10 @@ pub(super) fn export_bodies(s: &Session, cmd: &str, named: &[String], format: Fo
     }
     let mut doc = s.doc.painted(&s.world_state());
     let laid = super::print_face::lay_on_print_faces(s, &mut doc, &bodies, &[]);
-    let write = |format| solidcraft_io::export_with_metadata(&doc, &bodies, format, &s.doc.name, &s.doc.metadata);
+    let write = |format| solidcraft_io::export_with_quality(&doc, &bodies, format, &s.doc.name, &s.doc.metadata, quality);
     let mut fell_back = false;
     let (bytes, ext) = match (format, write(format)) {
-        (_, Ok(b)) => (b, if format == Format::StlBinary { "stl" } else { "3mf" }),
+        (_, Ok(b)) => (b, if matches!(format, Format::StlBinary | Format::StlAscii) { "stl" } else { "3mf" }),
         (Format::ThreeMf, Err(_)) => {
             fell_back = true;
             (write(Format::StlBinary)?, "stl")
@@ -59,7 +59,7 @@ pub(super) fn open_in_easyprint(s: &mut Session, p: &Value) -> Result<Value> {
     if !bool_(p, "consent").unwrap_or(false) {
         return Err(bad(cmd, "this uploads the model to Printables' servers: ask the user, then pass `consent: true`"));
     }
-    let Exported { bytes, ext, fell_back, laid, .. } = export_bodies(s, cmd, &string_list(cmd, p, "bodies")?, format)?;
+    let Exported { bytes, ext, fell_back, laid, .. } = export_bodies(s, cmd, &string_list(cmd, p, "bodies")?, format, Default::default())?;
     if bytes.len() > MAX_BYTES {
         let mb = bytes.len().div_ceil(1_000_000);
         return Err(bad(cmd, format!("the model is {mb} MB and EasyPrint takes {} MB at most: send fewer bodies", MAX_BYTES / 1_000_000)));

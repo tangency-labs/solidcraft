@@ -1,0 +1,47 @@
+{
+  "en": {
+    "cmd.file_slicers_add_remote": "Add Network Folder",
+    "cmd.file_slicers_remove_remote": "Remove Network Folder",
+    "cmd.file_slicers_test": "Test Network Folder"
+  },
+  "de": {
+    "cmd.file_slicers_add_remote": "Netzwerkordner hinzufügen",
+    "cmd.file_slicers_remove_remote": "Netzwerkordner entfernen",
+    "cmd.file_slicers_test": "Netzwerkordner testen"
+  },
+  "ar": {
+    "cmd.file_slicers_add_remote": "إضافة مجلد شبكة",
+    "cmd.file_slicers_remove_remote": "إزالة مجلد شبكة",
+    "cmd.file_slicers_test": "اختبار مجلد شبكة"
+  },
+  "he": {
+    "cmd.file_slicers_add_remote": "הוספת תיקיית רשת",
+    "cmd.file_slicers_remove_remote": "הסרת תיקיית רשת",
+    "cmd.file_slicers_test": "בדיקת תיקיית רשת"
+  },
+  "ja": {
+    "cmd.file_slicers_add_remote": "ネットワークフォルダーを追加",
+    "cmd.file_slicers_remove_remote": "ネットワークフォルダーを削除",
+    "cmd.file_slicers_test": "ネットワークフォルダーをテスト"
+  },
+  "ko": {
+    "cmd.file_slicers_add_remote": "네트워크 폴더 추가",
+    "cmd.file_slicers_remove_remote": "네트워크 폴더 제거",
+    "cmd.file_slicers_test": "네트워크 폴더 테스트"
+  },
+  "pt-BR": {
+    "cmd.file_slicers_add_remote": "Adicionar pasta de rede",
+    "cmd.file_slicers_remove_remote": "Remover pasta de rede",
+    "cmd.file_slicers_test": "Testar pasta de rede"
+  },
+  "vi": {
+    "cmd.file_slicers_add_remote": "Thêm thư mục mạng",
+    "cmd.file_slicers_remove_remote": "Xóa thư mục mạng",
+    "cmd.file_slicers_test": "Kiểm tra thư mục mạng"
+  },
+  "zh": {
+    "cmd.file_slicers_add_remote": "添加网络文件夹",
+    "cmd.file_slicers_remove_remote": "移除网络文件夹",
+    "cmd.file_slicers_test": "测试网络文件夹"
+  }
+}
