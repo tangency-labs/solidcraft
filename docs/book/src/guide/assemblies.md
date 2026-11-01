@@ -37,6 +37,11 @@ doesn't move.
 
 <video src="../media/assemblies/drag.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Dragging Leaf B, which swings about the hinge, then trying to drag grounded Leaf A, which stays where it is"></video>
 
+**4. Drive it.** **Drive Joints** turns a joint through its values: drag the slider, or type the
+angle. A ghost shows where the part started. **OK** keeps the new angle.
+
+<video src="../media/assemblies/drive.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Drive Joints: dragging the angle slider swings Leaf B about the hinge while a ghost shows where it started, then OK"></video>
+
 ## Components, placement and joints
 
 A component is placed by its **occurrences**. Paste creates another instance of the same
