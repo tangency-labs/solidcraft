@@ -2,8 +2,8 @@
 //! scene ([`Scene`]), for the sheet page and every export, so the screen and the files draw the
 //! same thing. In paint order: the sheet's drawing border ([`SheetLayout::paper`]), then each view
 //! on the sheet by id, its lines as [`paper_group`] makes them, then the dimensions of those
-//! views, by view and id ([`crate::drawing_dimension_paper`]), then its title block's lines and
-//! projection symbol, in the drawing's projection ([`TitleBlockLayout::paper`]). Images placed on
+//! views, by view and id ([`crate::drawing_dimension_paper`]), then its title block's logos, lines
+//! and projection symbol, in the drawing's projection ([`TitleBlockLayout::paper`]). Images placed on
 //! the sheet sit between the border and the views ([`groups`]), so a view's lines draw over a photo.
 //! Text and tables each join as one more kind of group. A shaded view's group holds
 //! its pictures under its lines; nothing here draws their pixels ([`crate::drawing_picture`]).
@@ -171,7 +171,8 @@ pub fn build(s: &Session, drawing: &Drawing, sheet: u64) -> Result<SheetScene> {
     // placed as they are drawn, so at most one view's are held beside the scene.
     let shown = crate::drawing_view::shown(s);
     let drawn = on.iter().map(|(id, view, centre)| (*id, *centre, draw(s, &shown, *id, view)));
-    let mut assembly = assemble(record, drawing.projection, &crate::drawing_pictures::groups(drawing, sheet), drawn)?;
+    let (images, logos) = (crate::drawing_pictures::groups(drawing, sheet), crate::drawing_pictures::logo_items(drawing, sheet));
+    let mut assembly = assemble(record, drawing.projection, &images, &logos, drawn)?;
     // After the views, as they need the views' frames: one read for the sheet's dimensions.
     let frames: BTreeMap<u64, ViewFrame> = assembly.placed.iter().map(|(view, (frame, _))| (*view, *frame)).collect();
     let wanted = dimensions_on(drawing, on.iter().map(|(id, ..)| *id));
@@ -358,13 +359,14 @@ impl Assembly {
 }
 
 /// The scene of sheet `record`: its border, then `images`, then each of `views` (its id, centre and
-/// lines, in id order) moved to its centre, with its title block, its symbol in `projection`, to go
-/// on top ([`Assembly::finish`]). A view that would take the scene past a paper scene's limits is
+/// lines, in id order) moved to its centre, with its title block (`logos` under its lines) and its
+/// symbol in `projection`, to go on top ([`Assembly::finish`]). A view that would take the scene past a paper scene's limits is
 /// left out and says why, and the views after it are still drawn when they fit.
 fn assemble<D: Borrow<Drawn>>(
     record: &Sheet,
     projection: Projection,
     images: &[Group],
+    logos: &[Item],
     views: impl Iterator<Item = (u64, Vec2, D)>,
 ) -> Result<Assembly> {
     let size_mm = record.sheet.size_mm().map_err(|e| bad(CMD, e.to_string()))?;
@@ -373,7 +375,11 @@ fn assemble<D: Borrow<Drawn>>(
     // The block sits on the border. It's painted over the views, but counted with the border, so no
     // view takes its records.
     let block = match (&record.title_block, &layout) {
-        (Some(block), Some(layout)) => Some(block.layout(layout).map_err(|e| bad(CMD, e.to_string()))?.paper(record.id, projection)),
+        (Some(block), Some(layout)) => {
+            let mut group = block.layout(layout).map_err(|e| bad(CMD, e.to_string()))?.paper(record.id, projection);
+            group.items.splice(0..0, logos.iter().cloned());
+            Some(group)
+        }
         _ => None,
     };
     let mut objects = Vec::new();
@@ -519,13 +525,14 @@ struct DimensionEntry {
 }
 
 /// What a scene is assembled from: the sheet's record, the drawing's projection (its title block's
-/// symbol), the images on the sheet, each view on it with its entry's serial (0: not drawn yet)
+/// symbol), the images and logos on the sheet, each view on it with its entry's serial (0: not drawn yet)
 /// and its centre, and each dimension read so far with its entry's serial.
 #[derive(PartialEq)]
 struct Inputs {
     sheet: Sheet,
     projection: Projection,
     images: Vec<Group>,
+    logos: Vec<Item>,
     views: Vec<(u64, u64, Vec2)>,
     dimensions: Vec<(u64, u64)>,
 }
@@ -552,10 +559,11 @@ impl Cache {
     fn inputs(&self, d: &Drawing, record: &Sheet, on: &[(u64, ResolvedView, Vec2)]) -> Inputs {
         let serial = |id: &u64| self.views.get(id).map_or(0, |e| e.serial);
         let images = crate::drawing_pictures::groups(d, record.id);
+        let logos = crate::drawing_pictures::logo_items(d, record.id);
         let views = on.iter().map(|(id, _, centre)| (*id, serial(id), *centre)).collect();
         let read = dimensions_on(d, on.iter().map(|(id, ..)| *id));
         let dimensions = read.iter().filter_map(|record| self.dimensions.get(&record.id).map(|e| (record.id, e.serial))).collect();
-        Inputs { sheet: record.clone(), projection: d.projection, images, views, dimensions }
+        Inputs { sheet: record.clone(), projection: d.projection, images, logos, views, dimensions }
     }
 
     /// The views of the last scene assembled, while it is still its sheet's scene: the sheet as `d`
@@ -650,7 +658,7 @@ pub fn extract(s: &mut Session, sheet: u64) -> Result<SheetView> {
             cache.views.retain(|id, _| kept.contains(id));
             cache.dimensions.retain(|id, _| d.dimension(*id).is_some());
             let drawn = on.iter().filter_map(|(id, _, centre)| cache.views.get(id).map(|e| (*id, *centre, &e.drawn)));
-            let mut assembly = assemble(record, d.projection, &inputs.images, drawn)?;
+            let mut assembly = assemble(record, d.projection, &inputs.images, &inputs.logos, drawn)?;
             assembly.add_dimensions(inputs.dimensions.iter().filter_map(|(id, _)| cache.dimensions.get(id).map(|e| &e.drawn)));
             let (scene, views, objects, dimensions) = assembly.finish()?;
             (Arc::new(scene), views, objects.into(), dimensions, GENERATION.fetch_add(1, Ordering::Relaxed).wrapping_add(1))

@@ -494,14 +494,14 @@ fn a_view_past_the_sheets_records_leaves_out_only_itself() {
     };
     for title_block in [None, Some(solidcraft_geom::title_block::default_block())] {
         let record = Sheet { title_block, ..(**d.sheets.iter().find(|x| x.id == sheet).unwrap()).clone() };
-        let (empty, ..) = assemble(&record, Projection::Third, &[], std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap().finish().unwrap();
+        let (empty, ..) = assemble(&record, Projection::Third, &[], &[], std::iter::empty::<(u64, Vec2, Drawn)>()).unwrap().finish().unwrap();
         assert_eq!(empty.groups.len(), if record.title_block.is_some() { 4 } else { 3 });
         let left = MAX_RECORDS - empty.groups.iter().map(Group::records).sum::<usize>();
         // The first leaves 20 records; the second needs 32; the third takes the last 20.
         let views = [lines(left - 22), lines(30), lines(18)];
         let centre = Vec2::new(100.0, 100.0);
         let views = views.iter().enumerate().map(|(i, v)| (i as u64, centre, v));
-        let (scene, states, ..) = assemble(&record, Projection::Third, &[], views).unwrap().finish().unwrap();
+        let (scene, states, ..) = assemble(&record, Projection::Third, &[], &[], views).unwrap().finish().unwrap();
         let statuses: Vec<&'static str> = states.iter().map(|v| v.status.name()).collect();
         assert_eq!(statuses, ["drawn", "failed", "drawn"]);
         let records = scene.groups.iter().map(Group::records).sum::<usize>();
@@ -751,7 +751,7 @@ fn a_views_box_is_what_it_draws() {
             boundary: Some(boundary),
             frame: None,
         };
-        let (_, _, objects, _) = assemble(&record, Projection::Third, &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
+        let (_, _, objects, _) = assemble(&record, Projection::Third, &[], &[], [(7, centre, &drawn)].into_iter()).unwrap().finish().unwrap();
         let object = objects.iter().find(|o| o.object == 7).unwrap();
         assert!(near(&object.bounds_mm, min, max), "{object:?}");
     }
@@ -1114,7 +1114,7 @@ fn a_dimension_past_the_scenes_limits_is_left_out_and_says_why() {
         boundary: None,
         frame: Some(ViewFrame::new(solidcore_record::Plane::XY, "1:1".parse().unwrap(), Vec2::ZERO, Vec2::ZERO).unwrap()),
     };
-    let mut assembly = assemble(record, Projection::Third, &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
+    let mut assembly = assemble(record, Projection::Third, &[], &[], std::iter::once((front, Vec2::new(100.0, 100.0), view))).unwrap();
     let stroke = |to: Vec2| Item::Stroke { path: vec![Seg2::Line { a: Vec2::ZERO, b: to }], closed: false, width_mm: 0.25, pattern: None };
     let dimension = |id, items| DrawnDimension {
         dimension: id,
