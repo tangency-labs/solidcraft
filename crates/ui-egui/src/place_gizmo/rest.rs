@@ -3,19 +3,21 @@
 
 use solidcraft_engine::geom::Vec3;
 
-use super::{Spec, Turn, angle_of, circle, dir_at, len, pt, pulled, rect, vec3_of};
+use super::{PlaceSource, Spec, Turn, angle_of, circle, dir_at, len, pt, pulled, rect, vec3_of};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::dialogs_plastic::Pl;
 
 pub(super) static SPEC: Spec = Spec {
     name: "rest",
-    serves: |d| matches!(d.kind, Kind::Plastic(Pl::Rest { .. })),
+    serves: |app, d| super::on(app) && matches!(d.kind, Kind::Plastic(Pl::Rest { .. })),
     snap_commands: &["plastic.rest"],
     move_tip: "Drag to move the rest across the model. It snaps to sketch points on the face.",
-    frame: crate::dialogs_plastic::handle_frame,
-    move_to: crate::dialogs_plastic::handle_move,
+    many: false,
+    place: PlaceSource::Input(0),
+    click: None,
     footprint,
+    freedom: super::anywhere,
     turn: Some(Turn { tip: "Drag to turn the rest in 5° steps. Hold Alt or Ctrl to turn it freely.", reach, angle, set }),
 };
 
