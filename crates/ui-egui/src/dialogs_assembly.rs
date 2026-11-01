@@ -1942,11 +1942,13 @@ pub(crate) fn joint_glyph_at(plan: &[JointGlyph], pos: Pos2) -> Option<u64> {
     plan.iter().map(|g| (g.id, g.centre.distance(pos))).filter(|(_, d)| *d <= GLYPH_TIP_REACH).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(id, _)| id)
 }
 
-/// A glyph's tooltip: the joint's name and type, e.g. "Glue · Rigid", so the square, ring and
+/// A glyph's tooltip: the joint's name and type, e.g. "Glue (Rigid)", or the name alone when it says the type ("Rigid 7"), so the square, ring and
 /// axis explain themselves (#6404).
 pub(crate) fn joint_glyph_tip(app: &SolveApp, id: u64) -> Option<String> {
     let j = app.session.doc.assembly.joints.iter().find(|j| j.id == id)?;
-    Some(format!("{} · {:?}", j.name, j.kind))
+    let kind = app.tr(kind_label(j.kind));
+    // A name that already says the type ("Rigid 7") is enough on its own.
+    Some(if j.name.to_lowercase().contains(&kind.to_lowercase()) { j.name.clone() } else { format!("{} ({kind})", j.name) })
 }
 
 /// Joint glyphs in the viewport: a ring where a moving joint sits, its motion axis and its

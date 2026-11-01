@@ -60,8 +60,13 @@ fn hovering_a_glyph_names_its_joint_and_type() {
     assert_eq!(joint_glyph_at(&plan, at_glue + egui::vec2(3.0, -2.0)), Some(glue));
     assert_eq!(joint_glyph_at(&plan, at_hinge), Some(hinge));
     assert_eq!(joint_glyph_at(&plan, at_glue + egui::vec2(20.0, 0.0)), None, "off the glyph: no tooltip");
-    assert_eq!(joint_glyph_tip(&h.app, glue).as_deref(), Some("Glue · Rigid"));
-    assert_eq!(joint_glyph_tip(&h.app, hinge).as_deref(), Some("Hinge · Revolute"));
+    assert_eq!(joint_glyph_tip(&h.app, glue).as_deref(), Some("Glue (Rigid)"));
+    assert_eq!(joint_glyph_tip(&h.app, hinge).as_deref(), Some("Hinge (Revolute)"));
+    // A name that already says the type is not followed by it again.
+    if let Some(j) = h.app.session.doc_mut().assembly.joints.iter_mut().find(|j| j.id == glue) {
+        j.name = "Rigid 7".into();
+    }
+    assert_eq!(joint_glyph_tip(&h.app, glue).as_deref(), Some("Rigid 7"));
     // Piled up far out, the pointer names the glyph drawn on top, not the faded one under it.
     let far = plan_at(&mut h, 20_000.0);
     assert_eq!(joint_glyph_at(&far, glyph(&far, hinge).centre), Some(hinge), "{far:?}");
