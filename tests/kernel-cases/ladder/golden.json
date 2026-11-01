@@ -1234,36 +1234,36 @@
     },
     "ladder/07-fillets/005-variable-r5-to-r1": {
       "measured": {
-        "area_mm2": 8717.217924050128,
+        "area_mm2": 8717.28253785695,
         "body_count": 1,
         "edges": 15,
         "faces": 7,
         "vertices": 10,
-        "volume_mm3": 47866.939865273875
+        "volume_mm3": 47867.134444772186
       },
       "seconds": 0.020330867,
       "status": "pass"
     },
     "ladder/07-fillets/006-variable-r5-to-zero": {
       "measured": {
-        "area_mm2": 8730.326099306438,
+        "area_mm2": 8730.41162701569,
         "body_count": 1,
         "edges": 14,
         "faces": 7,
         "vertices": 9,
-        "volume_mm3": 47892.69344121365
+        "volume_mm3": 47892.93831039204
       },
       "seconds": 0.01733797,
       "status": "pass"
     },
     "ladder/07-fillets/007-variable-r5-to-1e-3": {
       "measured": {
-        "area_mm2": 8730.313207922401,
+        "area_mm2": 8730.398716300346,
         "body_count": 1,
         "edges": 15,
         "faces": 7,
         "vertices": 10,
-        "volume_mm3": 47892.671975647136
+        "volume_mm3": 47892.91679617965
       },
       "seconds": 0.009474805,
       "status": "pass"
@@ -1318,12 +1318,12 @@
     },
     "ladder/07-fillets/012-variable-into-rounded-corner": {
       "measured": {
-        "area_mm2": 8665.870097489847,
+        "area_mm2": 8665.945693079353,
         "body_count": 1,
         "edges": 18,
         "faces": 8,
         "vertices": 12,
-        "volume_mm3": 47754.87240844197
+        "volume_mm3": 47755.118560955016
       },
       "seconds": 0.050985104,
       "status": "pass"

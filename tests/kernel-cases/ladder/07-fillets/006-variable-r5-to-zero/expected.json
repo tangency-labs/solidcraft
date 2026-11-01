@@ -5,5 +5,8 @@
  "method": "as 005 with b=0 (tests/oracle/78): the cone's apex at the x=60 vertex, which stays; 107.055974 removed (great circles: 107.301)",
  "body_count": 1,
  "volume_mm3": 47892.944026,
- "faces": 7
+ "faces": 7,
+ "tolerance": {
+  "rel": 1e-06
+ }
 }
