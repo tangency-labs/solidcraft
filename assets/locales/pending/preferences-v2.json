@@ -1,0 +1,10 @@
+{
+  "ar": { "prefs.carousel_next": "التالي", "prefs.carousel_previous": "السابق" },
+  "de": { "prefs.carousel_next": "Weiter", "prefs.carousel_previous": "Zurück" },
+  "en": { "prefs.carousel_next": "Next", "prefs.carousel_previous": "Previous" },
+  "he": { "prefs.carousel_next": "הבא", "prefs.carousel_previous": "הקודם" },
+  "ja": { "prefs.carousel_next": "次へ", "prefs.carousel_previous": "前へ" },
+  "ko": { "prefs.carousel_next": "다음", "prefs.carousel_previous": "이전" },
+  "vi": { "prefs.carousel_next": "Tiếp", "prefs.carousel_previous": "Trước" },
+  "zh": { "prefs.carousel_next": "下一个", "prefs.carousel_previous": "上一个" }
+}
