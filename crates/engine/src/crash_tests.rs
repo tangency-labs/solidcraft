@@ -148,6 +148,29 @@ fn child() {
         "kernel" => {
             assert!(s.execute("diagnostics.crash_test", &json!({"mode": "kernel"})).is_err());
         }
+        // A Rayon worker panics while this command is inside the kernel guard. The hook must not
+        // write an unrecovered report at once; the command fails with a kernel error and the
+        // report is recovered, with this command and the design.
+        "worker" => {
+            let r = s.execute("diagnostics.crash_test", &json!({"mode": "worker"}));
+            let msg = r.as_ref().err().map(ToString::to_string).unwrap_or_default();
+            assert!(msg.contains("kernel internal error"), "{msg}");
+            assert_eq!(s.doc.features.len(), 1, "the design is unchanged");
+        }
+        // Same worker, but the panic is not caught by the kernel guard. It stays a command panic.
+        "worker_raw" => {
+            let r = s.execute("diagnostics.crash_test", &json!({"mode": "worker_raw"}));
+            let msg = r.as_ref().err().map(ToString::to_string).unwrap_or_default();
+            assert!(msg.contains("internal error in `diagnostics.crash_test`"), "{msg}");
+            assert!(!msg.contains("kernel internal error"), "{msg}");
+            assert_eq!(s.doc.features.len(), 1, "the design is unchanged");
+        }
+        // Between commands: a worker panic is reported at once, as a panic on any other thread is.
+        "worker_idle" => {
+            let r = solidcraft_kernel::crash_test_worker_panic("rayon worker outside a command");
+            let msg = r.as_ref().err().map(ToString::to_string).unwrap_or_default();
+            assert!(msg.contains("kernel internal error"), "{msg}");
+        }
         // `thread_dies`: the panic ends the app, as one on the window's thread does.
         "thread" | "thread_dies" => {
             let r = std::thread::Builder::new()
@@ -259,6 +282,55 @@ fn a_kernel_panic_is_reported_as_recovered() {
     assert_eq!(s.kind, "kernel_panic_recovered");
     assert!(s.replayable);
     assert!(v["message"].as_str().unwrap().contains("in the kernel"), "{v}");
+    let _ = fs::remove_dir_all(&d);
+}
+
+#[test]
+fn a_worker_panic_during_a_command_is_recovered_with_the_command() {
+    let d = fresh_dir("worker");
+    let (_, ok) = run_child(&d, "worker");
+    assert!(ok, "the worker panic was caught");
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "kernel_panic_recovered");
+    assert_eq!(s.command.as_deref(), Some("diagnostics.crash_test"));
+    assert!(s.replayable);
+    assert_eq!(v["thread"], "solidcraft-pool-0");
+    assert!(v["message"].as_str().unwrap().contains("on a worker"), "{v}");
+    assert_eq!(v["base"], "the design as it was when the command started");
+    let design = solidcraft_io::read_design(&fs::read(v["design_path"].as_str().unwrap()).unwrap()).unwrap();
+    assert_eq!(design.features.len(), 1);
+    let replay: Value = serde_json::from_slice(&fs::read(v["replay_path"].as_str().unwrap()).unwrap()).unwrap();
+    assert_eq!(replay["commands"], json!([{"command": "diagnostics.crash_test", "params": {"mode": "worker"}}]));
+    let _ = fs::remove_dir_all(&d);
+}
+
+#[test]
+fn a_worker_panic_outside_the_kernel_guard_is_a_command_panic() {
+    let d = fresh_dir("worker-raw");
+    let (_, ok) = run_child(&d, "worker_raw");
+    assert!(ok, "the worker panic was caught by the command");
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "command_panic");
+    assert_eq!(s.command.as_deref(), Some("diagnostics.crash_test"));
+    assert!(s.replayable);
+    assert_eq!(v["thread"], "solidcraft-pool-0");
+    assert!(v["message"].as_str().unwrap().contains("a worker panic in a command"), "{v}");
+    assert_eq!(v["base"], "the design as it was when the command started");
+    let _ = fs::remove_dir_all(&d);
+}
+
+#[test]
+fn a_worker_panic_outside_a_command_is_reported_at_once() {
+    let d = fresh_dir("worker-idle");
+    let (_, ok) = run_child(&d, "worker_idle");
+    assert!(ok, "the worker panic was caught");
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "panic");
+    assert_eq!(s.command, None, "no command was running");
+    assert_eq!(v["thread"], "solidcraft-pool-0");
+    assert_eq!(v["message"], "rayon worker outside a command");
+    assert_eq!(v["base"], "new");
+    assert_eq!(v["recent_commands"][0]["command"], "solid.box");
     let _ = fs::remove_dir_all(&d);
 }
 
