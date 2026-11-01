@@ -2201,8 +2201,11 @@ pub struct CanvasPanel {
     pub a: [f64; 2],
     pub b: [f64; 2],
     pub distance: f64,
-    /// Next viewport click sets Point A (`0`) or Point B (`1`) (#9108).
+    /// Next viewport click sets Point A (`0`) or Point B (`1`) (#9108). `2`: both are picked
+    /// and the distance is next; another click starts over at Point A.
     pub next: u8,
+    /// The Distance box in the view while it is being typed into (it may hold an expression).
+    pub(crate) distance_text: Option<String>,
 }
 
 impl CanvasPanel {
@@ -2216,7 +2219,7 @@ impl CanvasPanel {
             .find(|c| c.id == canvas)
             .map(|c| ([c.center.x - c.width / 2.0, c.center.y], [c.center.x + c.width / 2.0, c.center.y], c.width))
             .unwrap_or(([0.0, 0.0], [100.0, 0.0], 100.0));
-        CanvasPanel { canvas, calibrate, depth: app.session.undo.len(), a, b, distance: d, next: 0 }
+        CanvasPanel { canvas, calibrate, depth: app.session.undo.len(), a, b, distance: d, next: 0, distance_text: None }
     }
 }
 
