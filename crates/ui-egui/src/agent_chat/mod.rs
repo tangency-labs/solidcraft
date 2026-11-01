@@ -2113,8 +2113,9 @@ fn model_id_valid(id: &str) -> bool {
 }
 
 /// A model's provider and its name at that provider, when the agent says which provider serves it:
-/// a name `Provider · model` (Hermes, OpenCode) or a description `Provider: …` (up to a ` • `).
-/// `None`: the agent names no provider.
+/// a name `Provider · model` (Hermes, OpenCode), a description `Provider: …` (up to a ` • `), or
+/// an endpoint's listing whose id reads `vendor/model` and whose description (the endpoint's own
+/// name for it) reads `Vendor: Model` (OpenRouter). `None`: the agent names no provider.
 pub fn model_provider(m: &acp::ModelInfo) -> Option<(String, String)> {
     let cap = |s: &str| s.trim().chars().take(PROVIDER_NAME_CAP).collect::<String>();
     if let Some((provider, name)) = m.name.split_once(" · ")
@@ -2123,9 +2124,48 @@ pub fn model_provider(m: &acp::ModelInfo) -> Option<(String, String)> {
     {
         return Some((cap(provider), name.trim().to_string()));
     }
-    let rest = m.description.strip_prefix("Provider:")?;
-    let provider = rest.lines().next().unwrap_or("").split(" • ").next().unwrap_or("");
-    (!provider.trim().is_empty()).then(|| (cap(provider), m.name.clone()))
+    if let Some(rest) = m.description.strip_prefix("Provider:") {
+        let provider = rest.lines().next().unwrap_or("").split(" • ").next().unwrap_or("");
+        return (!provider.trim().is_empty()).then(|| (cap(provider), m.name.clone()));
+    }
+    let first_line = m.description.lines().next().unwrap_or("");
+    if m.id.contains('/')
+        && let Some((vendor, name)) = first_line.split_once(": ")
+        && !vendor.trim().is_empty()
+        && vendor.chars().count() <= PROVIDER_NAME_CAP
+        && !name.trim().is_empty()
+    {
+        return Some((cap(vendor), name.trim().to_string()));
+    }
+    None
+}
+
+/// How a picker shows `models`: each one's label, the group it folds under and its tooltip. With
+/// models from two or more providers the label is the name at the provider, the group the
+/// provider and the tooltip the id (or the description where the label already is the id);
+/// otherwise the name as it is, no group, and the description.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub fn model_rows(models: &[acp::ModelInfo]) -> Vec<(String, Option<String>, String)> {
+    let mut providers: Vec<String> = Vec::new();
+    for m in models {
+        let p = provider_of(m);
+        if !providers.contains(&p) {
+            providers.push(p);
+        }
+    }
+    let grouped = providers.len() >= 2;
+    models
+        .iter()
+        .map(|m| {
+            if grouped {
+                let (provider, name) = model_provider(m).unwrap_or_else(|| (provider_of(m), m.name.clone()));
+                let tip = if name == m.id { m.description.clone() } else { m.id.clone() };
+                (name, Some(provider), tip)
+            } else {
+                (m.name.clone(), None, m.description.clone())
+            }
+        })
+        .collect()
 }
 
 /// The provider a model is listed under: its own, or "Other" when the agent names none.
@@ -2178,24 +2218,12 @@ pub fn listed_models(app: &SolveApp) -> Vec<(acp::ModelInfo, String)> {
         .collect()
 }
 
-/// Every model the header's picker lists, with the name it shows and the group it folds under:
-/// with several providers, the name without the provider in front and the provider as the group;
-/// otherwise the name as it is and no group.
+/// Every model the header's picker lists, with its label, the group it folds under and its tooltip
+/// ([`model_rows`]).
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-pub fn grouped_models(app: &SolveApp) -> Vec<(acp::ModelInfo, String, Option<String>)> {
-    let grouped = !model_providers(app).is_empty();
-    app.agent_chat
-        .models
-        .iter()
-        .map(|m| {
-            if grouped {
-                let (provider, name) = model_provider(m).unwrap_or_else(|| (provider_of(m), m.name.clone()));
-                (m.clone(), name, Some(provider))
-            } else {
-                (m.clone(), m.name.clone(), None)
-            }
-        })
-        .collect()
+pub fn grouped_models(app: &SolveApp) -> Vec<(acp::ModelInfo, String, Option<String>, String)> {
+    let rows = model_rows(&app.agent_chat.models);
+    app.agent_chat.models.iter().cloned().zip(rows).map(|(m, (label, group, tip))| (m, label, group, tip)).collect()
 }
 
 /// The provider whose group the header's model picker opens first (the control channel's

@@ -411,6 +411,7 @@ fn search_picker_folds_groups_under_their_headers() {
     let ctx = crate::fonts::test_context();
     let picked = std::cell::RefCell::new(Vec::new());
     let open_group = std::cell::Cell::new(None::<&'static str>);
+    let current = std::cell::Cell::new("b1");
     let choices = [
         SearchChoice { value: "a1", label: "Alpha one", tip: "", group: Some("A") },
         SearchChoice { value: "b1", label: "Beta one", tip: "", group: Some("B") },
@@ -425,7 +426,7 @@ fn search_picker_folds_groups_under_their_headers() {
                     id: "search_picker_groups",
                     handles: "grp",
                     current: "Beta one",
-                    current_value: "b1",
+                    current_value: current.get(),
                     hint: "",
                     choices: &choices,
                     custom: false,
@@ -467,6 +468,13 @@ fn search_picker_folds_groups_under_their_headers() {
     open_group.set(Some("C"));
     click("grp");
     assert!(!has("grp:a1") && has("grp:b1") && has("grp:c1"), "C opens as asked, B as the current value's, A folds");
+    frame(&ctx, key(egui::Key::Escape), draw);
+    frame(&ctx, vec![], draw);
+
+    open_group.set(None);
+    current.set("");
+    click("grp");
+    assert!(has("grp:a1") && has("grp:b1") && has("grp:c1"), "nothing to prefer: every group starts open");
     frame(&ctx, key(egui::Key::Escape), draw);
     frame(&ctx, vec![], draw);
 }

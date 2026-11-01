@@ -79,7 +79,9 @@ clicks and scrolling over the panel stay in the chat. The docked layout retains 
   models under their providers, each a header with the count of its models that a click folds or
   opens: the provider of the model in use starts open and the others folded, a search opens every
   provider with a match, and a provider folded by hand stays folded until the picker closes. Models
-  with no provider named are listed under *Other*.
+  with no provider named are listed under *Other*. An endpoint whose listing names its models
+  `Vendor: Model` under ids `vendor/model` (OpenRouter) is grouped by vendor the same way; its rows
+  read the model's name, and the id stays in the tooltip and in the search.
 - **Picking a model.** Every model picker opens on a search box over the list the agent or endpoint
   gave at this connection: SolidCraft has no list of its own. The search covers ids, names and
   descriptions, and Enter takes the exact match or the first one shown. A model that isn't listed

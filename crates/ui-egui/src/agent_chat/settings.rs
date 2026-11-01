@@ -130,8 +130,8 @@ fn listing_wants_retry(listing: Option<&Result<Vec<acp::ModelInfo>, String>>) ->
 }
 
 /// `models` as a model picker's rows: the id chooses, the endpoint's name for it is searched too.
-fn model_choices(models: &[acp::ModelInfo]) -> Vec<ui_kit::SearchChoice<'_>> {
-    models.iter().map(|m| ui_kit::SearchChoice { value: &m.id, label: &m.name, tip: &m.description, group: None }).collect()
+fn model_choices<'a>(models: &'a [acp::ModelInfo], rows: &'a [(String, Option<String>, String)]) -> Vec<ui_kit::SearchChoice<'a>> {
+    models.iter().zip(rows).map(|(m, (label, group, tip))| ui_kit::SearchChoice { value: &m.id, label, tip, group: group.as_deref() }).collect()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -707,7 +707,8 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                     listed_for(&chat.settings.endpoint_models, key.as_ref())
                                 };
                                 let listed = !models.is_empty();
-                                let choices = model_choices(models);
+                                let rows = super::model_rows(models);
+                                let choices = model_choices(models, &rows);
                                 let id = format!("sc_ai_model:{}", entry.id);
                                 let handles = format!("prefs:ai_model:{}", entry.id);
                                 let picker = ui_kit::search_picker(
@@ -969,7 +970,8 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                     });
                     ui_kit::row(ui, tr("ui.ai_model"), |ui| {
                         let (models, note) = listed_for(&app.agent_chat.settings.endpoint_models, s.listing.as_ref());
-                        let choices = model_choices(models);
+                        let rows = super::model_rows(models);
+                        let choices = model_choices(models, &rows);
                         let current = if s.model.is_empty() { tr("ui.agent_chat_choose_model") } else { s.model.as_str() };
                         let picker = ui_kit::search_picker(
                             ui,
@@ -1590,6 +1592,7 @@ mod card_tests {
         h.step(&json!({"click":{"handle":"ai_add:model"}})).unwrap();
         h.frames(3);
         assert!(scenario::handle_at("ai_add:model:search").is_some());
+        assert!(scenario::handle_at("ai_add:model:group:Vendor").is_some(), "an endpoint's vendors are the groups");
         h.step(&json!({"click":{"handle":"ai_add:model:vendor/big"}})).unwrap();
         h.frames(3);
         assert_eq!(h.app.agent_chat.settings.add.as_ref().unwrap().model, "vendor/big");

@@ -1114,13 +1114,13 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
             // current model's provider open.
             let list = grouped_models(app);
             let open = shown_provider(app).filter(|_| !providers.is_empty());
-            let cur =
-                list.iter().find(|(m, _, _)| m.id == app.agent_chat.model).map_or_else(|| app.agent_chat.model.clone(), |(_, name, _)| name.clone());
-            let width = if providers.is_empty() { t.form_label_width } else { picker_width(ui, &cur) };
-            let choices: Vec<ui_kit::SearchChoice<'_>> = list
+            let cur = list
                 .iter()
-                .map(|(m, name, group)| ui_kit::SearchChoice { value: &m.id, label: name, tip: &m.description, group: group.as_deref() })
-                .collect();
+                .find(|(m, _, _, _)| m.id == app.agent_chat.model)
+                .map_or_else(|| app.agent_chat.model.clone(), |(_, name, _, _)| name.clone());
+            let width = if providers.is_empty() { t.form_label_width } else { picker_width(ui, &cur) };
+            let choices: Vec<ui_kit::SearchChoice<'_>> =
+                list.iter().map(|(m, name, group, tip)| ui_kit::SearchChoice { value: &m.id, label: name, tip, group: group.as_deref() }).collect();
             let custom = custom_models_accepted(app);
             let picker = ui
                 .allocate_ui(vec2(width, t.control_height), |ui| {

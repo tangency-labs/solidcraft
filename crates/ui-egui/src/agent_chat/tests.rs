@@ -1400,6 +1400,35 @@ fn models_reply(current: &str) -> Event {
     Event::Models { current: current.into(), available: vec![m("fast"), m("smart")] }
 }
 
+/// An endpoint's listing whose ids read `vendor/model` and whose names (the descriptions here) read
+/// `Vendor: Model`, as OpenRouter's, names its providers; the rows then read the model's name with
+/// the id as the tooltip. One vendor is one flat list.
+#[test]
+fn an_endpoints_vendor_named_listing_names_its_providers() {
+    let m = |id: &str, description: &str| acp::ModelInfo { id: id.into(), name: id.into(), description: description.into() };
+    assert_eq!(model_provider(&m("openai/gpt-6.1-terra", "OpenAI: GPT-6.1 Terra")), Some(("OpenAI".into(), "GPT-6.1 Terra".into())));
+    assert_eq!(model_provider(&m("openai/gpt-6.1-terra", "OpenAI: GPT-6.1 Terra\nmore")), Some(("OpenAI".into(), "GPT-6.1 Terra".into())));
+    assert_eq!(model_provider(&m("gpt-6.1-terra", "OpenAI: GPT-6.1 Terra")), None, "no vendor in the id");
+    assert_eq!(model_provider(&m("openai/gpt-6.1-terra", "OpenAI: ")), None, "no name");
+    assert_eq!(model_provider(&m("openai/gpt-6.1-terra", "")), None);
+    assert_eq!(
+        model_provider(&m("openai/gpt-6.1-terra", "Provider: Host • current")),
+        Some(("Host".into(), "openai/gpt-6.1-terra".into())),
+        "an agent's own word first"
+    );
+    let rows = model_rows(&[m("openai/gpt-6.1-terra", "OpenAI: GPT-6.1 Terra"), m("qwen/qwen3.8-flash", "Qwen: Qwen3.8 Flash"), m("free-model", "")]);
+    assert_eq!(
+        rows,
+        [
+            ("GPT-6.1 Terra".to_string(), Some("OpenAI".to_string()), "openai/gpt-6.1-terra".to_string()),
+            ("Qwen3.8 Flash".to_string(), Some("Qwen".to_string()), "qwen/qwen3.8-flash".to_string()),
+            ("free-model".to_string(), Some(tr("ui.agent_chat_provider_other").to_string()), String::new()),
+        ]
+    );
+    let rows = model_rows(&[m("openai/gpt-6.1-terra", "OpenAI: GPT-6.1 Terra"), m("openai/gpt-5.6-luna", "OpenAI: GPT-5.6 Luna")]);
+    assert_eq!(rows[0], ("openai/gpt-6.1-terra".to_string(), None, "OpenAI: GPT-6.1 Terra".to_string()), "one vendor is one flat list");
+}
+
 /// Models from several providers fold under their providers inside the picker: the current model's
 /// provider is open and the others folded; a header opens or folds its group; a typed search opens
 /// every group with a match but one folded by hand; the provider asked for over the control channel

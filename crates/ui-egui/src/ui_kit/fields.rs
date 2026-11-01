@@ -286,8 +286,8 @@ pub(crate) struct SearchPicker<'a> {
     /// A dim line under the list: still listing, or why it could not.
     pub note: Option<&'a str>,
     /// With two or more groups, each folds under its header. Before anything is typed, only the
-    /// current value's group and this one are open; a group with a match opens once something is
-    /// typed; a fold made by hand stays until the popup closes.
+    /// current value's group and this one are open (every group, when neither names one); a group
+    /// with a match opens once something is typed; a fold made by hand stays until the popup closes.
     pub open_group: Option<&'a str>,
     pub enabled: bool,
 }
@@ -398,7 +398,10 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
     let grouped = search_groups(p.choices).iter().filter(|(group, _)| group.is_some()).count() >= 2;
     let folds: SearchFolds = ui.data(|data| data.get_temp(folds_id)).unwrap_or_default();
     let current_group = p.choices.iter().find(|c| c.value == p.current_value).and_then(|c| c.group).filter(|g| !g.is_empty());
-    let is_open = |group: &str| folds.get(group).copied().unwrap_or(!query.is_empty() || Some(group) == p.open_group || Some(group) == current_group);
+    let nothing_preferred = p.open_group.is_none() && current_group.is_none();
+    let is_open = |group: &str| {
+        folds.get(group).copied().unwrap_or(!query.is_empty() || nothing_preferred || Some(group) == p.open_group || Some(group) == current_group)
+    };
     let rows = search_rows(&visible, grouped, &is_open);
     let shown: Vec<&SearchChoice<'_>> = rows.iter().filter_map(|row| if let SearchRow::Choice(c) = row { Some(*c) } else { None }).collect();
     let custom = (p.custom && !typed.is_empty() && !p.choices.iter().any(|c| c.value == typed)).then_some(typed);
