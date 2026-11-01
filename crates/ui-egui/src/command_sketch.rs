@@ -1,8 +1,9 @@
 //! A new sketch drawn from inside a feature's dialog (#6383). New Sketch (or a click on an
 //! origin or construction plane while the profiles are still empty) puts the dialog aside and
-//! opens a sketch; finishing or cancelling the sketch brings the dialog back, with every profile
-//! of the new sketch picked. OK makes the sketch and the feature one undo step; Cancel leaves
-//! the design and its undo history as they were before New Sketch.
+//! opens a sketch; finishing or cancelling the sketch brings the dialog back, with the new
+//! sketch's profile picked when it has only one (with more, the user picks). OK makes the sketch
+//! and the feature one undo step; Cancel leaves the design and its undo history as they were
+//! before New Sketch.
 //!
 //! The sketch stays a timeline entry of its own and the feature's command runs as from any other
 //! sketch: only the dialog and the undo history know the two were made together. A dialog kind
@@ -156,7 +157,8 @@ pub fn closed(app: &mut SolveApp, applied: bool) {
     }
 }
 
-/// The waiting dialog again, with the profiles of the sketch just made picked. With no new
+/// The waiting dialog again, with the profile of the sketch just made picked when it has only
+/// one: with more, nothing is picked, so the user chooses which to use. With no new
 /// sketch at all (it was cancelled), the design and history go back to before New Sketch, so
 /// nothing of it is left to undo.
 fn resume(app: &mut SolveApp) {
@@ -172,9 +174,9 @@ fn resume(app: &mut SolveApp) {
         inline.checkpoint = app.session.checkpoint();
     }
     if let Some(sketch) = made {
-        let picked = drawn_profiles(app, sketch);
+        let profiles = app.session.world_state().sketch(sketch).map_or(0, |ss| ss.profiles.len());
         if let Some(input) = d.inputs.get_mut(inline.input) {
-            input.items = picked.into_iter().map(|index| Sel::Profile { sketch, index }).collect();
+            input.items = if profiles == 1 { vec![Sel::Profile { sketch, index: 0 }] } else { Vec::new() };
         }
         d.profile_selection_changed = true;
         d.error = None;
@@ -184,17 +186,6 @@ fn resume(app: &mut SolveApp) {
     d.focus = true;
     app.dialog = Some(d);
     app.inline_sketch = Some(inline);
-}
-
-/// The profiles of `sketch` to pick: those whose outer boundary has a curve drawn in it, so the
-/// face a sketch was started on (its outline projected there) is not extruded with them, also
-/// not as the ring around a shape drawn inside it; every profile when none has one.
-fn drawn_profiles(app: &SolveApp, sketch: u64) -> Vec<usize> {
-    let state = app.session.world_state();
-    let Some(ss) = state.sketch(sketch) else { return Vec::new() };
-    let drawn = |id: &String| ss.sketch.curve_index(id).is_some_and(|ci| !ss.sketch.is_linked_curve(ci) || ss.sketch.is_text_curve(ci));
-    let own: Vec<usize> = ss.profiles.iter().enumerate().filter(|(_, p)| p.outer_curves.iter().any(drawn)).map(|(i, _)| i).collect();
-    if own.is_empty() { (0..ss.profiles.len()).collect() } else { own }
 }
 
 /// Let go of the flow, keeping the design as it is.

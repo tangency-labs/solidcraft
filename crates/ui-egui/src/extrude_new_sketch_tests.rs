@@ -1,5 +1,6 @@
 //! New Sketch from inside Extrude (#6383): the dialog waits while its sketch is drawn, comes
-//! back with the sketch's profiles picked, and OK makes the sketch and the extrude one undo step;
+//! back with the sketch's profile picked when it has only one (none when it has more), and OK
+//! makes the sketch and the extrude one undo step;
 //! Cancel leaves the design and its undo history as they were. Scripts are not affected.
 use std::sync::Arc;
 
@@ -63,16 +64,20 @@ fn ok(h: &mut Harness) {
 }
 
 #[test]
-fn new_sketch_comes_back_with_its_profiles_and_ok_is_one_undo_step() {
+fn new_sketch_with_two_profiles_comes_back_with_none_picked_and_ok_is_one_undo_step() {
     let mut h = extrude_open();
     let (doc, undo) = (h.app.session.doc.clone(), h.app.session.undo.len());
     sketch_two_squares(&mut h);
     h.app.start("sketch.finish");
     h.frames(3);
     assert!(in_extrude(&h), "Finish Sketch goes back to Extrude");
-    let d = h.app.dialog.as_ref().unwrap();
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty(), "two profiles: the user picks");
     let sketch = h.app.session.doc.features.iter().rev().find(|f| matches!(f.kind, FeatureKind::Sketch { .. })).unwrap().id;
-    assert_eq!(d.inputs[0].items, vec![Sel::Profile { sketch, index: 0 }, Sel::Profile { sketch, index: 1 }], "both profiles picked");
+    for index in [0, 1] {
+        crate::viewport::dialog_pick(&mut h.app, &Hit::Profile { sketch, index }, Sel::Profile { sketch, index });
+    }
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, vec![Sel::Profile { sketch, index: 0 }, Sel::Profile { sketch, index: 1 }]);
     ok(&mut h);
     assert_eq!((sketches(&h), extrudes(&h)), (1, 1), "the sketch and the extrude are their own timeline entries");
     assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
@@ -140,15 +145,15 @@ fn a_plane_clicked_into_empty_profiles_starts_the_sketch_on_it() {
     h.app.start("solid.extrude");
     h.frames(3);
     assert!(h.app.session.active_sketch.is_none() && in_extrude(&h));
-    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1);
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "a sketch with one profile has it picked");
     ok(&mut h);
     assert_eq!((sketches(&h), extrudes(&h)), (1, 1));
 }
 
-/// On a face, the face's outline is projected into the sketch: a circle drawn inside it is the
-/// profile picked, not the ring of the face around it.
+/// On a face, the face's outline is projected into the sketch: a circle drawn inside it and the
+/// ring of the face around it are two profiles, so none is picked.
 #[test]
-fn on_a_face_only_the_drawn_profile_is_picked() {
+fn on_a_face_a_circle_and_the_ring_around_it_leave_the_pick_to_the_user() {
     let mut h = extrude_open();
     click(&mut h, "dialog:new_sketch");
     let top = Vec3::new(42.5, 2.5, 5.0);
@@ -159,16 +164,14 @@ fn on_a_face_only_the_drawn_profile_is_picked() {
     let sketch = h.app.session.active_sketch.expect("the sketch opened on the face");
     let plane = h.app.session.world_state().sketch(sketch).unwrap().plane;
     let c = plane.to_local(top);
-    let made = h.app.run("sketch.circle.center", json!({"center": [c.x, c.y], "radius": 1})).unwrap();
-    let circle = made["created"]["curves"][0].as_str().unwrap().to_string();
+    h.app.run("sketch.circle.center", json!({"center": [c.x, c.y], "radius": 1})).unwrap();
     h.app.start("sketch.finish");
     h.frames(3);
     let state = h.app.session.world_state();
     let profiles = &state.sketch(sketch).unwrap().profiles;
     assert!(profiles.len() >= 2, "the face's outline bounds a profile too: {}", profiles.len());
-    let picked = &h.app.dialog.as_ref().unwrap().inputs[0].items;
-    let [Sel::Profile { index, .. }] = picked.as_slice() else { panic!("{picked:?}") };
-    assert_eq!(profiles[*index].outer_curves, vec![circle]);
+    assert!(in_extrude(&h));
+    assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.is_empty(), "nothing picked for the user");
 }
 
 #[test]

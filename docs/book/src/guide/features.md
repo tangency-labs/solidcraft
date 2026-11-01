@@ -42,8 +42,9 @@ alter operations already saved in a design.
 **A new sketch from inside Extrude.** The Extrude dialog's **New Sketch** button (or a click on
 an origin or construction plane while **Profiles** is still empty) opens a sketch while the
 dialog waits: pick its plane or planar face and draw. **Finish Sketch** (or Extrude's own button
-or shortcut) comes back to the dialog with every profile of the new sketch picked and the
-dialog's other settings as they were; **Cancel Sketch** comes back without it. **OK** makes the
+or shortcut) comes back to the dialog with the dialog's other settings as they were. A sketch
+with one profile has it picked; with more, none is picked and you pick the ones to extrude.
+**Cancel Sketch** comes back without it. **OK** makes the
 sketch and the extrude one undo step; **Cancel** leaves the design and the undo history as they
 were. The sketch is an ordinary timeline entry of its own, and `solid.extrude` is unchanged for
 scripts.
