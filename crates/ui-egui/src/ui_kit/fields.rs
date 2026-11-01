@@ -398,9 +398,7 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
     let grouped = search_groups(p.choices).iter().filter(|(group, _)| group.is_some()).count() >= 2;
     let folds: SearchFolds = ui.data(|data| data.get_temp(folds_id)).unwrap_or_default();
     let current_group = p.choices.iter().find(|c| c.value == p.current_value).and_then(|c| c.group).filter(|g| !g.is_empty());
-    let is_open = |group: &str| {
-        folds.get(group).copied().unwrap_or(!query.is_empty() || Some(group) == p.open_group || Some(group) == current_group)
-    };
+    let is_open = |group: &str| folds.get(group).copied().unwrap_or(!query.is_empty() || Some(group) == p.open_group || Some(group) == current_group);
     let rows = search_rows(&visible, grouped, &is_open);
     let shown: Vec<&SearchChoice<'_>> = rows.iter().filter_map(|row| if let SearchRow::Choice(c) = row { Some(*c) } else { None }).collect();
     let custom = (p.custom && !typed.is_empty() && !p.choices.iter().any(|c| c.value == typed)).then_some(typed);
@@ -512,7 +510,11 @@ enum SearchRow<'a> {
     /// A lone group's dim heading.
     Heading(&'a str),
     /// One of several groups: its header, with how many of its choices are listed, folded or open.
-    Group { name: &'a str, count: usize, open: bool },
+    Group {
+        name: &'a str,
+        count: usize,
+        open: bool,
+    },
     Choice(&'a SearchChoice<'a>),
 }
 

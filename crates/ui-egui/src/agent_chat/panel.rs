@@ -1046,10 +1046,8 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
         );
         let models = !modern && models_shown(app);
         let providers = if models { model_providers(app) } else { Vec::new() };
-        let w = (ui.available_width()
-            - if modern || app.agent_chat.modes.is_empty() { 4.0 } else { 116.0 }
-            - if models { 146.0 } else { 0.0 })
-        .clamp(90.0, 260.0);
+        let w = (ui.available_width() - if modern || app.agent_chat.modes.is_empty() { 4.0 } else { 116.0 } - if models { 146.0 } else { 0.0 })
+            .clamp(90.0, 260.0);
         let mut picked: Option<String> = None;
         let mut add = false;
         let combo = ui
@@ -1116,7 +1114,8 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
             // current model's provider open.
             let list = grouped_models(app);
             let open = shown_provider(app).filter(|_| !providers.is_empty());
-            let cur = list.iter().find(|(m, _, _)| m.id == app.agent_chat.model).map_or_else(|| app.agent_chat.model.clone(), |(_, name, _)| name.clone());
+            let cur =
+                list.iter().find(|(m, _, _)| m.id == app.agent_chat.model).map_or_else(|| app.agent_chat.model.clone(), |(_, name, _)| name.clone());
             let width = if providers.is_empty() { t.form_label_width } else { picker_width(ui, &cur) };
             let choices: Vec<ui_kit::SearchChoice<'_>> = list
                 .iter()
