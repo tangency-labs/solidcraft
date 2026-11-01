@@ -579,7 +579,7 @@ pub fn take_focus_for_text(popped: bool, over_text: bool, chat_active: Option<bo
     popped && over_text && chat_active == Some(false) && main_active == Some(true)
 }
 
-/// A small drawn button: `kind` is `minimize`, `close`, `newchat`, `stopturn`, `pop_out` or `dock`.
+/// A small drawn button: `kind` is `minimize`, `close`, `newchat`, `export`, `stopturn`, `pop_out` or `dock`.
 fn glyph_button(ui: &mut egui::Ui, kind: &str, tip: &str) -> egui::Response {
     let t = Tokens::get();
     let (r, resp) = ui.allocate_exact_size(vec2(t.form_close_size, t.form_close_size), Sense::click());
@@ -620,6 +620,13 @@ fn glyph_button(ui: &mut egui::Ui, kind: &str, tip: &str) -> egui::Response {
         }
         "stopturn" => {
             ui.painter().rect_filled(Rect::from_center_size(c, vec2(9.0, 9.0)), 1.5, t.error);
+        }
+        "export" => {
+            // An arrow leaving downward into a tray: save the conversation out.
+            p.line_segment([c + vec2(0.0, -5.0), c + vec2(0.0, 1.5)], s);
+            p.line_segment([c + vec2(-2.5, -1.0), c + vec2(0.0, 1.5)], s);
+            p.line_segment([c + vec2(2.5, -1.0), c + vec2(0.0, 1.5)], s);
+            p.line_segment([c + vec2(-5.0, 5.0), c + vec2(5.0, 5.0)], s);
         }
         _ => {}
     }
@@ -729,6 +736,31 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, left: bool) {
                 .clicked()
                 {
                     request_new_chat(app);
+                }
+                // Export the retained conversation: two explicit entries, so including tool
+                // calls is always a deliberate choice before the save dialog (#10677).
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let tip = tr("ui.agent_chat_export");
+                    let menu = ui_kit::Menu::button_with(
+                        ui,
+                        |ui, _| glyph_button(ui, "export", tip),
+                        |ui| {
+                            let mut pick = None;
+                            if crate::context_menu::button(ui, tip, "export").clicked() {
+                                pick = Some(false);
+                                ui.close();
+                            }
+                            if crate::context_menu::button(ui, tr("ui.agent_chat_export_tools"), "export").clicked() {
+                                pick = Some(true);
+                                ui.close();
+                            }
+                            pick
+                        },
+                    );
+                    if let Some(with_tools) = menu.inner.flatten() {
+                        export::start(app, with_tools);
+                    }
                 }
                 #[cfg(not(target_arch = "wasm32"))]
                 {
