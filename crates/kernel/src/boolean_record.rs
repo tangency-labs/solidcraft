@@ -202,8 +202,10 @@ pub(crate) fn heal_prism_result(body: &Body, size: f64, keep: &[Vec<Vec3>], coun
 /// `body` healed as the local modifiers take it (coplanar neighbours as one face, as after a
 /// join; faces split on purpose kept apart), with its history over `[body]`.
 pub(crate) fn healed(body: &Body) -> Result<Body> {
-    let counts = record::counts(&[body]);
-    heal_body(&operand(body, 0, &counts), body.deep_copy(), body.size(), body.split_keep(), &counts)
+    crate::memo::healed(body, || {
+        let counts = record::counts(&[body]);
+        heal_body(&operand(body, 0, &counts), body.deep_copy(), body.size(), body.split_keep(), &counts)
+    })
 }
 
 /// `body` copied as it is, unhealed (`Body::deep_copy`, which keeps its face and edge order),

@@ -1,5 +1,55 @@
 # Design loading
 
+## Pattern copies of fillets and chamfers: work kept per body (#2341, 2026-10-18)
+
+A feature pattern repeats a fillet or chamfer once per copy, each on the whole body built so
+far, and each blend redid work over that whole body. It measured its input and its result
+finely to check that the blend went the right way (`blend_fit::accept`), healed its input up
+to three times, meshed every edge of the body once per picked edge, and every new body searched
+each of its revolved faces for its angle (`rephase_revolved`, a grid search per face). The body
+grows with the copies, so the copies cost about n²: a 42-cell Gridfinity-style baseplate took
+over ten minutes to open, 98 % of it in two patterns of an extrude and two chamfers.
+
+None of this work changes when the body doesn't, and none of it is now done twice:
+
+- A body's measure is kept with its solid, as its volume already was, and clones share it. A
+  copy's result is the next copy's input, so each body is measured once rather than twice. The
+  merged counts follow the split lines, so a clone with other split lines is measured anew.
+- While a blend runs (`memo::scope`, opened by the public fillet and chamfer entry points), its
+  input is healed once, its edges are meshed once per tolerance, and each body it works on is
+  meshed once per tolerance. `Body::contains` meshed the whole body for every point it tested,
+  and a chamfer tests four points per edge on its input. The memo goes when the outermost blend
+  returns, so it keeps no body alive past it.
+- The fine tessellation's edge maps (`refined_with_cache`) are presized, look a key up once
+  rather than twice, and hash an edge by its parameters; lookups still compare every coordinate.
+  The maps are never iterated, so nothing they return depends on the hash.
+- The angle search of a revolved face is remembered by the surface's exact content and the
+  point searched from (up to 8 MiB a thread), so a face carried unchanged into the next body is
+  not searched again.
+
+Each cache returns what the work it replaces returns. On the 119 command scripts, designs and
+oracle recipes in `examples/` and `tests/`, release `solidcraft-cli` builds of `main` and of the
+change give the same measures, the same face and edge names at the same points and the same
+timeline (errors and warnings), bit for bit, for 116. The other three (`07-fillet-all-edges`,
+`37-pyramid-apex-blend`, `closed_sweep_torus_cut`) number their faces differently from one run
+of `main` to the next; their faces, by area and centre, and their names agree between the two
+builds. The meshes a running blend keeps change none of the 116 either (checked the same way on
+`ci` builds with and without them). `crates/kernel/src/mesh_memo_tests.rs` (`once_per_body`) counts what is measured,
+healed, meshed and searched.
+
+Release `solidcraft-cli`, Apple M4 Pro (14 cores, 48 GB), macOS 27, shared with other work
+(load 5–15), three alternating before/after pairs (medians; the baseplate once each):
+
+| Design | Before | After |
+|---|---:|---:|
+| #2341 repro, 4 × 3 bosses (pattern feature) | 12.8 s | 4.3 s |
+| #2341 repro, 6 × 5 bosses (pattern feature) | 58.0 s | 17.2 s |
+| 42-cell baseplate, `bench-open` evaluate | 649 s | 224 s |
+
+Peak memory of the baseplate open goes from 1.18 GB to 1.49 GB: the measures, and the bodies and
+meshes a running blend keeps. What is left is a heal and an orientation mesh of the whole body per copy,
+and the joins of patterns (#2076).
+
 ## Edges made by booleans: each point evaluated once (2026-10-16)
 
 A boolean meshes both operands with truck-meshalgo, which first divides every edge into a

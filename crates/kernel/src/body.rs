@@ -33,10 +33,8 @@ pub struct Body {
     /// `crate::step_in::split`). The display planner takes it only where it is more than its own
     /// bound, a hundredth of the body (see `accept` in [`crate::tess::plan_face`]).
     pub(crate) boundary_tol: Option<f64>,
-    /// The last volume measured for this solid and the tolerance it was measured at, shared by
-    /// clones because they share the solid. A boolean measures its operands, and a later boolean
-    /// takes the result as an operand again, so the same body is measured twice otherwise.
-    pub(crate) volume: Option<std::sync::Arc<std::sync::Mutex<Option<(u64, f64)>>>>,
+    /// What was measured of this solid, shared by clones because they share the solid.
+    pub(crate) cache: Option<std::sync::Arc<SolidCache>>,
     /// Missing-face check from the orientation mesh, reusable at exactly its tolerance.
     pub(crate) coarse_missing: Option<(f64, usize)>,
     /// Set for mesh bodies (`solid` is then empty).
@@ -67,6 +65,18 @@ pub struct Body {
     /// placed copy, which keeps them where they are, need not turn them again: searching every
     /// revolved face of every placed occurrence was most of the time moving an assembly took.
     pub(crate) phased: bool,
+}
+
+/// Measurements of one solid, made once. A boolean measures its operands and a blend checks its
+/// input and its result, and each result is the next operation's input: without this the same
+/// body is measured again and again.
+#[derive(Debug, Default)]
+pub(crate) struct SolidCache {
+    /// The last volume measured and the tolerance it was measured at.
+    volume: std::sync::Mutex<Option<(u64, f64)>>,
+    /// [`crate::measure`] of the body, with the split lines it was measured with: clones share
+    /// the solid but may carry other split lines, which the merged counts follow.
+    pub(crate) measure: std::sync::Mutex<Option<(Option<std::sync::Arc<Vec<Vec<Vec3>>>>, crate::measure::BodyMeasure)>>,
 }
 
 /// The meshes made of one solid (see [`Body::keeping_meshes`]), by tolerance, angle and
@@ -292,6 +302,17 @@ fn refined(pm: &PolygonMesh, surf: &mt::Surface, tol: f64) -> Option<Vec<[(Vec3,
     refined_with_cache(pm, surf, tol, true)
 }
 
+/// An edge between two exact vertices (position, parameters, normal as bits), hashed by the
+/// parameters alone: equal keys still compare every coordinate.
+#[derive(PartialEq, Eq)]
+struct EdgeKey([u64; 8], [u64; 8]);
+
+impl std::hash::Hash for EdgeKey {
+    fn hash<H: std::hash::Hasher>(&self, h: &mut H) {
+        [self.0[3], self.0[4], self.1[3], self.1[4]].hash(h);
+    }
+}
+
 #[allow(clippy::type_complexity)]
 fn refined_with_cache(pm: &PolygonMesh, surf: &mt::Surface, tol: f64, memoize: bool) -> Option<Vec<[(Vec3, Vec3); 3]>> {
     use mt::{ParametricSurface, ParametricSurface3D};
@@ -330,23 +351,25 @@ fn refined_with_cache(pm: &PolygonMesh, surf: &mt::Surface, tol: f64, memoize: b
         values.iter().all(|x| x.is_finite()).then(|| values.map(f64::to_bits))
     };
     let cache_limit = cap * 3;
-    let mut singular_cache = std::collections::HashMap::<(u64, u64), bool>::new();
+    let mut singular_cache = std::collections::HashMap::<(u64, u64), bool>::with_capacity(tris.len().min(cache_limit));
     let mut changed = false;
     for _ in 0..4 {
-        let mut uses: std::collections::HashMap<((i64, i64), (i64, i64)), u32> = std::collections::HashMap::new();
+        let mut uses: std::collections::HashMap<((i64, i64), (i64, i64)), u32> = std::collections::HashMap::with_capacity(tris.len() * 2);
         for [a, b, c] in &tris {
             for e in [ek(a, b), ek(b, c), ek(c, a)] {
                 *uses.entry(e).or_default() += 1;
             }
         }
-        let mut edge_cache = std::collections::HashMap::<([u64; 8], [u64; 8]), Option<V>>::new();
+        let room = if memoize { uses.len().min(cache_limit) } else { 0 };
+        let mut edge_cache = std::collections::HashMap::<EdgeKey, Option<V>>::with_capacity(room);
         let mut at = |a: &V, b: &V| -> Option<V> {
-            let key = if memoize { vertex_key(a).zip(vertex_key(b)).map(|(a, b)| if a < b { (a, b) } else { (b, a) }) } else { None };
-            if let Some(key) = key
-                && let Some(value) = edge_cache.get(&key)
-            {
-                return *value;
-            }
+            let key = if memoize { vertex_key(a).zip(vertex_key(b)).map(|(a, b)| if a < b { EdgeKey(a, b) } else { EdgeKey(b, a) }) } else { None };
+            let room = edge_cache.len() < cache_limit;
+            let slot = match key.map(|key| edge_cache.entry(key)) {
+                Some(std::collections::hash_map::Entry::Occupied(e)) => return *e.get(),
+                Some(std::collections::hash_map::Entry::Vacant(e)) => Some(e),
+                None => None,
+            };
             let mut calculate = || -> Option<V> {
                 if uses.get(&ek(a, b)).copied().unwrap_or(0) < 2 {
                     return None;
@@ -386,11 +409,11 @@ fn refined_with_cache(pm: &PolygonMesh, surf: &mt::Surface, tol: f64, memoize: b
                 Some((q, (u, v), n))
             };
             let value = calculate();
-            if let Some(key) = key
-                && edge_cache.len() < cache_limit
+            if let Some(slot) = slot
+                && room
                 && value.is_none_or(|v| vertex_key(&v).is_some())
             {
-                edge_cache.insert(key, value);
+                slot.insert(value);
             }
             value
         };
@@ -426,7 +449,7 @@ fn refined_with_cache(pm: &PolygonMesh, surf: &mt::Surface, tol: f64, memoize: b
 /// or 2π, which confuses the boolean's loop projection. Each revolved face's surface is turned
 /// (same geometry) so the face sits around angle π, well away from the wrap.
 fn rephase_revolved(solid: Solid) -> Solid {
-    use mt::{BoundedCurve, ParametricCurve, SearchNearestParameter};
+    use mt::{BoundedCurve, ParametricCurve};
     #[cfg(test)]
     REPHASED.with(|n| n.set(n.get() + 1));
     let r = guard("rephase", || {
@@ -453,7 +476,7 @@ fn rephase_revolved(solid: Solid) -> Solid {
                         }
                     }
                 }
-                let Some((_, v)) = surf.search_nearest_parameter(p3(acc / n.max(1.0)), None, 100) else {
+                let Some((_, v)) = revolved_nearest(&surf, p3(acc / n.max(1.0))) else {
                     faces.push(f.clone());
                     continue;
                 };
@@ -491,6 +514,49 @@ fn rephase_revolved(solid: Solid) -> Solid {
         Ok(Some(s)) => s,
         _ => solid,
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Revolved faces searched on this thread, not taken from the memo (tests count them).
+    pub(crate) static SEARCHED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The nearest parameters of `p` on `surf`, searched without a hint, remembered by the
+/// surface's exact content and the point: every new body checks each revolved face it has, and
+/// most come unchanged from the operation's input.
+fn revolved_nearest(surf: &mt::Surface, p: mt::Point3) -> Option<(f64, f64)> {
+    use mt::SearchNearestParameter;
+    type Seen = std::collections::HashMap<(Vec<u8>, [u64; 3]), Option<(f64, f64)>>;
+    /// Bytes of surface content remembered at most.
+    const KEEP: usize = 8 << 20;
+    thread_local! {
+        static SEEN: std::cell::RefCell<(Seen, usize)> = std::cell::RefCell::new((Seen::new(), 0));
+    }
+    let search = || surf.search_nearest_parameter(p, None, 100);
+    // A non-finite number is written as null: such a surface is searched each time.
+    let Ok(mut content) = serde_json::to_vec(surf) else { return search() };
+    if content.windows(4).any(|w| w == b"null") {
+        return search();
+    }
+    content.shrink_to_fit();
+    let key = (content, [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]);
+    if let Some(hit) = SEEN.with(|s| s.borrow().0.get(&key).copied()) {
+        return hit;
+    }
+    #[cfg(test)]
+    SEARCHED.with(|n| n.set(n.get() + 1));
+    let found = search();
+    SEEN.with(|s| {
+        let (seen, bytes) = &mut *s.borrow_mut();
+        if *bytes + key.0.len() > KEEP {
+            seen.clear();
+            *bytes = 0;
+        }
+        *bytes += key.0.len();
+        seen.insert(key, found);
+    });
+    found
 }
 
 pub(crate) fn p3(v: Vec3) -> mt::Point3 {
@@ -658,7 +724,7 @@ impl Body {
             solid: std::sync::Arc::new(solid),
             size: if span.is_finite() && span > 0.0 { span } else { 0.0 },
             boundary_tol: None,
-            volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
+            cache: Some(std::sync::Arc::default()),
             coarse_missing: Some((tol, missing)),
             mesh: None,
             color: None,
@@ -700,7 +766,7 @@ impl Body {
             solid: std::sync::Arc::new(solid),
             size: if span.is_finite() && span > 0.0 { span } else { 0.0 },
             boundary_tol: None,
-            volume: Some(std::sync::Arc::new(std::sync::Mutex::new(None))),
+            cache: Some(std::sync::Arc::default()),
             coarse_missing: coarse,
             mesh: None,
             color: None,
@@ -1176,16 +1242,16 @@ impl Body {
     pub fn volume_at(&self, tol: f64) -> Option<f64> {
         let key = if tol.is_finite() && tol > 0.0 { tol } else { 0.05 };
         let key = key.to_bits();
-        if let Some(cell) = &self.volume
-            && let Ok(cached) = cell.lock()
+        if let Some(cache) = &self.cache
+            && let Ok(cached) = cache.volume.lock()
             && let Some((cached_tol, volume)) = *cached
             && cached_tol == key
         {
             return Some(volume);
         }
         let volume = self.tessellate(f64::from_bits(key)).ok()?.measure().volume;
-        if let Some(cell) = &self.volume
-            && let Ok(mut slot) = cell.lock()
+        if let Some(cache) = &self.cache
+            && let Ok(mut slot) = cache.volume.lock()
         {
             *slot = Some((key, volume));
         }
@@ -1230,20 +1296,28 @@ impl Body {
     /// [`Body::tessellate_with`] in which no facet turns more than `angle` radians either
     /// (infinite: the chord tolerance alone).
     fn tessellate_within(&self, tol: f64, angle: f64, refine: bool) -> Result<Mesh> {
+        self.mesh_within(tol, angle, refine).map(|m| (*m).clone())
+    }
+
+    /// [`Body::tessellate_within`], shared: kept with the body when it keeps its meshes
+    /// ([`Body::keeping_meshes`]), else made once per body and settings while a blend runs.
+    fn mesh_within(&self, tol: f64, angle: f64, refine: bool) -> Result<std::sync::Arc<Mesh>> {
         let mesh = || crate::profile::timed(crate::profile::Kind::Tessellate, || self.tessellate_within_untimed(tol, angle, refine));
         let memo = self.meshes.as_ref().filter(|m| std::sync::Arc::ptr_eq(&m.solid, &self.solid));
         // Held while meshing: threads asking for the same mesh wait for it rather than make it too.
-        let Some(Ok(mut made)) = memo.map(|m| m.made.lock()) else { return mesh() };
-        let key = (tol.to_bits(), angle.to_bits(), refine);
-        if let Some((_, m)) = made.iter().find(|(k, _)| *k == key) {
-            return Ok(Mesh::clone(m));
+        if let Some(Ok(mut made)) = memo.map(|m| m.made.lock()) {
+            let key = (tol.to_bits(), angle.to_bits(), refine);
+            if let Some((_, m)) = made.iter().find(|(k, _)| *k == key) {
+                return Ok(m.clone());
+            }
+            let m = std::sync::Arc::new(mesh()?);
+            if made.len() >= MEMO_MESHES {
+                made.remove(0);
+            }
+            made.push((key, m.clone()));
+            return Ok(m);
         }
-        let m = mesh()?;
-        if made.len() >= MEMO_MESHES {
-            made.remove(0);
-        }
-        made.push((key, std::sync::Arc::new(m.clone())));
-        Ok(m)
+        crate::memo::mesh(self, [tol.to_bits(), angle.to_bits(), u64::from(refine)], mesh)
     }
 
     /// A copy of this body that keeps the meshes made of it for reuse, for as long as the copy
@@ -1612,15 +1686,22 @@ impl Body {
 
     /// Edges with polylines (index = position in [`Body::tessellate`]'s `edges`).
     pub fn edges(&self, tol: f64) -> Result<Vec<EdgeInfo>> {
-        let m = self.tessellate(tol)?;
-        Ok(m.edges
-            .into_iter()
-            .enumerate()
-            .map(|(index, points)| {
-                let (mid, length) = polyline_mid(&points);
-                EdgeInfo { index, points, mid, length }
-            })
-            .collect())
+        self.shared_edges(tol).map(|e| std::sync::Arc::try_unwrap(e).unwrap_or_else(|e| e.as_ref().clone()))
+    }
+
+    /// [`Body::edges`], made once while a blend runs.
+    fn shared_edges(&self, tol: f64) -> Result<std::sync::Arc<Vec<EdgeInfo>>> {
+        crate::memo::edges(self, tol, || {
+            let m = self.tessellate(tol)?;
+            Ok(m.edges
+                .into_iter()
+                .enumerate()
+                .map(|(index, points)| {
+                    let (mid, length) = polyline_mid(&points);
+                    EdgeInfo { index, points, mid, length }
+                })
+                .collect())
+        })
     }
 
     /// Edges `indices` (as in [`Body::tessellate`]'s `edges`) in `plane`'s coordinates,
@@ -1681,9 +1762,9 @@ impl Body {
 
     /// Index of the edge closest to `p` (by polyline distance).
     pub fn nearest_edge(&self, p: Vec3, tol: f64) -> Result<Option<(usize, f64)>> {
-        let edges = self.edges(tol)?;
+        let edges = self.shared_edges(tol)?;
         let mut best: Option<(usize, f64)> = None;
-        for e in &edges {
+        for e in edges.iter() {
             for w in e.points.windows(2) {
                 if let (Some(a), Some(b)) = (w.first(), w.get(1)) {
                     let d = p.dist_to_segment(*a, *b);
@@ -1698,7 +1779,7 @@ impl Body {
 
     /// Is the point inside the solid?
     pub fn contains(&self, p: Vec3) -> bool {
-        self.tessellate(self.size() * 2e-3).map(|m| m.contains(p)).unwrap_or(false)
+        self.mesh_within(self.size() * 2e-3, f64::INFINITY, false).map(|m| m.contains(p)).unwrap_or(false)
     }
 
     /// B-rep faces (a mesh body is one face; [`crate::measure`] counts its triangles).
