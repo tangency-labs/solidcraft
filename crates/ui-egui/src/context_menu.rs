@@ -1102,6 +1102,23 @@ fn explode_text(app: &SolveApp) -> Option<Item> {
     Some(cmd(app, "sketch.break_link", "Explode Text").with(json!({ "link": link })))
 }
 
+/// Break Link (#10417): projected geometry among the selection (a model edge or vertex, another
+/// sketch's curve) becomes normal sketch geometry, which Trim, drags and dimensions change like
+/// any other. Messages already send people here ("use Break Link on it"); text has Explode Text.
+fn break_link(app: &SolveApp, sk: &solidcraft_engine::sketch::Sketch, ents: &[String]) -> Option<Item> {
+    let projected = |link: Option<&String>| {
+        link.and_then(|l| sk.link(l)).is_some_and(|l| !matches!(l.source, solidcraft_engine::sketch::LinkSource::Text { .. }))
+    };
+    let linked: Vec<&str> = ents
+        .iter()
+        .filter_map(|id| match sk.curves.iter().find(|c| &c.id == id) {
+            Some(c) => projected(c.link.as_ref()).then_some(c.id.as_str()),
+            None => sk.resolve_point(id).and_then(|i| sk.points.get(i)).filter(|p| projected(p.link.as_ref())).map(|p| p.id.as_str()),
+        })
+        .collect();
+    (!linked.is_empty()).then(|| cmd(app, "sketch.break_link", "Break Link").with(json!({ "entities": linked })))
+}
+
 fn alignment_items(selection: &[Sel]) -> Vec<Item> {
     let Some(points) = crate::selection::alignment_points(selection) else { return Vec::new() };
     vec![
@@ -1205,6 +1222,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "sketch.edit_text", "Edit Text"));
         v.extend(explode_text(app));
     }
+    v.extend(break_link(app, &ss.sketch, &ents));
     if let Some(curve) = crate::sketch_modify_ui::selected_equation(app) {
         v.push(act("ui.editEquationCurve", "Edit Equation Curve", "equation_curve").with(json!({ "curve": curve })));
     }
