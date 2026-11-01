@@ -3712,6 +3712,31 @@ fn full_detail_preview_source_can_exceed_legacy_128_mib_without_mesh_reduction()
     assert!(maximum.add(true, false, MAX_GEOMETRY_BYTES / (3 * crate::gpu::PBR_SIZE) + 1, MAX_GEOMETRY_BYTES).is_err());
 }
 
+/// The product scene is extracted again only when what it shows can change: a selection or a
+/// view change keeps its signature (they extracted every body and built every vertex again),
+/// an appearance edit, hiding a body or a geometry edit changes it.
+#[test]
+fn product_preview_signature_follows_what_the_preview_shows() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    let body = h.app.session.world_state().bodies[0].name.clone();
+    let first = preview_signature(&mut h.app);
+    assert_eq!(preview_signature(&mut h.app), first, "nothing changed");
+    h.app.run("select.set", json!({"items": [{"type": "body", "name": &body}]})).unwrap();
+    assert_eq!(preview_signature(&mut h.app), first, "a selection");
+    h.app.run("select.clear", json!({})).unwrap();
+    let _ = h.call("ui.view", json!({"view": "top"}));
+    assert_eq!(preview_signature(&mut h.app), first, "a view change");
+    h.app.run("appearance.assign", json!({"bodies": [&body], "color": "#336699"})).unwrap();
+    let painted = preview_signature(&mut h.app);
+    assert_ne!(painted, first, "an appearance edit");
+    h.app.run("browser.visibility", json!({"items": [&body], "visible": false})).unwrap();
+    assert_ne!(preview_signature(&mut h.app), painted, "hiding a body");
+    h.app.run("browser.visibility", json!({"items": [&body], "visible": true})).unwrap();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0], "operation": "new"})).unwrap();
+    assert_ne!(preview_signature(&mut h.app), painted, "a geometry edit");
+}
+
 #[test]
 fn refused_product_capture_is_cached_until_identity_changes_or_explicit_retry() {
     let mut h = Harness::new();
