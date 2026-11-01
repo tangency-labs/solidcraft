@@ -115,6 +115,8 @@ frame_member
 frame_member_sketch
   sketches: [1, 2]
   remap_refs: path_sketch, profile.sketch
+frame_plate
+  remap_refs: member.feature, plane.base.base.feature
 emboss
   sketches: [1]
   remap_refs: sketch

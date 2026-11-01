@@ -506,6 +506,12 @@ Some translations show the clash today: Japanese and Chinese show a hole's flat 
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the
 Normal line type as "normal vector".
 
+## Mounting plate
+
+A separate, constant-thickness plate attached to a structural member's planar face,
+used as a base plate or bolted end plate. A bolt pattern describes the through holes
+in the plate; creating one does not drill or join the supporting member.
+
 ## Two commands, one label
 
 A label names one command. Today two pairs share one:

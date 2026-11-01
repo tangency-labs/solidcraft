@@ -498,7 +498,10 @@ pub(super) fn build(
         {
             face.author_path = cloned_path(source, &face.author_path, component, &clone_path, &occurrences)?;
         }
-        if let (FeatureKind::Sketch { plane, .. }, FeatureKind::Sketch { plane: old_plane, .. }) = (&mut f.kind, &old.kind)
+        if let (
+            FeatureKind::Sketch { plane, .. } | FeatureKind::FramePlate { plane, .. },
+            FeatureKind::Sketch { plane: old_plane, .. } | FeatureKind::FramePlate { plane: old_plane, .. },
+        ) = (&mut f.kind, &old.kind)
             && let (Some(anchor), Some(original)) = (super::sketch::face::anchor_mut(plane), super::sketch::face::anchor(old_plane))
         {
             if bodies.contains_key(&original.target.body) {
@@ -641,7 +644,7 @@ pub(super) fn build(
                 }
             }
         }
-        if let FeatureKind::Sketch { plane, .. } = &feature.kind
+        if let FeatureKind::Sketch { plane, .. } | FeatureKind::FramePlate { plane, .. } = &feature.kind
             && let Some(anchor) = super::sketch::face::anchor(plane)
             && !bodies.contains_key(&anchor.target.body)
         {

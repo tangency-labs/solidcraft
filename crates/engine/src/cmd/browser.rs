@@ -996,7 +996,7 @@ fn replace_body_name(v: &mut Value, old: &str, new: &str, names_body: bool, dept
 
 /// A frame member feature's bodies by line id, as its own result made them: what pins each
 /// member's name to its line. `None` for any other feature, or when they don't pair up.
-fn member_pins(s: &Session, fid: u64) -> Option<BTreeMap<String, String>> {
+pub(super) fn member_pins(s: &Session, fid: u64) -> Option<BTreeMap<String, String>> {
     let f = s.doc.feature(fid)?;
     let result = s.model.result(fid)?;
     let lines = solidcraft_doc::frame::member_line_ids(&result.state, &f.kind).ok()?;
@@ -1129,6 +1129,14 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
                     link.face_name = Some(anchor.target.name.clone());
                 }
             }
+        }
+        if let FeatureKind::FramePlate { plane, .. } = &mut f.kind
+            && let Some(anchor) = super::sketch::face::anchor_mut(plane)
+            && anchor.target.body == old
+        {
+            let ids = std::collections::BTreeMap::from([(anchor.target.origin_feature, anchor.target.origin_feature)]);
+            let bodies = std::collections::BTreeMap::from([(old.clone(), name.to_string())]);
+            anchor.remap_target(&ids, &bodies)?;
         }
         let Ok(mut v) = serde_json::to_value(&f.kind) else { continue };
         if replace_body_name(&mut v, &old, name, false, 0) {

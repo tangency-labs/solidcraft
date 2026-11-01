@@ -240,6 +240,21 @@ frame_member
     Rotation = frame_member.angle (Angle)
   expressions: 40, 3, 40, frame_member.angle
 frame_member_sketch
+frame_plate
+  inputs:
+    Angle = plate.angle (Angle)
+    Offset = plate.offset (Length)
+    Width = plate.width (Length)
+    Height = plate.height (Length)
+    Hole Diameter = plate.hole (Length)
+    Bolt Circle Diameter = plate.pitch (Length)
+    Bolt Pattern Angle = plate.hole_angle (Angle)
+    Thickness = plate.thickness (Length)
+    Offset = plate.offset (Length)
+    X Offset = plate.x (Length)
+    Y Offset = plate.y (Length)
+    Rotation = plate.angle (Angle)
+  expressions: plate.angle, plate.offset, plate.width, plate.height, plate.hole, plate.pitch, plate.hole_angle, plate.thickness, plate.offset, plate.x, plate.y, plate.angle
 emboss
   inputs:
     Depth = emboss.depth (Length)

@@ -125,6 +125,7 @@ flat	false
 fold	false
 folder	false
 frame_member	false
+frame_plate	false
 gear	false
 graph	false
 grid	false
