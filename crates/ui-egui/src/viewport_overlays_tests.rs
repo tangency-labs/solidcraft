@@ -73,6 +73,7 @@ fn section_details_live_fields_reconstruct_arbitrary_plane_without_losing_compan
     assert_eq!(params["flip"], !current_flip);
     h.app.run("inspect.section", params).unwrap();
     assert!((h.app.session.section.unwrap().1 - flipped.1).len() < 1e-9);
+    assert_eq!(h.app.session.doc.section_analyses.items.len(), 1, "the card changes the section shown, it never adds one (#3977)");
 }
 
 #[test]
@@ -1868,7 +1869,8 @@ fn section_status_preserves_legacy_three_items_and_dialog_escape_ownership() {
         let item = crate::viewport_status::presentation(&h.app, effect).unwrap();
         assert!(crate::scenario::rect_of(&format!("viewport_status:{}:item", item.id)).is_some());
     }
-    crate::dialogs::edit_section(&mut h.app);
+    let shown = h.app.session.doc.section_analyses.shown.unwrap();
+    crate::dialogs::edit_section(&mut h.app, shown);
     h.frames(3);
     let cut = h.app.session.section;
     h.step(&json!({"key":"Escape"})).unwrap();

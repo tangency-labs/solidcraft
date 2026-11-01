@@ -1685,7 +1685,8 @@ fn measure_items() {
     assert!(s.execute("inspect.measure", &json!({"items": [{"type": "nonsense"}]})).is_err());
 }
 
-/// Section Analysis sets and clears the view cut without touching the design or history.
+/// Section Analysis sets and clears the view cut. Each section is kept in the design and is an
+/// undo step (#3977); the model is not touched.
 #[test]
 fn section_analysis() {
     let mut s = Session::default();
@@ -1719,8 +1720,262 @@ fn section_analysis() {
     assert!(s.execute("inspect.section", &json!({"plane": "XZ", "at": 1, "offset": 1})).is_err());
     assert!(s.execute("inspect.section", &json!({"plane": {"normal": [0, 1, 0]}, "at": 1})).is_err());
     run(&mut s, "inspect.section", json!({"clear": true}));
-    assert!(Arc::ptr_eq(&doc, &s.doc));
-    assert_eq!(s.undo.len(), undo);
+    assert!(s.section.is_none());
+    // Nine sections made (two refused), two clears: each an undo step, and the features alone.
+    assert_eq!(s.doc.section_analyses.items.len(), 9);
+    assert_eq!(s.doc.section_analyses.shown, None);
+    assert_eq!(s.undo.len(), undo + 11);
+    assert_eq!(s.doc.features, doc.features);
+}
+
+fn section_names(s: &Session) -> Vec<String> {
+    s.doc.section_analyses.items.iter().map(|x| x.name.clone()).collect()
+}
+
+/// A design keeps any number of Section Analyses, named Section 1, 2, …; only one is shown,
+/// showing another hides it, the folder's eye hides and brings back the one shown, and they are
+/// renamed and deleted one by one (#3977).
+#[test]
+fn several_section_analyses_one_shown_at_a_time() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    let a = run(&mut s, "inspect.section", json!({"plane": "XY", "offset": 5}))["id"].as_u64().unwrap();
+    let b = run(&mut s, "inspect.section", json!({"plane": "XZ", "offset": 10}))["id"].as_u64().unwrap();
+    let c = run(&mut s, "inspect.section", json!({"plane": "YZ", "at": 3, "name": "Middle"}))["id"].as_u64().unwrap();
+    assert_eq!(section_names(&s), ["Section 1", "Section 2", "Middle"]);
+    assert_eq!(s.doc.section_analyses.shown, Some(c), "a new section is shown");
+    assert!((s.section.unwrap().0.x - 3.0).abs() < 1e-12);
+    // A name is the next free number, counted on from the sections there are.
+    let d = run(&mut s, "inspect.section", json!({"plane": "XY"}))["id"].as_u64().unwrap();
+    assert_eq!(section_names(&s).last().map(String::as_str), Some("Section 4"));
+    assert!(s.execute("inspect.section", &json!({"plane": "XY", "name": "Middle"})).is_err(), "names are unique");
+
+    // Showing one hides the one shown (by id or by name).
+    let r = run(&mut s, "inspect.section.visibility", json!({"section": "Section 1", "visible": true}));
+    assert_eq!(r["section"]["id"], a, "{r}");
+    assert_eq!(s.doc.section_analyses.shown, Some(a));
+    assert!((s.section.unwrap().0.z - 5.0).abs() < 1e-12);
+    run(&mut s, "inspect.section.visibility", json!({"section": b, "visible": true}));
+    assert!((s.section.unwrap().0.y - 10.0).abs() < 1e-12);
+    // Hiding one that is not shown changes nothing.
+    let undo = s.undo.len();
+    run(&mut s, "inspect.section.visibility", json!({"section": a, "visible": false}));
+    assert_eq!((s.doc.section_analyses.shown, s.undo.len()), (Some(b), undo));
+    // The folder hides them all and brings back the one shown.
+    run(&mut s, "inspect.section.visibility", json!({"visible": false}));
+    assert!(s.section.is_none() && s.doc.section_analyses.shown == Some(b));
+    run(&mut s, "inspect.section.visibility", json!({"visible": true}));
+    assert!((s.section.unwrap().0.y - 10.0).abs() < 1e-12);
+    run(&mut s, "inspect.section.visibility", json!({"section": b, "visible": false}));
+    assert!(s.section.is_none() && s.doc.section_analyses.shown.is_none());
+
+    // Edit changes that one section, and shows it.
+    let r = run(&mut s, "inspect.section.edit", json!({"section": a, "offset": "7 mm", "flip": true, "hatch": false}));
+    assert_eq!(r["id"], a);
+    let (o, n) = s.section.unwrap();
+    assert!((o.z - 7.0).abs() < 1e-12 && (n.z + 1.0).abs() < 1e-12 && !s.section_hatch);
+    assert_eq!(s.doc.section_analyses.get(b).map(|x| x.offset.as_str()), Some("10"), "the others keep theirs");
+    assert!(s.execute("inspect.section.edit", &json!({"section": 99, "offset": 1})).is_err());
+
+    // Rename: unique, 1…128 characters.
+    run(&mut s, "inspect.section.rename", json!({"section": b, "name": "Front cut"}));
+    assert!(s.execute("inspect.section.rename", &json!({"section": a, "name": "Front cut"})).is_err());
+    assert!(s.execute("inspect.section.rename", &json!({"section": a, "name": "  "})).is_err());
+    assert_eq!(section_names(&s), ["Section 1", "Front cut", "Middle", "Section 4"]);
+
+    // The list says what each one is and where it cuts.
+    let l = run(&mut s, "inspect.section.list", json!({}));
+    assert_eq!(l["sections"].as_array().map(Vec::len), Some(4), "{l}");
+    assert_eq!(l["sections"][0]["shown"], true);
+    assert_eq!(l["sections"][1]["plane"], json!({"type": "origin", "name": "XZ"}));
+
+    // Deleting the one shown leaves none shown; deleting the last one leaves no folder.
+    run(&mut s, "inspect.section.delete", json!({"section": a}));
+    assert!(s.section.is_none() && s.doc.section_analyses.shown.is_none());
+    for id in [b, c, d] {
+        run(&mut s, "inspect.section.delete", json!({"section": id}));
+    }
+    assert!(s.doc.section_analyses.is_empty());
+    assert!(s.execute("inspect.section.delete", &json!({"section": a})).is_err());
+    assert!(s.execute("inspect.section.visibility", &json!({"visible": true})).is_err(), "no folder without sections");
+}
+
+/// Making, changing and deleting sections are undone and redone like any other change, and the
+/// cut shown follows.
+#[test]
+fn section_analyses_undo_and_redo() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    let a = run(&mut s, "inspect.section", json!({"plane": "XY", "offset": 5}))["id"].as_u64().unwrap();
+    run(&mut s, "inspect.section", json!({"plane": "XY", "offset": 8}));
+    assert!((s.section.unwrap().0.z - 8.0).abs() < 1e-12);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.section_analyses.items.len(), 1);
+    assert!((s.section.unwrap().0.z - 5.0).abs() < 1e-12, "the one shown before is back");
+    run(&mut s, "edit.redo", json!({}));
+    assert!((s.section.unwrap().0.z - 8.0).abs() < 1e-12);
+    run(&mut s, "inspect.section.delete", json!({"section": a}));
+    run(&mut s, "inspect.section.rename", json!({"section": "Section 2", "name": "Top"}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(section_names(&s), ["Section 1", "Section 2"]);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.section_analyses.is_empty() && s.section.is_none(), "all undone, no cut");
+}
+
+/// By default each run adds a section and `clear` hides the one shown; with `replace` (the app's
+/// "Section Analysis replaces the cut" preference) a run changes the section shown in place and
+/// `clear` deletes it, one cut at a time as before several were kept (#3977).
+#[test]
+fn section_analysis_adds_by_default_and_replaces_on_request() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    // Default: a second run is a second section, and clear keeps it.
+    let a = run(&mut s, "inspect.section", json!({"plane": "XY", "offset": 5}))["id"].as_u64().unwrap();
+    let b = run(&mut s, "inspect.section", json!({"plane": "XZ", "offset": 10}))["id"].as_u64().unwrap();
+    assert_ne!(a, b);
+    assert_eq!(section_names(&s), ["Section 1", "Section 2"]);
+    run(&mut s, "inspect.section", json!({"clear": true}));
+    assert!(s.section.is_none());
+    assert_eq!(section_names(&s), ["Section 1", "Section 2"], "clear hides, the section stays");
+
+    // Replace with none shown: a new section, as the first cut was.
+    let c = run(&mut s, "inspect.section", json!({"plane": "YZ", "at": 3, "replace": true}))["id"].as_u64().unwrap();
+    assert_eq!(section_names(&s), ["Section 1", "Section 2", "Section 3"]);
+    assert_eq!(s.doc.section_analyses.shown, Some(c));
+    // Replace with one shown: that section takes the new plane, keeps its id and name.
+    let undo = s.undo.len();
+    let r = run(&mut s, "inspect.section", json!({"plane": "XY", "offset": 7, "flip": true, "hatch": false, "replace": true}));
+    assert_eq!(r["section"]["id"], c, "{r}");
+    assert_eq!(section_names(&s), ["Section 1", "Section 2", "Section 3"], "no section added");
+    assert_eq!(s.undo.len(), undo + 1, "an undo step");
+    let (o, n) = s.section.unwrap();
+    assert!((o.z - 7.0).abs() < 1e-12 && (n.z + 1.0).abs() < 1e-12 && !s.section_hatch, "{o:?} {n:?}");
+    assert_eq!(s.doc.section_analyses.get(a).map(|x| x.offset.as_str()), Some("5"), "the others keep theirs");
+    // A name given renames the one replaced; another section's name is refused.
+    run(&mut s, "inspect.section", json!({"plane": "XY", "offset": 2, "replace": true, "name": "Low"}));
+    assert_eq!(section_names(&s), ["Section 1", "Section 2", "Low"]);
+    assert!(s.execute("inspect.section", &json!({"plane": "XY", "replace": true, "name": "Section 1"})).is_err());
+    // Undo brings the replaced cut back.
+    run(&mut s, "edit.undo", json!({}));
+    assert!((s.section.unwrap().0.z - 7.0).abs() < 1e-12);
+
+    // Remove Section with replace deletes the one shown; the others stay.
+    run(&mut s, "inspect.section", json!({"clear": true, "replace": true}));
+    assert!(s.section.is_none());
+    assert_eq!(section_names(&s), ["Section 1", "Section 2"]);
+    // Nothing shown: clear changes nothing, whichever mode.
+    let before = (s.undo.len(), s.doc.section_analyses.clone());
+    run(&mut s, "inspect.section", json!({"clear": true, "replace": true}));
+    run(&mut s, "inspect.section", json!({"clear": true}));
+    assert_eq!((s.undo.len(), s.doc.section_analyses.clone()), before);
+    // The last one deleted this way leaves no folder.
+    for id in [a, b] {
+        run(&mut s, "inspect.section.visibility", json!({"section": id, "visible": true}));
+        run(&mut s, "inspect.section", json!({"clear": true, "replace": true}));
+    }
+    assert!(s.doc.section_analyses.is_empty() && s.section.is_none());
+}
+
+/// A design with several sections opens the same whatever a later run asks for: the file holds
+/// its sections, not a setting, and `replace` only changes the section shown (#3977).
+#[test]
+fn several_saved_sections_open_the_same_in_either_mode() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    for (plane, offset) in [("XY", 5), ("XZ", 10), ("YZ", 3)] {
+        run(&mut s, "inspect.section", json!({"plane": plane, "offset": offset}));
+    }
+    run(&mut s, "inspect.section.visibility", json!({"section": "Section 2", "visible": true}));
+    let text = s.doc.to_json();
+    let open = || Session::new(solidcraft_doc::Document::from_json(&text).unwrap());
+    let (mut adds, mut replaces) = (open(), open());
+    assert_eq!(adds.doc.section_analyses, s.doc.section_analyses);
+    assert_eq!((adds.section, replaces.section), (s.section, s.section), "the section shown is shown again");
+    run(&mut adds, "inspect.section", json!({"plane": "XY", "offset": 1}));
+    run(&mut replaces, "inspect.section", json!({"plane": "XY", "offset": 1, "replace": true}));
+    assert_eq!(section_names(&adds), ["Section 1", "Section 2", "Section 3", "Section 4"]);
+    assert_eq!(section_names(&replaces), ["Section 1", "Section 2", "Section 3"]);
+    for other in ["Section 1", "Section 3"] {
+        let kept = |x: &Session| x.doc.section_analyses.items.iter().find(|x| x.name == other).cloned();
+        assert_eq!(kept(&replaces), kept(&open()), "{other} is kept as saved");
+    }
+}
+
+/// Sections are saved with the design: names, planes, distances, flip, hatch, which one is shown
+/// and the folder's eye come back when it opens; a design without them opens without them.
+#[test]
+fn section_analyses_are_saved_with_the_design() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    assert!(!s.doc.to_json().contains("section_analyses"), "a design without sections saves none");
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 4, "name": "Cut"}));
+    run(&mut s, "inspect.section", json!({"plane": "Cut", "offset": 2, "flip": true, "hatch": false}));
+    run(&mut s, "inspect.section", json!({"plane": {"face": [20, 15, 20]}, "offset": -3}));
+    run(&mut s, "inspect.section", json!({"plane": {"origin": [1, 2, 3], "normal": [1, 0, 0]}, "name": "Fixed"}));
+    run(&mut s, "inspect.section.visibility", json!({"section": "Section 2", "visible": true}));
+    let cut = s.section.unwrap();
+    let text = s.doc.to_json();
+    let back = solidcraft_doc::Document::from_json(&text).unwrap();
+    assert_eq!(back.section_analyses, s.doc.section_analyses);
+    let reopened = Session::new(back);
+    assert_eq!(reopened.section, Some(cut), "the section shown is shown again");
+    assert!(reopened.section_hatch);
+    let mut hidden = reopened.scratch();
+    hidden.section_sync = true;
+    run(&mut hidden, "inspect.section.visibility", json!({"visible": false}));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&hidden.doc.to_json()).unwrap());
+    assert!(reopened.section.is_none() && reopened.doc.section_analyses.folder_hidden);
+    // An older design has no `section_analyses`.
+    let mut old: serde_json::Value = serde_json::from_str(&text).unwrap();
+    old.as_object_mut().unwrap().remove("section_analyses");
+    let older = Session::new(solidcraft_doc::Document::from_json(&old.to_string()).unwrap());
+    assert!(older.doc.section_analyses.is_empty() && older.section.is_none());
+}
+
+/// A section on a planar face or a construction plane follows it when the model changes; when
+/// the face or plane is gone it stays listed, says why, and cuts nothing (#3977).
+#[test]
+fn section_analyses_follow_their_face_or_plane() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "20 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "d", "expression": "4 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": "h"}));
+    let top = run(&mut s, "inspect.section", json!({"plane": {"face": [20, 15, 20]}, "offset": -2}))["id"].as_u64().unwrap();
+    assert!(matches!(s.doc.section_analyses.get(top).map(|x| &x.plane), Some(solidcraft_doc::section_analysis::SectionPlane::Face { .. })));
+    let (o, n) = s.section.unwrap();
+    assert!((o.z - 18.0).abs() < 1e-9 && (n.z - 1.0).abs() < 1e-9, "{o:?} {n:?}");
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "30 mm"}));
+    let (o, _) = s.section.unwrap();
+    assert!((o.z - 28.0).abs() < 1e-9, "the cut follows the top face: {o:?}");
+
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "d", "name": "Cut"}));
+    let on_plane = run(&mut s, "inspect.section", json!({"plane": "Cut"}))["id"].as_u64().unwrap();
+    assert!((s.section.unwrap().0.z - 4.0).abs() < 1e-9);
+    run(&mut s, "parameters.change", json!({"name": "d", "expression": "9 mm"}));
+    assert!((s.section.unwrap().0.z - 9.0).abs() < 1e-9, "the cut follows the construction plane");
+
+    // The plane deleted: listed, with the reason, and no cut; no panic.
+    run(&mut s, "timeline.delete", json!({"feature": "Cut"}));
+    assert!(s.section.is_none());
+    assert!(crate::cmd::section::status(&s, on_plane).is_some_and(|r| r.is_err_and(|e| e.contains("deleted"))));
+    let l = run(&mut s, "inspect.section.list", json!({}));
+    assert!(l["sections"][1]["error"].is_string(), "{l}");
+    // The box suppressed: the face is gone too; shown again, the cut is back.
+    run(&mut s, "inspect.section.visibility", json!({"section": top, "visible": true}));
+    assert!(s.section.is_some());
+    let boxf = s.doc.features.iter().find(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Box { .. })).map(|f| f.id).unwrap();
+    run(&mut s, "timeline.suppress", json!({"feature": boxf, "suppressed": true}));
+    assert!(s.section.is_none());
+    assert!(crate::cmd::section::status(&s, top).is_some_and(|r| r.is_err()));
+    run(&mut s, "timeline.suppress", json!({"feature": boxf, "suppressed": false}));
+    assert!((s.section.unwrap().0.z - 28.0).abs() < 1e-9);
+    // Editing a lost section to a new plane makes it cut again.
+    run(&mut s, "inspect.section.edit", json!({"section": on_plane, "plane": "XY", "offset": 1}));
+    assert!((s.section.unwrap().0.z - 1.0).abs() < 1e-9);
+    // A plane that is not built is refused when a section is made on it.
+    assert!(s.execute("inspect.section", &json!({"plane": {"face": [500, 500, 500]}})).is_err());
 }
 
 /// A section index finds the same cut segments, in the same order, as cutting every triangle:

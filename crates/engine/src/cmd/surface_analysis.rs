@@ -506,9 +506,6 @@ mod tests {
         for continuity_first in [false, true] {
             let mut s = Session::default();
             boxed(&mut s, 10.0);
-            s.mark_saved();
-            let doc = s.doc.clone();
-            let undo = s.undo.len();
             s.set_single_surface_analysis(false);
             let shading = ("inspect.zebra", json!({"stripes": 14.5}));
             let continuity = ("inspect.continuity", json!({"edges": [[5, 0, 0]], "samples": 5}));
@@ -516,6 +513,11 @@ mod tests {
                 s.execute(command, &params).unwrap();
             }
             s.execute("inspect.section", &json!({"plane": "XY"})).unwrap();
+            // A Section Analysis is kept in the design (#3977), so making one is an undo step; the
+            // effects after it must leave the design alone.
+            s.mark_saved();
+            let doc = s.doc.clone();
+            let undo = s.undo.len();
             let items = status(&mut s);
             let expected = if continuity_first { vec![Continuity, SurfaceAnalysis, Section] } else { vec![SurfaceAnalysis, Continuity, Section] };
             assert_eq!(items.iter().map(|item| item.id).collect::<Vec<_>>(), expected);
@@ -557,15 +559,17 @@ mod tests {
             for latest_continuity in [false, true] {
                 let mut s = Session::default();
                 boxed(&mut s, 10.0);
-                s.mark_saved();
-                let doc = s.doc.clone();
-                let undo = s.undo.len();
                 s.set_single_surface_analysis(false);
                 let shading = ("inspect.zebra", json!({}));
                 let continuity = ("inspect.continuity", json!({"edges": [[5, 0, 0]], "samples": 5}));
                 let (first, last) = if continuity_first { (continuity, shading) } else { (shading, continuity) };
                 s.execute(first.0, &first.1).unwrap();
                 s.execute("inspect.section", &json!({"plane": "XY"})).unwrap();
+                // A Section Analysis is kept in the design (#3977), so making one is an undo step; the
+                // effects after it must leave the design alone.
+                s.mark_saved();
+                let doc = s.doc.clone();
+                let undo = s.undo.len();
                 s.execute(last.0, &last.1).unwrap();
                 // Replacement does not move the slot, but determines the policy-switch winner.
                 if latest_continuity {
