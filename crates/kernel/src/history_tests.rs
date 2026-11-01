@@ -302,3 +302,44 @@ fn collinear_profile_lines_taper_into_one_side_face() {
         );
     }
 }
+
+/// A joined side's source is the first of its own pieces (#1949 review): a run that wraps past
+/// the loop's first segment starts with its last-numbered piece, and a hole whose run starts at
+/// a vertex it shares with the outline takes its piece from the hole, not from the outline.
+#[test]
+fn a_joined_side_is_sourced_from_its_own_first_piece() {
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    let v = |x: f64, y: f64| Vec2::new(x, y);
+    let side_segments = |body: &crate::Body| -> Vec<Seg2> {
+        body.face_sources()
+            .into_iter()
+            .flatten()
+            .filter_map(|s| match s {
+                Some(crate::FaceSource::ExtrudeSide { segment, .. }) => Some(*segment),
+                _ => None,
+            })
+            .collect()
+    };
+    // The bottom run is the last segment, (0,0)→(10,0), then the first, (10,0)→(20,0).
+    let wraps = Region2 { outer: Loop2::polygon(&[v(10.0, 0.0), v(20.0, 0.0), v(20.0, 10.0), v(0.0, 10.0), v(0.0, 0.0)]), holes: vec![] };
+    let body = crate::extrude_whole_sides(&Plane::XY, &[wraps], 0.0, 5.0).unwrap().pop().unwrap();
+    assert_eq!(body.face_count(), 6);
+    let bottom: Vec<Seg2> = side_segments(&body).into_iter().filter(|s| s.start().y == 0.0 && s.end().y == 0.0).collect();
+    assert_eq!(bottom, vec![Seg2::Line { a: v(0.0, 0.0), b: v(10.0, 0.0) }], "the run starts with the wrapped piece");
+    // A hole touching the outline at one corner, (0, 0), where its straight run of two pieces
+    // starts: the outline's own segment from that corner must not stand in for the hole's.
+    // One hole on each side of the run, so that whichever way holes are built, one of them runs
+    // from the shared corner.
+    let same = |a: &Seg2, b: &Seg2| (a.start() == b.start() && a.end() == b.end()) || (a.start() == b.end() && a.end() == b.start());
+    for third in [v(15.0, 5.0), v(2.0, 10.0)] {
+        let outer = Loop2::polygon(&[v(0.0, 0.0), v(30.0, 0.0), v(30.0, 20.0), v(0.0, 20.0)]);
+        let hole = Loop2::polygon(&[v(0.0, 0.0), v(5.0, 5.0), v(10.0, 10.0), third]);
+        let hole = if hole.signed_area() > 0.0 { hole.reversed() } else { hole };
+        let region = Region2 { outer, holes: vec![hole] };
+        let body = crate::extrude_whole_sides(&Plane::XY, std::slice::from_ref(&region), 0.0, 5.0).unwrap().pop().unwrap();
+        let run: Vec<Seg2> =
+            side_segments(&body).into_iter().filter(|s| (s.start().x - s.start().y).abs() < 1e-9 && (s.end().x - s.end().y).abs() < 1e-9).collect();
+        assert_eq!(run.len(), 1, "the hole's run is one side: {run:?}");
+        assert!(region.holes[0].segs.iter().any(|p| same(p, &run[0])), "{third:?}: {:?} is one of the hole's own pieces", run[0]);
+    }
+}

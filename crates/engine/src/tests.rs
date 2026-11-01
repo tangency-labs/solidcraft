@@ -4350,6 +4350,7 @@ fn a_side_drawn_in_two_collinear_pieces_extrudes_into_one_face() {
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     let r = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0], [20, 0], [20, 10], [0, 10], [0, 0]]}));
     let pieces: Vec<String> = r["created"]["curves"].as_array().into_iter().flatten().take(2).filter_map(|c| c.as_str().map(String::from)).collect();
+    assert_eq!(pieces.len(), 2, "{r}");
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"distance": 5}));
     let faces = |s: &mut Session| run(s, "model.faces", json!({"body": "Body1"}))["faces"].as_array().cloned().unwrap_or_default();
@@ -4378,6 +4379,7 @@ fn a_sketch_on_one_piece_stays_attached_when_the_side_joins() {
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     let r = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, -2], [20, 0], [20, 10], [0, 10], [0, 0]]}));
     let first = r["created"]["curves"][0].as_str().unwrap_or_default().to_string();
+    assert!(!first.is_empty(), "{r}");
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"distance": 5}));
     let faces = |s: &mut Session| run(s, "model.faces", json!({"body": "Body1"}))["faces"].as_array().map(Vec::len).unwrap_or(0);
