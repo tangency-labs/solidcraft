@@ -39,6 +39,15 @@ one as a separate piece, and the feature's warning says so: "`Body1` is now in 2
 pieces". Combine joins the bodies it is given without that warning. Changing the default does not
 alter operations already saved in a design.
 
+**A new sketch from inside Extrude.** The Extrude dialog's **New Sketch** button (or a click on
+an origin or construction plane while **Profiles** is still empty) opens a sketch while the
+dialog waits: pick its plane or planar face and draw. **Finish Sketch** (or Extrude's own button
+or shortcut) comes back to the dialog with every profile of the new sketch picked and the
+dialog's other settings as they were; **Cancel Sketch** comes back without it. **OK** makes the
+sketch and the extrude one undo step; **Cancel** leaves the design and the undo history as they
+were. The sketch is an ordinary timeline entry of its own, and `solid.extrude` is unchanged for
+scripts.
+
 **Extrude to a picked target** (Preferences › Design, off by default) lets a pick choose the
 extent. With it on and a profile selected in the solid Extrude dialog, picking a face away from
 its plane, a curved face, an off-plane vertex or a parallel plane automatically switches
