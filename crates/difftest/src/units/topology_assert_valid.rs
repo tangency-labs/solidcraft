@@ -13,9 +13,11 @@ use serde_json::Value;
 use solidcore::geom::assert_array::{labels, obj_type_string, AssertArray, ObjectKey as ReportKey};
 use solidcore::geom::attribute::ObjectKey;
 use solidcore::geom::object::ObjectRef;
+use solidcore::geom::tol::zone_tol3d;
 use solidcore::topology::brep::validation;
+use solidcore::topology::face::p3 as face_p3;
 use solidcore::topology::{
-    Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopuseId, NamingScheme, VertexId,
+    edge, vertex, Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopuseId, NamingScheme, VertexId,
 };
 use solidcore::{EntityRef, Kernel, Vec3};
 use solidcore_ffi::units::topology_assert_valid as ffi;
@@ -258,8 +260,10 @@ fn orient(v: f64) -> solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType {
         _ => OrientType::Unknown,
     }
 }
-/// The shim's `Mutation` (kinds 1-10 of `topology_brep_validation`).
-fn mutate(b: &mut Brep, i: &Inputs) -> Result<(), HarnessError> {
+/// The shim's `Mutation` (kinds 1-10 of `topology_brep_validation`). The tolerance
+/// kinds call the ported setters as the shim calls `SetTolerance(value, FALSE[, FALSE])`:
+/// the `SmZoneTol3d` argument takes fabs ([`zone_tol3d`]) and nothing is cascaded.
+fn mutate(k: &Kernel, b: &mut Brep, i: &Inputs) -> Result<(), HarnessError> {
     let n = match i.mutation {
         1 | 6 => b.vertices().len(),
         2 | 7 | 9 => b.edges().len(),
@@ -275,12 +279,17 @@ fn mutate(b: &mut Brep, i: &Inputs) -> Result<(), HarnessError> {
     let index = (i.index % n) as u32;
     let e = |e: solidcore::SolidError| herr(e.to_string());
     match i.mutation {
-        1 => b.vertex_mut(VertexId::from_index(index)).map_err(e)?.tolerance = i.value,
-        2 => b.edge_mut(EdgeId::from_index(index)).map_err(e)?.tolerance = i.value,
+        1 => {
+            let v = VertexId::from_index(index);
+            vertex::set_tolerance(b, v, zone_tol3d(k, i.value), false, true).map_err(e)?;
+        }
+        2 => {
+            let ed = EdgeId::from_index(index);
+            edge::set_tolerance(b, ed, zone_tol3d(k, i.value), false, false).map_err(e)?;
+        }
         3 => {
             let f = FaceId::from_index(index);
-            b.face_mut(f).map_err(e)?.tolerance = i.value;
-            b.sync_face_surface_tolerance(f).map_err(e)?;
+            face_p3::set_tolerance(b, f, zone_tol3d(k, i.value), false, false).map_err(e)?;
         }
         4 => {
             b.faceuse_mut(FaceuseId::from_index(index))
@@ -539,12 +548,12 @@ fn level2_tests(k: &mut Kernel, b: &mut Brep) -> solidcore::Result<Vec<f64>> {
         });
     }
     for e in edges {
-        let (ok, gap) = solidcore::topology::edge::edge_form::assert_test_edge13(k, b, e)?;
+        let (ok, gap) = edge::edge_form::assert_test_edge13(k, b, e)?;
         out.push(flag(ok));
         out.push(gap);
     }
     for v in vertices {
-        let (ok, gap, face) = solidcore::topology::vertex::corner::assert_test_vertex1(k, b, v)?;
+        let (ok, gap, face) = vertex::corner::assert_test_vertex1(k, b, v)?;
         out.push(flag(ok));
         out.push(gap);
         out.push(face.map_or(-1.0, |f| f64::from(f.index())));
@@ -809,7 +818,7 @@ impl UnitDiff for Runner {
         if i.copy {
             return copy_check(&mut k, &b, &i);
         }
-        mutate(&mut b, &i)?;
+        mutate(&k, &mut b, &i)?;
         if i.tests {
             return match level2_tests(&mut k, &mut b) {
                 Ok(out) => tests_output(&out),
