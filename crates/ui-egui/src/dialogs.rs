@@ -482,6 +482,9 @@ pub struct Dialog {
     value_focus: Option<egui::Id>,
     /// A viewport press or click returns the keyboard after selection and canvas updates.
     pub(crate) restore_value_focus: bool,
+    /// The name of a dimension clicked in the view, for the value editor the keyboard returns
+    /// to (#9477).
+    pub(crate) reference: Option<String>,
     /// Folded to its header (the shared disclosure chevron).
     pub collapsed: bool,
     reset_scroll: bool,
@@ -751,6 +754,7 @@ impl Dialog {
             focus: true,
             value_focus: None,
             restore_value_focus: false,
+            reference: None,
             collapsed: false,
             reset_scroll: true,
             preview_enabled: true,
@@ -3491,10 +3495,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if d.restore_value_focus && !pointer_busy {
         d.restore_value_focus = false;
         let target = value_fields.iter().find(|(id, _)| Some(*id) == d.value_focus).or_else(|| value_fields.first());
+        let reference = d.reference.take();
         if let Some(&(id, length)) = target {
             d.focus = false;
             ctx.memory_mut(|memory| memory.request_focus(id));
-            if let Some(mut state) = egui::text_edit::TextEditState::load(ctx, id) {
+            if let Some(name) = reference {
+                // The editor puts the name in where its cursor was, instead of selecting it all.
+                crate::ui_kit::queue_reference(ctx, id, name);
+            } else if let Some(mut state) = egui::text_edit::TextEditState::load(ctx, id) {
                 state
                     .cursor
                     .set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(length))));
