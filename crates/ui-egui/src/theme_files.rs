@@ -455,9 +455,10 @@ macro_rules! theme_keys {
         #[allow(dead_code)]
         fn every_colour_has_a_key(t: &Tokens) {
             // Not colours: the hover lift is a grey step, the analysis colours belong to shaders.
+            // Not a theme's: the view's middle colour is only ever the user's own (#9230).
             let Tokens {
                 $($one: _,)* $($many: _,)*
-                hover_face_lift: _, analysis: _, icons: _, borders: _, icon_palette: _,
+                hover_face_lift: _, viewport_middle: _, analysis: _, icons: _, borders: _, icon_palette: _,
                 file_action_height: _, file_back_height: _, file_recovery_icon: _, file_grid_gap: _,
                 file_nav_width: _, file_nav_height: _, file_tile_height: _, file_tile_icon: _, file_recent_height: _,
                 file_sample_image_height: _, file_content_inset_x: _, file_content_inset_y: _, file_section_gap: _, font_start_title: _,

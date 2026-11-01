@@ -427,9 +427,10 @@ pub fn request_scope(app: &SolveApp, params: &Value) -> Result<Option<vfs::PathS
 /// Slice), with the grid and the origin's axes as `guides` says.
 pub(crate) fn view_scene(app: &SolveApp, guides: solidcraft_engine::view::Guides) -> solidcraft_engine::render::Scene {
     let mut palette = crate::viewport::scene_palette(app.viewport_dark(), app.preferences.color_vision);
-    // The view's own background colour (#7688).
-    if let Some([r, g, b]) = app.preferences.viewport_background {
-        palette.background = (solidcraft_engine::render::Rgb(r, g, b), solidcraft_engine::render::Rgb(r, g, b));
+    // The view's own background, one colour (#7688) or a gradient (#9230).
+    if let Some(crate::theme::ViewBackground { top: [r, g, b], middle, bottom: [r2, g2, b2] }) = app.preferences.viewport_background_colours() {
+        palette.background = (solidcraft_engine::render::Rgb(r, g, b), solidcraft_engine::render::Rgb(r2, g2, b2));
+        palette.background_middle = middle.map(|[r, g, b]| solidcraft_engine::render::Rgb(r, g, b));
     }
     let mut scene = solidcraft_engine::view::scene_with_thread_markings(
         &app.session,

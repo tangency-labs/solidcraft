@@ -75,6 +75,8 @@ pub struct Scene {
     pub grid: Vec<SceneLine>,
     /// Background gradient top → bottom.
     pub background: Option<(Rgb, Rgb)>,
+    /// A colour halfway down the background gradient (#9230): top → middle → bottom.
+    pub background_middle: Option<Rgb>,
     /// Scene radius for clipping planes.
     pub radius: f64,
     /// A section cut: (normal, d); what lies where normal·p > d is cut away, and the inside

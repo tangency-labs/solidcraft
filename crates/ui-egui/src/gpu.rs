@@ -27,6 +27,16 @@ pub(crate) fn paint_background(painter: &egui::Painter, rect: egui::Rect, tokens
     mesh.colored_vertex(rect.left_bottom(), tokens.viewport_bottom);
     mesh.add_triangle(0, 1, 2);
     mesh.add_triangle(0, 2, 3);
+    // A colour of the user's halfway down (#9230): two bands, top to middle and middle to bottom.
+    if let Some(middle) = tokens.viewport_middle {
+        mesh.indices.clear();
+        mesh.colored_vertex(egui::pos2(rect.right(), rect.center().y), middle);
+        mesh.colored_vertex(egui::pos2(rect.left(), rect.center().y), middle);
+        mesh.add_triangle(0, 1, 4);
+        mesh.add_triangle(0, 4, 5);
+        mesh.add_triangle(5, 4, 2);
+        mesh.add_triangle(5, 2, 3);
+    }
     painter.add(egui::Shape::mesh(mesh));
 }
 

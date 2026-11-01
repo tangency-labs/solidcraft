@@ -417,6 +417,7 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("nav_tip_ink", "neutral tooltip text; words identify the control and value"),
     ("nav_tip_key_border", "neutral keycap outline; its key label carries the meaning"),
     ("nav_viewport", "neutral preview-stage background, not model or status colour"),
+    ("viewport_middle", "the user's own background colour halfway down the view (#9230); themes have none"),
     ("borders.primary", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
     ("borders.secondary", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
     ("borders.secondary_dotted", "structural chrome: hierarchy uses width, pattern and placement, not hue"),
