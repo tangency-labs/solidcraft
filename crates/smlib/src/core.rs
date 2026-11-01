@@ -310,6 +310,39 @@ pub(crate) fn fixes() -> UpstreamFixes {
     f.cpoly_remove_poly_face_check_member = true;
     f.check_seam_crossing_unclosed = true;
     f.ascii_doubles_round_trip = true;
+    f.transform_aligned_bbox_image = true;
+    f.bspline_simple_offset_matches_parameterization = true;
+    f.offset_edges_keep_source_tolerance = true;
+    f.best_fit_line_largest_scatter_eigenvector = true;
+    f.circle_silhouette_perspective_center = true;
+    f.ellipse_convert_to_2d_uses_both_axes = true;
+    f.circle_offset_antiparallel_normal = true;
+    f.masked_array_uses_bit_shift = true;
+    f.global_solver_identical_prefers_larger_when_maximizing = true;
+    f.surface_continuity_checks_last_v_knot = true;
+    f.surface_point_solver_propagates_bbox_failure = true;
+    f.volume_lift_third_derivative_terms = true;
+    f.volume_discontinuity_checks_vw_unaligned = true;
+    f.periodic_extent_add_empty_interval = true;
+    f.stop_tracking_checks_own_callback = true;
+    f.plane_reparameterize_moves_origin = true;
+    f.crv_in_volume_mults_by_break_index = true;
+    f.curve_bounded_surface_read_uv_type_and_implicit_outer = true;
+    f.polar_box_region_to_arc_transposes_domain = true;
+    f.point_set_centroid_all_blocks = true;
+    f.local_solve1d_unbounded_newton_step = true;
+    f.composite_curve_bbox_segment_intervals = true;
+    f.knot_vector_valid_requires_span = true;
+    f.projected_curve_transform_when_owned = true;
+    f.curve_property_gs_branch_bounds = true;
+    f.volume_representational_end_continuities = true;
+    f.integrator_propagates_failure = true;
+    f.precise_properties_span_end_from_below = true;
+    f.offset_open_edge_second_trim_point = true;
+    f.close_loop_relates_only_coincident_edges = true;
+    f.ssi_split_curves_at_singular_points = true;
+    f.surface_parallel_to_vector_checks = true;
+    f.fillet_round_ends_at_tangent_continuation = true;
     f
 }
 
