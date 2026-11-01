@@ -431,9 +431,18 @@ fn undo_takes_back_one_arc_as_it_takes_back_one_segment() {
     h.frames(2);
     assert_eq!(curves(&h), 1, "only the arc goes");
     assert_eq!(sketch(&h).curves.first().map(|c| matches!(c.kind, CurveKind::Line { .. })), Some(true));
-    // As with a line undone mid-chain, the chain's point went with it: the next click is refused
-    // and changes nothing, and Esc ends the chain, leaving the Line tool ready for a new one.
-    click_at(&mut h, [20.0, 20.0]);
+    // The chain goes back to the line's end, still drawing tangent arcs (#10016): the next click
+    // is an arc from there. Esc ends the chain, leaving the Line tool ready for a new one.
+    click_at(&mut h, [10.0, 10.0]);
+    assert_eq!(curves(&h), 2, "{:?}", h.app.status);
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.frames(2);
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.frames(2);
+    assert_eq!(curves(&h), 0);
+    // Past the line too: lines again, from where the chain began.
+    click_at(&mut h, [25.0, 5.0]);
+    assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.line"), "nothing is left to be tangent to");
     assert_eq!(curves(&h), 1, "{:?}", h.app.status);
     h.step(&json!({"key":"Escape"})).unwrap();
     h.frames(2);
