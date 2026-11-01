@@ -1,4 +1,5 @@
-//! Parameter expressions: `2 * width + 5 mm`, `angle / 2`, `sqrt(a^2 + b^2)`, `atan2(h; w)`.
+//! Parameter expressions: `2 * width + 5 mm`, `angle / 2`, `sqrt(a^2 + b^2)`, `atan2(h; w)`,
+//! and conditionals: `shelves > 5 ? 440 : length / shelves`.
 //!
 //! Values carry a simple dimension (powers of length and angle). Lengths are millimetres and
 //! angles radians internally. A unit-less number added to a dimensioned value takes that value's
@@ -339,6 +340,8 @@ enum Tok {
     Num(f64),
     Id(String),
     Op(char),
+    /// A comparison operator: `>`, `<`, `>=`, `<=`, `==` or `!=` (#9949).
+    Cmp(&'static str),
 }
 
 /// Tokens with their byte ranges in the source.
@@ -449,6 +452,27 @@ fn lex_spans(s: &str) -> Result<Vec<(Tok, usize, usize)>, DocError> {
             // Some CAD tools separate function arguments with `;` in some locales.
             out.push((Tok::Op(','), at(i), at(i + 1)));
             i += 1;
+        } else if c == '?' || c == ':' {
+            // The conditional `cond ? a : b` (#9949).
+            out.push((Tok::Op(c), at(i), at(i + 1)));
+            i += 1;
+        } else if matches!(c, '>' | '<' | '!' | '=') {
+            // Comparisons (#9949): `>=`, `<=`, `==` and `!=` are one token, `>` and `<` alone
+            // too. A lone `!` or `=` is not an operator (a leading `=` was read above as the
+            // formula marker or a definition's `=`).
+            let eq = cs.get(i + 1).is_some_and(|(_, d)| *d == '=');
+            let op = match (c, eq) {
+                ('>', true) => ">=",
+                ('>', false) => ">",
+                ('<', true) => "<=",
+                ('<', false) => "<",
+                ('!', true) => "!=",
+                ('=', true) => "==",
+                _ => return Err(DocError::Expr(format!("unexpected `{c}`"))),
+            };
+            let n = op.len();
+            out.push((Tok::Cmp(op), at(i), at(i + n)));
+            i += n;
         } else if "+-*/^(),%".contains(c) {
             match c {
                 '(' => parens.push(matches!(out.last(), Some((Tok::Id(_), _, _)))),
@@ -666,15 +690,41 @@ impl Parser<'_> {
         self.depth += 1;
         if self.depth > MAX_DEPTH { Err(DocError::Expr("expression nested too deeply".into())) } else { Ok(()) }
     }
+    /// An expression: a comparison, or a conditional `cond ? a : b` — the lowest precedence,
+    /// right-associative, so `a ? b : c ? d : e` is `a ? b : (c ? d : e)` (#9949).
     fn expr(&mut self) -> Result<Value, DocError> {
         self.enter()?;
+        let mut a = self.comparison()?;
+        if matches!(self.peek(), Some(Tok::Op('?'))) {
+            self.pos += 1;
+            let then = self.expr()?;
+            match self.next() {
+                Some(Tok::Op(':')) => {}
+                _ => return Err(DocError::Expr("missing `:` in `cond ? a : b`".into())),
+            }
+            let other = self.expr()?;
+            a = branch(a, then, other, self.defaults)?;
+        }
+        self.depth -= 1;
+        Ok(a)
+    }
+    /// Comparisons: `a > b`, `a == b`, chained left to right; each yields a unit-less 1 or 0.
+    fn comparison(&mut self) -> Result<Value, DocError> {
+        let mut a = self.sum()?;
+        while let Some(Tok::Cmp(op)) = self.peek().cloned() {
+            self.pos += 1;
+            let b = self.sum()?;
+            a = compare(a, b, op, self.defaults)?;
+        }
+        Ok(a)
+    }
+    fn sum(&mut self) -> Result<Value, DocError> {
         let mut a = self.term()?;
         while let Some(Tok::Op(c @ ('+' | '-'))) = self.peek().cloned() {
             self.pos += 1;
             let b = self.term()?;
             a = add(a, b, c == '-', self.defaults)?;
         }
-        self.depth -= 1;
         Ok(a)
     }
     fn term(&mut self) -> Result<Value, DocError> {
@@ -820,6 +870,7 @@ impl Parser<'_> {
                 (self.lookup)(&id)
             }
             Some(Tok::Op(c)) => Err(DocError::Expr(format!("unexpected `{c}`"))),
+            Some(Tok::Cmp(op)) => Err(DocError::Expr(format!("unexpected `{op}`"))),
             None => Err(DocError::Expr("unexpected end of expression".into())),
         }
     }
@@ -876,6 +927,47 @@ fn modulo(a: Value, b: Value, d: Defaults) -> Result<Value, DocError> {
         return Err(DocError::Expr("modulo by zero".into()));
     }
     Ok(Value { v: x.rem_euclid(y), len, ang })
+}
+
+/// `a > b` and friends (#9949): the operands must have the same dimension (a bare number takes
+/// the other side's unit, as in `a + b`), and the answer is a unit-less 1 or 0.
+fn compare(a: Value, b: Value, op: &str, d: Defaults) -> Result<Value, DocError> {
+    let (len, ang) = if a.unitless() {
+        (b.len, b.ang)
+    } else if b.unitless() || (a.len == b.len && a.ang == b.ang) {
+        (a.len, a.ang)
+    } else {
+        return Err(DocError::Expr(format!("cannot compare {} with {}", a.describe(), b.describe())));
+    };
+    let (x, y) = (scale_bare(a, len, ang, d), scale_bare(b, len, ang, d));
+    let held = match op {
+        ">" => x > y,
+        "<" => x < y,
+        ">=" => x >= y,
+        "<=" => x <= y,
+        "==" => x == y,
+        "!=" => x != y,
+        _ => return Err(DocError::Expr(format!("unknown operator `{op}`"))),
+    };
+    Ok(Value::num(if held { 1.0 } else { 0.0 }))
+}
+
+/// `cond ? a : b` (#9949): the condition is a unit-less number and nonzero is true; the two
+/// results must share units, as `min` and `max` require, and a bare number takes the other's
+/// unit. Both results are worked out even though one is chosen, as every sub-expression is.
+fn branch(cond: Value, then: Value, other: Value, d: Defaults) -> Result<Value, DocError> {
+    if !cond.unitless() {
+        return Err(DocError::Expr(format!("a condition must be a unit-less number, not {}", cond.describe())));
+    }
+    let (len, ang) = if then.unitless() {
+        (other.len, other.ang)
+    } else if other.unitless() || (then.len == other.len && then.ang == other.ang) {
+        (then.len, then.ang)
+    } else {
+        return Err(DocError::Expr(format!("the two results of `? :` must have the same units, not {} and {}", then.describe(), other.describe())));
+    };
+    let chosen = if cond.v != 0.0 { then } else { other };
+    Ok(Value { v: scale_bare(chosen, len, ang, d), len, ang })
 }
 
 fn pow(base: Value, e: Value) -> Result<Value, DocError> {
@@ -1418,6 +1510,107 @@ mod tests {
         assert!(!e.contains("divide"), "{e}");
     }
 
+    /// The reporter's example (#9949): `shelves > 5 ? 440 : length / shelves`, both branches.
+    #[test]
+    fn a_conditional_picks_its_branch() {
+        let look = |n: &str| match n {
+            "shelves" => Ok(Value::num(6.0)),
+            "length" => Ok(Value::length(1800.0)),
+            _ => Err(DocError::Expr(format!("unknown {n}"))),
+        };
+        assert!((eval_with("shelves > 5 ? 440 : length / shelves", &look).unwrap().v - 440.0).abs() < 1e-9);
+        let look = |n: &str| match n {
+            "shelves" => Ok(Value::num(4.0)),
+            "length" => Ok(Value::length(1800.0)),
+            _ => Err(DocError::Expr(format!("unknown {n}"))),
+        };
+        assert!((eval_with("shelves > 5 ? 440 : length / shelves", &look).unwrap().v - 450.0).abs() < 1e-9);
+        // A unit-less condition is a plain nonzero test, and a comparison gives a unit-less 1 or 0.
+        assert_eq!(ev("1 ? 7 : 8", Kind::Unitless).unwrap(), 7.0);
+        assert_eq!(ev("0 ? 7 : 8", Kind::Unitless).unwrap(), 8.0);
+        assert_eq!(ev("count ? 7 : 8", Kind::Unitless).unwrap(), 7.0);
+        assert_eq!(ev("(count > 2) + (count > 9)", Kind::Unitless).unwrap(), 1.0);
+    }
+
+    /// Comparisons work on same-kind quantities, in their own units, and give a unit-less 1 or 0
+    /// (#9949); a bare number is compared in the other side's unit, as in `a + b`.
+    #[test]
+    fn comparisons_of_same_kind_quantities() {
+        assert_eq!(ev("10 mm > 5 mm", Kind::Unitless).unwrap(), 1.0);
+        assert_eq!(ev("5 mm > 10 mm", Kind::Unitless).unwrap(), 0.0);
+        assert_eq!(ev("1 in > 20 mm", Kind::Unitless).unwrap(), 1.0);
+        assert_eq!(ev("width >= 40 mm", Kind::Unitless).unwrap(), 1.0);
+        assert_eq!(ev("width < 40 mm", Kind::Unitless).unwrap(), 0.0);
+        assert_eq!(ev("width == 40 mm", Kind::Unitless).unwrap(), 1.0);
+        assert_eq!(ev("width != 40 mm", Kind::Unitless).unwrap(), 0.0);
+        assert_eq!(ev("count == 3", Kind::Unitless).unwrap(), 1.0);
+        assert!((ev("90 deg < 2 rad", Kind::Unitless).unwrap() - 1.0).abs() < 1e-12);
+        assert_eq!(ev("width > 5", Kind::Unitless).unwrap(), 1.0);
+        // A comparison binds looser than `+ - * /`: `2 + 3 > 4` is `5 > 4`.
+        assert_eq!(ev("2 + 3 > 4", Kind::Unitless).unwrap(), 1.0);
+        assert_eq!(ev("count < 2 + 2", Kind::Unitless).unwrap(), 1.0);
+    }
+
+    /// Comparing incompatible units is an error that says so (#9949).
+    #[test]
+    fn comparisons_of_incompatible_units_are_refused() {
+        let e = ev("10 mm > 5 deg", Kind::Unitless).unwrap_err().to_string();
+        assert!(e.contains("cannot compare a length with an angle"), "{e}");
+        assert!(ev("width > ang", Kind::Unitless).is_err());
+        assert!(ev("width^2 > 4 mm", Kind::Unitless).is_err());
+    }
+
+    /// A conditional's two results must share units, as `min` and `max` require, and a bare
+    /// number takes the other result's unit (#9949).
+    #[test]
+    fn a_conditionals_results_share_units() {
+        assert_eq!(ev("count > 2 ? 30 mm : 10 mm", Kind::Length).unwrap(), 30.0);
+        assert_eq!(ev("count > 9 ? 30 mm : 10 mm", Kind::Length).unwrap(), 10.0);
+        // A bare result takes the other one's unit, whichever branch is taken.
+        assert_eq!(ev("count > 2 ? 5 : 10 mm", Kind::Length).unwrap(), 5.0);
+        assert_eq!(ev("count > 9 ? 5 : 10 mm", Kind::Length).unwrap(), 10.0);
+        // Length-valued branches keep their unit through a conversion.
+        assert_eq!(ev("count > 2 ? 1 in : 2 in", Kind::Length).unwrap(), 25.4);
+        // A length and an angle never mix, and the condition must be a unit-less number.
+        assert!(ev("count > 2 ? 30 mm : 10 deg", Kind::Length).is_err());
+        let e = ev("30 mm ? 1 : 2", Kind::Unitless).unwrap_err().to_string();
+        assert!(e.contains("a condition must be a unit-less number"), "{e}");
+    }
+
+    /// Ternaries nest and chain: `a ? b : c ? d : e` is `a ? b : (c ? d : e)` — right-associative
+    /// (#9949) — and a conditional fits inside calls and comparisons.
+    #[test]
+    fn conditionals_chain_to_the_right() {
+        assert_eq!(ev("1 ? 2 : 0 ? 3 : 4", Kind::Unitless).unwrap(), 2.0);
+        assert_eq!(ev("0 ? 2 : 1 ? 3 : 4", Kind::Unitless).unwrap(), 3.0);
+        assert_eq!(ev("0 ? 2 : 0 ? 3 : 4", Kind::Unitless).unwrap(), 4.0);
+        // A ternary as the `then` branch: `a ? (b ? c : d) : e`.
+        assert_eq!(ev("1 ? 0 ? 2 : 3 : 4", Kind::Unitless).unwrap(), 3.0);
+        assert_eq!(ev("0 ? 0 ? 2 : 3 : 4", Kind::Unitless).unwrap(), 4.0);
+        assert_eq!(ev("count > 2 ? count > 1 ? 10 : 20 : 30", Kind::Unitless).unwrap(), 10.0);
+        // Inside a call's arguments and beside arithmetic.
+        assert_eq!(ev("max(1 ? 5 : 9, 2)", Kind::Unitless).unwrap(), 5.0);
+        assert_eq!(ev("2 * (count > 2 ? 3 : 4) + 1", Kind::Unitless).unwrap(), 7.0);
+        assert_eq!(ev("count > 2 ? 1 : 2 + 3", Kind::Unitless).unwrap(), 1.0);
+        assert_eq!(ev("count > 9 ? 1 : 2 + 3", Kind::Unitless).unwrap(), 5.0);
+    }
+
+    /// Existing expressions parse exactly as they did before comparisons and conditionals (#9949):
+    /// a lone `=` is still no operator, and `name == value` is still no definition.
+    #[test]
+    fn existing_expressions_are_unchanged_by_conditionals() {
+        assert_eq!(ev("2 * width + 5 mm", Kind::Length).unwrap(), 85.0);
+        assert_eq!(ev("max(1 mm, 3, 2)", Kind::Length).unwrap(), 3.0);
+        assert_eq!(ev("width / 2,5", Kind::Length).unwrap(), 16.0);
+        assert_eq!(ev("2 1/8\"", Kind::Length).unwrap(), 2.125 * 25.4);
+        assert_eq!(ev("10 mm / 2 mm", Kind::Unitless).unwrap(), 5.0);
+        assert_eq!(ev("1e-3 m", Kind::Length).unwrap(), 1.0);
+        assert_eq!(definition("w == 3"), None);
+        assert!(!is_literal("w == 3") && !is_bare_number("==5"));
+        assert_eq!(references("shelves > 5 ? 440 : length / shelves"), ["shelves".to_string(), "length".to_string()]);
+        assert_eq!(rename_reference("a > b ? c : a", "a", "w"), "w > b ? c : w");
+    }
+
     #[test]
     fn errors() {
         assert!(ev("width + ang", Kind::Length).is_err());
@@ -1438,6 +1631,16 @@ mod tests {
         assert!(ev("width ^ 1.5", Kind::Unitless).is_err());
         assert!(ev("max()", Kind::Unitless).is_err());
         assert!(ev("frob(1)", Kind::Unitless).is_err());
+        // Conditionals (#9949): a `?` needs its `:`, and a lone `!` or `=` is still no operator.
+        assert!(ev("1 ? 2", Kind::Unitless).is_err());
+        assert!(ev("1 ? 2 : ", Kind::Unitless).is_err());
+        assert!(ev("1 : 2", Kind::Unitless).is_err());
+        assert!(ev("?", Kind::Unitless).is_err());
+        assert!(ev("!", Kind::Unitless).is_err());
+        assert!(ev("1 ! 2", Kind::Unitless).is_err());
+        assert!(ev("1 = 2", Kind::Unitless).is_err());
+        assert!(ev("1 > = 2", Kind::Unitless).is_err());
+        assert!(ev(&("1 ? ".repeat(100) + "1" + &" : 0".repeat(100)), Kind::Unitless).is_err());
         let deep = "(".repeat(500) + "1" + &")".repeat(500);
         assert!(ev(&deep, Kind::Length).is_err());
         assert!(ev(&"-".repeat(500), Kind::Length).is_err());
@@ -1449,8 +1652,28 @@ mod tests {
     /// Hostile input never panics: random strings over the expression alphabet.
     #[test]
     fn fuzz_never_panics() {
-        let alphabet: Vec<char> = "0123456789.eE+-*/^(),;% abcdmnpitrsgxw_°×÷−µ\u{0}\u{7f}é\"'".chars().collect();
-        let words = ["width", "sin(", "atan2(", "mm", "deg", "pi", "1e308", "1e-400", "(", ")", "^", "max(", "in", "count", ","];
+        let alphabet: Vec<char> = "0123456789.eE+-*/^(),;% ?><=!:abcdmnpitrsgxw_°×÷−µ\u{0}\u{7f}é\"'".chars().collect();
+        let words = [
+            "width",
+            "sin(",
+            "atan2(",
+            "mm",
+            "deg",
+            "pi",
+            "1e308",
+            "1e-400",
+            "(",
+            ")",
+            "^",
+            "max(",
+            "in",
+            "count",
+            ",",
+            "a>b",
+            "a?b:c",
+            "count>2?1:2",
+            "width>=3?1mm:2mm",
+        ];
         let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
         let mut rnd = move || {
             seed ^= seed << 13;
