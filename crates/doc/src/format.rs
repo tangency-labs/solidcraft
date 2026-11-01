@@ -1912,6 +1912,7 @@ mod tests {
                         to: Some(crate::FacePick(solidcraft_geom::Vec3::new(0.0, 0.0, 10.0))),
                         to_offset: Some("offset + 1 mm".into()),
                         from: Some(crate::FacePick(solidcraft_geom::Vec3::new(0.0, 0.0, 5.0))),
+                        to_body_apart: false,
                     },
                     operation: Operation::NewBody,
                     targets: vec![],

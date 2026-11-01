@@ -314,6 +314,11 @@ pub struct Extent {
     /// `start_offset`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from: Option<FacePick>,
+    /// A Join To Object leaves the body it runs to as its own body, joining only its targets.
+    /// Designs saved before a Join also took that body (format 39 and older, #8151) open with
+    /// it set, so they keep the bodies they were built with.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub to_body_apart: bool,
 }
 
 /// Thin Extrude: a wall of constant thickness along sketch curves instead of the profiles.
