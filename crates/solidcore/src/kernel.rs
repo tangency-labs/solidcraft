@@ -451,6 +451,15 @@ pub struct UpstreamFixes {
     pub surface_continuity_checks_last_v_knot: bool,
     /// `sm_GoodDropResult` (`SmSurface::DropPoint` given a guess) refuses a local solve's result when the result is farther from the point than its guess, as its comment says; upstream measures its two distances the wrong way round (`dDsqGuess` to the result, `dDsqResult` to the guess), so it refused a result nearer than its guess, sending the drop to the global solve, and took one farther. The same fork change also takes a local result as the foot only when the gap's components along the unit tangents are within the local solve's tight tolerance, `SM_EFF_ZERO (1 + max|P|)` (their sum under it; an interior result each under it), where upstream takes any foot 1e-4 off (an interior one 1e-3 off in each direction); a stalled solve goes to the global solve (WR-56, #1852; the fork's tangency-labs/smlib@eaa998a (was 0b4de8c) / eaa998a, fork PR #70).
     pub good_drop_result_distances_in_order: bool,
+    /// `SmSurfacePointSolver::SmSurfacePointSolver` returns the failing status of
+    /// `SmSurface::CalculateBoundingBox` when `eSolverOp == SM_SO_3D_SIGNED_DIRECTED_MAXIMIZE`
+    /// instead of ignoring it and setting `m_sTestPt` from a corner of the uninitialised
+    /// inside-out `SmExtent3d` (`±1.4 * SM_BIG_DOUBLE`, on the wrong side of the surface)
+    /// (WR-72, #2169;
+    /// `plan/upstream-issues/WR-72--addendum-2026-11-01-propagate-bbox-failure.md`).
+    /// Non-directed solver operations and [`crate::SolidError::Unported`] propagation are
+    /// unchanged. Off by default for pinned C++ parity.
+    pub surface_point_solver_propagates_bbox_failure: bool,
     /// `SmTwistVolume::EvaluateSimple` uses positive `per * cos` for the y
     /// component of `Duw` (WR-46). Propagated through volume evaluation options.
     pub twist_simple_duw_sign: bool,
