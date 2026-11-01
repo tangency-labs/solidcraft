@@ -192,6 +192,42 @@ pub(crate) fn keyboard(ctx: &egui::Context, ok_enabled: bool) -> Action {
     }
 }
 
+/// First-letter accelerators (#9841): a typed character answers the visible button whose
+/// translated label starts with it. The match is on the typed glyph (`Event::Text`), not the
+/// physical key, so it works on any keyboard layout, and on the label after translation, so a
+/// German dialog answers N, A and S. Ambiguous letters do nothing; a matched but disabled
+/// button still swallows the key so it cannot reach the app behind the dialog. A focused text
+/// editor keeps the keystroke, as with Enter in [`keyboard`].
+pub(super) fn first_letter_action(ctx: &egui::Context, candidates: &[(Action, &str, bool)]) -> Action {
+    if ctx.memory(|m| m.focused().is_some()) {
+        return Action::None;
+    }
+    ctx.input_mut(|i| {
+        let hit = i.events.iter().enumerate().find_map(|(index, event)| match event {
+            egui::Event::Text(text) => {
+                let mut letters = text.chars();
+                let (Some(ch), None) = (letters.next(), letters.next()) else {
+                    return None;
+                };
+                let mut matches = candidates.iter().filter(|(_, label, _)| {
+                    crate::i18n::tr_label(label).trim().chars().next().is_some_and(|first| first.to_lowercase().eq(ch.to_lowercase()))
+                });
+                let (action, live) = match (matches.next(), matches.next()) {
+                    (Some((action, _, live)), None) => (*action, *live),
+                    _ => return None,
+                };
+                Some((index, action, live))
+            }
+            _ => None,
+        });
+        if let Some((index, action, live)) = hit {
+            i.events.remove(index);
+            return if live { action } else { Action::None };
+        }
+        Action::None
+    })
+}
+
 /// Pinned actions with optional Apply, compute status and keyboard selection mark.
 #[derive(Default)]
 pub(crate) struct Footer<'a> {
