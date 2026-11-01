@@ -302,8 +302,7 @@ pub(crate) fn segment(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> O
 /// `run` in `plane` exactly as segments: as [`segment`], and a curve of several Bézier spans
 /// (a chain of a font's curves, a spline through points) as one segment per span, each the
 /// line, conic or Bézier it is, for a planar region's outline. `None` when the edge doesn't lie
-/// in a plane parallel to `plane` or isn't read exactly. Only planar sheets read on SMLib use it.
-#[cfg(feature = "smlib")]
+/// in a plane parallel to `plane` or isn't read exactly.
 pub(crate) fn projected(run: &Run, plane: &Plane, tol: f64, work: &mut usize) -> Option<Vec<Seg2>> {
     read(run, plane, tol, work, true)
 }
