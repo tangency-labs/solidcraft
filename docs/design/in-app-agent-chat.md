@@ -184,13 +184,16 @@ conversation shows the merged step with an Undo button while it's still the late
 ### Document ownership
 
 Each open design tab owns an `AgentChat`, including its transcript, backend session, agent
-selection, sign-in retry, draft, attachments, pending messages and approval state. `DocSlot`
-parks that state alongside its `Session`; switching restores both together. Panel visibility,
-placement, agent discovery, the latest sign-in evidence per agent, endpoint model cache,
-settings dialogs and the desktop endpoint starter remain window state. A new tab gets a fresh conversation. Closing a tab drops its
-backend; closing the last tab or replacing its design (including programmatic New, Open and
-Recover commands or scripts from external callers) clears its conversation.
-Conversation state is in memory only and does not change the design file format.
+selection, sign-in retry, draft, attachments, pending messages and approval state. The conversation
+is also kept in `<design>_context/` beside the design, or in the data folder until first save.
+When the agent's own New or Open carries the conversation into another design, it goes on being
+kept for that design, as after Save As; for a new unsaved design, in a copy in the data folder.
+`DocSlot` parks that state alongside its `Session`; switching restores both together. Panel visibility,
+placement, agent discovery, the latest sign-in evidence per agent, endpoint model cache, settings
+dialogs, the desktop endpoint starter and the context data folder remain window state. A new tab gets
+a fresh conversation. Closing a tab drops its backend; closing the last tab or replacing its design
+(including programmatic New, Open and Recover commands or scripts from external callers) clears its
+conversation. The conversation does not change the design file format.
 
 An admitted request from the current chat carries its turn's validity flag through direct
 dispatch, cursor animation and asynchronous file loading. Only while that request applies,
@@ -265,7 +268,7 @@ returns the whole state, for tests and screenshots.
 
 | Area | Work |
 |---|---|
-| Conversation | Diffs, persisted conversation history, resume (`session/load`) |
+| Conversation | Diffs, showing saved history on reopen, resume (`session/load`) |
 | Session controls | Slash commands |
 | Auth | An embedded terminal or "open a terminal here" for terminal logins on each OS; logout |
 | Discovery | Read the ACP registry; keychain-aware login check on macOS |

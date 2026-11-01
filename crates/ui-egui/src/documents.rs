@@ -585,6 +585,7 @@ pub(crate) fn reset_chat(app: &mut SolveApp) {
     // design: it starts over in place, and its agent stays connected.
     if !app.agent_chat.items.iter().any(|i| matches!(i, crate::agent_chat::Item::User { .. })) {
         crate::agent_chat::new_chat(app);
+        app.agent_chat.clear_design_context();
         app.agent_chat.input.clear();
         return;
     }

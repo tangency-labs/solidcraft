@@ -36,8 +36,11 @@ pub mod paste;
 #[cfg(not(target_arch = "wasm32"))]
 mod process;
 pub mod settings;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod store;
 pub mod summary;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -316,6 +319,14 @@ impl Loading {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+struct ContextLink {
+    context: Option<store::Context>,
+    design: Option<PathBuf>,
+    recorded: usize,
+    failed: bool,
+}
+
 /// The model before an ACP agent was sent another, for when it refuses that one.
 struct ModelRevert {
     model: String,
@@ -441,6 +452,10 @@ pub struct AgentChat {
     login_results: std::collections::HashMap<String, bool>,
     /// Desktop host hook: start the endpoint on demand.
     pub control_starter: Option<ControlStarter>,
+    /// Data folder for conversations belonging to unsaved designs, shared across tabs.
+    pub context_root: Option<PathBuf>,
+    #[cfg(not(target_arch = "wasm32"))]
+    context_link: Option<ContextLink>,
     /// The picker is unfolded (it folds to one line once an agent is connected).
     picking: Option<bool>,
     /// This launch connects the agent started last once the installed agents are known ([`begin`]).
@@ -465,6 +480,7 @@ impl AgentChat {
         std::mem::swap(&mut self.following_document, &mut other.following_document);
         std::mem::swap(&mut self.settings, &mut other.settings);
         std::mem::swap(&mut self.control_starter, &mut other.control_starter);
+        std::mem::swap(&mut self.context_root, &mut other.context_root);
         std::mem::swap(&mut self.models_cache, &mut other.models_cache);
         std::mem::swap(&mut self.window_placed, &mut other.window_placed);
         std::mem::swap(&mut self.connect_at_start, &mut other.connect_at_start);
@@ -479,6 +495,14 @@ impl AgentChat {
         self.panel_rect = None;
         self.dock_space = None;
         self.drop_rect = None;
+    }
+
+    /// A replacement design starts with no link, even if New chat cleared its visible items.
+    pub(crate) fn clear_design_context(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.context_link = None;
+        }
     }
 
     pub(crate) fn disconnect_document(&mut self, session: &mut solidcraft_engine::Session, wait: bool) {
@@ -577,6 +601,10 @@ impl AgentChat {
     fn push(&mut self, item: Item) {
         if self.items.len() >= MAX_ITEMS {
             self.items.drain(..MAX_ITEMS / 10);
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(link) = &mut self.context_link {
+                link.recorded = link.recorded.saturating_sub(MAX_ITEMS / 10);
+            }
         }
         self.items.push(item);
     }
@@ -842,6 +870,197 @@ impl AgentChat {
             }
         }
         None
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl AgentChat {
+    fn context_error(&mut self, error: std::io::Error) {
+        if let Some(link) = &mut self.context_link {
+            if link.failed {
+                return;
+            }
+            link.failed = true;
+            self.notice(trf("ui.agent_chat_context_write_failed", &[("reason", &error.to_string())]), true);
+        }
+    }
+
+    /// Follow the session path even when a save came from outside the chat.
+    fn follow_design(&mut self, path: Option<&str>) {
+        let design = path.map(PathBuf::from);
+        let Some(link) = &mut self.context_link else { return };
+        if link.design == design {
+            return;
+        }
+        let Some(target) = design.as_deref() else {
+            // The agent's own New carries the conversation (#7526): it goes on in a copy under the
+            // data folder, as an unsaved design's does. Anything else starts over.
+            let copy = match (&link.context, &self.context_root) {
+                (Some(context), Some(root)) if !link.failed => context.copy_unsaved(root),
+                _ => {
+                    self.context_link = None;
+                    return;
+                }
+            };
+            match copy {
+                Ok(copy) => {
+                    link.context = Some(copy);
+                    link.design = None;
+                }
+                Err(error) => self.context_error(error),
+            }
+            return;
+        };
+        if link.failed {
+            return;
+        }
+        let result = (|| -> std::io::Result<()> {
+            let Some(context) = &mut link.context else { return Ok(()) };
+            let dir = store::folder_for(target);
+            if dir == context.dir() {
+                return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "designs share a context folder"));
+            }
+            match std::fs::symlink_metadata(dir.join("context.json")) {
+                Ok(_) => {
+                    store::set_aside(&dir)?;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+            let name = target.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+            if link.design.is_none() {
+                context.move_to(&dir, &name)?;
+            } else {
+                link.context = Some(context.copy_to(&dir, &name)?);
+            }
+            link.design = Some(target.to_path_buf());
+            Ok(())
+        })();
+        if let Err(error) = result {
+            self.context_error(error);
+        }
+    }
+
+    fn record_user(&mut self, path: Option<&str>, at: Option<usize>, view: Option<&[u8]>) {
+        self.follow_design(path);
+        let Some(at) = at else { return };
+        if self.context_link.is_none() {
+            if path.is_none() && self.context_root.is_none() {
+                return;
+            }
+            let design = path.map(PathBuf::from);
+            let result = if let Some(path) = design.as_deref() {
+                let dir = store::folder_for(path);
+                match std::fs::symlink_metadata(dir.join("context.json")) {
+                    Ok(_) => store::Context::open(&dir),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+                        store::Context::create(&dir, &name, &self.agent)
+                    }
+                    Err(error) => Err(error),
+                }
+            } else if let Some(root) = &self.context_root {
+                store::Context::create_unsaved(root, &self.agent)
+            } else {
+                return;
+            };
+            self.context_link = Some(ContextLink { context: None, design, recorded: at, failed: false });
+            match result {
+                Ok(context) => {
+                    if let Some(link) = &mut self.context_link {
+                        link.context = Some(context);
+                    }
+                }
+                Err(error) => {
+                    self.context_error(error);
+                    return;
+                }
+            }
+        }
+        // A sign-in retry refers to the same item and must not append it again.
+        let Some(link) = &self.context_link else { return };
+        if link.failed || at < link.recorded {
+            return;
+        }
+        self.record_items_until(at, None);
+        self.record_items_until(at.saturating_add(1), view);
+    }
+
+    fn record_plan(&mut self, path: Option<&str>, entries: &[(String, String)]) {
+        self.follow_design(path);
+        let Some(link) = &self.context_link else { return };
+        if link.failed {
+            return;
+        }
+        let Some(context) = &link.context else { return };
+        if let Err(error) = context.write_plan(entries) {
+            self.context_error(error);
+        }
+    }
+
+    fn record_remaining(&mut self, path: Option<&str>) {
+        self.follow_design(path);
+        self.record_items_until(self.items.len(), None);
+    }
+
+    fn record_items_until(&mut self, end: usize, view: Option<&[u8]>) {
+        loop {
+            let Some(link) = &self.context_link else { return };
+            if link.failed || link.recorded >= end {
+                return;
+            }
+            let Some(context) = &link.context else { return };
+            let Some(item) = self.items.get(link.recorded) else { return };
+            let result = (|| -> std::io::Result<()> {
+                let record = match item {
+                    Item::User { text, pictures, files, .. } => {
+                        let mut names = Vec::new();
+                        for picture in pictures.iter().filter(|picture| !picture.view) {
+                            names.push(context.add_reference(&picture.note, &picture.bytes)?);
+                        }
+                        if let Some(bytes) = view {
+                            names.push(context.add_reference("view.png", bytes)?);
+                        }
+                        Some(store::Record::User { text: text.clone(), pictures: names, files: files.clone() })
+                    }
+                    Item::Agent { text, thought } => Some(store::Record::Agent { text: text.clone(), thought: *thought }),
+                    Item::Tool { id, title, status, output, .. } => {
+                        let status = match status {
+                            Some(ToolStatus::Pending) => "pending",
+                            Some(ToolStatus::InProgress) => "in_progress",
+                            Some(ToolStatus::Completed) => "completed",
+                            Some(ToolStatus::Failed) => "failed",
+                            None => "",
+                        };
+                        let output = output.as_deref().unwrap_or("");
+                        let mut end = output.len().min(4096);
+                        while !output.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        Some(store::Record::Tool {
+                            id: id.clone(),
+                            title: title.clone(),
+                            status: status.into(),
+                            output: output.get(..end).unwrap_or_default().into(),
+                        })
+                    }
+                    Item::Changes { steps, undone, .. } => Some(store::Record::Changes { steps: *steps, undone: *undone }),
+                    Item::Notice { text, error } => Some(store::Record::Notice { text: text.clone(), error: *error }),
+                    Item::Plan(_) | Item::Permission { .. } | Item::Approval { .. } => None,
+                };
+                if let Some(record) = record {
+                    context.append(&record)?;
+                }
+                Ok(())
+            })();
+            if let Err(error) = result {
+                self.context_error(error);
+                return;
+            }
+            if let Some(link) = &mut self.context_link {
+                link.recorded += 1;
+            }
+        }
     }
 }
 
@@ -1391,6 +1610,10 @@ pub fn new_chat(app: &mut SolveApp) {
     let chat = &mut app.agent_chat;
     chat.confirm_new = false;
     chat.items.clear();
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(link) = &mut chat.context_link {
+        link.recorded = 0;
+    }
     chat.turn_warning = None;
     chat.gallery = None;
     chat.picked.clear();
@@ -1463,16 +1686,24 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
     let about_files = attach::note(&files, pictures, documents, budget);
     let sent: String = format!("{lead}{about_files}").chars().take(MAX_PROMPT).collect();
     let mut parts = vec![PromptPart::Text(sent)];
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut view_picture = None;
     if image {
         match crate::control::view_png(app, VIEW_IMAGE.0, VIEW_IMAGE.1) {
             Ok(png) => {
                 parts.push(PromptPart::Image { mime: "image/png".into(), base64: backend::base64(&png) });
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    view_picture = Some(png.clone());
+                }
                 app.agent_chat.keep_picture(at, png);
             }
             Err(e) => log::warn!("the view's picture is left out of the prompt: {e}"),
         }
     }
     parts.extend(attach::parts(&files, pictures, documents));
+    #[cfg(not(target_arch = "wasm32"))]
+    app.agent_chat.record_user(app.session.path.as_deref(), at, view_picture.as_deref());
     // The undo step is named after the message, or its first file when it has no words.
     let first_line = text.lines().find(|l| !l.trim().is_empty()).or_else(|| files.first().map(|f| f.name.as_str())).unwrap_or("");
     let label: String = first_line.chars().take(48).collect();
@@ -1748,6 +1979,8 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
         let doc = session.doc.clone();
         chat.push(Item::Changes { steps, doc, undone: false });
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    chat.record_remaining(session.path.as_deref());
 }
 
 /// Merge the undo steps made since `start_doc` (at depth `start_undo`) into one, labelled `label`;
@@ -1900,6 +2133,8 @@ pub(crate) fn take_loaded(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
+    #[cfg(not(target_arch = "wasm32"))]
+    app.agent_chat.follow_design(app.session.path.as_deref());
     settings::poll_tests(&mut app.agent_chat);
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(rx) = &app.agent_chat.detecting
@@ -1926,6 +2161,10 @@ pub fn poll(app: &mut SolveApp, ctx: &egui::Context) {
     take_loaded(app, ctx);
     let events = app.agent_chat.backend.as_mut().map(|b| b.poll()).unwrap_or_default();
     for e in events {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Event::Plan(entries) = &e {
+            app.agent_chat.record_plan(app.session.path.as_deref(), entries);
+        }
         let ready = matches!(e, Event::Ready { .. });
         let configured = matches!(e, Event::ConfigOptionFinished { .. });
         let confirmed_model = match &e {

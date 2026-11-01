@@ -4084,6 +4084,301 @@ fn a_screenshot_card_hides_the_path_until_details() {
     assert!(h.widget("Result").is_some() && h.widget(path).is_some(), "Details holds the full path");
 }
 
+// ---- The design's context folder (#1539) ----
+
+use super::store::{self, Context as StoreContext, Record};
+
+/// A fresh folder for one test.
+fn context_scratch(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("solidcraft-chat-context-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// An app with a scripted agent, its design saved at `design` (`None`: unsaved), keeping unsaved
+/// designs' conversations under `data`.
+fn app_on(design: Option<&std::path::Path>, data: &std::path::Path) -> (SolveApp, Script, egui::Context) {
+    let (mut app, script, ctx) = app_with_script();
+    app.session.path = design.map(|p| p.to_string_lossy().into_owned());
+    app.agent_chat.context_root = Some(data.to_path_buf());
+    (app, script, ctx)
+}
+
+fn records_in(dir: &std::path::Path) -> Vec<Record> {
+    StoreContext::open(dir).unwrap().transcript().unwrap()
+}
+
+fn user_texts(records: &[Record]) -> Vec<String> {
+    records.iter().filter_map(|r| if let Record::User { text, .. } = r { Some(text.clone()) } else { None }).collect()
+}
+
+fn end_turn_now(app: &mut SolveApp, script: &Script, ctx: &egui::Context) {
+    ended(script, "");
+    poll(app, ctx);
+}
+
+fn saved_as(app: &mut SolveApp, path: &std::path::Path) {
+    app.session.path = Some(path.to_string_lossy().into_owned());
+}
+
+#[test]
+fn no_context_folder_until_the_first_message() {
+    let root = context_scratch("none");
+    let design = root.join("bracket.sc");
+    let (mut app, _script, ctx) = app_on(Some(&design), &root.join("data"));
+    app.agent_chat.open = true;
+    for _ in 0..3 {
+        poll(&mut app, &ctx);
+    }
+    assert!(!store::folder_for(&design).exists(), "opening the chat on a design leaves nothing beside it");
+    assert!(!root.join("data").exists());
+}
+
+#[test]
+fn a_saved_designs_conversation_is_kept_beside_it() {
+    let root = context_scratch("saved");
+    let design = root.join("bracket.sc");
+    let (mut app, script, ctx) = app_on(Some(&design), &root.join("data"));
+    send(&mut app, &ctx, "a bracket, 40 mm arm".into());
+    let dir = store::folder_for(&design);
+    // The request is on disk as soon as it goes to the agent.
+    assert_eq!(user_texts(&records_in(&dir)), ["a bracket, 40 mm arm"]);
+    assert_eq!(StoreContext::open(&dir).unwrap().meta().design, "bracket.sc");
+
+    script.report(Event::Text { thought: false, text: "Planning ".into() });
+    script.report(Event::Text { thought: false, text: "it.".into() });
+    script.report(Event::Tool {
+        id: "t1".into(),
+        title: Some("execute".into()),
+        kind: Some("other".into()),
+        status: Some(ToolStatus::Completed),
+        input: None,
+        output: Some("{\"ok\":true}".into()),
+    });
+    script.report(Event::Plan(vec![("Sketch the profile".into(), "completed".into()), ("Extrude 6 mm".into(), "pending".into())]));
+    end_turn_now(&mut app, &script, &ctx);
+
+    let got = records_in(&dir);
+    assert!(got.contains(&Record::Agent { text: "Planning it.".into(), thought: false }), "streamed text is one record: {got:?}");
+    assert!(got.iter().any(|r| matches!(r, Record::Tool { id, status, .. } if id == "t1" && status == "completed")), "{got:?}");
+    assert_eq!(
+        StoreContext::open(&dir).unwrap().plan().unwrap(),
+        vec![("Sketch the profile".to_string(), "completed".to_string()), ("Extrude 6 mm".to_string(), "pending".to_string())]
+    );
+    assert_eq!(user_texts(&got), ["a bracket, 40 mm arm"], "nothing is written twice");
+
+    // The next message goes on in the same folder.
+    send(&mut app, &ctx, "add two holes".into());
+    assert_eq!(user_texts(&records_in(&dir)), ["a bracket, 40 mm arm", "add two holes"]);
+    assert!(!root.join("data").exists(), "a saved design keeps nothing in the data folder");
+}
+
+#[test]
+fn reopening_a_design_carries_on_its_conversation() {
+    let root = context_scratch("reopen");
+    let design = root.join("d.sc");
+    let earlier = StoreContext::create(&store::folder_for(&design), "d.sc", "claude").unwrap();
+    earlier.append(&Record::User { text: "yesterday".into(), pictures: vec![], files: vec![] }).unwrap();
+    let (mut app, _script, ctx) = app_on(Some(&design), &root.join("data"));
+    send(&mut app, &ctx, "today".into());
+    let dir = store::folder_for(&design);
+    assert_eq!(StoreContext::open(&dir).unwrap().meta().id, earlier.meta().id);
+    assert_eq!(user_texts(&records_in(&dir)), ["yesterday", "today"]);
+}
+
+#[test]
+fn an_unsaved_designs_conversation_moves_beside_it_on_first_save() {
+    let root = context_scratch("first-save");
+    let data = root.join("data");
+    let (mut app, script, ctx) = app_on(None, &data);
+    send(&mut app, &ctx, "start a case".into());
+    end_turn_now(&mut app, &script, &ctx);
+    let contexts = data.join("agent-chat").join("contexts");
+    let unsaved: Vec<_> = std::fs::read_dir(&contexts).unwrap().map(|e| e.unwrap().path()).collect();
+    assert_eq!(unsaved.len(), 1, "{unsaved:?}");
+    let id = StoreContext::open(&unsaved[0]).unwrap().meta().id.clone();
+
+    // Saved by any way that gives the design a path (the toolbar, a shortcut, the agent).
+    let design = root.join("case.sc");
+    saved_as(&mut app, &design);
+    poll(&mut app, &ctx);
+    let beside = store::folder_for(&design);
+    let moved = StoreContext::open(&beside).unwrap();
+    assert_eq!(moved.meta().id, id, "the same conversation, moved");
+    assert_eq!(moved.meta().design, "case.sc");
+    assert!(!unsaved[0].exists());
+
+    send(&mut app, &ctx, "now the lid".into());
+    assert_eq!(user_texts(&records_in(&beside)), ["start a case", "now the lid"]);
+}
+
+#[test]
+fn save_as_copies_the_conversation_and_carries_on_in_the_copy() {
+    let root = context_scratch("save-as");
+    let first = root.join("a.sc");
+    let (mut app, script, ctx) = app_on(Some(&first), &root.join("data"));
+    send(&mut app, &ctx, "hello".into());
+    end_turn_now(&mut app, &script, &ctx);
+    let a = store::folder_for(&first);
+    let a_id = StoreContext::open(&a).unwrap().meta().id.clone();
+
+    let second = root.join("b.sc");
+    saved_as(&mut app, &second);
+    poll(&mut app, &ctx);
+    let b = store::folder_for(&second);
+    let copy = StoreContext::open(&b).unwrap();
+    assert_ne!(copy.meta().id, a_id);
+    assert_eq!(copy.meta().design, "b.sc");
+
+    send(&mut app, &ctx, "only in b".into());
+    assert_eq!(user_texts(&records_in(&b)), ["hello", "only in b"]);
+    assert_eq!(user_texts(&records_in(&a)), ["hello"], "the first design's conversation stays as it was");
+}
+
+/// The agent's own New carries its conversation into the new design (#7526): the rest of the turn
+/// and what follows are kept in a copy under the data folder, as for any unsaved design.
+#[test]
+fn an_agents_new_design_keeps_its_conversation_on_disk() {
+    let root = context_scratch("agent-new");
+    let first = root.join("a.sc");
+    let data = root.join("data");
+    let (mut app, script, ctx) = app_on(Some(&first), &data);
+    let (tx, rx) = channel();
+    app.agent_chat.tools_rx = Some(rx);
+    app.preferences.ai_permissions = agents::Mode::All;
+    send(&mut app, &ctx, "start a second design".into());
+    let response = chat_tool(&mut app, &tx, &ctx, "engine.execute", json!({"command": "file.new"}));
+    assert_eq!(response["ok"], true, "{response}");
+    assert!(app.session.path.is_none());
+    script.report(Event::Text { thought: false, text: "A new design is open.".into() });
+    end_turn_now(&mut app, &script, &ctx);
+
+    let contexts = data.join("agent-chat").join("contexts");
+    let unsaved: Vec<_> = std::fs::read_dir(&contexts).map(|d| d.map(|e| e.unwrap().path()).collect()).unwrap_or_default();
+    assert_eq!(unsaved.len(), 1, "the conversation goes on under the data folder: {unsaved:?}");
+    let copy = StoreContext::open(&unsaved[0]).unwrap();
+    assert_eq!(copy.meta().design, "");
+    let got = records_in(&unsaved[0]);
+    assert_eq!(user_texts(&got), ["start a second design"]);
+    assert!(got.contains(&Record::Agent { text: "A new design is open.".into(), thought: false }), "the rest of the turn is kept: {got:?}");
+
+    send(&mut app, &ctx, "add a box".into());
+    assert_eq!(user_texts(&records_in(&unsaved[0])), ["start a second design", "add a box"]);
+    let a = store::folder_for(&first);
+    assert_eq!(user_texts(&records_in(&a)), ["start a second design"], "the first design's folder keeps what was said there");
+    assert!(!records_in(&a).iter().any(|r| matches!(r, Record::Agent { .. })));
+}
+
+#[test]
+fn saving_over_a_design_sets_its_old_folder_aside() {
+    let root = context_scratch("aside");
+    let target = root.join("c.sc");
+    let old = StoreContext::create(&store::folder_for(&target), "c.sc", "codex").unwrap();
+    old.append(&Record::User { text: "the old design's".into(), pictures: vec![], files: vec![] }).unwrap();
+    let (mut app, script, ctx) = app_on(None, &root.join("data"));
+    send(&mut app, &ctx, "mine".into());
+    end_turn_now(&mut app, &script, &ctx);
+    saved_as(&mut app, &target);
+    poll(&mut app, &ctx);
+    assert_eq!(user_texts(&records_in(&store::folder_for(&target))), ["mine"]);
+    assert_eq!(user_texts(&records_in(&root.join("c_context.old"))), ["the old design's"], "never merged, never deleted");
+}
+
+#[test]
+fn pictures_sent_with_a_message_are_kept_in_references() {
+    let root = context_scratch("pictures");
+    let design = root.join("e.sc");
+    let (mut app, _script, ctx) = app_on(Some(&design), &root.join("data"));
+    let mut png = std::io::Cursor::new(Vec::new());
+    image::RgbaImage::from_pixel(4, 4, image::Rgba([200, 30, 30, 255])).write_to(&mut png, image::ImageFormat::Png).unwrap();
+    app.agent_chat.add_file(attach::picture("sketch.png".into(), png.get_ref()).unwrap());
+    send(&mut app, &ctx, "like this".into());
+    let dir = store::folder_for(&design);
+    let got = records_in(&dir);
+    let Some(Record::User { pictures, .. }) = got.first() else { panic!("{got:?}") };
+    assert_eq!(pictures.len(), 1, "{got:?}");
+    let kept = std::fs::read(dir.join("references").join(&pictures[0])).unwrap();
+    assert!(image::load_from_memory(&kept).is_ok(), "the picture itself is kept");
+}
+
+#[test]
+fn a_conversation_that_cannot_be_kept_still_runs_and_says_so_once() {
+    let root = context_scratch("unwritable");
+    let blocker = root.join("data");
+    std::fs::write(&blocker, b"a file where the data folder should be").unwrap();
+    let (mut app, script, ctx) = app_on(None, &blocker);
+    send(&mut app, &ctx, "first".into());
+    end_turn_now(&mut app, &script, &ctx);
+    send(&mut app, &ctx, "second".into());
+    assert_eq!(script.prompts().len(), 2, "the agent still gets every message");
+    let told = app.agent_chat.items.iter().filter(|i| matches!(i, Item::Notice { error: true, .. })).count();
+    assert_eq!(told, 1, "one notice, not one per message: {:?}", app.agent_chat.items);
+}
+
+#[test]
+fn without_a_data_folder_an_unsaved_design_keeps_nothing_until_saved() {
+    let root = context_scratch("no-root");
+    let (mut app, script, ctx) = app_with_script();
+    app.agent_chat.context_root = None;
+    send(&mut app, &ctx, "first".into());
+    end_turn_now(&mut app, &script, &ctx);
+    assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { error: true, .. })), "not an error");
+    let design = root.join("f.sc");
+    saved_as(&mut app, &design);
+    poll(&mut app, &ctx);
+    send(&mut app, &ctx, "second".into());
+    let got = user_texts(&records_in(&store::folder_for(&design)));
+    assert!(got.ends_with(&["second".to_string()]), "kept from the first save on: {got:?}");
+}
+
+#[test]
+fn new_chat_keeps_the_context_but_replacing_the_design_drops_it() {
+    let root = context_scratch("new-chat-replace");
+    let (mut app, script, ctx) = app_on(None, &root.join("data"));
+    send(&mut app, &ctx, "first".into());
+    end_turn_now(&mut app, &script, &ctx);
+    let original = app.agent_chat.context_link.as_ref().unwrap().context.as_ref().unwrap().dir().to_path_buf();
+    new_chat(&mut app);
+    assert_eq!(app.agent_chat.context_link.as_ref().unwrap().recorded, 0);
+    assert_eq!(app.agent_chat.context_link.as_ref().unwrap().context.as_ref().unwrap().dir(), original);
+    crate::documents::reset_chat(&mut app);
+    assert!(app.agent_chat.context_link.is_none(), "the replacement is a different design even when both are unsaved");
+    assert_eq!(user_texts(&records_in(&original)), ["first"]);
+}
+
+#[test]
+fn context_root_stays_with_the_window_on_a_tab_switch() {
+    let mut window = AgentChat::default();
+    let mut other = AgentChat::default();
+    window.context_root = Some(context_scratch("window-root"));
+    let root = window.context_root.clone();
+    window.swap_document(&mut other);
+    assert_eq!(window.context_root, root);
+    assert_eq!(other.context_root, None);
+}
+
+#[test]
+fn tool_output_is_cut_on_a_utf8_boundary() {
+    let root = context_scratch("tool-output");
+    let design = root.join("tool.sc");
+    let (mut app, script, ctx) = app_on(Some(&design), &root.join("data"));
+    send(&mut app, &ctx, "run a tool".into());
+    script.report(Event::Tool {
+        id: "tool".into(),
+        title: Some("test".into()),
+        kind: None,
+        status: Some(ToolStatus::InProgress),
+        input: None,
+        output: Some(format!("{}é", "x".repeat(4095))),
+    });
+    end_turn_now(&mut app, &script, &ctx);
+    let records = records_in(&store::folder_for(&design));
+    let Some(Record::Tool { status, output, .. }) = records.iter().find(|r| matches!(r, Record::Tool { .. })) else { panic!("{records:?}") };
+    assert_eq!(status, "in_progress");
+    assert_eq!(output, &"x".repeat(4095));
+}
+
 /// The composer's input box fills its parent composer area on all four sides, in every layout:
 /// the only inset left is the text's own padding inside the box (no second margin around it).
 #[test]

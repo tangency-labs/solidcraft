@@ -1165,6 +1165,7 @@ fn main() -> eframe::Result {
             // on a free port the first time the chat connects (docs/agent-chat.md).
             let ctx = cc.egui_ctx.clone();
             app.agent_chat.control_starter = Some(Box::new(move |tx| control_server::listen_agent(tx, ctx.clone())));
+            app.agent_chat.context_root = solidcraft_engine::recovery::data_dir();
             if sample {
                 if let Err(e) = app.session.run_script(&solidcraft_engine::sample::script()) {
                     app.set_status(format!("sample: {e}"), true);
