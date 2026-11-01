@@ -1667,7 +1667,10 @@ impl SurfaceConversion {
 /// `sheet` folded, each piece of its flat where its first panel's place puts it. Every other
 /// panel with a place of its own (the face it was converted from) must fold onto it through the
 /// bends and seams that reach it: anywhere else, a joint was read wrong, and that is an error
-/// rather than a sheet in the wrong place.
+/// rather than a sheet in the wrong place. Onto it means within the millionth of its size Convert
+/// reads the body's faces to: a body is no more exact than that (a section drawn through points
+/// rounded to six places is a sheet to a few millionths of a millimetre), and a joint read wrong
+/// misses by far more.
 pub(crate) fn fold_onto(sheet: &Sheet, dev: &Development, places: &[Option<Rigid3>]) -> Result<Fold> {
     let root = |p: &Vec<usize>| p.first().and_then(|i| places.get(*i)).copied().flatten();
     let roots: Vec<Rigid3> =
@@ -1677,7 +1680,7 @@ pub(crate) fn fold_onto(sheet: &Sheet, dev: &Development, places: &[Option<Rigid
     for (i, (got, own)) in folded.places.iter().zip(places).enumerate() {
         let (Some(got), Some(own)) = (got, own) else { continue };
         let off = got.shift.dist(own.shift) + reach * (got.x.dist(own.x) + got.y.dist(own.y) + got.z.dist(own.z));
-        if off > (reach * 1e-9).max(1e-9) {
+        if off > (reach * 1e-6).max(1e-6) {
             let name = sheet.panels.get(i).map_or_else(|| format!("panel {i}"), |p| p.name.clone());
             return err(format!("the sheet folds {name} {off:.3e} mm from where the body has it"));
         }

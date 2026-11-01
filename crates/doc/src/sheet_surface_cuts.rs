@@ -122,7 +122,10 @@ fn touches(g: &Region2, of: &[Region2], near: f64) -> bool {
 /// lays its chart in the plane of the first panel's face.
 fn frames(sk: &SurfaceSheet, dev: &Development) -> Result<Vec<Option<Rigid3>>> {
     if !sk.unfolded {
-        return Ok(crate::sheet_surface_convert::fold_onto(&sk.sheet, dev, &sk.places)?.places);
+        // A panel with a place of its own (the face it was made from) is read where that face is:
+        // folding reaches it only to within the body's tolerance (see `fold_onto`).
+        let folded = crate::sheet_surface_convert::fold_onto(&sk.sheet, dev, &sk.places)?.places;
+        return Ok(folded.into_iter().enumerate().map(|(i, got)| sk.places.get(i).copied().flatten().or(got)).collect());
     }
     let base = sk.places.first().copied().flatten().ok_or_else(|| DocError::Invalid("the sheet's first panel has no place".into()))?;
     Ok(dev.placements.iter().map(|p| p.map(|r| lift(&base, &r))).collect())
