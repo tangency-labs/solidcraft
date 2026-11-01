@@ -79,6 +79,8 @@ lopdf = { version = "0.45", default-features = false }
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 # The offscreen viewport render test opens a device without a window.
 pollster = { workspace = true }
+# The SFTP network folder tests send to a server in the process (dialogs_save_mesh.rs).
+solidcraft-engine = { workspace = true, features = ["bundled-render-library", "sftp-test-server"] }
 
 [build-dependencies]
 serde_json = { workspace = true }
