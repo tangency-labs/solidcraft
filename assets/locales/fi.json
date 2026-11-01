@@ -4470,7 +4470,6 @@
   "ui.press_a_key": "paina näppäintä…",
   "ui.print_face_cleared": "{body}: tulostuspinta poistettu",
   "ui.print_face_input": "Tulostuspinta",
-  "ui.print_face_one_body": "Tulostuspinta on valittu yhdelle kappaleelle: lähetä kappale yksinään muuttaaksesi sitä",
   "ui.print_face_pick": "Valitse kiinteän kappaleen yksi tasainen pinta tulostuspinnaksi",
   "ui.print_face_set": "{body}: tulostuspinta asetettu; Lähetä viipalointiohjelmaan asettaa kappaleen sen varaan",
   "ui.profile": "Profiili",

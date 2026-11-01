@@ -4796,7 +4796,6 @@
   "ui.press_a_key": "tekan tombol…",
   "ui.print_face_cleared": "{body}: permukaan cetak dihapus",
   "ui.print_face_input": "Permukaan cetak",
-  "ui.print_face_one_body": "Permukaan cetak milik satu bodi: kirim bodi itu sendiri untuk mengubahnya",
   "ui.print_face_pick": "Pilih satu permukaan datar dari bodi padat untuk dijadikan permukaan cetak",
   "ui.print_face_set": "{body}: permukaan cetak diatur; Kirim ke slicer meletakkan bodi di atasnya",
   "ui.profile": "Profil",

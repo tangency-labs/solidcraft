@@ -4796,7 +4796,6 @@
   "ui.press_a_key": "pritisnite tipku…",
   "ui.print_face_cleared": "{body}: površina za štampu uklonjena",
   "ui.print_face_input": "Površina za štampu",
-  "ui.print_face_one_body": "Površina za štampu pripada jednom tijelu: pošaljite to tijelo samo da biste je promijenili",
   "ui.print_face_pick": "Odaberite ravnu površinu punog tijela da postane površina za štampu",
   "ui.print_face_set": "{body}: površina za štampu postavljena; Pošalji u slajser polaže tijelo na nju",
   "ui.profile": "Profil",

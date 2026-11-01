@@ -4796,7 +4796,6 @@
   "ui.press_a_key": "tryck på en tangent…",
   "ui.print_face_cleared": "{body}: utskriftsyta rensad",
   "ui.print_face_input": "Utskriftsyta",
-  "ui.print_face_one_body": "En utskriftsyta hör till en kropp: skicka den kroppen ensam för att ändra den",
   "ui.print_face_pick": "Välj en plan yta på en solid kropp för att göra den till utskriftsytan",
   "ui.print_face_set": "{body}: utskriftsyta angiven; Skicka till slicer lägger kroppen på den",
   "ui.profile": "Profil",

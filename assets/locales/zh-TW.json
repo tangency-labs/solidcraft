@@ -4797,7 +4797,6 @@
   "ui.press_a_key": "按一個鍵…",
   "ui.print_face_cleared": "{body}：已清除列印底面",
   "ui.print_face_input": "列印底面",
-  "ui.print_face_one_body": "列印底面屬於單一實體：請單獨傳送該實體以變更它",
   "ui.print_face_pick": "選取實體的一個平面，將其設為列印底面",
   "ui.print_face_set": "{body}：已設定列印底面；傳送到切片軟體時實體會放在此面上",
   "ui.profile": "輪廓",

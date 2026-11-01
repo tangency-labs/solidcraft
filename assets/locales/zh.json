@@ -4861,7 +4861,6 @@
   "ui.press_a_key": "按一个键…",
   "ui.print_face_cleared": "{body}：已清除打印底面",
   "ui.print_face_input": "打印底面",
-  "ui.print_face_one_body": "打印底面属于单个实体：请单独发送该实体以更改它",
   "ui.print_face_pick": "选择实体的一个平面，将其设为打印底面",
   "ui.print_face_set": "{body}：已设置打印底面；发送到切片软件时实体将放在此面上",
   "ui.profile": "轮廓",

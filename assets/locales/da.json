@@ -4796,7 +4796,6 @@
   "ui.press_a_key": "tryk på en tast…",
   "ui.print_face_cleared": "{body}: printflade ryddet",
   "ui.print_face_input": "Printflade",
-  "ui.print_face_one_body": "En printflade hører til ét legeme: send det legeme alene for at ændre den",
   "ui.print_face_pick": "Vælg en plan flade på et massivt legeme for at gøre den til printfladen",
   "ui.print_face_set": "{body}: printflade sat; Send til slicer lægger legemet på den",
   "ui.profile": "Profil",

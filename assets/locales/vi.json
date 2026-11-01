@@ -4861,7 +4861,6 @@
   "ui.press_a_key": "nhấn một phím…",
   "ui.print_face_cleared": "{body}: đã xóa mặt in",
   "ui.print_face_input": "Mặt in",
-  "ui.print_face_one_body": "Mặt in được chọn cho một thân: hãy gửi riêng thân đó để thay đổi",
   "ui.print_face_pick": "Chọn một mặt phẳng của thân đặc để đặt làm mặt in",
   "ui.print_face_set": "{body}: đã đặt mặt in; Gửi đến Slicer sẽ đặt thân lên mặt này",
   "ui.profile": "Biên dạng",

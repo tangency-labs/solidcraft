@@ -4796,7 +4796,6 @@
   "ui.press_a_key": "nyomjon meg egy billentyűt…",
   "ui.print_face_cleared": "{body}: nyomtatási lap törölve",
   "ui.print_face_input": "Nyomtatási lap",
-  "ui.print_face_one_body": "A nyomtatási lap egy testhez tartozik: a módosításhoz küldd el azt a testet egyedül",
   "ui.print_face_pick": "Válassz ki egy tömör test egy sík lapját, hogy az legyen a nyomtatási lap",
   "ui.print_face_set": "{body}: nyomtatási lap beállítva; a Küldés szeletelőnek erre a lapra fekteti a testet",
   "ui.profile": "Profil",

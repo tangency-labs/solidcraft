@@ -4796,7 +4796,6 @@
   "ui.press_a_key": "preme unha tecla…",
   "ui.print_face_cleared": "{body}: cara de impresión quitada",
   "ui.print_face_input": "Cara de impresión",
-  "ui.print_face_one_body": "Unha cara de impresión pertence a un só corpo: envía ese corpo só para cambiala",
   "ui.print_face_pick": "Selecciona unha cara plana dun corpo sólido para facela a cara de impresión",
   "ui.print_face_set": "{body}: cara de impresión definida; Enviar ao laminador apoia o corpo sobre ela",
   "ui.profile": "Perfil",

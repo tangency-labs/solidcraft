@@ -4861,7 +4861,6 @@
   "ui.press_a_key": "press a key…",
   "ui.print_face_cleared": "{body}: print face cleared",
   "ui.print_face_input": "Print face",
-  "ui.print_face_one_body": "A print face is picked for one body: send that body on its own to change it",
   "ui.print_face_pick": "Select one flat face of a solid body to make it the print face",
   "ui.print_face_set": "{body}: print face set; Send to Slicer lays the body on it",
   "ui.profile": "Profile",

@@ -4796,7 +4796,6 @@
   "ui.press_a_key": "druk op een toets…",
   "ui.print_face_cleared": "{body}: printvlak gewist",
   "ui.print_face_input": "Printvlak",
-  "ui.print_face_one_body": "Een printvlak hoort bij één lichaam: stuur dat lichaam alleen om het te wijzigen",
   "ui.print_face_pick": "Selecteer één vlak van een massief lichaam om het het printvlak te maken",
   "ui.print_face_set": "{body}: printvlak ingesteld; Naar slicer sturen legt het lichaam erop",
   "ui.profile": "Profiel",

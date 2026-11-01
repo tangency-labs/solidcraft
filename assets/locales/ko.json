@@ -3618,7 +3618,6 @@
   "ui.press_a_key": "키를 누르세요…",
   "ui.print_face_cleared": "{body}: 출력 바닥면을 해제했습니다",
   "ui.print_face_input": "출력 바닥면",
-  "ui.print_face_one_body": "출력 바닥면은 바디마다 하나입니다. 변경하려면 그 바디만 보내십시오",
   "ui.print_face_pick": "솔리드 바디의 평면 하나를 선택하면 출력 바닥면이 됩니다",
   "ui.print_face_set": "{body}: 출력 바닥면을 설정했습니다. 슬라이서로 보내면 이 면이 아래로 놓입니다",
   "ui.profile": "프로파일",

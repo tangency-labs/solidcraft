@@ -4807,7 +4807,6 @@
   "ui.press_a_key": "appuyez sur une touche…",
   "ui.print_face_cleared": "{body} : face d’impression effacée",
   "ui.print_face_input": "Face d’impression",
-  "ui.print_face_one_body": "Une face d’impression appartient à un seul corps : envoyez ce corps seul pour la modifier",
   "ui.print_face_pick": "Sélectionnez une face plane d’un corps solide pour en faire la face d’impression",
   "ui.print_face_set": "{body} : face d’impression définie ; Envoyer au slicer pose le corps sur cette face",
   "ui.profile": "Profil",

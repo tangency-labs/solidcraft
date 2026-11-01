@@ -4861,7 +4861,6 @@
   "ui.press_a_key": "キーを押してください…",
   "ui.print_face_cleared": "{body}: 造形面を解除しました",
   "ui.print_face_input": "造形面",
-  "ui.print_face_one_body": "造形面はボディごとに選びます。変更するにはそのボディだけを送信してください",
   "ui.print_face_pick": "ソリッドボディの平面を1つ選択すると造形面になります",
   "ui.print_face_set": "{body}: 造形面を設定しました。スライサーへ送るとこの面を下にして置きます",
   "ui.profile": "プロファイル",

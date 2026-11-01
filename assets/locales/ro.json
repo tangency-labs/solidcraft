@@ -4796,7 +4796,6 @@
   "ui.press_a_key": "apăsați o tastă…",
   "ui.print_face_cleared": "{body}: fața de imprimare a fost ștearsă",
   "ui.print_face_input": "Față de imprimare",
-  "ui.print_face_one_body": "O față de imprimare aparține unui singur corp: trimiteți acel corp singur pentru a o schimba",
   "ui.print_face_pick": "Selectați o față plană a unui corp solid pentru a o face fața de imprimare",
   "ui.print_face_set": "{body}: fața de imprimare a fost setată; Trimite la slicer așază corpul pe ea",
   "ui.profile": "Profil",

@@ -4796,7 +4796,6 @@
   "ui.press_a_key": "trykk på en tast…",
   "ui.print_face_cleared": "{body}: utskriftsflate fjernet",
   "ui.print_face_input": "Utskriftsflate",
-  "ui.print_face_one_body": "En utskriftsflate hører til ett legeme: send det legemet alene for å endre den",
   "ui.print_face_pick": "Velg en plan flate på et massivt legeme for å gjøre den til utskriftsflaten",
   "ui.print_face_set": "{body}: utskriftsflate satt; Send til slicer legger legemet på den",
   "ui.profile": "Profil",

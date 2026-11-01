@@ -4844,7 +4844,6 @@
   "ui.press_a_key": "Taste drücken…",
   "ui.print_face_cleared": "{body}: Auflagefläche entfernt",
   "ui.print_face_input": "Auflagefläche",
-  "ui.print_face_one_body": "Eine Auflagefläche gehört zu einem Körper: Sende diesen Körper allein, um sie zu ändern",
   "ui.print_face_pick": "Eine plane Fläche eines Volumenkörpers auswählen, um sie zur Auflagefläche zu machen",
   "ui.print_face_set": "{body}: Auflagefläche gesetzt; An Slicer senden legt den Körper darauf",
   "ui.profile": "Profil",

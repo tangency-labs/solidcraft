@@ -4796,7 +4796,6 @@
   "ui.press_a_key": "stiskněte klávesu…",
   "ui.print_face_cleared": "{body}: tisková plocha zrušena",
   "ui.print_face_input": "Tisková plocha",
-  "ui.print_face_one_body": "Tisková plocha patří jednomu tělesu: odešlete toto těleso samostatně, abyste ji změnili",
   "ui.print_face_pick": "Vyberte rovinnou plochu objemového tělesa, aby se stala tiskovou plochou",
   "ui.print_face_set": "{body}: tisková plocha nastavena; Odeslat do sliceru položí těleso na ni",
   "ui.profile": "Profil",

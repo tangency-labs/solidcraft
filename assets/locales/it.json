@@ -4802,7 +4802,6 @@
   "ui.press_a_key": "premi un tasto…",
   "ui.print_face_cleared": "{body}: faccia di stampa rimossa",
   "ui.print_face_input": "Faccia di stampa",
-  "ui.print_face_one_body": "Una faccia di stampa appartiene a un solo corpo: invia quel corpo da solo per cambiarla",
   "ui.print_face_pick": "Seleziona una faccia piana di un corpo solido per renderla la faccia di stampa",
   "ui.print_face_set": "{body}: faccia di stampa impostata; Invia allo slicer appoggia il corpo su di essa",
   "ui.profile": "Profilo",

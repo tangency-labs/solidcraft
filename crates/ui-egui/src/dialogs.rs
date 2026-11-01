@@ -1667,8 +1667,9 @@ impl Dialog {
             self.profile_selection_changed = true;
         }
         let measure = matches!(self.kind, Kind::Measure { .. });
-        // The chat's picks stay what was clicked: a rim is one edge there, not its pieces.
-        let one = measure || matches!(self.kind, Kind::ChatContext);
+        // The chat's picks stay what was clicked: a rim is one edge there, not its pieces. So do
+        // print faces: a click on one takes it out, not the other pieces of its surface in.
+        let one = measure || matches!(self.kind, Kind::ChatContext | Kind::SaveMesh(_));
         let sel = if measure { crate::viewport::measurement_selection(s, &sel) } else { sel };
         let chain = matches!(self.kind, Kind::Fillet { chain: true, .. });
         let single =

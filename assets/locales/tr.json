@@ -4797,7 +4797,6 @@
   "ui.press_a_key": "bir tuşa basın…",
   "ui.print_face_cleared": "{body}: baskı yüzeyi temizlendi",
   "ui.print_face_input": "Baskı yüzeyi",
-  "ui.print_face_one_body": "Baskı yüzeyi tek bir gövdeye aittir: değiştirmek için o gövdeyi tek başına gönderin",
   "ui.print_face_pick": "Baskı yüzeyi yapmak için katı bir gövdenin düz bir yüzeyini seçin",
   "ui.print_face_set": "{body}: baskı yüzeyi ayarlandı; Dilimleyiciye gönder gövdeyi bu yüzeyin üzerine koyar",
   "ui.profile": "Profil",
