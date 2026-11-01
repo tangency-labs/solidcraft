@@ -220,11 +220,14 @@ fn pinned_default_fails_the_corner() {
     assert!((removed - pappus()).abs() <= 1e-7, "removed {removed}");
 }
 
-/// The straight edges next to the corner still build as before with the fix on.
+/// The straight edges next to the corner still build as before with the fix on. The first
+/// figure is with WR-682's `fillet_surface_plane_curve_on_plane_equation`, which is in this
+/// test's set of fixes and takes 8.8e-9 off what that round removes (0.375911985298899
+/// without it): its end's curve is traced on the plane. The body is sound either way.
 #[test]
 fn the_neighbours_keep_their_rounds() {
     for (at, removed_before) in [
-        ([4.0, 28.0, 2.0], 0.375_911_985_298_898_8),
+        ([4.0, 28.0, 2.0], 0.375_911_976_512_270_5),
         ([0.0, 33.111_111_1, 2.0], 0.278_032_181_169_237_45),
         ([0.0, -25.0, 2.0], 7.958_674_274_526_857),
     ] {

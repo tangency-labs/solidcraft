@@ -166,6 +166,7 @@ use super::p1::{
     FilletVertexType, SurfaceHandle,
 };
 use super::p4::{set_edge_curve, set_vertex_point};
+use super::surface_plane_curve::{ends_on_both, surface_plane_curve};
 
 const OP_SRF_SRF: &str = "blend::fillet_geom::p2::srf_srf_intersection";
 const OP_RAIL_RAIL: &str = "blend::fillet_geom::p2::FilletBrep::calc_rail_int_rail";
@@ -1069,6 +1070,50 @@ pub fn srf_srf_intersection_with_context(
             &mut surface1_uv_curves,
             &mut surface2_uv_curves,
         );
+    }
+
+    // The fork's sm_SurfacePlaneCurve: a surface and a plane between two given points that lie
+    // on both, where they cross: the plane goes on as itself past the face it was made for, so
+    // its domain does not end the curve. A flat surface meets the plane in a line, which the
+    // analytic intersector gives exactly. Points off a surface, and an end where the surface
+    // touches the plane, are met by the intersectors below.
+    if k.fixes.fillet_surface_plane_curve_on_plane_equation && curves_3d.is_empty() {
+        let plane_first = matches!(surf1.kind(), SurfaceKind::Plane(_));
+        if let (Some(start_pnt), Some(end_pnt), true) = (
+            start,
+            end,
+            plane_first != matches!(surf2.kind(), SurfaceKind::Plane(_)),
+        ) {
+            let (surface, plane) = if plane_first {
+                (surf2, surf1)
+            } else {
+                (surf1, surf2)
+            };
+            if !surface.is_planar(k, approx_tol)?.is_planar
+                && ends_on_both(k, [surf1, surf2], [start_pnt, end_pnt], approx_tol)?
+            {
+                let c = surface_plane_curve(
+                    k,
+                    surface,
+                    plane,
+                    start_pnt,
+                    end_pnt,
+                    opt_dir.as_deref().copied(),
+                    approx_tol,
+                    angle_tol,
+                )?;
+                let (uv1, uv2) = if plane_first {
+                    (c.uv_plane, c.uv_surface)
+                } else {
+                    (c.uv_surface, c.uv_plane)
+                };
+                return Ok(SrfSrfCurves {
+                    curve_3d: Some(c.curve_3d),
+                    uv_curve1: Some(uv1),
+                    uv_curve2: Some(uv2),
+                });
+            }
+        }
     }
 
     // Use two-pts intersector (pOptDir is a required argument of it).
