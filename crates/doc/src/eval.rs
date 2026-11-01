@@ -3892,8 +3892,9 @@ fn body_at(st: &ModelState, body: &Option<crate::BodyName>, points: &[Vec3]) -> 
 
 /// A hole stays on its face when the model changes: a position now inside a body moves back
 /// against the drilling direction to the surface, one now above it moves down onto it. Only the
-/// bodies in `scope` count (every body when it is empty, see [`hole_scope`]).
-fn hole_on_surface(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String]) -> Vec3 {
+/// bodies in `scope` count (every body when it is empty, see [`hole_scope`]). Edit Hole seeds from
+/// this point so the dialog's face pick matches where evaluation drills (#10689).
+pub fn hole_on_surface(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String]) -> Vec3 {
     let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
     let eps = size * 1e-6;
     let mut best: Option<Vec3> = None;
