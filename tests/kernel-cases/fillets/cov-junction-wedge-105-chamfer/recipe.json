@@ -1,0 +1,59 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XY",
+    "name": "W"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      12.175228580174412,
+      -15.867066805824702
+     ],
+     [
+      12.175228580174412,
+      15.867066805824702
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "W",
+    "distance": 30.0,
+    "body_name": "Wedge"
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      0,
+      0,
+      15.0
+     ]
+    ],
+    "distance": 2.0
+   }
+  }
+ ]
+}

@@ -1,0 +1,56 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 8,
+    "height": 60,
+    "base": [
+     -30,
+     0,
+     0
+    ],
+    "axis": [
+     1,
+     0,
+     0
+    ],
+    "body_name": "M"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 4,
+    "height": 25,
+    "base": [
+     0,
+     1,
+     0
+    ],
+    "axis": [
+     0.7071067811865475,
+     0,
+     0.7071067811865476
+    ],
+    "operation": "join",
+    "targets": [
+     "M"
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      6.244997998398397,
+      5,
+      6.244997998398398
+     ]
+    ],
+    "radius": 1
+   }
+  }
+ ]
+}
