@@ -3221,6 +3221,8 @@ pub(crate) fn dialog_pick(app: &mut SolveApp, hit: &Hit, sel: Sel) {
     // With holes moving by clicking (Preferences), a Single hole picked again on its face moves there.
     if app.preferences.hole_moves && crate::hole_place::pick_moves(&mut d, &app.session, &sel) {
         d.focus = true;
+        d.awaiting_pick = false;
+        d.pick_refused = None;
     } else {
         d.pick(&app.session, sel);
     }
@@ -4604,11 +4606,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             && app.dialog.is_none()
             && crate::dim_view::pick_reference(ui.ctx(), p, resp.double_clicked());
         // Capture the press too: text editors lose focus before the click is released. A
-        // running tool keeps the keyboard for its own typed values.
+        // running tool keeps the keyboard for its own typed values, and so does a pick field
+        // clicked into until a click picks something (#10428).
         if !held
             && app.tool.is_none()
             && (resp.clicked() || (resp.contains_pointer() && ui.input(|i| i.pointer.primary_pressed())))
-            && let Some(dialog) = app.dialog.as_mut()
+            && let Some(dialog) = app.dialog.as_mut().filter(|d| !d.awaiting_pick)
         {
             dialog.restore_value_focus = true;
         }
@@ -4621,6 +4624,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if let Some((hit, Some(sel))) = cand {
                     dialog_pick(app, &hit, sel);
                 } else if let Some(mut dialog) = app.dialog.take() {
+                    // A pick field clicked into says what it is for when the click is not one (#10428).
+                    if dialog.awaiting_pick {
+                        dialog.pick_refused = dialog.active_input().and_then(|i| i.tip);
+                    }
                     // A sketch clicked for a pattern's or Mirror's objects: say why it is not taken (#10057).
                     let sketch = hits.iter().find_map(|h| match h {
                         Hit::SketchCurve { sketch, .. } | Hit::SketchPoint { sketch, .. } | Hit::Profile { sketch, .. } => Some(*sketch),

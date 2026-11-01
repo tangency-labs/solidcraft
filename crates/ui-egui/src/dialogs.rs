@@ -479,6 +479,12 @@ pub struct Dialog {
     value_focus: Option<egui::Id>,
     /// A viewport press or click returns the keyboard after selection and canvas updates.
     pub(crate) restore_value_focus: bool,
+    /// A pick field was clicked into and waits for its pick: a click in the view that picks
+    /// nothing leaves the keyboard with it instead of giving it to the first value (#10428).
+    pub(crate) awaiting_pick: bool,
+    /// The note (a message id) a click that the waiting pick field does not take leaves under
+    /// the form: what that field is for (#10428).
+    pub(crate) pick_refused: Option<&'static str>,
     /// Folded to its header (the shared disclosure chevron).
     pub collapsed: bool,
     reset_scroll: bool,
@@ -748,6 +754,8 @@ impl Dialog {
             focus: true,
             value_focus: None,
             restore_value_focus: false,
+            awaiting_pick: false,
+            pick_refused: None,
             collapsed: false,
             reset_scroll: true,
             preview_enabled: true,
@@ -1657,6 +1665,8 @@ impl Dialog {
 
     /// A pick in the viewport (already accepted by the active input).
     pub fn pick(&mut self, s: &Session, sel: Sel) {
+        self.awaiting_pick = false;
+        self.pick_refused = None;
         if self.take_extrude_target(s, &sel) {
             return;
         }
@@ -2747,6 +2757,8 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                     } else {
                         hint(inp).to_string()
                     }
+                } else if let Some(id) = inp.tip {
+                    crate::i18n::tr(id).to_string()
                 } else {
                     format!("{} (click to pick into this input)", hint(inp))
                 };
@@ -2784,6 +2796,8 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     }
     if let Some(i) = activate {
         d.active = i;
+        d.awaiting_pick = true;
+        d.pick_refused = None;
     }
     if let Some(i) = clear {
         if let Some(key) = feature_pattern_reference_key(d, i) {
@@ -2796,6 +2810,8 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
             d.picked_edges.clear();
         }
         d.active = i;
+        d.awaiting_pick = true;
+        d.pick_refused = None;
     }
     d.sync_thread(s);
 }
@@ -2852,6 +2868,11 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
     let shown_id = egui::Id::new("sc_dialog_refusal_shown");
     if d.error.is_none() && app.preview.error.is_none() {
         ui.data_mut(|m| m.remove::<String>(shown_id));
+    }
+    // A click the waiting pick field does not take: what that field is for, plainly (#10428).
+    if let Some(id) = d.pick_refused.filter(|_| d.error.is_none() && app.preview.error.is_none()) {
+        let note = crate::ui_kit::text(ui, crate::i18n::tr(id), crate::ui_kit::Text::Hint("pick_refused"));
+        crate::scenario::publish_rect("dialog:pick_refused", note.rect);
     }
     if let Some(error) = d.error.as_ref().or(app.preview.error.as_ref()).cloned() {
         // "Select the curves to offset first" is not a failure: nothing is picked yet. The header hint
@@ -3450,6 +3471,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ctx.request_repaint();
     } else {
         d.value_focus = ctx.memory(|memory| memory.focused()).filter(|id| value_fields.iter().any(|(field, _)| field == id));
+        // A value field clicked into: the pick field no longer waits.
+        if d.value_focus.is_some() {
+            d.awaiting_pick = false;
+        }
     }
     // Each prompt draws only for its own dialog, so both run (`|`, not `||`).
     let preset_prompt = crate::hole_presets::name_prompt(ctx, &mut d, &mut app.preferences.hole_presets, &app.session.doc)
