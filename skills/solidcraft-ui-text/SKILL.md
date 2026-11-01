@@ -27,4 +27,4 @@ New strings go in a new `assets/locales/pending/<slug>.json` (lowercase, dashes,
 - `docs/features.md` and `THIRD-PARTY-LICENSES.txt` are generated on `main` after each merge: never edit or regenerate them in a PR.
 
 ## Wording
-Use the terms in the glossary (`docs/book/src/reference/glossary.md`); words with several meanings (Construction, Flat, Round, Normal, Gap, Clearance) have one catalogue entry per meaning. A new idea adds its glossary term. Command labels (`cmd.*`, what menus, the toolbar, the command palette and the shortcut list show) are in title case ("Home View", "Center of Mass"); all other text (buttons, links, settings, rows, headings, tooltips) is in sentence case ("Restore defaults", "Center of mass"). Tests also require tabs, panels, menu labels and command labels to be in `en.json`.
+Use the terms in the glossary (`docs/book/src/reference/glossary.md`); words with several meanings (Construction, Flat, Round, Normal, Gap, Clearance) have one catalogue entry per meaning. A new idea adds its glossary term. Command labels are Title Case, other text sentence case. Tests also require tabs, panels, menu labels and command labels to be in `en.json`.
