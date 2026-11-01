@@ -75,6 +75,7 @@ impl Tokens {
             font_compass: 13.5,
             font_subtitle: 15.0,
             font_intro: 16.0,
+            font_page_heading: 20.0,
             font_article_heading: 17.0,
             font_title: 22.0,
             font_display: 26.0,
@@ -226,6 +227,29 @@ impl Tokens {
             dialog_label: Color32::from_rgb(58, 70, 86),
             selected_ink: Color32::from_rgb(26, 80, 127),
             selected_bg: Color32::from_rgb(232, 241, 250),
+            figure_ground: Color32::from_rgb(247, 248, 250),
+            figure_line: Color32::from_rgb(111, 124, 143),
+            figure_highlight: Color32::WHITE,
+            figure_shadow: Color32::BLACK,
+            figure_face_top: Color32::from_rgb(255, 255, 255),
+            figure_face_left: Color32::from_rgb(228, 233, 240),
+            figure_face_right: Color32::from_rgb(201, 210, 222),
+            figure_card: Color32::from_rgb(255, 255, 255),
+            figure_accent: Color32::from_rgb(35, 110, 173),
+            figure_reference: Color32::from_rgb(138, 83, 0),
+            figure_axis_x: Color32::from_rgb(214, 69, 69),
+            figure_axis_y: Color32::from_rgb(46, 158, 91),
+            figure_axis_z: Color32::from_rgb(47, 111, 208),
+            figure_ok: Color32::from_rgb(47, 125, 91),
+            figure_warn: Color32::from_rgb(201, 138, 0),
+            figure_conflict: Color32::from_rgb(184, 74, 0),
+            pref_well: Color32::from_rgb(238, 241, 245),
+            pref_note: Color32::from_rgb(183, 74, 0),
+            pref_note_fill: Color32::from_rgb(251, 235, 221),
+            pref_on_accent: Color32::from_rgb(255, 255, 255),
+            pref_ok: Color32::from_rgb(39, 107, 44),
+            pref_ok_fill: Color32::from_rgb(229, 242, 230),
+            pref_disabled: Color32::from_rgb(138, 148, 163),
             timeline_item: Color32::WHITE,
             timeline_item_error: Color32::from_rgb(250, 220, 220),
             timeline_marker: Color32::from_rgb(70, 76, 88),
@@ -345,6 +369,27 @@ impl Tokens {
         t.dialog_label = t.text;
         t.selected_ink = Color32::from_rgb(156, 199, 245);
         t.selected_bg = Color32::from_rgb(42, 70, 110);
+        t.figure_ground = Color32::from_rgb(28, 31, 38);
+        t.figure_line = Color32::from_rgb(163, 174, 194);
+        t.figure_face_top = Color32::from_rgb(107, 119, 144);
+        t.figure_face_left = Color32::from_rgb(81, 91, 114);
+        t.figure_face_right = Color32::from_rgb(57, 66, 86);
+        t.figure_card = Color32::from_rgb(47, 52, 62);
+        t.figure_accent = Color32::from_rgb(140, 190, 245);
+        t.figure_reference = Color32::from_rgb(232, 194, 74);
+        t.figure_axis_x = Color32::from_rgb(242, 122, 122);
+        t.figure_axis_y = Color32::from_rgb(98, 212, 142);
+        t.figure_axis_z = Color32::from_rgb(108, 168, 247);
+        t.figure_ok = Color32::from_rgb(127, 209, 174);
+        t.figure_warn = Color32::from_rgb(232, 194, 74);
+        t.figure_conflict = Color32::from_rgb(240, 162, 122);
+        t.pref_well = Color32::from_rgb(47, 52, 62);
+        t.pref_note = Color32::from_rgb(240, 162, 122);
+        t.pref_note_fill = Color32::from_rgb(74, 51, 38);
+        t.pref_on_accent = Color32::from_rgb(15, 22, 32);
+        t.pref_ok = Color32::from_rgb(127, 209, 174);
+        t.pref_ok_fill = Color32::from_rgb(31, 58, 49);
+        t.pref_disabled = Color32::from_rgb(138, 148, 163);
         t.construction_geom = icon_primary(crate::icon_svg::CONSTRUCTION_PRIMARY[1]);
         t.error = Color32::from_rgb(240, 100, 96);
         t.sketch_conflict = t.error;
