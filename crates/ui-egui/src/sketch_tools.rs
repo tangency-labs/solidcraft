@@ -792,7 +792,7 @@ pub fn hint(id: &str) -> Option<String> {
     Some(
         match id {
             "sketch.project" => "Project: click edges, faces, vertices, other sketches' curves, axes or planes",
-            "sketch.intersect" => "Intersect: click faces or edges to cut with the sketch plane",
+            "sketch.intersect" => "Intersect: click faces, edges or other sketches' curves to cut with the sketch plane",
             "sketch.include_3d" => "Include 3D Geometry: click edges or vertices",
             "sketch.fit_curves_to_section" => "Fit Curves to Mesh Section: click a body",
             "sketch.isoparametric_curve" => "Isoparametric Curve: click a point on a face (Shift: along)",

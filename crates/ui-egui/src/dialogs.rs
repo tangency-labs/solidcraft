@@ -99,6 +99,9 @@ const EXTRUDE_ACCEPT: Accept = PROFILES | PLANAR_FACES;
 const THIN_ACCEPT: Accept = PROFILES | CURVES;
 const PROJECT_GEOMETRY: Accept =
     EDGES | FACES | selection::VERTICES | PLANES | AXES | selection::SKETCH_LINES | selection::EXTERNAL_POINTS | selection::ORIGIN;
+/// What Intersect cuts with the sketch plane, picked one by one: faces, model edges and the
+/// curves of other sketches (#10484); an edge or a sketch line gives the points where it crosses.
+const INTERSECT_GEOMETRY: Accept = EDGES | FACES | selection::SKETCH_LINES;
 const HOLE_TYPES: [&str; 3] = ["simple", "counterbore", "countersink"];
 const HOLE_LABELS: [&str; 3] = ["Simple", "Counterbore", "Countersink"];
 
@@ -819,7 +822,7 @@ impl Dialog {
                 let bodies = s.selection.iter().any(|sel| matches!(sel, Sel::Body { .. }));
                 Dialog::new(
                     Kind::SketchIntersect { bodies, projection_link: true },
-                    vec![SelInput::new("ui.sketch_intersect_geometry", if bodies { BODIES } else { FACES }, true)],
+                    vec![SelInput::new("ui.sketch_intersect_geometry", if bodies { BODIES } else { INTERSECT_GEOMETRY }, true)],
                 )
             }
             "sketch.project" => {
@@ -5049,13 +5052,15 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
         Kind::ConfirmDelete { features, groups, .. } => ("timeline.delete", crate::timeline::delete_params(features, groups)),
         Kind::SketchIntersect { projection_link, .. } => {
-            need(0, "faces or bodies")?;
+            need(0, "geometry or bodies")?;
             let refs = sels(d, 0)
                 .iter()
                 .map(|sel| match sel {
                     Sel::Body { name } => Ok(json!({"body": name})),
                     Sel::Face { body, point, .. } => Ok(json!({"face": [point.x, point.y, point.z], "body": body})),
-                    _ => Err("select faces or bodies".to_string()),
+                    Sel::Edge { body, point, .. } => Ok(json!({"edge": [point.x, point.y, point.z], "body": body})),
+                    Sel::ExternalSketchCurve { sketch, id } => Ok(json!({"sketch": sketch, "curve": id})),
+                    _ => Err("select geometry or bodies".to_string()),
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             ("sketch.intersect", json!({"refs": refs, "projection_link": projection_link}))
