@@ -106,7 +106,10 @@ pub(super) fn definition_plan(
     name: &str,
 ) -> Option<Arc<TessPlan>> {
     cell.get_or_init(|| match body.display_plan_angular(q.chord(body.size()), q.angle()) {
-        Ok(plan) => Some(Arc::new(plan)),
+        Ok(mut plan) => {
+            plan.open_poles();
+            Some(Arc::new(plan))
+        }
         Err(e) => {
             log::debug!("{name}: no display plan ({e})");
             None
@@ -115,9 +118,100 @@ pub(super) fn definition_plan(
     .clone()
 }
 
+/// Corners of one triangle whose normals are further apart than this (cosine of 30 degrees) are
+/// worth a look: the mesher keeps a facet's turn well below it, except at a pole.
+const CORNERS_APART: f64 = 0.866;
+
+/// The reference mesher gives a surface's point on its axis (a cone's apex, the tip of a turned
+/// point) a normal from wherever it first met it, so part of the fan there is shaded from the
+/// wrong side, and it leaves a triangle with no area where the fan's parameters jump (#7801). At
+/// such a tip each corner takes the normal of its triangle's other two corners, and the empty
+/// triangles go. Each triangle has corners of its own in this mesh; no other corner moves. A
+/// sphere's pole has one true normal whichever way round, and stays.
+fn mend_cone_tips(body: &Body, mesh: &mut Mesh) {
+    let normal = |i: u32| mesh.normals.get(i as usize).copied().unwrap_or(Vec3::Z);
+    let position = |i: u32| mesh.positions.get(i as usize).copied();
+    // Far apart, or one point twice: on a blunt cone the normals hardly differ, but the empty
+    // triangle is there all the same.
+    let apart = |a: u32, b: u32| normal(a).dot(normal(b)) < CORNERS_APART || position(a) == position(b);
+    let mut faces: Vec<u32> = mesh
+        .triangles
+        .iter()
+        .zip(&mesh.tri_face)
+        .filter(|(t, _)| apart(t[0], t[1]) || apart(t[1], t[2]) || apart(t[2], t[0]))
+        .map(|(_, f)| *f)
+        .collect();
+    faces.sort_unstable();
+    faces.dedup();
+    let mut tips = std::collections::HashMap::<u32, Vec<Vec3>>::new();
+    for f in faces {
+        let corners = || mesh.triangles.iter().zip(&mesh.tri_face).filter(|(_, g)| **g == f).map(|(t, _)| t.map(position));
+        // The point a triangle has twice is a tip for certain, and exact.
+        let mut points: Vec<Vec3> = Vec::new();
+        for [a, b, c] in corners() {
+            let twice = if a == b || a == c {
+                a
+            } else if b == c {
+                b
+            } else {
+                None
+            };
+            if let Some(p) = twice.filter(|p| !points.contains(p)) {
+                points.push(p);
+            }
+        }
+        match kernel::face_surface(body, f as usize) {
+            None => {}
+            // Without such a triangle: the mesh's point nearest the apex, when that is close (the
+            // apex is a fit, poor along the axis of a sharp cone).
+            Some(kernel::FaceSurface::Cone { apex, .. }) => {
+                if points.is_empty()
+                    && let Some(p) = corners().flatten().flatten().min_by(|p, q| p.dist(apex).total_cmp(&q.dist(apex)))
+                    && p.dist(apex) <= body.size() * 1e-3
+                {
+                    points.push(p);
+                }
+            }
+            Some(_) => points.clear(),
+        }
+        if !points.is_empty() {
+            tips.insert(f, points);
+        }
+    }
+    if tips.is_empty() {
+        return;
+    }
+    let tol = (body.size() * 1e-9).max(1e-12);
+    let triangles = std::mem::take(&mut mesh.triangles);
+    let faces = std::mem::take(&mut mesh.tri_face);
+    for (t, f) in triangles.into_iter().zip(faces) {
+        if let Some(points) = tips.get(&f) {
+            let at = t.map(|i| mesh.positions.get(i as usize).is_some_and(|p| points.iter().any(|q| p.dist(*q) <= tol)));
+            let [a, b, c] = t;
+            let corner = match at {
+                [true, false, false] => Some((a, [b, c])),
+                [false, true, false] => Some((b, [c, a])),
+                [false, false, true] => Some((c, [a, b])),
+                [false, false, false] => None,
+                // Two corners at the tip: no area.
+                _ => continue,
+            };
+            if let Some((corner, others)) = corner {
+                let [p, q] = others.map(|i| mesh.normals.get(i as usize).copied().unwrap_or(Vec3::ZERO));
+                if let (Some(n), Some(slot)) = ((p + q).normalized(), mesh.normals.get_mut(corner as usize)) {
+                    *slot = n;
+                }
+            }
+        }
+        mesh.triangles.push(t);
+        mesh.tri_face.push(f);
+    }
+}
+
 pub(super) fn reference_mesh(body: &Body, mesh: &OnceLock<Arc<Mesh>>, tolerance: f64) -> Arc<Mesh> {
     mesh.get_or_init(|| {
         let mut mesh = body.reference_display_mesh_angular(tolerance, kernel::DISPLAY_ANGLE).unwrap_or_default();
+        mend_cone_tips(body, &mut mesh);
         if let Some((positions, triangles)) = body.triangle_mesh() {
             mesh.edges = mesh_outlines(positions, triangles);
             mesh.display_only_edges = true;

@@ -21,6 +21,11 @@ pub const MAX_EVAL_POINTS: usize = 1 << 18;
 /// Basis slots for the highest evaluable degree.
 pub(crate) const W: usize = MAX_SPLINE_DEGREE + 1;
 
+/// How far into a triangle, as a share of the way to its far side, a corner at a pole takes its
+/// normal from: far enough for the shader's `f32`, near enough that a curved profile's normal
+/// has barely turned (a facet turns at most 20 degrees, so this is a fifth of a degree).
+const POLE_STEP: f64 = 0.01;
+
 /// A rational B-spline curve: homogeneous control points `[x·w, y·w, z·w, w]`. Outside its
 /// domain it continues as the polynomial of the end span (a line extends for ever).
 #[derive(Clone, Debug, PartialEq)]
@@ -66,6 +71,56 @@ pub struct FacePlan {
     pub triangles: Vec<[u32; 3]>,
 }
 
+impl FacePlan {
+    /// [`TessPlan::open_poles`] for one face on surface `s`. A pole is a boundary node, so only
+    /// the pinned nodes are looked at.
+    fn open_poles(&mut self, s: &EvalSurface) {
+        let pinned = self.fixed.len();
+        let Some(uv) = self.uv.get(..pinned) else { return };
+        let pole: Vec<Option<usize>> = uv.iter().map(|q| s.pole_direction(q[0], q[1])).collect();
+        if pole.iter().all(Option::is_none) {
+            return;
+        }
+        let pole_of = |i: u32| pole.get(i as usize).copied().flatten();
+        let (mut new_uv, mut new_fixed, mut opened) = (Vec::new(), Vec::new(), Vec::new());
+        for (ti, t) in self.triangles.iter().enumerate() {
+            // The middle of the corners away from the pole; none: a triangle with no inside.
+            let far: Vec<[f64; 2]> = t.iter().filter(|i| pole_of(**i).is_none()).filter_map(|i| self.uv.get(*i as usize).copied()).collect();
+            if far.is_empty() {
+                continue;
+            }
+            let share = 1.0 / far.len() as f64;
+            let middle = far.iter().fold([0.0; 2], |m, q| [m[0] + q[0] * share, m[1] + q[1] * share]);
+            for (ci, i) in t.iter().enumerate() {
+                let (Some(d), Some(q), Some(p)) = (pole_of(*i), self.uv.get(*i as usize), self.fixed.get(*i as usize)) else { continue };
+                let mut corner = [q[0] + (middle[0] - q[0]) * POLE_STEP, q[1] + (middle[1] - q[1]) * POLE_STEP];
+                // Along the direction that doesn't move the point, the triangle's own value.
+                if let (Some(free), Some(own)) = (corner.get_mut(d), middle.get(d)) {
+                    *free = *own;
+                }
+                opened.push((ti, ci, new_uv.len()));
+                new_uv.push(corner);
+                new_fixed.push(*p);
+            }
+        }
+        let (Ok(start), Ok(added)) = (u32::try_from(pinned), u32::try_from(new_uv.len())) else { return };
+        if u32::try_from(self.uv.len() + new_uv.len()).is_err() {
+            return;
+        }
+        // The new corners join the pinned nodes, which come first: the others move up.
+        for i in self.triangles.iter_mut().flatten().filter(|i| **i >= start) {
+            *i += added;
+        }
+        for (ti, ci, k) in opened {
+            if let (Some(slot), Ok(k)) = (self.triangles.get_mut(ti).and_then(|t| t.get_mut(ci)), u32::try_from(k)) {
+                *slot = start + k;
+            }
+        }
+        self.uv.splice(pinned..pinned, new_uv);
+        self.fixed.extend(new_fixed);
+    }
+}
+
 /// A body's display tessellation, ready to evaluate.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TessPlan {
@@ -106,6 +161,21 @@ impl TessPlan {
         out.edges = self.edges.clone();
         out.edge_faces = self.edge_faces.clone();
         out
+    }
+
+    /// Give each triangle that ends at a pole (a cone's apex, a sphere's pole) a corner of its
+    /// own there, with its normal from just inside that triangle. All the triangles of a fan
+    /// otherwise share one node with one normal, though the surface's normal at a cone's apex
+    /// depends on the way round: the shading then turns across every triangle of the fan, and
+    /// the slivers of #7801 show. The new corners are pinned to the pole's exact point, so the
+    /// mesh stays closed.
+    pub fn open_poles(&mut self) {
+        let TessPlan { surfaces, faces, .. } = self;
+        for f in faces {
+            if let Some(s) = f.surface.and_then(|i| surfaces.get(i as usize)) {
+                f.open_poles(s);
+            }
+        }
     }
 
     /// Vertices across all faces.
@@ -224,6 +294,22 @@ impl EvalSurface {
             }
         }
         (p, Vec3::Z)
+    }
+
+    /// The parameter direction (0: u, 1: v) that doesn't move the point at `(u, v)`, if one
+    /// doesn't: a pole, such as a cone's apex or a sphere's.
+    fn pole_direction(&self, u: f64, v: f64) -> Option<usize> {
+        if matches!(self, EvalSurface::Plane { .. }) {
+            return None;
+        }
+        let (_, du, dv) = self.derivs(u, v)?;
+        if du.len() <= 1e-9 * dv.len().max(1e-12) {
+            Some(0)
+        } else if dv.len() <= 1e-9 * du.len().max(1e-12) {
+            Some(1)
+        } else {
+            None
+        }
     }
 
     /// Mirror transforms reverse the cross product of the mapped derivatives.
@@ -525,6 +611,67 @@ mod tests {
                 assert!(n.cross(p).len() < 3e-5, "normal {n:?} not radial at {p:?}");
             }
         }
+    }
+
+    /// A cone's side as the kernel plans it: revolved to the apex at u = 1 on +Z, one apex node
+    /// shared by a fan around a quarter turn, one interior node after the pinned ones. Reversed:
+    /// this profile's `S_u x S_v` points inward.
+    fn apex_fan() -> TessPlan {
+        let profile = line(Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 20.0));
+        let s = EvalSurface::Revolved { profile, origin: Vec3::ZERO, axis: Vec3::Z, transform: IDENTITY, swap: false };
+        let mut uv: Vec<[f64; 2]> = vec![[1.0, 0.0]];
+        uv.extend([0.0, 0.5, 1.0, 1.5].map(|v| [0.5, v]));
+        let fixed = uv.iter().map(|q| s.eval(q[0], q[1]).0).collect();
+        uv.push([0.25, 0.75]);
+        let face =
+            FacePlan { surface: Some(0), uv, fixed, flip: true, triangles: vec![[1, 2, 0], [2, 3, 0], [3, 4, 0], [1, 5, 2]], ..Default::default() };
+        TessPlan { surfaces: vec![s], faces: vec![face], ..Default::default() }
+    }
+
+    #[test]
+    fn a_fan_at_a_cone_apex_gets_a_corner_and_a_normal_per_triangle() {
+        let mut plan = apex_fan();
+        let before = plan.evaluate();
+        // Each apex corner against the true normal halfway round its triangle's far side.
+        let worst = |m: &Mesh| {
+            m.triangles
+                .iter()
+                .filter_map(|t| {
+                    let at = t.iter().position(|i| m.positions[*i as usize].z > 19.999)?;
+                    let [a, b] = [t[(at + 1) % 3], t[(at + 2) % 3]].map(|i| m.positions[i as usize]);
+                    let angle = (a.y + b.y).atan2(a.x + b.x);
+                    let outward = Vec3::new(2.0 * angle.cos(), 2.0 * angle.sin(), 1.0).normalized().unwrap();
+                    Some(m.normals[t[at] as usize].dot(outward))
+                })
+                .fold(1.0f64, f64::min)
+        };
+        assert!(worst(&before) < 0.9, "the shared node: {}", worst(&before));
+        plan.open_poles();
+        let after = plan.evaluate();
+        assert!(worst(&after) > 0.999, "one normal per triangle: {}", worst(&after));
+        // The same triangles in the same places, bit for bit: the mesh stays closed.
+        assert_eq!(after.triangles.len(), before.triangles.len());
+        for (a, b) in after.triangles.iter().zip(&before.triangles) {
+            assert_eq!(a.map(|i| after.positions[i as usize]), b.map(|i| before.positions[i as usize]));
+        }
+        // The interior node stays last, and unpinned.
+        let f = &plan.faces[0];
+        assert_eq!((f.uv.len(), f.fixed.len()), (6 + 3, 5 + 3));
+        assert_eq!(f.uv[8], [0.25, 0.75]);
+        assert_eq!(f.triangles[3][1], 8);
+    }
+
+    #[test]
+    fn opening_poles_leaves_a_surface_without_any_alone() {
+        let profile = line(Vec3::new(10.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 20.0));
+        let s = EvalSurface::Revolved { profile, origin: Vec3::ZERO, axis: Vec3::Z, transform: IDENTITY, swap: false };
+        let uv = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        let fixed = uv.iter().map(|q: &[f64; 2]| s.eval(q[0], q[1]).0).collect();
+        let face = FacePlan { surface: Some(0), uv, fixed, triangles: vec![[0, 1, 2]], ..Default::default() };
+        let plan = TessPlan { surfaces: vec![s], faces: vec![face], ..Default::default() };
+        let mut opened = plan.clone();
+        opened.open_poles();
+        assert_eq!(opened, plan);
     }
 
     #[test]

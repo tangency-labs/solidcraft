@@ -161,6 +161,97 @@ fn cone_and_frustum_match_the_analytic_volume_and_area() {
     assert!(near(lo, [-8.0, 32.0, 0.0]) && near(hi, [8.0, 48.0, 6.0]), "{lo:?} {hi:?}");
 }
 
+/// Everything about a drawn tip that #7801 got wrong: no triangle without area, each corner's
+/// normal on the outside of its triangle (a corner at the apex used to point nearly the opposite
+/// way), the mesh closed, and the volume right to within the chord tolerance.
+fn assert_clean_display_mesh(name: &str, m: &solidcraft_geom::Mesh, area: f64, tol: f64, volume: f64) {
+    let at = |i: u32| m.positions[i as usize];
+    let key = |i: u32| [at(i).x, at(i).y, at(i).z].map(|c| (c * 1e6).round() as i64);
+    let mut uses = std::collections::HashMap::<_, i32>::new();
+    for t in &m.triangles {
+        let [a, b, c] = t.map(at);
+        let cross = (b - a).cross(c - a);
+        let longest = (b - a).len().max((c - b).len()).max((a - c).len());
+        assert!(cross.len() > 1e-6 * longest * longest, "{name}: a sliver {a:?} {b:?} {c:?}");
+        let facet = cross.normalized().unwrap();
+        for i in t {
+            let n = m.normals[*i as usize];
+            assert!(n.is_finite() && (n.len() - 1.0).abs() < 1e-6, "{name}: normal {n:?} at {:?}", at(*i));
+            assert!(n.dot(facet) > 0.8, "{name}: normal {n:?} at {:?} on a facet facing {facet:?}", at(*i));
+        }
+        for e in 0..3 {
+            *uses.entry((key(t[e]), key(t[(e + 1) % 3]))).or_default() += 1;
+            *uses.entry((key(t[(e + 1) % 3]), key(t[e]))).or_default() -= 1;
+        }
+    }
+    assert!(uses.values().all(|n| *n == 0), "{name}: not closed");
+    let got = m.measure().volume;
+    assert!((got - volume).abs() <= area * tol * 1.5, "{name}: volume {got} vs {volume}");
+}
+
+/// Both meshes the viewport draws from, at every display quality and a step finer: a GPU draws
+/// the plan's, the browser and see-through bodies the reference mesh.
+fn assert_clean_tip(name: &str, s: &Session, body: &str, volume: f64) {
+    use solidcraft_doc::display_quality::DisplayQuality;
+    let b = s.model.state().body(body).unwrap().clone();
+    let area = measured(s, body).area;
+    assert_clean_display_mesh(&format!("{name} reference"), &b.mesh(), area, b.display_tol(), volume);
+    for q in DisplayQuality::ALL {
+        let tol = q.chord(b.body.size());
+        assert_clean_display_mesh(&format!("{name} plan {q:?}"), &b.plan_mesh_at(q).unwrap(), area, tol, volume);
+        let (_, fine) = b.refined_display(q, 1).unwrap();
+        assert_clean_display_mesh(&format!("{name} refined {q:?}"), &fine, area, tol, volume);
+    }
+}
+
+#[test]
+fn a_cone_tip_is_drawn_clean() {
+    let mut s = Session::default();
+    // The dialog's defaults, then moved and on a slanted axis.
+    run(&mut s, "solid.cone", json!({"diameter": 20, "top_diameter": 0, "height": 20, "body_name": "Cone"}));
+    run(&mut s, "solid.cone", json!({"radius": 7, "height": 30, "base": [50, 20, -5], "axis": [1, 2, 3], "body_name": "Slanted"}));
+    // Very blunt and very sharp, and with the cone upside down.
+    run(&mut s, "solid.cone", json!({"radius": 30, "height": 2, "base": [100, 0, 0], "body_name": "Blunt"}));
+    run(&mut s, "solid.cone", json!({"radius": 1, "height": 40, "base": [-50, 0, 0], "body_name": "Sharp"}));
+    run(&mut s, "solid.cone", json!({"radius": 5, "height": -12, "base": [0, -50, 0], "body_name": "Down"}));
+    // A frustum has no apex, and stays as it was; so does a top of 0.1 mm.
+    run(&mut s, "solid.cone", json!({"radius": 10, "top_radius": 4, "height": 15, "base": [0, 50, 0], "body_name": "Frustum"}));
+    run(&mut s, "solid.cone", json!({"diameter": 20, "top_diameter": 0.1, "height": 20, "base": [0, 100, 0], "body_name": "Tenth"}));
+    for (body, r, top, h) in [
+        ("Cone", 10.0, 0.0, 20.0),
+        ("Slanted", 7.0, 0.0, 30.0),
+        ("Blunt", 30.0, 0.0, 2.0),
+        ("Sharp", 1.0, 0.0, 40.0),
+        ("Down", 5.0, 0.0, 12.0),
+        ("Frustum", 10.0, 4.0, 15.0),
+        ("Tenth", 10.0, 0.05, 20.0),
+    ] {
+        assert_clean_tip(body, &s, body, cone_volume(r, top, h));
+        assert!(rel(measured(&s, body).volume, cone_volume(r, top, h)) < 2e-3, "{body}");
+    }
+}
+
+#[test]
+fn a_sphere_keeps_its_poles_clean() {
+    let mut s = Session::default();
+    run(&mut s, "solid.sphere", json!({"radius": 8, "center": [5, 6, 7], "body_name": "Ball"}));
+    assert_clean_tip("sphere", &s, "Ball", 4.0 / 3.0 * std::f64::consts::PI * 512.0);
+}
+
+#[test]
+fn a_sketched_triangle_revolved_to_a_point_is_drawn_clean() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"name": "Half", "plane": "XZ"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0], [0, 20]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(
+        &mut s,
+        "solid.revolve",
+        json!({"sketch": "Half", "axis": {"origin": [0, 0, 0], "dir": [0, 0, 1]}, "angle": "360 deg", "operation": "new", "body_name": "Spun"}),
+    );
+    assert_clean_tip("revolved triangle", &s, "Spun", cone_volume(10.0, 0.0, 20.0));
+}
+
 #[test]
 fn cone_takes_any_axis_base_and_a_negative_height() {
     let mut s = Session::default();

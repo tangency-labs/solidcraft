@@ -304,7 +304,10 @@ impl ModelBody {
             return Some((self.display_plan_at(q)?, self.plan_mesh_at(q)?));
         }
         let plan = match self.body.display_plan_angular(q.refined_chord(self.body.size(), k), q.refined_angle(k)) {
-            Ok(plan) => plan,
+            Ok(mut plan) => {
+                plan.open_poles();
+                plan
+            }
             Err(e) => {
                 log::debug!("{}: no display plan refined {k} steps ({e})", self.name);
                 return None;
