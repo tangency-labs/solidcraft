@@ -173,12 +173,17 @@ fn write_steps(path: &Path, bytes: &[u8], backup: bool, stop: Option<Step>) -> s
     if stop == Some(Step::BackupWritten) {
         return Ok(());
     }
-    if let Err(e) = replace_synced(&tmp, path) {
-        let _ = fs::remove_file(&tmp);
+    put_in_place(&tmp, path)
+}
+
+/// Rename the flushed temporary file `tmp` over `path` (it goes if that fails), then clear the
+/// temporary files of saves that crashed part way (a minute old or more).
+fn put_in_place(tmp: &Path, path: &Path) -> std::io::Result<()> {
+    if let Err(e) = replace_synced(tmp, path) {
+        let _ = fs::remove_file(tmp);
         return Err(e);
     }
     sync_dir(path);
-    // Temporary files of saves that crashed part way (a minute old or more) go.
     for t in stale_temps(path) {
         if fs::metadata(&t).and_then(|m| m.modified()).ok().and_then(|m| m.elapsed().ok()).is_some_and(|age| age.as_secs() >= 60) {
             let _ = fs::remove_file(t);
@@ -199,6 +204,76 @@ pub fn write_atomic(path: &Path, bytes: &[u8], backup: bool) -> std::io::Result<
         return crate::vfs::write(&path.to_string_lossy(), bytes);
     }
     write_steps(&resolve_links(path)?, bytes, backup, None)
+}
+
+/// A file written a piece at a time and put in place whole: [`write_atomic`] for content too large
+/// to hold in memory, by the same rule (a temporary file beside the target, flushed and renamed over
+/// it, a link followed, the permissions kept). Dropped before [`AtomicFile::commit`], its temporary
+/// file goes and the target stays as it was. A command writing a path it was given calls
+/// [`crate::vfs::check`] before [`AtomicFile::create`] and again before committing.
+pub struct AtomicFile {
+    /// The target, its links followed.
+    path: PathBuf,
+    permissions: Option<fs::Permissions>,
+    /// The temporary file and its path, until committed; none in the browser.
+    temp: Option<(fs::File, PathBuf)>,
+    /// In the browser, the bytes: the host stores files, and one write is atomic there.
+    held: Vec<u8>,
+}
+
+impl AtomicFile {
+    /// Start a file that will replace `path`.
+    pub fn create(path: &Path) -> std::io::Result<AtomicFile> {
+        if cfg!(target_arch = "wasm32") {
+            return Ok(AtomicFile { path: path.to_path_buf(), permissions: None, temp: None, held: Vec::new() });
+        }
+        let path = resolve_links(path)?;
+        let permissions = fs::metadata(&path).ok().filter(|m| m.is_file()).map(|m| m.permissions());
+        let tmp = temp_beside(&path, "new");
+        let file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        Ok(AtomicFile { path, permissions, temp: Some((file, tmp)), held: Vec::new() })
+    }
+
+    /// Flush what was written to disk and put it in place of the target.
+    pub fn commit(mut self) -> std::io::Result<()> {
+        let Some((file, tmp)) = self.temp.take() else {
+            return crate::vfs::write(&self.path.to_string_lossy(), &self.held);
+        };
+        let flushed = flush(&file);
+        drop(file);
+        if let Err(e) = flushed {
+            let _ = fs::remove_file(&tmp);
+            return Err(e);
+        }
+        keep_permissions(&self.permissions, &tmp);
+        put_in_place(&tmp, &self.path)
+    }
+}
+
+impl Write for AtomicFile {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match &mut self.temp {
+            Some((file, _)) => file.write(buf),
+            None => {
+                self.held.extend_from_slice(buf);
+                Ok(buf.len())
+            }
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.temp.as_mut().map_or(Ok(()), |(file, _)| file.flush())
+    }
+}
+
+impl Drop for AtomicFile {
+    fn drop(&mut self) {
+        // Closed first: Windows won't remove a file that is open.
+        if let Some((file, tmp)) = self.temp.take() {
+            drop(file);
+            let _ = fs::remove_file(tmp);
+        }
+    }
 }
 
 /// Publish a complete new file without replacing an existing destination, even if another
@@ -382,6 +457,35 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// A file written in pieces replaces the target only when committed; dropped, it leaves the
+    /// target (or its absence) and no temporary file.
+    #[test]
+    fn a_file_written_in_pieces_replaces_the_target_whole_or_not_at_all() {
+        let d = dir("pieces");
+        let p = d.join("sheet.png");
+        write_atomic(&p, b"old", false).unwrap();
+        let mut f = AtomicFile::create(&p).unwrap();
+        f.write_all(b"new ").unwrap();
+        f.write_all(b"content").unwrap();
+        assert_eq!(fs::read(&p).unwrap(), b"old", "the target is untouched while it is written");
+        assert_eq!(stale_temps(&p).len(), 1);
+        f.commit().unwrap();
+        assert_eq!(fs::read(&p).unwrap(), b"new content");
+        assert!(stale_temps(&p).is_empty());
+
+        let mut f = AtomicFile::create(&p).unwrap();
+        f.write_all(b"cancelled").unwrap();
+        drop(f);
+        assert_eq!(fs::read(&p).unwrap(), b"new content");
+        assert!(stale_temps(&p).is_empty(), "a dropped file leaves no temporary file");
+
+        let fresh = d.join("fresh.png");
+        drop(AtomicFile::create(&fresh).unwrap());
+        assert!(!fresh.exists() && stale_temps(&fresh).is_empty());
+        assert!(AtomicFile::create(&d.join("missing-dir").join("a.png")).is_err());
+        let _ = fs::remove_dir_all(&d);
+    }
+
     #[test]
     fn a_failed_write_leaves_the_target() {
         let d = dir("fail");
@@ -416,6 +520,24 @@ mod tests {
             assert_eq!(fs::read(&link).unwrap(), b"two");
             assert_eq!(fs::read(backup_path(&target)).unwrap(), b"one", "the backup sits beside the real file");
             assert!(!backup_path(&link).exists());
+            let _ = fs::remove_dir_all(&d);
+        }
+
+        /// A file written in pieces follows a link and keeps the target's permissions, as a save does.
+        #[test]
+        fn a_file_written_in_pieces_through_a_link_updates_the_target_and_keeps_its_mode() {
+            let d = dir("pieces-link");
+            let target = d.join("real.png");
+            let link = d.join("link.png");
+            write_atomic(&target, b"one", false).unwrap();
+            fs::set_permissions(&target, fs::Permissions::from_mode(0o640)).unwrap();
+            symlink(&target, &link).unwrap();
+            let mut f = AtomicFile::create(&link).unwrap();
+            f.write_all(b"two").unwrap();
+            f.commit().unwrap();
+            assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+            assert_eq!(fs::read(&target).unwrap(), b"two");
+            assert_eq!(mode(&target), 0o640);
             let _ = fs::remove_dir_all(&d);
         }
 
