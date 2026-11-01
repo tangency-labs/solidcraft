@@ -916,9 +916,13 @@ mod tests {
         h.app.home.open = false;
         crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GENERAL);
         h.frames(2);
+        crate::prefs::reveal_preference(&mut h, "prefs:max_step_file_mb");
         let field = crate::scenario::rect_of("prefs:max_step_file_mb").expect("STEP limit field");
+        assert!(crate::scenario::rect_of("prefs:page_body").expect("Preferences body").contains_rect(field));
         h.step(&serde_json::json!({"click": [field.center().x, field.center().y]})).expect("click the field");
         h.frames(2);
+        let focused = h.ctx.memory(|memory| memory.focused()).expect("the number editor has focus");
+        assert!(field.contains_rect(h.ctx.read_response(focused).expect("focused editor response").rect));
         h.step(&serde_json::json!({"text": "7"})).expect("type");
         h.frames(2);
         assert!(h.app.prefs_window.filter.is_empty(), "typed `{}` into the search", h.app.prefs_window.filter);

@@ -463,6 +463,33 @@ const ELEMENTS: &[Element] = &[
             });
         });
     }),
+    element!("below_row_control", |ui, state| {
+        settings_form(ui, Tokens::get().form_label_width, |ui| {
+            row(ui, "Autosave every", |ui| {
+                field(ui, &mut state.value);
+            });
+            below_row_control(ui, "Autosave every", 260.0, |ui| settings_autosave_timeline(ui, 5.0));
+        });
+    }),
+    element!("named_control", "dialog:widget:Profile name", Some("dialog:Profile name"), |ui, state| {
+        named_control(ui, "Profile name", |ui| {
+            text_field(ui, &mut state.value, "Name this setup");
+        });
+    }),
+    element!("settings_row_card", |ui, _| {
+        let t = Tokens::get();
+        for selected in [true, false] {
+            settings_row_card(ui, selected, t.control_height + t.space_14, |ui| {
+                text(ui, "Default", if selected { Text::SelectedNameCell } else { Text::NameCell(false) });
+                if selected {
+                    settings_badge(ui, "Active", false);
+                } else {
+                    button(ui, "Apply", Button::Normal);
+                }
+            });
+            ui.add_space(t.space_8);
+        }
+    }),
     element!("settings_composition", |ui, _| {
         settings_heading(ui, "Interface", "Appearance and workspace");
         settings_section(ui, "gallery_settings", "Layout", |ui| {
