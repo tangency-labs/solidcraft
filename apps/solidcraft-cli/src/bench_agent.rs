@@ -8,7 +8,7 @@
 //! no fixture.
 //!
 //! ```text
-//! solidcraft-cli bench-agent [--scale F] [--script-out script.json] [--save design.solidcraft]
+//! solidcraft-cli bench-agent [--scale F] [--script-out script.json] [--save design.sc]
 //! ```
 //! prints one JSON line per hundred commands (mean and max milliseconds, bodies so far), then the
 //! build total, then the phases `bench-open` prints for the saved design.
@@ -205,7 +205,10 @@ pub fn run(args: &[String]) -> Result<(), String> {
     );
     let path = match flag("--save") {
         Some(p) => p.clone(),
-        None => std::env::temp_dir().join(format!("bench-agent-{}.solidcraft", std::process::id())).to_string_lossy().into_owned(),
+        None => std::env::temp_dir()
+            .join(format!("bench-agent-{}.{}", std::process::id(), solidcraft_engine::io::DESIGN_EXT))
+            .to_string_lossy()
+            .into_owned(),
     };
     s.execute("file.save", &json!({"path": path})).map_err(|e| e.to_string())?;
     let r = crate::cmd_bench_open(std::slice::from_ref(&path));

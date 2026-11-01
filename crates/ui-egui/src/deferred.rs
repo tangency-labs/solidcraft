@@ -66,6 +66,9 @@ pub struct DeleteCheck {
     /// When it started (ms).
     pub(crate) started: f64,
     then: AfterCheck,
+    /// What the check computes, for the delete itself to find instead of building it again on
+    /// the window thread (#9917).
+    kept: std::sync::Arc<solidcraft_engine::doc::KeptResults>,
     /// The design's revision it was computed for: a design changed meanwhile checks again.
     revision: u64,
 }
@@ -73,8 +76,9 @@ pub struct DeleteCheck {
 /// What a delete does once its check is in.
 #[derive(Clone, Debug)]
 pub(crate) enum AfterCheck {
-    /// The timeline's Delete of these features (a `timeline.dependents` report for each).
-    Timeline(Vec<u64>),
+    /// The timeline's Delete of these features (a `timeline.dependents` report for each), and
+    /// of the timeline folders that go with them.
+    Timeline { features: Vec<u64>, groups: Vec<u64> },
     /// Delete with these `selection.delete` parameters (the report of its dry run).
     Selection(Value),
 }
@@ -83,9 +87,12 @@ impl AfterCheck {
     /// Check again, for the design as it is now.
     fn restart(self, app: &mut SolveApp) {
         match self {
-            AfterCheck::Timeline(ids) => {
-                let ids: Vec<u64> = ids.into_iter().filter(|id| app.session.doc.feature(*id).is_some()).collect();
-                if !ids.is_empty() {
+            AfterCheck::Timeline { features, groups } => {
+                let ids: Vec<u64> = features.into_iter().filter(|id| app.session.doc.feature(*id).is_some()).collect();
+                let groups: Vec<u64> = groups.into_iter().filter(|id| app.session.doc.timeline_groups.iter().any(|g| g.id == *id)).collect();
+                if !groups.is_empty() {
+                    crate::timeline::delete_folders(app, groups, ids);
+                } else if !ids.is_empty() {
                     crate::timeline::delete_features(app, ids);
                 }
             }
@@ -93,16 +100,16 @@ impl AfterCheck {
         }
     }
 
-    /// Carry on with the check's replies.
-    fn finish(self, app: &mut SolveApp, replies: Vec<Result<Value, String>>) {
+    /// Carry on with the check's replies, and what it `kept` (when it ran ahead) for the delete.
+    fn finish(self, app: &mut SolveApp, replies: Vec<Result<Value, String>>, kept: Option<std::sync::Arc<solidcraft_engine::doc::KeptResults>>) {
         match self {
-            AfterCheck::Timeline(ids) => {
+            AfterCheck::Timeline { features, groups } => {
                 let reports: Vec<Value> = replies.into_iter().map(Result::unwrap_or_default).collect();
-                crate::timeline::delete_checked_features(app, ids, &reports);
+                crate::timeline::delete_checked_features(app, features, groups, &reports);
             }
             AfterCheck::Selection(params) => {
                 let report = replies.into_iter().next().unwrap_or_else(|| Err("the delete was not checked".into()));
-                crate::delete::checked(app, params, report);
+                crate::delete::checked(app, params, report, kept);
             }
         }
     }
@@ -119,6 +126,12 @@ impl SolveApp {
     /// a while (see the module notes). `Ok(Null)` when it is left computing or waiting its turn:
     /// its outcome then shows as any command's does (an error in the status line).
     pub fn run_heavy(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if id == "timeline.play" {
+            return self.run(id, params);
+        }
+        // A manual history action takes over from playback. Playback takes its state out
+        // while submitting its own next step, then puts it back to wait for that step.
+        crate::timeline::stop_playback(self);
         if self.deferred.is_some() {
             if replaced_by_a_later_one(id) && self.deferred_queue.last().is_some_and(|(q, _)| q == id) {
                 self.deferred_queue.pop();
@@ -176,6 +189,7 @@ impl SolveApp {
             && self.file_picker.is_none()
         {
             let ahead = self.session.ahead();
+            let kept = ahead.kept();
             let (tx, rx) = std::sync::mpsc::channel();
             let checks = commands.clone();
             let spawned = std::thread::Builder::new().name("delete check".into()).spawn(move || {
@@ -183,17 +197,17 @@ impl SolveApp {
                 let _ = tx.send(replies);
             });
             if spawned.is_ok() {
-                let check = DeleteCheck { done: rx, started: crate::now_ms(), then, revision: self.session.revision };
+                let check = DeleteCheck { done: rx, started: crate::now_ms(), then, revision: self.session.revision, kept };
                 // As with the history's commands, zero always leaves it for a later frame.
                 match (wait.is_zero(), check.done.recv_timeout(wait)) {
-                    (false, Ok(replies)) => check.then.finish(self, replies),
+                    (false, Ok(replies)) => check.then.finish(self, replies, Some(check.kept.clone())),
                     _ => self.delete_check = Some(check),
                 }
                 return;
             }
         }
         let replies = commands.iter().map(|(id, params)| self.session.execute(id, params).map_err(|e| e.to_string())).collect();
-        then.finish(self, replies);
+        then.finish(self, replies, None);
     }
 
     /// Each frame: a delete whose check is in carries on (checked again when the design changed
@@ -212,7 +226,7 @@ impl SolveApp {
         match replies {
             None => self.set_status("the delete could not be checked", true),
             Some(_) if check.revision != self.session.revision => check.then.restart(self),
-            Some(replies) => check.then.finish(self, replies),
+            Some(replies) => check.then.finish(self, replies, Some(check.kept)),
         }
     }
 
@@ -230,7 +244,10 @@ impl SolveApp {
                     // The design changed meanwhile: computed again for the design as it is now.
                     let _ = self.run_heavy(&id, params);
                 } else if !superseded {
+                    // This is playback's own completed step, not a manual history edit.
+                    let playback = self.timeline_playback.take();
                     let _ = self.run_evaluated(&id, params, job.evaluated.flatten().as_ref(), job.kept);
+                    self.timeline_playback = playback;
                 }
             }
         }

@@ -136,8 +136,7 @@ impl Display {
                     let strength = self.finishing.bloom.map_or(0.0, |b| b.strength);
                     value += strength * self.tone_map.map(f64::from(glow[channel]) * self.exposure * self.finishing.rgb_gain[channel]);
                 }
-                let encoded = if value <= 0.0031308 { value * 12.92 } else { 1.055 * value.powf(1. / 2.4) - 0.055 };
-                *out = (encoded.clamp(0., 1.) * 255.).round() as u8;
+                *out = solidcraft_geom::srgb::encode8(value);
             }
             rgba[3] = if self.transparent { (alpha * 255.0).round() as u8 } else { 255 };
         }

@@ -93,7 +93,7 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
     // Mesh bodies are not measured. A mesh body named in `bodies` or `against` is left out of the
     // pairs and listed as unchecked, rather than refused as "no solid body".
     let named = |key: &str| -> Result<Vec<usize>> {
-        let names = string_list(p, key);
+        let names = string_list(cmd, p, key)?;
         let mut out = Vec::new();
         for n in &names {
             let Some(i) = solid.iter().position(|b| &b.name == n) else {
@@ -256,7 +256,10 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
     let (mut overlaps, mut near) = (Vec::new(), Vec::new());
     // The mesh bodies the call was about (every one without `bodies`, else those named in
     // `bodies` or `against`) come first, so "nothing found" is not read as "no overlap".
-    let asked: Vec<String> = ["bodies", "against"].iter().flat_map(|k| string_list(p, k)).collect();
+    let mut asked: Vec<String> = Vec::new();
+    for k in ["bodies", "against"] {
+        asked.extend(string_list(cmd, p, k)?);
+    }
     let mut unchecked: Vec<Value> = mesh_bodies
         .iter()
         .filter(|b| p.get("bodies").is_none_or(Value::is_null) || asked.contains(&b.name))

@@ -22,7 +22,7 @@ pub fn map(app: &SolveApp) -> Option<AccessMap> {
         return Some(m);
     }
     let st = crate::open_meshing::session_world(&app.session);
-    let meshes: Vec<_> = st.bodies.iter().filter(|b| app.session.body_visible(&b.name)).map(|b| b.mesh()).collect();
+    let meshes: Vec<_> = st.bodies.iter().filter(|b| app.body_visible(&b.name)).map(|b| b.mesh()).collect();
     // Every new map gets a new version (the GPU uploads it once).
     let version = VERSION.with(|v| {
         v.set(v.get() + 1);

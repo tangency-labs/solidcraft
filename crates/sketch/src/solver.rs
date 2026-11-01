@@ -42,6 +42,19 @@ pub const MAX_COMPONENT_VARS: usize = 4_000;
 const TOL: f64 = 1e-9;
 /// A solution is accepted when every residual is below this (mm).
 const ACCEPT: f64 = 1e-6;
+/// A solve that only asks whether it succeeds ([`Analysis::StatusOnly`], the held solves of a
+/// drag) gives up on a component once LM has stalled far from a solution: over the last
+/// `STALL_ITERS` iterations the sum of squared residuals fell by at most `STALL_DECREASE` of
+/// itself, and the largest residual is still above `STALL_RESIDUAL` (mm). Such a run sits in a
+/// least-squares valley of constraints that conflict, crawling until `MAX_ITERS`, and a held
+/// solve runs LM up to three times (#6606). Measured on about 62,000 LM runs that succeeded
+/// (the sketch and engine tests and 120 generated sketch scripts with 2,900 drags), the slowest
+/// still fell by 1.4e-3 of itself over any 20 iterations while it was that far off: some cross
+/// a plateau for dozens of iterations and then converge, so the threshold stays a hundred times
+/// below that. Other solves keep iterating: their report names what a failure leaves violated.
+const STALL_ITERS: usize = 20;
+const STALL_DECREASE: f64 = 1e-5;
+const STALL_RESIDUAL: f64 = 1e-4;
 /// How much less it costs a solve to move a point held on a curve than any other point: such a
 /// point is placed relative to the curve, so it follows the curve rather than the curve it.
 const SLIDE_WEIGHT: f64 = 0.01;
@@ -183,7 +196,9 @@ fn layout(sk: &Sketch, hold: &Hold) -> Layout {
         .iter()
         .enumerate()
         .map(|(i, c)| match c.kind {
-            CurveKind::Circle { .. } | CurveKind::Ellipse { .. } if c.link.is_none() && !c.fixed && !hold.radii.contains(&i) => {
+            CurveKind::Circle { .. } | CurveKind::Ellipse { .. }
+                if c.link.is_none() && !c.fixed && !hold.radii.contains(&i) && !sk.offset_circle_follows_source(i) =>
+            {
                 n += 1;
                 Some(n - 1)
             }
@@ -1112,13 +1127,11 @@ fn norm2(v: &[f64]) -> f64 {
 }
 
 /// Levenberg–Marquardt on one component (variables `vars`, blocks `blocks`). Returns the
-/// iterations and the largest residual left.
-fn lm(sk: &Sketch, lay: &Layout, blocks: &[(Block, Vec<usize>)], vars: &[usize], x: &mut Vec<f64>, col: &[usize]) -> (usize, f64) {
-    lm_capped(sk, lay, blocks, vars, x, col, MAX_ITERS)
-}
-
-/// [`lm`], counting its work against a live drag frame's numerical allowance when `budget` has
-/// one ([`Budget::frame`]). The solve itself runs as it would without it.
+/// iterations and the largest residual left. Its work counts against a live drag frame's
+/// numerical allowance when `budget` has one ([`Budget::frame`]); the solve itself runs as it
+/// would without it. `give_up`: stop once
+/// stalled (see [`STALL_ITERS`]); not in a live frame, whose allowance is measured in the work
+/// the full iteration does.
 fn lm_in(
     sk: &Sketch,
     lay: &Layout,
@@ -1127,9 +1140,10 @@ fn lm_in(
     x: &mut Vec<f64>,
     col: &[usize],
     budget: &mut Budget,
+    give_up: bool,
 ) -> (usize, f64) {
     if !budget.counts_numeric() {
-        return lm(sk, lay, blocks, vars, x, col);
+        return lm_run(sk, lay, blocks, vars, x, col, MAX_ITERS, None, give_up).unwrap_or((0, f64::INFINITY));
     }
     let mut meter = Budget::new(usize::MAX);
     let out = lm_capped_with_budget(sk, lay, blocks, vars, x, col, MAX_ITERS, Some(&mut meter)).unwrap_or((0, f64::INFINITY));
@@ -1161,7 +1175,22 @@ fn lm_capped_with_budget(
     x: &mut Vec<f64>,
     col: &[usize],
     max_iters: usize,
+    budget: Option<&mut Budget>,
+) -> Option<(usize, f64)> {
+    lm_run(sk, lay, blocks, vars, x, col, max_iters, budget, false)
+}
+
+/// [`lm_capped_with_budget`], giving up once stalled when `give_up` (see [`STALL_ITERS`]).
+fn lm_run(
+    sk: &Sketch,
+    lay: &Layout,
+    blocks: &[(Block, Vec<usize>)],
+    vars: &[usize],
+    x: &mut Vec<f64>,
+    col: &[usize],
+    max_iters: usize,
     mut budget: Option<&mut Budget>,
+    give_up: bool,
 ) -> Option<(usize, f64)> {
     #[cfg(feature = "solver-profiling")]
     let _timer = profiling::timer(Phase::Lm);
@@ -1177,11 +1206,24 @@ fn lm_capped_with_budget(
     let mut f = norm2(&r);
     #[cfg(feature = "solver-profiling")]
     let run = profiling::start_run(n, r.len(), max_iters, f);
+    // The sum of squares at the start of each iteration, while giving up is allowed.
+    let mut costs = Vec::new();
     for it in 0..max_iters {
         if max_abs(&r) < TOL {
             #[cfg(feature = "solver-profiling")]
             profiling::finish_run(run, StopReason::ResidualTolerance, max_abs(&r));
             return Some((it, max_abs(&r)));
+        }
+        if give_up {
+            if let Some(&earlier) = it.checked_sub(STALL_ITERS).and_then(|k| costs.get(k))
+                && max_abs(&r) > STALL_RESIDUAL
+                && earlier - f <= STALL_DECREASE * earlier
+            {
+                #[cfg(feature = "solver-profiling")]
+                profiling::finish_run(run, StopReason::Stalled, max_abs(&r));
+                return Some((it, max_abs(&r)));
+            }
+            costs.push(f);
         }
         let normal_work =
             n.saturating_mul(n).saturating_mul(r.len()).saturating_add(evaluation_work.saturating_mul(n.saturating_mul(2).saturating_add(1)));
@@ -1992,6 +2034,10 @@ enum Orient {
     OfLine(usize, usize, f64),
     /// Which of two nested circles or arcs encloses the other.
     RadiusOrder(usize, usize),
+    /// Which way along line `l` the point `q` is from `p`: a `Distance` between two points that
+    /// both lie on `l` (its ends, points on it, or points coincident with either; one of them may
+    /// lie on it by what else holds it).
+    Along(usize, usize, usize, f64),
 }
 
 /// An orientation's signed offset in a state (a corner's distance from the opposite side, an
@@ -2024,6 +2070,11 @@ fn offset(s: &State, o: Orient) -> Option<(f64, f64, f64)> {
             // Even a thin wall has an inside and an outside. Use the radius difference as
             // its size; rounding still accounts for the radii and the arc coordinates.
             (ra - rb, (ra - rb).abs(), ra.max(rb).max(coords(&[ca, cb])))
+        }
+        Orient::Along(p, q, l, size) => {
+            let (a, b) = s.line(l);
+            let (pp, pq) = (s.p(p), s.p(q));
+            ((b - a).normalized()?.dot(pq - pp), size, coords(&[pp, pq, a, b]))
         }
     })
 }
@@ -2156,11 +2207,17 @@ fn orients(s: &State, sub: &[(Block, Vec<usize>)]) -> Vec<(Orient, Vec<usize>)> 
     let mut out = Vec::new();
     let mut joins = Vec::new();
     let mut edges = Vec::new();
+    let mut spans: Vec<(usize, usize, f64, usize)> = Vec::new();
     for (b, _) in sub {
-        let Block::User(ci, kind) = b else { continue };
+        // A tangency at a point the two curves share (or a line's end held on the round) is a
+        // block of its own; its round keeps its side of the line all the same.
+        let (Block::User(ci, kind) | Block::TangentAt(ci, kind, _)) = b else { continue };
         match **kind {
             ConstraintKind::Coincident { p, q } => joins.push((p, q)),
-            ConstraintKind::Distance { p, q, .. } => edges.push((p, q, *ci)),
+            ConstraintKind::Distance { p, q, value } => {
+                edges.push((p, q, *ci));
+                spans.push((p, q, value, *ci));
+            }
             ConstraintKind::Length { l, .. } => edges.extend(line(l).map(|(p, q)| (p, q, *ci))),
             ConstraintKind::DistanceX { p, q, value } if free(p) || free(q) => out.push((Orient::SideX(p, q, value), vec![*ci])),
             ConstraintKind::DistanceY { p, q, value } if free(p) || free(q) => out.push((Orient::SideY(p, q, value), vec![*ci])),
@@ -2177,8 +2234,9 @@ fn orients(s: &State, sub: &[(Block, Vec<usize>)]) -> Vec<(Orient, Vec<usize>)> 
                     out.push((Orient::OfLine(*centre, l, value + s.round(c).1), vec![*ci]));
                 }
             }
-            // A line tangent to a circle away from both their ends: the circle stays on its side
-            // (the other tangent of that direction is a diameter away).
+            // A line tangent to a circle: the circle stays on its side (away from their ends, the
+            // other tangent of that direction is a diameter away; at an end they share, the other
+            // tangent from the line's far end is its mirror image).
             ConstraintKind::Tangent { a, b } => {
                 let (l, c) = if s.is_line(a) { (a, b) } else { (b, a) };
                 if s.is_line(l)
@@ -2188,6 +2246,57 @@ fn orients(s: &State, sub: &[(Block, Vec<usize>)]) -> Vec<(Orient, Vec<usize>)> 
                 }
             }
             _ => {}
+        }
+    }
+    // A distance between two points on one line leaves which way along it open: the other
+    // solution is the same distance back past `p`. A point is on a line as one of its ends, as a
+    // point held on it, or coincident with either, read from the whole sketch (the line may be
+    // fixed, solved apart from these points).
+    let ends = |l: usize| line(l).map(|(a, b)| [a, b]).unwrap_or([usize::MAX; 2]);
+    let mut lines_at: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    let mut together: Vec<(usize, usize)> = Vec::new();
+    if !spans.is_empty() {
+        for (l, c) in s.sk.curves.iter().enumerate() {
+            if let CurveKind::Line { a, b } = c.kind {
+                lines_at.entry(a).or_default().push(l);
+                lines_at.entry(b).or_default().push(l);
+            }
+        }
+        for c in &s.sk.constraints {
+            match c.kind {
+                ConstraintKind::PointOnCurve { p, c } if line(c).is_some() => lines_at.entry(p).or_default().push(c),
+                ConstraintKind::Coincident { p, q } => together.push((p, q)),
+                _ => {}
+            }
+        }
+    }
+    let lines_of = |p: usize| -> Vec<usize> {
+        let joined = together.iter().filter_map(|&(x, y)| {
+            if x == p {
+                Some(y)
+            } else if y == p {
+                Some(x)
+            } else {
+                None
+            }
+        });
+        std::iter::once(p).chain(joined).flat_map(|x| lines_at.get(&x).into_iter().flatten().copied()).collect()
+    };
+    // One of the two may lie on the line by what else holds it (the mirror image of a point on
+    // it, across a line square to it): where it is now, as exactly as a solve puts it.
+    let lies_on = |x: usize, l: usize| {
+        let ((a, b), px) = (s.line(l), s.p(x));
+        let reach = 1e-7 * crate::loci::mag(a).max(crate::loci::mag(b)).max(crate::loci::mag(px)).max(1.0);
+        (b - a).normalized().is_some_and(|d| d.cross(px - a).abs() <= reach)
+    };
+    for &(p, q, value, ci) in &spans {
+        if !(free(p) || free(q)) {
+            continue;
+        }
+        let (lp, lq) = (lines_of(p), lines_of(q));
+        let both = |l: &usize| (lp.contains(l) || lies_on(p, *l)) && (lq.contains(l) || lies_on(q, *l));
+        if let Some(l) = lp.iter().chain(&lq).copied().find(|l| both(l) && !(ends(*l).contains(&p) && ends(*l).contains(&q))) {
+            out.push((Orient::Along(p, q, l, value), vec![ci]));
         }
     }
     // Union-find over the points these constraints name (not the whole sketch).
@@ -2661,6 +2770,10 @@ fn solve_inner(
     }
     // Column of each variable in the system being solved or analysed (usize::MAX outside it).
     let mut col = vec![usize::MAX; lay.n];
+    // Only success matters to a status-only solve: a component LM cannot solve is left as soon
+    // as the iteration stalls (see `STALL_ITERS`). It fails either way, and a failed solve
+    // leaves the geometry as it was.
+    let give_up = analysis == Analysis::StatusOnly;
 
     let mut iterations = 0;
     let mut continuations = 0;
@@ -2696,7 +2809,7 @@ fn solve_inner(
                     let rest = unpinned(vars, &pin, None);
                     let rest_blocks = blocks_reading(&sub, &rest);
                     columns(&mut col, &rest, vars);
-                    let (its, r) = if rest.is_empty() { (0, 0.0) } else { lm_in(sk, &lay, &rest_blocks, &rest, &mut x, &col, budget) };
+                    let (its, r) = if rest.is_empty() { (0, 0.0) } else { lm_in(sk, &lay, &rest_blocks, &rest, &mut x, &col, budget, give_up) };
                     iterations += its;
                     residual = r;
                     solved = residual < ACCEPT;
@@ -2720,7 +2833,7 @@ fn solve_inner(
             // the seed did not move it.
             let reseeded = unseeded.as_ref().filter(|plain| vars.iter().any(|v| plain.get(*v).is_some_and(Option::is_some)));
             if !(solved || pinned_failed && reseeded.is_some()) {
-                let (its, r) = lm_in(sk, &lay, &sub, vars, &mut x, &col, budget);
+                let (its, r) = lm_in(sk, &lay, &sub, vars, &mut x, &col, budget, give_up);
                 iterations += its;
                 residual = r;
             }
@@ -2734,7 +2847,7 @@ fn solve_inner(
                         *s = plain.get(v).copied().flatten().unwrap_or(*s0);
                     }
                 }
-                let (its, r) = lm_in(sk, &lay, &sub, vars, &mut x, &col, budget);
+                let (its, r) = lm_in(sk, &lay, &sub, vars, &mut x, &col, budget, give_up);
                 iterations += its;
                 residual = r;
             }
@@ -2765,7 +2878,7 @@ fn solve_inner(
                 iterations += its;
                 if !done {
                     // The last sub-step's solution, solved for the new values in one jump.
-                    let (its, r) = lm_in(sk, &lay, &sub, vars, &mut from, &col, budget);
+                    let (its, r) = lm_in(sk, &lay, &sub, vars, &mut from, &col, budget, false);
                     iterations += its;
                     done = edit.holds(r, &State { sk, lay: &lay, x: &from });
                 }
@@ -2836,6 +2949,32 @@ fn solve_inner(
         let now = State { sk, lay: &lay, x: &x };
         for (b, _) in &sub {
             let (Block::User(ci, k) | Block::TangentAt(ci, k, _)) = b else { continue };
+            // An angle requires two directions. A nearly collapsed line can satisfy its
+            // horizontal/vertical residual within tolerance while pointing anywhere, so
+            // the angle alone must not turn that degenerate pose into a solved sketch.
+            // Compare against the input length, so an already short reference still solves.
+            let angular_lines = match **k {
+                ConstraintKind::Angle { a, b, .. } => Some([a, b]),
+                ConstraintKind::LineAngle { l, .. } => Some([l, l]),
+                _ => None,
+            };
+            if angular_lines.is_some_and(|lines| {
+                lines.iter().any(|&l| {
+                    let (a, b) = now.line(l);
+                    let original = match sk.curves.get(l).map(|c| &c.kind) {
+                        Some(CurveKind::Line { a, b }) => sk.point(*a).zip(sk.point(*b)).map_or(1.0, |(a, b)| a.dist(b)),
+                        _ => 1.0,
+                    };
+                    a.dist(b) < ACCEPT * original
+                })
+            }) {
+                if let Some(c) = sk.constraints.get(*ci)
+                    && !failing.contains(&c.id)
+                {
+                    failing.push(c.id.clone());
+                }
+                degenerate = true;
+            }
             let ConstraintKind::Tangent { a: ta, b: tb } = **k else { continue };
             let Some(c) = sk.constraints.get(*ci) else { continue };
             let mut touch_free = Vec::new();

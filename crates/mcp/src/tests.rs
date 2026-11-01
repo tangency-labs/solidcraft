@@ -135,6 +135,7 @@ fn handshake_and_tools_list() {
         "measure",
         "body_topology",
         "set_parameter",
+        "check_parameters",
         "screenshot",
         "export",
         "undo",
@@ -325,6 +326,115 @@ fn agent_builds_box_fillet_hole() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A 60 × 40 × 10 plate with two Ø6 holes at x 15 and 45 and a Ø10 × 8 boss in the middle, all
+/// on y 20 and along Z: three cylinders, the halves the kernel splits them into merged.
+fn plate_with_holes_and_boss(s: &mut Server) {
+    let r = tool(
+        s,
+        "batch",
+        json!({"commands": [
+            {"command": "sketch.create", "params": {"plane": "XY"}},
+            {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [60, 40]}},
+            {"command": "sketch.finish"},
+            {"command": "solid.extrude", "params": {"distance": 10}},
+            {"command": "sketch.create", "params": {"plane": "XY"}},
+            {"command": "sketch.circle.center", "params": {"center": [15, 20], "radius": 3}},
+            {"command": "sketch.circle.center", "params": {"center": [45, 20], "radius": 3}},
+            {"command": "sketch.finish"},
+            {"command": "solid.extrude", "params": {"distance": 10, "operation": "cut"}},
+            {"command": "solid.cylinder", "params": {"radius": 5, "height": 8, "base": [30, 20, 10], "operation": "join"}},
+        ]}),
+    );
+    assert_eq!(r["completed"], 10, "{r}");
+}
+
+/// `body_topology {faces: "cylinders"}` answers where the holes and bosses are in a few lines:
+/// one entry per cylinder with its radius, axis line and extent, and no edges (#3380).
+#[test]
+fn body_topology_lists_merged_cylinders_with_their_extent() {
+    let mut s = server();
+    plate_with_holes_and_boss(&mut s);
+    let full = tool(&mut s, "body_topology", json!({"body": "Body1"}));
+    let halves = full["faces"].as_array().unwrap().iter().filter(|f| f["cylinder"].is_object()).count();
+    assert!(halves >= 3, "{full}");
+
+    let topo = tool(&mut s, "body_topology", json!({"body": "Body1", "faces": "cylinders"}));
+    assert_eq!(topo["body"], "Body1", "{topo}");
+    assert!(topo.get("edges").is_none() && topo.get("faces").is_none(), "{topo}");
+    let found = topo["cylinders"].as_array().unwrap();
+    assert_eq!(found.len(), 3, "{topo}");
+    assert_eq!(found.iter().map(|c| c["names"].as_array().unwrap().len()).sum::<usize>(), halves, "{topo}");
+    assert!(topo.to_string().len() * 4 < full.to_string().len(), "{} vs {} bytes", topo.to_string().len(), full.to_string().len());
+    // Each cylinder: (x of its axis, radius, the z its extent spans), its axis along Z.
+    let mut seen: Vec<(i64, i64, i64, i64)> = found
+        .iter()
+        .map(|c| {
+            let axis: Vec<f64> = c["axis"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+            let origin: Vec<f64> = c["origin"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+            assert!(axis[2].abs() > 1.0 - 1e-6, "{c}");
+            assert!((origin[1] - 20.0).abs() < 1e-3, "{c}");
+            let extent: Vec<f64> = c["extent"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+            let mut z: Vec<f64> = extent.iter().map(|t| origin[2] + t * axis[2]).collect();
+            z.sort_by(|a, b| a.total_cmp(b));
+            let mm = |v: f64| (v * 1000.0).round() as i64;
+            (mm(origin[0]), mm(c["radius"].as_f64().unwrap()), mm(z[0]), mm(z[1]))
+        })
+        .collect();
+    seen.sort_unstable();
+    assert_eq!(seen, vec![(15000, 3000, 0, 10000), (30000, 5000, 10000, 18000), (45000, 3000, 0, 10000)], "{topo}");
+    // Every merged half is a real face name, so the entry picks the face too.
+    let names: Vec<&str> = found.iter().flat_map(|c| c["names"].as_array().unwrap()).filter_map(Value::as_str).collect();
+    let real: Vec<&str> = full["faces"].as_array().unwrap().iter().filter_map(|f| f["name"].as_str()).collect();
+    assert!(!names.is_empty() && names.iter().all(|n| real.contains(n)), "{names:?} in {real:?}");
+
+    // The default is unchanged, and a value outside the enum is refused by argument checking.
+    let same = tool(&mut s, "body_topology", json!({"body": "Body1", "faces": "all"}));
+    assert_eq!(same, full);
+    let r = raw_tool(&mut s, "body_topology", json!({"body": "Body1", "faces": "planes"}));
+    assert_eq!(r["error"]["code"], -32602, "{r}");
+    assert!(r["error"]["message"].as_str().unwrap().contains("cylinders"), "{r}");
+}
+
+/// `measure {summary: true}` keeps what a stage check needs, as a tool and as a batch step (#3380).
+#[test]
+fn measure_summary_keeps_only_the_check_fields() {
+    let mut s = server();
+    plate_with_holes_and_boss(&mut s);
+    let full = tool(&mut s, "measure", json!({}));
+    let m = tool(&mut s, "measure", json!({"summary": true}));
+    let keys = |v: &Value| -> Vec<String> { v.as_object().unwrap().keys().cloned().collect() };
+    assert_eq!(keys(&m), ["bodies", "body_count", "total"], "{m}");
+    assert_eq!(keys(&m["total"]), ["volume_mm3"], "{m}");
+    assert_eq!(m["body_count"], 1, "{m}");
+    let b = &m["bodies"][0];
+    assert_eq!(keys(b), ["bbox", "closed", "faces", "name", "volume_mm3"], "{m}");
+    assert_eq!(b["name"], "Body1");
+    assert_eq!(b["closed"], true);
+    assert_eq!(b["faces"], full["bodies"][0]["faces"]);
+    assert_eq!(b["bbox"], full["bodies"][0]["bbox"]);
+    let expect = 60.0 * 40.0 * 10.0 - 2.0 * PI * 9.0 * 10.0 + PI * 25.0 * 8.0;
+    let v = m["total"]["volume_mm3"].as_f64().unwrap();
+    assert_eq!(v, full["total"]["volume_mm3"].as_f64().unwrap(), "{m}");
+    assert_eq!(b["volume_mm3"].as_f64().unwrap(), full["bodies"][0]["volume_mm3"].as_f64().unwrap(), "{m}");
+    assert!(rel(v, expect) < 1e-3, "{v} vs {expect}");
+    assert!(m.to_string().len() * 2 < full.to_string().len(), "{} vs {} bytes", m.to_string().len(), full.to_string().len());
+    // One body by name, and the default unchanged.
+    let one = tool(&mut s, "measure", json!({"body": "Body1", "summary": true}));
+    assert_eq!(one, m);
+    assert_eq!(tool(&mut s, "measure", json!({"summary": false})), full);
+
+    // As a batch step, the same reply.
+    let r = tool(
+        &mut s,
+        "batch",
+        json!({"commands": [{"command": "measure", "params": {"summary": true}}, {"command": "measure", "params": {"body": "Body1"}}]}),
+    );
+    assert_eq!(r["completed"], 2, "{r}");
+    assert_eq!(r["results"][0], m, "{r}");
+    assert_eq!(r["results"][1], full, "{r}");
+    assert_eq!(raw_tool(&mut s, "measure", json!({"summary": "yes"}))["error"]["code"], -32602);
+}
+
 /// `open` hands `up` and `names` to the STEP import, and the tool's schema refuses other values.
 #[test]
 fn open_stands_a_y_up_step_file_up() {
@@ -451,6 +561,210 @@ fn set_parameter_takes_value_or_expression() {
     assert!(rel(volume(&mut s), 6000.0) < 1e-9);
 }
 
+/// A box whose length is a parameter and a cylinder standing on it at `len / 2`, so a change
+/// of `len` moves the cylinder's axis.
+fn parametric_box_with_cylinder(s: &mut Server) {
+    tool(&mut *s, "set_parameter", json!({"name": "len", "value": "40 mm"}));
+    tool(
+        &mut *s,
+        "batch",
+        json!({"commands": [
+            {"command": "solid.box", "params": {"length": "len", "width": 30, "height": 20, "corner": [0, 0, 0]}},
+            {"command": "solid.cylinder", "params": {"radius": 5, "height": 10, "base": ["len / 2", 15, 20], "operation": "join"}},
+        ]}),
+    );
+}
+
+fn box_with_cylinder_volume(len: f64) -> f64 {
+    len * 30.0 * 20.0 + PI * 25.0 * 10.0
+}
+
+/// `check_parameters` applies the values with one rebuild, reports the new volume, the
+/// features' state and the moved cylinder axis (its two kernel halves as one cylinder), and
+/// puts the design back: the parameter, the volume and the undo history are as before.
+#[test]
+fn check_parameters_tries_values_and_puts_the_design_back() {
+    let mut s = server();
+    parametric_box_with_cylinder(&mut s);
+    assert!(rel(volume(&mut s), box_with_cylinder_volume(40.0)) < 5e-4);
+    let before = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    let r = tool(&mut s, "check_parameters", json!({"set": {"len": "60 mm"}}));
+    assert_eq!(r["restored"], true, "{r}");
+    assert_eq!(r["values"]["len"], 60.0, "{r}");
+    assert!(r["recomputed"].as_u64().unwrap() >= 1, "{r}");
+    let v = r["measure"]["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(rel(v, box_with_cylinder_volume(60.0)) < 5e-4, "{v}");
+    assert_eq!(r["measure"]["body_count"], 1, "{r}");
+    assert!(r["measure"]["bodies"][0]["faces"].as_u64().unwrap() >= 8, "{r}");
+    assert_eq!((&r["errors"], &r["warnings"], &r["parameter_errors"]), (&json!([]), &json!([]), &json!([])), "{r}");
+    let cyl = r["cylinders"].as_array().unwrap();
+    assert_eq!(cyl.len(), 1, "one cylinder, halves merged: {r}");
+    assert_eq!(cyl[0]["body"], "Body1", "{r}");
+    assert!((cyl[0]["radius"].as_f64().unwrap() - 5.0).abs() < 1e-6, "{r}");
+    let origin: Vec<f64> = cyl[0]["origin"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+    let axis: Vec<f64> = cyl[0]["axis"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect();
+    assert!((origin[0] - 30.0).abs() < 1e-6 && (origin[1] - 15.0).abs() < 1e-6 && origin[2].abs() < 1e-6, "axis moved to len / 2 = 30: {r}");
+    assert!(axis[0].abs() < 1e-9 && axis[1].abs() < 1e-9 && (axis[2] - 1.0).abs() < 1e-9, "{r}");
+    assert!(!cyl[0]["faces"].as_array().unwrap().is_empty(), "{r}");
+    // The halves' areas add up to the cylinder's (measured on its mesh).
+    assert!(rel(cyl[0]["area"].as_f64().unwrap(), 2.0 * PI * 5.0 * 10.0) < 1e-2, "{r}");
+    // Back as it was: the value, the volume and the undo history (a checkpoint restores it).
+    assert!(rel(volume(&mut s), box_with_cylinder_volume(40.0)) < 5e-4);
+    let after = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    assert!(after["params"].as_array().unwrap().iter().any(|p| p["name"] == "len" && p["value"] == 40.0 && p["expression"] == "40 mm"), "{after}");
+    assert_eq!(after["undo"], before["undo"], "undo depth: {after}");
+    assert_eq!(after["redo"], before["redo"], "{after}");
+    // Only what was asked for.
+    let r = tool(&mut s, "check_parameters", json!({"set": {"len": 50}, "report": ["measure"]}));
+    assert!(rel(r["measure"]["total"]["volume_mm3"].as_f64().unwrap(), box_with_cylinder_volume(50.0)) < 5e-4, "{r}");
+    assert!(r.get("cylinders").is_none() && r.get("errors").is_none(), "{r}");
+    assert_eq!(r["restored"], true, "{r}");
+    assert!(rel(volume(&mut s), box_with_cylinder_volume(40.0)) < 5e-4);
+    // A value that breaks a feature is reported, not kept.
+    let r = tool(&mut s, "check_parameters", json!({"set": {"len": 0}, "report": ["errors"]}));
+    assert!(!r["errors"].as_array().unwrap().is_empty(), "{r}");
+    assert_eq!(r["restored"], true, "{r}");
+    assert!(rel(volume(&mut s), box_with_cylinder_volume(40.0)) < 5e-4);
+    let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    assert!(d["timeline"].as_array().unwrap().iter().all(|f| f["error"].is_null()), "{d}");
+}
+
+/// An unknown parameter name, a bad expression or a bad report list is an error that leaves the
+/// design untouched; `set` that is not an object is refused by argument checking; the tool is
+/// annotated as an edit (it changes the design and puts it back) and is not a batch step.
+#[test]
+fn check_parameters_refuses_bad_input_and_changes_nothing() {
+    let mut s = server();
+    parametric_box_with_cylinder(&mut s);
+    let before = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    let r = raw_tool(&mut s, "check_parameters", json!({"set": {"nope": 5}}));
+    assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    let text = r["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("`nope`") && text.contains("`len`"), "{text}");
+    let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    assert_eq!(d["undo"], before["undo"], "{d}");
+    assert!(d["params"].as_array().unwrap().iter().all(|p| p["name"] != "nope"), "{d}");
+    for args in [json!({"set": "len"}), json!({"set": [["len", 5]]}), json!({"set": 5}), json!({"set": {"len": 5}, "report": "measure"}), json!({})] {
+        let r = raw_tool(&mut s, "check_parameters", args.clone());
+        assert_eq!(r["error"]["code"], -32602, "{args}: {r}");
+    }
+    for (args, hint) in [
+        (json!({"set": {}}), "empty"),
+        (json!({"set": {"len": true}}), "`set.len`"),
+        (json!({"set": {"len": null}}), "`set.len`"),
+        (json!({"set": {"": 5}}), "empty"),
+        (json!({"set": {"len": 5}, "report": ["volume"]}), "measure, cylinders, errors"),
+        (json!({"set": {"len": "1 +"}}), "len"),
+        (json!({"set": {"len": "a = 5"}}), "len"),
+    ] {
+        let r = raw_tool(&mut s, "check_parameters", args.clone());
+        assert_eq!(r["result"]["isError"], json!(true), "{args}: {r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap_or_default();
+        assert!(text.contains(hint), "{args}: {text}");
+    }
+    assert!(rel(volume(&mut s), box_with_cylinder_volume(40.0)) < 5e-4);
+    // Untouched: the undo depth and the parameter (the engine's `revision` moves even for a
+    // refused change, so it is not what tells).
+    let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
+    assert_eq!(d["undo"], before["undo"], "{d}");
+    assert!(d["params"].as_array().unwrap().iter().any(|p| p["name"] == "len" && p["expression"] == "40 mm"), "{d}");
+    // Not a batch step: refused before anything runs.
+    let r = raw_tool(&mut s, "batch", json!({"commands": [{"command": "check_parameters", "params": {"set": {"len": 5}}}]}));
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["completed"], 0, "{body}");
+    assert!(body["failed"]["error"].as_str().unwrap().contains("check_parameters"), "{body}");
+    let def = tool_definitions().into_iter().find(|d| d["name"] == "check_parameters").unwrap();
+    assert_eq!(def["inputSchema"]["required"], json!(["set"]), "{def}");
+    assert_eq!(def["annotations"]["readOnlyHint"], false, "{def}");
+    assert_eq!(def["annotations"]["destructiveHint"], false, "{def}");
+}
+
+/// A backend answering from a closure: what `check_parameters` sends, and what it does when an
+/// app has no `parameters.change {changes}` or cannot restore the checkpoint.
+struct Answers {
+    calls: Vec<(String, Value)>,
+    answer: Box<dyn Fn(&str, &Value) -> Result<Value, String>>,
+}
+
+impl crate::backend::Backend for Answers {
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        self.calls.push((method.to_string(), params.clone()));
+        (self.answer)(method, &params)
+    }
+    fn has_ui(&self) -> bool {
+        true
+    }
+    fn describe(&self) -> String {
+        "answers".into()
+    }
+}
+
+/// An app without `parameters.change {changes}` gets one change per name; one that cannot
+/// restore the checkpoint makes the call an error that says the values are still in.
+#[test]
+fn check_parameters_falls_back_per_name_and_says_when_the_restore_failed() {
+    let app = |restore_ok: bool| Answers {
+        calls: Vec::new(),
+        answer: Box::new(move |method, p| {
+            let command = p["command"].as_str().unwrap_or_default();
+            match (method, command) {
+                ("engine.execute", "parameters.list") => Err("unknown command `parameters.list`".into()),
+                ("engine.execute", "edit.checkpoint") => Ok(json!({"checkpoint": 3})),
+                ("engine.execute", "edit.restore_checkpoint") if restore_ok => Ok(json!({"checkpoint": 3, "restored": true})),
+                ("engine.execute", "edit.restore_checkpoint") => Err("busy: request 9 is still running".into()),
+                ("engine.execute", "parameters.change") if p["params"].get("changes").is_some() => {
+                    Err("parameters.change: `name` is required".into())
+                }
+                ("engine.execute", "parameters.change") => Ok(json!({"name": p["params"]["name"], "value": 7.0, "recomputed": 1})),
+                ("engine.execute", "inspect.measure") => Ok(json!({"body_count": 1, "bodies": [], "total": {"volume_mm3": 12.5}})),
+                ("document.inspect", _) => {
+                    Ok(json!({"timeline": [{"id": 1, "name": "Box", "error": null, "warning": "thin"}], "params": [], "bodies": [{"name": "B"}]}))
+                }
+                ("engine.execute", "model.faces") => Ok(json!({"faces": [
+                    {"index": 0, "name": "side", "area": 1.0, "cylinder": {"origin": [0, 0, 5], "axis": [0, 0, -1], "radius": 2}},
+                    {"index": 1, "name": "side", "area": 1.0, "cylinder": {"origin": [0, 0, -3], "axis": [0, 0, 1], "radius": 2}},
+                    {"index": 2, "name": "hole", "area": 1.0, "cylinder": {"origin": [9, 0, 0], "axis": [0, 0, 1], "radius": 2}},
+                    {"index": 3, "name": "top", "area": 4.0, "plane_normal": [0, 0, 1]},
+                ]})),
+                (m, c) => Err(format!("unknown method `{m}` ({c})")),
+            }
+        }),
+    };
+    let mut b = app(true);
+    let r = crate::tools::call_tool(&mut b, "check_parameters", &json!({"set": {"a": "1 mm", "b": 2}}));
+    assert_ne!(r["isError"], json!(true), "{r}");
+    let body: Value = serde_json::from_str(r["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["restored"], true, "{body}");
+    assert_eq!(body["values"], json!({"a": 7.0, "b": 7.0}), "{body}");
+    assert_eq!(body["recomputed"], 2, "{body}");
+    assert_eq!(body["measure"]["total"]["volume_mm3"], 12.5, "{body}");
+    assert_eq!(body["warnings"], json!([{"feature": 1, "name": "Box", "warning": "thin"}]), "{body}");
+    assert_eq!(body["errors"], json!([]), "{body}");
+    // Two halves on one axis, reported with opposite directions and different axis points, are
+    // one cylinder; the hole next to it is another.
+    let cyl = body["cylinders"].as_array().unwrap();
+    assert_eq!(cyl.len(), 2, "{body}");
+    assert_eq!((&cyl[0]["faces"], &cyl[0]["origin"], &cyl[0]["axis"]), (&json!([0, 1]), &json!([0.0, 0.0, 0.0]), &json!([0.0, 0.0, 1.0])), "{body}");
+    assert_eq!((&cyl[1]["faces"], &cyl[1]["origin"], &cyl[1]["name"]), (&json!([2]), &json!([9.0, 0.0, 0.0]), &json!("hole")), "{body}");
+    let changes: Vec<&Value> = b.calls.iter().filter(|(_, p)| p["command"] == "parameters.change").map(|(_, p)| &p["params"]).collect();
+    assert_eq!(changes.len(), 3, "one combined change, then one per name: {changes:?}");
+    assert_eq!(changes[0], &json!({"changes": {"a": "1 mm", "b": 2}}), "{changes:?}");
+    assert_eq!((changes[1]["name"].as_str(), changes[2]["name"].as_str()), (Some("a"), Some("b")), "{changes:?}");
+    let last = b.calls.last().unwrap();
+    assert_eq!(last.1["command"], "edit.restore_checkpoint", "the restore is the last call: {last:?}");
+    assert_eq!(last.1["params"]["checkpoint"], 3, "{last:?}");
+
+    // The restore fails: an error, loudly, with everything that was read.
+    let mut b = app(false);
+    let r = crate::tools::call_tool(&mut b, "check_parameters", &json!({"set": {"a": "1 mm"}, "report": ["measure"]}));
+    assert_eq!(r["isError"], json!(true), "{r}");
+    let body: Value = serde_json::from_str(r["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["restored"], false, "{body}");
+    assert!(body["restore_error"].as_str().unwrap().contains("still running"), "{body}");
+    assert!(body["note"].as_str().unwrap().contains("STILL HOLDS"), "{body}");
+    assert_eq!(body["measure"]["total"]["volume_mm3"], 12.5, "{body}");
+}
+
 /// Design properties (#1015) are set through `execute` and come back in `inspect_design`.
 #[test]
 fn design_properties_show_in_inspect_design() {
@@ -495,6 +809,13 @@ fn batch_stops_at_first_error_and_rolls_back() {
     assert_eq!(r["result"]["isError"], true);
     assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("solid.extrude"));
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 2);
+    // `names_only` passes through, directly and as a batch step.
+    let n = tool(&mut s, "measure", json!({"names_only": true}));
+    assert_eq!(n["body_count"], 2, "{n}");
+    assert!(n["bodies"][0]["name"].is_string() && n["bodies"][0].get("volume_mm3").is_none(), "{n}");
+    assert_eq!(tool(&mut s, "measure", json!({"names_only": true, "summary": true})), n, "summary has nothing to narrow in a names list");
+    let r = tool(&mut s, "batch", json!({"commands": [{"command": "measure", "params": {"names_only": true, "summary": true}}]}));
+    assert!(r.to_string().contains("\"definition\""), "{r}");
 }
 
 /// #5853: a misspelled command, however late in the batch, refuses the batch before its first
@@ -512,6 +833,23 @@ fn batch_refuses_an_unknown_command_before_the_first_step() {
     assert_eq!((body["applied"].clone(), body["not_run"].as_array().map(Vec::len)), (json!([]), Some(21)), "{body}");
     assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "no step ran");
     assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["undo"], 0);
+}
+
+/// A step with its parameters under another key (`args`) refuses the batch before its first
+/// step, naming the key, instead of running the command without them.
+#[test]
+fn batch_refuses_a_step_with_an_unknown_key() {
+    let mut s = server();
+    let steps = json!([
+        {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}},
+        {"command": "sketch.create", "args": {"plane": "XY"}},
+    ]);
+    let r = raw_tool(&mut s, "batch", json!({"commands": steps}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((body["completed"].clone(), body["failed"]["index"].clone()), (json!(0), json!(1)), "{body}");
+    assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("unknown key `args`") && e.contains("`params`")), "{body}");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "no step ran");
 }
 
 /// #5822: with `coalesce_parameters` a batch of parameter edits, one per step, rebuilds the
@@ -638,6 +976,216 @@ fn a_failed_batch_with_file_new_restores_the_original_design() {
     assert!(rel(volume(&mut s), 1.0) < 1e-9, "{}", volume(&mut s));
     let d = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false}));
     assert_eq!(d["name"], name, "{d}");
+}
+
+/// `expect` on a batch: the volume, body count and bounding box the agent computed beforehand
+/// are measured and compared by the server once the batch went through, so no separate
+/// `measure` call and no comparison by hand follow every stage.
+#[test]
+fn a_batch_with_a_matching_expect_reports_the_expectation_met() {
+    let mut s = server();
+    let r = tool(
+        &mut s,
+        "batch",
+        json!({
+            "commands": [
+                {"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20, "corner": [0, 0, 0]}},
+                {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "corner": [15, 10, 5], "operation": "cut"}},
+            ],
+            "expect": {"volume_mm3": 23000, "bodies": 1, "bbox": {"min": [0, 0, 0], "max": [40, 30, 20]}},
+        }),
+    );
+    assert_eq!(r["completed"], 2, "{r}");
+    let e = &r["expectation"];
+    assert_eq!(e["ok"], true, "{r}");
+    assert_eq!(e["mismatch"], json!([]), "{r}");
+    assert_eq!(e["measured"]["bodies"], 1, "{r}");
+    assert!(rel(e["measured"]["volume_mm3"].as_f64().unwrap(), 23000.0) < 1e-6, "{r}");
+    assert!(rel(e["measured"]["bbox"]["max"][0].as_f64().unwrap(), 40.0) < 1e-6, "{r}");
+    assert_eq!(
+        e["expected"],
+        json!({"volume_mm3": 23000.0, "tol": 0.002, "bodies": 1, "bbox": {"min": [0.0, 0.0, 0.0], "max": [40.0, 30.0, 20.0]}}),
+        "{r}"
+    );
+    // Without `expect` the reply is as before.
+    tool(&mut s, "new_design", json!({}));
+    let box40 = json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20, "corner": [0, 0, 0]}});
+    let r = tool(&mut s, "batch", json!({"commands": [box40]}));
+    assert!(r.get("expectation").is_none(), "{r}");
+    // `expect` is the tool's argument, not a step key: a step carrying one is refused, as any step
+    // with a stray key is, saying where `expect` goes, instead of running with nothing checked.
+    let sphere = json!({"command": "solid.sphere", "params": {"radius": 5, "center": [100, 0, 0]}, "expect": {"bodies": 7}});
+    let r = raw_tool(&mut s, "batch", json!({"commands": [sphere]}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((body["completed"].clone(), body["failed"]["index"].clone()), (json!(0), json!(0)), "{body}");
+    assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("`expect` is the batch's argument")), "{body}");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1, "the sphere did not run");
+}
+
+/// A volume the design does not match flags the reply as an error that names the mismatch
+/// first, and keeps the design as built: the agent decides what to do with it.
+#[test]
+fn a_batch_with_a_wrong_expected_volume_is_flagged_and_the_design_kept() {
+    let mut s = server();
+    let box40 = json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20, "corner": [0, 0, 0]}});
+    let r = raw_tool(&mut s, "batch", json!({"commands": [box40], "expect": {"volume_mm3": 20000}}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let content = r["result"]["content"].as_array().unwrap();
+    let first = content[0]["text"].as_str().unwrap();
+    assert!(first.starts_with("expectation not met: volume: measured 24000, expected 20000 (+20.00 %)."), "{first}");
+    assert!(first.contains("kept as built"), "{first}");
+    let body: Value = serde_json::from_str(content[1]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["ok"], true, "the batch itself went through: {body}");
+    assert_eq!(body["completed"], 1, "{body}");
+    assert_eq!(body["results"][0]["created_bodies"], json!(["Body1"]), "{body}");
+    assert_eq!(body["expectation"]["ok"], false, "{body}");
+    assert_eq!(body["expectation"]["mismatch"], json!(["volume: measured 24000, expected 20000 (+20.00 %)"]), "{body}");
+    assert_eq!(body["expectation"]["expected"], json!({"volume_mm3": 20000.0, "tol": 0.002}), "{body}");
+    // The design is kept as built, undoably.
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 1);
+    assert!(rel(volume(&mut s), 24000.0) < 1e-9);
+    assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["undo"], 1);
+    // `tol` is relative to the expected volume: 0.5 % off passes at 1 %, not at the default 0.2 %.
+    let cube = json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0]}});
+    let r = tool(&mut s, "batch", json!({"commands": [cube], "expect": {"volume_mm3": 25000.0 * 1.005, "tol": 0.01}}));
+    assert_eq!(r["expectation"]["ok"], true, "{r}");
+    let r = raw_tool(&mut s, "batch", json!({"commands": [{"command": "undo"}], "expect": {"volume_mm3": 24000.0 * 1.005}}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("volume: measured 24000, expected 24120 (-0.50 %)"), "{r}");
+}
+
+/// A wrong body count and a wrong bounding box are each named, with the coordinates that are
+/// off; a bounding box within 0.05 mm matches.
+#[test]
+fn expect_names_body_count_and_bounding_box_mismatches() {
+    let mut s = server();
+    let box40 = json!({"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20, "corner": [0, 0, 0]}});
+    let cube = json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "corner": [100, -5, -5]}});
+    let r = raw_tool(
+        &mut s,
+        "batch",
+        json!({"commands": [box40, cube], "expect": {"volume_mm3": 25000, "bodies": 1, "bbox": {"min": [0, 0, 0], "max": [40, 30, 20]}}}),
+    );
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][1]["text"].as_str().unwrap()).unwrap();
+    let mismatch = body["expectation"]["mismatch"].as_array().unwrap();
+    assert_eq!(mismatch.len(), 2, "the volume matches and is not named: {body}");
+    assert_eq!(mismatch[0], "bodies: measured 2, expected 1", "{body}");
+    let bbox = mismatch[1].as_str().unwrap();
+    assert!(bbox.starts_with("bbox: measured min [0, -5, -5] max [110, 30, 20], expected min [0, 0, 0] max [40, 30, 20] ("), "{bbox}");
+    assert!(bbox.contains("min y off by -5 mm") && bbox.contains("min z off by -5 mm") && bbox.contains("max x off by 70 mm"), "{bbox}");
+    assert!(!bbox.contains("max y") && !bbox.contains("max z") && !bbox.contains("min x"), "{bbox}");
+    assert_eq!(body["expectation"]["measured"]["bodies"], 2, "{body}");
+    assert!(rel(body["expectation"]["measured"]["bbox"]["max"][0].as_f64().unwrap(), 110.0) < 1e-6, "{body}");
+    assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 2, "the design is kept");
+    // Within 0.05 mm the box matches; past it the coordinate is named.
+    tool(&mut s, "undo", json!({}));
+    let r = tool(&mut s, "batch", json!({"commands": [{"command": "redo"}], "expect": {"bbox": {"min": [0, -5, -5.04], "max": [110.04, 30, 20]}}}));
+    assert_eq!(r["expectation"]["ok"], true, "{r}");
+    let r = raw_tool(&mut s, "batch", json!({"commands": [{"command": "undo"}], "expect": {"bbox": {"min": [0, 0, 0], "max": [40.1, 30, 20]}}}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    assert!(r["result"]["content"][0]["text"].as_str().unwrap().contains("(max x off by -0.1 mm)"), "{r}");
+    // No body at all: the box can't be measured, and the count says so.
+    tool(&mut s, "new_design", json!({}));
+    let r = raw_tool(
+        &mut s,
+        "batch",
+        json!({"commands": [{"command": "parameters.add", "params": {"name": "w", "expression": "1 mm"}}], "expect": {"bodies": 1, "bbox": {"min": [0, 0, 0], "max": [1, 1, 1]}}}),
+    );
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][1]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        body["expectation"]["mismatch"],
+        json!(["bodies: measured 0, expected 1", "bbox: no body to measure, expected min [0, 0, 0] max [1, 1, 1]"]),
+        "{body}"
+    );
+    assert!(body["expectation"]["measured"]["bbox"].is_null(), "{body}");
+}
+
+/// An `expect` that is not what the schema says is refused before anything runs: a typo never
+/// builds a design that then goes unchecked.
+#[test]
+fn a_malformed_expect_is_refused_before_anything_runs() {
+    let mut s = server();
+    let step = json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}});
+    for name in ["execute", "batch"] {
+        let args = |expect: Value| {
+            let mut a = if name == "batch" { json!({"commands": [step]}) } else { step.clone() };
+            a["expect"] = expect;
+            a
+        };
+        // Not an object: the argument check, as for every tool argument.
+        for bad in [json!(5), json!("24000"), json!([24000]), json!(true)] {
+            let r = raw_tool(&mut s, name, args(bad.clone()));
+            assert_eq!(r["error"]["code"], -32602, "{name} {bad}: {r}");
+            assert!(r["error"]["message"].as_str().unwrap().contains("`expect` must be of type"), "{r}");
+        }
+        // An object the tool can't use: a tool error naming the key, and nothing was run.
+        for (bad, says) in [
+            (json!({}), "nothing to check"),
+            (json!({"volume": 24000}), "unknown key `volume`"),
+            (json!({"volume_mm3": "24000"}), "`volume_mm3` must be a number"),
+            (json!({"volume_mm3": -1}), "`volume_mm3` must not be negative"),
+            (json!({"volume_mm3": 1, "tol": -0.1}), "`tol` must not be negative"),
+            (json!({"bodies": 1.5}), "`bodies` must be a whole number"),
+            (json!({"bodies": -1}), "`bodies` must be a whole number"),
+            (json!({"bbox": [0, 0, 0]}), "`bbox` must be"),
+            (json!({"bbox": {"min": [0, 0], "max": [1, 1, 1]}}), "`bbox.min` must be [x, y, z]"),
+            (json!({"bbox": {"min": [0, 0, 0], "max": [1, "1", 1]}}), "`bbox.max` must be [x, y, z]"),
+            (json!({"bbox": {"min": [2, 0, 0], "max": [1, 1, 1]}}), "`bbox.min` must not exceed"),
+            (json!({"bbox": {"min": [0, 0, 0], "max": [1, 1, 1], "mid": [0, 0, 0]}}), "unknown key `bbox.mid`"),
+        ] {
+            let r = raw_tool(&mut s, name, args(bad.clone()));
+            assert_eq!(r["result"]["isError"], true, "{name} {bad}: {r}");
+            let text = r["result"]["content"][0]["text"].as_str().unwrap();
+            assert!(text.starts_with("expect: ") && text.contains(says), "{name} {bad}: {text}");
+        }
+        assert_eq!(tool(&mut s, "measure", json!({}))["body_count"], 0, "{name}: nothing ran");
+        assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["undo"], 0, "{name}: nothing ran");
+    }
+}
+
+/// `execute` takes `expect` as `batch` does: met, the reply carries the expectation; not met,
+/// the reply is an error naming it, and the command's result stays, as the design does. A
+/// command that fails is the error it always was, with nothing measured.
+#[test]
+fn execute_checks_its_expect_like_batch() {
+    let mut s = server();
+    let r = tool(
+        &mut s,
+        "execute",
+        json!({
+            "command": "solid.box", "params": {"length": 40, "width": 30, "height": 20, "corner": [0, 0, 0]},
+            "expect": {"volume_mm3": 24000, "bodies": 1, "bbox": {"min": [0, 0, 0], "max": [40, 30, 20]}},
+        }),
+    );
+    assert_eq!(r["created_bodies"], json!(["Body1"]), "{r}");
+    assert_eq!(r["expectation"]["ok"], true, "{r}");
+    assert_eq!(r["expectation"]["mismatch"], json!([]), "{r}");
+    let r = raw_tool(
+        &mut s,
+        "execute",
+        json!({
+            "command": "solid.box", "params": {"length": 10, "width": 10, "height": 10, "corner": [15, 10, 5], "operation": "cut"},
+            "verbose": false,
+            "expect": {"volume_mm3": 24000, "bodies": 2},
+        }),
+    );
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let content = r["result"]["content"].as_array().unwrap();
+    let first = content[0]["text"].as_str().unwrap();
+    assert!(first.starts_with("expectation not met: volume: measured 23000, expected 24000 (-4.17 %); bodies: measured 1, expected 2."), "{first}");
+    let body: Value = serde_json::from_str(content[1]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(body["changed_bodies"], json!(["Body1"]), "the command's result stays: {body}");
+    assert!(body.get("bodies").is_none(), "compact, as asked: {body}");
+    assert_eq!(body["expectation"]["measured"]["bodies"], 1, "{body}");
+    assert!(rel(volume(&mut s), 23000.0) < 1e-9, "the cut is kept");
+    let r = raw_tool(&mut s, "execute", json!({"command": "solid.extrude", "params": {"distance": 10}, "expect": {"bodies": 1}}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    assert_eq!(r["result"]["content"].as_array().map(Vec::len), Some(1), "{r}");
+    assert!(!r["result"]["content"][0]["text"].as_str().unwrap().contains("expectation"), "{r}");
+    assert!(rel(volume(&mut s), 23000.0) < 1e-9);
 }
 
 #[test]
@@ -826,6 +1374,28 @@ fn legacy_design_files_and_resource_uris() {
     let _ = std::fs::remove_file(&path);
     let d = call(&mut s, 1, "resources/read", json!({"uri": "solvecraft://design"}));
     assert!(d["result"]["contents"][0]["text"].as_str().unwrap().contains("timeline"));
+
+    // `.sc` is what new designs are saved as; a `.solidcraft` file opens and `save {}` writes it
+    // back under its own name.
+    let dir = std::env::temp_dir().join(format!("solidcraft-mcp-ext-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (new, old) = (dir.join("part.sc"), dir.join("part.solidcraft"));
+    let mut s = server();
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}));
+    tool(&mut s, "save", json!({"path": new.to_string_lossy()}));
+    assert!(new.is_file());
+    std::fs::rename(&new, &old).unwrap();
+    tool(&mut s, "open", json!({"path": old.to_string_lossy()}));
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5}}));
+    tool(&mut s, "save", json!({}));
+    assert!(old.is_file() && !new.exists(), "save keeps the opened file's name");
+    assert_eq!(solidcraft_engine::io::read_design(&std::fs::read(&old).unwrap()).unwrap().features.len(), 2);
+    tool(&mut s, "open", json!({"path": old.to_string_lossy()}));
+    tool(&mut s, "save", json!({"path": new.to_string_lossy()}));
+    tool(&mut s, "open", json!({"path": new.to_string_lossy()}));
+    assert!(old.is_file() && new.is_file(), "save as leaves the old file");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// The default folders (#205): the recovery folder works out of the box, `screenshot` without a
@@ -872,6 +1442,59 @@ fn the_default_folders_are_the_designs_the_recovery_folder_and_the_scratch_folde
     }
     assert_eq!(std::fs::read_to_string(proj.join(".env")).unwrap(), "TOKEN=secret");
     assert_eq!(std::fs::read_dir(&other).unwrap().count(), 0);
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// #7181: the folder the agent opened or saved a design in stays one of its folders when the
+/// design moves on (a new design, a STEP file opened from there, a save-as into a subfolder), so
+/// a later `save` beside it works. Its hidden files and the folders beside it stay out of reach,
+/// and a refused call adds nothing.
+#[test]
+fn a_folder_the_agent_saved_a_design_in_stays_its_folder() {
+    use solidcraft_engine::io::vfs::PathScope;
+    let base = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-mcp-remembered-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let (proj, other) = (base.join("proj"), base.join("other"));
+    std::fs::create_dir_all(proj.join("sub")).unwrap();
+    std::fs::create_dir_all(&other).unwrap();
+    let at = |d: &std::path::Path, f: &str| d.join(f).to_string_lossy().to_string();
+    let mut session = solidcraft_engine::Session::default();
+    session.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    session.execute("file.save_as", &json!({"path": at(&proj, "part.solidcraft")})).unwrap();
+    let mut s = Server::new(Box::new(Headless::new(session))).with_path_scope(Some(PathScope::new([])));
+    tool(&mut s, "export", json!({"path": at(&proj, "part.step")}));
+    tool(&mut s, "new_design", json!({}));
+    tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5}}));
+    tool(&mut s, "save", json!({"path": at(&proj, "part-2.solidcraft")}));
+    // A STEP file opens as a new, unsaved design; it saves beside its file.
+    tool(&mut s, "open", json!({"path": at(&proj, "part.step")}));
+    tool(&mut s, "save", json!({"path": at(&proj, "part-3.solidcraft")}));
+    // A save-as into a subfolder moves the design there; the folder above goes on counting.
+    tool(&mut s, "execute", json!({"command": "file.save_as", "params": {"path": at(&proj.join("sub"), "part-4.solidcraft")}}));
+    tool(&mut s, "save", json!({"path": at(&proj, "part-5.solidcraft")}));
+    for f in ["part-2", "part-3", "sub/part-4", "part-5"] {
+        assert!(proj.join(format!("{f}.solidcraft")).exists(), "{f}");
+    }
+    // Twice: the first refusal must not have added anything.
+    for _ in 0..2 {
+        let r = raw_tool(&mut s, "export", json!({"path": at(&proj, ".env")}));
+        assert_eq!(r["result"]["isError"], json!(true), "{r}");
+        let r = raw_tool(&mut s, "save", json!({"path": at(&other, "x.solidcraft")}));
+        assert!(r.to_string().contains("outside the folders this agent may use"), "{r}");
+    }
+    assert!(!proj.join(".env").exists());
+    assert_eq!(std::fs::read_dir(&other).unwrap().count(), 0);
+    // A link beside it to a design here counts where it leads, never where it lies.
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(proj.join("part.step"), other.join("link.step")).unwrap();
+        std::os::unix::fs::symlink(proj.join("part.solidcraft"), other.join("link.solidcraft")).unwrap();
+        tool(&mut s, "open", json!({"path": at(&other, "link.step")}));
+        tool(&mut s, "open", json!({"path": at(&other, "link.solidcraft")}));
+        let r = raw_tool(&mut s, "save", json!({"path": at(&other, "x.solidcraft")}));
+        assert!(r.to_string().contains("outside the folders this agent may use"), "{r}");
+        assert!(!other.join("x.solidcraft").exists());
+    }
     let _ = std::fs::remove_dir_all(&base);
 }
 
@@ -1017,6 +1640,43 @@ fn a_bridged_request_carries_the_agents_folders() {
     assert_eq!(got["command"], "file.new");
     assert_eq!(got["sent_token"], "0123456789abcdef0123456789abcdef");
     echo.join().unwrap();
+}
+
+/// #7181, bridged: once the agent has saved a design through the app, that file's folder goes
+/// with every later request as `design_folders`, so the app counts it after the design moves on.
+/// Not before the save succeeded, not for one the app refused, not for a relative path (the app
+/// resolves those against its own working folder).
+#[test]
+fn a_bridged_server_sends_the_folders_the_agent_saved_designs_in() {
+    use solidcraft_engine::io::vfs::PathScope;
+    let base = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-mcp-bridged-folders-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let (proj, other) = (base.join("proj"), base.join("other"));
+    std::fs::create_dir_all(&proj).unwrap();
+    std::fs::create_dir_all(&other).unwrap();
+    let at = |d: &std::path::Path, f: &str| d.join(f).to_string_lossy().to_string();
+    let sent = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let (log, refused) = (sent.clone(), at(&other, "x.solidcraft"));
+    let (addr, _) = scripted_app(move |req| {
+        if req["method"] == "engine.execute" {
+            log.lock().unwrap().push(req["params"]["design_folders"].clone());
+        }
+        if req["params"]["params"]["path"] == refused.as_str() {
+            json!({"ok": false, "error": "outside the folders this agent may use"})
+        } else {
+            json!({"ok": true, "result": {}})
+        }
+    });
+    let remote = crate::Remote::connect_with_token(&addr, Some("0123456789abcdef0123456789abcdef")).unwrap();
+    let mut s = Server::new(Box::new(remote)).with_path_scope(Some(PathScope::new([])));
+    let r = raw_tool(&mut s, "save", json!({"path": at(&other, "x.solidcraft")}));
+    assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    tool(&mut s, "save", json!({"path": "relative/y.solidcraft"}));
+    tool(&mut s, "save", json!({"path": at(&proj, "a.solidcraft")}));
+    tool(&mut s, "new_design", json!({}));
+    let proj = std::fs::canonicalize(&proj).unwrap();
+    assert_eq!(*sent.lock().unwrap(), [Value::Null, Value::Null, Value::Null, json!([proj.to_string_lossy()])]);
+    let _ = std::fs::remove_dir_all(&base);
 }
 
 /// #528: an agent saves the angle of a product photo as a named view once, then renders the
@@ -1396,6 +2056,100 @@ fn skill_reference_example_builds_as_documented() {
     holes_at(&mut s, 52.0);
 }
 
+/// The server instructions' recipe (primitives with expression fields, fillet before the shell,
+/// inside features after it, a blind hole with its depth, picks by world point, parameters
+/// checked in one coalesced batch and set back) builds the part it describes, with the volume
+/// worked out by hand, and follows its parameters, so the instructions and the engine stay in
+/// step whatever the kernel does.
+#[test]
+fn instructions_recipe_builds_a_parametric_shelled_box() {
+    // A box L × W × H with its four vertical edges rounded r, shelled from the top with wall t
+    // (the inner corners are r - t), a boss of radius R from the floor to the rim, and a blind
+    // hole Ø d, depth hd, down the boss.
+    let (fr, t, big_r, d, hd) = (5.0, 2.0, 6.0, 5.0, 10.0);
+    let expected = |l: f64, w: f64, h: f64| {
+        let corner = 4.0 * (1.0 - PI / 4.0);
+        let outer = l * w * h - corner * fr * fr * h;
+        let cavity = (l - 2.0 * t) * (w - 2.0 * t) * (h - t) - corner * (fr - t) * (fr - t) * (h - t);
+        let boss = PI * big_r * big_r * (h - t);
+        let hole = PI * (d / 2.0) * (d / 2.0) * hd;
+        outer - cavity + boss - hole
+    };
+    let mut s = server();
+    let r = tool(
+        &mut s,
+        "batch",
+        json!({"verbose": false, "commands": [
+            {"command": "parameters.add", "params": {"name": "L", "expression": "60 mm"}},
+            {"command": "parameters.add", "params": {"name": "W", "expression": "40 mm"}},
+            {"command": "parameters.add", "params": {"name": "H", "expression": "30 mm"}},
+            {"command": "parameters.add", "params": {"name": "wall", "expression": "2 mm"}},
+            {"command": "solid.box", "params": {"length": "L", "width": "W", "height": "H", "corner": [0, 0, 0], "name": "Block", "body_name": "Case"}},
+            {"command": "solid.fillet", "params": {"edges": [[0, 0, 15], [60, 0, 15], [60, 40, 15], [0, 40, 15]], "radius": fr, "name": "Corners"}},
+            {"command": "solid.shell", "params": {"faces": [[30, 20, 30]], "thickness": "wall", "name": "Hollow"}},
+            {"command": "solid.cylinder", "params": {"radius": big_r, "height": "H - wall", "base": ["L/2", "W/2", "wall"], "operation": "join", "name": "Boss"}},
+            {"command": "solid.hole", "params": {"position": ["L/2", "W/2", "H"], "diameter": d, "depth": hd, "name": "Pilot"}},
+            {"command": "measure", "params": {}},
+        ]}),
+    );
+    let results = r["results"].as_array().unwrap();
+    assert_eq!(results.len(), 10, "{r}");
+    let m = &results[9];
+    assert_eq!(m["bodies"].as_array().map(Vec::len), Some(1), "{m}");
+    assert!(rel(m["total"]["volume_mm3"].as_f64().unwrap(), expected(60.0, 40.0, 30.0)) < 1e-3, "{m}");
+    let no_errors = |s: &mut Server| {
+        let d = tool(s, "inspect_design", json!({"measure": false, "sketches": false}));
+        let failed: Vec<&Value> = d["timeline"].as_array().unwrap().iter().filter(|f| !f["error"].is_null()).collect();
+        assert!(failed.is_empty(), "{failed:?}");
+        assert_eq!(d["timeline"].as_array().map(Vec::len), Some(5), "{d}");
+    };
+    no_errors(&mut s);
+    // The boss and the pilot hole are where the expressions put them.
+    let axes = |s: &mut Server, x: f64, y: f64| {
+        let topo = tool(s, "body_topology", json!({"body": "Case"}));
+        let cylinders: Vec<(f64, f64, f64)> = topo["faces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|f| f.get("cylinder"))
+            .map(|c| (c["origin"][0].as_f64().unwrap(), c["origin"][1].as_f64().unwrap(), c["radius"].as_f64().unwrap()))
+            .collect();
+        for radius in [big_r, d / 2.0] {
+            assert!(
+                cylinders.iter().any(|&(cx, cy, cr)| (cx - x).abs() < 1e-6 && (cy - y).abs() < 1e-6 && (cr - radius).abs() < 1e-6),
+                "no cylinder r {radius} on ({x}, {y}): {cylinders:?}"
+            );
+        }
+    };
+    axes(&mut s, 30.0, 20.0);
+    // Two parameters changed in one coalesced batch (one rebuild per run), measured, set back.
+    let r = tool(
+        &mut s,
+        "batch",
+        json!({"verbose": false, "coalesce_parameters": true, "commands": [
+            {"command": "parameters.change", "params": {"name": "L", "expression": "80 mm"}},
+            {"command": "parameters.change", "params": {"name": "W", "expression": "50 mm"}},
+            {"command": "measure", "params": {}},
+            {"command": "parameters.change", "params": {"name": "L", "expression": "60 mm"}},
+            {"command": "parameters.change", "params": {"name": "W", "expression": "40 mm"}},
+        ]}),
+    );
+    let results = r["results"].as_array().unwrap();
+    assert_eq!(results.len(), 5, "{r}");
+    assert_eq!(results[0]["coalesced"], 2, "{r}");
+    assert_eq!(results[0]["errors"].as_array().map(Vec::len), Some(0), "{r}");
+    let m = &results[2];
+    assert_eq!(m["bodies"].as_array().map(Vec::len), Some(1), "{m}");
+    assert!(rel(m["total"]["volume_mm3"].as_f64().unwrap(), expected(80.0, 50.0, 30.0)) < 1e-3, "{m}");
+    assert_eq!(results[3]["coalesced"], 2, "{r}");
+    assert_eq!(results[4]["errors"].as_array().map(Vec::len), Some(0), "{r}");
+    let m = tool(&mut s, "measure", json!({}));
+    assert_eq!(m["bodies"].as_array().map(Vec::len), Some(1), "{m}");
+    assert!(rel(m["total"]["volume_mm3"].as_f64().unwrap(), expected(60.0, 40.0, 30.0)) < 1e-3, "{m}");
+    no_errors(&mut s);
+    axes(&mut s, 30.0, 20.0);
+}
+
 /// The skill reference's sketch-plane table: where sketch (10, 20) lands and which way +distance goes.
 #[test]
 fn sketch_plane_axes_match_the_skill_reference() {
@@ -1521,18 +2275,29 @@ fn skills_name_only_real_tools_and_commands() {
     assert!(checked > 30, "only {checked} tool and command names found in the skills");
 }
 
-/// Every tool the server instructions name (a bare `snake_case` word in backticks) is a real tool.
+/// Every tool and command the server instructions name is real: a backticked `snake_case` word
+/// (bare or as a call, `measure {}`) is a tool, a dotted id (`solid.box`) a command in the
+/// engine's registry. A rename or removal can't leave the instructions sending agents to names
+/// the server no longer has.
 #[test]
 fn instructions_name_only_real_tools() {
     let mut s = server();
     let init = call(&mut s, 1, "initialize", json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}}));
     let text = init["result"]["instructions"].as_str().unwrap().to_owned();
     let tools: Vec<String> = tool_definitions().iter().map(|t| t["name"].as_str().unwrap().to_owned()).collect();
+    let commands: Vec<String> =
+        tool(&mut s, "list_commands", json!({})).as_array().unwrap().iter().filter_map(|c| c["id"].as_str()).map(str::to_owned).collect();
+    let ident = |w: &str| !w.is_empty() && w.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '.');
+    // A span is `name`, `name {}` or `name {"json":…}`; `edges: [[x,y,z]]`, `verbose: false` and
+    // `"L/2 - 10"` are fields and values, not calls.
     let named: Vec<&str> =
-        text.split('`').skip(1).step_by(2).filter(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_lowercase() || c == '_')).collect();
-    assert!(named.contains(&"body_topology"), "{named:?}");
+        text.split('`').skip(1).step_by(2).map(|span| span.split_once(" {").map_or(span, |(head, _)| head)).filter(|w| ident(w)).collect();
+    for must in ["skill_reference", "batch", "measure", "body_topology", "pending", "solid.box", "parameters.change", "edit.restore_checkpoint"] {
+        assert!(named.contains(&must), "{named:?}");
+    }
     for name in named {
-        assert!(tools.iter().any(|t| t == name), "the instructions name `{name}`, which is not a tool");
+        let known = if name.contains('.') { commands.iter().any(|c| c == name) } else { tools.iter().any(|t| t == name) };
+        assert!(known, "the instructions name `{name}`, which is neither a tool nor a command");
     }
 }
 
@@ -1612,6 +2377,28 @@ fn batch_reports_a_failed_engine_batch_like_before() {
         body,
         json!({"ok": false, "completed": 1, "failed": {"index": 1, "command": "a.two", "error": "boom"}, "rolled_back": true, "undone": 1, "applied": [], "not_run": [], "results": [{"x": 1}]})
     );
+}
+
+/// Bridged, `expect` measures the app's design with one `inspect.measure` after the one
+/// `engine.batch` request, and a batch that failed is not measured.
+#[test]
+fn a_bridged_batch_measures_its_expect_after_the_one_batch_call() {
+    let steps = json!([{"command": "a.one"}]);
+    let reply = json!({"completed": 1, "results": [{"x": 1}], "undone": 0});
+    let mut b = Recorder { calls: Vec::new(), batch: Ok(reply.clone()) };
+    let r = crate::tools::call_tool(&mut b, "batch", &json!({"commands": steps, "expect": {"bodies": 1}}));
+    assert_eq!(methods(&b), ["engine.batch", "engine.execute"]);
+    assert_eq!(b.calls[1].1, json!({"command": "inspect.measure", "params": {}}));
+    // The recorder's measure reply has no bodies: the mismatch comes first, the batch's reply after it.
+    assert_eq!(r["isError"], json!(true), "{r}");
+    assert!(r["content"][0]["text"].as_str().unwrap().starts_with("expectation not met: bodies: measured 0, expected 1."), "{r}");
+    let body: Value = serde_json::from_str(r["content"][1]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((body["ok"].clone(), body["completed"].clone(), body["expectation"]["ok"].clone()), (json!(true), json!(1), json!(false)), "{body}");
+    let failed = json!({"completed": 0, "results": [], "failed": {"index": 0, "command": "a.one", "error": "boom"}, "undone": 0});
+    let (b, body, is_error) = recorded_batch(Ok(failed), json!({"commands": steps, "expect": {"bodies": 1}}));
+    assert!(is_error);
+    assert_eq!(methods(&b), ["engine.batch"], "a failed batch is not measured");
+    assert!(body.get("expectation").is_none(), "{body}");
 }
 
 /// `rolled_back` tells whether the design went back, not whether a rollback was asked for
@@ -1800,7 +2587,7 @@ fn tool_annotations_tell_the_whole_truth() {
         assert_eq!(hints(name), (true, false, false), "{name}");
     }
     assert_eq!(hints("new_design"), (false, true, false));
-    for name in ["set_parameter", "undo", "redo"] {
+    for name in ["set_parameter", "check_parameters", "undo", "redo"] {
         assert_eq!(hints(name), (false, false, false), "{name}");
     }
     assert!(tools.iter().all(|t| t["annotations"]["readOnlyHint"].is_boolean()), "every tool is annotated");
@@ -2140,6 +2927,17 @@ fn batch_steps_may_name_tools() {
     assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("screenshot")), "{body}");
     let (_, body, _) = recorded_batch(Ok(json!({})), json!({"commands": [{"command": "body_topology", "params": {"body": "Body1"}}]}));
     assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("model.edges") && e.contains("model.faces")), "{body}");
+    // Editing in place goes to another design's tab: never a step, not even one by one
+    for step in [
+        json!({"command": "component.edit_in_place"}),
+        json!({"command": "Component.Finish_Edit"}),
+        json!({"command": "execute", "params": {"command": "component.finish_edit"}}),
+    ] {
+        let command = step.to_string();
+        let (b, body, is_error) = recorded_batch(Ok(json!({})), json!({"commands": [{"command": "solid.box"}, step]}));
+        assert!(is_error && b.calls.is_empty(), "{command}: {body}");
+        assert!(body["failed"]["error"].as_str().is_some_and(|e| e.contains("on its own")), "{body}");
+    }
 
     // Headless, step by step.
     let mut s = server();
@@ -2199,6 +2997,122 @@ fn describe_command_and_strict_parameter_checking() {
     assert_eq!(m["body_count"], json!(0), "{m}");
 }
 
+/// Bridged to an app (#9072), the server checks each call against its command's contract before
+/// sending it, as a headless session does: the app's own session checks nothing. `strict` sends
+/// nothing that breaks a contract, `warn` adds `param_warnings` to the app's reply, and a command
+/// this server has no contract for goes to the app unchecked.
+#[test]
+fn a_bridged_server_checks_calls_at_its_param_check_level() {
+    use solidcraft_engine::schema::ParamCheck;
+    let (addr, seen) = scripted_app(|req| match req["method"].as_str() {
+        Some("engine.batch") => {
+            let n = req["params"]["commands"].as_array().map_or(0, Vec::len);
+            json!({"ok": true, "result": {"completed": n, "results": vec![json!({}); n], "undone": 0}})
+        }
+        _ => json!({"ok": true, "result": {"created_bodies": ["Box1"]}}),
+    });
+    let bridged = |level| {
+        let remote = crate::Remote::connect_with_token(&addr, Some("0123456789abcdef0123456789abcdef")).unwrap().with_param_check(level);
+        Server::new(Box::new(remote))
+    };
+    let sent = |what: &str| seen.lock().unwrap().1.iter().filter(|w| w.as_str() == what).count();
+    let text = |r: &Value| r["result"]["content"][0]["text"].as_str().unwrap_or_default().to_string();
+    let misspelt = json!({"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5, "operaton": "cut"}});
+    let good = json!({"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5}});
+    let warning = "unknown key `operaton`; did you mean `operation`?";
+
+    let mut s = bridged(ParamCheck::Strict);
+    let r = raw_tool(&mut s, "execute", misspelt.clone());
+    assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    assert!(text(&r).contains(&format!("invalid parameters for `solid.box`: {warning}")), "{r}");
+    assert_eq!(sent("engine.execute solid.box"), 0, "refused unsent");
+    let r = raw_tool(&mut s, "execute", json!({"command": "solid.fillet", "params": {"nonsense": 1}}));
+    assert_ne!(r["result"]["isError"], json!(true), "{r}");
+    assert_eq!(sent("engine.execute solid.fillet"), 1, "no contract here: the app decides");
+    let r = raw_tool(&mut s, "batch", json!({"commands": [good, misspelt]}));
+    assert_eq!(r["result"]["isError"], json!(true), "{r}");
+    let reply: Value = serde_json::from_str(&text(&r)).unwrap();
+    assert_eq!((&reply["failed"]["index"], &reply["completed"], &reply["not_run"]), (&json!(1), &json!(0), &json!([0, 1])), "{reply}");
+    assert!(reply["failed"]["error"].as_str().unwrap_or_default().contains(warning), "{reply}");
+    assert_eq!(sent("engine.batch"), 0, "refused unsent");
+
+    let mut s = bridged(ParamCheck::Warn);
+    let r = tool(&mut s, "execute", misspelt.clone());
+    assert_eq!(r["param_warnings"], json!([warning]), "{r}");
+    assert_eq!(sent("engine.execute solid.box"), 1);
+    let r = tool(&mut s, "batch", json!({"commands": [good, misspelt]}));
+    assert_eq!((r["results"][0].get("param_warnings"), &r["results"][1]["param_warnings"]), (None, &json!([warning])), "{r}");
+    assert_eq!(sent("engine.batch"), 1);
+
+    let mut s = bridged(ParamCheck::Off);
+    let r = tool(&mut s, "execute", misspelt);
+    assert_eq!(r.get("param_warnings"), None, "{r}");
+}
+
+/// Bridged to an app that checks a request's own `param_check` (#9184), the server asks it once
+/// per connection (`control.capabilities`) and then sends every call with its level, unchecked
+/// here: the app checks against its own commands, so a key only a newer app knows is not
+/// refused, and its answer is the one the agent sees.
+#[test]
+fn a_bridged_server_leaves_the_check_to_an_app_that_makes_it() {
+    use solidcraft_engine::schema::ParamCheck;
+    let levels = std::sync::Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let log = levels.clone();
+    let (addr, seen) = scripted_app(move |req| {
+        let level = req["params"]["param_check"].clone();
+        match req["method"].as_str() {
+            Some("control.capabilities") => json!({"ok": true, "result": {"param_check": ["off", "warn", "strict"]}}),
+            Some("engine.batch") => {
+                log.lock().unwrap().push(level.clone());
+                json!({"ok": true, "result": {"completed": 1, "results": [{"param_warnings": ["the app's own"]}], "undone": 0}, "param_check": level})
+            }
+            _ => {
+                log.lock().unwrap().push(level.clone());
+                json!({"ok": true, "result": {"created_bodies": ["Box1"], "param_warnings": ["the app's own"]}, "param_check": level})
+            }
+        }
+    });
+    let remote = crate::Remote::connect_with_token(&addr, Some("0123456789abcdef0123456789abcdef")).unwrap().with_param_check(ParamCheck::Strict);
+    let mut s = Server::new(Box::new(remote));
+    let sent = |what: &str| seen.lock().unwrap().1.iter().filter(|w| w.as_str() == what).count();
+    let newer = json!({"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5, "a_newer_key": 1}});
+
+    for _ in 0..2 {
+        let r = tool(&mut s, "execute", newer.clone());
+        assert_eq!(r["param_warnings"], json!(["the app's own"]), "{r}");
+    }
+    assert_eq!((sent("engine.execute solid.box"), sent("control.capabilities")), (2, 1), "asked once, both sent");
+    // A batch goes on a fresh connection, so the next call asks again.
+    let r = tool(&mut s, "batch", json!({"commands": [newer.clone()]}));
+    assert_eq!(r["results"][0]["param_warnings"], json!(["the app's own"]), "{r}");
+    tool(&mut s, "execute", newer);
+    assert_eq!(sent("control.capabilities"), 2);
+    assert!(levels.lock().unwrap().iter().all(|l| l == "strict"), "{:?}", levels.lock().unwrap());
+}
+
+/// An app that says it checks `param_check` but answers a call without saying it checked it at
+/// the bridge's level (#9184), with no echo or another level: at `strict` that is an error, as the
+/// call may have run unchecked, and from then on the server checks the calls itself.
+#[test]
+fn a_bridged_server_at_strict_refuses_an_unconfirmed_reply() {
+    use solidcraft_engine::schema::ParamCheck;
+    for echo in [Value::Null, json!("off")] {
+        let (addr, seen) = scripted_app(move |req| match req["method"].as_str() {
+            Some("control.capabilities") => json!({"ok": true, "result": {"param_check": ["off", "warn", "strict"]}}),
+            _ => json!({"ok": true, "result": {"created_bodies": ["Box1"]}, "param_check": echo}),
+        });
+        let remote = crate::Remote::connect_with_token(&addr, Some("0123456789abcdef0123456789abcdef")).unwrap().with_param_check(ParamCheck::Strict);
+        let mut s = Server::new(Box::new(remote));
+        let sent = |what: &str| seen.lock().unwrap().1.iter().filter(|w| w.as_str() == what).count();
+        let r = raw_tool(&mut s, "execute", json!({"command": "solid.sphere", "params": {"radius": 2}}));
+        assert_eq!(r["result"]["isError"], json!(true), "{r}");
+        assert!(r.to_string().contains("did not say it checked this call"), "{r}");
+        let r = raw_tool(&mut s, "execute", json!({"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5, "operaton": "cut"}}));
+        assert!(r.to_string().contains("unknown key `operaton`"), "checked here now: {r}");
+        assert_eq!(sent("engine.execute solid.box"), 0, "refused unsent");
+    }
+}
+
 /// Plain `mcp` with no app running: the session is headless, says so on every result, and bridges
 /// to the app once one runs, but only while it holds no work of its own.
 #[test]
@@ -2222,6 +3136,13 @@ fn auto_session_bridges_to_a_late_app_only_while_empty() {
     assert!(!text(&r).contains("headless session because"), "{r}");
     assert!(s.backend().has_ui());
     assert!(s.backend().describe().contains("connected to the SolidCraft app"));
+    // The headless session's `--param-check` level goes on checking the bridged calls.
+    let mut headless = Headless::default();
+    headless.session.param_check = solidcraft_engine::schema::ParamCheck::Strict;
+    let mut strict = Server::new(Box::new(crate::Auto::new(headless, Box::new(|| Some(1)), None)));
+    raw_tool(&mut strict, "inspect_design", json!({}));
+    assert!(strict.backend().has_ui());
+    assert_eq!(strict.backend().param_check(), solidcraft_engine::schema::ParamCheck::Strict);
 
     // With work in the headless session, the app showing up changes nothing.
     port.set(None);

@@ -3,6 +3,10 @@
 //! send the bodies to: it always asks, and pre-selects the slicer used last time. The list also has
 //! a plain text row for EasyPrint (`file.open_in_easyprint`), which works in a browser too.
 //!
+//! Send to Slicer also has a Print face input (#8429): it shows the print face of the one body being
+//! sent, takes a flat face picked in the viewport as that body's print face, and clears it when
+//! emptied. Each change runs `body.print_face` at once, so it undoes like any other.
+//!
 //! Every place that saves a mesh opens this dialog: File › Export STL / Export 3MF, the Mesh tab, and the
 //! Save As Mesh item of the body menus. The slicer list (Send to Slicer only) holds the programs the user added (kept
 //! between runs, newest first), then the slicers found on this machine, then "Custom…", which asks
@@ -19,8 +23,9 @@ use solidcraft_engine::slicers::{self, Slicer};
 
 use crate::SolveApp;
 use crate::dialogs::{Kind, form_row};
-use crate::selection::{BODIES, SelInput};
+use crate::selection::{BODIES, PLANAR_FACES, SelInput};
 use crate::theme::Tokens;
+use solidcraft_engine::Sel;
 
 /// The formats, as shown and as `file.save_mesh` names them.
 /// (label, `format` parameter, file extension).
@@ -46,6 +51,9 @@ pub struct SaveMesh {
     slicer: String,
     /// The slicer list has not been read for this opening yet.
     stale: bool,
+    /// Send to Slicer: the bodies and the print face the Print face input last showed, to tell
+    /// a pick or a clear in it from a change of the bodies.
+    shown: Option<(Vec<String>, Option<Sel>)>,
 }
 
 impl SaveMesh {
@@ -127,8 +135,12 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         _ => String::new(),
     };
     let quality = QUALITIES.iter().position(|q| q.1 == p.save_mesh_quality).unwrap_or(0);
-    let kind = Kind::SaveMesh(SaveMesh { format, quality, open, slicer, stale: true });
-    Some((kind, vec![SelInput::new("Bodies", BODIES, true)]))
+    let kind = Kind::SaveMesh(SaveMesh { format, quality, open, slicer, stale: true, shown: None });
+    let mut inputs = vec![SelInput::new("Bodies", BODIES, true)];
+    if open {
+        inputs.push(SelInput::new("Print face", PLANAR_FACES, false));
+    }
+    Some((kind, inputs))
 }
 
 /// Send to Slicer needs a way to start a program (a browser has none) or a way to reach EasyPrint.
@@ -302,8 +314,61 @@ fn paint_icon(ui: &egui::Ui, rect: egui::Rect, tex: Option<egui::TextureId>, nam
     }
 }
 
+/// Every body of the design, in model order; with `visible`, only the bodies the viewport shows.
+pub(crate) fn body_picks(app: &SolveApp, visible: bool) -> Vec<Sel> {
+    let st = crate::open_meshing::session_world(&app.session);
+    let shown = |name: &str| !visible || app.session.body_visible(name);
+    st.bodies.iter().filter(|b| shown(&b.name)).map(|b| Sel::Body { name: b.name.clone() }).collect()
+}
+
+/// Keep the Print face input and the design in step. A face picked into it becomes the print
+/// face of its body, which must be the one body being sent; emptying it clears that body's print
+/// face. When the bodies change, it shows the print face of the one body, or nothing for several.
+fn sync_print_face(app: &mut SolveApp, k: &mut SaveMesh, inputs: &mut [SelInput]) {
+    let bodies = crate::selection::items(inputs, 0).body_names();
+    let Some(input) = inputs.get_mut(1) else { return };
+    let picked = input.items.first().cloned();
+    match k.shown.take() {
+        Some((shown_bodies, shown)) if shown_bodies == bodies && shown != picked => {
+            let one = bodies.first().filter(|_| bodies.len() == 1).cloned();
+            let target = match (&picked, &shown) {
+                (Some(Sel::Face { body, .. }), _) => Some(body.clone()),
+                (None, Some(Sel::Face { body, .. })) => Some(body.clone()),
+                _ => None,
+            };
+            match (target, one) {
+                (Some(body), Some(one)) if body == one => {
+                    crate::print_face_ui::set(app, &body, picked.as_ref());
+                }
+                _ => app.set_status(crate::i18n::tr("ui.print_face_one_body"), true),
+            }
+        }
+        Some(shown) if shown.0 == bodies => {
+            k.shown = Some(shown);
+            return;
+        }
+        _ => {}
+    }
+    let current = bodies.first().filter(|_| bodies.len() == 1).and_then(|b| crate::print_face_ui::current(app, b));
+    input.items = current.iter().cloned().collect();
+    k.shown = Some((bodies, current));
+}
+
 /// The rows after the Bodies input; true when Enter was pressed in a field.
-pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) -> bool {
+pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mut [SelInput]) -> bool {
+    if k.open {
+        sync_print_face(app, k, inputs);
+    }
+    // One row each: the two side by side do not fit the dialog's width.
+    for (label, visible) in [("Add all bodies", false), ("Add visible bodies", true)] {
+        form_row(ui, "", |ui| {
+            if crate::ui_kit::button(ui, crate::i18n::tr_label(label), crate::ui_kit::Button::Small).clicked()
+                && let Some(input) = inputs.first_mut()
+            {
+                input.items = body_picks(app, visible);
+            }
+        });
+    }
     if !k.open {
         choice_row(ui, "Format", "sm_format", &mut k.format, &FORMATS.map(|f| f.0));
         choice_row(ui, "Quality", "sm_quality", &mut k.quality, &QUALITIES.map(|q| q.0));
@@ -861,7 +926,7 @@ mod tests {
 
     #[test]
     fn send_to_slicer_asks_for_bodies_and_a_slicer_but_not_a_format() {
-        let k = SaveMesh { format: 0, quality: 0, open: true, slicer: "prusa".into(), stale: false };
+        let k = SaveMesh { format: 0, quality: 0, open: true, slicer: "prusa".into(), stale: false, shown: None };
         let mut input = SelInput::new("Bodies", BODIES, true);
         assert!(commands(&k, std::slice::from_ref(&input)).is_err());
         input.items = vec![Sel::Body { name: "Part".into() }];
@@ -880,7 +945,7 @@ mod tests {
     fn a_remembered_quality_goes_to_save_but_not_to_send() {
         let mut input = SelInput::new("Bodies", BODIES, true);
         input.items = vec![Sel::Body { name: "Part".into() }];
-        let k = SaveMesh { format: 0, quality: 2, open: true, slicer: "prusa".into(), stale: false };
+        let k = SaveMesh { format: 0, quality: 2, open: true, slicer: "prusa".into(), stale: false, shown: None };
         let (_, sent) = commands(&k, std::slice::from_ref(&input)).unwrap().remove(0);
         assert_eq!(sent.get("quality"), None, "sending has no quality row: the default applies");
         let (_, saved) = commands(&SaveMesh { open: false, ..k }, &[input]).unwrap().remove(0);

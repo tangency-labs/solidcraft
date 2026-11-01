@@ -733,7 +733,12 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
     }
     for (_, members) in families.into_iter().filter(|(_, m)| m.len() > 1) {
         let feature = members.first().and_then(|i| bodies.get(*i)).map(|b| b.feature);
-        if members.iter().any(|i| bodies.get(*i).map(|b| b.feature) != feature) {
+        // A cut's pieces past the first belong to the cut itself (#10123), so its family spans
+        // two features: the piece that kept the body's name comes from the body's own feature
+        // and the rest from this feature. Any other mix is not a split's family: leave it be.
+        let same = members.iter().all(|i| bodies.get(*i).map(|b| b.feature) == feature);
+        let foreign = members.iter().filter(|i| bodies.get(**i).map(|b| b.feature) != Some(origin.feature.id)).count();
+        if !same && foreign > 1 {
             continue;
         }
         let least = |b: &crate::ModelBody| {
@@ -744,10 +749,13 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         let keys: Option<Vec<(String, usize)>> = members.iter().map(|i| bodies.get(*i).and_then(least).map(|k| (k, *i))).collect();
         let Some(mut keys) = keys else { continue };
         keys.sort();
-        let names: Vec<String> = members.iter().filter_map(|i| bodies.get(*i).map(|b| b.name.clone())).collect();
-        for (name, (_, i)) in names.into_iter().zip(keys) {
+        // A name goes with the feature that made it: the piece taking the first name is the body
+        // the feature was given, whichever piece the kernel lists first.
+        let names: Vec<(String, u64)> = members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature))).collect();
+        for ((name, feature), (_, i)) in names.into_iter().zip(keys) {
             if let Some(b) = bodies.get_mut(i) {
                 b.name = name;
+                b.feature = feature;
             }
         }
     }

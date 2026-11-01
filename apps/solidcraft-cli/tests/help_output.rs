@@ -157,3 +157,34 @@ fn render_help_keeps_the_registered_gpu_request_controls() {
         }
     }
 }
+
+/// `--max-file-size` (#4086), with any command: the usage names it, a bad size stops the run
+/// with the reason, and a design over the default limit opens once the flag raises it.
+#[test]
+fn max_file_size_raises_the_limit_and_refuses_bad_sizes() {
+    let output = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli")).arg("--help").output().unwrap();
+    assert!(String::from_utf8_lossy(&output.stdout).contains("--max-file-size"));
+    for size in ["17GB", "2", "lots"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli")).args(["--max-file-size", size, "exec", "file.new"]).output().unwrap();
+        assert!(!output.status.success(), "{size} was accepted");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.starts_with("error: --max-file-size"), "{size}: {stderr}");
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli")).args(["exec", "file.new", "--max-file-size=2GB"]).output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+
+    // A sparse design file just over the default 256 MB: refused unread, then read with the flag
+    // (and refused for what it holds, which is no design).
+    let dir = std::env::temp_dir().join(format!("solidcraft-cli-4086-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("big.solidcraft");
+    std::fs::File::create(&path).unwrap().set_len((256 << 20) + 1).unwrap();
+    let path = path.to_string_lossy().to_string();
+    let output = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli")).args(["eval", &path]).output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success() && stderr.contains("too large") && stderr.contains("--max-file-size"), "{stderr}");
+    let output = Command::new(env!("CARGO_BIN_EXE_solidcraft-cli")).args(["--max-file-size", "1GB", "eval", &path]).output().unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!output.status.success() && !stderr.contains("too large"), "{stderr}");
+    let _ = std::fs::remove_dir_all(&dir);
+}

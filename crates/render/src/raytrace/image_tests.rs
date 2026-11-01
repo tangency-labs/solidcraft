@@ -59,7 +59,7 @@ fn emission_actual_png_adds_linear_radiance_once_and_never_lights_neighbor() {
         let image = ::image::load_from_memory(&emission_png(scene.clone(), request.clone(), options.clone())).unwrap().to_rgba8();
         let expected = [0.25, 0.5, 1.0].map(|c| {
             let v = c * 2.0_f64.powf(ev);
-            encode(v / (1.0 + v))
+            encode8(v / (1.0 + v))
         });
         assert_eq!(image.get_pixel(0, 0).0, [expected[0], expected[1], expected[2], 255]);
         assert_eq!(image.get_pixel(1, 0).0, [0, 0, 0, 255]);
@@ -170,12 +170,13 @@ fn thirty_two_emission_bindings_resume_with_four_work_units_and_cancel_without_p
             assert!(matches!(task.step(1).unwrap(), TaskPoll::Pending(_)));
             assert_eq!(task.work.used() - before, 1);
             assert_eq!(task.pixel, 1);
-            assert_eq!(task.pixels, [encode(0.25 / 1.25), encode(0.5 / 1.5), encode(0.5), 255]);
+            assert_eq!(task.pixels, [encode8(0.25 / 1.25), encode8(0.5 / 1.5), encode8(0.5), 255]);
         }
     }
 }
 fn request() -> ImageRequest {
     ImageRequest {
+        studio_weights: None,
         environment: None,
         textures: None,
         integrator: job::Integrator::Raytrace,
@@ -318,7 +319,7 @@ fn actual_png_has_analytic_lit_and_cast_shadow_pixels() {
     // at normal view yields BRDF=1/[2*pi*(1+cosL)].
     let cosine = (0.5_f64).sqrt();
     let radiance = cosine / (2.0 * std::f64::consts::PI * (1.0 + cosine));
-    let expected = encode(radiance / (1.0 + radiance));
+    let expected = encode8(radiance / (1.0 + radiance));
     assert_eq!(unshadowed, [expected, expected, expected, 255]);
     assert_eq!(shadowed.get_pixel(7, 20), lit.get_pixel(7, 20), "unoccluded receiver changes when toggling shadows");
 }
@@ -450,7 +451,7 @@ fn emission_primary_aa_and_reflection_attempts_preserve_single_linear_value() {
                 samples: r,
             });
             let image = ::image::load_from_memory(&emission_png(scene, request, options)).unwrap().to_rgba8();
-            assert_eq!(image.get_pixel(0, 0).0, [encode(0.25 / 1.25), encode(0.5 / 1.5), encode(0.5), 255], "S{s}/R{r}");
+            assert_eq!(image.get_pixel(0, 0).0, [encode8(0.25 / 1.25), encode8(0.5 / 1.5), encode8(0.5), 255], "S{s}/R{r}");
             assert_eq!(image.get_pixel(1, 0).0, [0, 0, 0, 255], "emission does not illuminate the neighboring reflector");
         }
     }
@@ -490,7 +491,7 @@ fn emission_and_directional_point_area_terms_share_one_linear_output_transform()
     // At normal incidence a white fully rough conductor has BRDF 1/(4*pi).
     // Point reference distance is 10 mm; the 4 mm² rectangle contributes 5*4/100.
     let direct = (2.0 + 3.0 + 5.0 * 4.0 / 100.0) / (4.0 * std::f64::consts::PI);
-    let expected = [0.25, 0.5, 1.0].map(|e| encode((e + direct) / (1.0 + e + direct)));
+    let expected = [0.25, 0.5, 1.0].map(|e| encode8((e + direct) / (1.0 + e + direct)));
     assert_eq!(image.get_pixel(0, 0).0, [expected[0], expected[1], expected[2], 255]);
 }
 
@@ -561,7 +562,7 @@ fn reflected_hit_adds_surface_emission_with_the_current_path_throughput() {
     let schlick = (1.0 - 0.5_f64.sqrt()).powi(5);
     let expected = [(0.2, 0.5), (0.5, 1.0), (0.75, 2.0)].map(|(f0, emitted)| {
         let radiance = (f0 + (1.0 - f0) * schlick) * emitted;
-        encode(radiance / (1.0 + radiance))
+        encode8(radiance / (1.0 + radiance))
     });
     assert_eq!(image.get_pixel(0, 0).0, [expected[0], expected[1], expected[2], 255]);
 }

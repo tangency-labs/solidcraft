@@ -29,6 +29,7 @@ chamfer
   remap_bodies: body
 box
 cylinder
+cylinder_references
 sphere
 torus
 cone

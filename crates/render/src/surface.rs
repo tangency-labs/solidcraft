@@ -138,11 +138,8 @@ impl OpaqueSurface {
     }
 }
 
-/// Exact piecewise sRGB decoding of an existing 8-bit color channel.
-pub fn srgb8_to_linear(channel: u8) -> f64 {
-    let c = f64::from(channel) / 255.0;
-    if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
-}
+/// Exact piecewise sRGB decoding of an existing 8-bit color channel ([`solidcraft_geom::srgb::decode8`]).
+pub use solidcraft_geom::srgb::decode8 as srgb8_to_linear;
 
 /// Normalize finite directions without overflow or an arbitrary magnitude threshold.
 pub fn unit_direction(v: Vec3) -> Result<Vec3, SurfaceError> {
@@ -271,13 +268,5 @@ mod tests {
                 assert!((s.specular_fresnel(c) - conductor * metallic).len() < 1e-14);
             }
         }
-    }
-
-    #[test]
-    fn srgb_conversion_includes_the_linear_toe() {
-        assert_eq!(srgb8_to_linear(0), 0.0);
-        assert_eq!(srgb8_to_linear(255), 1.0);
-        assert!((srgb8_to_linear(10) - (10.0 / 255.0) / 12.92).abs() < 1e-15);
-        assert!((srgb8_to_linear(128) - 0.21586050011389926).abs() < 1e-14);
     }
 }

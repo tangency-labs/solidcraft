@@ -212,10 +212,16 @@ fn named_vertex(st: &ModelState, at: Vec3, names: &[String]) -> Option<Vec3> {
     let ends: Vec<[Vec3; 2]> = names
         .iter()
         .map(|n| {
-            // The edge with that name itself, never the one nearest the old pick.
-            let on = bodies(st).find_map(|b| crate::naming::find_edge(b, n, at).ok())?;
-            let pts = edge_points(st, on, &None).ok()?;
-            Some([*pts.first()?, *pts.last()?])
+            // The edge with that name itself, never the one nearest the old pick, and its ends
+            // on the body that has it: picked again by a point on it, a corner found the first
+            // edge of any body through that corner, such as another body's edge running past
+            // it, so a vertex took that edge's end (#8650).
+            bodies(st).find_map(|b| {
+                let hit = crate::name_lookup::locate_edge(b, n, at).ok()?;
+                let m = b.mesh();
+                let pts = m.edges.get(hit.edge)?;
+                Some([*pts.first()?, *pts.last()?])
+            })
         })
         .collect::<Option<_>>()?;
     let (first, rest) = ends.split_first()?;
@@ -335,9 +341,12 @@ fn model_line(st: &ModelState, g: &GeoRef) -> Result<(Vec3, Vec3)> {
                 _ => Err(bad("the face is not a cylinder, cone or torus")),
             }
         }
-        _ => Err(bad("pick a straight or circular edge, or a cylinder, cone or torus face")),
+        _ => Err(bad(MODEL_AXIS_REFS)),
     }
 }
+
+/// What [`model_axis`] says about a reference that is neither an edge nor a face.
+pub const MODEL_AXIS_REFS: &str = "pick a straight or circular edge, or a cylinder, cone or torus face";
 
 /// The axis a feature turns about when an edge or face of the model is picked for it (a revolve,
 /// a circular pattern, a plane at an angle), as [`model_line`] finds it. The direction is

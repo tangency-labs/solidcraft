@@ -33,7 +33,7 @@ pub struct ThreadInfo {
 /// Nominal diameters and coarse pitches (mm) used for automatic ISO metric thread sizing.
 /// Other diameter/pitch pairs can be supplied as explicit designations.
 pub fn metric_thread_sizes() -> &'static [(f64, f64)] {
-    &crate::thread_forms::ISO_COARSE
+    crate::thread_forms::ISO_COARSE
 }
 
 /// "M8" or "M8x1" → (nominal diameter, pitch).

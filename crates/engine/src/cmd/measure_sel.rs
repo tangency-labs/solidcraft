@@ -104,8 +104,9 @@ fn fit_circle(pts: &[Vec3], tol: f64) -> Option<(Vec3, UnitVec3, f64)> {
 }
 
 /// The round shape of mesh edge `index` of body `b`: from the kernel's exact curve when it
-/// is the same edge (its ends on the polyline), else fitted to the polyline's points.
-fn edge_round(b: &solidcraft_doc::ModelBody, m: &Mesh, index: usize, whole: bool) -> Option<Shape> {
+/// is the same edge (its ends on the polyline), else fitted to the polyline's points; and
+/// whether it is the exact one.
+fn edge_round(b: &solidcraft_doc::ModelBody, m: &Mesh, index: usize, whole: bool) -> Option<(Shape, bool)> {
     let pts = m.edges.get(index)?;
     let tol = (m.bounds().diagonal().max(1.0) * 1e-6).max(1e-9);
     let exact = solidcraft_kernel::edge_circle(&b.body, index).filter(|c| {
@@ -113,6 +114,7 @@ fn edge_round(b: &solidcraft_doc::ModelBody, m: &Mesh, index: usize, whole: bool
         let on = pts.iter().all(|p| (p.dist(c.center) - c.radius).abs() <= tol * 10.0);
         ends && on
     });
+    let is_exact = exact.is_some();
     let (center, axis, radius, angle) = match exact {
         Some(c) => (c.center, c.axis, c.radius, if whole { std::f64::consts::TAU } else { c.angle }),
         None => {
@@ -123,7 +125,17 @@ fn edge_round(b: &solidcraft_doc::ModelBody, m: &Mesh, index: usize, whole: bool
             (center, axis, radius, angle)
         }
     };
-    Some(Shape::Round { center, axis, radius, angle, planar: true, lo: 0.0, hi: 0.0 })
+    Some((Shape::Round { center, axis, radius, angle, planar: true, lo: 0.0, hi: 0.0 }, is_exact))
+}
+
+/// The length of a measured curve: an exact circle's or arc's own (radius times angle, as its
+/// circumference and arc length are), else that of the polyline drawn for it, which runs inside
+/// a curve (#9086).
+fn curve_len(shape: &Shape, exact: bool, polyline: f64) -> f64 {
+    match *shape {
+        Shape::Round { radius, angle, .. } if exact => radius * angle,
+        _ => polyline,
+    }
 }
 
 /// Points along a circle or arc (`angle` from `start` about `axis`).
@@ -150,7 +162,7 @@ fn sketch_of<'a>(
     if let Some(id) = sketch {
         return st.sketch(id);
     }
-    if let Some(ss) = s.active_sketch.and_then(|id| st.sketch(id)).filter(|ss| has(&ss.sketch)) {
+    if let Some(ss) = super::sketch_store::active(s).and_then(|id| st.sketch(id)).filter(|ss| has(&ss.sketch)) {
         return Some(ss);
     }
     st.sketches.iter().rev().map(|ss| &**ss).find(|ss| has(&ss.sketch))
@@ -192,7 +204,8 @@ fn sketch_curve(ss: &solidcraft_doc::SolvedSketch, id: &str) -> Option<Item> {
             (b - a).normalized()
         }
         _ => {
-            json["length_mm"] = json!(polyline_len(&pts));
+            // A sketch's circle or arc is exact.
+            json["length_mm"] = json!(curve_len(&shape, true, polyline_len(&pts)));
             add_round(&mut json, &shape);
             None
         }
@@ -290,19 +303,18 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
                 let pieces: Vec<&Vec<Vec3>> = rim.iter().filter_map(|&i| m.edges.get(i)).collect();
                 let len: f64 = pieces.iter().map(|p| polyline_len(p)).sum();
                 let points = pieces.iter().flat_map(|p| densify(p)).collect();
-                let mut json = json!({"type": "edge", "length_mm": len});
-                let shape = edge_round(b, &m, index, true).unwrap_or(Shape::Other);
+                let (shape, exact) = edge_round(b, &m, index, true).unwrap_or((Shape::Other, false));
+                let mut json = json!({"type": "edge", "length_mm": curve_len(&shape, exact, len)});
                 add_round(&mut json, &shape);
                 return Some(Item { geo: Geo::Points(points), dir: None, json, shape, slot: None });
             }
             let (a, z) = (*pts.first()?, *pts.last()?);
             let straight = (z - a).normalized().filter(|d| pts.iter().all(|p| (*p - a).cross(*d).len() < 1e-6 * (1.0 + a.dist(z))));
-            let len = polyline_len(pts);
-            let mut json = json!({"type": "edge", "length_mm": len});
-            let shape = match straight {
-                Some(_) => Shape::Line { a, b: z },
-                None => edge_round(b, &m, index, false).unwrap_or(Shape::Other),
+            let (shape, exact) = match straight {
+                Some(_) => (Shape::Line { a, b: z }, false),
+                None => edge_round(b, &m, index, false).unwrap_or((Shape::Other, false)),
             };
+            let mut json = json!({"type": "edge", "length_mm": curve_len(&shape, exact, polyline_len(pts))});
             add_round(&mut json, &shape);
             Some(Item { geo: Geo::Points(densify(pts)), dir: straight, json, shape, slot: None })
         }

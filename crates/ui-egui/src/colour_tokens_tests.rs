@@ -147,6 +147,8 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("dialogs_appearance.rs", 1, "a design appearance: the colour is the fact"),
     ("dialogs_save_mesh.rs", 1, "an installed slicer's own icon, drawn untinted"),
     ("dialogs_library.rs", 1, "a library appearance's swatch: the colour is the fact"),
+    ("render_ui/scene.rs", 2, "Browser appearance swatches: the colours are document data"),
+    ("render_workspace_library.rs", 1, "a catalog appearance preview: the colour is authored data"),
     ("render_workspace_materials.rs", 1, "an authored material swatch: the displayed colour is the material data"),
     ("dialogs_assembly.rs", 1, "the interference fill, shaded from its token"),
     ("dialogs_motion.rs", 1, "a white outline"),
@@ -287,4 +289,35 @@ fn every_engine_colour_tag_is_placed() {
     let mut placed: Vec<&str> = MAPPED.iter().chain(NEUTRAL).copied().collect();
     placed.sort_unstable();
     assert_eq!(names, placed, "an engine colour tag must be mapped to a token in `viewport::sketch_color` or listed as neutral");
+}
+
+/// Preferences › Interface › Logo: the logo in shades of the theme's accent (the accent itself in
+/// the middle, a lighter and a darker face), in a built-in theme and a theme file alike, and back
+/// to the theme's own logo colours.
+#[test]
+fn the_logo_can_take_the_themes_accent() {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            crate::theme::set_logo_accent(false);
+        }
+    }
+    let _reset = Reset;
+    let mut h = crate::scenario::Harness::new();
+    for theme in ["dark", "gruvbox-dark"] {
+        h.call("ui.prefs", serde_json::json!({"theme": theme, "logo_accent": false}));
+        h.frames(1);
+        let own = Tokens::get();
+        h.call("ui.prefs", serde_json::json!({"logo_accent": true}));
+        h.frames(1);
+        let t = Tokens::get();
+        let accent = t.accent.to_opaque();
+        assert_eq!(t.logo[1], accent, "{theme}");
+        let lum = |c: Color32| u32::from(c.r()) + u32::from(c.g()) + u32::from(c.b());
+        assert!(lum(t.logo[0]) > lum(accent) && lum(t.logo[2]) < lum(accent), "{theme}: {:?}", t.logo);
+        assert_eq!(Tokens { logo: own.logo, ..t }, own, "{theme}: only the logo changes");
+        h.call("ui.prefs", serde_json::json!({"logo_accent": false}));
+        h.frames(1);
+        assert_eq!(Tokens::get().logo, own.logo, "{theme}: the theme's own again");
+    }
 }

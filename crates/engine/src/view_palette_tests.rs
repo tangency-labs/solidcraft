@@ -75,6 +75,133 @@ fn the_grid_reaches_further_as_its_plane_is_seen_at_a_slant() {
     assert!(grid_ext(40.0, major, 0.0).is_finite());
 }
 
+/// #9570: zooming through a switch of the grid's spacing used to swap the whole grid at once, so
+/// scrolling made it pop over and over. The drawn grid now cross-fades: zoomed in small steps
+/// through a switch, no line's strength jumps from one step to the next, while away from a
+/// switch only [`grid_step`]'s level is drawn, at full strength, as before.
+#[test]
+fn the_grid_cross_fades_between_levels_as_the_view_zooms() {
+    // Every 1, 2, 5 switch, zoomed by 1% a step from a half height of 8 to 1200.
+    let strengths = |hh: f64| {
+        let mut m = std::collections::BTreeMap::new();
+        // The grid's centre off the origin, as when the view has panned: each level's lines
+        // stay on the plane's own places.
+        let at = 37.0;
+        for l in grid_lines(hh, at, 60.0 * hh, 4000) {
+            let world = l.offset + at;
+            // Weight and major share, keyed by the line's place on the plane (to 1e-6 mm).
+            m.insert((world * 1e6).round() as i64, (l.weight, l.major));
+        }
+        m
+    };
+    let mut hh = 8.0;
+    let mut prev = strengths(hh);
+    let mut faded = 0;
+    while hh < 1200.0 {
+        let next_hh = hh * 1.01;
+        let next = strengths(next_hh);
+        // Only lines both steps draw: compare within the smaller reach, short of its ends, where
+        // each level stops at a whole number of its steps.
+        let reach = ((60.0 * hh - hh / 4.0) * 1e6) as i64;
+        for key in prev.keys().chain(next.keys()).filter(|k| (**k - 37_000_000).abs() < reach) {
+            let (a, ma) = prev.get(key).copied().unwrap_or((0.0, 0.0));
+            let (b, mb) = next.get(key).copied().unwrap_or((0.0, 0.0));
+            assert!((a - b).abs() < 0.1, "the line at {} mm jumps from {a} to {b} zooming from {hh} to {next_hh}", *key as f64 * 1e-6);
+            if a > 0.05 && b > 0.05 {
+                assert!((ma - mb).abs() < 0.1, "the line at {} mm turns from major {ma} to {mb} zooming from {hh} to {next_hh}", *key as f64 * 1e-6);
+            }
+        }
+        let levels = grid_levels(next_hh);
+        let total: f32 = levels.iter().map(|g| g.weight).sum();
+        assert!((total - 1.0).abs() < 1e-5, "the levels at {next_hh} add up to {total}");
+        // The strongest level is the one snapping and the tools use.
+        let strongest = levels.iter().fold(levels[0], |a, g| if g.weight > a.weight { *g } else { a });
+        assert_eq!((strongest.minor, strongest.major), grid_step(next_hh), "at {next_hh} the drawn grid's main level is grid_step's");
+        faded += usize::from(levels.len() == 2);
+        prev = next;
+        hh = next_hh;
+    }
+    assert!(faded > 0, "some steps cross-fade");
+    // Away from a switch (raw step 3 lies between the 2 and 5 switches), one level at full
+    // strength, as the grid always was.
+    assert_eq!(grid_levels(30.0), vec![GridLevel { minor: 2.0, major: 10.0, weight: 1.0 }]);
+    // grid_step's floor and hostile heights draw one level.
+    for hh in [0.0, 1e-9, -5.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(grid_levels(hh).len(), 1, "{hh}");
+        let _ = grid_lines(hh, f64::NAN, 10.0, 10);
+        let _ = grid_lines(hh, 1e300, 1e300, 10);
+    }
+}
+
+/// #9570: the headless picture's grid cross-fades as the viewport's does: right at a nested
+/// switch of the spacing (5 to 10), both levels are drawn, the finer one's own lines at half
+/// strength, in the palette's grid colours only. Right at the switch from 2 to 5, which do not
+/// nest, neither level's own lines are drawn, only the 10 mm lines both share.
+#[test]
+fn the_headless_grid_draws_both_levels_at_a_switch() {
+    let s = Session::default();
+    let mut cam = home_camera(&s).unwrap();
+    cam.pitch = std::f64::consts::FRAC_PI_2;
+    cam.target = Vec3::ZERO;
+    let strength = |hh: f64, x: f64| {
+        let mut cam = cam;
+        cam.distance *= hh / cam.half_height();
+        assert!((cam.half_height() - hh).abs() < 1e-6);
+        let scene = scene(&s, &cam).unwrap();
+        assert!(scene.grid.iter().all(|l| [Palette::DEFAULT.grid, Palette::DEFAULT.grid_major].contains(&l.color)));
+        // The strongest piece of the line in each grid colour, added: a line two levels share
+        // with different kinds is drawn in both.
+        let on = |l: &&SceneLine| (l.points[0].x - x).abs() < 1e-6 && (l.points[1].x - x).abs() < 1e-6;
+        [Palette::DEFAULT.grid, Palette::DEFAULT.grid_major]
+            .iter()
+            .map(|c| scene.grid.iter().filter(on).filter(|l| l.color == *c).map(|l| l.alpha).fold(0.0f32, f32::max))
+            .sum::<f32>()
+    };
+    // A half height where grid_step switches from 5 to 10: the 5 mm line (only the finer level)
+    // is drawn at half strength, the 10 mm line (both) at full.
+    let a = strength(100.0, 5.0);
+    assert!(a > 0.3 && a < 0.7, "the line at 5 mm is drawn at {a}, half strength while the levels cross-fade");
+    assert!(strength(100.0, 10.0) > 0.9);
+    // A half height where grid_step switches from 2 to 5.
+    for x in [2.0, 5.0] {
+        let a = strength(50.0, x);
+        assert!(a < 1e-6, "the line at {x} mm is drawn at {a} while 2 and 5 swap");
+    }
+    assert!(strength(50.0, 10.0) > 0.9);
+}
+
+/// #9570: the levels 2 and 5 do not nest, and drawn together they gave lines at 0, 2, 4, 5, 6,
+/// 8, 10 mm, which looked restless. Zooming through that switch the finer level's own lines are
+/// gone before the coarser level's own lines appear, while the lines both share (every 10 mm)
+/// stay at full strength, so the grid never goes blank. Checked in every decade drawn.
+#[test]
+fn the_grid_never_draws_two_levels_that_do_not_nest_at_once() {
+    for scale in [0.1, 1.0, 10.0, 100.0] {
+        // grid_step switches from 2 to 5 (times `scale`) at a half height of 50 times `scale`.
+        let (mut hh, end) = (30.0 * scale, 80.0 * scale);
+        let (mut saw_fine, mut saw_coarse) = (false, false);
+        while hh < end {
+            let lines = grid_lines(hh, 0.0, 60.0 * scale, 4000);
+            let at = |x: f64| lines.iter().filter(|l| (l.offset - x * scale).abs() < 1e-6 * scale).map(|l| l.weight).sum::<f32>();
+            // 2, 4, 6, 8: only the finer level; 5, 15: only the coarser.
+            let fine = [2.0, 4.0, 6.0, 8.0].iter().map(|x| at(*x)).fold(0.0f32, f32::max);
+            let coarse = [5.0, 15.0].iter().map(|x| at(*x)).fold(0.0f32, f32::max);
+            assert!(fine == 0.0 || coarse == 0.0, "at {hh} the 2 and 5 levels are both drawn ({fine}, {coarse})");
+            saw_fine |= fine > 0.0 && fine < 1.0;
+            saw_coarse |= coarse > 0.0 && coarse < 1.0;
+            for x in [0.0, 10.0, 20.0] {
+                assert!(at(x) > 0.999, "at {hh} the line at {x} mm both levels share is drawn at {}", at(x));
+            }
+            hh *= 1.005;
+        }
+        assert!(saw_fine && saw_coarse, "both levels fade rather than swap (scale {scale})");
+    }
+    // The nested switches still cross-fade both levels together: from 1 to 2 (half height 20).
+    let lines = grid_lines(20.0, 0.0, 20.0, 4000);
+    let at = |x: f64| lines.iter().filter(|l| (l.offset - x).abs() < 1e-6).map(|l| l.weight).sum::<f32>();
+    assert!(at(1.0) > 0.3 && at(1.0) < 0.7 && at(2.0) > 0.999, "{} {}", at(1.0), at(2.0));
+}
+
 /// No colour here is one of [`colors`] or an appearance below, and each field has its own.
 const MARK: Palette = Palette {
     background: (Rgb(1, 2, 3), Rgb(4, 5, 6)),

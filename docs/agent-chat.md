@@ -20,6 +20,17 @@ Everything about it is on one page: **Preferences → AI**.
 - **Show Assistant button in application bar** (on by default): the **Assistant** icon in the application bar
   row, which stays there however wide the window is. Turn it off to keep only the shortcut and
   the menu entry.
+- **Connect the last-used agent when SolidCraft starts** (off by default): each launch starts
+  the agent you connected last (the default one if you never connected), in the background,
+  once SolidCraft has looked for the installed agents. The panel's header shows **Starting…**,
+  then **Ready**, or **Connection failed** with **Retry** in place of **Connect** (the agent is
+  missing, could not start, or ended while starting); the conversation says why. A design
+  opened in place of the empty one SolidCraft starts with keeps the agent connected, as long
+  as nothing was asked in that empty design's chat.
+- **Open the Assistant panel when SolidCraft starts** (off by default): the panel (or its own
+  window) is shown at each launch.
+
+Neither applies when SolidCraft is started with `--control` for automation.
 
 With AI features on, the panel opens from:
 
@@ -29,7 +40,7 @@ With AI features on, the panel opens from:
 
 Nothing runs until you need it: SolidCraft looks for installed agents (a quick `--version`
 each, in the background) when the panel or the AI page first opens, and starts an agent only
-when you send a message or press **Connect**.
+when you send a message or press **Connect** (or at launch, when you turned that on above).
 
 ## The panel
 
@@ -52,16 +63,25 @@ clicks and scrolling over the panel stay in the chat. The docked layout retains 
   icon, the agent's state, and a count of anything waiting for your answer. Click the icon to
   unfold it. **Close** (×) hides the panel. Neither stops the agent; **Stop** does.
 - **The agent switcher** under the title picks the agent for this conversation; switching stops
-  the one running. Next to it, when the agent has modes of its own (Claude Code has *Default*,
-  *Accept Edits*, *Plan*…), a second drop-down sets the agent's mode. When the agent reports its models (an ACP agent's
-  model list, or an endpoint's `/models`), a model drop-down shows the one in use and changes it;
-  SolidCraft remembers the last choice for each agent and puts it back on the next session. An
-  endpoint's agent also keeps it as its default model. An agent that reports no models shows no
-  drop-down. When the models come from more than one provider (Hermes and OpenCode name each
-  model `Provider · model`, or say `Provider: …` in its description), a provider drop-down comes
-  first and the model drop-down lists only that provider's models, without the provider in front.
-  It opens on the provider of the model in use; picking another provider changes nothing until one
-  of its models is chosen. Models with no provider named are listed under *Other*.
+  the one running. When an ACP agent reports **configuration options** (including OpenCode V2),
+  a compact inline strip below it shows the agent's model, reasoning effort, mode, and any other
+  supported select options, wrapping when space is tight. Hover a selector for its full label and
+  description. Their names and choices come from the agent: not every model offers adjustable
+  reasoning effort. Changing the model can change or remove the effort choices. A selection is
+  shown as applied only after the agent reports it; a rejected change leaves the confirmed
+  selection in place and shows an error.
+- **Older agents and API endpoints** keep their model and mode drop-downs when they report those
+  choices (an ACP agent's legacy model/mode lists, or an endpoint's `/models`). SolidCraft remembers
+  the last model choice for each agent and puts it back on the next session when still available.
+  An endpoint's agent also keeps it as its default model. An agent that reports no choices shows
+  no drop-down. When these model lists include more than one provider (Hermes and OpenCode name
+  each model `Provider · model`, or say `Provider: …` in its description), a provider drop-down
+  comes first and the model drop-down lists only that provider's models, without the provider in
+  front. It opens on the provider of the model in use; picking another provider changes nothing
+  until one of its models is chosen. Models with no provider named are listed under *Other*.
+- **Reasoning effort is not permissions.** The agent's thinking setting does not change
+  SolidCraft's Ask / Edits / All approval policy. Reasoning options belong to the current session;
+  changing them here does not rewrite OpenCode's configuration or another OpenCode session.
 
 Messages use right-aligned user bubbles and plain assistant text. Consecutive tool calls share
 an activity group: click a row to inspect its output; failed calls have an error tint. Approval
@@ -113,10 +133,18 @@ clears the files waiting on the chips too.
 ## Typing while the agent works
 
 Each design tab has its own conversation, agent session, draft, attachments and queued messages.
-A new tab starts with an empty chat. Switching away stops the current turn and keeps its
+A new tab starts with an empty chat and a session of its own; a sign-in the chat confirmed in one
+tab still counts in the others, so a new tab doesn't mark the agent as signed out. Switching away stops the current turn and keeps its
 completed changes in that design's undo history. Returning restores the conversation; queued
 messages wait for **Send**. Closing a design closes its conversation. Conversations are kept
 only while the tabs remain open.
+
+When the agent itself creates a new design or opens a file, its conversation follows the new
+design and the same turn continues. Its completed changes stay in each design's own undo
+history. The original tab starts a fresh conversation if you return to it. Opening a file that
+is already in another tab returns an error instead of displacing that tab's conversation;
+select that tab yourself to continue there. Your own New, Open and tab switches still stop
+the current turn. Stop also cancels a file the agent is still opening.
 
 The input stays enabled during a turn. **Enter** queues the message: it shows in the conversation
 as a **Queued** bubble that you can **Edit** or remove (×) until it is sent. Several queued
@@ -137,7 +165,7 @@ messages go as one prompt, in order, when the turn ends normally.
 
 Preferences → AI → **Agents** lists every agent the chat can use, each with its kind (a program or
 an endpoint), version or model, whether it looks signed in, **Test**, **Default** (the one a new
-conversation starts with), its own permission setting, and **Remove** for the ones you added.
+conversation starts with), its own permission setting, and **Edit** and **Remove** for the ones you added.
 
 ### Found by themselves
 
@@ -167,7 +195,12 @@ doesn't change the last known login state.
 | GitHub Copilot CLI, Qwen Code, goose | listed with their install command when missing |
 
 The panel lists agents that aren't installed with their install command and a **Copy** button.
-**Refresh** looks again after you install one. **Test** starts an agent briefly, asks it for a
+**Refresh** looks again after you install one. An agent whose program is there but fails its
+`--version` check without printing a version (an install that didn't finish, such as an npm
+install whose setup script didn't run, or a program built for another kind of computer) is
+still listed, marked **does not start** with the system's reason. Connecting to it first says
+why and gives its install command; reinstall it until `--version` works in a terminal, then
+press **Refresh**. A check that runs out of time is not counted as a failure. **Test** starts an agent briefly, asks it for a
 session and ends it again.
 
 ### Flatpak
@@ -177,7 +210,7 @@ through nvm or `~/.local/bin` can therefore work in a terminal while SolidCraft 
 that no agent was found. For Claude Code and its ACP adapter, run:
 
 ```sh
-flatpak override --user ai.storyteller.solidcraft --filesystem=~/.nvm:ro --filesystem=~/.local/bin:ro --filesystem=~/.local/share/claude:ro --filesystem=~/.claude --filesystem=~/.claude.json --share=network
+flatpak override --user io.tangencylabs.solidcraft --filesystem=~/.nvm:ro --filesystem=~/.local/bin:ro --filesystem=~/.local/share/claude:ro --filesystem=~/.claude --filesystem=~/.claude.json --share=network
 ```
 
 These permissions apply to SolidCraft for your user account:
@@ -213,7 +246,13 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
 - **Custom command:** any other program that speaks ACP on stdin and stdout, such as
   `my-agent --acp`. SolidCraft starts it directly, not through a shell.
 - **OpenAI-compatible API:** a preset (Ollama `http://localhost:11434/v1`, LM Studio
-  `http://localhost:1234/v1`, OpenAI, Mammouth AI `https://api.mammouth.ai/v1`) or a custom URL, the model name, and an optional key.
+  `http://localhost:1234/v1`, OpenAI, Mammouth AI `https://api.mammouth.ai/v1`, OpenCode Go `https://opencode.ai/zen/go/v1`) or a custom URL, the model name, and an optional key.
+  OpenCode Go models are routed to their endpoint by themselves (`/responses`,
+  `/messages` or Gemini for those families, `/chat/completions` for the rest),
+  each conversation request carrying the session header Go asks for, so one
+  preset covers every model.
+  A model the list does not know is retried on the next protocol when Go names
+  the mismatch.
 - **Anthropic-compatible API:** a preset (Anthropic) or a custom URL, for an endpoint that
   speaks the Anthropic Messages API (`{base}/v1/messages`). This covers Anthropic itself and
   providers that offer an Anthropic-compatible endpoint, such as DeepSeek and Qwen.
@@ -226,7 +265,20 @@ Grok Build also supports `XAI_API_KEY` for users who choose API authentication.
   take: 300 s by default, from 30 s to an hour. A slow local model (a large model on modest
   hardware, or a long message with many tool results) may need more; raise it here or in the
   endpoint's entry under **Agents**, where a change applies from the next request. A request that
-  runs out of time ends the message with the limit it hit and where to raise it.
+  runs out of time ends the message with the limit it hit and where to raise it. **Reasoning
+  effort** is optional and empty by default: nothing is sent and the provider's own default
+  applies. When set, the value goes out as `reasoning_effort` on each `/chat/completions`
+  request; accepted values differ per provider and model (for example `low`, `high` or `max`).
+  A value you set is never replaced by SolidCraft: if the endpoint refuses it, the refusal is
+  shown instead of being retried with `none`.
+
+**Edit** on an agent you added opens the same dialog filled with its name and command, or its
+protocol, endpoint, model and request timeout, and **Save** changes it in place: it keeps its id,
+its permission setting and the tools you always allow for it. A stored key is never shown: leave
+the key field empty to keep it, or type a new one to replace it. A saved key still only goes to
+HTTPS or this computer, so moving an endpoint with a key to a plain `http://` address elsewhere is
+refused. The running conversation takes a new request timeout at once; a new command, endpoint
+or model applies the next time the agent connects.
 
 For Ollama, choosing a model checks its reported capabilities in the background. If its
 capabilities list lacks `tools`, a warning below the model picker explains that the model can
@@ -246,6 +298,10 @@ short notice when the reply was empty, or when an explicit edit request received
 Ordinary answers to questions do not show it. Edit requests are recognised conservatively from
 English opening words such as “make”, “rename”, or “can you move”; other phrasing may stay quiet.
 Cancelled and failed turns keep their existing messages. Text describing a call is never run.
+A reply that stopped at its length limit, or that the model declined, says that instead of the
+tool-calling notice: an endpoint reports it as `max_tokens` or `refusal` (Anthropic), or as
+`length`, `content_filter` or a refusal (OpenAI-compatible). A tool call cut off at the length
+limit is not run.
 
 ### An agent inside WSL (Windows)
 

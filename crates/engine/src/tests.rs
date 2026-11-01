@@ -403,6 +403,7 @@ mod pleat_join;
 mod primitive_points;
 mod rim_cut;
 mod robustness;
+mod rounded_loft_face;
 mod sphere_lens;
 mod spiral_join;
 mod step_import_options;
@@ -873,6 +874,10 @@ pub(crate) fn hostile_values() -> Vec<Value> {
         json!("mm = 5"),
         json!("w = w"),
         json!("w == 1/0"),
+        // Every value input reads `name = expression` (#4071).
+        json!("a = = 3"),
+        json!("é = 1e308 * 10"),
+        json!(format!("{} = 1", "n".repeat(5000))),
         json!([]),
         json!([1e308, -1e308]),
         json!([0, 0, 0]),
@@ -1091,6 +1096,33 @@ fn hostile_params_never_panic() {
         workers.into_iter().flat_map(|w| w.join().unwrap()).collect()
     });
     assert!(internal.is_empty(), "commands panicked:\n{}", internal.join("\n"));
+}
+
+/// #6651: a list parameter of the wrong type is refused, not read as an empty list. An empty
+/// list means "every body" to most commands, so a number, an object or a list with a number in
+/// it was read as no list at all: a cut meant for one body cut every body it touched, and the
+/// command reported success.
+///
+/// `null` is not in this list: the schema contract declares these parameters optional and
+/// reads `null` as absent, so it keeps the meaning it always had (no list given).
+#[test]
+fn a_list_parameter_of_the_wrong_type_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "solid.box", json!({"corner": [60, 0, 0], "length": 10, "width": 10, "height": 20, "body_name": "Block"}));
+    let before = volume(&mut s);
+    // A tool crossing both bodies, meant for the Block only.
+    for targets in [json!(7), json!(true), json!({"body": "Block"}), json!(["Block", 42])] {
+        let params =
+            json!({"corner": [35, 2, -1], "length": 30, "width": 3, "height": 30, "operation": "cut", "body_name": "Slot", "targets": targets});
+        let err = s.execute("solid.box", &params).expect_err("a list parameter of the wrong type is refused");
+        let EngineError::BadParams { cmd, msg } = &err else {
+            panic!("{params}: {err}");
+        };
+        assert_eq!(cmd, "solid.box", "{params}: {err}");
+        assert!(msg.contains("targets"), "{params}: {err}");
+        assert_eq!(volume(&mut s), before, "{params}: the design changed");
+    }
 }
 
 #[test]
@@ -2097,6 +2129,24 @@ fn checkpoint_restores_with_a_full_undo_history() {
     assert!(s.execute("edit.restore_checkpoint", &json!({"checkpoint": id})).is_err());
 }
 
+/// Regression (#9746): a checkpoint restored already, or one of more than the 16 kept, was
+/// refused with only "no checkpoint N", so a script that restores twice could not tell why.
+#[test]
+fn a_used_up_or_dropped_checkpoint_says_why() {
+    let mut s = Session::default();
+    let id = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": id}));
+    let used = s.execute("edit.restore_checkpoint", &json!({"checkpoint": id})).unwrap_err().to_string();
+    assert!(used.contains("used up") && used.contains("16"), "{used}");
+    let first = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    for _ in 0..MAX_CHECKPOINTS {
+        run(&mut s, "edit.checkpoint", json!({}));
+    }
+    let dropped = s.execute("edit.restore_checkpoint", &json!({"checkpoint": first})).unwrap_err().to_string();
+    assert!(dropped.contains("16"), "{dropped}");
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": first + 1}));
+}
+
 /// Regression (#3242): `file.new` replaced the session and its checkpoints with it, so a
 /// batch that failed after `file.new` could not go back to the design it began in.
 #[test]
@@ -2318,6 +2368,25 @@ fn material_and_appearance_colours_export_to_step() {
     run(&mut s2, "doc.open", json!({"path": p.to_string_lossy()}));
     let _ = std::fs::remove_file(&p);
     check(&step_round_trip(&mut s2, "colours2"));
+}
+
+/// The OBJ export carries the colours of the bodies: the mesh file names a material library
+/// beside it, and the library holds a material per body.
+#[test]
+fn obj_export_writes_the_colours_of_the_bodies() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Red Box"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Red Box"], "color": "#d03030"}));
+    let dir = std::env::temp_dir().join(format!("solidcraft-objcolours-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let obj = dir.join("part.obj");
+    run(&mut s, "file.export", json!({"path": obj.to_string_lossy(), "format": "obj"}));
+    let text = std::fs::read_to_string(&obj).unwrap();
+    assert!(text.contains("\nmtllib part.mtl\n"), "{text}");
+    let mtl = std::fs::read_to_string(dir.join("part.mtl")).unwrap();
+    assert!(mtl.contains("\nnewmtl Red_Box\n"), "{mtl}");
+    assert!(mtl.contains("Kd 0.816 0.188 0.188"), "{mtl}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Face appearances and see-through bodies export: STEP styles on the faces with a
@@ -3593,6 +3662,48 @@ fn computed_import_preserves_file_and_earlier_undo_history() {
     assert!(s.model.state().bodies.is_empty());
 }
 
+/// The unsaved-changes answer is worked out once per pair of documents and revision, and stays
+/// right through every way the design changes: an edit in place (`doc_mut`, which stays in
+/// place), one that bypasses it, a new document equal to the saved one, Save, a change of what
+/// is hidden, and undo back to the saved design. Each answer is checked against the plain
+/// comparison it stands for.
+#[test]
+fn the_unsaved_changes_answer_follows_every_change() {
+    let plain = |s: &Session| (!std::sync::Arc::ptr_eq(&s.doc, &s.saved) && *s.doc != *s.saved) || s.visibility != s.saved_visibility;
+    let check = |s: &Session, want: bool, why: &str| {
+        for _ in 0..2 {
+            assert_eq!(s.is_dirty(), want, "{why}");
+            assert_eq!(plain(s), want, "{why}: the plain comparison");
+        }
+    };
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    s.mark_saved();
+    check(&s, false, "saved");
+    // An edit in place: the cached answer holds the document, yet the edit is not a copy.
+    s.doc = std::sync::Arc::new((*s.doc).clone());
+    check(&s, false, "an equal copy of the saved design");
+    let at = std::sync::Arc::as_ptr(&s.doc);
+    s.doc_mut().name = "Renamed".into();
+    assert_eq!(std::sync::Arc::as_ptr(&s.doc), at, "doc_mut edits in place");
+    check(&s, true, "renamed in place, same revision");
+    s.doc_mut().name = s.saved.name.clone();
+    check(&s, false, "named back in place");
+    // An edit that goes around doc_mut while the answer holds the document copies it.
+    std::sync::Arc::make_mut(&mut s.doc).name = "Elsewhere".into();
+    check(&s, true, "edited past doc_mut");
+    s.mark_saved();
+    check(&s, false, "saved again");
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]}));
+    check(&s, true, "a command");
+    run(&mut s, "edit.undo", json!({}));
+    check(&s, false, "undone back to the saved design");
+    s.visibility.hidden_bodies.push("Body1".into());
+    check(&s, true, "a body hidden");
+    s.visibility.hidden_bodies.clear();
+    check(&s, false, "shown again");
+}
+
 /// Commands evaluated ahead (off the window thread) and then run for real take what was
 /// evaluated: on a design whose states are past the shared cache's budget the second run
 /// evaluated everything again, so an off-thread command cost twice its time.
@@ -4610,6 +4721,40 @@ fn renaming_an_imported_assembly_body_reads_nothing_again() {
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(names(&s), before);
     assert_eq!(s.evaluations, 0, "nor does its undo");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Renaming one of an imported file's solids whose siblings are numbered after it (`Bolt` beside
+/// `Bolt (2)`, as the solids of a STEP file with one label are built) evaluates nothing either: the
+/// rename keeps the siblings' names, so the model is the one evaluating the renamed design gives.
+#[test]
+fn renaming_an_imported_body_with_numbered_siblings_evaluates_nothing() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-step-rename-siblings-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut a = Session::default();
+    run(&mut a, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Bolt"}));
+    run(&mut a, "solid.box", json!({"length": 4, "width": 4, "height": 4, "center": [30, 0, 2], "operation": "new", "body_name": "Bolt (2)"}));
+    let p = dir.join("Bolts.step");
+    run(&mut a, "file.export", json!({"path": p.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": p.to_string_lossy()}));
+    let names = |s: &Session| s.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+    let before = names(&s);
+    let first = before.iter().find(|n| !n.ends_with(" (2)")).cloned().unwrap();
+    assert!(before.contains(&format!("{first} (2)")), "a sibling numbered after it: {before:?}");
+    s.evaluations = 0;
+    run(&mut s, "body.rename", json!({"body": first, "name": "Renamed"}));
+    assert_eq!(s.evaluations, 0, "a rename evaluates nothing");
+    let after = names(&s);
+    assert!(after.contains(&"Renamed".to_string()) && after.contains(&format!("{first} (2)")), "{after:?}");
+    let mut fresh = Session::new((*s.doc).clone());
+    fresh.refresh();
+    assert_eq!(names(&fresh), after, "the same names as evaluating the renamed design");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(names(&s), before);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(names(&s), after);
+    assert_eq!(s.evaluations, 0, "nor do its undo and redo");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

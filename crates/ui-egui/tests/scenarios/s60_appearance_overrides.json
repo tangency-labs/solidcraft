@@ -17,5 +17,20 @@
   {"widget": "OK"},
   {"expect": {"dialog": null, "query": {"command": "appearance.list", "path": ["bodies"], "value": {}}}},
   {"call": "engine.execute", "params": {"command": "edit.undo", "params": {}}},
-  {"expect": {"query": {"command": "appearance.list", "path": ["bodies", "Body1", "opacity"], "value": 0.25}}}
+  {"expect": {"query": {"command": "appearance.list", "path": ["bodies", "Body1", "opacity"], "value": 0.25}}},
+  {"note": "#7935: quick choices on a selected Browser body apply to both selected bodies, leaving a third body alone."},
+  {"call": "engine.execute", "params": {"command": "solid.box", "params": {"body_name": "Body2", "length": 10, "width": 10, "height": 10, "corner": [40, 0, 0], "operation": "new"}}},
+  {"call": "engine.execute", "params": {"command": "solid.box", "params": {"body_name": "Other", "length": 10, "width": 10, "height": 10, "corner": [60, 0, 0], "operation": "new"}}},
+  {"call": "engine.execute", "params": {"command": "select.set", "params": {"items": [{"type": "body", "name": "Body1"}, {"type": "body", "name": "Body2"}]}}},
+  {"call": "ui.menu", "params": {"x": 300, "y": 300, "target": {"type": "body", "name": "Body2"}}},
+  {"call": "ui.menuPick", "params": {"item": "Paint - Red"}},
+  {"expect": {"errors": 0, "query": {"command": "appearance.list", "path": ["bodies", "Body1", "color"], "value": "#c42824"}}},
+  {"expect": {"query": {"command": "appearance.list", "path": ["bodies", "Body2", "color"], "value": "#c42824"}}},
+  {"expect": {"query": {"command": "appearance.list", "path": ["bodies", "Other"], "value": null}}},
+  {"call": "ui.menu", "params": {"x": 300, "y": 300, "target": {"type": "body", "name": "Body1"}}},
+  {"call": "ui.menuPick", "params": {"item": "Remove override"}},
+  {"expect": {"query": {"command": "appearance.list", "path": ["bodies"], "value": {}}}},
+  {"call": "engine.execute", "params": {"command": "edit.undo", "params": {}}},
+  {"expect": {"query": {"command": "appearance.list", "path": ["bodies", "Body1", "color"], "value": "#c42824"}}},
+  {"expect": {"query": {"command": "appearance.list", "path": ["bodies", "Body2", "color"], "value": "#c42824"}}}
 ]
