@@ -29,7 +29,7 @@
 //! | [`BSplineSurface::number_natural_knots`]          | `GetNumberNaturalKnots`                          |
 //! | [`BSplineSurface::number_control_points`]         | `GetNumberControlPoints`                         |
 //! | [`BSplineSurface::is_degenerate_curve`]           | `IsDegenerateCurve`                              |
-//! | [`BSplineSurface::is_parallel_to_vector`]         | `IsParallelToVector`                             |
+//! | [`BSplineSurface::is_parallel_to_vector`], [`BSplineSurface::is_parallel_to_vector_opt_in`], [`BSplineSurface::is_parallel_to_vector_with_kernel`] | `IsParallelToVector` |
 //! | [`BSplineSurface::is_rational`]                   | `IsRational`                                     |
 //! | [`BSplineSurface::greville_abscissa`]             | `GetGrevilleAbscissa`                            |
 //! | [`BSplineSurface::degree`]                        | `GetDegree`                                      |
@@ -98,10 +98,15 @@
 //!   row (u index slowest).
 //! - **`IsParallelToVector`** returns its `SER(sTestVec.Unitize())` status
 //!   (`SM_ERR_INVALID_INPUT`, nonzero) as the boolean for a zero vector, so upstream
-//!   callers see `TRUE`; the port returns `Ok(true)` there. Its line distance test
-//!   passes the second line point as the *direction* of the line
+//!   callers see `TRUE`; the port returns `Ok(true)` there by default. Its line
+//!   distance test passes the second line point as the *direction* of the line
 //!   (`smgu_LinePointDistance(LinePnt, LineEnd, Pnt, ..)` binds the `SmVector3d`
-//!   overload); the port keeps that.
+//!   overload); the port keeps that by default, with an opt-in fix
+//!   `Kernel::fixes.surface_parallel_to_vector_checks` (WR-39, #2145) via
+//!   [`BSplineSurface::is_parallel_to_vector_opt_in`] and
+//!   [`BSplineSurface::is_parallel_to_vector_with_kernel`] that returns `Ok(false)` for
+//!   a zero vector and passes the unitised chord direction `line_vec` instead of
+//!   `line_end`.
 //! - **`CreateLinearSweep`** extrudes the curve's own NURB, which NLib makes 3D in
 //!   place for a 2D curve (upstream casts away `const`); the port takes the curve
 //!   mutably for that reason.
@@ -1251,9 +1256,30 @@ impl BSplineSurface {
     ///
     /// None (the `Result` is kept for the derived surfaces).
     pub fn is_parallel_to_vector(&self, vector: Vec3) -> Result<bool> {
+        self.is_parallel_to_vector_opt_in(vector, false)
+    }
+
+    /// [`BSplineSurface::is_parallel_to_vector`] with kernel opt-in fixes applied
+    /// (`IsParallelToVector`).
+    ///
+    /// # Errors
+    ///
+    /// None (the `Result` is kept for the derived surfaces).
+    pub fn is_parallel_to_vector_with_kernel(&self, k: &Kernel, vector: Vec3) -> Result<bool> {
+        self.is_parallel_to_vector_opt_in(vector, k.fixes.surface_parallel_to_vector_checks)
+    }
+
+    /// [`BSplineSurface::is_parallel_to_vector`], optionally returning `false` for a
+    /// zero `vector` and testing subsequent control points against the chord direction
+    /// rather than `line_end` when `fix_checks` is `true` (WR-39).
+    ///
+    /// # Errors
+    ///
+    /// None (the `Result` is kept for the derived surfaces).
+    pub fn is_parallel_to_vector_opt_in(&self, vector: Vec3, fix_checks: bool) -> Result<bool> {
         let Ok(test_vec) = vector.unitize() else {
             // SER(sTestVec.Unitize()): SM_ERR_INVALID_INPUT returned as the boolean
-            return Ok(true);
+            return Ok(!fix_checks);
         };
 
         // the SmPlane branch (|Z . v| < SM_EFF_ZERO * (1 + |origin|max)) is
@@ -1279,9 +1305,11 @@ impl BSplineSurface {
             if line_vec.dot(test_vec).abs() < 1.0 - tol {
                 return Ok(false);
             }
+            let dir = if fix_checks { line_vec } else { line_end };
             for pnt in rest {
                 // smgu_LinePointDistance(LinePnt, LineEnd, ..): LineEnd is the direction
-                let (distance, _) = line_point_distance(line_pnt, line_end, pnt?);
+                // upstream; line_vec under WR-39 opt-in.
+                let (distance, _) = line_point_distance(line_pnt, dir, pnt?);
                 if distance > tol {
                     return Ok(false);
                 }
@@ -2482,6 +2510,12 @@ fn polar_guess_basis(g: &PolarBox) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::curve::curve::Curve;
+    use crate::kernel::UpstreamFixes;
+    use crate::nurbs::b_spline_curve::{BSplineCurveForm, CanonicalData};
+    use crate::surface::plane::Plane;
+    use crate::surface::surf_of_extrusion::SurfOfExtrusion;
+    use crate::surface::surface::Surface as SmSurface;
 
     fn bilinear() -> BSplineSurface {
         BSplineSurface::create_bilinear_surface(
@@ -2719,5 +2753,227 @@ mod tests {
             d.control_points = &[];
             assert!(BSplineSurface::create_canonical(&d).is_err());
         }
+    }
+
+    fn quadratic_patch(pts: &[Point3; 9]) -> BSplineSurface {
+        BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 2,
+            v_degree: 2,
+            control_points: pts,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &[3, 3],
+            v_multiplicities: &[3, 3],
+            u_knots: &[0.0, 1.0],
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::PiecewiseBezierKnots,
+            weights: None,
+            uv_domain: None,
+        })
+        .unwrap()
+    }
+
+    fn parallel(s: &BSplineSurface, k: &Kernel, v: Vec3) -> bool {
+        s.is_parallel_to_vector_with_kernel(k, v).unwrap()
+    }
+
+    fn srf_parallel(s: &SmSurface, k: &Kernel, v: Vec3) -> bool {
+        s.is_parallel_to_vector(k, v).unwrap()
+    }
+
+    #[test]
+    fn wr39_zero_vector_returns_false_when_opted_in() {
+        let k_def = Kernel::default();
+        let mut k_fix = Kernel::default();
+        k_fix.fixes.surface_parallel_to_vector_checks = true;
+
+        let srf = bilinear();
+        let empty = BSplineSurface::new();
+        let axis = Axis2Placement::default();
+        let plane = Plane::create_canonical(&axis).unwrap();
+        let tiny = Vec3::new(1.0e-15, 0.0, 0.0);
+
+        for v in [Vec3::ZERO, tiny] {
+            assert!(srf.is_parallel_to_vector(v).unwrap());
+            assert!(parallel(&srf, &k_def, v));
+            assert!(!parallel(&srf, &k_fix, v));
+            assert!(!srf.is_parallel_to_vector_opt_in(v, true).unwrap());
+
+            assert!(empty.is_parallel_to_vector(v).unwrap());
+            assert!(!empty.is_parallel_to_vector_opt_in(v, true).unwrap());
+
+            assert!(plane.is_parallel_to_vector(v));
+            assert!(plane.is_parallel_to_vector_with_kernel(&k_def, v));
+            assert!(!plane.is_parallel_to_vector_with_kernel(&k_fix, v));
+            assert!(!plane.is_parallel_to_vector_opt_in(v, true));
+        }
+
+        assert!(plane.is_parallel_to_vector_with_kernel(&k_fix, Vec3::X));
+        assert!(!plane.is_parallel_to_vector_with_kernel(&k_fix, Vec3::Z));
+        assert!(!empty.is_parallel_to_vector_opt_in(Vec3::X, true).unwrap());
+    }
+
+    #[test]
+    fn wr39_translated_quadratic_extruded_surfaces_u_and_v_directions() {
+        let k_def = Kernel::default();
+        let mut k_fix = Kernel::default();
+        k_fix.fixes.surface_parallel_to_vector_checks = true;
+
+        // Constant-U rulings parallel to +Z, translated near (10, 20, 5).
+        let u_extruded = quadratic_patch(&[
+            Point3::new(10.0, 20.0, 5.0),
+            Point3::new(10.0, 20.0, 7.0),
+            Point3::new(10.0, 20.0, 9.0),
+            Point3::new(11.0, 21.0, 5.0),
+            Point3::new(11.0, 21.0, 7.0),
+            Point3::new(11.0, 21.0, 9.0),
+            Point3::new(12.0, 20.0, 5.0),
+            Point3::new(12.0, 20.0, 7.0),
+            Point3::new(12.0, 20.0, 9.0),
+        ]);
+        assert!(!parallel(&u_extruded, &k_def, Vec3::Z));
+        assert!(parallel(&u_extruded, &k_fix, Vec3::Z));
+        assert!(parallel(&u_extruded, &k_fix, Vec3::new(0.0, 0.0, -3.0)));
+        assert!(!parallel(&u_extruded, &k_fix, Vec3::X));
+
+        // Constant-V rulings parallel to +X, translated near (10, 20, 5).
+        let v_extruded = quadratic_patch(&[
+            Point3::new(10.0, 20.0, 5.0),
+            Point3::new(10.0, 21.0, 6.0),
+            Point3::new(10.0, 22.0, 5.0),
+            Point3::new(13.0, 20.0, 5.0),
+            Point3::new(13.0, 21.0, 6.0),
+            Point3::new(13.0, 22.0, 5.0),
+            Point3::new(16.0, 20.0, 5.0),
+            Point3::new(16.0, 21.0, 6.0),
+            Point3::new(16.0, 22.0, 5.0),
+        ]);
+        assert!(!parallel(&v_extruded, &k_def, Vec3::X));
+        assert!(parallel(&v_extruded, &k_fix, Vec3::X));
+        assert!(!parallel(&v_extruded, &k_fix, Vec3::Y));
+
+        // Ruling whose second control point lands at (0, 0, 0) while non-degenerate.
+        let through_origin = quadratic_patch(&[
+            Point3::new(0.0, 0.0, -1.0),
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(0.0, 0.0, 1.0),
+            Point3::new(1.0, 0.0, -1.0),
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(1.0, 0.0, 1.0),
+            Point3::new(2.0, 1.0, -1.0),
+            Point3::new(2.0, 1.0, 0.0),
+            Point3::new(2.0, 1.0, 1.0),
+        ]);
+        assert!(!parallel(&through_origin, &k_def, Vec3::Z));
+        assert!(parallel(&through_origin, &k_fix, Vec3::Z));
+    }
+
+    #[test]
+    fn wr39_bent_non_parallel_surface_false_positive_rejected() {
+        let k_def = Kernel::default();
+        let mut k_fix = Kernel::default();
+        k_fix.fixes.surface_parallel_to_vector_checks = true;
+
+        // Each i_u row has P[i_u][1] - P[i_u][0] = (0, 0, 2) parallel to +Z, while
+        // P[i_u][2] = P[i_u][0] + 0.5 * P[i_u][1] bends >11 units off the +Z line yet
+        // lies on the wrong line P[i_u][0] + t * P[i_u][1].
+        let bent_u = quadratic_patch(&[
+            Point3::new(10.0, 20.0, 5.0),
+            Point3::new(10.0, 20.0, 7.0),
+            Point3::new(15.0, 30.0, 8.5),
+            Point3::new(11.0, 20.0, 5.0),
+            Point3::new(11.0, 20.0, 7.0),
+            Point3::new(16.5, 30.0, 8.5),
+            Point3::new(12.0, 20.0, 5.0),
+            Point3::new(12.0, 20.0, 7.0),
+            Point3::new(18.0, 30.0, 8.5),
+        ]);
+        assert!(parallel(&bent_u, &k_def, Vec3::Z));
+        assert!(!parallel(&bent_u, &k_fix, Vec3::Z));
+
+        // Same false-positive pattern in the V-constant loop along +X.
+        let bent_v = quadratic_patch(&[
+            Point3::new(10.0, 20.0, 5.0),
+            Point3::new(10.0, 21.0, 5.0),
+            Point3::new(10.0, 22.0, 6.0),
+            Point3::new(12.0, 20.0, 5.0),
+            Point3::new(12.0, 21.0, 5.0),
+            Point3::new(12.0, 22.0, 6.0),
+            Point3::new(16.0, 30.0, 7.5),
+            Point3::new(16.0, 31.5, 7.5),
+            Point3::new(16.0, 33.0, 9.0),
+        ]);
+        assert!(parallel(&bent_v, &k_def, Vec3::X));
+        assert!(!parallel(&bent_v, &k_fix, Vec3::X));
+    }
+
+    #[test]
+    fn wr39_surface_dispatch_and_flag_mut() {
+        assert!(UpstreamFixes::NAMES.contains(&"surface_parallel_to_vector_checks"));
+        let k_def = Kernel::default();
+        let mut k_fix = Kernel::default();
+        let slot = k_fix.fixes.flag_mut("surface_parallel_to_vector_checks");
+        assert_eq!(slot.as_deref(), Some(&false));
+        *slot.unwrap() = true;
+        assert!(k_fix.fixes.surface_parallel_to_vector_checks);
+
+        let axis = Axis2Placement::default();
+        let plane = Plane::create_canonical(&axis).unwrap();
+        let s_plane = SmSurface::from(plane);
+        assert!(srf_parallel(&s_plane, &k_def, Vec3::ZERO));
+        assert!(!srf_parallel(&s_plane, &k_fix, Vec3::ZERO));
+        assert!(srf_parallel(&s_plane, &k_fix, Vec3::Y));
+        assert!(!srf_parallel(&s_plane, &k_fix, Vec3::Z));
+
+        let patch = quadratic_patch(&[
+            Point3::new(10.0, 20.0, 5.0),
+            Point3::new(10.0, 20.0, 7.0),
+            Point3::new(10.0, 20.0, 9.0),
+            Point3::new(11.0, 21.0, 5.0),
+            Point3::new(11.0, 21.0, 7.0),
+            Point3::new(11.0, 21.0, 9.0),
+            Point3::new(12.0, 20.0, 5.0),
+            Point3::new(12.0, 20.0, 7.0),
+            Point3::new(12.0, 20.0, 9.0),
+        ]);
+        let s_bspline = SmSurface::from(patch);
+        assert!(srf_parallel(&s_bspline, &k_def, Vec3::ZERO));
+        assert!(!srf_parallel(&s_bspline, &k_fix, Vec3::ZERO));
+        assert!(!srf_parallel(&s_bspline, &k_def, Vec3::Z));
+        assert!(srf_parallel(&s_bspline, &k_fix, Vec3::Z));
+
+        let gen_pts = [
+            Point3::new(10.0, 20.0, 5.0),
+            Point3::new(12.0, 20.0, 5.0),
+            Point3::new(14.0, 20.0, 5.0),
+        ];
+        let gen_bs = BSplineCurve::create_canonical(&CanonicalData {
+            dim: 3,
+            degree: 2,
+            control_points: &gen_pts,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[3, 3],
+            knots: &[0.0, 1.0],
+            knot_type: KnotType::PiecewiseBezierKnots,
+            weights: None,
+            trim: None,
+        })
+        .unwrap();
+        let ext = SurfOfExtrusion::new(
+            &k_def,
+            Curve::from(gen_bs),
+            Point3::new(10.0, 20.0, 5.0),
+            Vec3::Z,
+            Extent2d::from_bounds(0.0, 0.0, 1.0, 2.0),
+            false,
+        )
+        .unwrap();
+        let s_ext = SmSurface::from(ext);
+        assert!(srf_parallel(&s_ext, &k_def, Vec3::ZERO));
+        assert!(!srf_parallel(&s_ext, &k_fix, Vec3::ZERO));
+        assert!(srf_parallel(&s_ext, &k_def, Vec3::Z));
+        assert!(srf_parallel(&s_ext, &k_fix, Vec3::Z));
+        assert!(!srf_parallel(&s_ext, &k_def, Vec3::X));
+        assert!(srf_parallel(&s_ext, &k_fix, Vec3::X));
+        assert!(!srf_parallel(&s_ext, &k_fix, Vec3::Y));
     }
 }

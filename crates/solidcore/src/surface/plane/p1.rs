@@ -37,7 +37,7 @@
 //! | [`Plane::step_uv_domain`], [`Plane::position`], [`Plane::uv_scale`] | `GetSTEPUVDomain`, `GetPosition`, `GetUVScale` |
 //! | [`Plane::is_kind_of`], [`Plane::TYPE`], [`Plane::type_string`], [`Plane::class_string`] | `IsKindOf`, `GetType`, `GetTypeString`, `GetClassString` (`SM_COMMON`) |
 //! | [`Plane::base`], [`Plane::base_with_nurb`], [`Plane::natural_uv_domain`] | the `SmBSplineSurface` part, `GetOrCreateGwNurbPointer`, `GetNaturalUVDomain` (inherited) |
-//! | [`Plane::max_analytic_domain`], [`Plane::is_parallel_to_vector`], [`Plane::reverse`], [`Plane::swap_uv`] | `SmBSplineSurface::GetMaxAnalyticDomain`, `IsParallelToVector`, `Reverse`, `SwapUV` (inherited, re-dispatched) |
+//! | [`Plane::max_analytic_domain`], [`Plane::is_parallel_to_vector`], [`Plane::is_parallel_to_vector_opt_in`], [`Plane::is_parallel_to_vector_with_kernel`], [`Plane::reverse`], [`Plane::swap_uv`] | `SmBSplineSurface::GetMaxAnalyticDomain`, `IsParallelToVector`, `Reverse`, `SwapUV` (inherited, re-dispatched) |
 //! | [`Plane::create_extended_surface`], [`Plane::create_extended_surface_dir`] | `SmBSplineSurface::CreateExtendedSurface` (both overloads; inherited, re-dispatched to the `IsSingularity` / `IsClosed` overrides) |
 //!
 //! Deviations:
@@ -80,6 +80,12 @@
 //!   [`Plane::reparameterize_opt_in`] and [`Plane::reparameterize_with_kernel`] that
 //!   updates the origin to `origin_max`. Its `Notify` calls only drop caches and
 //!   inform owners and are omitted, as for B-splines.
+//! - **`IsParallelToVector`** (inherited from `SmBSplineSurface`) returns the failed
+//!   `Unitize` status (`SM_ERR_INVALID_INPUT`, nonzero) as `SmBoolean` for a zero
+//!   vector, so upstream callers see `TRUE`. The port keeps `true` by default, with an
+//!   opt-in fix `Kernel::fixes.surface_parallel_to_vector_checks` (WR-39, #2145) via
+//!   [`Plane::is_parallel_to_vector_opt_in`] and
+//!   [`Plane::is_parallel_to_vector_with_kernel`] that returns `false`.
 //! - **Co-ported callees.** `SmTol::MapTo2d(SmTol3d, SmVector2d, SmSurface)` (unit
 //!   `geom.tol`, waiting on `SmSurface::Evaluate1stDerivatives`) is ported here for a
 //!   plane (the only surface it is called with). `Evaluate1stDerivatives` /
@@ -574,8 +580,22 @@ impl Plane {
     /// `true` for a zero vector (upstream returns the failed `Unitize` status).
     #[must_use]
     pub fn is_parallel_to_vector(&self, vector: Vec3) -> bool {
+        self.is_parallel_to_vector_opt_in(vector, false)
+    }
+
+    /// [`Plane::is_parallel_to_vector`] with kernel opt-in fixes applied
+    /// (`IsParallelToVector`).
+    #[must_use]
+    pub fn is_parallel_to_vector_with_kernel(&self, k: &Kernel, vector: Vec3) -> bool {
+        self.is_parallel_to_vector_opt_in(vector, k.fixes.surface_parallel_to_vector_checks)
+    }
+
+    /// [`Plane::is_parallel_to_vector`], optionally returning `false` when `vector`
+    /// cannot be unitised (`fix_checks` `true`, WR-39).
+    #[must_use]
+    pub fn is_parallel_to_vector_opt_in(&self, vector: Vec3, fix_checks: bool) -> bool {
         let Ok(test_vec) = vector.unitize() else {
-            return true;
+            return !fix_checks;
         };
         let z_axis = self.position.z_axis();
         let tol1 = EFF_ZERO * (1.0 + self.position.origin().max_dimension());

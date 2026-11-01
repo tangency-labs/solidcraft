@@ -981,6 +981,16 @@ pub struct UpstreamFixes {
     /// shift happened (WR-87; `plan/upstream-issues/WR-87--sm-checkseamcrossing-returns-sm-success-as-its-smboolean.md`
     /// and its 2026-10-31 addendum). Off by default for pinned C++ parity.
     pub check_seam_crossing_unclosed: bool,
+    /// `SmBSplineSurface::IsParallelToVector` (and `SmPlane`'s inherited branch) returns
+    /// `false` when `vector` cannot be unitised, and tests subsequent control points of
+    /// each row or column against the chord direction `(line_end - line_pnt).unitize()`
+    /// rather than `line_end`. Upstream returns `SER(sTestVec.Unitize())`'s
+    /// `SM_ERR_INVALID_INPUT` (1004) as `SmBoolean` (`true`) for a zero vector and passes
+    /// `sLineEnd` as the line direction to `smgu_LinePointDistance(sLinePnt, sLineEnd, ..)`
+    /// (WR-39, #2145;
+    /// `plan/upstream-issues/WR-39--addendum-2026-10-31-parallel-to-vector.md`). Off by
+    /// default for pinned C++ parity.
+    pub surface_parallel_to_vector_checks: bool,
     /// `DoIntersection`'s start-point loop fails with [`crate::SolidError::InvalidInput`]
     /// once its traces have taken [`MAX_START_LOOP_TRACE_STEPS`] `ComputeNextPoint` calls
     /// together. Upstream's loop ignores a failed trace and goes on to the next start point,
