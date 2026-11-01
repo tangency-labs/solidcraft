@@ -26,6 +26,16 @@
 //! `SmCurve::ApproximateLength` (unit `curve.curve_p2`). Every run has at least
 //! [`MIN_GENERATED`] generated cases; generated inputs the ffi wrapper rejects are
 //! redrawn.
+//!
+//! An `interp_crv` case with `given_params` (fixture cases only, never generated) runs
+//! the SolidCraft fork's `CreateInterpolatingCurve(..., cpOptParams)` (tangency-labs/
+//! smlib#76 68f6913, ported as `create_interpolating_curve_with_params`) on the Rust
+//! side, with the parameters `par` gives as `cpOptParams`, computed by the Rust side
+//! itself (`param_values`, upstream `N_FitCalcCrvParamValues`). The pinned C++ has no
+//! such argument; its side runs `CreateInterpolatingCurve` with `par`, which the fork
+//! routes through `N_FitCrvHighDerivs`, that computation followed by
+//! `N_FitCrvHighDerivsParams`. Only the end-derivative branches take parameters, so
+//! such cases have no vector per point and are not the degree-1 two-point line.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -39,7 +49,7 @@ use solidcore::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
 use solidcore::nurbs::b_spline_curve_n_lib::{HelixSpec, InValueType, TrimMode};
 use solidcore::nurbs::crv_adv::p1::CurveEnd;
 use solidcore::nurbs::crv_basic::Curve;
-use solidcore::nurbs::crv_fit::p1::ParamMethod;
+use solidcore::nurbs::crv_fit::p1::{param_values, ParamMethod};
 use solidcore::geom::vector2d::Vec2;
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
@@ -179,6 +189,10 @@ enum OpIn {
         #[serde(default)]
         more: Option<Vec<[f64; 3]>>,
         ignore: bool,
+        /// The Rust side passes the parameters `par` gives as the fork's
+        /// `cpOptParams` (see the module docs); the C++ side ignores it.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        given_params: bool,
     },
     Dampen {
         factor: f64,
@@ -460,6 +474,7 @@ fn cpp_input(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
             vecs,
             more,
             ignore,
+            ..
         } => {
             o.extend([f64::from(*par), *dim as f64, *deg as f64]);
             encode_pts(pts, &mut o);
@@ -854,16 +869,26 @@ fn rust_static(op: &OpIn, o: &mut Vec<f64>) -> Result<(), Fail> {
             vecs,
             more,
             ignore,
+            given_params,
         } => {
             let more = more.as_ref().map(|m| pts_of(m));
-            let c = BSplineCurve::create_interpolating_curve(
-                param_of(*par, false),
+            let pts = pts_of(pts);
+            let par = param_of(*par, false);
+            // the fork's cpOptParams: the parameters of `par` (N_FitCalcCrvParamValues)
+            let params = if *given_params {
+                Some(param_values(&pts, par).map_err(|e| harness(format!("parameters: {e}")))?)
+            } else {
+                None
+            };
+            let c = BSplineCurve::create_interpolating_curve_with_params(
+                par,
                 *dim,
                 *deg,
-                &pts_of(pts),
+                &pts,
                 &pts_of(vecs),
                 more.as_deref(),
                 *ignore,
+                params.as_deref(),
             )?;
             push_new(o, Some(&c));
         }
@@ -1420,6 +1445,7 @@ fn gen_static_op(rng: &mut Rng) -> Inputs {
                 vecs,
                 more,
                 ignore: rng.chance(0.5),
+                given_params: false,
             }
         }
         6..=8 => {
@@ -1542,5 +1568,47 @@ impl UnitDiff for Runner {
         // the FFI refuses (fuzz00880: a 2^31 count, 16 GiB knot arrays).
         ffi::validate(i.op.ffi(), &cpp_input(&i)?).map_err(|e| harness(e.to_string()))?;
         rust(&i)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `CreateInterpolatingCurve` with the parameters of `par` given as the fork's
+    /// `cpOptParams` (tangency-labs/smlib#76 68f6913) is the pinned routine with `par`,
+    /// bit for bit, on every `given_params` fixture, so its C++ comparison (against
+    /// the pinned routine) holds the fork's argument to the C++ wherever the plain
+    /// case passes. The fixtures reach every end-derivative branch, a zero start
+    /// speed with a given second derivative among them, and the refusals.
+    #[test]
+    fn given_params_fixtures_are_the_pinned_interpolation() {
+        let fixtures: Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/nurbs.b_spline_curve_n_lib/interp_given_params.json"
+        ))
+        .unwrap();
+        let (mut built, mut refused) = (0, 0);
+        for case in fixtures["cases"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let given: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
+            let mut pinned = given.clone();
+            let OpIn::InterpCrv { given_params, .. } = &mut pinned.op else {
+                panic!("{name}: not interp_crv");
+            };
+            assert!(*given_params, "{name}");
+            *given_params = false;
+            let (a, b) = (rust(&given).unwrap(), rust(&pinned).unwrap());
+            // (`Debug` prints each value exactly, so equal text is equal bits)
+            assert_eq!(format!("{a:?}"), format!("{b:?}"), "{name}");
+            if a.values["status"] == [0.0] {
+                built += 1;
+            } else {
+                refused += 1;
+            }
+        }
+        assert!(
+            built >= 80 && refused >= 4,
+            "{built} built, {refused} refused"
+        );
     }
 }

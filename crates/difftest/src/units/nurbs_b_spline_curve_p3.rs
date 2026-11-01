@@ -29,6 +29,12 @@
 //! `SmCCIntersectENFO::Evaluate`, `curve.curve_p5`) and `AssertValid` past its
 //! knot checks (`SmCurve::AssertValid`, `curve.curve_p4`; `SmTol::IsDegenerate`).
 //! `AssertNoPeriodicJump` runs on built-in cases (`jump_*`, see [`jump_cases`]).
+//! `fixtures/nurbs.b_spline_curve_p3/zero_speed_end.json` checks curves with a
+//! zero-speed end (coincident end control points, a second derivative that does not
+//! vanish: the shape the SolidCraft fork's tangency-labs/smlib#76 6ca3405 accepts at a
+//! vertex where an edge's faces touch, WR-668) and ordinary coincident-point faults,
+//! as free curves: the pinned check, and the opt-in's, which needs an edge, both
+//! refuse them.
 //! Every run has at least [`MIN_GENERATED`] generated cases; generated inputs the ffi
 //! wrapper rejects are redrawn.
 
@@ -42,7 +48,7 @@ use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::geom_utility::p2::ContinuityType;
 use solidcore::geom::vector3d::Vec3;
-use solidcore::kernel::Kernel;
+use solidcore::kernel::{Kernel, UpstreamFixes};
 use solidcore::nurbs::b_spline_curve::{
     BSplineCurve, ControlPointForm, GapFix, NurbCircleParam,
 };
@@ -569,16 +575,20 @@ impl From<HarnessError> for Fail {
     }
 }
 
-/// Runs an op on `c` (and `other` for joins and gaps); pushes its outputs (after the
-/// status) on success.
+/// Runs an op on `c` (and `other` for joins and gaps) with the opt-in `fixes` (the
+/// default in the gate); pushes its outputs (after the status) on success.
 fn rust_op(
     op: &OpIn,
     c: &mut BSplineCurve,
     other: Option<&mut BSplineCurve>,
     o: &mut Vec<f64>,
+    fixes: &UpstreamFixes,
 ) -> Result<(), Fail> {
     let ivl = |a: f64, b: f64| Extent1d::from_min_max(a, b);
-    let k = Kernel::default();
+    let k = Kernel {
+        fixes: *fixes,
+        ..Kernel::default()
+    };
     match op {
         OpIn::Scale { sv, ev, deg } => {
             let r = c.create_by_scale_trans_rot(v3(*sv), v3(*ev), *deg)?;
@@ -656,13 +666,18 @@ fn rust_op(
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
+    rust_with_fixes(i, &UpstreamFixes::default())
+}
+
+/// [`rust`] with the opt-in `fixes` (runner tests only; the gate runs the default).
+fn rust_with_fixes(i: &Inputs, fixes: &UpstreamFixes) -> Result<Output, HarnessError> {
     let mut this = build_this(&i.this)?;
     let mut other = match &i.op {
         OpIn::Join { other, .. } | OpIn::Gap { other, .. } => Some(build_this(other)?),
         _ => None,
     };
     let mut o = vec![0.0];
-    match rust_op(&i.op, &mut this, other.as_mut(), &mut o) {
+    match rust_op(&i.op, &mut this, other.as_mut(), &mut o, fixes) {
         Ok(()) => {}
         Err(Fail::Harness(e)) => return Err(e),
         Err(Fail::Solid(e)) => {
@@ -1188,5 +1203,49 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         rust(&case.parse()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// WR-668's opt-in (`curve_check_zero_speed_tangent_end`, tangency-labs/smlib#76
+    /// 6ca3405) takes a zero-speed end only at a vertex of the curve's edge: on the
+    /// free curves of `zero_speed_end.json`, which the C++ gate compares with the
+    /// default, it reports exactly what the default reports, bit for bit, with and
+    /// without the minimum radius read (`bspline_check_min_radius`, WR-382). Coincident
+    /// first control points fail test 3. Coincident last ones pass test 4, which
+    /// reports the first pair's values, so the backwards curve fails only once the
+    /// minimum radius is read (tests 13/14).
+    #[test]
+    fn zero_speed_end_fixtures_on_no_edge_ignore_the_fix() {
+        let fixtures: Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/nurbs.b_spline_curve_p3/zero_speed_end.json"
+        ))
+        .unwrap();
+        let cases = fixtures["cases"].as_array().unwrap();
+        assert!(cases.len() >= 8);
+        for min_radius in [false, true] {
+            let mut off = UpstreamFixes::default();
+            off.bspline_check_min_radius = min_radius;
+            let mut on = off;
+            on.curve_check_zero_speed_tangent_end = true;
+            for case in cases {
+                let name = case["name"].as_str().unwrap();
+                let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
+                assert!(matches!(i.op, OpIn::Assert { .. }), "{name}");
+                let a = rust_with_fixes(&i, &off).unwrap();
+                let b = rust_with_fixes(&i, &on).unwrap();
+                // (`Debug` prints each value exactly, so equal text is equal bits)
+                assert_eq!(format!("{a:?}"), format!("{b:?}"), "{name}");
+                let valid = name.starts_with("zero_speed_end") && !min_radius;
+                assert_eq!(
+                    a.values["flag"],
+                    [f64::from(u8::from(valid))],
+                    "{name}: {a:?}"
+                );
+            }
+        }
     }
 }

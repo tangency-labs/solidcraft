@@ -68,7 +68,8 @@
 //!   `short`), so on its unchecked one-vector path a degree of 32768 or more wraps; the
 //!   port takes a `usize` (no wrap), and the difftest FFI caps the degree at
 //!   `NL_MAXDEG` (17).
-//! - **Given parameters (SolidCraft fork `0cc8cd4`).** The fork's optional last
+//! - **Given parameters (SolidCraft fork `0cc8cd4`; `68f6913` in tangency-labs/smlib#76,
+//!   the same patch).** The fork's optional last
 //!   argument `cpOptParams` of `CreateInterpolatingCurve` is
 //!   [`BSplineCurve::create_interpolating_curve_with_params`];
 //!   [`BSplineCurve::create_interpolating_curve`] is it with `None` (the pinned

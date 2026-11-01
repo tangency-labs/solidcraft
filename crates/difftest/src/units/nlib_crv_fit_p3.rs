@@ -14,6 +14,14 @@
 //! (x y z w) and `knots`.
 //!
 //! Points are `[x, y, z]`. Every run has at least [`MIN_GENERATED`] generated cases.
+//!
+//! `high_derivs_params` (fixture cases only, never generated) runs the SolidCraft
+//! fork's `N_FitCrvHighDerivsParams` (tangency-labs/smlib#76 68f6913, ported as
+//! `interp_high_derivs_params`) on the Rust side at the parameters `par` gives, which
+//! the Rust side computes itself (`param_values`, upstream `N_FitCalcCrvParamValues`).
+//! The pinned C++ has no such entry point; its side runs `N_FitCrvHighDerivs` with
+//! `par`, which the fork splits into exactly that computation and that fit. Parameters
+//! other than a parametrization's have no C++ counterpart at the pin.
 
 // Harness code: the input builders index their own freshly sized arrays; a panic
 // would fail the case (runner panics are caught).
@@ -24,7 +32,7 @@ use serde_json::Value;
 
 use solidcore::math::Vec3;
 use solidcore::nurbs::crv_basic::Curve;
-use solidcore::nurbs::crv_fit::p1::ParamMethod;
+use solidcore::nurbs::crv_fit::p1::{param_values, ParamMethod};
 use solidcore::nurbs::crv_fit::p3::{self as fit, EndTangents, ParamSource, VectorKind};
 use solidcore::nurbs::math::CPoint;
 use solidcore::{Result as SolidResult, SolidError};
@@ -97,6 +105,17 @@ enum Inputs {
         par: i32,
     },
     HighDerivs {
+        pts: Vec<[f64; 3]>,
+        p: usize,
+        #[serde(default)]
+        ds: Vec<[f64; 3]>,
+        #[serde(default)]
+        de: Vec<[f64; 3]>,
+        par: i32,
+    },
+    /// `high_derivs` at the parameters `par` gives, through the fork's
+    /// `N_FitCrvHighDerivsParams` on the Rust side (see the module docs).
+    HighDerivsParams {
         pts: Vec<[f64; 3]>,
         p: usize,
         #[serde(default)]
@@ -216,6 +235,13 @@ fn cpp_flat(i: &Inputs) -> Result<Vec<f64>, FfiError> {
             ffi::closed_conditions(pts, *p, d.as_deref(), *k, *par)
         }
         Inputs::HighDerivs {
+            pts,
+            p,
+            ds,
+            de,
+            par,
+        }
+        | Inputs::HighDerivsParams {
             pts,
             p,
             ds,
@@ -413,6 +439,24 @@ fn rust_flat(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
             &vs(de),
             par_method(*par)?,
         )),
+        Inputs::HighDerivsParams {
+            pts,
+            p,
+            ds,
+            de,
+            par,
+        } => {
+            let a = vs(pts);
+            let u = param_values(&a, par_method(*par)?)
+                .map_err(|e| harness(format!("parameters: {e}")))?;
+            curve_record(&fit::interp_high_derivs_params(
+                &a,
+                *p,
+                &vs(ds),
+                &vs(de),
+                &u,
+            ))
+        }
     })
 }
 
@@ -763,6 +807,7 @@ mod tests {
             Inputs::KnotsAndTangents { .. } => "knots_and_tangents",
             Inputs::ClosedConditions { .. } => "closed_conditions",
             Inputs::HighDerivs { .. } => "high_derivs",
+            Inputs::HighDerivsParams { .. } => "high_derivs_params",
         }
     }
 
@@ -792,5 +837,47 @@ mod tests {
             );
             assert!(!seen.contains_key(&(op, -1)), "{op}: non-NLib Rust error");
         }
+    }
+
+    /// The fork's `N_FitCrvHighDerivsParams` at the parameters of `par` is the pinned
+    /// `N_FitCrvHighDerivs` with `par` (tangency-labs/smlib#76 68f6913), bit for bit,
+    /// on every `high_derivs_params` fixture: so its C++ comparison (against the pinned
+    /// routine) holds the fork entry point to the C++ wherever `high_derivs` passes.
+    /// The fixtures cover successes and the input errors.
+    #[test]
+    fn high_derivs_params_fixtures_are_the_pinned_fit() {
+        let fixtures: Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/nlib.crv_fit_p3/high_derivs_params.json"
+        ))
+        .unwrap();
+        let mut statuses: BTreeMap<i64, usize> = BTreeMap::new();
+        for case in fixtures["cases"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let i: Inputs = serde_json::from_value(case["inputs"].clone()).unwrap();
+            let Inputs::HighDerivsParams {
+                pts,
+                p,
+                ds,
+                de,
+                par,
+            } = i.clone()
+            else {
+                panic!("{name}: not high_derivs_params");
+            };
+            let at_params = rust_flat(&i).unwrap();
+            let pinned = rust_flat(&Inputs::HighDerivs {
+                pts,
+                p,
+                ds,
+                de,
+                par,
+            })
+            .unwrap();
+            let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+            assert_eq!(bits(&at_params), bits(&pinned), "{name}");
+            *statuses.entry(at_params[0] as i64).or_default() += 1;
+        }
+        assert!(statuses.get(&0).copied().unwrap_or(0) >= 20, "{statuses:?}");
+        assert!(statuses.keys().any(|s| *s > 0), "{statuses:?}");
     }
 }

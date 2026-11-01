@@ -55,7 +55,8 @@
 //!   mismatch (`NL_INP_ERR`, as upstream's wrapped sum), and sums whose degree check
 //!   comes later are formed after that check (the order is not observable).
 //! - [`interp_high_derivs_params`] ports the SolidCraft fork's split of
-//!   `N_FitCrvHighDerivs` (fork commit `0cc8cd4`): the interpolation at given
+//!   `N_FitCrvHighDerivs` (fork commit `0cc8cd4`, replayed patch for patch as `68f6913`
+//!   in tangency-labs/smlib#76): the interpolation at given
 //!   parameters, which [`interp_high_derivs`] calls with the parameters of `par`.
 //!   The wrapper keeps the pinned upstream order (input checks, then the
 //!   parameters), so its results and errors are those of the unsplit routine (the
