@@ -96,6 +96,35 @@ impl PointExprs3 {
 /// Most a 3D length dimension may ask for (mm).
 pub const MAX_WIRE_LENGTH: f64 = 1e6;
 
+/// An origin plane of the wires' coordinate space.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OriginPlane {
+    Xy,
+    Yz,
+    Xz,
+}
+
+impl OriginPlane {
+    /// Its unit normal (XY's is +Z, YZ's +X, XZ's +Y).
+    pub fn normal(self) -> Vec3 {
+        match self {
+            OriginPlane::Xy => Vec3::new(0.0, 0.0, 1.0),
+            OriginPlane::Yz => Vec3::new(1.0, 0.0, 0.0),
+            OriginPlane::Xz => Vec3::new(0.0, 1.0, 0.0),
+        }
+    }
+    /// The plane a name gives: `xy`, `yz` or `xz` (either case, `zx` too).
+    pub fn from_name(name: &str) -> Option<OriginPlane> {
+        match name.to_ascii_lowercase().as_str() {
+            "xy" | "yx" => Some(OriginPlane::Xy),
+            "yz" | "zy" => Some(OriginPlane::Yz),
+            "xz" | "zx" => Some(OriginPlane::Xz),
+            _ => None,
+        }
+    }
+}
+
 /// What a 3D constraint asks for.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -131,6 +160,33 @@ pub enum WireConstraintKind {
     Angle { a: String, b: String, value: f64 },
     /// The radius of a drawn 3D arc.
     Radius { arc: String, value: f64 },
+    /// Two drawn 3D lines parallel (either way round).
+    Parallel { a: String, b: String },
+    /// Two drawn 3D lines square to each other (they need not meet).
+    Perpendicular { a: String, b: String },
+    /// Two drawn 3D lines on one infinite line.
+    Collinear { a: String, b: String },
+    /// Two drawn 3D lines of equal length, or two drawn 3D arcs of equal radius.
+    Equal { a: String, b: String },
+    /// A drawn 3D line tangent to a drawn 3D arc where they meet: the line's end `line_end`
+    /// (0: start, 1: end) on the arc's end `arc_end` (0: start, 2: end), the line running along
+    /// the arc's direction there and in its plane.
+    Tangent { line: String, arc: String, line_end: usize, arc_end: usize },
+    /// A drawn 3D line parallel to an origin plane.
+    ParallelToPlane { line: String, plane: OriginPlane },
+    /// A fit point on an origin plane.
+    OnPlane { p: WirePoint, plane: OriginPlane },
+    /// The signed distance of a fit point from an origin plane, along its normal (`reversed`:
+    /// on the plane's back side, the way it was measured).
+    PlaneDistance {
+        p: WirePoint,
+        plane: OriginPlane,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reversed: bool,
+        value: f64,
+    },
+    /// The angle (radians, 0 to π/2) between a drawn 3D line and an origin plane.
+    PlaneAngle { line: String, plane: OriginPlane, value: f64 },
 }
 
 impl WireConstraintKind {
@@ -149,6 +205,31 @@ impl WireConstraintKind {
             WireConstraintKind::Distance { a, b, .. } | WireConstraintKind::AxisDistance { a, b, .. } => vec![a.clone(), b.clone()],
             WireConstraintKind::Angle { a, b, .. } => ends(a).into_iter().chain(ends(b)).collect(),
             WireConstraintKind::Radius { arc, .. } => (0..3).map(|index| WirePoint { wire: arc.clone(), index }).collect(),
+            WireConstraintKind::Parallel { a, b } | WireConstraintKind::Perpendicular { a, b } | WireConstraintKind::Collinear { a, b } => {
+                ends(a).into_iter().chain(ends(b)).collect()
+            }
+            WireConstraintKind::Equal { a, b } => {
+                let n = self.equal_arity();
+                let (x, y) = (a.strip_prefix(EQUAL_ARC).unwrap_or(a), b.strip_prefix(EQUAL_ARC).unwrap_or(b));
+                (0..n)
+                    .map(|index| WirePoint { wire: x.to_string(), index })
+                    .chain((0..n).map(|index| WirePoint { wire: y.to_string(), index }))
+                    .collect()
+            }
+            WireConstraintKind::Tangent { line, arc, .. } => {
+                ends(line).into_iter().chain((0..3).map(|index| WirePoint { wire: arc.clone(), index })).collect()
+            }
+            WireConstraintKind::ParallelToPlane { line, .. } | WireConstraintKind::PlaneAngle { line, .. } => ends(line).to_vec(),
+            WireConstraintKind::OnPlane { p, .. } | WireConstraintKind::PlaneDistance { p, .. } => vec![p.clone()],
+        }
+    }
+
+    /// 2 for lines, 3 for arcs: an Equal between arcs names them with the [`EQUAL_ARC`] prefix,
+    /// so a saved constraint keeps its meaning.
+    fn equal_arity(&self) -> usize {
+        match self {
+            WireConstraintKind::Equal { a, .. } if a.starts_with(EQUAL_ARC) => 3,
+            _ => 2,
         }
     }
 
@@ -162,6 +243,11 @@ impl WireConstraintKind {
             WireConstraintKind::Distance { a, b, .. } | WireConstraintKind::AxisDistance { a, b, .. } => vec![&a.wire, &b.wire],
             WireConstraintKind::Angle { a, b, .. } => vec![a, b],
             WireConstraintKind::Radius { arc, .. } => vec![arc],
+            WireConstraintKind::Parallel { a, b } | WireConstraintKind::Perpendicular { a, b } | WireConstraintKind::Collinear { a, b } => vec![a, b],
+            WireConstraintKind::Equal { a, b } => vec![a.strip_prefix(EQUAL_ARC).unwrap_or(a), b.strip_prefix(EQUAL_ARC).unwrap_or(b)],
+            WireConstraintKind::Tangent { line, arc, .. } => vec![line, arc],
+            WireConstraintKind::ParallelToPlane { line, .. } | WireConstraintKind::PlaneAngle { line, .. } => vec![line],
+            WireConstraintKind::OnPlane { p, .. } | WireConstraintKind::PlaneDistance { p, .. } => vec![&p.wire],
         }
     }
 
@@ -176,7 +262,9 @@ impl WireConstraintKind {
             WireConstraintKind::Distance { value, .. }
             | WireConstraintKind::AxisDistance { value, .. }
             | WireConstraintKind::Angle { value, .. }
-            | WireConstraintKind::Radius { value, .. } => Some(*value),
+            | WireConstraintKind::Radius { value, .. }
+            | WireConstraintKind::PlaneDistance { value, .. }
+            | WireConstraintKind::PlaneAngle { value, .. } => Some(*value),
             _ => None,
         }
     }
@@ -187,14 +275,16 @@ impl WireConstraintKind {
             WireConstraintKind::Distance { value, .. }
             | WireConstraintKind::AxisDistance { value, .. }
             | WireConstraintKind::Angle { value, .. }
-            | WireConstraintKind::Radius { value, .. } => *value = v,
+            | WireConstraintKind::Radius { value, .. }
+            | WireConstraintKind::PlaneDistance { value, .. }
+            | WireConstraintKind::PlaneAngle { value, .. } => *value = v,
             _ => {}
         }
     }
 
     /// Whether its value is an angle.
     pub fn is_angle(&self) -> bool {
-        matches!(self, WireConstraintKind::Angle { .. })
+        matches!(self, WireConstraintKind::Angle { .. } | WireConstraintKind::PlaneAngle { .. })
     }
 
     /// What a dimension measures with its points at `at` (in [`Self::points`] order).
@@ -213,8 +303,15 @@ impl WireConstraintKind {
             WireConstraintKind::Radius { .. } => {
                 // The circle through the arc's three points: |ab| |bc| |ca| / (2 |ab × ac|).
                 let (a, b, c) = (p(0), p(1), p(2));
-                let twice_area = (b - a).cross(c - a).len();
-                Some(if twice_area > 1e-18 { a.dist(b) * b.dist(c) * c.dist(a) / (2.0 * twice_area) } else { MAX_WIRE_LENGTH * 10.0 })
+                Some(circumradius(a, b, c))
+            }
+            WireConstraintKind::PlaneDistance { plane, reversed, .. } => {
+                let d = p(0).dot(plane.normal());
+                Some(if *reversed { -d } else { d })
+            }
+            WireConstraintKind::PlaneAngle { plane, .. } => {
+                let u = p(1) - p(0);
+                Some(u.dot(plane.normal()).abs().atan2(u.cross(plane.normal()).len()))
             }
             _ => None,
         }
@@ -250,7 +347,45 @@ impl WireConstraintKind {
             WireConstraintKind::Distance { value, .. }
             | WireConstraintKind::AxisDistance { value, .. }
             | WireConstraintKind::Angle { value, .. }
-            | WireConstraintKind::Radius { value, .. } => vec![self.measure_at(at).unwrap_or(0.0) - *value],
+            | WireConstraintKind::Radius { value, .. }
+            | WireConstraintKind::PlaneDistance { value, .. }
+            | WireConstraintKind::PlaneAngle { value, .. } => vec![self.measure_at(at).unwrap_or(0.0) - *value],
+            WireConstraintKind::Parallel { .. } => {
+                // The sine of the angle between them, as a vector: zero either way round.
+                let c = unit(p(1) - p(0)).cross(unit(p(3) - p(2)));
+                vec![c.x, c.y, c.z]
+            }
+            WireConstraintKind::Perpendicular { .. } => vec![unit(p(1) - p(0)).dot(unit(p(3) - p(2)))],
+            WireConstraintKind::Collinear { .. } => {
+                let d = unit(p(1) - p(0));
+                let c = d.cross(unit(p(3) - p(2)));
+                // b's start on a's line too.
+                let o = (p(2) - p(0)).cross(d);
+                vec![c.x, c.y, c.z, o.x, o.y, o.z]
+            }
+            WireConstraintKind::Equal { .. } => {
+                if self.equal_arity() == 3 {
+                    vec![circumradius(p(0), p(1), p(2)) - circumradius(p(3), p(4), p(5))]
+                } else {
+                    vec![p(0).dist(p(1)) - p(2).dist(p(3))]
+                }
+            }
+            WireConstraintKind::Tangent { line_end, arc_end, .. } => {
+                // The arc's centre and its direction at the shared end; the line must run along
+                // it (a cross product of units: zero when parallel, either way round).
+                let (s, m, e) = (p(2), p(3), p(4));
+                let n = (m - s).cross(e - s);
+                let center = circumcenter(s, m, e);
+                let at = if *arc_end == 0 { s } else { e };
+                let along = unit(n.cross(at - center));
+                let line = unit(p(1) - p(0));
+                let c = line.cross(along);
+                // And the line's end held on the arc's end.
+                let gap = p(*line_end) - at;
+                vec![c.x, c.y, c.z, gap.x, gap.y, gap.z]
+            }
+            WireConstraintKind::ParallelToPlane { plane, .. } => vec![unit(p(1) - p(0)).dot(plane.normal())],
+            WireConstraintKind::OnPlane { plane, .. } => vec![p(0).dot(plane.normal())],
         }
     }
 
@@ -262,6 +397,13 @@ impl WireConstraintKind {
             (PointOnLine { p, line }, PointOnLine { p: q, line: m }) => p == q && line == m,
             (Fix { p, .. }, Fix { p: q, .. }) => p == q,
             (AlongAxis { line, axis }, AlongAxis { line: m, axis: b }) => line == m && axis == b,
+            (Parallel { a, b }, Parallel { a: c, b: d })
+            | (Perpendicular { a, b }, Perpendicular { a: c, b: d })
+            | (Collinear { a, b }, Collinear { a: c, b: d })
+            | (Equal { a, b }, Equal { a: c, b: d }) => (a == c && b == d) || (a == d && b == c),
+            (Tangent { line, arc, .. }, Tangent { line: m, arc: r, .. }) => line == m && arc == r,
+            (ParallelToPlane { line, plane }, ParallelToPlane { line: m, plane: q }) => line == m && plane == q,
+            (OnPlane { p, plane }, OnPlane { p: q, plane: r }) => p == q && plane == r,
             _ => false,
         }
     }
@@ -276,9 +418,38 @@ impl WireConstraintKind {
             (AxisDistance { a, b, axis, .. }, AxisDistance { a: c, b: d, axis: e, .. }) => axis == e && pair(a, b, c, d),
             (Angle { a, b, .. }, Angle { a: c, b: d, .. }) => (a == c && b == d) || (a == d && b == c),
             (Radius { arc, .. }, Radius { arc: other, .. }) => arc == other,
+            (PlaneDistance { p, plane, .. }, PlaneDistance { p: q, plane: r, .. }) => p == q && plane == r,
+            (PlaneAngle { line, plane, .. }, PlaneAngle { line: m, plane: q, .. }) => line == m && plane == q,
             _ => false,
         }
     }
+}
+
+/// How an Equal between two arcs stores their ids (`arc:w3`): the prefix tells it reads three
+/// points of each, not two.
+pub const EQUAL_ARC: &str = "arc:";
+
+/// `v` scaled to length 1 (or zero when it has none).
+fn unit(v: Vec3) -> Vec3 {
+    let n = v.len();
+    if n > 1e-12 { v * (1.0 / n) } else { Vec3::ZERO }
+}
+
+/// The centre of the circle through three points (their centroid when they are in a line).
+fn circumcenter(a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
+    let (u, v) = (b - a, c - a);
+    let n = u.cross(v);
+    let n2 = n.len2();
+    if n2 < 1e-24 {
+        return (a + b + c) * (1.0 / 3.0);
+    }
+    a + (n.cross(u) * v.len2() + v.cross(n) * u.len2()) * (0.5 / n2)
+}
+
+/// The radius of the circle through three points (very large when they are in a line).
+fn circumradius(a: Vec3, b: Vec3, c: Vec3) -> f64 {
+    let twice_area = (b - a).cross(c - a).len();
+    if twice_area > 1e-18 { a.dist(b) * b.dist(c) * c.dist(a) / (2.0 * twice_area) } else { MAX_WIRE_LENGTH * 10.0 }
 }
 
 /// A 3D constraint as a sketch stores it.
@@ -374,11 +545,41 @@ impl Sketch {
             WireConstraintKind::Radius { arc, .. } if !self.drawn_wire(arc).is_some_and(|w| w.arc.is_some()) => {
                 return bad(format!("`{arc}` is not a drawn 3D arc"));
             }
+            WireConstraintKind::Parallel { a, b } | WireConstraintKind::Perpendicular { a, b } | WireConstraintKind::Collinear { a, b }
+                if a == b || !self.is_drawn_line(a) || !self.is_drawn_line(b) =>
+            {
+                return bad("this needs two different drawn 3D lines".into());
+            }
+            WireConstraintKind::Equal { a, b } => {
+                let arcs = a.starts_with(EQUAL_ARC);
+                let (x, y) = (a.strip_prefix(EQUAL_ARC).unwrap_or(a), b.strip_prefix(EQUAL_ARC).unwrap_or(b));
+                let is_arc = |id: &str| self.drawn_wire(id).is_some_and(|w| w.arc.is_some());
+                let ok = x != y
+                    && arcs == b.starts_with(EQUAL_ARC)
+                    && if arcs { is_arc(x) && is_arc(y) } else { self.is_drawn_line(x) && self.is_drawn_line(y) };
+                if !ok {
+                    return bad("Equal needs two different drawn 3D lines, or two different drawn 3D arcs".into());
+                }
+            }
+            WireConstraintKind::Tangent { line, arc, line_end, arc_end } => {
+                let ok = self.is_drawn_line(line)
+                    && self.drawn_wire(arc).is_some_and(|w| w.arc.is_some())
+                    && *line_end <= 1
+                    && (*arc_end == 0 || *arc_end == 2);
+                if !ok {
+                    return bad("Tangent needs a drawn 3D line and a drawn 3D arc that meet at an end".into());
+                }
+            }
+            WireConstraintKind::ParallelToPlane { line, .. } | WireConstraintKind::PlaneAngle { line, .. } if !self.is_drawn_line(line) => {
+                return bad(format!("`{line}` is not a drawn 3D line"));
+            }
             _ => {}
         }
         if let Some(v) = k.value() {
             let ok = match k {
                 WireConstraintKind::Angle { .. } => (0.0..=std::f64::consts::PI).contains(&v),
+                WireConstraintKind::PlaneAngle { .. } => (0.0..=std::f64::consts::FRAC_PI_2).contains(&v),
+                WireConstraintKind::PlaneDistance { .. } => v.abs() <= MAX_WIRE_LENGTH,
                 WireConstraintKind::Radius { .. } => v > 1e-9 && v <= MAX_WIRE_LENGTH,
                 WireConstraintKind::AxisDistance { .. } => v.abs() <= MAX_WIRE_LENGTH,
                 _ => (0.0..=MAX_WIRE_LENGTH).contains(&v),
@@ -386,6 +587,7 @@ impl Sketch {
             if !ok {
                 return bad(match k {
                     WireConstraintKind::Angle { .. } => "a 3D angle must be between 0 and 180 degrees".to_string(),
+                    WireConstraintKind::PlaneAngle { .. } => "an angle to a plane must be between 0 and 90 degrees".to_string(),
                     WireConstraintKind::Radius { .. } => format!("a 3D radius must be above 0 and at most {MAX_WIRE_LENGTH} mm"),
                     _ => format!("a 3D distance must be at most {MAX_WIRE_LENGTH} mm (and not negative)"),
                 });
@@ -442,6 +644,32 @@ impl Sketch {
         let param = if driven || !kind.is_dimension() { None } else { param };
         self.wire_constraints.push(WireConstraint { id: id.clone(), kind, param, driven });
         Ok(id)
+    }
+
+    /// A Tangent between a drawn 3D line and a drawn 3D arc that meet at an end (the ends that
+    /// are at the same place), or `None` when they do not meet.
+    pub fn tangent_kind(&self, line: &str, arc: &str) -> Option<WireConstraintKind> {
+        let l = self.drawn_wire(line).filter(|w| w.fit.len() == 2 && w.arc.is_none())?;
+        let a = self.drawn_wire(arc).filter(|w| w.arc.is_some())?;
+        for line_end in [0usize, 1] {
+            for arc_end in [0usize, 2] {
+                if let (Some(p), Some(q)) = (l.fit.get(line_end), a.fit.get(arc_end))
+                    && p.dist(*q) < 1e-6
+                {
+                    return Some(WireConstraintKind::Tangent { line: line.to_string(), arc: arc.to_string(), line_end, arc_end });
+                }
+            }
+        }
+        None
+    }
+
+    /// An Equal between two drawn 3D lines or two drawn 3D arcs.
+    pub fn equal_kind(&self, a: &str, b: &str) -> Option<WireConstraintKind> {
+        if self.is_drawn_line(a) && self.is_drawn_line(b) {
+            return Some(WireConstraintKind::Equal { a: a.to_string(), b: b.to_string() });
+        }
+        let arc = |id: &str| self.drawn_wire(id).is_some_and(|w| w.arc.is_some());
+        (arc(a) && arc(b)).then(|| WireConstraintKind::Equal { a: format!("{EQUAL_ARC}{a}"), b: format!("{EQUAL_ARC}{b}") })
     }
 
     /// What a 3D dimension measures now.

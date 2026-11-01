@@ -2390,6 +2390,9 @@ fn two_curves_or_axes(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<(usize, u
 }
 
 fn c_tangent(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(reply) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.tangent")? {
+        return Ok(reply);
+    }
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.tangent", &["a", "b"])?;
     constrain(s, p, "sketch.constraint.tangent", |sk| {
         two_curves_or_axes(sk, p, "sketch.constraint.tangent")
@@ -2398,6 +2401,9 @@ fn c_tangent(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 fn c_equal(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(reply) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.equal")? {
+        return Ok(reply);
+    }
     if p.get("curves").is_some() {
         return equal_curves(s, p);
     }
@@ -2441,6 +2447,9 @@ fn equal_curves(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"constraints": out, "sketch": info}))
 }
 fn c_parallel(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(reply) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.parallel")? {
+        return Ok(reply);
+    }
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.parallel", &["a", "b"])?;
     constrain(s, p, "sketch.constraint.parallel", |sk| {
         two_curves_or_axes(sk, p, "sketch.constraint.parallel")
@@ -2449,6 +2458,9 @@ fn c_parallel(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 fn c_perpendicular(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(reply) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.perpendicular")? {
+        return Ok(reply);
+    }
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.perpendicular", &["a", "b"])?;
     constrain(s, p, "sketch.constraint.perpendicular", |sk| {
         two_curves_or_axes(sk, p, "sketch.constraint.perpendicular")
@@ -2475,6 +2487,9 @@ fn c_concentric(s: &mut Session, p: &Value) -> Result<Value> {
     })
 }
 fn c_collinear(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(reply) = super::sketch_3d::relation_3d(s, p, "sketch.constraint.collinear")? {
+        return Ok(reply);
+    }
     let p = &super::sketch_project::project_operands(s, p, "sketch.constraint.collinear", &["a", "b"])?;
     constrain(s, p, "sketch.constraint.collinear", |sk| {
         two_curves_or_axes(sk, p, "sketch.constraint.collinear")
