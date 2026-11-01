@@ -45,13 +45,33 @@ pub(crate) fn details_field_owned_escape(ctx: &egui::Context) -> bool {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum DetailValue {
-    Number { value: f64, min: f64, max: f64, suffix: String },
-    Length { value: f64, units: String },
+    Number {
+        value: f64,
+        min: f64,
+        max: f64,
+        suffix: String,
+    },
+    /// Shown to `decimals` places, as the design shows lengths.
+    Length {
+        value: f64,
+        units: String,
+        decimals: u8,
+    },
     Angle(f64),
-    Slider { value: f64, min: f64, max: f64 },
-    Axis { value: [f64; 3], current: String },
+    Slider {
+        value: f64,
+        min: f64,
+        max: f64,
+    },
+    Axis {
+        value: [f64; 3],
+        current: String,
+    },
     Check(bool),
-    Choice { selected: usize, options: Vec<String> },
+    Choice {
+        selected: usize,
+        options: Vec<String>,
+    },
 }
 
 pub(crate) struct DetailSetting {
@@ -136,7 +156,7 @@ fn setting(ui: &mut Ui, field: &DetailSetting, focus: bool) -> Option<DetailEven
             ui.style_mut().drag_value_text_style = egui::TextStyle::Monospace;
             let response = match &mut value {
                 DetailValue::Number { value, min, max, suffix } => Some(super::number_field(ui, value, *min..=*max, 0.01, suffix)),
-                DetailValue::Length { value, units } => Some(super::length_field(ui, value, units, 6)),
+                DetailValue::Length { value, units, decimals } => Some(super::length_field(ui, value, units, *decimals)),
                 DetailValue::Angle(value) => Some(super::angle_field(ui, value)),
                 DetailValue::Slider { value, min, max } => Some(super::slider(ui, value, *min..=*max, Default::default())),
                 DetailValue::Check(value) => Some(super::checkbox(ui, "", value)),
@@ -228,6 +248,9 @@ pub(crate) fn details(ui: &mut Ui, id: &str, description: &Details, max_height: 
     ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new(CONTROL_FOCUS), Vec::<egui::Id>::new()));
     ui.ctx().data_mut(|data| data.insert_temp(egui::Id::new(OWNED_POPUPS), Vec::<egui::Id>::new()));
     ui.set_width((t.form_card_width + if description.findings.is_empty() { 0.0 } else { t.space_24 * 2.0 }).min(ui.available_width()));
+    // A card's area is as tall as it was last frame: allowed `max_height`, a body that grew
+    // after the first frame scrolls instead, and its last row was cut off (#10708).
+    ui.set_max_height(max_height);
     super::scope(ui, |ui| {
         let mut caption_height = 0.0;
         if let Some(caption) = &description.caption {
