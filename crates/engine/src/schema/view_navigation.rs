@@ -186,6 +186,58 @@ pub struct RenderFrame {
     pub centre_mark: Option<bool>,
 }
 
+/// Set the view navigator at the view's corner: its type, and for the custom one the body it
+/// draws, its texture and the controls around it. The navigator is the app's, kept with the
+/// preferences and settings profiles, never in the design; without an app the call only checks
+/// its parameters. Never opens a dialog.
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NavigatorParams {
+    /// The navigator: signed axes, the cube, or a custom body (the cube until a body is
+    /// chosen). Default: unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<NavigatorStyle>,
+    /// A body of the open design for the custom navigator to draw; the app keeps a snapshot of
+    /// it, so it stays when the design closes. `null`: no body (the cube again). A body over
+    /// 10,000 triangles, or whose thinnest width is under a fifth of its widest, is refused.
+    /// Default: unchanged.
+    #[serde(default, deserialize_with = "nullable", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub body: Option<Option<String>>,
+    /// The custom navigator's colours: the cube's (`themed`) or the body's own appearance and
+    /// edge colour (`modeled`). Default: unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub texture: Option<NavigatorTexture>,
+    /// The cube's orbit and roll arrows around the custom navigator. Default: unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arrows: Option<bool>,
+    /// The cube's Home button beside the custom navigator. Default: unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home: Option<bool>,
+}
+
+/// A view navigator type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NavigatorStyle {
+    Axes,
+    Cube,
+    Custom,
+}
+
+/// How the custom view navigator colours its body.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NavigatorTexture {
+    Themed,
+    Modeled,
+}
+
+/// A key that may be given as `null` (`Some(None)`), apart from absent (`None`).
+fn nullable<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Option<String>>, D::Error> {
+    Option::<String>::deserialize(d).map(Some)
+}
+
 #[cfg(test)]
 #[path = "view_navigation_tests.rs"]
 mod tests;

@@ -236,7 +236,8 @@ fn measured_navigator_targets_home_and_drag_work_beside_the_palette_at_hidpi() {
                     continue;
                 }
                 assert!(!layout.navigation.intersect(outer).is_positive());
-                if style == crate::prefs::NavigatorStyle::Cube {
+                // Custom without a body draws the cube.
+                if style != crate::prefs::NavigatorStyle::Axes {
                     let front = crate::scenario::handle_at("navigation_cube:front").unwrap();
                     assert!(outer.contains(front));
                     let up = crate::scenario::handle_at("navigation_cube:control:up").unwrap();

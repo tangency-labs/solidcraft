@@ -468,7 +468,11 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `msaa`
 - `nav` (`fusion`, `solidworks`, `creo`, `inventor`, `alias`, `blender`, `tinkercad`, `openscad`, `touchpad`)
 - `nav_bridge_enabled` (default false) and `nav_bridge_port` (default 8765: a device's own app on this computer moves the view, [the navigation bridge](3d-mouse.md#device-apps-the-navigation-bridge))
+- `navigator_arrows` (default true: the custom view navigator has the cube's orbit and roll arrows around its body; also `view.navigator {arrows}`)
 - `navigator_fit` (default false: a view chosen on the view cube or the axis gizmo also looks at the middle of the model from the one distance that fits its bounding sphere in the free part of the view, at `home_fit_size`; Home and an opened design use the same zoom and centre while it is on, so views chosen after them only turn; #10091)
+- `navigator_home` (default true: the custom view navigator has the cube's Home button beside it; also `view.navigator {home}`)
+- `navigator_style` (`axes` (default), `cube`, `custom`: the body chosen with `view.navigator`, the cube until one is chosen)
+- `navigator_texture` (`themed` (default): the custom view navigator in the cube's colours; `modeled`: in its body's own appearance and edge colour)
 - `offer_stand_up`
 - `orbit_around` (`view_centre` (default: what Pan moves and Fit frames), `origin` (the world origin stays still on screen), `cursor` (the model point under the pointer when the drag began); the older `orbit_cursor` boolean still sets `cursor` when true)
 - `orbit_reverse` (default false: Shift with two-finger scrolling orbits the other way)
@@ -596,11 +600,26 @@ channel; see [mcp.md](mcp.md).
 {"id":5,"method":"ui.screenshot","params":{"path":"/tmp/part.png"}}
 ```
 
-Preferences → Navigation → View navigator offers **Signed axes** (the original default) and
-**Cube**. This choice is saved independently of the mouse preset. The control channel selects it
-with `ui.prefs {"navigator_style":"axes"}` or `ui.prefs {"navigator_style":"cube"}`.
-Existing settings without this field keep signed axes. Signed-axis tips choose principal views;
-clicking an aligned tip again reverses the view.
+Preferences → Navigation → View navigator offers **Signed axes** (the original default),
+**Cube** and **Custom**; a right-click anywhere on the navigator offers the same three. This choice is
+saved independently of the mouse preset. The control channel selects it with
+`ui.prefs {"navigator_style":"axes"}`, `"cube"` or `"custom"`. Existing settings without this field
+keep signed axes. Signed-axis tips choose principal views; clicking an aligned tip again reverses
+the view.
+
+Custom draws a body in place of the cube, at the cube's size; a click on one of its faces looks
+straight at it, and with `navigator_fit` on it also frames the model, as the cube does. Picking
+Custom from the navigator's menu opens the Custom View Navigator panel, with OK and Cancel: pick
+the body in the view, then its texture (`themed`: the cube's colours; `modeled`: the body's own
+appearance and the view's edge colour) and whether the cube's rotation arrows and Home button go
+around it. The navigator previews the panel's choices while it is open. OK runs
+`view.navigator`, which scripts and `engine.execute` run too without opening anything:
+`{"style": "custom", "body": "Body1", "texture": "modeled", "arrows": true, "home": false}` (any
+subset; `"body": null` goes back to the cube) returns the whole navigator. A body over 10,000
+triangles is refused, and so is a long or flat one: measured across the axes and the diagonals,
+its thinnest width must be at least a fifth of its widest. The body is kept as a snapshot with the
+preferences and in settings profiles (`settings.profile.*`, as `view_gizmo`), so it stays across
+runs and designs and travels with an exported profile.
 
 Hold Shift during an orbit gesture to snap to the nearest standard or diagonal view. This applies to
 right-drag, the Orbit navigation tool, and dragging either view navigator. Under the default preset,
