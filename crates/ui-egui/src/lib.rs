@@ -117,6 +117,7 @@ mod measurement_ui_tests;
 #[cfg(test)]
 mod menu_tests;
 pub(crate) mod mesh_lod;
+pub mod mesh_units;
 pub mod messages;
 pub(crate) mod motion;
 pub mod occurrence_drag;
@@ -662,6 +663,8 @@ pub struct SolveApp {
     pub recovery_discard_all: bool,
     /// The selection's measurement in the view's corner (#7000).
     pub(crate) quick_measure: quick_measure::QuickMeasure,
+    /// An STL or OBJ file waiting for the unit its coordinates are in (`mesh_units`).
+    pub mesh_units: Option<mesh_units::Ask>,
     /// The bodies of a just-opened Y-up file, offered to be stood up (`stand_up`).
     pub stand_up: Option<Vec<String>>,
     /// The placement of the component that file came in as: the offer turns it.
@@ -860,6 +863,7 @@ impl SolveApp {
             recoverable: Vec::new(),
             recovery_discard_all: false,
             quick_measure: Default::default(),
+            mesh_units: None,
             stand_up: None,
             stand_up_occurrence: None,
             stand_up_reason: false,
@@ -1795,7 +1799,22 @@ impl SolveApp {
             linked_source::start_selected(self);
             return;
         }
-        if matches!(id, "file.insert_step" | "file.insert_mesh" | "pointcloud.insert") {
+        if id == "file.insert_mesh" {
+            // Insert Mesh is an explicit ask for a mesh: a PLY chosen here is read as one (its
+            // faces), after asking its unit, where any other way of inserting it is a point cloud.
+            // Like Insert SVG it asks the host for its own kind of file (on the web a file dialog,
+            // not the window that also opens and downloads designs), so the file comes straight
+            // back here and nothing has to remember which command asked.
+            self.pick_open_for(&["3mf", "stl", "obj", "ply", "glb", "gltf"], |app, path| {
+                if let Some(path) = path
+                    && !mesh_units::ask_ply_as_mesh(app, &path)
+                {
+                    app.insert_path_async(&path);
+                }
+            });
+            return;
+        }
+        if matches!(id, "file.insert_step" | "pointcloud.insert") {
             self.pick_open(|app, path| {
                 if let Some(path) = path {
                     app.insert_path_async(&path);
@@ -2329,6 +2348,11 @@ impl SolveApp {
     }
 
     pub fn open_path(&mut self, path: &str) {
+        self.open_path_with(path, &Default::default());
+    }
+
+    /// [`Self::open_path`] with the import options of the request (`units` of an STL or OBJ file).
+    pub fn open_path_with(&mut self, path: &str, options: &serde_json::Map<String, Value>) {
         match documents::reuse_path(self, path) {
             Ok(true) => return,
             Err(e) => {
@@ -2339,7 +2363,9 @@ impl SolveApp {
         }
         self.home.open = false;
         documents::prepare_open(self);
-        if let Ok(r) = self.run("doc.open", json!({ "path": path })) {
+        let mut params = options.clone();
+        params.insert("path".into(), json!(path));
+        if let Ok(r) = self.run("doc.open", Value::Object(params)) {
             // An opened design comes up at the home view, not at the angle the design before it
             // was left at: `prepare_open` keeps the camera when it reuses a blank design.
             self.cam.set_view(StandardView::Iso);
@@ -2369,9 +2395,23 @@ impl SolveApp {
 
     /// Insert CAD bodies, meshes or sketch drawing geometry into the current design.
     pub fn insert_path(&mut self, path: &str) {
-        let cmd = if solidcraft_engine::io::is_point_cloud_path(path) { "pointcloud.insert" } else { file_load::insert_command(path) };
+        self.insert_path_with(path, &Default::default(), false);
+    }
+
+    /// [`Self::insert_path`] with the import options of the request (`units` of an STL or OBJ file).
+    /// `mesh`: insert it as a mesh whatever its extension says (a PLY with faces).
+    pub fn insert_path_with(&mut self, path: &str, options: &serde_json::Map<String, Value>, mesh: bool) {
+        let cmd = if mesh {
+            "file.insert_mesh"
+        } else if solidcraft_engine::io::is_point_cloud_path(path) {
+            "pointcloud.insert"
+        } else {
+            file_load::insert_command(path)
+        };
         let before: Vec<String> = self.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
-        if let Ok(r) = self.run(cmd, json!({ "path": path })) {
+        let mut params = options.clone();
+        params.insert("path".into(), json!(path));
+        if let Ok(r) = self.run(cmd, Value::Object(params)) {
             self.fit_view();
             stand_up::offer(self, path, &before, Some(&r));
             if let Some(w) = r["warnings"].as_array().filter(|w| !w.is_empty()) {
@@ -3074,6 +3114,7 @@ impl SolveApp {
         bom_panel::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
+        mesh_units::show(self, ui.ctx());
         stand_up::show(self, ui.ctx());
         prefs_notice::show(self, ui.ctx());
         context_menu::show(self, ui.ctx());
