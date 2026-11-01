@@ -2461,6 +2461,7 @@ fn align_axes_are_world_axes_on_a_placed_component() {
     assert!(near(after.min.x, before.min.x) && near(after.max.x, before.max.x), "x: {after:?}");
     assert!(near(after.min.y, before.min.y + 20.0) && near(after.max.y, before.max.y + 20.0), "y: {after:?}");
     assert!(near(after.min.z, before.min.z) && near(after.max.z, before.max.z), "z: {after:?}");
+}
 
 #[test]
 fn replace_round_into_its_neighbour_survives_rebuild_and_undo() {
