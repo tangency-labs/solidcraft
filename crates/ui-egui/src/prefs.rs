@@ -1102,6 +1102,9 @@ preference_settings! {
     /// A small dot at every vertex wherever edges are drawn (#7834). Off by default: the viewport
     /// draws edges only, as it always has.
     vertex_markers: bool = false => check("Vertex markers", "Show a small dot at every vertex wherever edges are drawn");
+    /// With no command running, the faces of the feature that made the face under the pointer are
+    /// outlined, thin, in `hover_feature_edge`. Off: only the face under the pointer lights up.
+    hover_feature_outline: bool = true, PAGE_GRAPHICS => check_id("prefs.hover_feature_outline");
     /// A preview of a feature that changes a body draws the surface it adds in the preview
     /// colour, working out face by face which surface that is. Off: the body is drawn as itself
     /// and nothing is worked out (`preview::Colors::tint_new`).

@@ -3431,6 +3431,31 @@ fn hover_drawn(hover: &Option<Hit>) -> String {
     }
 }
 
+/// With nothing running (no command, tool or sketch, and faces picked as faces), the body under
+/// the pointer and the faces on it that the feature which made the hovered face made, found by
+/// their persistent names as `feature_parts` finds them. Off in Preferences › Graphics.
+fn hovered_feature_faces<'a>(
+    app: &SolveApp,
+    st: &'a solidcraft_engine::doc::ModelState,
+    hover: Option<&Hit>,
+) -> Option<(&'a solidcraft_engine::doc::ModelBody, Vec<usize>)> {
+    if !app.preferences.hover_feature_outline
+        || app.dialog.is_some()
+        || app.tool.is_some()
+        || app.session.active_sketch.is_some()
+        || app.ui.pick_bodies
+        || app.ui.pick_components
+    {
+        return None;
+    }
+    let Some(Hit::Face { body, index, .. }) = hover else { return None };
+    let b = st.body(body)?;
+    let names = solidcraft_engine::doc::naming::face_names(b);
+    let made_by = |n: &String| solidcraft_engine::doc::persistent_name::made_by(n);
+    let id = made_by(names.get(*index)?)?;
+    Some((b, names.iter().enumerate().filter(|(_, n)| made_by(n) == Some(id)).map(|(i, _)| i).collect()))
+}
+
 /// The body the current hover actually selects, after the active dialog's filter.
 fn hovered_body(app: &SolveApp) -> Option<String> {
     if app.tool.is_some() {
@@ -3454,6 +3479,7 @@ fn highlight_geometry_key(app: &SolveApp) -> u64 {
     hovered_body(app).hash(&mut h);
     app.viewport.hover_feature.hash(&mut h);
     app.viewport.hover_bodies.hash(&mut h);
+    app.preferences.hover_feature_outline.hash(&mut h);
     app.viewport.hover_plane.hash(&mut h);
     // Which mesh lights a face follows how the model draws its body (see `shown_mesh`), and at
     // which display quality its plan and edges are made.
@@ -4102,6 +4128,24 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             profile_fill(&mut feedback, app, *sketch, *index, t.hover_profile, t.hover_profile_edge);
         }
         _ => {}
+    }
+    // The feature that made the face under the pointer: its faces outlined, thin, in their own colour.
+    if let Some((b, faces)) = hovered_feature_faces(app, &st, hover)
+        && !replaced(&b.name)
+    {
+        // Where the model hides them, the feature's edges stay clear enough to see (most hidden
+        // highlights are dimmed to 45%, which a thin outline does not survive).
+        let mut outline = EdgeColours::new(&mut feedback, t.hover_feature_edge, t.hover_edge_halo);
+        outline.hidden = feedback.color(c4(t.hover_feature_edge.gamma_multiply(0.8)));
+        let m = drawn(b);
+        for (e, fs) in m.edge_faces.iter().enumerate() {
+            if fs.iter().any(|f| faces.contains(&(*f as usize)))
+                && m.edge_pickable(e)
+                && let Some(p) = m.edges.get(e)
+            {
+                edge_lines(&mut feedback, p, outline, 1.5, &edge_normals(&m, p));
+            }
+        }
     }
     feedback.hover_instanced = hover_instances.finish();
     feedback.selected_instanced = selected_instances.finish();
@@ -9455,6 +9499,43 @@ mod tests {
         let mut app = SolveApp::new(s, crate::Services::default());
         app.set_origin_shown(false);
         app
+    }
+
+    /// With nothing running, the faces of the feature that made the face under the pointer are
+    /// outlined in `hover_feature_edge`: a fillet's own faces, not the cylinder's.
+    #[test]
+    fn hovering_a_face_outlines_the_feature_that_made_it() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.cylinder", &json!({"radius": 10, "height": 20})).unwrap();
+        s.execute("solid.fillet", &json!({"edges": [[10, 0, 20]], "radius": 2})).unwrap();
+        let mut app = SolveApp::new(s, crate::Services::default());
+        app.set_origin_shown(false);
+        let st = app.session.world_state();
+        let b = &st.bodies[0];
+        let names = solidcraft_engine::doc::naming::face_names(b);
+        let fillet = app.session.doc.features.last().map(|f| f.id).unwrap();
+        let made_by = |i: usize| solidcraft_engine::doc::persistent_name::made_by(&names[i]);
+        let blend = (0..names.len()).find(|&i| made_by(i) == Some(fillet)).expect("a face the fillet made");
+        let other = (0..names.len()).find(|&i| made_by(i).is_some_and(|f| f != fillet)).expect("a face the cylinder made");
+        let t = Tokens::get();
+        let has = |app: &SolveApp| build_highlight(app).palette.entries().contains(&c4(t.hover_feature_edge));
+        let hover = |app: &mut SolveApp, index: usize| app.viewport.hover = Some(Hit::Face { body: b.name.clone(), index, point: Vec3::ZERO });
+        hover(&mut app, blend);
+        assert!(app.preferences.hover_feature_outline, "on by default");
+        assert!(has(&app));
+        let hidden = c4(t.hover_feature_edge.gamma_multiply(0.8));
+        assert!(build_highlight(&app).palette.entries().contains(&hidden), "hidden edges stay clear to see");
+        let (_, faces) = hovered_feature_faces(&app, &st, app.viewport.hover.as_ref()).unwrap();
+        assert!(faces.contains(&blend) && !faces.contains(&other), "{faces:?}");
+        hover(&mut app, other);
+        let (_, faces) = hovered_feature_faces(&app, &st, app.viewport.hover.as_ref()).unwrap();
+        assert!(faces.contains(&other) && !faces.contains(&blend), "{faces:?}");
+        // A command running, or the setting off: only the face lights up, as before.
+        app.dialog = crate::dialogs::Dialog::for_command(&app, "solid.fillet");
+        assert!(!has(&app));
+        app.dialog = None;
+        app.preferences.hover_feature_outline = false;
+        assert!(!has(&app));
     }
 
     /// Moving the pointer across a face keeps its highlight (a scanned mesh is one face of

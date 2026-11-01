@@ -581,6 +581,7 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("sel_profile_edge", "selection highlight"),
     ("hover_profile", "hover highlight"),
     ("hover_profile_edge", "hover highlight"),
+    ("hover_feature_edge", "hover highlight"),
     ("sel_vertex", "selection highlight"),
     ("rubber_band", "the shape being drawn"),
     ("manipulator", "a drag handle, alone"),
