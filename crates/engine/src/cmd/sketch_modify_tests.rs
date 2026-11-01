@@ -3913,6 +3913,27 @@ fn corner_tools_refuse_all_spatial_curves_with_an_unsupported_message() {
     }
 }
 
+/// #10653: a tangent arc started on a line between its ends (`on:l1:…`, which a click there
+/// gives) is refused as no end to start from, not as an unknown point; `tangent_arc_starts_at`
+/// tells a tool which points it can start at.
+#[test]
+fn a_tangent_arc_starts_only_at_a_curves_end() {
+    let mut s = new_sketch();
+    let line = ids(&run(&mut s, "sketch.line", json!({"points": [[5, 0], [15, 0]], "connect": false, "infer": false}))["curves"])[0].clone();
+    let before = s.doc.to_json();
+    let on = format!("on:{line}:10,0");
+    for start in [on.clone(), format!("mid:{line}")] {
+        let err = s.execute("sketch.arc.tangent", &json!({"start": start, "end": [20, 10]})).map(|v| v.to_string()).unwrap_err().to_string();
+        assert!(err.contains("`start` must be the end point of a line or arc") && !err.contains("unknown sketch point"), "{start}: {err}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+    let sk = sketch(&s);
+    assert!(crate::cmd::tangent_arc_starts_at(&sk, &format!("{line}.end")));
+    assert!(crate::cmd::tangent_arc_starts_at(&sk, &format!("{line}.start")));
+    assert!(!crate::cmd::tangent_arc_starts_at(&sk, &on));
+    assert!(!crate::cmd::tangent_arc_starts_at(&sk, "origin"), "no curve ends at the origin here");
+}
+
 /// `sketch.arc.tangent` ends on an existing point when `end` names it, so a chain can close, and
 /// makes a new point for coordinates as before (#9489). The preview is the arc the command draws.
 #[test]
