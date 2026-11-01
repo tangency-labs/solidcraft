@@ -13,7 +13,7 @@ pub(super) const GROW_LABEL: &str = "sc_grow_label_column";
 /// under `key`, the width its label column needs beyond the design's 1.6x cap; the card's
 /// owner reads that before opening the card, so the card settles one frame later.
 /// Tokens: `form_label_width, font_label, dialog_label, space_4`.
-pub(crate) fn scope_grow<R>(ui: &mut Ui, key: egui::Id, add: impl FnOnce(&mut Ui) -> R) -> R {
+pub(super) fn scope_grow<R>(ui: &mut Ui, key: egui::Id, add: impl FnOnce(&mut Ui) -> R) -> R {
     scope_inner(ui, Some(key), add)
 }
 
