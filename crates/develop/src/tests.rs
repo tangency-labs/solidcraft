@@ -919,3 +919,42 @@ fn a_rip_on_a_roll_is_cut_back_on_the_roll() {
     let [Seg2::Line { a, b }] = cut.as_slice() else { panic!("one cut edge: {cut:?}") };
     assert!((a.y - want).abs() < 1e-6 && (b.y - want).abs() < 1e-6, "{a:?} {b:?} vs {want}");
 }
+
+/// A point of the folded sheet maps back to the flat: through a bend, to the point of its zone,
+/// its depth and the way deeper; through a panel, from its parameters, a roll's included.
+#[test]
+fn a_point_of_the_folded_sheet_maps_back_to_the_flat() {
+    for toward in [true, false] {
+        let mut b = bend(FRAC_PI_2, Datum::Sharp, (0.0, 100.0));
+        b.toward_material = toward;
+        let sheet = bracket(b);
+        let dev = develop(&sheet, 0).unwrap_or_default();
+        let folded = fold(&sheet, &dev, &[Rigid3::IDENTITY]).unwrap_or_else(|e| panic!("{e}"));
+        let (Some(Some(bent)), [zone]) = (folded.bends.first(), dev.zones.as_slice()) else { panic!("one bend") };
+        for (u, v) in [(0.2, 0.1), (0.5, 0.5), (0.9, 0.97)] {
+            let p = zone.near[0].lerp(zone.near[1], u).lerp(zone.far[0].lerp(zone.far[1], u), v);
+            for depth in [0.0, 0.4 * T, T] {
+                let Some((back, w, deeper)) = bent.unwrapped(bent.point(p, depth)) else { panic!("{toward}: on the axis") };
+                let step = (bent.point(p, depth + 1e-6) - bent.point(p, depth)) * 1e6;
+                assert!(
+                    near(back, p) && (w - depth).abs() < 1e-9 && near3(deeper, step),
+                    "{toward}: {back:?} {w} {deeper:?} vs {p:?} {depth} {step:?}"
+                );
+            }
+        }
+    }
+    let sheet = Sheet {
+        thickness: T,
+        k_factor: K,
+        panels: vec![Panel { name: "floor".into(), region: rect(0.0, 0.0, 100.0, 40.0), ..Panel::default() }, roll(30.0, true, 100.0, FRAC_PI_2)],
+        joints: vec![seam(0, 40.0, 1, 0.0)],
+        corners: Vec::new(),
+        cuts: Vec::new(),
+    };
+    let dev = develop(&sheet, 0).unwrap_or_default();
+    let folded = fold(&sheet, &dev, &[Rigid3::IDENTITY]).unwrap_or_else(|e| panic!("{e}"));
+    for (i, p) in [(0, Vec2::new(30.0, 20.0)), (1, Vec2::new(60.0, 50.0)), (1, Vec2::new(10.0, 80.0))] {
+        let back = folded.param(i, p).and_then(|q| folded.flat_point(i, q)).unwrap_or_default();
+        assert!(near(back, p), "panel {i}: {back:?} vs {p:?}");
+    }
+}

@@ -12,14 +12,20 @@
 //! These meet end to end at corners found exactly on the edges, where a wall's leaning changes
 //! along them, so the outline is put together from how its pieces meet, never by joining
 //! overlapping shapes: a fold meets an edge tangent to it in the flat, where a union of the two
-//! could not tell them apart. Refused: walls that don't run through the thickness from face to
-//! face (a countersink, a rounded or chamfered face edge, a recess), walls that reach the panel's
-//! outline, and walls whose shapes in the flat overlap.
+//! could not tell them apart. An edge piece on flat material is the line or the arc it is,
+//! exactly; elsewhere a curve is put through its points.
+//!
+//! A cut whose walls cross a joint is read the same way in the sheet as a whole ([`Folded`]):
+//! each point in whichever piece of the flat holds its fiber (a panel, a tab, or a bend's zone,
+//! unwrapped round its axis), its outline drawn in the flat, one curve across tangent lines and
+//! seams. Refused: walls that don't run through the thickness from face to face (a countersink, a
+//! rounded or chamfered face edge, a recess, a cut that stops inside a bend), walls that reach the
+//! sheet's outline, and walls whose shapes in the flat overlap.
 
 use std::collections::BTreeSet;
-use std::f64::consts::TAU;
+use std::f64::consts::{PI, TAU};
 
-use solidcraft_develop::{Rigid3, Surface, curve_through};
+use solidcraft_develop::{Bent, Fold, Rigid2, Rigid3, Surface, curve_through};
 use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::brep::query::Query;
 use solidcraft_geom::brep::{Loop as Bounds, Shell, Surface as Record};
@@ -48,10 +54,23 @@ pub(crate) struct Slab<'a> {
 /// the way deeper (the fiber's way, a unit vector), and the panel's parameters its fiber starts
 /// from (a roll's angle within half a turn of 0).
 #[derive(Clone, Copy)]
-struct Depth {
+pub(crate) struct Depth {
     w: f64,
     deeper: Vec3,
     at: Vec2,
+}
+
+/// The sheet's material as a shadow is read in it: for a point of space, how deep it lies into
+/// the material, the way deeper, and where its fiber starts in the chart the shadow is drawn in.
+pub(crate) trait Fibers {
+    fn depth(&self, p: Vec3) -> Option<Depth>;
+    /// Whether the chart's second coordinate is an angle round a roll.
+    fn angular(&self) -> bool;
+    fn thickness(&self) -> f64;
+    /// Where the fiber through `p` starts in a plane the chart takes rigidly: which piece of the
+    /// sheet's material (a key), the plane's frame in space, and where the chart lays the frame's
+    /// `x`, `y`. `None` where the material there is curved.
+    fn rigid(&self, p: Vec3) -> Option<(usize, Rigid3, Rigid2)>;
 }
 
 fn turned(v: f64, inward: bool) -> f64 {
@@ -62,7 +81,9 @@ impl<'a> Slab<'a> {
     pub(crate) fn new(surface: &'a Surface, place: Rigid3, t: f64) -> Slab<'a> {
         Slab { surface, place, from: place.inverse(), t }
     }
+}
 
+impl Fibers for Slab<'_> {
     fn depth(&self, p: Vec3) -> Option<Depth> {
         let q = self.from.point(p);
         let side = |inward: bool| if inward { -1.0 } else { 1.0 };
@@ -96,6 +117,183 @@ impl<'a> Slab<'a> {
     fn angular(&self) -> bool {
         !matches!(self.surface, Surface::Plane)
     }
+
+    fn thickness(&self) -> f64 {
+        self.t
+    }
+
+    fn rigid(&self, _: Vec3) -> Option<(usize, Rigid3, Rigid2)> {
+        matches!(self.surface, Surface::Plane).then_some((0, self.place, Rigid2::IDENTITY))
+    }
+}
+
+/// What carries a piece of a folded sheet's flat material into space.
+pub(crate) enum Carrier<'a> {
+    /// Panel `.0`, its surface in the slab `.1`: its own material, or a tab riding with it.
+    Panel(usize, Slab<'a>),
+    /// A bend's zone.
+    Bend(&'a Bent),
+    /// The sheet laid out flat, the flat's frame in the slab's plane.
+    Flat(Slab<'a>),
+}
+
+/// A sheet's material round a cut that crosses its joints, read as one: a point of space is read
+/// in whichever piece of the flat holds its fiber (a panel, a tab with its panel, or a bend's
+/// zone), and its fiber's start is given in the flat, so that one outline runs on across tangent
+/// lines and seams.
+pub(crate) struct Folded<'a> {
+    /// Each carrier, and the piece's flat material.
+    pieces: Vec<(Carrier<'a>, Region2)>,
+    fold: Option<&'a Fold>,
+    t: f64,
+}
+
+impl<'a> Folded<'a> {
+    /// The sheet's pieces as `fold` carries them (`None`: laid out flat), `t` thick.
+    pub(crate) fn new(pieces: Vec<(Carrier<'a>, Region2)>, fold: Option<&'a Fold>, t: f64) -> Folded<'a> {
+        Folded { pieces, fold, t }
+    }
+
+    /// The piece that holds the fiber through `p`, and `p`'s depth in it: the piece whose flat
+    /// material holds the fiber's start with `p` within the thickness, or else comes nearest.
+    pub(crate) fn read(&self, p: Vec3) -> Option<(usize, Depth)> {
+        let mut best: Option<(f64, usize, Depth)> = None;
+        for (k, (carrier, region)) in self.pieces.iter().enumerate() {
+            let got = match carrier {
+                Carrier::Panel(i, slab) => slab.depth(p).and_then(|d| Some(Depth { at: self.fold?.flat_point(*i, d.at)?, ..d })),
+                Carrier::Bend(bent) => bent.unwrapped(p).map(|(at, w, deeper)| Depth { w, deeper, at }),
+                Carrier::Flat(slab) => slab.depth(p),
+            };
+            let Some(d) = got.filter(|d| d.at.x.is_finite() && d.at.y.is_finite() && d.w.is_finite()) else { continue };
+            let off = if region.contains(d.at) { 0.0 } else { outline_distance(region, d.at) };
+            let off = off + (-d.w).max(0.0) + (d.w - self.t).max(0.0);
+            if best.as_ref().is_none_or(|b| off < b.0) {
+                best = Some((off, k, d));
+            }
+        }
+        best.map(|(_, k, d)| (k, d))
+    }
+}
+
+impl Fibers for Folded<'_> {
+    fn depth(&self, p: Vec3) -> Option<Depth> {
+        self.read(p).map(|(_, d)| d)
+    }
+
+    fn angular(&self) -> bool {
+        false
+    }
+
+    fn thickness(&self) -> f64 {
+        self.t
+    }
+
+    fn rigid(&self, p: Vec3) -> Option<(usize, Rigid3, Rigid2)> {
+        let (k, _) = self.read(p)?;
+        match &self.pieces.get(k)?.0 {
+            Carrier::Panel(i, slab) if matches!(slab.surface, Surface::Plane) => Some((k, slab.place, self.fold?.placement(*i)?)),
+            Carrier::Flat(slab) => Some((k, slab.place, Rigid2::IDENTITY)),
+            _ => None,
+        }
+    }
+}
+
+/// How far (mm) an edge's points may lie off the line or the circle it is taken for: a rounding.
+const ON_FORM: f64 = 1e-9;
+
+/// The flat segments of an edge's piece from its parameter `a` to `b`, where it lies in the plane
+/// of `frame`, which the chart takes rigidly by `place`: a line or a circular arc where the piece
+/// is one (its points within [`ON_FORM`] of it, whatever form its record holds it in), else none.
+fn exact(curve: &CurveEval, a: f64, b: f64, frame: &Rigid3, place: &Rigid2) -> Vec<Seg2> {
+    const N: usize = 16;
+    let from = frame.inverse();
+    let pts: Option<Vec<Vec2>> = (0..=N)
+        .map(|k| {
+            let q = from.point(curve.point(a + (b - a) * k as f64 / N as f64)?);
+            Some(place.point(Vec2::new(q.x, q.y)))
+        })
+        .collect();
+    let Some(pts) = pts else { return Vec::new() };
+    let (s, e) = (pts[0], pts[N]);
+    let on = ON_FORM + 1e-12 * s.dist(e);
+    let off_line = |p: Vec2| {
+        let d = e - s;
+        let t = if d.len2() > 0.0 { ((p - s).dot(d) / d.len2()).clamp(0.0, 1.0) } else { 0.0 };
+        p.dist(s + d * t)
+    };
+    if s.dist(e) > on && pts.iter().all(|p| off_line(*p) <= on) {
+        return vec![Seg2::Line { a: s, b: e }];
+    }
+    // The circle through three points a third of the piece apart.
+    let (p, q, r) = (pts[0], pts[N / 3], pts[2 * N / 3]);
+    let (u, v) = (q - p, r - p);
+    let den = 2.0 * u.cross(v);
+    if !(den.abs() > 1e-12) {
+        return Vec::new();
+    }
+    let center = p + Vec2::new(v.y * u.len2() - u.y * v.len2(), u.x * v.len2() - v.x * u.len2()) * (1.0 / den);
+    let radius = p.dist(center);
+    if !pts.iter().all(|x| (x.dist(center) - radius).abs() <= on) {
+        return Vec::new();
+    }
+    let angle = |x: Vec2| (x - center).y.atan2((x - center).x);
+    let sweep: f64 = pts.windows(2).map(|w| (angle(w[1]) - angle(w[0]) + PI).rem_euclid(TAU) - PI).sum();
+    // Past a half turn, in halves: an arc's ends stay well apart.
+    let n = if sweep.abs() > PI { 2 } else { 1 };
+    (0..n).map(|k| Seg2::Arc { center, radius, start: angle(s) + sweep * k as f64 / n as f64, sweep: sweep / n as f64 }).collect()
+}
+
+/// `walls` in groups that meet each other along edges: each the walls of one cut through the
+/// sheet.
+pub(crate) fn components(q: &Query, walls: &[usize]) -> Vec<Vec<usize>> {
+    fn root(group: &mut [usize], mut i: usize) -> usize {
+        while group[i] != i {
+            group[i] = group[group[i]];
+            i = group[i];
+        }
+        i
+    }
+    let mut group: Vec<usize> = (0..walls.len()).collect();
+    for (i, &f) in walls.iter().enumerate() {
+        for l in &q.record().faces[f].loops {
+            let Bounds::Edges { edges } = l else { continue };
+            for oe in edges {
+                for g in q.edge_faces(oe.edge as usize) {
+                    if let Some(j) = walls.iter().position(|w| *w == g && g != f) {
+                        let (a, b) = (root(&mut group, i), root(&mut group, j));
+                        group[a] = b;
+                    }
+                }
+            }
+        }
+    }
+    let mut out: Vec<(usize, Vec<usize>)> = Vec::new();
+    for (i, &f) in walls.iter().enumerate() {
+        let r = root(&mut group, i);
+        match out.iter_mut().find(|(k, _)| *k == r) {
+            Some((_, list)) => list.push(f),
+            None => out.push((r, vec![f])),
+        }
+    }
+    out.into_iter().map(|(_, list)| list).collect()
+}
+
+/// Which of `folded`'s pieces the edges of `walls` lie in, by their places in its list.
+pub(crate) fn reached(q: &Query, folded: &Folded, walls: &[usize], sag: f64) -> BTreeSet<usize> {
+    let mut out = BTreeSet::new();
+    for &f in walls {
+        for l in &q.record().faces[f].loops {
+            let Bounds::Edges { edges } = l else { continue };
+            for oe in edges {
+                for (_, p) in q.edge_points(oe.edge as usize, sag).unwrap_or_default() {
+                    if let Some((k, _)) = folded.read(p) {
+                        out.insert(k);
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Whether faces `a` and `b` lie on one surface within `tol`: a cut leaves the faces it didn't
@@ -194,7 +392,7 @@ struct Wall {
 /// Reads one panel's shadow from the body a cut left.
 struct Reader<'a> {
     q: &'a Query<'a>,
-    slab: &'a Slab<'a>,
+    slab: &'a dyn Fibers,
     surfaces: Vec<Option<Wall>>,
     /// Points this near are one.
     tol: f64,
@@ -464,8 +662,9 @@ impl Reader<'_> {
     }
 }
 
-/// A piece of the outline: its points in space, in order.
-struct Piece(Vec<Vec3>);
+/// A piece of the outline: its points in space, in order, and its exact segments in the chart,
+/// where known (else none).
+struct Piece(Vec<Vec3>, Vec<Seg2>);
 
 /// The shadow on the panel `name` in `slab` of what a cut took through it, from the body `now`
 /// it left and the faces it made there (`walls`, faces of `now`), as regions of the panel's
@@ -474,7 +673,7 @@ struct Piece(Vec<Vec3>);
 pub(crate) fn shadow(
     now: &Body,
     q: &Query,
-    slab: &Slab,
+    slab: &dyn Fibers,
     walls: &[usize],
     name: &str,
     around: f64,
@@ -521,7 +720,7 @@ pub(crate) fn shadow(
                 } else if ws.iter().all(|w| w.abs() <= tol * 10.0) {
                     near = true;
                     Kind::Rim { far: false, wall: f }
-                } else if ws.iter().all(|w| (w - slab.t).abs() <= tol * 10.0) {
+                } else if ws.iter().all(|w| (w - slab.thickness()).abs() <= tol * 10.0) {
                     far = true;
                     Kind::Rim { far: true, wall: f }
                 } else {
@@ -538,7 +737,7 @@ pub(crate) fn shadow(
         if !(near && far) {
             let level = depths.iter().all(|w| (w - depths[0]).abs() <= tol * 10.0);
             return Err(if level {
-                format!("leaves a recess in {name}: not supported yet at a slant or on a roll")
+                format!("leaves a recess in {name}: not supported yet at a slant, on a roll or in a bend")
             } else {
                 format!(
                     "leaves walls that are not square to the sheet and don't run through it on {name}: not supported yet (a countersink, a rounded or chamfered face edge)"
@@ -546,7 +745,7 @@ pub(crate) fn shadow(
             });
         }
         if edge {
-            return Err(format!("reaches the edge of {name} at a slant or on a roll: not supported yet"));
+            return Err(format!("reaches the edge of {name}: not supported yet at a slant, on a roll or across a bend"));
         }
     }
     for edge in &mut edges {
@@ -572,7 +771,7 @@ pub(crate) fn shadow(
                     edges[i].corners.sort_by(|x, y| x.0.total_cmp(&y.0));
                 }
             }
-            folds.push(Piece(path));
+            folds.push(Piece(path, Vec::new()));
         }
     }
     // A wall whose edges lean both ways with no corner on them has a fold all round inside it.
@@ -595,7 +794,7 @@ pub(crate) fn shadow(
         if let Some((a, b)) = pair {
             let from = r.seed(f, a, b)?;
             let (path, _) = r.fold(f, from, None, &[from], &edges)?;
-            folds.push(Piece(path));
+            folds.push(Piece(path, Vec::new()));
         }
     }
     // The edges' pieces on the outline: between corners, where their walls lean as the outline
@@ -615,7 +814,13 @@ pub(crate) fn shadow(
             let mut pts = vec![edge.curve.point(a).ok_or_else(unread)?];
             pts.extend(samples.iter().filter(|(t, _)| *t > a && *t < b).map(|(_, p)| *p));
             pts.push(edge.curve.point(b).ok_or_else(unread)?);
-            pieces.push(Piece(pts));
+            // On flat material the chart takes rigidly, a line or a circle is one exactly.
+            let inside = [0.25, 0.5, 0.75].map(|u| edge.curve.point(a + (b - a) * u).and_then(|p| r.slab.rigid(p)));
+            let segs = match inside {
+                [Some((k, frame, place)), Some((l, ..)), Some((m, ..))] if k == l && l == m => exact(&edge.curve, a, b, &frame, &place),
+                _ => Vec::new(),
+            };
+            pieces.push(Piece(pts, segs));
         }
     }
     let loops = assemble(&r, pieces, around)?;
@@ -649,7 +854,7 @@ pub(crate) fn within(q: &Query, slab: &Slab, region: &Region2, walls: &[usize], 
     let on = |p: Vec3| {
         slab.depth(p).is_some_and(|d| {
             let at = Vec2::new(d.at.x, d.at.y + if slab.angular() { ((mid - d.at.y) / TAU).round() * TAU } else { 0.0 });
-            d.w >= -near && d.w <= slab.t + near && (region.contains(at) || outline_distance(region, at) <= near)
+            d.w >= -near && d.w <= slab.thickness() + near && (region.contains(at) || outline_distance(region, at) <= near)
         })
     };
     let rec = q.record();
@@ -683,10 +888,10 @@ fn assemble(r: &Reader, pieces: Vec<Piece>, around: f64) -> Result<Vec<Loop2>, S
     // The pieces' ends, as points one within the edges' tolerance; a piece all within it is a
     // point (an edge's bit between a vertex and a touch beside it).
     let join = r.tol.max(r.q.record().tolerance) * 10.0;
-    let pieces: Vec<Piece> = pieces.into_iter().filter(|Piece(p)| p.iter().any(|x| x.dist(p[0]) > join)).collect();
+    let pieces: Vec<Piece> = pieces.into_iter().filter(|Piece(p, _)| p.iter().any(|x| x.dist(p[0]) > join)).collect();
     let mut nodes: Vec<Vec3> = Vec::new();
     let mut ends: Vec<[usize; 2]> = Vec::new();
-    for Piece(p) in &pieces {
+    for Piece(p, _) in &pieces {
         let mut end = [0; 2];
         for (slot, x) in end.iter_mut().zip([p[0], p[p.len() - 1]]) {
             *slot = match nodes.iter().position(|n| n.dist(x) <= join) {
@@ -725,11 +930,19 @@ fn assemble(r: &Reader, pieces: Vec<Piece>, around: f64) -> Result<Vec<Loop2>, S
             }
             k = (0..pieces.len()).find(|j| !used[*j] && ends[*j].contains(&at)).ok_or_else(broken)?;
         }
-        // Its points in the panel's parameters, a roll's angle unwrapped along it.
-        let mut runs: Vec<Vec<Vec2>> = Vec::new();
+        // Its points in the panel's parameters, a roll's angle unwrapped along it, or its exact
+        // segments.
+        let mut runs: Vec<Run> = Vec::new();
         let mut last: Option<Vec2> = None;
         for (k, back) in &cycle {
-            let mut pts: Vec<Vec3> = pieces[*k].0.clone();
+            let Piece(points, exact) = &pieces[*k];
+            if !exact.is_empty() {
+                let segs: Vec<Seg2> = if *back { exact.iter().rev().map(Seg2::reversed).collect() } else { exact.clone() };
+                last = segs.last().map(Seg2::end);
+                runs.push(Run::Exact(segs));
+                continue;
+            }
+            let mut pts: Vec<Vec3> = points.clone();
             if *back {
                 pts.reverse();
             }
@@ -744,52 +957,126 @@ fn assemble(r: &Reader, pieces: Vec<Piece>, around: f64) -> Result<Vec<Loop2>, S
                 last = Some(c);
                 run.push(c);
             }
-            runs.push(run);
+            runs.push(Run::Points(run));
         }
-        // Each piece starts where the one before it ends; one that is a point in the flat (a fold
-        // along a fiber, a wall edge-on to the fibers along a line) is left out.
-        let extent = |run: &Vec<Vec2>| run.iter().map(|p| p.dist(run[0])).fold(0.0, f64::max);
+        // Each piece starts where the one before it ends (an exact piece's ends stay, the points
+        // beside them move); one that is a point in the flat (a fold along a fiber, a wall
+        // edge-on to the fibers along a line) is left out.
         let scale = if r.slab.angular() { 1e-3 } else { 1.0 };
-        runs.retain(|run| run.len() > 1 && extent(run) > r.tol * 1e-3 * scale);
+        runs.retain(|run| run.extent() > r.tol * 1e-3 * scale);
         for i in 1..runs.len() {
-            let end = runs[i - 1].last().copied();
-            if let (Some(end), Some(first)) = (end, runs[i].first_mut()) {
-                *first = end;
+            let (end, start) = (runs[i - 1].end(), runs[i].start());
+            let (before, after) = runs.split_at_mut(i);
+            match (&mut before[i - 1], &mut after[0]) {
+                (Run::Points(prev), Run::Exact(_)) => {
+                    if let (Some(p), Some(s)) = (prev.last_mut(), start) {
+                        *p = s;
+                    }
+                }
+                (_, Run::Points(next)) => {
+                    if let (Some(p), Some(e)) = (next.first_mut(), end) {
+                        *p = e;
+                    }
+                }
+                (Run::Exact(_), Run::Exact(_)) => {}
             }
         }
-        let first = runs.first().and_then(|r| r.first()).copied().ok_or_else(broken)?;
-        let finish = runs.last().and_then(|r| r.last()).copied().ok_or_else(broken)?;
+        let first = runs.first().and_then(Run::start).ok_or_else(broken)?;
+        let finish = runs.last().and_then(Run::end).ok_or_else(broken)?;
         if r.slab.angular() && (first.y - finish.y).abs() > 1.0 {
             return Err(format!("cuts all round {name}: not supported yet"));
         }
-        if let Some(l) = runs.last_mut().and_then(|r| r.last_mut()) {
-            *l = first;
+        match runs.as_mut_slice() {
+            [.., Run::Points(tail)] => {
+                if let Some(l) = tail.last_mut() {
+                    *l = first;
+                }
+            }
+            [Run::Points(head), ..] => {
+                if let Some(f) = head.first_mut() {
+                    *f = finish;
+                }
+            }
+            _ => {}
         }
         // Onto the panel's own turn round a roll.
         if r.slab.angular() {
-            let mean = runs.iter().flatten().map(|p| p.y).sum::<f64>() / runs.iter().map(Vec::len).sum::<usize>().max(1) as f64;
+            let pts = || runs.iter().filter_map(|run| if let Run::Points(v) = run { Some(v) } else { None }).flatten();
+            let mean = pts().map(|p| p.y).sum::<f64>() / pts().count().max(1) as f64;
             let shift = ((around - mean) / TAU).round() * TAU;
-            for p in runs.iter_mut().flatten() {
-                p.y += shift;
+            for run in &mut runs {
+                if let Run::Points(v) = run {
+                    for p in v {
+                        p.y += shift;
+                    }
+                }
             }
         }
         // A run that closes on itself (a whole rim) as two halves: a curve through points runs
         // from one end to another.
-        let runs: Vec<Vec<Vec2>> = runs
+        let runs: Vec<Run> = runs
             .into_iter()
-            .flat_map(|run| {
-                let n = run.len();
-                if n > 2 && run[0].dist(run[n - 1]) <= r.tol * 1e-3 { vec![run[..=n / 2].to_vec(), run[n / 2..].to_vec()] } else { vec![run] }
+            .flat_map(|run| match run {
+                Run::Points(run) => {
+                    let n = run.len();
+                    if n > 2 && run[0].dist(run[n - 1]) <= r.tol * 1e-3 {
+                        vec![Run::Points(run[..=n / 2].to_vec()), Run::Points(run[n / 2..].to_vec())]
+                    } else {
+                        vec![Run::Points(run)]
+                    }
+                }
+                exact => vec![exact],
             })
             .collect();
-        junctions.extend(runs.iter().filter_map(|run| run.first().copied()));
-        let segs: Vec<Seg2> = runs.iter().flat_map(|run| curve_through(run)).collect();
+        junctions.extend(runs.iter().filter_map(Run::start));
+        let segs: Vec<Seg2> = runs
+            .iter()
+            .flat_map(|run| match run {
+                Run::Points(v) => curve_through(v),
+                Run::Exact(segs) => segs.clone(),
+            })
+            .collect();
         if segs.is_empty() {
             return Err(broken());
         }
         loops.push(Loop2 { segs });
     }
     crossed(&loops, &junctions, r.tol).map_or(Ok(loops), |_| Err(format!("its walls on {name} overlap in the flat: not supported yet")))
+}
+
+/// A run of an outline in the chart: points a curve is put through, or exact segments.
+enum Run {
+    Points(Vec<Vec2>),
+    Exact(Vec<Seg2>),
+}
+
+impl Run {
+    fn start(&self) -> Option<Vec2> {
+        match self {
+            Run::Points(v) => v.first().copied(),
+            Run::Exact(segs) => segs.first().map(Seg2::start),
+        }
+    }
+
+    fn end(&self) -> Option<Vec2> {
+        match self {
+            Run::Points(v) => v.last().copied(),
+            Run::Exact(segs) => segs.last().map(Seg2::end),
+        }
+    }
+
+    /// How far it reaches from its start: a run that reaches no further is a point.
+    fn extent(&self) -> f64 {
+        match self {
+            Run::Points(v) => {
+                if v.len() < 2 {
+                    return 0.0;
+                }
+                v.iter().map(|p| p.dist(v[0])).fold(0.0, f64::max)
+            }
+            Run::Exact(segs) => segs.iter().map(Seg2::length).sum(),
+        }
+    }
 }
 
 /// A point where the outlines cross themselves or each other, away from the points where their

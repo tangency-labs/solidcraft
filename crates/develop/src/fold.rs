@@ -100,6 +100,26 @@ impl Bent {
         (q.dot(d), if self.wrap.neutral > 0.0 { across / self.wrap.neutral } else { 0.0 })
     }
 
+    /// Where a point of space lies in the bend: the point of the flat zone whose fiber runs
+    /// through it, how deep it lies into the material, and the way deeper (a unit vector). The
+    /// inverse of [`Bent::point`]; `None` on the bend's axis.
+    pub fn unwrapped(&self, p: Vec3) -> Option<(Vec2, f64, Vec3)> {
+        let q = self.frame.inverse().point(p);
+        let w = &self.wrap;
+        // In the frame, a point turned `phi` at radius `rho` lies at (along, sign (sheet -
+        // rho cos phi), rho sin phi - setback); deeper, `rho` falls (sign 1) or grows.
+        let (c, s) = (w.sheet - w.sign * q.y, q.z + w.setback);
+        let rho = c.hypot(s);
+        if !(rho > 0.0) {
+            return None;
+        }
+        let phi = s.atan2(c);
+        let (o, d) = self.flat;
+        let flat = o + d * q.x + Vec2::new(d.y, -d.x) * (phi * w.neutral - w.setback);
+        let deeper = self.frame.vector(Vec3::new(0.0, phi.cos(), -w.sign * phi.sin()));
+        Some((flat, (w.sheet - rho) * w.sign, deeper))
+    }
+
     /// A point of the bend's axis and its direction, round which the sheet turns positively
     /// (right-handed) from the `a` panel to the `b` one.
     pub fn axis(&self) -> (Vec3, Vec3) {
@@ -123,6 +143,25 @@ impl Fold {
     pub fn surface_point(&self, i: usize, q: Vec2, depth: f64) -> Option<Vec3> {
         let (local, _) = embed(self.surfaces.get(i)?, q, depth)?;
         Some(self.places.get(i).copied().flatten()?.point(local))
+    }
+
+    /// Where panel `i`'s neutral chart lies in the flat (a planar panel's chart is its neutral
+    /// one).
+    pub fn placement(&self, i: usize) -> Option<Rigid2> {
+        self.unplace.get(i).copied().flatten().map(|p| p.inverse())
+    }
+
+    /// Where the point of panel `i`'s surface at the parameters `q` lies in the flat: the inverse
+    /// of [`Fold::param`]. A roll's angle is taken within half a turn of its region's middle.
+    pub fn flat_point(&self, i: usize, q: Vec2) -> Option<Vec2> {
+        let q = match self.surfaces.get(i)? {
+            Surface::Cylinder { .. } | Surface::Cone { .. } => {
+                let middle = self.middle.get(i).copied().unwrap_or(0.0);
+                Vec2::new(q.x, q.y + ((middle - q.y) / std::f64::consts::TAU).round() * std::f64::consts::TAU)
+            }
+            Surface::Plane | Surface::Spline(_) => q,
+        };
+        Some(self.unplace.get(i).copied().flatten()?.inverse().point(self.maps.get(i)?.point(q)))
     }
 
     /// The parameters of panel `i`'s surface at a point of its flat material.

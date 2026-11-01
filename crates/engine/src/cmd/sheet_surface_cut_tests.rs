@@ -6,7 +6,7 @@
 
 use std::f64::consts::PI;
 
-use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
+use solidcraft_geom::{Loop2, Region2, Seg2, Vec2, Vec3};
 
 use super::*;
 
@@ -131,7 +131,7 @@ fn a_corner_rounded_through_the_sheet_is_an_arc_of_its_outline() {
 }
 
 /// What a sheet can't keep is refused, and the sheet stays as it was: a countersink and a
-/// chamfered face edge (walls not square to the sheet), a cut across a bend.
+/// chamfered face edge (walls not square to the sheet), a notch through a bend from the edge.
 #[test]
 fn cuts_a_sheet_cannot_keep_are_refused_with_the_reason() {
     let refused = |cmd: &str, p: Value| {
@@ -147,7 +147,7 @@ fn cuts_a_sheet_cannot_keep_are_refused_with_the_reason() {
     let e = refused("solid.chamfer", json!({"edges": [[50, 60, T]], "distance": 0.5}));
     assert!(e.contains("not square to the sheet"), "{e}");
     let e = refused("solid.box", json!({"corner": [45, -10, -10], "length": 10, "width": 15, "height": 50, "operation": "cut"}));
-    assert!(e.contains("reaches a bend"), "{e}");
+    assert!(e.contains("reaches the edge of") && e.contains("across a bend"), "{e}");
 }
 
 /// A hole drilled through a plate at a slant is cut from the flat as its shadow, as a shop cuts
@@ -275,7 +275,8 @@ fn a_ball_stepped_through_a_rolls_face_is_cut_alike_either_side() {
 }
 
 /// What a roll can't keep is refused, and the roll stays as it was: a dimple that stops inside
-/// the metal, and a drill that runs on into a bend.
+/// the metal; and on a plate, a drill at a slant through its edge that scoops into its bend and
+/// flange without going through them.
 #[test]
 fn shadows_a_sheet_cannot_keep_are_refused_with_the_reason() {
     let mut s = half_roll();
@@ -296,7 +297,7 @@ fn shadows_a_sheet_cannot_keep_are_refused_with_the_reason() {
         .err()
         .map(|e| e.to_string())
         .unwrap_or_default();
-    assert!(e.contains("reaches a bend"), "{e}");
+    assert!(e.contains("leaves a recess") && e.contains("in a bend"), "{e}");
     assert!((exact_volume(&s) - v).abs() < 1e-9 * v, "the sheet changed");
 }
 
@@ -440,4 +441,101 @@ fn cuts_that_part_a_bend_from_its_panels_are_refused() {
     let c = f.at(50.0, w / 2.0);
     let e = refused(vec![Region2 { outer: disc(c, 2.0), holes: vec![disc(c, 1.0).reversed()] }]);
     assert!(e.contains("joined to neither"), "{e}");
+}
+
+/// A 100 x 60 plate of 2 mm sheet with a 30 high flange on its edge y = 0, bent R 10 (K 0.44):
+/// the bend's axis runs along x at y = z = 12, its metal 10 to 12 from it.
+fn wide_bend() -> Session {
+    let mut s = Session::default();
+    rule(&mut s, "Wide", T, 0.44, 10.0, 0.5);
+    run(&mut s, "solid.box", json!({"length": 100, "width": 60, "height": T, "body_name": "Plate"}));
+    run(&mut s, "sheet.convert", json!({"mode": "thicken", "body": "Plate", "face": [50, 30, T]}));
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 30}));
+    s
+}
+
+/// A drill through the middle of a bend, square to it, is cut from the bend's flat zone as its
+/// shadow: every fiber its round meets, so that each section across the drill loses the angle
+/// within which the inside of the bend comes nearer its axis than its radius.
+#[test]
+fn a_drill_through_a_bend_is_cut_as_its_shadow() {
+    let mut s = wide_bend();
+    let v0 = exact_volume(&s);
+    let (r, inside) = (2.0, 10.0);
+    let d = std::f64::consts::FRAC_1_SQRT_2;
+    run(&mut s, "solid.cylinder", json!({"radius": r, "height": 20, "base": [50, 12, 12], "axis": [0, -d, -d], "operation": "cut"}));
+    let removed = simpson(|x: f64| ((r * r - x * x).max(0.0).sqrt() / inside).asin(), -r, r, 20000) * T * (2.0 * inside + T);
+    let want = v0 - removed;
+    assert!((exact_volume(&s) - want).abs() < 1e-5 * removed, "{} vs {want}", exact_volume(&s));
+}
+
+/// A hole drilled square through the plate beside its bend runs on into the bend: one outline
+/// across the tangent line, square through the plate where the drill is, and in the bend every
+/// fiber the drill meets.
+#[test]
+fn a_hole_through_a_plate_that_runs_into_its_bend_is_cut_from_both() {
+    let mut s = wide_bend();
+    let v0 = exact_volume(&s);
+    // Its center 1 into the plate from the tangent line y = 12.
+    let (r, d, inside): (f64, f64, f64) = (3.0, 1.0, 10.0);
+    run(&mut s, "solid.cylinder", json!({"radius": r, "height": 30, "base": [50, 12.0 + d, -5], "axis": "Z", "operation": "cut"}));
+    let cap = r * r * (d / r).acos() - d * (r * r - d * d).sqrt();
+    // In the bend, the fiber turned phi meets the drill where its inside end comes within the
+    // drill's half chord s of its center: 10 sin phi <= s - 1.
+    let reach = (r * r - d * d).sqrt();
+    let bend =
+        simpson(|x: f64| (((r * r - x * x).max(0.0).sqrt() - d) / inside).clamp(0.0, 1.0).asin(), -reach, reach, 20000) * T * (2.0 * inside + T)
+            / 2.0;
+    let removed = (PI * r * r - cap) * T + bend;
+    let want = v0 - removed;
+    assert!((exact_volume(&s) - want).abs() < 1e-5 * removed, "{} vs {want}", exact_volume(&s));
+}
+
+/// A drill that stops inside a bend is refused, and the sheet stays as it was.
+#[test]
+fn a_drill_that_stops_inside_a_bend_is_refused() {
+    let mut s = wide_bend();
+    let v = exact_volume(&s);
+    let d = std::f64::consts::FRAC_1_SQRT_2;
+    let e = s
+        .execute(
+            "solid.cylinder",
+            &json!({"radius": 2, "height": 9, "base": [50.0, 12.0 - 20.0 * d, 12.0 - 20.0 * d], "axis": [0, d, d], "operation": "cut"}),
+        )
+        .err()
+        .map(|e| e.to_string())
+        .unwrap_or_default();
+    assert!(e.contains("don't run through"), "{e}");
+    assert!((exact_volume(&s) - v).abs() < 1e-9 * v, "the sheet changed");
+}
+
+/// A slot cut through the flat across a bend while the sheet is unfolded is a cut of the sheet's,
+/// as if drawn on the flat: folded again, both stretches of the bend bend, as for the same slot
+/// cut folded.
+#[test]
+fn a_slot_cut_across_a_bend_in_the_flat_folds_with_the_sheet() {
+    let f = Flanged::new();
+    let (v0, _) = f.cut(Vec::new());
+    let w = f.width;
+    let mut s = plate();
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, T]], "height": 20}));
+    run(&mut s, "sheet.unfold", json!({}));
+    // The slot's corners in space: the flat lies in the plane of the plate's face.
+    let Some(place) = f.sheet.places.first().copied().flatten() else { panic!("the plate has a place") };
+    let corners: Vec<Vec3> = [(40.0, -3.0), (60.0, -3.0), (60.0, w + 3.0), (40.0, w + 3.0)]
+        .iter()
+        .map(|(a, b)| {
+            let p = f.at(*a, *b);
+            place.point(Vec3::new(p.x, p.y, 0.0))
+        })
+        .collect();
+    let (lo, hi) = corners.iter().fold(
+        (Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY), Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY)),
+        |(lo, hi), p| (lo.min(*p), hi.max(*p)),
+    );
+    assert!((hi.x - lo.x - 20.0).abs() < 1e-9 || (hi.y - lo.y - 20.0).abs() < 1e-9, "the flat runs along x or y: {lo:?} {hi:?}");
+    run(&mut s, "solid.box", json!({"corner": [lo.x, lo.y, -10], "length": hi.x - lo.x, "width": hi.y - lo.y, "height": 20, "operation": "cut"}));
+    run(&mut s, "sheet.refold", json!({}));
+    let want = v0 - 2.0 * 20.0 * 3.0 * T - 20.0 * w * bent_per_area();
+    assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", exact_volume(&s));
 }
