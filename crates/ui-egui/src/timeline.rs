@@ -1,6 +1,6 @@
 //! The timeline (bottom): features in order, the rollback marker, errors and warnings.
 
-use crate::ui_kit::{Container, Edge, Status, Surface};
+use crate::ui_kit::{Container, Edge, Status, StatusTip, Surface};
 use egui::{Rect, Sense, UiBuilder, pos2, vec2};
 use serde_json::{Value, json};
 use solidcraft_engine::doc::{
@@ -434,8 +434,8 @@ fn status_at<'a>(app: &SolveApp, index: usize, result: impl FnOnce() -> Option<&
     if result.error.is_some() { Some(Status::Error) } else { result.warning.as_ref().map(|_| Status::Warning) }
 }
 
-/// The worst mark among `ids`, with the message of the first feature that has it.
-pub(crate) fn worst_status(app: &SolveApp, ids: &[u64]) -> (Option<Status>, Option<String>) {
+/// The worst mark among `ids`, with the tooltip of the first feature that has it.
+pub(crate) fn worst_status(app: &SolveApp, ids: &[u64]) -> (Option<Status>, Option<StatusTip>) {
     let mark = |status: Option<Status>, id: &u64| status.map(|status| (status, *id));
     // A long folder finds each feature's place and result in tables built once: a search per
     // feature made a folded long history cost the square of its length every frame. A short
@@ -453,9 +453,25 @@ pub(crate) fn worst_status(app: &SolveApp, ids: &[u64]) -> (Option<Status>, Opti
     };
     let worst = marks.into_iter().reduce(|a, b| if b.0 > a.0 { b } else { a });
     match worst {
-        Some((status, id)) => (Some(status), feature_message(app, id)),
+        Some((status, id)) => (Some(status), feature_tip(app, id)),
         None => (None, None),
     }
+}
+
+/// A feature's mark tooltip: as [`feature_message`] says it, with the error in the error colour.
+pub(crate) fn feature_tip(app: &SolveApp, id: u64) -> Option<StatusTip> {
+    let result = app.session.model.result(id)?;
+    if result.error.is_none() && result.warning.is_none() {
+        return None;
+    }
+    let feature = app.session.doc.features.iter().find(|f| f.id == id)?;
+    Some(status_tip(format!("{}  ({})", feature.name, feature.kind.type_name()), result.error.as_deref(), result.warning.as_deref()))
+}
+
+/// The error and the warning in the user's language under `head`.
+pub(crate) fn status_tip(head: String, error: Option<&str>, warning: Option<&str>) -> StatusTip {
+    let line = |id: &str, message: &str| crate::i18n::format(id, &[("message", &crate::i18n::tr_diagnostic(message))]);
+    StatusTip { head, error: error.map(|e| line("timeline.feature_error", e)), warning: warning.map(|w| line("timeline.feature_warning", w)) }
 }
 
 /// What a feature's error or warning mark says, as its tooltip shows it (name and type, then
@@ -1012,23 +1028,20 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 }
                 // The tip is written only while it shows (as `on_hover_text` would lay it out).
                 let resp = resp.on_hover_ui(|ui| {
-                    let mut tip = status_text(name, ty, err.as_deref(), warn.as_deref());
+                    ui.set_max_width(ui.spacing().tooltip_width);
+                    // The error in the error colour, as the other History layouts show it.
+                    status_tip(format!("{name}  ({ty})"), err.as_deref(), warn.as_deref()).show(ui);
+                    let mut more = Vec::new();
                     // Greyed out says only "not shown": say why (#8100).
                     if rolled {
-                        tip.push('\n');
-                        tip.push_str(crate::i18n::tr("timeline.feature_rolled_back"));
+                        more.push(crate::i18n::tr("timeline.feature_rolled_back").to_string());
                     }
-                    if let Some(state) = sketch_state {
-                        tip.push('\n');
-                        tip.push_str(&state.text());
-                    }
+                    more.extend(sketch_state.map(|state| state.text()));
                     if let Some(ms) = ms {
-                        tip += &format!("\n{ms:.1} ms");
+                        more.push(format!("{ms:.1} ms"));
                     }
-                    tip.push('\n');
-                    tip.push_str(crate::i18n::tr("timeline.feature_hint"));
-                    ui.set_max_width(ui.spacing().tooltip_width);
-                    ui.add(egui::Label::new(tip));
+                    more.push(crate::i18n::tr("timeline.feature_hint").to_string());
+                    crate::ui_kit::text(ui, &more.join("\n"), crate::ui_kit::Text::Report("timeline_feature", false));
                 });
                 if resp.clicked() && !pick_feature_into_dialog(app, *id, ui.input(|i| i.modifiers)) {
                     let modifiers = ui.input(|i| i.modifiers);
@@ -1316,6 +1329,22 @@ mod tests {
         );
         let _english = crate::i18n::scope("en");
         assert_eq!(super::status_text("Box", "BoxFeature", Some("error"), Some("warning")), "Box  (BoxFeature)\nError: error\nWarning: warning");
+    }
+
+    /// The bottom History's tooltip puts a feature's error on a line of its own, in the error
+    /// colour, as the other History layouts do.
+    #[test]
+    fn bottom_history_tooltip_shows_the_error_on_its_own_line() {
+        let mut h = Harness::new();
+        let id = h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Broken"})).unwrap()["feature"].as_u64().unwrap();
+        h.frames(4);
+        let result = h.app.session.model.results.iter_mut().find(|r| r.id == id).unwrap();
+        result.error = Some("the blend is larger than the neighbouring faces".into());
+        h.frames(2);
+        let chip = crate::scenario::handle_at("timeline:Broken").unwrap();
+        h.app.synthetic.push(egui::Event::PointerMoved(chip));
+        h.frames(90);
+        assert!(crate::scenario::handle_at("dialog:report:status_error").is_some(), "the error has its own line");
     }
 
     #[test]
@@ -2018,14 +2047,14 @@ mod tests {
         }
         let own = |h: &Harness, ids: &[u64]| {
             let worst = ids.iter().filter_map(|id| super::feature_status(&h.app, *id).map(|s| (s, *id))).reduce(|a, b| if b.0 > a.0 { b } else { a });
-            (worst.map(|w| w.0), worst.and_then(|w| super::feature_message(&h.app, w.1)))
+            (worst.map(|w| w.0), worst.and_then(|w| super::feature_tip(&h.app, w.1)))
         };
         // Every folder short enough to be searched, then the same repeated past the length that
         // builds the tables.
         let check = |h: &Harness, folder: &[u64], status: Option<Status>, of: Option<u64>, why: &str| {
             for ids in [folder.to_vec(), folder.repeat(16)] {
                 let found = super::worst_status(&h.app, &ids);
-                assert_eq!(found, (status, of.and_then(|id| super::feature_message(&h.app, id))), "{why}, {} ids", ids.len());
+                assert_eq!(found, (status, of.and_then(|id| super::feature_tip(&h.app, id))), "{why}, {} ids", ids.len());
                 assert_eq!(found, own(h, &ids), "{why}, {} ids", ids.len());
             }
         };
