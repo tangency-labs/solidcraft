@@ -207,6 +207,10 @@ two seconds and a pin in its corner can be clicked to pin it to the ribbon or re
 quicker click anywhere on the icon starts the command). Right-clicking the icon, or dragging it
 onto the ribbon, also pins it; a pinned command always shows its pin.
 
+To change the order of a section's menu, drag a command to another place in it (list or large
+icons): a line shows where it will go. A command stays within its group (Edges, Faces, …). The
+order is kept with the toolbar, and **Reset Toolbar** restores it.
+
 Interface › **Leave pinned commands out of the drop-down menus** (off by default) lists in a
 section's menu only the commands that are not already buttons on the ribbon. When the window is
 too narrow for a section's buttons, its menu lists them again.
