@@ -257,6 +257,30 @@ fn placement_field_keeps_focus_for_owner_validation_on_enter() {
     assert!(value.contains('x'));
 }
 
+/// #10582: an angle typed a key at a time keeps its decimal point when its owner keeps it in
+/// radians, as Edit Canvas does, and so gives back a hair off the value the field set.
+#[test]
+fn an_angle_kept_in_radians_takes_a_typed_decimal_point() {
+    let ctx = crate::fonts::test_context();
+    let mut radians = 0.0_f64;
+    let mut draw = |ui: &mut Ui| {
+        row(ui, "Angle", |ui| {
+            let mut degrees = radians.to_degrees();
+            if angle_field(ui, &mut degrees).changed() {
+                radians = degrees.to_radians();
+            }
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let at = scenario::rect_of("dialog:angle:Angle").expect("the angle field").center();
+    frame(&ctx, pointer(at, true), &mut draw);
+    frame(&ctx, pointer(at, false), &mut draw);
+    for typed in ["-", "3", ".", "7"] {
+        frame(&ctx, vec![egui::Event::Text(typed.into())], &mut draw);
+    }
+    assert!((radians.to_degrees() + 3.7).abs() < 1e-9, "typed -3.7, the angle is {}", radians.to_degrees());
+}
+
 #[test]
 fn bounded_name_editor_keeps_unicode_character_cap() {
     let ctx = crate::fonts::test_context();
