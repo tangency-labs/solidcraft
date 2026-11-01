@@ -2152,6 +2152,8 @@
   "prefs.button_left": "Arrastrar con el botón izquierdo",
   "prefs.button_middle": "Arrastrar con el botón central",
   "prefs.button_right": "Arrastrar con el botón derecho",
+  "prefs.carousel_next": "Siguiente",
+  "prefs.carousel_previous": "Anterior",
   "prefs.choose_font": "Elegir archivo de fuente…",
   "prefs.click": "Clic",
   "prefs.contact_shading": "Sombreado de contacto suave",
