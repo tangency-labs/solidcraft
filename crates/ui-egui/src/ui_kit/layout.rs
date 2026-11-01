@@ -262,11 +262,34 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(
     // Measuring takes the original text and prepares it the same way, so column and row agree.
     let label_width = label_column(ui, text, width);
     let label_rect = egui::Rect::from_min_size(rect.min, vec2(label_width, rect.height()));
-    ui.scope_builder(egui::UiBuilder::new().max_rect(label_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-        // Left aligned in the label column, as in the design.
-        ui.add(egui::Label::new(RichText::new(shown.clone()).size(t.font_label).color(t.dialog_label)).truncate()).on_hover_text(shown);
-    });
-    let control_rect = egui::Rect::from_min_max(egui::pos2((label_rect.right() + label_gap(ui, width)).min(rect.right()), rect.top()), rect.max);
+    let help = ui.stack().iter().find_map(|node| node.tags().get_downcast::<String>(super::preferences_small::ROW_HELP)).cloned();
+    if label_width > 0.0 {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(label_rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+            // Left aligned in the label column, as in the design.
+            if let Some(help) = &help {
+                ui.spacing_mut().item_spacing.x = t.space_4;
+                let width = (label_width - t.space_16 - t.space_4).max(0.0);
+                let label = ui
+                    .scope_builder(
+                        egui::UiBuilder::new()
+                            .max_rect(egui::Rect::from_min_size(label_rect.min, vec2(width, height)))
+                            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                        |ui| {
+                            ui.add(egui::Label::new(RichText::new(shown.clone()).size(t.font_label).color(t.dialog_label)).truncate())
+                                .on_hover_text(&shown)
+                        },
+                    )
+                    .inner;
+                let help = super::help_icon(ui, help);
+                scenario::publish_rect(&format!("dialog:row_label:{text}"), label.rect);
+                scenario::publish_rect(&format!("dialog:row_help:{text}"), help.rect);
+            } else {
+                ui.add(egui::Label::new(RichText::new(shown.clone()).size(t.font_label).color(t.dialog_label)).truncate()).on_hover_text(shown);
+            }
+        });
+    }
+    let gutter = if label_width > 0.0 { label_gap(ui, width) } else { 0.0 };
+    let control_rect = egui::Rect::from_min_max(egui::pos2((label_rect.right() + gutter).min(rect.right()), rect.top()), rect.max);
     let result = ui
         .scope_builder(
             egui::UiBuilder::new()
@@ -302,6 +325,18 @@ pub(crate) fn caption(ui: &mut Ui, aligned_to: &str, text: &str) {
     let text_rect = egui::Rect::from_min_max(egui::pos2(left, rect.top()), rect.max);
     paint_text(ui, text_rect, text, egui::FontId::proportional(t.font_small), t.form_dim, false);
     scenario::publish_rect(&format!("dialog:caption:{aligned_to}"), text_rect);
+}
+
+/// Natural-height content aligned beneath an indexed row's control, bounded independently of the form.
+pub(crate) fn below_row_control<R>(ui: &mut Ui, label: &str, width: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let available = dimension(ui.available_width());
+    let inset = (label_column(ui, label, available) + label_gap(ui, available)).min(available);
+    ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.add_space(inset);
+        ui.allocate_ui_with_layout(vec2(width.min((available - inset).max(0.0)), 0.0), egui::Layout::top_down(egui::Align::Min), add).inner
+    })
+    .inner
 }
 
 /// Where a [`figure_rows`] field went (in the order given): the field's rect, and whether it is
@@ -450,7 +485,16 @@ fn section_with_badge<R>(
     let id = ui.make_persistent_id(id);
     let mut open = !pending && (searching || ui.ctx().data_mut(|data| data.get_persisted::<bool>(id)).unwrap_or(default_open));
     let (rect, response) = ui.allocate_exact_size(
-        vec2(dimension(ui.available_width()), if compact { t.control_height - t.space_4 } else { row_height() }),
+        vec2(
+            dimension(ui.available_width()),
+            if compact {
+                t.control_height - t.space_4
+            } else if super::settings_page_active(ui) {
+                t.control_height + t.space_2
+            } else {
+                row_height()
+            },
+        ),
         egui::Sense::click(),
     );
     crate::prefs_search::follow(ui, title, rect);
@@ -620,7 +664,7 @@ pub(crate) fn divider(ui: &mut Ui, key: &str) {
 
 /// Give a compound row's subfield its accessible name without allocating layout space.
 /// Name a subfield without allocating another row. Tokens: `none`.
-pub(super) fn named_control<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
+pub(crate) fn named_control<R>(ui: &mut Ui, label: &str, add: impl FnOnce(&mut Ui) -> R) -> R {
     ui.scope_builder(egui::UiBuilder::new().id_salt(label).ui_stack_info(egui::UiStackInfo::default().with_tag_value(LABEL, label.to_owned())), add)
         .inner
 }
@@ -662,6 +706,7 @@ pub(crate) enum Text<'a> {
     Inline,
     Cell,
     NameCell(bool),
+    SelectedNameCell,
     MonoCell,
     Value(&'a str, bool),
 }
@@ -704,16 +749,17 @@ fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>)
         }
     }
     let t = Tokens::get();
-    let fixed = matches!(style, Text::Cell | Text::NameCell(_) | Text::MonoCell | Text::Value(_, _));
+    let fixed = matches!(style, Text::Cell | Text::NameCell(_) | Text::SelectedNameCell | Text::MonoCell | Text::Value(_, _));
     let ink = match style {
         Text::Hint(_) | Text::Note(_) | Text::MonoNote(_) => t.form_dim,
         Text::Inline if in_catalog(ui) => t.form_dim,
         Text::Report(_, true) | Text::Value(_, true) | Text::Error(_) => t.form_error,
+        Text::SelectedNameCell => t.selected_ink,
         _ => t.form_ink,
     };
     let font = match style {
         Text::Inline if in_catalog(ui) => crate::fonts::semibold(t.font_small),
-        Text::NameCell(true) => crate::fonts::semibold(t.font_label),
+        Text::NameCell(true) | Text::SelectedNameCell => crate::fonts::semibold(t.font_label),
         Text::NameCell(false) => crate::fonts::medium(t.font_label),
         Text::Heading(_) => crate::fonts::semibold(t.font_button),
         Text::MonoCell | Text::Value(_, _) => egui::FontId::monospace(t.font_body),
@@ -765,7 +811,7 @@ fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>)
         Text::Note(key) | Text::MonoNote(key) => ("note", key),
         Text::Report(key, _) | Text::Value(key, _) | Text::Error(key) | Text::Heading(key) => ("report", key),
         Text::Inline => ("inline", text),
-        Text::Cell | Text::MonoCell | Text::NameCell(_) => ("cell", text),
+        Text::Cell | Text::MonoCell | Text::NameCell(_) | Text::SelectedNameCell => ("cell", text),
     };
     let id = format!("dialog:{kind}:{key}");
     scenario::publish_rect(&id, response.rect);
