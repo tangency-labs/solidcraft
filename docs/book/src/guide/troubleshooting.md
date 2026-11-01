@@ -10,7 +10,8 @@ shader compiler. That covers older Intel graphics, PCs without a graphics driver
 ## Start in safe mode
 
 Safe mode starts with default settings (your own settings stay as they are, for the next normal
-start), skips the "Recover unsaved design?" offer and draws with the software renderer.
+start), skips the "Recover unsaved design?" offer, draws with the software renderer and lets no AI
+agent connect (no control channel, even with `--control`).
 
 - Windows: run `solidcraft.exe --safe-mode` from a terminal in the install folder, or add
   ` --safe-mode` to the end of a shortcut's *Target*.
