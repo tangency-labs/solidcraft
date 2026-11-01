@@ -649,12 +649,12 @@ mod tests {
     #[test]
     fn blur_radius_schedule_and_hostile_values() {
         use crate::blur::{schedule, validate_radius};
-        for radius in [f32::NAN, f32::INFINITY, -1.0, 40.01] {
+        for radius in [f32::NAN, f32::INFINITY, -1.0, 60.01] {
             assert!(validate_radius(radius).is_err());
             assert!(schedule(radius).is_none());
         }
         assert!(schedule(0.0).is_none());
-        for (radius, steps) in [(1.0, 2), (8.0, 2), (9.0, 3), (18.0, 3), (19.0, 4), (30.0, 4), (31.0, 5), (40.0, 5)] {
+        for (radius, steps) in [(1.0, 2), (8.0, 2), (9.0, 3), (18.0, 3), (19.0, 4), (30.0, 4), (31.0, 5), (40.0, 5), (60.0, 5)] {
             let (actual, offset) = schedule(radius).unwrap();
             assert_eq!(actual, steps);
             assert!(offset.is_finite() && offset > 0.0);

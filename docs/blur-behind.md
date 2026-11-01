@@ -8,11 +8,11 @@ The 22 ms/60-sample threshold remains a starting policy, not a measured tuning r
 
 ## Theme controls and runtime intent
 
-Only a theme declaring `blur` offers its registered 0..40 physical-pixel range.
+Only a theme declaring `blur` offers its registered 0..60 physical-pixel range.
 The slider edits in steps of one; finite fractional persisted/API values remain
 valid and merely opening the control does not round them. Zero has a muted hollow
 thumb, Off readout and flat 2 px cost line. Positive values use accent fill/thumb,
-a px readout, and five bars of height 4/6/8/11/14 px: `ceil(radius / 8)` are filled.
+a px readout, and five bars of height 4/6/8/11/14 px: `ceil(radius / 8)` are filled, saturating at five from 33 through 60 px.
 The tooltip describes relative cost; it is not a timing or resource estimate.
 The readout, meter and any disabled reason reserve space beside the slider.
 An inactive parent prevents activation without changing the stored child value.
@@ -231,7 +231,7 @@ rectangle heuristic selects backing surfaces.
 
 ## Radius, cache, allocation and recovery
 
-Radius is finite physical pixels in 0..40; invalid requests are refused before
+Radius is finite physical pixels in 0..60; invalid requests are refused before
 mutation. Zero selects plain rendering. Positive tiers have N down and N up passes:
 
 | Radius | N | First down target |
@@ -239,7 +239,10 @@ mutation. Zero selects plain rendering. Positive tiers have N down and N up pass
 | >0..8 | 2 | ceil-half resolution |
 | >8..18 | 3 | ceil-half resolution |
 | >18..30 | 4 | ceil-half resolution |
-| >30..40 | 5 | ceil-half resolution |
+| >30..60 | 5 | ceil-half resolution |
+
+Radii above 40 retain the existing five-step tier and increase only its normalized
+offset. Existing 0..40 values keep their original schedule and cost indication.
 
 Every subsequent dimension is ceil-halved with a minimum of one pixel. Upsampling
 ends at full resolution B. The original kernel has a center-plus-four-corners
@@ -307,7 +310,7 @@ The full GPU fixture in existing `gpu.rs::tests` renders actual app egui output,
 font textures, viewport callbacks and compositor into a readback target. Tests
 remain in the existing area modules; no per-issue test module was added.
 
-The PR6 controls consume this capability/reason and finite 0..40 contract, leave
+The PR6 controls consume this capability/reason and finite 0..60 contract, leave
 saved intent intact on fallback, and request a frame on changes. They do not create
 resources merely by opening Preferences. Blur remains a theme option, with no
 independent global switch or quality preference.
