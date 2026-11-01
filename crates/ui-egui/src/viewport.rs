@@ -454,6 +454,13 @@ fn scene_bounds(app: &SolveApp) -> solidcraft_engine::geom::Aabb3 {
     b
 }
 
+/// The ambient occlusion radius (0: off): 4% of what the frame draws, the box the depth range uses,
+/// so a preview in an empty design has its own. Nothing to draw has no occlusion (#9327).
+fn ao_radius(app: &SolveApp) -> f32 {
+    let size = scene_bounds(app).diagonal();
+    if app.preferences.ambient_occlusion && app.ui.visual_style != 2 && size > 0.0 { (size * 0.04).clamp(1e-4, 1e6) as f32 } else { 0.0 }
+}
+
 pub fn scene_radius(app: &SolveApp) -> f64 {
     let b = scene_bounds(app);
     let r = if b.is_empty() { 50.0 } else { b.diagonal() * 0.5 + b.center().dist(app.cam.target) };
@@ -4429,11 +4436,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             analysis_colors: crate::gpu::analysis_colors(&t.analysis),
             access: crate::access::map(app),
             outline: matches!(app.ui.visual_style, 0 | 3),
-            ao_radius: if app.preferences.ambient_occlusion && app.ui.visual_style != 2 {
-                (model_bounds(app).diagonal() * 0.04).clamp(1e-4, 1e6) as f32
-            } else {
-                0.0
-            },
+            ao_radius: ao_radius(app),
             eye: {
                 let e = proj.cam.eye().to_f32();
                 [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }]
