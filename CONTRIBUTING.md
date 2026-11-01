@@ -447,8 +447,10 @@ The user guide's screenshots and short clips (`docs/book/src/media/`) are captur
 app by `examples/demo/doc_shots.py`, one function per figure. Each run starts a fresh app with its
 own settings, so your preferences never show. When a change makes a figure out of date, run
 `python3 examples/demo/doc_shots.py <page or shot>` (it needs Xvfb, ffmpeg, Pillow and a release
-build) and commit the new file. A new figure is a new function there, an ATTRIBUTION row in
-`attribution/pending/`, and a `<video>` (clips) or image link on the page. Keep a still under
+build) and commit the new file. Stills come in both themes: `--light` makes `<name>.light.png`,
+and the page shows the one that matches the book's theme (an `<img class="dark-ui">` and an
+`<img class="light-ui">`). A new figure is a new function there, an ATTRIBUTION row in
+`attribution/pending/`, and a `<video>` (clips) or the image pair on the page. Keep a still under
 about 250 KB and a clip under about 1 MB.
 
 ## Licence

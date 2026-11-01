@@ -1,6 +1,7 @@
 # A tour of the window
 
-![The SolidCraft window with the sample plate open, its parts numbered 1 to 8](../media/ui-tour/window.png)
+<img class="dark-ui" src="../media/ui-tour/window.png" alt="The SolidCraft window with the sample plate open, its parts numbered 1 to 8">
+<img class="light-ui" src="../media/ui-tour/window.light.png" alt="The SolidCraft window with the sample plate open, its parts numbered 1 to 8">
 
 **1** Title bar · **2** Toolbar · **3** Browser · **4** Viewport · **5** Axis view ·
 **6** Navigation bar · **7** Timeline · **8** Command search

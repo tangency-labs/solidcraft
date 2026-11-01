@@ -13,7 +13,8 @@ cursor, replacing selected text and keeping what you typed, so typing `10 + ` an
 the expression or **Escape** to cancel the edit.
 Add and edit user parameters through the existing **Change Parameters** command.
 
-![The Parameters dialog, numbered 1 to 5](../media/parameters/dialog.png)
+<img class="dark-ui" src="../media/parameters/dialog.png" alt="The Parameters dialog, numbered 1 to 5">
+<img class="light-ui" src="../media/parameters/dialog.light.png" alt="The Parameters dialog, numbered 1 to 5">
 
 **1** Apply each change as you leave its field · **2** User parameters, and **Add parameter** ·
 **3** Model parameters, grouped by the sketch or feature they belong to · **4** An expression ·
