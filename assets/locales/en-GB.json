@@ -246,6 +246,7 @@
   "ui.details_curvature_caption": "Faces are coloured by their local radius of curvature.",
   "ui.details_draft_caption": "Faces are coloured by their angle to the pull direction.",
   "ui.export_keymap_tip": "Keys, S box favourites and the toolbar, as a file",
+  "ui.instances": "Instances",
   "ui.layout_compact": "Compact",
   "ui.layout_floating": "Floating",
   "ui.material_review.claims": "Sources and licences are unverified claims. Missing values remain unknown.",

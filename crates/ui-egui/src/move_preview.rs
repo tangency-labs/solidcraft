@@ -95,7 +95,7 @@ impl MovePreview {
         let mut bounds = Aabb3::EMPTY;
         for mesh in &cache.meshes {
             draw(&mut scene, mesh, &m, colors, &mut bounds);
-            if !copy {
+            if !copy && colors.cut_tint {
                 // Where the body was, as the scratch-design preview shows a body moved away.
                 for t in &mesh.triangles {
                     for k in t {
@@ -119,9 +119,11 @@ impl MovePreview {
     }
 }
 
-/// `mesh` moved by `m`, in the colour of geometry the feature adds, with its shaded edges.
+/// `mesh` moved by `m`, in the colour of geometry the feature adds, or the body's own where
+/// the preference leaves new surface untinted (a move makes none either way), with its shaded
+/// edges.
 fn draw(scene: &mut GpuScene, mesh: &Mesh, m: &Mat, colors: Colors, bounds: &mut Aabb3) {
-    let added = scene.color(colors.added);
+    let added = scene.color(if colors.tint_new { colors.added } else { colors.body });
     for t in &mesh.triangles {
         for k in t {
             let i = *k as usize;

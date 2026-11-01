@@ -4709,6 +4709,7 @@
   "ui.insert_design.saved_file": "{name} ima nespremljene promjene, pa je umetnuta njegova spremljena datoteka. Spremite ga, a zatim pokrenite Ažuriraj veze kako biste unijeli promjene.",
   "ui.insert_design.unsaved": "Nespremljene promjene",
   "ui.inspect": "Pregledaj",
+  "ui.instances": "Instance",
   "ui.intersect": "Presjek",
   "ui.isolate": "Izoliraj",
   "ui.join": "Spoji",

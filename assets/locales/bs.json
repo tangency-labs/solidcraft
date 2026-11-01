@@ -4709,6 +4709,7 @@
   "ui.insert_design.saved_file": "{name} ima nesačuvane promjene, pa je umetnuta njegova sačuvana datoteka. Sačuvajte ga, a zatim pokrenite Ažuriraj veze da unesete promjene.",
   "ui.insert_design.unsaved": "Nesačuvane promjene",
   "ui.inspect": "Pregledaj",
+  "ui.instances": "Instance",
   "ui.intersect": "Presjek",
   "ui.isolate": "Izoluj",
   "ui.join": "Spoji",

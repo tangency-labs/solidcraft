@@ -115,6 +115,10 @@ impl StraightPreview {
         let color = scene.color(color);
         let cut_edge = scene.color(cut_edge);
         let triangle = |scene: &mut GpuScene, points: [Vec3; 3], normal: Vec3| {
+            // Removed material the preference leaves fully transparent: only the cut's outline.
+            if operation == "cut" && !colors.cut_tint {
+                return;
+            }
             for point in points {
                 if matches!(operation, "cut" | "intersect") {
                     scene.xray_tri(point.to_f32(), normal.to_f32(), color);

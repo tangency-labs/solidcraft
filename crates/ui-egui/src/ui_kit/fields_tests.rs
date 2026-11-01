@@ -403,6 +403,39 @@ fn count_steps_stay_within_limits_and_keep_expressions() {
     assert_eq!(super::step_count("5", i64::MIN, &wide).as_deref(), Some("-9223372036854775803"));
 }
 
+/// A count's step arrows stand inside the editor, which asks for the text cursor across its
+/// whole rect, so the arrows showed an I-beam and read as part of the text. They are not text:
+/// the pointer over one is the ordinary cursor, whether it can step or not, and the number
+/// beside them is still typed.
+#[test]
+fn count_step_arrows_do_not_take_the_text_cursor() {
+    for value in ["5", "1"] {
+        let ctx = crate::fonts::test_context();
+        let eval = |text: &str| text.trim().parse::<f64>().ok();
+        let mut count = value.to_string();
+        let mut draw = |ui: &mut Ui| {
+            count_row(ui, "Instances", &mut count, &Count { min: 1, max: 10, eval: &eval });
+        };
+        frame(&ctx, vec![], &mut draw);
+        let at = |name: &str| scenario::handle_at(&format!("dialog:Instances {name}")).unwrap_or_else(|| panic!("{name} has a handle"));
+        let (above, below) = (at("up"), at("down"));
+        let field = scenario::rect_of("dialog:widget:Instances").expect("the field has a rect");
+        // The first frame registers the rects; the second reads the cursor they ask for. At 1 the
+        // down arrow is dimmed and the up arrow can still step: neither is text either way.
+        for (pos, which) in [(above, "up"), (below, "down")] {
+            frame_cursor(&ctx, pos, &mut draw);
+            assert_eq!(frame_cursor(&ctx, pos, &mut draw), egui::CursorIcon::Default, "{value}: the {which} arrow");
+        }
+        let text = egui::pos2(field.left() + 2.0, field.center().y);
+        frame_cursor(&ctx, text, &mut draw);
+        assert_eq!(frame_cursor(&ctx, text, &mut draw), egui::CursorIcon::Text, "{value}: the number is still typed");
+        // The enabled arrow still steps when it is clicked.
+        frame(&ctx, pointer(above, true), &mut draw);
+        frame(&ctx, pointer(above, false), &mut draw);
+        assert_eq!(count, if value == "1" { "2" } else { "6" }, "the up arrow steps");
+    }
+}
+
 #[test]
 fn selection_field_has_three_distinct_looks_in_every_theme() {
     type Look = (Vec<(egui::Color32, egui::Color32)>, Option<egui::Color32>);

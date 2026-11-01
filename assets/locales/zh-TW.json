@@ -4711,6 +4711,7 @@
   "ui.insert_design.saved_file": "{name} 有未儲存的變更，因此插入的是其已儲存的檔案。請儲存後執行「更新連結」以帶入變更。",
   "ui.insert_design.unsaved": "未儲存的變更",
   "ui.inspect": "檢查",
+  "ui.instances": "實例數",
   "ui.intersect": "相交",
   "ui.isolate": "隔離",
   "ui.join": "接合",

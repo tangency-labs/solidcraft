@@ -1107,6 +1107,13 @@ preference_settings! {
     /// A small dot at every vertex wherever edges are drawn (#7834). Off by default: the viewport
     /// draws edges only, as it always has.
     vertex_markers: bool = false;
+    /// A preview of a feature that changes a body draws the surface it adds in the preview
+    /// colour, working out face by face which surface that is. Off: the body is drawn as itself
+    /// and nothing is worked out (`preview::Colors::tint_new`).
+    preview_tint_new_faces: bool = true, PAGE_GRAPHICS => check_id("prefs.preview_tint_new_faces");
+    /// A preview that removes material shows the removed shape as a red see-through ghost. Off:
+    /// the ghost is fully transparent and only its outline is drawn (`preview::Colors::cut_tint`).
+    cut_preview_tint: bool = true, PAGE_GRAPHICS => check_id("prefs.cut_preview_tint");
     /// Restore the previous platform-specific fixed Render preview geometry budget.
     render_previous_geometry_budget: bool = false, PAGE_GRAPHICS => check_id("prefs.render_previous_geometry_budget");
     /// How finely the viewport tessellates curved faces and edges: `coarse`, `normal`, `fine` or
@@ -10069,6 +10076,7 @@ mod graphics_preset_tests {
             h.call("ui.prefs", json!({"theme":theme,"language":"en"}));
             h.call("ui.prefs", json!({"open":"Graphics"}));
             let original = h.app.preferences.clone();
+            assert!(original.preview_tint_new_faces && original.cut_preview_tint, "incoming preview preferences retain their true defaults");
             let session = (h.app.ui.show_grid, h.app.ui.ground_shadow, h.app.ui.perspective);
             for (query, handle) in [("Grid", "prefs:grid"), ("Ground shadow", "prefs:ground_shadow"), ("Perspective", "prefs:perspective")] {
                 click_graphics(&mut h, query, handle);
@@ -10084,6 +10092,8 @@ mod graphics_preset_tests {
                 ("Section", "viewport_section_status"),
                 ("Live details", "viewport_status_details"),
                 ("Fold items", "viewport_status_summary"),
+                ("Tint new surface in a preview", "preview_tint_new_faces"),
+                ("Show removed material in red", "cut_preview_tint"),
             ] {
                 let before = serde_json::to_value(&h.app.preferences).unwrap();
                 click_graphics(&mut h, query, &format!("prefs:{field}"));
@@ -10091,6 +10101,14 @@ mod graphics_preset_tests {
                 let mut expected = before.clone();
                 expected[field] = json!(!before[field].as_bool().unwrap());
                 assert_eq!(after, expected, "{theme}: {field} changes precisely its own setting");
+                if matches!(field, "preview_tint_new_faces" | "cut_preview_tint") {
+                    let tree = h.output.accesskit_update.as_ref().unwrap();
+                    assert_eq!(
+                        tree.nodes.iter().filter(|(_, node)| node.role() == egui::accesskit::Role::CheckBox && node.label() == Some(query)).count(),
+                        1,
+                        "{field} has exactly one real checkbox"
+                    );
+                }
             }
             h.call("ui.prefs", json!({"button":"cancel"}));
             assert_eq!(h.app.preferences, original);
@@ -10255,8 +10273,11 @@ mod graphics_preset_tests {
                 assert_eq!(h.app.preferences.perspective_fov, 0.6, "drawing a whole-degree readout never rounds the default");
             }
             for page in 0..PAGES.len() {
+                h.call("ui.prefs", json!({"preview_tint_new_faces":false,"cut_preview_tint":false}));
                 defaults(&mut h.app, page);
                 assert!(h.app.preferences.vertex_markers && h.app.preferences.grid_follows_view, "{page}: neither unpaged field joins resets");
+                assert_eq!(h.app.preferences.preview_tint_new_faces, page == PAGE_GRAPHICS, "{page}: preview surface tint belongs only to Graphics");
+                assert_eq!(h.app.preferences.cut_preview_tint, page == PAGE_GRAPHICS, "{page}: removed-material tint belongs only to Graphics");
             }
             assert_eq!(h.app.preferences.perspective_fov, 0.6);
         }

@@ -4357,6 +4357,7 @@
   "ui.insert_design.saved_file": "{name} tiene cambios sin guardar, así que se insertó su archivo guardado. Guárdalo y luego Actualizar vínculos para traer los cambios.",
   "ui.insert_design.unsaved": "Cambios sin guardar",
   "ui.inspect": "Inspeccionar",
+  "ui.instances": "Instancias",
   "ui.intersect": "Intersecar",
   "ui.isolate": "Aislar",
   "ui.join": "Unir",

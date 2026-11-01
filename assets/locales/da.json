@@ -4709,6 +4709,7 @@
   "ui.insert_design.saved_file": "{name} har ændringer, der ikke er gemt, så dens gemte fil blev indsat. Gem den, og kør derefter Opdatér forbindelser for at hente ændringerne.",
   "ui.insert_design.unsaved": "Ikke-gemte ændringer",
   "ui.inspect": "Inspicér",
+  "ui.instances": "Forekomster",
   "ui.intersect": "Fællesvolumen",
   "ui.isolate": "Isolér",
   "ui.join": "Foren",

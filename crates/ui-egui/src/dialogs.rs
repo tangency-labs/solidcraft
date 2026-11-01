@@ -6774,7 +6774,16 @@ mod refused_ok_tests {
         let preview = crate::preview::compute(
             &app.session,
             &commands,
-            crate::preview::Colors { body: [1; 4], added: [2; 4], new_body: [3; 4], removed: [4; 4], edge: [5; 4], ghost: false },
+            crate::preview::Colors {
+                body: [1; 4],
+                added: [2; 4],
+                new_body: [3; 4],
+                removed: [4; 4],
+                edge: [5; 4],
+                ghost: false,
+                tint_new: true,
+                cut_tint: true,
+            },
         )
         .expect("the angled plane previews");
 
@@ -6842,6 +6851,36 @@ mod refused_ok_tests {
                     assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, sketch), "{command} {how}");
                 }
             }
+        }
+    }
+
+    /// One Escape closes an edit dialog opened from its History row, also when its value names a parameter
+    /// and the field lists the longer names (`T` lists `tan(`, #9084).
+    #[test]
+    fn one_escape_closes_an_edit_dialog_whose_value_names_a_parameter() {
+        for name in ["Plate", "Corners", "Hole"] {
+            let mut h = Harness::new();
+            for (command, params) in [
+                ("parameters.add", json!({"name": "T", "expression": "3 mm"})),
+                ("parameters.add", json!({"name": "R", "expression": "5 mm"})),
+                ("sketch.create", json!({"plane": "XY"})),
+                ("sketch.rectangle.two_point", json!({"p0": [-40, -25], "p1": [40, 25]})),
+                ("sketch.finish", json!({})),
+                ("solid.extrude", json!({"distance": "T", "name": "Plate"})),
+                ("solid.fillet", json!({"edges": [[40, 25, 1.5], [-40, 25, 1.5]], "radius": "R", "name": "Corners"})),
+                ("solid.hole", json!({"position": [0, 0, 3], "diameter": 3.4, "name": "Hole"})),
+            ] {
+                h.app.run(command, params).unwrap();
+            }
+            h.frames(2);
+            steps(&mut h, &[json!({"click": {"handle": format!("timeline:{name}")}, "double": true}), json!({"frames": 30})]);
+            assert!(h.app.dialog.as_ref().is_some_and(|d| d.editing.is_some()), "{name}: the edit dialog opened");
+            if name != "Hole" {
+                assert!(h.ctx.memory(|m| m.focused()).is_some(), "{name}: its value field has the keyboard");
+                assert!(crate::expression_complete::popup_state(&h.ctx).is_some(), "{name}: the field lists longer names");
+            }
+            steps(&mut h, &[json!({"key": "Escape"}), json!({"frames": 2})]);
+            assert!(h.app.dialog.as_ref().is_none_or(|d| d.editing.is_none()), "{name}: one Escape closes the dialog");
         }
     }
 

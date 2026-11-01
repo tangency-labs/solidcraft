@@ -353,7 +353,8 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
             let planar = normals.first().copied().filter(|n0| normals.iter().all(|n| n.dot(*n0) > 1.0 - 1e-6));
             let mut json = json!({"type": "face", "area_mm2": area, "planar": planar.is_some()});
             let verts: Vec<Vec3> = tris.iter().flat_map(|t| t.iter().copied()).collect();
-            let shape = match solidcraft_kernel::face_surface(&b.body, *index) {
+            let surface = solidcraft_kernel::face_surface(&b.body, *index);
+            let shape = match surface {
                 Some(solidcraft_kernel::FaceSurface::Cylinder { origin, axis, radius }) => {
                     super::measure_shape::cylinder(origin, axis, radius, &verts).unwrap_or(Shape::Other)
                 }
@@ -365,6 +366,7 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
                 _ => Shape::Other,
             };
             add_round(&mut json, &shape);
+            super::measure_shape::add_curved(&mut json, surface);
             let slot = if matches!(shape, Shape::Round { .. }) && !shape.full() { face_slot(b, &m, &shape, &verts) } else { None };
             if let Some(sl) = &slot {
                 json["slot"] = sl.json();

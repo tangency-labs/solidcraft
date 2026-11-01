@@ -312,6 +312,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             let reference =
                 setting::reference_geometry_through_bodies(app, ui).on_hover_text(app.tr("settings.reference_geometry_through_bodies_help"));
             crate::scenario::publish_target("dialog:Show reference geometry through bodies", reference.rect);
+            let tint_new = setting::preview_tint_new_faces(app, ui).on_hover_text(app.tr("prefs.preview_tint_new_faces_help"));
+            crate::scenario::publish_target("prefs:preview_tint_new_faces", tint_new.rect);
+            let cut_tint = setting::cut_preview_tint(app, ui).on_hover_text(app.tr("prefs.cut_preview_tint_help"));
+            crate::scenario::publish_target("prefs:cut_preview_tint", cut_tint.rect);
             ui.add_enabled_ui(app.ui.show_grid, |ui| {
                 setting::grid_follows_view(app, ui).on_hover_text(app.tr("ui.grid_follows_view_hint"));
             });

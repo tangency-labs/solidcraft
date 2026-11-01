@@ -4709,6 +4709,7 @@
   "ui.insert_design.saved_file": "{name} heeft niet-opgeslagen wijzigingen, dus is het opgeslagen bestand ingevoegd. Sla het op en gebruik daarna Koppelingen bijwerken om de wijzigingen over te nemen.",
   "ui.insert_design.unsaved": "Niet-opgeslagen wijzigingen",
   "ui.inspect": "Inspecteren",
+  "ui.instances": "Instanties",
   "ui.intersect": "Snijden",
   "ui.isolate": "Isoleren",
   "ui.join": "Samenvoegen",

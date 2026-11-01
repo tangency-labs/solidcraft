@@ -4709,6 +4709,7 @@
   "ui.insert_design.saved_file": "{name} contiene modifiche non salvate, quindi è stato inserito il file salvato. Salvalo, poi usa Aggiorna collegamenti per includere le modifiche.",
   "ui.insert_design.unsaved": "Modifiche non salvate",
   "ui.inspect": "Esamina",
+  "ui.instances": "Istanze",
   "ui.intersect": "Interseca",
   "ui.isolate": "Isola",
   "ui.join": "Unisci",

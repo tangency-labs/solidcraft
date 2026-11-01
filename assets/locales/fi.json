@@ -4321,6 +4321,7 @@
   "ui.insert_design.saved_file": "Mallissa {name} on tallentamattomia muutoksia, joten sen tallennettu tiedosto lisättiin. Tallenna se ja tuo muutokset valitsemalla Päivitä linkit.",
   "ui.insert_design.unsaved": "Tallentamattomia muutoksia",
   "ui.inspect": "Tarkastele",
+  "ui.instances": "Esiintymät",
   "ui.intersect": "Leikkaus",
   "ui.isolate": "Eristä",
   "ui.join": "Yhdistä",

@@ -4709,6 +4709,7 @@
   "ui.insert_design.saved_file": "{name} obsahuje neuložené změny, proto byl vložen jeho uložený soubor. Uložte jej a pak použijte Aktualizovat odkazy, aby se změny převzaly.",
   "ui.insert_design.unsaved": "Neuložené změny",
   "ui.inspect": "Analýza",
+  "ui.instances": "Instance",
   "ui.intersect": "Průnik",
   "ui.isolate": "Izolovat",
   "ui.join": "Sjednotit",

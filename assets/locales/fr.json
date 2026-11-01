@@ -4657,6 +4657,7 @@
   "ui.insert_design.saved_file": "{name} contient des modifications non enregistrées ; c'est donc son fichier enregistré qui a été inséré. Enregistrez-le, puis utilisez Mettre à jour les liens pour intégrer les modifications.",
   "ui.insert_design.unsaved": "Modifications non enregistrées",
   "ui.inspect": "Inspecter",
+  "ui.instances": "Instances",
   "ui.intersect": "Intersection",
   "ui.isolate": "Isoler",
   "ui.join": "Joindre",

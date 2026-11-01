@@ -2418,6 +2418,143 @@ fn offset_two_sides_of_one_curve_follows_the_sign_of_the_distance() {
     assert!(close(one.1.x - one.0.x, 40.0) && close(two.1.x - two.0.x, 40.0), "{one:?} {two:?}");
 }
 
+/// Each instance of an outward offset of a 40 by 30 rectangle, as a box one more step out.
+fn offset_rings(sk: &solidcraft_sketch::Sketch, o: &Value, out: &[f64]) {
+    for (index, out) in out.iter().copied().enumerate() {
+        let curves = side_curves(o, index);
+        assert_eq!(curves.len(), 4, "{o}");
+        assert!(box_is(sk, &curves, [-out, -out], [40.0 + out, 30.0 + out]), "instance {}: {:?}", index + 1, bounds(sk, &curves));
+    }
+}
+
+#[test]
+fn offset_instances_stack_one_behind_another_at_the_same_distance() {
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    let l = ids(&r["curves"]);
+    // Three instances outward by 5 from a 40 by 30 rectangle: rings 5, 10 and 15 out, each the
+    // offset of the one before it.
+    let o = run(&mut s, "sketch.offset", json!({"curves": [l[0]], "distance": 5, "side": [20, -10], "instances": 3}));
+    assert_eq!(o["instances"], 3, "{o}");
+    let sides = o["sides"].as_array().unwrap().clone();
+    assert_eq!(sides.len(), 3, "{o}");
+    assert_eq!(sides.iter().map(|side| side["instance"].as_u64()).collect::<Vec<_>>(), vec![Some(1), Some(2), Some(3)], "{o}");
+    assert_eq!(ids(&o["curves"]).len(), 12, "{o}");
+    offset_rings(&sketch(&s), &o, &[5.0, 10.0, 15.0]);
+    // One dimension drives the whole ladder, so every ring moves together when it changes.
+    let param = o["param"].as_str().unwrap().to_string();
+    assert!(sides.iter().all(|side| side["param"].as_str() == Some(param.as_str())), "{o}");
+    assert_eq!(sketch(&s).constraints.iter().filter(|c| matches!(c.kind, ConstraintKind::OffsetDistance { .. })).count(), 3);
+    run(&mut s, "parameters.change", json!({"name": param, "expression": "8 mm"}));
+    offset_rings(&sketch(&s), &o, &[8.0, 16.0, 24.0]);
+}
+
+#[test]
+fn offset_instances_go_the_way_the_first_one_went() {
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    let l = ids(&r["curves"]);
+    // Inward by 5: rings at (5,5)-(35,25) and (10,10)-(30,20). A later instance reads its side
+    // from the ring it follows, so it never doubles back over the one before it.
+    let o = run(&mut s, "sketch.offset", json!({"curves": [l[0]], "distance": 5, "side": [20, 15], "instances": 2}));
+    let sk = sketch(&s);
+    assert!(box_is(&sk, &side_curves(&o, 0), [5.0, 5.0], [35.0, 25.0]), "{:?}", bounds(&sk, &side_curves(&o, 0)));
+    assert!(box_is(&sk, &side_curves(&o, 1), [10.0, 10.0], [30.0, 20.0]), "{:?}", bounds(&sk, &side_curves(&o, 1)));
+}
+
+#[test]
+fn offset_instances_stop_where_the_shape_runs_out() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    let before = s.doc.to_json();
+    // Inward by 5 twice reaches a 20 by 10 ring; a third would have no height left, so the
+    // whole command is refused and names the instance that could not be made.
+    let error = s.execute("sketch.offset", &json!({"curves": ["l1"], "distance": 5, "side": [20, 15], "instances": 3})).unwrap_err().to_string();
+    assert!(error.contains("instance 3 of 3"), "{error}");
+    assert_eq!(s.doc.to_json(), before, "a refused instance leaves the design alone");
+    // Two of them still work on the same shape.
+    let o = run(&mut s, "sketch.offset", json!({"curves": ["l1"], "distance": 5, "side": [20, 15], "instances": 2}));
+    assert_eq!(o["sides"].as_array().map(Vec::len), Some(2), "{o}");
+}
+
+#[test]
+fn offset_instances_count_must_be_a_whole_number_within_the_cap() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    for count in [json!(0), json!(-1), json!(1.5), json!(101), json!("two"), json!(true)] {
+        let params = json!({"curves": ["l1"], "distance": 1, "side": [20, -10], "instances": count.clone()});
+        assert!(s.execute("sketch.offset", &params).is_err(), "instances {count} must be refused");
+    }
+    // No count, and a count of one, are the offset by itself.
+    for count in [json!(null), json!(1), json!("1")] {
+        let mut s = new_sketch();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+        let o = run(&mut s, "sketch.offset", json!({"curves": ["l1"], "distance": 1, "side": [20, -10], "instances": count}));
+        assert_eq!(o["instances"], 1, "{o}");
+        assert_eq!(o["sides"].as_array().map(Vec::len), Some(1), "{o}");
+        assert_eq!(ids(&o["curves"]).len(), 4, "{o}");
+    }
+}
+
+#[test]
+fn offset_instances_into_a_circle_run_out_at_the_centre() {
+    let mut s = new_sketch();
+    let c = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}))["curves"])[0].clone();
+    let radii = |s: &Session, o: &Value| -> Vec<f64> {
+        let sk = sketch(s);
+        o["sides"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|side| match sk.curves.get(sk.curve_index(ids(&side["curves"])[0].as_str()).unwrap()).unwrap().kind {
+                CurveKind::Circle { r, .. } => r,
+                ref other => panic!("{other:?}"),
+            })
+            .collect()
+    };
+    // Inward by 3 from a 10 mm circle: rings at 7, 4 and 1 mm.
+    let o = run(&mut s, "sketch.offset", json!({"curves": [c.clone()], "distance": 3, "side": [0, 0], "instances": 3}));
+    let got = radii(&s, &o);
+    assert!(got.iter().zip([7.0, 4.0, 1.0]).all(|(a, b)| close(*a, b)), "{got:?}");
+    let before = s.doc.to_json();
+    // A fourth has nothing left to take. The ladder has to run out here: a step past a ring
+    // smaller than the distance lands beyond the centre, and reading that as the outward side
+    // turned the ladder round and grew it again (1, 4, 1, 4 ...) rather than refusing.
+    let error = s.execute("sketch.offset", &json!({"curves": [c.clone()], "distance": 3, "side": [0, 0], "instances": 4})).unwrap_err().to_string();
+    assert!(error.contains("instance 4 of 4"), "{error}");
+    assert!(error.contains("no size"), "{error}");
+    assert_eq!(s.doc.to_json(), before, "a refused instance leaves the design alone");
+    // Outward is unaffected: every ring is one distance larger than the last.
+    let out = run(&mut s, "sketch.offset", json!({"curves": [c], "distance": 3, "side": [40, 0], "instances": 3}));
+    let got = radii(&s, &out);
+    assert!(got.iter().zip([13.0, 16.0, 19.0]).all(|(a, b)| close(*a, b)), "{got:?}");
+}
+
+#[test]
+fn offset_instances_follow_each_side_of_a_symmetric_offset() {
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    // Symmetric by 5, two instances: both ways get a second ring a further 5 out, so the four
+    // rings are 5 and 10 inside and 5 and 10 outside.
+    let o = run(&mut s, "sketch.offset", json!({"curves": ["l1"], "distance": 5, "symmetric": true, "instances": 2}));
+    let sides = o["sides"].as_array().unwrap().clone();
+    assert_eq!(sides.len(), 4, "{o}");
+    assert_eq!(sides.iter().filter(|side| side["instance"] == 2).count(), 2, "{o}");
+    let sk = sketch(&s);
+    let mut boxes: Vec<[f64; 4]> = sides
+        .iter()
+        .map(|side| {
+            let (lo, hi) = bounds(&sk, &ids(&side["curves"]));
+            [lo.x, lo.y, hi.x, hi.y]
+        })
+        .collect();
+    boxes.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    let want = [[-10.0, -10.0, 50.0, 40.0], [-5.0, -5.0, 45.0, 35.0], [5.0, 5.0, 35.0, 25.0], [10.0, 10.0, 30.0, 20.0]];
+    for (got, want) in boxes.iter().zip(&want) {
+        assert!(got.iter().zip(want).all(|(a, b)| close(*a, *b)), "{boxes:?}");
+    }
+}
+
 #[test]
 fn offset_both_sides_of_a_rounded_boundary_keep_separate_associations() {
     let mut s = new_sketch();

@@ -80,7 +80,7 @@ macro_rules! form_case {
 }
 
 form_case!(scale, "sketch.scale", ["Factor"]);
-form_case!(offset, "sketch.offset", ["Direction", "Distance"]);
+form_case!(offset, "sketch.offset", ["Direction", "Distance", "Instances"]);
 form_case!(mirror, "sketch.mirror", []);
 form_case!(move_copy, "sketch.move", ["Position", "Angle"]);
 form_case!(rectangular_pattern, "sketch.pattern.rectangular", ["Quantity", "Spacing", "Alignment", "Quantity 2", "Spacing 2", "Alignment 2"]);

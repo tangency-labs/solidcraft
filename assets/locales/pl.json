@@ -2998,6 +2998,7 @@
   "ui.insert_design.saved_file": "{name} ma niezapisane zmiany, więc wstawiono jego zapisany plik. Zapisz go, a potem użyj Aktualizuj łącza, aby wprowadzić zmiany.",
   "ui.insert_design.unsaved": "Niezapisane zmiany",
   "ui.inspect": "Sprawdź",
+  "ui.instances": "Wystąpienia",
   "ui.intersect": "Przytnij",
   "ui.isolate": "Izoluj",
   "ui.join": "Połącz",
