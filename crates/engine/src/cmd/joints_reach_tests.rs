@@ -125,6 +125,26 @@ fn out_of_reach_the_arm_points_at_the_target() {
     assert!(got(&r).dist(Vec3::new(50.0, 50.0, 0.0)) < 1e-6, "{r}");
 }
 
+/// A drag's frames settle where the full reach does, without working out what stopped it.
+#[test]
+fn drag_frames_settle_where_the_reach_does_and_leave_out_the_report() {
+    use solidcraft_doc::joints::{Reach, reach as full, reach_frame};
+    let mut s = arm(false, 10.0);
+    run(&mut s, "joint.limits", json!({"joint": "Elbow", "min": -30, "max": 30}));
+    let st = s.model.state();
+    let r = Reach { occurrence: occ(&s, "Fore"), point: Vec3::new(100.0, 0.0, 0.0), to: Vec3::new(50.0, 50.0, 0.0), axis: None, joints: None };
+    let told = full(&s.doc, &st, &r).unwrap();
+    assert!(!told.limits.is_empty(), "{told:?}");
+    let frame = reach_frame(&s.doc, &st, &r).unwrap();
+    assert!(frame.limits.is_empty() && frame.stopped_by_loop.is_none(), "{frame:?}");
+    let mut pose = (*s.doc).clone();
+    for _ in 0..30 {
+        super::reach_preview(&mut pose, &st, &r).unwrap();
+    }
+    let elbow = pose.assembly.joints.iter().find(|j| j.name == "Elbow").map_or(0.0, |j| j.values[0]).to_degrees();
+    assert!((elbow - 30.0).abs() < 1e-3, "{elbow}");
+}
+
 #[test]
 fn a_limited_elbow_stops_the_reach_and_says_so() {
     let tip = Vec3::new(100.0, 0.0, 0.0);
@@ -389,6 +409,28 @@ fn reach_frames_solve_once_and_skip_body_name_pinning() {
     run(&mut s, "body.rename", json!({"body": late[0].clone(), "name": "Renamed"}));
     assert_eq!(s.doc.find_feature("Late").map(|f| f.body_names.clone()), Some(vec!["Renamed".to_string()]));
     assert!(s.model.state().body("Renamed").is_some());
+}
+
+/// A drag's frame that jumps past a limit on a closed loop ends on the limit, not short of it:
+/// the part must show how far it goes while it is held.
+#[test]
+fn a_drag_frame_past_a_limit_on_a_closed_loop_ends_on_the_limit() {
+    let (mut s, _, q0) = four_bar();
+    run(&mut s, "joint.limits", json!({"joint": "Rocker", "min": -12, "max": 12}));
+    let o4 = Vec3::new(45.0, 0.0, 0.0);
+    let start = q0.y.atan2(q0.x - 45.0);
+    let rocker = occ(&s, "Rocker");
+    let local = solidcraft_doc::apply_point(&solidcraft_doc::mat_inverse(&solidcraft_doc::joints::occurrence_world(&s.doc, rocker)).unwrap(), q0);
+    let st = s.model.state();
+    let mut pose = (*s.doc).clone();
+    for angle in [-6.0_f64, -40.0, -40.0] {
+        let a = start + angle.to_radians();
+        let to = o4 + Vec3::new(40.0 * a.cos(), 40.0 * a.sin(), 0.0);
+        let r = solidcraft_doc::joints::Reach { occurrence: rocker, point: local, to, axis: None, joints: None };
+        assert!(super::reach_preview(&mut pose, &st, &r).is_ok());
+    }
+    let value = pose.assembly.joints.iter().find(|j| j.name == "Rocker").map_or(0.0, |j| j.values[0]).to_degrees();
+    assert!((value.abs() - 12.0).abs() < 1e-3, "{value}");
 }
 
 /// #6325: a joint drag's frames reach on a copy of the design (`reach_preview`), and its release

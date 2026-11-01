@@ -1304,7 +1304,7 @@ pub fn reach_from(design: &Document, start: &BTreeMap<u64, Vec<f64>>) -> Value {
 /// move, which evaluated the whole design again, re-placed and redrew it and kept an undo step up
 /// to date; the drag now shows each frame and applies only the last.
 pub fn reach_preview(doc: &mut Document, st: &ModelState, r: &joints::Reach) -> std::result::Result<joints::Reached, String> {
-    let reached = joints::reach(doc, st, r);
+    let reached = joints::reach_frame(doc, st, r);
     if let Ok(x) = &reached {
         for (id, q) in &x.values {
             if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == *id) {

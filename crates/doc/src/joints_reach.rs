@@ -56,12 +56,45 @@ const MAX_REACH_STEPS: usize = 200;
 const STEP_ANGLE: f64 = 10.0;
 const STEP_SHARE: f64 = 0.1;
 
+/// How hard [`approach`] tries for the nearest pose.
+#[derive(Clone, Copy)]
+struct Effort {
+    steps: usize,
+    /// Damped tries of a step before it gives up.
+    tries: usize,
+    /// A step that gets less than this closer (mm) ends it.
+    gain: f64,
+    /// A step that gets nowhere is tried once more, kicked off where it stands.
+    kick: bool,
+    /// A step that would run past a limit is cut, every value alike, to end on it: clamped alone,
+    /// that value leaves the loops open, and the damped tries that would save it are few here.
+    to_limit: bool,
+}
+
+/// The nearest pose there is.
+const THOROUGH: Effort = Effort { steps: MAX_REACH_STEPS, tries: usize::MAX, gain: 0.0, kick: true, to_limit: false };
+/// Enough for one frame of a drag, which the next frame goes on from. A loop that has run into a
+/// limit can get no closer, and proving that took each frame up to 300 ms (every damped try of a
+/// step closes the loops again).
+const FRAME: Effort = Effort { steps: 16, tries: 3, gain: 1e-3, kick: false, to_limit: true };
+
 /// Move the values of the joints on `r.occurrence`'s chain (those in `r.joints`, when given) so
 /// its point gets to `r.to`, or as close as the limits and closed loops let it: the nearest pose,
 /// found from where it is (it stays on the mechanism's branch). Values a motion link sets move
 /// through the start of their link chain; the other values of the loops they are in follow. An
 /// error says why nothing can move.
 pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, String> {
+    reach_with(doc, st, r, true)
+}
+
+/// [`reach`] for one frame of a drag: as near as a frame's [`FRAME`] effort gets, without working
+/// out what stopped it short (`Reached::limits`, `Reached::stopped_by_loop`). A pointer off a
+/// slider's line misses on every frame, and a frame only shows where the part got to.
+pub fn reach_frame(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, String> {
+    reach_with(doc, st, r, false)
+}
+
+fn reach_with(doc: &Document, st: &ModelState, r: &Reach, explain: bool) -> Result<Reached, String> {
     let asm = &doc.assembly;
     let vals = joint_values(asm);
     let built = build(doc, st, &vals, &mut Solution::default());
@@ -161,12 +194,13 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
     let mut x = x0.clone();
     let miss = |res: &[f64]| res.iter().take(mt).map(|v| v * v).sum::<f64>().sqrt();
     let before = f(&x0).map_or(f64::INFINITY, |r| miss(&r));
-    let res = approach(&mut f, &|a, b| stride(asm, &vals, &vars, &paced, a, b), mt, &mut x, &bounds, &cap, tol, loose_gap(scale))
+    let effort = if explain { THOROUGH } else { FRAME };
+    let res = approach(&mut f, &|a, b| stride(asm, &vals, &vars, &paced, a, b), mt, &mut x, &bounds, &cap, tol, loose_gap(scale), effort)
         .ok_or("a closed loop on its chain is open and can't close (joint.list shows its conflict)")?;
     let mut out = Reached::default();
     let point_miss = res.iter().take(3).map(|v| v * v).sum::<f64>().sqrt();
     let turn_miss = (res.iter().skip(3).take(mt - 3).map(|v| v * v).sum::<f64>().sqrt() / scale).to_degrees();
-    if point_miss > REACH_TOL || turn_miss > REACH_TOL {
+    if explain && (point_miss > REACH_TOL || turn_miss > REACH_TOL) {
         // The limits it rests on: the target pulls the value past them (−Jᵀr over the target's
         // rows, ignoring pulls at right angles to the miss: under a millionth of the value's own
         // reach times the miss).
@@ -222,7 +256,7 @@ pub fn reach(doc: &Document, st: &ModelState, r: &Reach) -> Result<Reached, Stri
             let mut g = |x: &[f64]| misses(&mut alone_workspace, asm, r, scale, &drive, &[], x, &mut alone, &spent);
             let (mut xo, bo, co) = (x0.get(..k).unwrap_or_default().to_vec(), bounds.get(..k).unwrap_or_default(), cap.get(..k).unwrap_or_default());
             // The loops left open, nothing to pace.
-            if let Some(ro) = approach(&mut g, &|_, _| 0.0, mt, &mut xo, bo, co, tol, loose_gap(scale))
+            if let Some(ro) = approach(&mut g, &|_, _| 0.0, mt, &mut xo, bo, co, tol, loose_gap(scale), THOROUGH)
                 && miss(&ro) < miss(&res) - REACH_TOL.max(1e-9 * miss(&res))
             {
                 out.stopped_by_loop = Some(*first);
@@ -338,6 +372,7 @@ fn approach(
     cap: &[f64],
     tol: f64,
     loose: f64,
+    effort: Effort,
 ) -> Option<Vec<f64>> {
     let n = x.len();
     let miss = |r: &[f64]| r.iter().take(mt).map(|v| v * v).sum::<f64>();
@@ -353,10 +388,11 @@ fn approach(
     };
     let mut r = f(x)?;
     let (mut lambda, mut kicked) = (1e-3, false);
-    for _ in 0..MAX_REACH_STEPS {
+    for _ in 0..effort.steps {
         if largest(r.get(..mt).unwrap_or_default()) <= tol {
             break;
         }
+        let was = miss(&r).sqrt();
         let m = r.len();
         let Some(jac) = jacobian(f, x, m) else { break };
         // The normal equations JᵀJ δ = −Jᵀr, and the target rows' share of the diagonal (the
@@ -383,8 +419,9 @@ fn approach(
                 jtj.set(p, q, jtj.get(q, p));
             }
         }
-        let mut stepped = false;
-        while lambda < 1e12 && !stepped {
+        let (mut stepped, mut tries) = (false, 0);
+        while lambda < 1e12 && !stepped && tries < effort.tries {
+            tries += 1;
             let mut held = vec![false; n];
             // Solved, then again with the values held that it pushes past their limits.
             for _ in 0..=n {
@@ -410,7 +447,15 @@ fn approach(
                     continue;
                 }
                 let full: Vec<f64> = x.iter().zip(&d).map(|(v, dv)| v + dv).collect();
-                let over = d.iter().zip(cap).map(|(d, c)| d.abs() / c).fold(1.0f64, f64::max).max(stride(x, &full));
+                let mut over = d.iter().zip(cap).map(|(d, c)| d.abs() / c).fold(1.0f64, f64::max).max(stride(x, &full));
+                if effort.to_limit {
+                    for ((v, dv), (lo, hi)) in x.iter().zip(&d).zip(bounds) {
+                        let room = if *dv > 0.0 { hi - v } else { v - lo };
+                        if room > 0.0 {
+                            over = over.max(dv.abs() / room);
+                        }
+                    }
+                }
                 let mut next: Vec<f64> = x.iter().zip(&d).zip(bounds).map(|((v, dv), (lo, hi))| (v + dv / over).max(*lo).min(*hi)).collect();
                 // Checked again once taken: a link held at a limit or the loops closed again may
                 // move it further than foreseen (joint.drive halves such steps too).
@@ -431,10 +476,13 @@ fn approach(
                 lambda *= 4.0;
             }
         }
+        if stepped && was - miss(&r).sqrt() < effort.gain {
+            break;
+        }
         if !stepped {
             // Where nothing changes the misses to first order but they aren't least (the target
             // straight across a pivot from the point), a small kick off it gets closer, once.
-            if kicked {
+            if kicked || !effort.kick {
                 break;
             }
             kicked = true;
