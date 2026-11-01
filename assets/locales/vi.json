@@ -1557,7 +1557,7 @@
   "help.sketch.constrainer": "Áp dụng ràng buộc mà một hoặc hai đường cong đã chọn gần như đã thỏa, như nằm ngang, song song, tiếp tuyến hay bằng nhau. Dùng để chỉnh lại phác thảo vẽ tay từng quan hệ một.",
   "help.sketch.constraint.coincident": "Làm một điểm trùng với điểm khác, nằm trên một đường cong hoặc trục phác thảo. Dùng để đóng khe hở trong biên dạng hoặc đặt điểm lên đường thẳng.",
   "help.sketch.constraint.collinear": "Làm hai đường thẳng nằm trên cùng một đường thẳng. Dùng để căn thẳng hàng các cạnh bị ngắt quãng, như hai bên của một khe khuyết.",
-  "help.sketch.constraint.concentric": "Cho hai đường tròn hoặc cung cùng một tâm. Dùng cho vòng, lỗ khoét bậc và trục có vai.",
+  "help.sketch.constraint.concentric": "Cho hai đường tròn hoặc cung cùng một tâm, hoặc đặt tâm của đường tròn hay cung tại một điểm phác thảo, kể cả gốc tọa độ. Chọn cặp đối tượng theo thứ tự bất kỳ.",
   "help.sketch.constraint.curvature": "Làm hai đường cong gặp nhau tại đầu mút tiếp tục với cùng độ cong (G2). Dùng khi nối tiếp tuyến chưa đủ mượt, chẳng hạn trên các bề mặt nhìn thấy.",
   "help.sketch.constraint.equal": "Làm các đường thẳng bằng chiều dài, hoặc các đường tròn và cung bằng bán kính. Dùng để một kích thước điều khiển nhiều chi tiết giống nhau.",
   "help.sketch.constraint.fix": "Cố định điểm hoặc đường cong tại chỗ, hoặc bỏ cố định chúng. Dùng cho hình học không được di chuyển khi bạn kéo hoặc giải phác thảo.",

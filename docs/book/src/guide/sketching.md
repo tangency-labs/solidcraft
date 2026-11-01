@@ -325,6 +325,9 @@ aligned, horizontal, vertical, point-to-line, line-to-circle, point-to-circle, c
 radius, diameter, arc length and angle dimensions. For an arc's length, click the arc and then one of its end points. Each is a parameter
 (`d1`, `d2`, …), so it can hold an expression.
 
+**Concentric** accepts two circles or arcs, or a circle or arc and a sketch point (including the
+origin). Preselect the pair and choose Concentric, or start the tool and pick both, in either order.
+
 Press D, click what you want to measure and type the value: as soon as the click settles the
 dimension (one line, circle or arc, or the second point or line of a distance or angle), its
 value box takes the keyboard with the measured value selected, so typing replaces it. Numbers,

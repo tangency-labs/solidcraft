@@ -740,6 +740,11 @@ pub(crate) fn constraint_preselection(
         }
         ("sketch.constraint.horizontal_vertical", _) => crate::selection::alignment_points(selection).map(|points| json!({"points": points})),
         ("sketch.constraint.coincident", [_, _]) => crate::selection::coincident_operands(selection),
+        ("sketch.constraint.concentric", [SketchCurve { id: a, .. }, SketchPoint { id: b }] | [SketchPoint { id: a }, SketchCurve { id: b, .. }])
+            if a != b =>
+        {
+            Some(json!({"a":a,"b":b}))
+        }
         (
             "sketch.constraint.midpoint",
             [SketchPoint { id: point }, SketchCurve { id: line, .. }] | [SketchCurve { id: line, .. }, SketchPoint { id: point }],

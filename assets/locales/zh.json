@@ -1557,7 +1557,7 @@
   "help.sketch.constrainer": "应用所选的一两条曲线已近乎满足的约束，例如水平、平行、相切或相等。用于逐个关系地整理手绘草图。",
   "help.sketch.constraint.coincident": "使一个点位于另一个点、曲线或草图轴上。用于闭合轮廓中的间隙，或把点放到直线上。",
   "help.sketch.constraint.collinear": "使两条直线位于同一条直线上。用于对齐被打断的边，例如缺口的两侧。",
-  "help.sketch.constraint.concentric": "使两个圆或圆弧具有相同的圆心。用于圆环、沉孔和带台阶的轴。",
+  "help.sketch.constraint.concentric": "使两个圆或圆弧具有相同的圆心，也可将圆或圆弧的圆心约束到草图点（包括原点）。两者的选择顺序不限。",
   "help.sketch.constraint.curvature": "使在端点相接的两条曲线以相同的曲率延续 (G2)。用于相切连接不够平滑的地方，例如可见曲面。",
   "help.sketch.constraint.equal": "使直线长度相等，或使圆和圆弧半径相等。用于让一个尺寸同时驱动多个相同的特征。",
   "help.sketch.constraint.fix": "把点或曲线固定在当前位置，或再次解除固定。用于拖动或解算草图时不得移动的几何体。",

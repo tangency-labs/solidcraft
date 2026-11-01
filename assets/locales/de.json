@@ -1549,7 +1549,7 @@
   "help.sketch.constrainer": "Setzt die Bedingung, die eine oder zwei gewählte Kurven schon fast erfüllen, etwa horizontal, parallel, tangential oder gleich. Damit räumen Sie eine frei gezeichnete Skizze Beziehung für Beziehung auf.",
   "help.sketch.constraint.coincident": "Legt einen Punkt auf einen anderen Punkt, eine Kurve oder eine Skizzenachse. Damit schließen Sie Lücken in einem Profil oder setzen einen Punkt auf eine Linie.",
   "help.sketch.constraint.collinear": "Legt zwei Linien auf eine gemeinsame Gerade. Damit richten Sie unterbrochene Kanten aus, etwa die beiden Seiten einer Kerbe.",
-  "help.sketch.constraint.concentric": "Gibt zwei Kreisen oder Bögen denselben Mittelpunkt. Für Ringe, Senkungen und abgesetzte Wellen.",
+  "help.sketch.constraint.concentric": "Gibt zwei Kreisen oder Bögen denselben Mittelpunkt oder zentriert einen Kreis oder Bogen auf einem Skizzenpunkt, auch dem Ursprung. Die Auswahlreihenfolge ist beliebig.",
   "help.sketch.constraint.curvature": "Lässt zwei Kurven, die sich an einem Endpunkt treffen, mit gleicher Krümmung ineinander übergehen (G2). Wo ein tangentialer Übergang nicht glatt genug ist, etwa an Sichtflächen.",
   "help.sketch.constraint.equal": "Macht Linien gleich lang oder Kreise und Bögen gleich groß im Radius. So steuert ein Maß mehrere gleiche Elemente.",
   "help.sketch.constraint.fix": "Fixiert Punkte oder Kurven an ihrer Stelle oder löst sie wieder. Für Geometrie, die sich beim Ziehen oder Lösen der Skizze nicht bewegen darf.",

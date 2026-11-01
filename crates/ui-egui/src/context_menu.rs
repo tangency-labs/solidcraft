@@ -1323,6 +1323,9 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         c.push(cmd(app, "sketch.constraint.equal", "Equal").with(ab.clone()));
         c.push(cmd(app, "sketch.constraint.tangent", "Tangent").with(ab));
     }
+    if r == 1 && p == 1 && n == 2 {
+        c.push(cmd(app, "sketch.constraint.concentric", "Concentric").with(json!({ "a": picked[0], "b": picked[1] })));
+    }
     if l == 1 && r == 1 && n == 2 {
         c.push(cmd(app, "sketch.constraint.tangent", "Tangent").with(json!({ "a": picked[0], "b": picked[1] })));
     }

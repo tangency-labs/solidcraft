@@ -1557,7 +1557,7 @@
   "help.sketch.constrainer": "Applies the constraint that one or two picked curves nearly have already, such as horizontal, parallel, tangent or equal. Use it to tidy a hand-drawn sketch one relation at a time.",
   "help.sketch.constraint.coincident": "Makes a point lie on another point, a curve or a sketch axis. Use it to close gaps in a profile or to put a point on a line.",
   "help.sketch.constraint.collinear": "Makes two lines lie on one straight line. Use it to line up interrupted edges, such as both sides of a notch.",
-  "help.sketch.constraint.concentric": "Gives two circles or arcs the same centre. Use it for rings, counterbores and shafts with shoulders.",
+  "help.sketch.constraint.concentric": "Gives two circles or arcs the same centre, or centres a circle or arc on a sketch point, including the origin. Pick either pair in either order.",
   "help.sketch.constraint.curvature": "Makes two curves that meet at an end point continue with the same curvature (G2). Use it where a tangent join is not smooth enough, for example on visible surfaces.",
   "help.sketch.constraint.equal": "Makes lines the same length, or circles and arcs the same radius. Use it so that one dimension drives several matching features.",
   "help.sketch.constraint.fix": "Fixes points or curves where they are, or frees them again. Use it for geometry that must not move when you drag or solve the sketch.",
