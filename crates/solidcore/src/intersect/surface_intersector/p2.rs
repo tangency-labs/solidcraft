@@ -110,7 +110,7 @@ fn deg2rad(deg: f64) -> f64 {
 fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -507,7 +507,7 @@ impl SurfaceIntersector<'_> {
             // load Surface eval matrix into the point
             let m = match self.surface(s).evaluate(k, uv, 2, 2, LEFT_UPPER) {
                 Ok(m) => m,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(e) => {
                     // upstream evaluates into the point's matrix before the zero
                     // tangent replacement fails: those exact derivatives stay
@@ -632,7 +632,7 @@ impl SurfaceIntersector<'_> {
                             k.fixes.dupin_bottom_hyperbola_axis,
                         ) {
                             Ok(()) => {}
-                            Err(e) if e.is_unported() => return Err(e),
+                            Err(e) if e.is_unported_or_cancelled() => return Err(e),
                             Err(_) => return Err(SolidError::sm_err(OP_SING)),
                         }
                     } else {
@@ -1328,7 +1328,7 @@ impl SurfaceIntersector<'_> {
                 let pc_dot_bi_norm = pc.dot(bi_norm);
                 Ok(!self.domain(o).contains_point(p_uv, EFF_ZERO) || pc_dot_bi_norm < -EFF_ZERO)
             }
-            Err(e) if e.is_unported() => Err(e),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
             _ => Ok(true), // open for nonzero gaps
         }
     }
@@ -1703,7 +1703,7 @@ pub fn compute_law_point_values_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         // `Unported` propagates)
         match v.compute_point_values_delta(k, uvs, uv_deltas, point, &mut delta_pnt) {
             Ok(()) => return Ok(()),
-            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
             Err(_) => {}
         }
 

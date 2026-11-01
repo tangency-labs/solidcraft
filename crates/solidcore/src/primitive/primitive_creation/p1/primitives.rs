@@ -389,7 +389,7 @@ pub fn create_rectangle(
 // An unavailable port must remain visible; a failed native allocation/geometry
 // instead yields the static constructor's null result and its SM_ERR status.
 fn circle_error(error: SolidError) -> SolidError {
-    if error.is_unported() {
+    if error.is_unported_or_cancelled() {
         error
     } else {
         SolidError::sm_err("primitive::primitive_creation::p1::create_circle")
@@ -671,7 +671,7 @@ impl PrimitiveCreation {
         let domain = Extent2d::from_bounds(0.0, 0.0, 360.0, height);
         match cylinder.adjust_step_uv_domain(k, &domain) {
             Ok(()) => {}
-            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
             Err(_) => return Err(SolidError::sm_err(OP)),
         }
 
@@ -1347,7 +1347,7 @@ impl PrimitiveCreation {
         )
         .map(drop)
         {
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             other => other,
         };
         let mut translation = Axis2Placement::IDENTITY;
@@ -1482,7 +1482,7 @@ pub fn analytic_rotational_sweep(
             }
             return match planar_face(k, brep, brep.infinite_region(), &circles, tol) {
                 Ok(_) => Ok(()),
-                Err(e) if e.is_unported() => Err(e),
+                Err(e) if e.is_unported_or_cancelled() => Err(e),
                 Err(_) => Err(SolidError::sm_err(op)),
             };
         } else {
@@ -1597,7 +1597,7 @@ pub fn analytic_rotational_sweep(
     };
     match analytic_face(k, brep, surface) {
         Ok(_) => Ok(()),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Err(SolidError::sm_err(op)),
     }
 }

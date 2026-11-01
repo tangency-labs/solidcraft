@@ -676,7 +676,7 @@ pub fn find_fillet_min_max_radii(
                 Ok(o) => {
                     radii.add_value(fillet_radius_or_zero(k, s, rail_dir, o.t, true)?);
                 }
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => {}
             }
         } // end else
@@ -852,7 +852,7 @@ pub fn identify_fillet_u_or_v(
         );
         match drop {
             Ok(d) if d.success && d.distance < tol3d => return Ok(out),
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             _ => {}
         }
     }

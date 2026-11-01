@@ -781,7 +781,7 @@ impl SurfOfExtrusion {
     pub(crate) fn base_with_nurb_or_base(&self, k: &Kernel) -> Result<Cow<'_, BSplineSurface>> {
         match self.base_with_nurb(k) {
             Ok(b) => Ok(b),
-            Err(e) if e.is_unported() => Err(e),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
             Err(_) => Ok(Cow::Borrowed(&self.base)),
         }
     }

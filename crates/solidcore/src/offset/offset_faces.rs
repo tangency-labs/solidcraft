@@ -1062,7 +1062,7 @@ impl OffsetFacesExecutive {
             (status, info.code, info.comment.clone())
         };
         if let Err(e) = status {
-            if e.is_unported() {
+            if e.is_unported_or_cancelled() {
                 return Err(e);
             }
             if code == FilletErrorType::NoRoom as i32 {
@@ -1131,7 +1131,7 @@ impl OffsetFacesExecutive {
                     b.refresh_cached_topology();
                     match r {
                         Ok(()) => Some(removal.sharp_edge()),
-                        Err(e) if e.is_unported() => return Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
                         Err(_) => {
                             not_exact = not_exact || removal.not_exact();
                             None
@@ -1144,7 +1144,7 @@ impl OffsetFacesExecutive {
                     b.refresh_cached_topology();
                     match r {
                         Ok(()) => Some(removal.sharp_edge()),
-                        Err(e) if e.is_unported() => return Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
                         Err(_) => {
                             not_exact = not_exact || removal.not_exact();
                             None

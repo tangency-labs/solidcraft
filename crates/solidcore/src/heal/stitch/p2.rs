@@ -260,6 +260,7 @@ impl Stitch<'_> {
         out: &mut Stitching,
     ) -> Result<()> {
         let tol_3d = self.stitch_tol_3d();
+        k.check_cancelled("heal::stitch::p2::Stitch::do_stitching")?;
         // (status not checked)
         ignore_status(self.edit_brep_pre_edit(k, b))?;
 
@@ -334,6 +335,7 @@ impl Stitch<'_> {
         let mut count = 0u32;
         let mut more_work_needed = true;
         while more_work_needed && count < 10 {
+            k.check_cancelled("heal::stitch::p2::Stitch::do_stitching")?;
             count += 1;
             more_work_needed = false;
 
@@ -755,7 +757,7 @@ impl Stitch<'_> {
                         SolverOperation::Minimize,
                     ) {
                         Ok(d) if d.success => d,
-                        Err(err) if err.is_unported() => return Err(err),
+                        Err(err) if err.is_unported_or_cancelled() => return Err(err),
                         // no drop point, or a failing status
                         Ok(_) | Err(_) => continue,
                     };
@@ -885,7 +887,7 @@ impl Stitch<'_> {
                             set_none(&mut v_edges, kk)?;
                             done_with_vertex = false;
                         }
-                        Err(err) if err.is_unported() => return Err(err),
+                        Err(err) if err.is_unported_or_cancelled() => return Err(err),
                         Err(_) if !self.ignore_problems => return Err(sm_err()),
                         Err(_) => {
                             // forget the deleted edge when the failed glue removed it
@@ -1175,7 +1177,7 @@ impl Stitch<'_> {
 
                 let split = match self.edit_test_and_split_edge(k, b, e, pv_point, this_tol) {
                     Ok(s) => s,
-                    Err(err) if err.is_unported() => return Err(err),
+                    Err(err) if err.is_unported_or_cancelled() => return Err(err),
                     Err(_) if self.ignore_problems => continue,
                     Err(err) => return Err(err),
                 };

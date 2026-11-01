@@ -1300,7 +1300,7 @@ fn fix_loop_orientation_ignored(
 ) -> Result<bool> {
     match fix_loop_orientation(k, b, f, l, outer_loop) {
         Ok(r) => Ok(r),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(false),
     }
 }
@@ -2217,7 +2217,7 @@ pub fn check_face(
         // Check the loop orientation results.
         let lo = face_compute_loop_orientation(k, b, f, l);
         let lo = match lo {
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             other => other,
         };
         report(
@@ -2313,7 +2313,7 @@ pub fn is_loop_uv_gap_within_tolerance(
         SurfaceKind::BSpline(b) => Cow::Borrowed(b),
         SurfaceKind::Plane(p) => match p.base_with_nurb() {
             Ok(b) => b,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(false),
         },
         SurfaceKind::SurfOfRevolution(s) => Cow::Borrowed(s.base()),
@@ -2372,14 +2372,14 @@ pub fn is_loop_uv_gap_within_tolerance(
             },
         ) {
             Ok(c) => c,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(false),
         };
         let mut curve = iso.curve;
         let mut trim = gap_ivl;
         match curve.trim(k, &mut trim, TrimMode::Notify) {
             Ok(()) => {}
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(false),
         }
         // Trimming can snap to knots; the curve must still cover the whole gap.
@@ -2394,7 +2394,7 @@ pub fn is_loop_uv_gap_within_tolerance(
     } else {
         let patch = match bss.copy_sub_patch(&gap) {
             Ok(p) => p,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(false),
         };
 
@@ -2796,7 +2796,7 @@ fn is_iso_curve_at_impl(
         Ok(c) => c,
         Err(e)
             if propagate_canonical_failure
-                || e.is_unported()
+                || e.is_unported_or_cancelled()
                 || matches!(
                     e,
                     SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }

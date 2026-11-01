@@ -1371,7 +1371,7 @@ impl DerivSurfDefinition<'_> {
                         let uv_binormal = surface
                             .compute_param_direction(k, surface_uv0, binormal)
                             .map_err(|e| {
-                                if e.is_unported() {
+                                if e.is_unported_or_cancelled() {
                                     e
                                 } else {
                                     SolidError::sm_err(OP_SAMPLE)

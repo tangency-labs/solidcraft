@@ -1420,7 +1420,7 @@ impl Surface {
                 // (`SurfOfExtrusion::base_with_nurb`; status ignored, as upstream)
                 if s.base().gw_nurb().is_none() {
                     match s.base_with_nurb(k) {
-                        Err(e) if e.is_unported() => return Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
                         _ => {}
                     }
                 }

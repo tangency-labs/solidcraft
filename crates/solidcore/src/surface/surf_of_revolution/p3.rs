@@ -207,7 +207,7 @@ fn iso_point_inversion(
         &mut sol,
     );
     if let Err(e) = &r {
-        if e.is_unported() {
+        if e.is_unported_or_cancelled() {
             return Err(e.clone());
         }
     }

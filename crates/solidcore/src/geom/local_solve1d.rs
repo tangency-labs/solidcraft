@@ -88,7 +88,10 @@ fn sm_err(operation: &'static str) -> SolidError {
 /// Upstream returns `SM_ERR` after a failed evaluation; an `Unported` error is
 /// passed through unchanged.
 fn eval_failed(e: SolidError, operation: &'static str) -> SolidError {
-    if matches!(e, SolidError::Unported { .. }) {
+    if matches!(
+        e,
+        SolidError::Unported { .. } | SolidError::Cancelled { .. }
+    ) {
         e
     } else {
         sm_err(operation)
@@ -974,7 +977,10 @@ impl LocalSolve1d {
         let mut found_answer = false;
         let r = Self::eval_into(eval, &mut self.curr, &mut found_answer, false);
         if let Err(e) = r {
-            if matches!(e, SolidError::Unported { .. }) {
+            if matches!(
+                e,
+                SolidError::Unported { .. } | SolidError::Cancelled { .. }
+            ) {
                 return Err(e);
             }
             // Bad start point: within an interval, tweak it by 1/1000 of the interval.

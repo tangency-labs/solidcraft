@@ -110,7 +110,7 @@ pub fn find_surface_extension_dist_at_corner(
             // failed law evaluation yields the status code as the radius.
             ext_dist = match vr.law.evaluate(parameter, &interval, orientation) {
                 Ok(values) => values[0],
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(e) => f64::from(status_of(&e)),
             };
         }

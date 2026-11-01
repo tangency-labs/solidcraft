@@ -173,7 +173,7 @@ pub fn find_fillet_tsect_pnt(
     for s in [surf1, surf2] {
         // smsurf_GetSurfaceCache + NER
         if let Err(e) = get_surface_cache(k, s, None::<NoObject>) {
-            return Err(if e.is_unported() {
+            return Err(if e.is_unported_or_cancelled() {
                 e
             } else {
                 SolidError::null_pointer(OP_F)
@@ -426,7 +426,7 @@ impl FilletSolver {
                         out.found_good_point = o.found;
                         radius_found = o.t;
                     }
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => out.found_good_point = false,
                 }
                 // the EFO refines sUV[] through references
@@ -1323,7 +1323,7 @@ fn rail_edgeuse_param(
     match FilletSolver::rail_edgeuse_intersect(solver, k, target, rail_index, side_eu, guess, tsect)
     {
         Ok(Some(param)) => Ok(param),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         // the uninitialised dEUParamMin / dEUParamMax would be read next
         Ok(None) | Err(_) => Err(invalid(
             "RailEdgeuseIntersect found no crossing (uninitialised edge use parameter upstream)",

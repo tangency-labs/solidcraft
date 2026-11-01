@@ -527,7 +527,7 @@ impl DropPt {
                 approx_tol_3d,
             ) {
                 Ok(r) => (r.is_good, r.drop_to_surf, r.approx_dev),
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 // when smsurf_IsPointOnNormal fails - it's not a good point
                 Err(_) => (false, 0.0, 0.0),
             };

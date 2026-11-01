@@ -72,7 +72,7 @@ fn invalid(reason: &'static str) -> SolidError {
 fn ignore<T>(result: Result<T>) -> Result<Option<T>> {
     match result {
         Ok(value) => Ok(Some(value)),
-        Err(error) if error.is_unported() => Err(error),
+        Err(error) if error.is_unported_or_cancelled() => Err(error),
         Err(_) => Ok(None),
     }
 }
@@ -698,7 +698,7 @@ impl StitchAttempt {
                 max_vertex_gap: o.max_vertex_edge_gap,
                 max_edge_gap: o.max_edge_face_trim_curve_gap,
             }),
-            Err(e) if e.is_unported() => Err(e),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
             Err(e) => Ok(Self {
                 status: Some(e),
                 stitched: 0,
@@ -2412,6 +2412,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     ) -> Result<()> {
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
+            k.check_cancelled(OP)?;
             if ignore(access.vertices_make_topology(k, corner, self))?.is_none() {
                 return self.corner_vertex_failure(
                     access,
@@ -2475,6 +2476,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     ) -> Result<()> {
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
+            k.check_cancelled(OP)?;
             if !access.adjustment_check_degeneracy(k, corner, self)?
                 && ignore(access.adjustment_topology(k, corner, self))?.is_none()
             {
@@ -2500,6 +2502,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     ) -> Result<()> {
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
+            k.check_cancelled(OP)?;
             if ignore(access.geometry_calculate(k, solver, self))?.is_none() {
                 return self.record_solver_failure(
                     access.geometry_edge(solver)?,
@@ -2756,6 +2759,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     ) -> Result<()> {
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
+            k.check_cancelled(OP)?;
             if ignore(access.edges_adjust_tangent(k, corner, self))?.is_none() {
                 return self.corner_vertex_failure(
                     access,
@@ -2793,6 +2797,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     ) -> Result<()> {
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
+            k.check_cancelled(OP)?;
             if ignore(access.rails_trim(k, solver, self))?.is_none() {
                 return self.record_solver_failure(
                     access.geometry_edge(solver)?,
@@ -2828,6 +2833,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         // Process corners by calculating the vertices first.
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
+            k.check_cancelled(OP)?;
             if ignore(access.vertices_make_topology(k, corner, self))?.is_none() {
                 return self.corner_vertex_failure(
                     access,
@@ -2886,6 +2892,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         if self.options.classification && !self.cliff_overflow {
             let mut index = 0;
             while let Some(solver) = self.solvers.get(index).copied() {
+                k.check_cancelled(OP)?;
                 if ignore(access.rails_classify(k, solver, &mut adjusted, self))?.is_none() {
                     self.record_solver_failure(
                         access.geometry_edge(solver)?,
@@ -2931,6 +2938,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         access.faces_enable_editing(fillet)?;
         let mut index = 0;
         while let Some(corner) = self.corners.get(index).copied() {
+            k.check_cancelled(OP)?;
             if ignore(access.faces_corner_geometry(k, corner, self))?.is_none() {
                 self.corner_vertex_failure(
                     access,
@@ -2942,6 +2950,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         }
         let mut index = 0;
         while let Some(solver) = self.solvers.get(index).copied() {
+            k.check_cancelled(OP)?;
             let tolerance = access.faces_solver_tolerance(solver)?;
             if access.faces_tolerance(k, fillet)? < tolerance
                 && access.faces_tolerance(k, fillet)? < tolerance
@@ -2992,7 +3001,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             access.stitch_body(k, fillet, tolerance)?
         };
         if let Some(error) = attempt.status.take() {
-            if error.is_unported() {
+            if error.is_unported_or_cancelled() {
                 return Err(error);
             }
             self.error.code = 7; // SM_FILERR_BAD_MERGE
@@ -3140,14 +3149,17 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         if self.options.topology_insertion {
             let mut index = 0;
             while let Some(solver) = self.solvers.get(index).copied() {
+                k.check_cancelled(OP)?;
                 // GetFilletGeoms copies the array before its inner loop.
                 for geom in access.insertion_solver_geoms(solver)? {
+                    k.check_cancelled(OP)?;
                     access.insertion_geom_topology(k, geom, self)?;
                 }
                 index += 1;
             }
             let mut index = 0;
             while let Some(corner) = self.corners.get(index).copied() {
+                k.check_cancelled(OP)?;
                 access.insertion_corner_topology(k, corner, self)?;
                 index += 1;
             }
@@ -3314,7 +3326,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 break;
             }
             if let Some(error) = &stitch.status {
-                if error.is_unported() {
+                if error.is_unported_or_cancelled() {
                     return Err(error.clone());
                 }
                 if attempt == 4 {

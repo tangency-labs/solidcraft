@@ -684,7 +684,7 @@ impl SurfaceIntersector<'_> {
                     Some(cache) => cache,
                     None => slot.insert(match make_curve_cache::<()>(k, curve, None) {
                         Ok(c) => c,
-                        Err(e) if e.is_unported() => return Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
                         Err(_) => return Err(SolidError::null_pointer(OP_FIC)),
                     }),
                 };
@@ -991,7 +991,8 @@ pub fn do_law_intersection_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         if let Err(
             e @ (SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
-            | SolidError::Unported { .. }),
+            | SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }),
         ) = v.intersector_mut().add_point_to_curve(id)
         {
             return Err(e);
@@ -1036,7 +1037,7 @@ fn trace_step<'s, V: IntersectorVirtuals<'s> + ?Sized>(
             step.hit_boundary = n.boundary_hit;
             Ok(true)
         }
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(false),
     }
 }
@@ -1144,6 +1145,7 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     // 4. iterate the trace, adding points to the curve
     let mut iterations = 0usize;
     while !done {
+        k.check_cancelled(OP_TRACE)?;
         iterations += 1;
         if iterations > MAX_TRACE_ITERATIONS {
             return Err(too_many(OP_TRACE));
@@ -1427,7 +1429,7 @@ fn stop_at_found_curve_end<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         let end = v.intersector_mut().alloc_point(fresh);
         let n = match v.compute_next_point(k, prev, short_step, end) {
             Ok(n) => Some(n),
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => None,
         };
         if let Some(n) = n {
@@ -1533,7 +1535,7 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
         *v.intersector_mut().point_mut(pid)? = tsp.clone();
         match r {
             Ok(()) => {}
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Err(SolidError::sm_err(OP_DPI)),
         }
 
@@ -1573,7 +1575,8 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
                 Err(
                     e @ (SolidError::InvalidInput { .. }
                     | SolidError::PortInvariant { .. }
-                    | SolidError::Unported { .. }),
+                    | SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }),
                 ) => return Err(e),
                 Err(e) if k.fixes.ssi_proto_topology_statuses_pass_on => return Err(e),
                 _ => {}
@@ -1614,7 +1617,7 @@ fn do_point_intersection_body<'s, V: IntersectorVirtuals<'s> + ?Sized>(
     let input_trace_direction = v.intersector().curve_trace_direction;
     let traced = match trace_curve_with(v, k, tsp_id, &out.curves_3d) {
         Ok(()) => true,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => false,
     };
     if traced {

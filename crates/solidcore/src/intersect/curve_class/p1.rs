@@ -1171,7 +1171,7 @@ impl<O: ClassObject> CurveClassification<O> {
         let mut record = |r: Result<()>| -> Result<()> {
             match r {
                 Ok(()) => Ok(()),
-                Err(e) if e.is_unported() => Err(e),
+                Err(e) if e.is_unported_or_cancelled() => Err(e),
                 Err(e) => {
                     ret = Err(e);
                     Ok(())
@@ -1812,7 +1812,7 @@ pub fn set_xsect_edge_through_point_in(
         // If the curve was not changed, then we're done.
         let modified = match r {
             Ok(m) => m,
-            Err(err) if err.is_unported() => return Err(err),
+            Err(err) if err.is_unported_or_cancelled() => return Err(err),
             Err(_) => false,
         };
         out.modified_curve = modified;
@@ -2327,7 +2327,7 @@ fn apply_point_solution_impl<O, S: Copy>(
     match eval {
         None => return Ok(out),
         Some(Ok(p)) => out.sss_point = p,
-        Some(Err(e)) if e.is_unported() => return Err(e),
+        Some(Err(e)) if e.is_unported_or_cancelled() => return Err(e),
         Some(Err(SolidError::Upstream { code, .. })) if code == SM_ERR => return Ok(out),
         Some(Err(_)) => {}
     }
@@ -2810,7 +2810,7 @@ pub fn compute_face_point_class_in(
         &mut BrepCacheFace { b: &mut *b, f },
     ) {
         Ok(c) => Some(c),
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => {
             if make_surface_cache(k, &surface, None::<EntityRef>).is_err() {
                 return Err(SolidError::null_pointer(OP));
@@ -2998,7 +2998,7 @@ fn surface_local_point_solve(
 fn surface_approximate_size(k: &Kernel, surface: &Surface) -> Result<Vec2> {
     match surface.approximate_size(k, None) {
         Ok(size) => Ok(size),
-        Err(e @ SolidError::Unported { .. }) => Err(e),
+        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
         Err(_) => Ok(Vec2::ZERO),
     }
 }

@@ -433,7 +433,7 @@ impl CurveLoops {
         // find adjacent loop curve (status ignored, index 0 on failure)
         let adj = match self.find_adjacent_loop_curve(k, store, key, param) {
             Ok(a) => a,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => 0,
         };
         let adj_crv = curve_of(store, get(&self.curves, adj)?)?;
@@ -498,7 +498,7 @@ impl CurveLoops {
                     SolutionRequested::Single,
                 ) {
                     Ok(s) => s,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => return Ok(false),
                 };
                 if sols.len() != 1 {

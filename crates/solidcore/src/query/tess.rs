@@ -135,7 +135,7 @@ fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
 fn ignore<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -598,6 +598,7 @@ impl TessSrfCache {
     /// `BuildTree` inside the face containment guard; `true` when the guard was
     /// cleared (containment done).
     fn build_tree_body(&mut self, k: &Kernel) -> Result<bool> {
+        k.check_cancelled("query::tess::TessSrfCache::build_tree")?;
         // Build the m_pTree subdivision tree of the surface
         if self.base().tree().is_none() {
             // (`GetNaturalUVDomain` and the copy constructor read the NURB through

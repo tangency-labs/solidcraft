@@ -316,7 +316,7 @@ fn build_cache<O: SolutionObject>(
         zone_tol_3d.or_else(|| curve.owner_zone_tol_3d()),
     ) {
         Ok(c) => Ok(c),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Err(SolidError::null_pointer(OP_GCI)),
     }
 }

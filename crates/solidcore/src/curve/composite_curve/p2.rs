@@ -759,7 +759,7 @@ impl CompositeCurve {
         for _ in 0..n {
             match CompositeCurveSegment::read_from_db(k, db, version) {
                 Ok(s) => segments.push(s),
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => {
                     return Err(SolidError::invalid_input(
                         OP_READ,

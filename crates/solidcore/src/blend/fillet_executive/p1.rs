@@ -1263,6 +1263,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     ..crate::kernel::KernelOptions::default()
                 });
                 tk.rng = k.rng.clone();
+                tk.cancel.clone_from(&k.cancel);
                 let mut trim_ivl = edge_ivl;
                 let crv = target
                     .edge_mut(edge_id)?
@@ -1353,7 +1354,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             pass_on,
         )? {
             Ok(c) => c,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Err(SolidError::null_pointer(OP)),
         };
 
@@ -1388,7 +1389,7 @@ fn eval_first_deriv_ignored(
 ) -> Result<crate::math::Vec3> {
     match crate::error::passed_on(crv.evaluate(k, param, 1, false, true), pass_on)? {
         Ok(vals) => Ok(vals.get(1).copied().unwrap_or(crate::math::Vec3::UNDEF)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(crate::math::Vec3::UNDEF),
     }
 }
@@ -1635,6 +1636,7 @@ pub(crate) fn remove_topo_edges_with_notifications(
                     let editing = b.editing_enabled();
                     if let Err(
                         e @ (SolidError::Unported { .. }
+                        | SolidError::Cancelled { .. }
                         | SolidError::InvalidInput { .. }
                         | SolidError::PortInvariant { .. }
                         | SolidError::NotFound { .. }),

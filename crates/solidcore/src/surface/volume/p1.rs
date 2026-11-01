@@ -861,7 +861,7 @@ impl Volume {
             // Copy this Volume omitting any compounding volumes
             let simple = match self.copy(true) {
                 Ok(v) => v,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => {
                     return Err(SolidError::invalid_input(
                         "surface::volume::p1::Volume::is_curve_in_param_domain",
@@ -1051,7 +1051,7 @@ impl Volume {
             // return OrientMap's simple evaluation (status ignored)
             return match orient.evaluate_simple(param_point, n) {
                 Ok(d) => Ok(d),
-                Err(e) if e.is_unported() => Err(e),
+                Err(e) if e.is_unported_or_cancelled() => Err(e),
                 Err(_) => {
                     let size = eval_size(n, OP_ORIENT)?;
                     if size > MAX_UNDEF_ARRAY {

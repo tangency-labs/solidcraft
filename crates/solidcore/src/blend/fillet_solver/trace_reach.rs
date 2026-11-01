@@ -55,7 +55,7 @@ fn domain_ends(k: &Kernel, surface: &Surface, domain: &Extent2d) -> Result<Optio
     for (end, uv) in ends.iter_mut().zip(uvs) {
         match surface.evaluate_point(k, uv) {
             Ok(p) => *end = p,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(None),
         }
     }
@@ -79,7 +79,7 @@ fn is_same_surface(
         candidate.natural_uv_domain_with_nurb(k),
     ) {
         (Ok(a), Ok(b)) => a.min == b.min && a.max == b.max,
-        (Err(e), _) | (_, Err(e)) if e.is_unported() => return Err(e),
+        (Err(e), _) | (_, Err(e)) if e.is_unported_or_cancelled() => return Err(e),
         _ => false,
     };
     if !same_domain {
@@ -97,7 +97,7 @@ fn is_same_surface(
         candidate.evaluate_point(k, mid),
     ) {
         (Ok(a), Ok(b)) => Ok(a == b),
-        (Err(e), _) | (_, Err(e)) if e.is_unported() => Err(e),
+        (Err(e), _) | (_, Err(e)) if e.is_unported_or_cancelled() => Err(e),
         _ => Ok(false),
     }
 }

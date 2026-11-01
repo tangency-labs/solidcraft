@@ -1151,7 +1151,7 @@ impl Surface {
             Err(e @ (SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. })) => {
                 return Err(e)
             }
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // a NULL blend surface
             Err(_) => return Err(SolidError::sm_err(OP_BLEND)),
         };
@@ -1180,7 +1180,7 @@ impl Surface {
     ) -> Result<&'c SurfaceCache<O>> {
         match cache.get_tree(k) {
             Ok(_) => Ok(cache),
-            Err(e) if e.is_unported() => Err(e),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
             Err(_) => Err(SolidError::null_pointer(op)),
         }
     }
@@ -1194,7 +1194,7 @@ impl Surface {
     ) -> Result<SurfaceCache<O>> {
         let mut cache = match get_surface_cache::<O>(k, self, handle) {
             Ok(c) => c,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Err(SolidError::null_pointer(op)),
         };
         // the solves' GetTree (NER): a reused cache whose tree is not built yet
@@ -1643,7 +1643,7 @@ impl Surface {
             LineCacheSource::Face(source) => {
                 owned = match source.build(k) {
                     Ok(c) => c,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => return Err(SolidError::null_pointer(OP_LINE)),
                 };
                 face_cache = Some(source);
@@ -2543,7 +2543,7 @@ impl Surface {
         let curve_cache =
             match crate::curve::curve::p5::make_curve_cache::<O>(k, curve, curve_handle) {
                 Ok(c) => c,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => return Err(SolidError::null_pointer(OP_CURVE)),
             };
         let curve_tree = curve_cache

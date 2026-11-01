@@ -209,7 +209,7 @@ const CONCAVITY_ANGLE_LIMIT_DEG: f64 = 2.0;
 fn ignored<T>(r: Result<T>, fallback: T) -> Result<T> {
     match r {
         Ok(v) => Ok(v),
-        Err(e @ SolidError::Unported { .. }) => Err(e),
+        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
         Err(_) => Ok(fallback),
     }
 }
@@ -1226,7 +1226,11 @@ pub fn check_nx1_degeneracy_status(
     let binormal = |b: &mut Brep, eu: EdgeuseId, t: f64| -> Result<Result<Vec3, SolidError>> {
         match eu3::evaluate_binormal(k, b, eu, t, false, &options) {
             Ok(e) => Ok(Ok(e.face_normal)),
-            Err(e @ (SolidError::Unported { .. } | SolidError::NotFound { .. })) => Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::NotFound { .. }),
+            ) => Err(e),
             Err(
                 e @ (SolidError::InvalidInput { reason, .. }
                 | SolidError::PortInvariant { reason, .. }),
@@ -1374,7 +1378,9 @@ impl FilletCorner {
             already_processed.push(is_processed(context, fv)?);
             match calculate(context, fv) {
                 Ok(()) => {}
-                Err(e @ SolidError::Unported { .. }) => return Err(e),
+                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                    return Err(e)
+                }
                 Err(_) => return Err(SolidError::sm_err(OP_VERT_GEOM)),
             }
         }
@@ -1887,7 +1893,7 @@ impl FilletCorner {
             // Branch on SmFilletEdge->m_eType to pass call to
             // the appropriate edgeBuilding function
             let calc = calculate(context, self, curr_edge);
-            if let Err(e @ SolidError::Unported { .. }) = calc {
+            if let Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) = calc {
                 return Err(e);
             }
             if calc.is_err() {
@@ -2186,7 +2192,7 @@ impl FilletCorner {
             // Create Face (and Edges and Verts) in m_pFilletBrep from m_vSurfaces with call m_pFilletBrep->MakeFaceWithCurves()
             match self.make_face_brep(env) {
                 Ok(()) => {}
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(
                     e @ SolidError::InvalidInput {
                         reason: NULL_DEREF, ..
@@ -2258,7 +2264,7 @@ impl FilletCorner {
             // Create Face (and Edges and Verts) in m_pFilletBrep from m_vSurfaces
             match self.make_face_brep_with(env) {
                 Ok(()) => {}
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(
                     e @ SolidError::InvalidInput {
                         reason: NULL_DEREF, ..
@@ -2795,7 +2801,7 @@ impl FilletCorner {
             Some(&center_curve),
         ) {
             Ok(()) => {}
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Err(sm_err()), // Unable to convert
         }
 

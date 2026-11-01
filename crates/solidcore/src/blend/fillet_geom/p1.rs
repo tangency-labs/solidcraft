@@ -1306,7 +1306,7 @@ impl FilletGeom {
                     // its status is ignored, so a failed copy leaves NULL
                     Some(off_srf) => match offset_surface_copy(k, off_srf) {
                         Ok(new_surf) => Some(new_surf),
-                        Err(e) if e.is_unported() => return Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
                         Err(_) => None,
                     },
                     None => None,
@@ -2597,7 +2597,7 @@ impl FilletBrep {
 /// Ignores a status upstream does not check, but never a missing dependency.
 fn ignore_non_unported<T>(result: Result<T>) -> Result<()> {
     match result {
-        Err(error) if error.is_unported() => Err(error),
+        Err(error) if error.is_unported_or_cancelled() => Err(error),
         _ => Ok(()),
     }
 }
@@ -2779,7 +2779,7 @@ pub fn surface_drop_point<O: SolutionObject>(
     // the surface cache the solves below use; a surface whose cache cannot be built
     // (its Bezier decomposition fails, UB-166's u direction) is a null pointer here
     if let Err(e) = get_surface_cache(k, surface, handle) {
-        return Err(if e.is_unported() {
+        return Err(if e.is_unported_or_cancelled() {
             e
         } else {
             SolidError::null_pointer(OP_SURFACE_DROP_POINT)
@@ -3059,7 +3059,7 @@ fn uv_domain_from_uv_trim_curves(
 ) -> Result<Extent2d> {
     match calculate_uv_domain_from_uv_trim_curves(k, brep, face, true, false, false) {
         Ok(d) => Ok(d.domain),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(domain),
     }
 }
@@ -3102,7 +3102,7 @@ fn point_3d_classify(
     );
     match r {
         Ok(()) => Ok((pc.point_class(), true)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok((pc.point_class(), false)),
     }
 }
@@ -3226,7 +3226,7 @@ fn normalized_drop(
     };
     match surface.drop_point::<NoObject>(k, pos, domain, &opts) {
         Ok(d) => Ok((true, d.success, d.result_uv, d.gap)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         // DropPoint sets dGap = SM_BIG_DOUBLE before failing
         Err(_) => Ok((false, false, Point2::new(0.0, 0.0), BIG_DOUBLE)),
     }
@@ -3463,7 +3463,7 @@ pub fn create_cubic_rail_rail_interpolant(
         k.fixes.fillet_statuses_pass_on,
     )? {
         Ok(uv) => uv,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => Point2::new(UNDEF_DOUBLE, UNDEF_DOUBLE),
     };
 
@@ -3904,7 +3904,7 @@ fn drop_rail_onto_offset_surface(
     let uv_curves = match drop {
         // the sampled max distance and the deviation are not used
         Ok((_max_dist_to_surf, _deviation, uv_curves)) => uv_curves,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         // if (eStatus != SM_SUCCESS) continue
         Err(_) => return Ok(()),
     };

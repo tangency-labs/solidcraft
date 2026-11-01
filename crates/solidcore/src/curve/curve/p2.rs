@@ -2370,7 +2370,7 @@ pub fn approximate_length<C: CurveEvaluate + ?Sized>(
 
         // Get base of ActTurnAngRad = BaseTurnAngRad +- N*2PI
         let base_turn_ang_rad = match z.ccw_angle_between(last[1], curr[1]) {
-            Err(e) if no_length && !e.is_unported() => return undef,
+            Err(e) if no_length && !e.is_unported_or_cancelled() => return undef,
             r => r?,
         };
 
@@ -2393,7 +2393,7 @@ pub fn approximate_length<C: CurveEvaluate + ?Sized>(
 
             // accumulate turn angle
             let this_turn_ang_rad = match z.ccw_angle_between(last[1], curr[1]) {
-                Err(e) if no_length && !e.is_unported() => return undef,
+                Err(e) if no_length && !e.is_unported_or_cancelled() => return undef,
                 r => r?,
             };
             turn_ang_rad += this_turn_ang_rad;
@@ -3456,15 +3456,11 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
     /// The solver with `curve1` and `curve2`, the curves its trees were built for,
     /// and the kernel `k`, which [`GlobalSolve::local_solve`] needs.
     #[must_use]
-    pub const fn with_curves(
-        mut self,
-        curve1: &'t Curve,
-        curve2: &'t Curve,
-        k: &'t Kernel,
-    ) -> Self {
+    pub fn with_curves(mut self, curve1: &'t Curve, curve2: &'t Curve, k: &'t Kernel) -> Self {
         self.curves = Some([curve1, curve2]);
         self.kernel = Some(k);
         self.base.fixes = k.fixes;
+        self.base.cancel.clone_from(&k.cancel);
         self
     }
 
@@ -3678,7 +3674,7 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
     ) -> Self {
         Self {
             kernel: k,
-            base: GlobalSolver::with_trees(point_tree, curve_tree, 1),
+            base: GlobalSolver::with_trees_and_kernel(k, point_tree, curve_tree, 1),
             interval,
             curve: None,
             zone_tol_3d: None,
@@ -3845,8 +3841,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
         property_value: Option<f64>,
         opt_vectors: Vec<Vec3>,
     ) -> Self {
-        let mut base = GlobalSolver::with_tree(curve_tree, 1);
-        base.fixes = k.fixes;
+        let mut base = GlobalSolver::with_tree_and_kernel(k, curve_tree, 1);
         if k.fixes.curve_property_gs_branch_bounds {
             base.opt_vectors.clone_from(&opt_vectors);
         }
@@ -4059,7 +4054,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
                             // rules nothing out (tangency-labs/smlib 8311f8e)
                             let cos_theta = match property_angle(prop, o1, o2, vec) {
                                 Err(e) if self.kernel.fixes.query_statuses_pass_on => {
-                                    if e.is_unported() {
+                                    if e.is_unported_or_cancelled() {
                                         return Err(e);
                                     }
                                     return Ok(true);
@@ -4292,14 +4287,10 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
     /// (the owner objects of the trees' nodes upstream), and the kernel `k`, which
     /// [`GlobalSolve::local_solve`] needs.
     #[must_use]
-    pub const fn with_curves(
-        mut self,
-        curve1: &'t Curve,
-        curve2: &'t Curve,
-        k: &'t Kernel,
-    ) -> Self {
+    pub fn with_curves(mut self, curve1: &'t Curve, curve2: &'t Curve, k: &'t Kernel) -> Self {
         self.curves = Some([curve1, curve2]);
         self.kernel = Some(k);
+        self.base.cancel.clone_from(&k.cancel);
         self.base.fixes = k.fixes;
         self
     }

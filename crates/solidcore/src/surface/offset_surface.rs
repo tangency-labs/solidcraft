@@ -1873,7 +1873,7 @@ impl OffsetSurface {
         let mut result = base;
         let retry = match &result {
             Ok((_, location)) => *location == LocationType::Exterior,
-            Err(e) if e.is_unported() => return result,
+            Err(e) if e.is_unported_or_cancelled() => return result,
             Err(_) => true,
         };
         if retry {
@@ -2247,7 +2247,7 @@ fn extend_toward(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Surface> {
     let sur = nurb_of(k, surface)?;
     let mut esur: Option<UnboundedExtension> = None;
     match eval_pt_derivs_unbounded(&sur, uv.x, uv.y, 0, ExtendContinuity::G1R, &mut esur) {
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Err(SolidError::sm_err(OP_EXTEND)),
         Ok(_) => {}
     }
@@ -3182,13 +3182,13 @@ fn extend_surface(
     let mut esur: Option<UnboundedExtension> = None;
     let first = eval_pt_derivs_unbounded(&sur, s_uv.x, s_uv.y, 0, ExtendContinuity::G1R, &mut esur);
     if let Err(e) = first {
-        if e.is_unported() {
+        if e.is_unported_or_cancelled() {
             return Err(e);
         }
         let second =
             eval_pt_derivs_unbounded(&sur, uv.x, uv.y, 0, ExtendContinuity::G1R, &mut esur);
         match second {
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Err(SolidError::sm_err(OP_EXTEND)),
             Ok(_) => {}
         }

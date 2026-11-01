@@ -2780,7 +2780,7 @@ fn not_yet_heal_face(operation: &'static str) -> SolidError {
 /// overwrites with the next stage's otherwise).
 fn keep_unported(r: &Result<()>) -> Result<()> {
     match r {
-        Err(e) if e.is_unported() => Err(e.clone()),
+        Err(e) if e.is_unported_or_cancelled() => Err(e.clone()),
         _ => Ok(()),
     }
 }

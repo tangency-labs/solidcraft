@@ -333,7 +333,7 @@ fn find_degen_param(
 ) -> Result<Point2> {
     match surface.find_degen_param_for_direction(k, uv, dir, dir_from_pole, singular_dir, 0.0001) {
         Ok(d) => Ok(d.uv),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(uv),
     }
 }
@@ -871,7 +871,7 @@ impl DropPt {
                 false,
             ) {
                 Ok(code) => code,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(e) => status_of(&e),
             };
 

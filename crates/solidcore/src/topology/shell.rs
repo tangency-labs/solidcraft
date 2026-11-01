@@ -444,7 +444,7 @@ pub fn order_region_shells(kernel: &mut Kernel, brep: &mut Brep, id: RegionId) -
                         chosen = Some(shell);
                         break;
                     }
-                    Err(error) if error.is_unported() => return Err(error),
+                    Err(error) if error.is_unported_or_cancelled() => return Err(error),
                     Ok(false) | Err(_) => {}
                 }
             }
@@ -1519,7 +1519,7 @@ enum Checked<T> {
 fn checked<T>(k: &Kernel, r: Result<T>) -> Result<Checked<T>> {
     match r {
         Ok(v) => Ok(Checked::Value(v)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) if k.fixes.shell_inner_shell_of_statuses => Ok(Checked::Decides),
         Err(_) => Ok(Checked::Ignored),
     }

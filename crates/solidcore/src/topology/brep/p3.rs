@@ -182,6 +182,7 @@ fn ignore_soft<T>(r: Result<T>) -> Result<()> {
     match r {
         Err(
             e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
@@ -714,7 +715,7 @@ pub fn copy_brep(
             reverse_map,
             add_analytics,
         ) {
-            if e.is_unported() {
+            if e.is_unported_or_cancelled() {
                 return Err(e);
             }
         }
@@ -4088,7 +4089,7 @@ pub(crate) fn with_nurb<'a>(k: &Kernel, s: &'a Surface) -> Result<Option<Cow<'a,
             } else {
                 let mut tmp = x.as_ref().clone();
                 match tmp.make_nurb(k) {
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Ok(()) | Err(_) => {}
                 }
                 Some(Cow::Owned(tmp.base().clone()))
@@ -4209,7 +4210,7 @@ fn turn_to_nurbs_in(
                 OffsetParamType::ChordLength,
             ) {
                 Ok(x) => x,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 // SE(SM_ERR_INVALID_INPUT); continue
                 Err(_) => continue,
             };
@@ -4225,7 +4226,7 @@ fn turn_to_nurbs_in(
             let srf_bbox =
                 match new_surface.calculate_bounding_box(k, &domain, [true, false, false], true) {
                     Ok(boxes) => boxes.normal_box.unwrap_or_else(Extent3d::new),
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     // (fork 60a8a51 passes this status on: `SER`)
                     Err(e) if k.fixes.brep_edit_statuses_pass_on => return Err(e),
                     Err(_) => Extent3d::new(),
@@ -4297,7 +4298,7 @@ fn turn_to_nurbs_in(
                 false,
             ) {
                 Ok(l) => bsc = Some(l.curve),
-                Err(err) if err.is_unported() => return Err(err),
+                Err(err) if err.is_unported_or_cancelled() => return Err(err),
                 Err(_) => {}
             }
         }
@@ -4306,13 +4307,13 @@ fn turn_to_nurbs_in(
         if bsc.is_none() {
             let (knots, _) = match curve.knots(k, None) {
                 Ok(x) => x,
-                Err(err) if err.is_unported() => return Err(err),
+                Err(err) if err.is_unported_or_cancelled() => return Err(err),
                 Err(_) => (Vec::new(), Vec::new()),
             };
             let opts = crate::curve::curve::p1::ApproximateCurveOptions::default();
             match curve.approximate_curve(k, &knots, approx_tol, &opts) {
                 Ok(a) => bsc = Some(a.curve),
-                Err(err) if err.is_unported() => return Err(err),
+                Err(err) if err.is_unported_or_cancelled() => return Err(err),
                 Err(_) => {}
             }
         }

@@ -424,6 +424,7 @@ fn ignore_soft<T>(r: Result<T>) -> Result<Option<T>> {
         Ok(v) => Ok(Some(v)),
         Err(
             e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }),
         ) => Err(e),
@@ -1063,7 +1064,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         // MakeEdgeInFace stopped before its first edit
                         *edited = false;
                     }
-                    if !e.is_unported() {
+                    if !e.is_unported_or_cancelled() {
                         // Get rid of our curves, which were not consumed.
                         let _ = self.ed_mut(ed)?.destruct();
                     }
@@ -1151,7 +1152,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         // Brep1's new edge is whole
                         *edited = false;
                     }
-                    if !e.is_unported() {
+                    if !e.is_unported_or_cancelled() {
                         // Brep1 keeps the curves it consumed; the copy is dropped.
                         let d = self.ed_mut(ed)?;
                         d.set_xsect_curve_3d(None);
@@ -2485,7 +2486,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         {
                             Some(drop.parameter)
                         }
-                        Err(e) if e.is_unported() => return Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
                         _ => None,
                     };
                     if let Some(at) = at {
@@ -2512,7 +2513,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             let mid_pt = match d.evaluate_mid(k, brep, true, false) {
                 Ok((Some(p), _)) => p,
                 Err(e)
-                    if e.is_unported()
+                    if e.is_unported_or_cancelled()
                         || k.fixes.ssi_proto_topology_statuses_pass_on
                         || matches!(
                             e,
@@ -2669,7 +2670,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 let mid_pt = match d.evaluate_mid(k, brep, true, false) {
                     Ok((Some(p), _)) => p,
                     // passed on with `ssi_proto_topology_statuses_pass_on` (fork bcc6f01)
-                    Err(e) if e.is_unported() || k.fixes.ssi_proto_topology_statuses_pass_on => {
+                    Err(e)
+                        if e.is_unported_or_cancelled()
+                            || k.fixes.ssi_proto_topology_statuses_pass_on =>
+                    {
                         return Err(e)
                     }
                     _ => Vec3::UNDEF,
@@ -2776,7 +2780,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                         Ok((Some(p), _)) => p,
                         // passed on with `ssi_proto_topology_statuses_pass_on` (fork bcc6f01)
                         Err(e)
-                            if e.is_unported() || k.fixes.ssi_proto_topology_statuses_pass_on =>
+                            if e.is_unported_or_cancelled()
+                                || k.fixes.ssi_proto_topology_statuses_pass_on =>
                         {
                             return Err(e)
                         }

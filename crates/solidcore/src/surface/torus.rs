@@ -274,7 +274,7 @@ impl Torus {
                 Some(opts.inside_out),
             )
             .map_err(|e| {
-                if e.is_unported() {
+                if e.is_unported_or_cancelled() {
                     e
                 } else {
                     SolidError::null_pointer(OP_NEW)
@@ -340,7 +340,7 @@ impl Torus {
 
         // Build NURB; fail cleanly rather than leak a null-NURB object.
         match torus.make_nurb(k) {
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Err(SolidError::sm_err(OP_CANONICAL)),
             Ok(()) => {}
         }
@@ -1116,7 +1116,7 @@ impl Torus {
                 EFF_ZERO_DEG,
             ) {
                 Ok(ivl) => ivl,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => return Ok(None),
             }
         } else {

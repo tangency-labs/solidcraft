@@ -1323,7 +1323,7 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
                     &mut solution,
                 ) {
                     Ok(f) => found_solution = f,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => continue, // If error try another guess
                 }
 
@@ -1366,7 +1366,7 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
                         op,
                     ) {
                         Ok(d) => d,
-                        Err(e) if e.is_unported() => return Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
                         Err(e) => status_value(&e),
                     };
                 }
@@ -1382,7 +1382,7 @@ impl<'t, O: SolutionObject + 't> CpGlobalSolver<'t, O> {
                         found_solution = f;
                         merge_point_solution(&mut solution, f, &s, local_op);
                     }
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => continue, // If have an error move on to next guess
                 }
             }
@@ -1773,7 +1773,7 @@ impl Curve {
         if cache.is_none() {
             *cache = Some(match make_curve_cache::<O>(k, self, opts.handle) {
                 Ok(c) => c,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => return Err(SolidError::null_pointer(OP_GLOBAL)),
             });
         }

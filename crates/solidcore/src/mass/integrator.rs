@@ -476,18 +476,26 @@ pub fn integrate_with_kernel<F>(
     b: f64,
     algorithm: IntegrationAlgorithm,
     accuracy: f64,
-    evaluate: F,
+    mut evaluate: F,
 ) -> Result<f64>
 where
     F: FnMut(f64) -> Result<f64>,
 {
+    k.check_cancelled(OP)?;
+    let mut eval_calls = 0u64;
     integrate_opt_in(
         a,
         b,
         algorithm,
         accuracy,
         k.fixes.integrator_propagates_failure,
-        evaluate,
+        |t| {
+            eval_calls += 1;
+            if (eval_calls & 63) == 1 {
+                k.check_cancelled(OP)?;
+            }
+            evaluate(t)
+        },
     )
 }
 
@@ -528,7 +536,7 @@ where
         Ok(())
     }) {
         Ok(_) => Ok(y.into_iter().next().unwrap_or(0.0)),
-        Err(e) if e.is_unported() || propagate_failure => Err(e),
+        Err(e) if e.is_unported_or_cancelled() || propagate_failure => Err(e),
         Err(_) => Ok(0.0),
     }
 }

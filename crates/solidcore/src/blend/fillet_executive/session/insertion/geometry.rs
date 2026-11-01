@@ -568,7 +568,7 @@ impl<'a> InsertionGeometry<'a> {
             &mut output,
         );
         if let Err(error) = result {
-            if error.is_unported() {
+            if error.is_unported_or_cancelled() {
                 return Err(error);
             }
         }
@@ -606,7 +606,7 @@ impl<'a> InsertionGeometry<'a> {
             },
         );
         if let Err(error) = result {
-            if error.is_unported() {
+            if error.is_unported_or_cancelled() {
                 return Err(error);
             }
         }

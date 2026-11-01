@@ -424,6 +424,7 @@ pub fn boolean_trees<D: BooleanDriver>(
                 -6 => BooleanOperation::Slice,
                 _ => return Err(SolidError::sm_err(OP)),
             };
+            k.check_cancelled(OP)?;
             let result = driver
                 .manifold_boolean(
                     k,
@@ -437,7 +438,7 @@ pub fn boolean_trees<D: BooleanDriver>(
                 .map_err(|e| {
                     // undefined behaviour the port detects (InvalidInput) keeps its
                     // error, as Unported does
-                    if e.is_unported()
+                    if e.is_unported_or_cancelled()
                         || matches!(
                             e,
                             SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }

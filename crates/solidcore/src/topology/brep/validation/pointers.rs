@@ -422,7 +422,7 @@ pub fn validate_pointers(
         let checked =
             crate::topology::trimming_tools::check_face(k, b, f, tol, r.array.as_deref_mut(), walk);
         if let Err(e) = checked {
-            if e.is_unported() {
+            if e.is_unported_or_cancelled() {
                 return Err(e);
             }
         }
@@ -579,7 +579,7 @@ pub fn validate_pointers(
                     let result = check_edgeuse_geometry(k, b, eu);
                     let good = match result {
                         Ok(()) => true,
-                        Err(e) if e.is_unported() => return Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
                         Err(_) => false,
                     };
                     r.check(b, offset + 1, good, EntityRef::Edgeuse(eu))?;
@@ -773,7 +773,7 @@ fn check_edges(
         )?;
         let good = match check_edge_geometry(k, b, e, cache, keys) {
             Ok(()) => true,
-            Err(err) if err.is_unported() => return Err(err),
+            Err(err) if err.is_unported_or_cancelled() => return Err(err),
             Err(_) => false,
         };
         r.check(b, 61, good, EntityRef::Edge(e))?;
@@ -820,7 +820,7 @@ fn check_edges(
                     ] {
                         match trim.evaluate_point(k, t) {
                             Ok(p) => point = p,
-                            Err(err) if err.is_unported() => return Err(err),
+                            Err(err) if err.is_unported_or_cancelled() => return Err(err),
                             Err(_) => {}
                         }
                         r.value(
@@ -1028,7 +1028,7 @@ fn first_fundamental_form(
 ) -> Result<Option<[f64; 3]>> {
     match surface.evaluate_1st_derivatives(k, uv, u_from_left, v_from_left) {
         Ok((_, du, dv)) => Ok(Some([du.dot(du), du.dot(dv), dv.dot(dv)])),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -1246,7 +1246,7 @@ fn edge_geometry(
                 51,
                 None,
             ) {
-                if err.is_unported() {
+                if err.is_unported_or_cancelled() {
                     return Err(err);
                 }
             }

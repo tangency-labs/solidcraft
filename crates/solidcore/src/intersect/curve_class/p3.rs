@@ -1904,7 +1904,7 @@ pub fn fix_problems_by_squeezing<O: ClassObject>(
                 start_obj_zone_tol_3d,
             ) {
                 Ok(f) => f,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => continue,
             };
 
@@ -1917,7 +1917,7 @@ pub fn fix_problems_by_squeezing<O: ClassObject>(
                 end_obj_zone_tol_3d,
             ) {
                 Ok(f) => f,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => continue,
             };
 

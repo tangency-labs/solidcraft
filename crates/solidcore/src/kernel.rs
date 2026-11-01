@@ -20,6 +20,7 @@
 //! | [`Caches`]                             | `SmCacheMgr`, `SmCacheMgrCrv/Srf/TSrf/Brep` |
 //! | [`Kernel::fillet_point_step`], [`Kernel::latch_fillet_point_step`] | the function-static `sdStaticStep` of `SmFilletSolver::ComputePointValues` |
 //! | [`Kernel::upstream_ub_passed`], [`Kernel::note_upstream_ub`] | (none: upstream undefined behaviour the port went past) |
+//! | [`CancelToken`], [`Kernel::cancel`], [`Kernel::set_cancel_token`], [`Kernel::check_cancelled`] | (none: cooperative cancellation for worker-thread jobs) |
 //!
 //! Upstream seeds `rand()` from the clock in a few places; the port replaces that with
 //! [`Rng`], seeded from [`KernelOptions::seed`], so runs are reproducible. Results that
@@ -34,7 +35,10 @@
 //! already holds.
 
 use core::cell::Cell;
+use core::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
+use crate::error::SolidError;
 use crate::geom::context::Context;
 
 /// Geometric tolerances in model units (upstream defaults from `SmMath.h`).
@@ -1366,6 +1370,63 @@ impl Default for KernelOptions {
     }
 }
 
+#[cold]
+#[inline(never)]
+const fn cancelled_error(operation: &'static str) -> SolidError {
+    SolidError::cancelled(operation)
+}
+
+/// Shared cooperative cancellation flag for cancelling a [`Kernel`] operation from
+/// another thread.
+///
+/// Cloning a `CancelToken` shares the underlying `AtomicBool`: calling [`Self::cancel`]
+/// on any clone signals every [`Kernel`] configured with [`Kernel::set_cancel_token`], so
+/// one token can also cancel a group of jobs.
+#[derive(Clone, Debug, Default)]
+pub struct CancelToken {
+    flag: Arc<AtomicBool>,
+}
+
+impl CancelToken {
+    /// Creates an uncancelled token (`false`).
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Signals cancellation (`true`) to every clone of this token.
+    pub fn cancel(&self) {
+        self.flag.store(true, Ordering::Relaxed);
+    }
+
+    /// Clears the cancellation signal (`false`) so the token can be reused.
+    pub fn reset(&self) {
+        self.flag.store(false, Ordering::Relaxed);
+    }
+
+    /// Whether [`Self::cancel`] has been called since construction or the last
+    /// [`Self::reset`].
+    #[must_use]
+    #[inline]
+    pub fn is_cancelled(&self) -> bool {
+        self.flag.load(Ordering::Relaxed)
+    }
+
+    /// Returns `Err(SolidError::Cancelled { operation })` when [`Self::is_cancelled`] is
+    /// `true`, else `Ok(())`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Cancelled`] when [`Self::cancel`] has been signalled.
+    #[inline]
+    pub fn check(&self, operation: &'static str) -> crate::Result<()> {
+        if self.is_cancelled() {
+            return Err(cancelled_error(operation));
+        }
+        Ok(())
+    }
+}
+
 /// Per-session kernel state passed to operations (upstream `SmContext`).
 ///
 /// A `Kernel` is `Send` (it can move between threads) and holds no global state, so
@@ -1404,6 +1465,14 @@ pub struct Kernel {
     pub memoize_curve_caches: bool,
     /// Opt-in fixes of upstream defects (all off: upstream behaviour).
     pub fixes: UpstreamFixes,
+    /// Optional cooperative cancellation token polled at outer solver, trace, cache,
+    /// stitch, heal, integration, fillet, and boolean loops (`None` by default).
+    ///
+    /// When cancellation fires, operations unwind through normal `Result` paths with
+    /// [`SolidError::Cancelled`]; never a partial or altered `Ok` result. Values borrowed
+    /// mutably by the cancelled call (such as mutable `Brep` operands or `Kernel` caches
+    /// and RNG state) may have been partly modified, as on any other error return.
+    pub cancel: Option<CancelToken>,
     /// Not upstream: the default-record map of the last `kernel_named_edit`
     /// (`topology::brep::p3`), kept only to reuse its allocation; every edit resets it
     /// to the records of a fresh seeding, so it never carries state between edits.
@@ -1430,8 +1499,53 @@ impl Kernel {
             upstream_ub_passed: Vec::new(),
             memoize_curve_caches: !cfg!(feature = "curve-memo-off"),
             fixes: UpstreamFixes::default(),
+            cancel: None,
             notify_records: crate::topology::topology::NotifyRecords::new(),
         }
+    }
+
+    /// Installs `token` as this kernel's cooperative cancellation token.
+    ///
+    /// Inputs borrowed mutably by an operation when `token.cancel()` is observed may be
+    /// left partially modified, as on any other error return.
+    pub fn set_cancel_token(&mut self, token: CancelToken) {
+        self.cancel = Some(token);
+    }
+
+    /// Removes any configured cooperative cancellation token (`None`).
+    pub fn clear_cancel_token(&mut self) {
+        self.cancel = None;
+    }
+
+    /// The configured [`CancelToken`], if any.
+    #[must_use]
+    #[inline]
+    pub const fn cancel_token(&self) -> Option<&CancelToken> {
+        self.cancel.as_ref()
+    }
+
+    /// Polls [`Self::cancel`] (`false` when unset).
+    #[must_use]
+    #[inline]
+    pub fn is_cancelled(&self) -> bool {
+        match &self.cancel {
+            Some(token) => token.is_cancelled(),
+            None => false,
+        }
+    }
+
+    /// Polls [`Self::cancel`] and returns `Err(SolidError::Cancelled { operation })` when
+    /// cancellation has been signalled.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Cancelled`] when [`Self::cancel`] is `Some` and cancelled.
+    #[inline]
+    pub fn check_cancelled(&self, operation: &'static str) -> crate::Result<()> {
+        if let Some(token) = &self.cancel {
+            return token.check(operation);
+        }
+        Ok(())
     }
 
     /// Records that an operation went past upstream undefined behaviour `id` (see
@@ -1470,8 +1584,42 @@ mod tests {
 
     #[test]
     fn kernel_is_send() {
-        fn assert_send<T: Send>() {}
+        fn assert_send<T: Send + core::fmt::Debug>() {}
+        fn assert_send_sync<T: Send + Sync + Clone + core::fmt::Debug + Default>() {}
         assert_send::<Kernel>();
+        assert_send_sync::<CancelToken>();
+    }
+
+    #[test]
+    fn cancel_token_round_trip() {
+        let mut k = Kernel::default();
+        assert!(k.cancel.is_none());
+        assert!(k.cancel_token().is_none());
+        assert!(!k.is_cancelled());
+        assert_eq!(k.check_cancelled("kernel::test"), Ok(()));
+
+        let token = CancelToken::new();
+        k.set_cancel_token(token.clone());
+        assert!(k.cancel_token().is_some());
+        assert!(!k.is_cancelled());
+        assert!(format!("{token:?}").contains("false"));
+        assert_eq!(k.check_cancelled("kernel::test"), Ok(()));
+
+        token.cancel();
+        assert!(k.is_cancelled());
+        assert!(format!("{token:?}").contains("true"));
+        assert_eq!(
+            k.check_cancelled("kernel::test"),
+            Err(SolidError::cancelled("kernel::test"))
+        );
+
+        token.reset();
+        assert!(!k.is_cancelled());
+        assert_eq!(k.check_cancelled("kernel::test"), Ok(()));
+
+        k.clear_cancel_token();
+        assert!(k.cancel.is_none());
+        assert_eq!(k.check_cancelled("kernel::test"), Ok(()));
     }
 
     #[test]

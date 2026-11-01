@@ -180,6 +180,7 @@ fn invalid(reason: &'static str) -> SolidError {
 fn as_sm_err(e: SolidError, op: &'static str) -> SolidError {
     match e {
         SolidError::Unported { .. }
+        | SolidError::Cancelled { .. }
         | SolidError::InvalidInput { .. }
         | SolidError::PortInvariant { .. } => e,
         _ => SolidError::sm_err(op),
@@ -1767,7 +1768,7 @@ impl FilletSolver {
 fn bool_status(r: Result<bool>) -> Result<bool> {
     match r {
         Ok(v) => Ok(v),
-        Err(e @ SolidError::Unported { .. }) => Err(e),
+        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
         Err(_) => Ok(true),
     }
 }
@@ -1779,7 +1780,7 @@ fn singularity_status(
 ) -> Result<crate::surface::surface::p5::Singularity> {
     match r {
         Ok(v) => Ok(v),
-        Err(e @ SolidError::Unported { .. }) => Err(e),
+        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
         Err(_) => Ok(crate::surface::surface::p5::Singularity {
             singular: true,
             direction: SurfParamType::Neither,
@@ -3104,7 +3105,7 @@ fn binormal_status_ignored(
     match evaluate_binormal(k, b, edge_use, parameter, false, &options) {
         Ok(r) => Ok((r.point, r.binormal, r.face_normal)),
         Err(e)
-            if e.is_unported()
+            if e.is_unported_or_cancelled()
                 || matches!(
                     e,
                     SolidError::NotFound { .. }
@@ -3261,6 +3262,7 @@ pub fn trim_rail(k: &Kernel, b: &mut Brep, rail: EdgeId, trim_interval: &Extent1
     // callbacks owned by boxed trait objects) cannot be cloned and nothing on the trim
     // path reads it
     tk.rng = k.rng.clone();
+    tk.cancel.clone_from(&k.cancel);
     tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
     tk.fixes.bspline_trim_keeps_rational_end_spans = k.fixes.bspline_trim_keeps_rational_end_spans;
     b.edge_mut(rail)?

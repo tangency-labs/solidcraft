@@ -232,7 +232,7 @@ impl Surface {
         let simple =
             match self.evaluate_simple(k, uv, 1, 1, upper_flags(Side::Left, Side::Left, false)) {
                 Ok(m) => m,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => return Ok(failed),
             };
         let su = at(&simple, 1, 0, OP_SING)?;
@@ -265,7 +265,7 @@ impl Surface {
                         match self.evaluate(k, uv, 2, 2, upper_flags(Side::Left, Side::Left, true))
                         {
                             Ok(m) => m,
-                            Err(e) if e.is_unported() => return Err(e),
+                            Err(e) if e.is_unported_or_cancelled() => return Err(e),
                             Err(_) => return Ok(failed),
                         };
                     let su_unit = at(&m3, 1, 0, OP_SING)?.unitize_or_z();
@@ -302,7 +302,7 @@ impl Surface {
                         match self.evaluate(k, uv, 2, 2, upper_flags(Side::Left, Side::Left, true))
                         {
                             Ok(m) => m,
-                            Err(e) if e.is_unported() => return Err(e),
+                            Err(e) if e.is_unported_or_cancelled() => return Err(e),
                             Err(_) => return Ok(failed),
                         };
                     let sv_unit = at(&m3, 0, 1, OP_SING)?.unitize_or_z();
@@ -1646,7 +1646,7 @@ fn try_cover<O: SolutionObject>(
                 st.max_dist = r.max_dist;
                 Ok(r.success)
             }
-            Err(e) if e.is_unported() => Err(e),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
             Err(_) => {
                 st.max_dist = BIG_DOUBLE;
                 Ok(false)
@@ -1659,7 +1659,7 @@ fn try_cover<O: SolutionObject>(
     // subset, then map back using the final parameters.
     let this_step = match cover.convert_domain_from_nurbs_to_step(k, &cover_domain) {
         Ok(d) => d,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Ok(false),
     };
     let r = match cover_coincident_surface(
@@ -1674,7 +1674,7 @@ fn try_cover<O: SolutionObject>(
         st.across_wrapped_seams,
     ) {
         Ok(r) => r,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => {
             st.max_dist = BIG_DOUBLE;
             return Ok(false);
@@ -1692,7 +1692,7 @@ fn try_cover<O: SolutionObject>(
             st.merged = Some(d);
             Ok(true)
         }
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(false),
     }
 }

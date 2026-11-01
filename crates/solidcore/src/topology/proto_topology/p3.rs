@@ -161,6 +161,7 @@ fn ignore_soft<T>(r: Result<T>) -> Result<Option<T>> {
         Ok(v) => Ok(Some(v)),
         Err(
             e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }),
         ) => Err(e),
@@ -973,7 +974,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             &CurveIntersectOptions::default(),
         ) {
             Ok(s) => s,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(deleted),
         };
         if sols.is_empty() {
@@ -1341,7 +1342,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                                             deleted_curves.extend(self.delete_edge_definition(ed));
                                         }
                                     }
-                                    Err(e) if e.is_unported() => return Err(e),
+                                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                                     Err(e) => ret = Err(e),
                                 }
                             } else {
@@ -1924,7 +1925,7 @@ fn edge_crossing_sine<O: ClassObject>(
     let tangent = |r: Result<Vec<Vec3>>| -> Result<Option<Vec3>> {
         match r {
             Ok(d) => Ok(d.get(1).copied()),
-            Err(e) if e.is_unported() => Err(e),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
             Err(_) => Ok(None),
         }
     };

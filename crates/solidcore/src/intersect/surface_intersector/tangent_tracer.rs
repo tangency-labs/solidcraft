@@ -250,7 +250,7 @@ impl<'a> TangentTracer<'a> {
         };
         let d = match srf.evaluate(k, uv, 2, 2, flags) {
             Ok(d) => d,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(None),
         };
         let g = |i: usize, j: usize| -> Result<Vec3> {
@@ -269,7 +269,7 @@ impl<'a> TangentTracer<'a> {
             // degenerate point (pole, collapsed or folded edge): the limit normal
             let sn = match srf.evaluate_normal(k, uv, Side::Left, Side::Left) {
                 Ok(n) => n,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => return Ok(None),
             };
             let n = unit(sn);

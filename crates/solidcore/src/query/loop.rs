@@ -143,7 +143,7 @@ fn drop_on_edge(
         SolverOperation::Intersect,
     ) {
         Ok(d) => Ok(d.success.then_some(d.parameter)),
-        Err(e @ SolidError::Unported { .. }) => Err(e),
+        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -153,7 +153,7 @@ fn drop_on_edge(
 /// (`SM_POC_UNKNOWN`, tangency-labs/smlib 7a35f33). [`SolidError::Unported`] propagates.
 fn or_unknown<T>(k: &Kernel, r: Result<T>) -> Result<Option<T>> {
     match r {
-        Err(e) if k.fixes.query_statuses_pass_on && !e.is_unported() => Ok(None),
+        Err(e) if k.fixes.query_statuses_pass_on && !e.is_unported_or_cancelled() => Ok(None),
         r => r.map(Some),
     }
 }
@@ -178,7 +178,7 @@ fn local_minimize(
     match trim.local_point_solve::<()>(k, interval, SolverOperation::Minimize, point, &opts, guess)
     {
         Ok((true, sol)) => Ok(Ok(Some(sol))),
-        Err(e @ SolidError::Unported { .. }) => Err(e),
+        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
         Err(_) if k.fixes.query_statuses_pass_on => Ok(Err(())),
         Ok((false, _)) | Err(_) => Ok(Ok(None)),
     }

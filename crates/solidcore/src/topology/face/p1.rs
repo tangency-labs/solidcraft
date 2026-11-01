@@ -361,7 +361,7 @@ fn has_near_misses<O: LoopObject>(
     match c.has_near_misses(k, geometry, false) {
         Ok(v) => Ok(v),
         Err(e)
-            if e.is_unported()
+            if e.is_unported_or_cancelled()
                 || matches!(
                     e,
                     SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }
@@ -623,7 +623,7 @@ pub fn calculate_uv_domain_from_uv_trim_curves_into(
     // place a UVTrimCurve on each Face->Edgeuse
     match create_uv_trim_curves(k, b, f) {
         Ok(()) => {}
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         // Return the default from above.
         Err(_) => return Ok(()),
     }
@@ -1073,7 +1073,7 @@ pub fn find_if_rectangular_trim(
 
     let boundary = match create_oriented_trim_boundary(k, b, f, true, true, None, key_of) {
         Ok(r) => r,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Err(SolidError::sm_err(OP)),
     };
 
@@ -1495,7 +1495,7 @@ fn swap_uv_notifying(
                     // (MakeNurb's status is ignored upstream: mirror the base as it is)
                     CurveKind::Line(c) => match c.base_with_nurb() {
                         Ok(base) => base.create_mirror_curve(&mirror)?,
-                        Err(e) if e.is_unported() => return Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
                         Err(_) => c.base().create_mirror_curve(&mirror)?,
                     },
                     // the conics: MakeNurb (their override) when missing, then the
@@ -2226,7 +2226,7 @@ pub fn move_seam_notified<O: LoopObject>(
             && (!periodic.is_full_period() || opts.ok_to_move_to_center || opts.ok_to_split)
         {
             let (left, right) = surface.split_at(k, new_param, surf_param).map_err(|e| {
-                if e.is_unported() {
+                if e.is_unported_or_cancelled() {
                     e
                 } else {
                     SolidError::sm_err(OP)

@@ -1355,7 +1355,7 @@ impl OffsetExecutive {
         for status in [first, second] {
             match status {
                 Ok(()) => {}
-                Err(error) if error.is_unported() => return Err(error),
+                Err(error) if error.is_unported_or_cancelled() => return Err(error),
                 Err(_) => problems = true,
             }
         }
@@ -1507,7 +1507,7 @@ impl OffsetExecutive {
                 self.tangency_tol_radians,
             ) {
                 Ok(surfaces) => surfaces,
-                Err(error) if error.is_unported() => return Err(error),
+                Err(error) if error.is_unported_or_cancelled() => return Err(error),
                 Err(_) => return Err(SolidError::sm_err(OP)),
             };
 
@@ -2354,7 +2354,7 @@ impl OffsetExecutive {
             &mut offset_env(notifications, offset_key_of),
         ) {
             Ok(made) => made,
-            Err(error) if error.is_unported() => return Err(error),
+            Err(error) if error.is_unported_or_cancelled() => return Err(error),
             Err(_) => return Ok(Vec::new()),
         };
         let new_face = required(made.face)?;

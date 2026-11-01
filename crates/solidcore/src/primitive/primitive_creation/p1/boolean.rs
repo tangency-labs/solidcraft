@@ -217,7 +217,7 @@ fn finish_with(
                     None,
                 ) {
                     Ok(value) => value,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => continue,
                 };
                 if let Some(faceuse) = sector.coincident_faceuse {

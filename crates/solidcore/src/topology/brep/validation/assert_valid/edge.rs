@@ -221,7 +221,7 @@ fn faces_tangent_at(k: &Kernel, b: &Brep, e: EdgeId, edge_end: f64) -> Result<bo
         let t = trim.natural_interval().clamp_value(edge_end);
         let uv = match trim.evaluate_point(k, t) {
             Ok(p) => crate::geom::vector2d::Point2::new(p.x, p.y),
-            Err(err) if err.is_unported() => return Err(err),
+            Err(err) if err.is_unported_or_cancelled() => return Err(err),
             Err(_) => return Ok(false),
         };
         let normal = match surface.evaluate_normal(
@@ -231,7 +231,7 @@ fn faces_tangent_at(k: &Kernel, b: &Brep, e: EdgeId, edge_end: f64) -> Result<bo
             crate::nurbs::knots::Side::Left,
         ) {
             Ok(n) => n,
-            Err(err) if err.is_unported() => return Err(err),
+            Err(err) if err.is_unported_or_cancelled() => return Err(err),
             Err(_) => return Ok(false),
         };
         if faces == 0 {

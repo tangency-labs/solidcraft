@@ -323,7 +323,7 @@ pub fn calculate_bounding_box_base(
                     stat_ok = true;
                     found
                 }
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => {
                     stat_ok = false;
                     // Quit and try something different.
@@ -1685,6 +1685,9 @@ impl Curve {
         out: &mut Coincidence<O>,
     ) -> Result<()> {
         *calls += 1;
+        if (*calls & 15) == 1 {
+            k.check_cancelled(OP_COINCIDENCE)?;
+        }
         if depth > MAX_COINCIDENCE_DEPTH {
             return Err(SolidError::invalid_input(
                 OP_COINCIDENCE,

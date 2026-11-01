@@ -453,7 +453,7 @@ impl ProjectedCurve {
     pub fn number_natural_knots(&self, k: &Kernel) -> Result<usize> {
         let (_, mults) = match self.knots(k, None) {
             Ok(km) => km,
-            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
             Err(_) => (Vec::new(), Vec::new()),
         };
 

@@ -306,7 +306,7 @@ impl Sphere {
                 Some(opts.inside_out),
             )
             .map_err(|e| {
-                if e.is_unported() {
+                if e.is_unported_or_cancelled() {
                     e
                 } else {
                     SolidError::null_pointer(OP_NEW)
@@ -360,7 +360,7 @@ impl Sphere {
 
         // Build NURB; fail cleanly rather than leak a null-NURB object.
         match sphere.make_nurb(k) {
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Err(SolidError::sm_err(OP_CANONICAL)),
             Ok(()) => {}
         }
@@ -1575,7 +1575,7 @@ impl Sphere {
                 tol_3d,
             ) {
                 Ok(h) => h,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => CurveIntersection::Points(Vec::new()),
             };
 
@@ -2239,7 +2239,7 @@ impl Sphere {
         // reparameterize the NURB so that AnalyticSurface->NurbDomain ==
         // InputSurface->NurbDomain
         match sphere.reparameterize(k, &test.natural_uv_domain()) {
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(None), // [B414]
             Ok(()) => {}
         }

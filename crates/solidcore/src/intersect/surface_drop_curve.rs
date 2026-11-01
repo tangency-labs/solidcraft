@@ -1034,7 +1034,7 @@ impl<'s> SurfaceDropCurve<'s> {
         // get Curve and Surface Caches
         let curve_cache = match make_curve_cache::<()>(k, curve, None) {
             Ok(c) => c,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Err(SolidError::null_pointer(OP_BOUNDARY)),
         };
 
@@ -1151,7 +1151,7 @@ impl<'s> SurfaceDropCurve<'s> {
                     None,
                 ) {
                     Ok(l) => l,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => continue,
                 };
 
@@ -1386,7 +1386,7 @@ impl<'s> SurfaceDropCurve<'s> {
                 let drop = match drop_iso_curve(k, surface, &uv_domain, curve, &ivl, uv, approx_tol)
                 {
                     Ok(d) => d,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => {
                         jj += 1;
                         continue;
@@ -1781,7 +1781,7 @@ impl<'s> SurfaceDropCurve<'s> {
                 context.as_mut().map(reborrow),
             ) {
                 Ok(d) => Some(d),
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => None,
             };
 
@@ -1828,7 +1828,7 @@ impl<'s> SurfaceDropCurve<'s> {
                 // aliasing; the harness reports such a start list as -3 on both sides.
                 match trace_curve_base(self, k, start, &out.curves_3d) {
                     Ok(()) => flush_curve(k, &mut self.base, out, Some(self.curve))?,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => {}
                 }
             }

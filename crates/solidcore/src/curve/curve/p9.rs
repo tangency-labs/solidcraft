@@ -254,7 +254,7 @@ impl EndSolve<'_> {
             ) {
                 Ok(f) => Ok(f),
                 // (passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
-                Err(e) if e.is_unported() || k.fixes.query_statuses_pass_on => Err(e),
+                Err(e) if e.is_unported_or_cancelled() || k.fixes.query_statuses_pass_on => Err(e),
                 Err(_) => Ok(false),
             }
         } else {
@@ -268,7 +268,7 @@ impl EndSolve<'_> {
                     merge_point_solution(solution, f, &s, self.op);
                     Ok(f)
                 }
-                Err(e) if e.is_unported() || k.fixes.query_statuses_pass_on => Err(e),
+                Err(e) if e.is_unported_or_cancelled() || k.fixes.query_statuses_pass_on => Err(e),
                 Err(_) => Ok(false),
             }
         }
@@ -790,7 +790,7 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
                                 op,
                             ) {
                                 Ok(d) => d,
-                                Err(e) if e.is_unported() => return Err(e),
+                                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                                 Err(e) => status_value(&e),
                             };
                         }
@@ -933,7 +933,9 @@ impl<'t, O: SolutionObject + 't> CcGlobalSolver<'t, O> {
             ) {
                 Ok((true, s)) => Some(s),
                 // (passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
-                Err(e) if e.is_unported() || k.fixes.query_statuses_pass_on => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() || k.fixes.query_statuses_pass_on => {
+                    return Err(e)
+                }
                 Ok((false, _)) | Err(_) => None,
             };
 
@@ -1188,7 +1190,7 @@ fn build_cache<O: SolutionObject>(
 ) -> Result<CurveCache<O>> {
     match make_curve_cache::<O>(k, curve, handle) {
         Ok(c) => Ok(c),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Err(SolidError::null_pointer(OP_GCS)),
     }
 }

@@ -837,6 +837,7 @@ pub fn make_faceuse_attempt_with(
                 Ok(sector) => sector.radial_edgeuse,
                 Err(
                     e @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
                     | SolidError::InvalidInput { .. }
                     | SolidError::PortInvariant { .. }),
                 ) => return Err(e),
@@ -1383,6 +1384,7 @@ fn ignore_soft<T>(r: Result<T>) -> Result<Option<T>> {
         Ok(v) => Ok(Some(v)),
         Err(
             e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }),
         ) => Err(e),

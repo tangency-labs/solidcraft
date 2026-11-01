@@ -2255,7 +2255,7 @@ impl Plane {
                     &CurveIntersectOptions::<NoObject>::default(),
                 ) {
                     Ok(s) => s,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => continue,
                 };
                 if sols.is_empty() {

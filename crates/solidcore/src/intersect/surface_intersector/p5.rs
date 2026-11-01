@@ -150,7 +150,7 @@ fn intersection_surface_caches_in<O: Copy + PartialEq>(
     mut context: Option<&mut dyn SurfaceSolveContext<O>>,
 ) -> Result<Vec<SurfaceCache<O>>> {
     let ner = |e: SolidError| {
-        if e.is_unported() {
+        if e.is_unported_or_cancelled() {
             e
         } else {
             SolidError::null_pointer(OP_CACHES)
@@ -522,7 +522,7 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         for c in caches.iter_mut().take(2) {
             if !(trees_ready && c.tree().is_some()) {
                 c.get_tree(k).map_err(|e| {
-                    if e.is_unported() {
+                    if e.is_unported_or_cancelled() {
                         e
                     } else {
                         SolidError::null_pointer(OP_DI)
@@ -691,6 +691,7 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         self.base
             .set_trace_budget(k.fixes.ssi_start_loop_trace_budget);
         while let Some(&start) = self.base.start_points.last() {
+            k.check_cancelled(OP_DI)?;
             // keep a copy of the start point (operator= into a fresh element)
             let mut tmp = TsectPnt::zeroed();
             tmp.assign(self.base.point(start)?);

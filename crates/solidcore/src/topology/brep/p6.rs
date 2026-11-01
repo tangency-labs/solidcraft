@@ -1688,6 +1688,7 @@ fn native<T>(r: Result<T>) -> Result<Option<T>> {
         Ok(value) => Ok(Some(value)),
         Err(
             e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
@@ -2288,6 +2289,7 @@ fn ignore_status(r: Result<()>) -> Result<()> {
     match r {
         Err(
             e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),

@@ -1714,7 +1714,7 @@ fn make_face_with_curves_transfer_impl(
         // CreateUVTrimCurves(FALSE, &sNewUVCurves, &crCurveOrientations, ..)
         let r = face_create_uv_trim_curves(k, b, face, false, uv, &orientations);
         match r {
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(SolidError::Upstream { code, .. }) if code == crate::error::SM_ERR => {
                 // delete the edge uses of the face's edges
                 for e in face_edges(b, face)? {
@@ -2338,7 +2338,7 @@ fn copy_faces_named(
                     [new_face, None, None],
                 )?;
             }
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => all_ok = false,
         }
     }

@@ -2202,7 +2202,7 @@ fn fast_drop_classify_options(
 /// class. [`SolidError::Unported`] propagates.
 fn fast_drop_good_point(status: Result<()>, pc: &PointClassification<EntityRef>) -> Result<bool> {
     match status {
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(false),
         Ok(()) => Ok(matches!(
             pc.point_class(),
@@ -2251,7 +2251,7 @@ fn one_point<O: ClassObject>(
         let uv = Point2::new(sol.param(0)?, sol.param(1)?);
         match surface.evaluate_point(k, uv) {
             Ok(p) => Ok(Some(p)),
-            Err(e) if e.is_unported() => Err(e),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
             Err(_) => Ok(None),
         }
     };

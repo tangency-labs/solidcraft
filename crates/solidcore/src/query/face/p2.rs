@@ -606,6 +606,7 @@ fn surface_cache_of_face(
             surface.delete_trim_cache();
             match e {
                 SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
                 | SolidError::InvalidInput { .. }
                 | SolidError::PortInvariant { .. }
                 | SolidError::NotFound { .. } => Err(e),
@@ -1339,6 +1340,7 @@ pub fn classify_param_on_faces(
         match point_classify(k, b, face, uv, &mut pc, opts) {
             Err(
                 e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
                 | SolidError::InvalidInput { .. }
                 | SolidError::PortInvariant { .. }
                 | SolidError::NotFound { .. }),
@@ -2141,7 +2143,7 @@ pub fn curve_on_classify_mut<O: ClassObject>(
             cc.set_surface1(objects.face_surface(f));
             match intersect_ts_bound(k, objects, &mut made_trims, cc, f, do_check_3d) {
                 Ok(()) => {}
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => return Err(SolidError::sm_err(OP_CURVE)),
             }
         } else {

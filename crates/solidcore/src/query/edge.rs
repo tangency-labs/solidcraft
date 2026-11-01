@@ -215,7 +215,7 @@ pub fn calculate_bounding_box(
             match calculate_tight_bounding_box(k, brep, edge) {
                 Ok(Some(b)) => out.normal = Some(b),
                 Ok(None) => {}
-                Err(err) if err.is_unported() => return Err(err),
+                Err(err) if err.is_unported_or_cancelled() => return Err(err),
                 Err(_) => ok1 = false,
             }
         }
@@ -231,7 +231,7 @@ pub fn calculate_bounding_box(
                     out.pseudo = b.pseudo;
                     out.polar = b.polar;
                 }
-                Err(err) if err.is_unported() => return Err(err),
+                Err(err) if err.is_unported_or_cancelled() => return Err(err),
                 Err(_) => ok2 = false,
             }
         }
@@ -498,7 +498,7 @@ fn vec_status<T>(r: Result<T>, operation: &'static str) -> Result<T> {
 fn stepped_off(r: Result<()>) -> Result<bool> {
     match r {
         Ok(()) => Ok(false),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(true),
     }
 }

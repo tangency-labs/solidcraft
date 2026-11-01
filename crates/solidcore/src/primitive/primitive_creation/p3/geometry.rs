@@ -313,9 +313,7 @@ pub fn prepare_curve_sweep(
         let as_curves: Vec<_> = profiles.iter().cloned().map(Curve::from).collect();
         let mut normal = match compute_crvs_normal(k, &as_curves) {
             Ok(normal) => normal,
-            Err(SolidError::Unported { upstream, unit }) => {
-                return Err(SolidError::Unported { upstream, unit })
-            }
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(SolidError::Upstream { code: 1001, .. }) => {
                 let first = profiles.first().ok_or_else(|| SolidError::sm_err(OP))?;
                 let values = ignored(passed_on(

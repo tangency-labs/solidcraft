@@ -1292,7 +1292,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
                             Err(SolidError::null_pointer(OP_EU))
                         };
                         if let Err(e) = r {
-                            if e.is_unported() {
+                            if e.is_unported_or_cancelled() {
                                 return Err(e);
                             }
                         }
@@ -1315,7 +1315,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
                         // The native caller ignores ordinary implantation errors.
                         let embed = match poly_edge_in_domain(k, &geometry.input(pe), domain) {
                             Ok(embed) => embed,
-                            Err(e) if e.is_unported() => return Err(e),
+                            Err(e) if e.is_unported_or_cancelled() => return Err(e),
                             Err(_) => continue,
                         };
                         if embed {

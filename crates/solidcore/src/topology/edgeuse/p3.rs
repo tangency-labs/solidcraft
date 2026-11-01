@@ -291,7 +291,7 @@ fn surface_local_point_solve(
 fn status<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e @ SolidError::Unported { .. }) => Err(e),
+        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -1149,6 +1149,7 @@ fn trim_other_uv_curves(
         ..crate::kernel::KernelOptions::default()
     });
     tk.rng = k.rng.clone();
+    tk.cancel.clone_from(&k.cancel);
     tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
     tk.fixes.bspline_trim_keeps_rational_end_spans = k.fixes.bspline_trim_keeps_rational_end_spans;
     for x in crate::topology::edge::edgeuses(b, e, None, None)? {
@@ -1668,6 +1669,7 @@ pub fn get_or_create_uv_trim_curve(
         Ok(c) => c,
         Err(
             e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
@@ -2372,7 +2374,7 @@ pub fn normalized_evaluate(
                             .map_or((Vec3::UNDEF, Vec3::UNDEF), |(_, su, sv)| (su, sv));
                     first_deriv = Some(match vec_lin_comb_two_vectors(s_su, s_sv, d3) {
                         Ok(d) => Vec3::new(d.x, d.y, 0.0),
-                        Err(e) if e.is_unported() => return Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
                         Err(_) => {
                             // Probably a zero vector. Set that one to zero, the other to
                             // the dot product.

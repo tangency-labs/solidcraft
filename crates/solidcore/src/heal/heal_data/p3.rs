@@ -240,6 +240,7 @@ impl<O: LoopObject> HealData<O> {
         healer_op: HealerOpType,
         make_uv_trim_curves: bool,
     ) -> Result<()> {
+        k.check_cancelled("heal::heal_data::HealData::heal_targets")?;
         self.stop_heal_op = healer_op;
         self.done_heal_op = HealerOpType::None;
         with_editing_enabled(b, |b| {
@@ -266,6 +267,7 @@ impl<O: LoopObject> HealData<O> {
         macro_rules! step {
             ($op:ident, $call:expr) => {
                 if self.done_heal_op.code() < through.code() {
+                    k.check_cancelled("heal::heal_data::HealData::heal_targets")?;
                     $call?;
                     self.done_heal_op = HealerOpType::$op;
                 }

@@ -1381,6 +1381,8 @@ impl FilletCorner {
     ///
     /// Those of the selected implementation.
     pub fn create_corner_patch(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+        env.k
+            .check_cancelled("blend::fillet_corner::p3::create_corner_patch")?;
         match self.kind {
             FilletCornerKind::ThreeByTwoMixed => self.create_corner_patch_3x2(env),
             FilletCornerKind::NByOne | FilletCornerKind::Open => self.create_corner_patch_nx1(env),
@@ -1644,7 +1646,7 @@ impl FilletCorner {
         // Create Face (and Edges and Verts) in m_pFilletBrep from m_vSurfaces with call m_pFilletBrep->MakeFaceWithCurves()
         match self.make_face_brep_with(env) {
             Ok(()) => {}
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(
                 e @ SolidError::InvalidInput {
                     reason: p1::NULL_DEREF,
@@ -2467,7 +2469,7 @@ impl FilletCorner {
                 pass_on,
             )? {
                 Ok(ev) => Ok(ev.first_deriv.unwrap_or(Vec3::UNDEF)),
-                Err(e) if e.is_unported() => Err(e),
+                Err(e) if e.is_unported_or_cancelled() => Err(e),
                 Err(_) => Ok(Vec3::UNDEF),
             }
         };
@@ -2694,7 +2696,7 @@ impl FilletCorner {
                 // a failed drop counts as no drop point
                 let drop = match drop {
                     Ok(d) => d,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => continue,
                 };
                 if !drop.success {
@@ -2736,7 +2738,7 @@ impl FilletCorner {
                 // If failure, the whole fillet could still succeed, so don't SER.
                 let new_geom = match split {
                     Ok(g) => g,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => continue,
                 };
 
@@ -2880,7 +2882,7 @@ impl FilletCorner {
                 // (the status is ignored upstream: a failed drop counts as no drop point)
                 let drop = match drop {
                     Ok(d) => d,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => continue,
                 };
                 if !drop.success {
@@ -3222,7 +3224,7 @@ pub(super) fn recalc_split_geoms(
 pub(super) fn unchecked_point(r: Result<Point3>) -> Result<Point3> {
     match r {
         Ok(p) => Ok(p),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(Point3::UNDEF),
     }
 }

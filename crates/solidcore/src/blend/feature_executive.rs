@@ -479,7 +479,7 @@ impl<'a> FeatureExecutive<'a> {
         let stat = collect_faces(k, self.base, &mut self.marks, self.mark, &mut feature, face);
         match stat {
             Ok(()) => {}
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // SE_MSG(SM_ERR, "Feature edges do not partition the brep")
             Err(_) => return Ok(None),
         }
@@ -541,7 +541,7 @@ impl<'a> FeatureExecutive<'a> {
                     floops.push(FeatureLoop::new(edges, base_rb_type, feature_rb_type));
                 }
             }
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => {
                 // Treat edge loops as a single SmFeatureLoop
                 floops.push(FeatureLoop::new(
@@ -655,7 +655,7 @@ impl<'a> FeatureExecutive<'a> {
                 Ok(()) => {
                     self.features.remove(ii);
                 }
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => ii += 1,
             }
         }
@@ -714,7 +714,7 @@ pub fn defeature_and_rebuild(
 /// A status upstream ignores, but an unported callee still surfaces.
 fn keep_unported(r: Result<()>) -> Result<()> {
     match r {
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         _ => Ok(()),
     }
 }
@@ -940,7 +940,7 @@ fn build_patches(
                     first.feat_patch = first.base_patch;
                 }
             }
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // SE_MSG(SM_ERR, "Patch does not fill Feature void manifold-ly")
             Err(_) => {}
         }
@@ -1447,7 +1447,7 @@ fn validate_patch(
                 let param = curve.natural_interval().mid();
                 // FindPointClass (status ignored)
                 match cc.find_point_class(k, &geometry, param, tol) {
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     _ => {}
                 }
                 // If the curve is internal to the face, then the new face is a bad result:
@@ -1510,7 +1510,7 @@ fn planar_cap_rebuild(k: &mut Kernel, patch: &mut Brep, loop_curves: &[LoopCurve
         let lp = chained.curves.get(start..end).ok_or_else(sm_err)?;
         // Create planar face
         planar_face(k, patch, lp, tol).map_err(|e| {
-            if e.is_unported() {
+            if e.is_unported_or_cancelled() {
                 e
             } else {
                 // SER_MSG(.., "Couldn't make a planar cap. Loop edges non-planar?")
@@ -1628,7 +1628,7 @@ fn ext_surface_rebuild(
             let new_surf = surface
                 .create_extended_surface(k, ext, ContinuityType::G1)
                 .map_err(|e| {
-                    if e.is_unported() {
+                    if e.is_unported_or_cancelled() {
                         e
                     } else {
                         SolidError::null_pointer(OP)
@@ -1717,7 +1717,7 @@ fn trim_patches(
                         continue;
                     }
                 }
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => {
                     to_delete.push(pf);
                     continue;
@@ -1738,7 +1738,7 @@ fn trim_patches(
                             (Some(&uv), Some(&pt)) => (uv, pt),
                             _ => continue,
                         },
-                        Err(e) if e.is_unported() => return Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
                         Err(_) => continue,
                     };
                 if point_in_face(k, patch, pf, tpt, tol, tuv)? {
@@ -2073,7 +2073,7 @@ fn piecewise_merge(k: &mut Kernel, a: Brep, b: Brep, tol: f64) -> Result<(Brep, 
     let stat = match merged {
         Ok(id) if id == PrimitiveModel::MAIN => Ok(()),
         Ok(_) => Err(sm_err()),
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(e) => Err(e),
     };
     let mut other = model.take_brep(other_id)?;
@@ -2104,7 +2104,7 @@ fn manifold_xor(k: &mut Kernel, a: Brep, b: Brep) -> Result<Brep> {
     let result = match r {
         Ok(Some(b)) => b,
         Ok(None) => primary.take().ok_or_else(|| SolidError::null_pointer(OP))?,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => primary.take().ok_or_else(|| SolidError::null_pointer(OP))?,
     };
     let mut result = result;

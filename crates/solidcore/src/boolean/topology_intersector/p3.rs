@@ -1788,7 +1788,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // face's trimmed cache); a cache that cannot be had fails the drop
                 let mut cache = match brep.face_surface_trace_cache(k, target_surface) {
                     Ok(cache) => cache,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => continue,
                 };
                 let dropped = ignore_soft(target.drop_and_trim_curve_in::<O, O>(

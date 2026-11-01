@@ -695,7 +695,9 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
                         geometric_g2: k.fixes.geometric_g2_continuity,
                     },
                 ) {
-                    Err(e) if not_shown && !e.is_unported() => return Ok((false, discontinuous)),
+                    Err(e) if not_shown && !e.is_unported_or_cancelled() => {
+                        return Ok((false, discontinuous))
+                    }
                     r => r?,
                 };
 
@@ -1442,7 +1444,10 @@ impl Surface {
         let curve_cache = match crate::curve::curve::p5::make_curve_cache::<O>(k, curve, handles[0])
         {
             Ok(c) => c,
-            Err(e) if e.is_unported() || matches!(e, SolidError::PreparationRequired { .. }) => {
+            Err(e)
+                if e.is_unported_or_cancelled()
+                    || matches!(e, SolidError::PreparationRequired { .. }) =>
+            {
                 return Err(e);
             }
             Err(_) => return Err(SolidError::null_pointer(OP_SOLVE)),
@@ -1889,7 +1894,7 @@ impl Surface {
         // check state - internal surface continuities are better than C0 (NER; the
         // continuity is only reported)
         let ner = |e: SolidError| {
-            if e.is_unported() {
+            if e.is_unported_or_cancelled() {
                 e
             } else {
                 SolidError::null_pointer(OP_PROJ)
@@ -2071,12 +2076,12 @@ fn solve_surface_cache<O: SolutionObject>(
 ) -> Result<SurfaceCache<O>> {
     let mut cache = match super::p1::get_surface_cache(k, surface, handle) {
         Ok(c) => c,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Err(SolidError::null_pointer(OP_SOLVE)),
     };
     match cache.get_tree(k) {
         Ok(_) => Ok(cache),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Err(SolidError::null_pointer(OP_SOLVE)),
     }
 }
@@ -2092,14 +2097,22 @@ fn solve_surface_cache_with<O: SolutionObject>(
 ) -> Result<SurfaceCache<O>> {
     let mut cache = match context.build_surface_cache(k, surface, handle) {
         Ok(c) => c,
-        Err(e) if e.is_unported() || matches!(e, SolidError::PreparationRequired { .. }) => {
+        Err(e)
+            if e.is_unported_or_cancelled()
+                || matches!(e, SolidError::PreparationRequired { .. }) =>
+        {
             return Err(e);
         }
         Err(_) => return Err(SolidError::null_pointer(OP_SOLVE)),
     };
     match cache.get_tree(k) {
         Ok(_) => Ok(cache),
-        Err(e) if e.is_unported() || matches!(e, SolidError::PreparationRequired { .. }) => Err(e),
+        Err(e)
+            if e.is_unported_or_cancelled()
+                || matches!(e, SolidError::PreparationRequired { .. }) =>
+        {
+            Err(e)
+        }
         Err(_) => Err(SolidError::null_pointer(OP_SOLVE)),
     }
 }

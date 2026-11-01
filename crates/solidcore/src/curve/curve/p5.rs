@@ -197,7 +197,7 @@ pub fn is_line_base(
                     pt_vec[1] = d;
                 }
             }
-            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
             Err(_) => {}
         }
         pt1 = pt_vec[0];
@@ -1987,7 +1987,7 @@ pub fn local_property_analysis<C: CurveEvaluate + ?Sized, O: Copy>(
     // solve with NewtonRaphson iteration
     let outcome = match ls.solve_it(&mut efo, guess, EFF_ZERO_SQRT) {
         Ok(o) => o,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         // Something went wrong in 1d solver return error
         Err(_) => return Err(SolidError::sm_err(OP_LPA)),
     };

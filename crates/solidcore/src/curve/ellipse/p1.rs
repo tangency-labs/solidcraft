@@ -2404,7 +2404,7 @@ impl Ellipse {
         let to_step = |e: &Self, t: f64| -> Result<f64> {
             match e.convert_t_from_nurbs_to_step(k, t) {
                 Ok(v) => Ok(v),
-                Err(err @ SolidError::Unported { .. }) => Err(err),
+                Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(err),
                 Err(_) => Err(SolidError::invalid_input(
                     "curve::ellipse::p1::Ellipse::trim",
                     "trim end not convertible (upstream: uninitialised)",

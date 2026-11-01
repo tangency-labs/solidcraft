@@ -253,6 +253,7 @@ fn ignore_soft<T>(r: Result<T>) -> Result<Option<T>> {
         Ok(v) => Ok(Some(v)),
         Err(
             e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
             | SolidError::InvalidInput {
                 operation: UNDEFINED_UPSTREAM,
                 ..
@@ -1430,12 +1431,16 @@ pub fn make_edges_on_analytics_exact(
             Some(deg20_rad),
         ) {
             Ok(exact) => exact,
-            Err(err @ SolidError::Unported { .. }) => return Err(err),
+            Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                return Err(err)
+            }
             Err(_) => continue,
         };
         let trimmed = match topo_edge::create_trimmed_nurbs_curve(k, b, e) {
             Ok(Some(trimmed)) => trimmed,
-            Err(err @ SolidError::Unported { .. }) => return Err(err),
+            Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                return Err(err)
+            }
             Ok(None) | Err(_) => continue,
         };
         let Some(mut piece) = exact_piece(k, &trimmed, &exact.curves_3d, tol)? else {
@@ -2124,7 +2129,9 @@ impl OffsetGeometryCreation {
             // (any failure is SM_ERR; an unported callee stays unported)
             let sphere = match BSplineSurface::create_sphere_from_arcs(k, &curves, tolerance) {
                 Ok(sphere) => sphere,
-                Err(e @ SolidError::Unported { .. }) => return Err(e),
+                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                    return Err(e)
+                }
                 Err(_) => return Err(sm_err(OP_VERTEX)),
             };
             let trim_curves: Vec<Curve> = sphere
@@ -2214,6 +2221,7 @@ impl OffsetGeometryCreation {
             }) => return Err(sm_err(OP_UPDATE)),
             Err(
                 e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
                 | SolidError::InvalidInput { .. }
                 | SolidError::PortInvariant { .. }),
             ) => return Err(e),
@@ -4716,7 +4724,9 @@ impl OffsetGeometryCreation {
                     out.trim_orientations = trimmed.trim_orientations;
                     new_surface = Some(trimmed.plane);
                 }
-                Err(e @ SolidError::Unported { .. }) => return Err(e),
+                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                    return Err(e)
+                }
                 // any other failure is upstream's `!= SM_SUCCESS` (e.g. the `SM_ERR` of
                 // `Unitize` on the zero cross product of two collinear-derivative rails):
                 // the ruled surface between the rails instead

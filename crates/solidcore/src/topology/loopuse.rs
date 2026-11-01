@@ -675,7 +675,7 @@ fn edgeuse_end_point(
     let t = if same == start { ivl.min() } else { ivl.max() };
     match curve.evaluate_point(k, t) {
         Ok(p) => Ok(p),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(prev),
     }
 }
@@ -1325,7 +1325,7 @@ fn drop_point(k: &Kernel, s: &Surface, dom: &Extent2d, p: Point3) -> Result<Opti
 fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
     }
 }

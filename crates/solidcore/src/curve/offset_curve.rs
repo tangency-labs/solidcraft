@@ -541,7 +541,9 @@ impl OffsetCurve {
                     // derivative (status ignored upstream)
                     let vals = match self.evaluate(k, t, 2, from_left, true) {
                         Ok(v) => v,
-                        Err(e @ SolidError::Unported { .. }) => return Err(e),
+                        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                            return Err(e)
+                        }
                         // (fork 4803d6d passes this status on: `SER`)
                         Err(e) if k.fixes.brep_edit_statuses_pass_on => return Err(e),
                         Err(_) => vec![Vec3::UNDEF; 3],

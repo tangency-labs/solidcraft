@@ -846,7 +846,7 @@ impl ProtoBrep<H> for ArenaPair<'_> {
             &mut output,
         );
         if let Err(error) = result {
-            if error.is_unported() {
+            if error.is_unported_or_cancelled() {
                 return Err(error);
             }
         }
@@ -880,7 +880,7 @@ impl ProtoBrep<H> for ArenaPair<'_> {
             },
         );
         if let Err(error) = result {
-            if error.is_unported() {
+            if error.is_unported_or_cancelled() {
                 return Err(error);
             }
         }

@@ -754,7 +754,7 @@ fn geom_rail(pseudo: &FilletBrep, geom: FilletGeomId, rail: usize) -> Result<Edg
 fn keep_unported<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -994,7 +994,7 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
             previous,
         ) {
             Ok(()) => Ok(()),
-            Err(e) if e.is_unported() => Err(e),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
             Err(_) => Err(SolidError::sm_err(OP_VALUES)),
         }
     }

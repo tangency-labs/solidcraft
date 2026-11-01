@@ -1151,7 +1151,7 @@ impl<'s> RayTracer<'s> {
                 let solved = self.solver.local_solve(k, surface, &leaf, self.faces);
                 // (the status is ignored; Unported always propagates)
                 if let Err(e) = &solved.status {
-                    if e.is_unported() {
+                    if e.is_unported_or_cancelled() {
                         return Err(e.clone());
                     }
                 }

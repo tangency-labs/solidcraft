@@ -742,7 +742,7 @@ impl CrvInVolume {
         // Volume Evaluate / Map - with fewer derivatives while the volume can't
         let mut vol = self.volume_derivs(k, &crv, n_eval, from_left, non_zero_tangents);
         while let Err(e) = &vol {
-            if e.is_unported() || n_eval == 0 {
+            if e.is_unported_or_cancelled() || n_eval == 0 {
                 break;
             }
             n_eval -= 1;
@@ -907,7 +907,7 @@ impl CrvInVolume {
             self.in_param_space,
         ) {
             Ok(classes) => classes,
-            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
             Err(e) => {
                 let status = Err(e);
                 return Ok((

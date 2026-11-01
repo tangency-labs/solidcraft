@@ -181,7 +181,7 @@ impl<'s> SurfacePointSolver<'s> {
                 {
                     Ok(boxes) => boxes.normal_box.unwrap_or_else(Extent3d::new),
                     Err(e)
-                        if e.is_unported()
+                        if e.is_unported_or_cancelled()
                             || k.fixes.surface_point_solver_propagates_bbox_failure =>
                     {
                         return Err(e);
@@ -569,7 +569,7 @@ impl<'s> SurfPtGlobalSolver<'s> {
         if b.solver_op == SolverOperation::Normalize {
             let (srf_pt, su, sv) = match b.surface.evaluate_1st_derivatives(k, uv, false, false) {
                 Ok(r) => r,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => return Ok(BIG_DOUBLE),
             };
             if srf_pt.is_undef() {
@@ -586,7 +586,7 @@ impl<'s> SurfPtGlobalSolver<'s> {
         } else {
             let srf_pt = match b.surface.evaluate_point(k, uv) {
                 Ok(p) => p,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => return Ok(BIG_DOUBLE),
             };
             if srf_pt.is_undef() {
@@ -1301,7 +1301,7 @@ fn eval_1st(
             *sv = v;
             Ok(())
         }
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(()),
     }
 }
@@ -1310,7 +1310,7 @@ fn eval_1st(
 /// values held when the evaluation fails.
 fn eval_value(ev: &mut SurfaceEval<'_>, i: usize, j: usize) -> Result<Vec3> {
     if let Err(e) = ev.eval() {
-        if e.is_unported() {
+        if e.is_unported_or_cancelled() {
             return Err(e);
         }
     }
@@ -1326,7 +1326,7 @@ fn eval_value(ev: &mut SurfaceEval<'_>, i: usize, j: usize) -> Result<Vec3> {
 fn fails_eval(ev: &mut SurfaceEval<'_>) -> Result<bool> {
     match ev.eval() {
         Ok(()) => Ok(false),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(true),
     }
 }
@@ -1617,7 +1617,7 @@ impl<'s> SurfPtSolveStepper<'s> {
     pub fn normal(&mut self, k: &Kernel) -> Result<Vec3> {
         match self.srf_eval.normal(k) {
             Ok(normal) => Ok(normal),
-            Err(error) if error.is_unported() => Err(error),
+            Err(error) if error.is_unported_or_cancelled() => Err(error),
             Err(_) => Ok(self
                 .srf_eval
                 .values()
@@ -1930,7 +1930,7 @@ impl<'s> SurfPtSolveStepper<'s> {
             false,
         ) {
             Ok(r) => r.curve,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(false),
         };
 
@@ -1943,7 +1943,7 @@ impl<'s> SurfPtSolveStepper<'s> {
         // We have to check the iso-curve itself for having kinks (status ignored).
         let conts = match iso_curve.calculate_continuities(k, CONTINUITY_ANGLE) {
             Ok((_, c)) => c,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => Vec::new(),
         };
 
@@ -1954,7 +1954,7 @@ impl<'s> SurfPtSolveStepper<'s> {
         // Drop the point to each continuous section.
         let knots = match iso_curve.knots(k, None) {
             Ok((k, _)) => k,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => Vec::new(),
         };
         let first_knot = *knots.first().ok_or(SolidError::invalid_input(
@@ -1988,7 +1988,7 @@ impl<'s> SurfPtSolveStepper<'s> {
                 SolverOperation::Minimize,
             ) {
                 Ok(d) => Some(d),
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => None,
             };
 

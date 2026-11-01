@@ -154,7 +154,7 @@ fn with_editing<R>(b: &mut Brep, f: impl FnOnce(&mut Brep) -> Result<R>) -> Resu
 
 /// `SER(SM_ERR)` after a failed call: [`SolidError::Unported`] goes through.
 fn as_sm_err(e: SolidError) -> SolidError {
-    if e.is_unported() {
+    if e.is_unported_or_cancelled() {
         e
     } else {
         SolidError::sm_err(OP)
@@ -1050,7 +1050,7 @@ pub fn make_faces_with_curves(
                     // Exiting a usable segment of the iso curve
                     let (enter, leave) = match loops.find_entering_and_leaving(indx1, indx2) {
                         Ok(x) => x,
-                        Err(e) if e.is_unported() => return Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
                         Err(_) => break 'pair,
                     };
                     seg.end_enter = enter;
@@ -1075,7 +1075,7 @@ pub fn make_faces_with_curves(
                     // Entering a usable segment of the iso curve
                     let (enter, leave) = match loops.find_entering_and_leaving(indx1, indx2) {
                         Ok(x) => x,
-                        Err(e) if e.is_unported() => return Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
                         Err(_) => break 'pair,
                     };
                     seg.start_enter = enter;
@@ -1309,7 +1309,7 @@ pub fn make_faces_with_curves(
                         }
                     }
                 }
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => {}
             }
 

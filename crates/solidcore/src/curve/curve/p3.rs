@@ -1246,7 +1246,7 @@ impl Curve {
             let guess_t = [guess, 0.1, 0.1, 0.1];
             let r = match ls.solve_it(&guess_t, EFF_ZERO) {
                 Ok(r) => r,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 // some sort of error in solver
                 Err(_) => return Err(SolidError::sm_err(OP_POINT)),
             };
@@ -1275,7 +1275,7 @@ impl Curve {
         // acceptable accuracy when Func(t) < tolerance
         let r = match ls.solve_it(&mut efo, guess, 1.0e-8) {
             Ok(r) => r,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // some solver error - return without answer
             Err(_) => return Ok((false, solution)),
         };
@@ -2154,7 +2154,7 @@ impl<'t, O: SolutionObject + 't> CurvePropertyGs<'t, O> {
                 &mut sol,
             ) {
                 Ok(f) => f,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 // Had an error just try a different starting point - perhaps some
                 // higher derivative was zero.
                 Err(_) => continue,

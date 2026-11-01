@@ -1054,7 +1054,7 @@ impl EdgeLoop {
             true,
         ) {
             Ok(pc) => pc,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(Some(seam.p - seam.f0 * frame.h)),
         };
         self.push(curve, pcurve, orient, *seam);
@@ -1829,12 +1829,12 @@ pub(super) fn curvature_keeping_walls(
             )?;
             let pc_seam1 = match seam_pcurve(w, &s1, n, h, [u0, u1], w.lo, v0, v_scale, false) {
                 Ok(pc) => pc,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => return Ok(refuse(TaperCornerRefusal::NotExact, s1.p)),
             };
             let pc_seam0 = match seam_pcurve(w, &s0, n, h, [u0, u1], w.lo, v0, v_scale, false) {
                 Ok(pc) => pc,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => return Ok(refuse(TaperCornerRefusal::NotExact, s0.p)),
             };
             let mut curves: Vec<BSplineCurve> = Vec::new();

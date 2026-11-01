@@ -1090,7 +1090,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                         continue;
                     }
                     if let Err(error) = access.mapping_find(k, fe, &edges, false) {
-                        if error.is_unported() {
+                        if error.is_unported_or_cancelled() {
                             return Err(error);
                         }
                         self.note_fillet_edge(
@@ -1294,7 +1294,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 let pass_on = k.fixes.fillet_statuses_pass_on;
                 fs = self
                     .fillet_solver_of_edge_with(edge, |e| match access.smooth_edge_edgeuses(e) {
-                        Err(err) if pass_on && !err.is_unported() => Ok(Vec::new()),
+                        Err(err) if pass_on && !err.is_unported_or_cancelled() => Ok(Vec::new()),
                         r => r,
                     })?
                     .ok_or_else(|| null!("no solver of edge"))?;

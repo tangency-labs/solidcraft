@@ -2498,6 +2498,7 @@ pub fn stitch_and_orient_with_identity(
     options: &StitchAndOrientOptions,
     identity: Option<crate::query::brep::BrepIdentity<'_>>,
 ) -> Result<()> {
+    k.check_cancelled(OP)?;
     let mut lamina = 0;
     let mut tolerance = initial_stitch_tolerance(b.tolerance(), options.stitch_tolerance);
     crate::error::ignore_status(crate::error::passed_on(
@@ -2562,6 +2563,7 @@ pub(crate) fn stitch_and_orient_notified(
     env: &mut EditNotifyEnv<'_>,
     curve_identity: crate::topology::brep::p9::CurveIdentity<'_>,
 ) -> Result<()> {
+    k.check_cancelled(OP)?;
     let mut lamina = 0;
     let mut tolerance = initial_stitch_tolerance(b.tolerance(), options.stitch_tolerance);
     crate::error::ignore_status(crate::error::passed_on(

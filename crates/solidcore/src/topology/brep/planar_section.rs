@@ -135,7 +135,7 @@ pub fn create_plane_from_bbox(
     match Plane::is_nurb_surface_plane(k, &bilinear, 1.0) {
         Ok(Some(plane)) => Ok(Some(Surface::from(plane))),
         Ok(None) => Err(SolidError::sm_err(OP_PLANE)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         // (an `SER` inside reads as `TRUE` and leaves no plane)
         Err(_) => Ok(None),
     }
@@ -365,7 +365,7 @@ pub fn create_planar_section_curves(
         );
         let (mut curves_3d, mut uv_curves) = match section {
             Ok(s) => (s.curves_3d, s.uv_curves),
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => continue,
         };
         // (one UV entry per 3D curve, as upstream indexes them)
@@ -402,7 +402,7 @@ pub fn create_planar_section_curves(
                     [None, None],
                 );
                 if let Err(e) = status {
-                    if e.is_unported() {
+                    if e.is_unported_or_cancelled() {
                         return Err(e);
                     }
                 }
@@ -493,7 +493,7 @@ pub fn create_planar_section_curves(
             true,
         ) {
             Ok(t) => t,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => continue,
         };
         let trim_3d = trimmed.curves_3d.unwrap_or_default();
@@ -630,7 +630,11 @@ fn force_uv_curves(
 fn status_free<T>(r: Result<T>, fallback: T) -> Result<T> {
     match r {
         Ok(v) => Ok(v),
-        Err(e @ (SolidError::Unported { .. } | SolidError::NotFound { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::NotFound { .. }),
+        ) => Err(e),
         Err(_) => Ok(fallback),
     }
 }

@@ -403,7 +403,7 @@ fn centre_line_on_axis(
             .evaluate_point(k, t.uv_pos(SrfIndex::First))
         {
             Ok(p) => p,
-            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
             Err(_) => return Ok(false),
         };
         let off = centre - origin;
@@ -1417,7 +1417,7 @@ impl FilletSolver {
             k.fixes.fillet_statuses_pass_on,
         )? {
             Ok(a) => a,
-            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
             Err(_) => 0.0,
         };
         if span_ang < ANG_TOL_RAD {
@@ -2774,6 +2774,7 @@ fn edge_zone_kernel(k: &Kernel, tol: f64) -> Kernel {
         ..crate::kernel::KernelOptions::default()
     });
     tk.rng = k.rng.clone();
+    tk.cancel.clone_from(&k.cancel);
     tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
     tk.fixes.bspline_trim_keeps_rational_end_spans = k.fixes.bspline_trim_keeps_rational_end_spans;
     tk

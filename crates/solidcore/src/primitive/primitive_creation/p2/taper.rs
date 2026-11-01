@@ -493,7 +493,7 @@ fn taper(
                 );
                 *curve = Curve::from(offset_curve);
                 match result {
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     // no ruled surface: skip this offset curve
                     Err(_) => {}
                     Ok((surface, _)) => {
@@ -555,7 +555,7 @@ fn taper(
         crvs_cleanup(a.kernel(brep)?, &mut input, brep_tol)?;
         let mut face = None;
         match a.planar_face(region, input, brep_tol, &mut face) {
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             _ => {}
         }
     }
@@ -577,7 +577,7 @@ fn taper(
             crvs_cleanup(a.kernel(brep)?, &mut chain, brep_tol)?;
             let mut face = None;
             match a.planar_face(region, chain, brep_tol, &mut face) {
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 _ => {}
             }
         }
@@ -641,7 +641,7 @@ fn surface_intersection_method(
             state,
             *rule_options,
         ) {
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // no ruled surface: skip this offset curve
             Err(_) => {}
             Ok((surface, map)) => {

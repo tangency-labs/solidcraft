@@ -35,7 +35,7 @@ pub trait TopologyChangesAccess<O> {
 
 fn ignored(status: Result<()>) -> Result<()> {
     match status {
-        Err(error) if error.is_unported() => Err(error),
+        Err(error) if error.is_unported_or_cancelled() => Err(error),
         _ => Ok(()),
     }
 }

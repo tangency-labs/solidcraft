@@ -375,7 +375,7 @@ fn required<T>(value: Option<T>) -> Result<T> {
 fn ignored<T>(result: Result<T>) -> Result<Option<T>> {
     match result {
         Ok(value) => Ok(Some(value)),
-        Err(error) if error.is_unported() => Err(error),
+        Err(error) if error.is_unported_or_cancelled() => Err(error),
         Err(_) => Ok(None),
     }
 }
@@ -1574,6 +1574,10 @@ fn manifold_boolean_transformed(
 ) -> Result<bool> {
     let a = required(primary.as_mut())?;
     let b = required(other.as_mut())?;
+    kernels.primary.check_cancelled(OP)?;
+    if let Some(other_kernel) = kernels.other.as_deref() {
+        other_kernel.check_cancelled(OP)?;
+    }
     let transform = p1::temporary_brep_transform(kernels.primary, kernels.other(), a, b)?.apply(
         a,
         b,
@@ -1623,6 +1627,10 @@ fn manifold_boolean_translated(
 ) -> Result<bool> {
     let a = required(primary.as_mut())?;
     let b = required(other.as_mut())?;
+    kernels.primary.check_cancelled(OP)?;
+    if let Some(other_kernel) = kernels.other.as_deref() {
+        other_kernel.check_cancelled(OP)?;
+    }
     if operation == BooleanOperation::Slice {
         if !is_sheet(kernels, b)? {
             return Err(SolidError::sm_err(OP));

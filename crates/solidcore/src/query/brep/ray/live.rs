@@ -226,7 +226,7 @@ impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
                             pc.point_class() == crate::intersect::point_class::PointClassType::Face
                         )
                     }
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => {}
                 }
             }
@@ -551,6 +551,7 @@ impl<'a> BrepFaceServices<'a> {
         match status {
             Err(
                 e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
                 | SolidError::InvalidInput { .. }
                 | SolidError::PortInvariant { .. }
                 | SolidError::PreparationRequired { .. }),

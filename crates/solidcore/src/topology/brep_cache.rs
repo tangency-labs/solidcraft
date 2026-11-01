@@ -321,7 +321,7 @@ impl<O: Copy + PartialEq> BrepCache<O> {
             let owner = face_id(b, owner, keys)?;
             match face_bounding_box(k, b, owner) {
                 Ok(bbox) => surface_box = bbox,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => {}
             }
             surface_union = surface_union.union(&surface_box);
@@ -422,7 +422,7 @@ fn resize_edge(
                 *curve_box = bbox;
             }
         }
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => {}
     }
     *curve_union = curve_union.union(curve_box);

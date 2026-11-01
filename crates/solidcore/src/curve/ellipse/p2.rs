@@ -602,7 +602,7 @@ impl PolarConversion {
             &mut written,
         ) {
             Ok((t, _)) => Ok(Some(t)),
-            Err(e) if e.is_unported() => Err(e),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
             Err(_) => Ok(written),
         }
     }
@@ -1884,7 +1884,9 @@ impl Ellipse {
             let solutions2: Vec<Solution<O>> =
                 match line_global_point_solve(line, other_interval, *ip, tol * 10.0) {
                     Ok(s) => s,
-                    Err(e @ SolidError::Unported { .. }) => return Err(e),
+                    Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                        return Err(e)
+                    }
                     Err(_) => return Ok(out),
                 };
 
@@ -1895,7 +1897,9 @@ impl Ellipse {
             let solutions1: Vec<Solution<O>> =
                 match ellipse_global_point_solve(k, self, interval, *ip, tol * 10.0) {
                     Ok(s) => s,
-                    Err(e @ SolidError::Unported { .. }) => return Err(e),
+                    Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                        return Err(e)
+                    }
                     Err(_) => return Ok(out),
                 };
 

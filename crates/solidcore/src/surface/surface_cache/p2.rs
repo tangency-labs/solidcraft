@@ -146,7 +146,7 @@ impl PatchBoundaryBoundingPlanes {
             // Does not seem to make sense crash in a boxtest-like function:
             match self.compute_bounding_planes(k, surface) {
                 Ok(()) => {}
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => return Ok(out),
             }
         }
@@ -300,7 +300,7 @@ pub fn create_approximate_bezier_patch_block(
 
             // approximate the surface shape with a degree 3x3 bezier patch
             match compute_bezier_approximation(k, surface, &uv_domain, &mut bezier) {
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) | Ok(()) => {}
             }
 
@@ -348,7 +348,7 @@ pub type ToleranceTester<'a, O> =
 fn ignore<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
     }
 }

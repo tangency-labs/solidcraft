@@ -172,7 +172,7 @@ impl FilletSession<'_> {
             // SmVariableRadiusFS::GetFilletRadius: SER inside a `double` function
             let radius = match law.evaluate(t, &vr.law_interval, vr.law_orientation) {
                 Ok(values) => values.first().copied().unwrap_or(0.0),
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(e) => f64::from(status_of(&e)),
             }
             .abs();
@@ -501,7 +501,7 @@ impl FilletSession<'_> {
             }
             Err(e) => {
                 *self.objects.target = kept;
-                if e.is_unported() {
+                if e.is_unported_or_cancelled() {
                     return Err(e);
                 }
                 self.note_refusal(Refusal {

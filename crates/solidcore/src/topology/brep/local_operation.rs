@@ -178,7 +178,7 @@ pub fn local_operation(
     let offset = executive
         .do_extended_offset(k, Some(&mut *b), notifications)
         .map_err(|e| {
-            if e.is_unported() || k.fixes.local_operation_offset_status {
+            if e.is_unported_or_cancelled() || k.fixes.local_operation_offset_status {
                 e
             } else {
                 SolidError::sm_err(OP)

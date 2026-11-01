@@ -584,7 +584,7 @@ fn assert_test_surface4(k: &Kernel, s: &Surface) -> Result<bool> {
         let mut reached = None;
         match s.calculate_continuities_reached(k, dir, &mut reached) {
             Ok((c, _)) => Ok(Some(c)),
-            Err(e) if e.is_unported() => Err(e),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
             Err(_) if fails => Ok(None),
             Err(_) => reached.map(Some).ok_or_else(|| {
                 invalid("continuity output never written (upstream reads it uninitialised)")
@@ -649,7 +649,7 @@ fn assert_test_surface6(k: &Kernel, s: &Surface) -> Result<bool> {
         let fails = k.fixes.query_statuses_pass_on;
         let (crv1, crv2) = match s.create_iso_boundaries(k, dir, a_tol) {
             Ok(Some(c)) => c,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) if fails => return Ok(false),
             _ => {
                 return Err(invalid(
@@ -683,7 +683,7 @@ fn assert_test_surface6(k: &Kernel, s: &Surface) -> Result<bool> {
             ],
         ) {
             Ok(f) => f,
-            Err(e) if fails && !e.is_unported() => return Ok(false),
+            Err(e) if fails && !e.is_unported_or_cancelled() => return Ok(false),
             Err(e) => return Err(e),
         };
 
@@ -1812,7 +1812,7 @@ fn no_tangent_along(k: &Kernel, gen: &Curve, extrusion_vec: Vec3, tol: f64) -> R
         &opts,
     ) {
         Ok(found) => Ok(found.solutions.is_empty()),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(true),
     }
 }

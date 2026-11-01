@@ -225,7 +225,7 @@ fn drop_param(
 ) -> Result<Option<f64>> {
     match curve.drop_point(k, ivl, pnt, None, tol, None, SolverOperation::Minimize) {
         Ok(d) if d.success => Ok(Some(d.parameter)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         _ => Ok(None),
     }
 }

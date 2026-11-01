@@ -572,7 +572,7 @@ pub fn calculate_tight_bounding_box_into(
 fn eval_pos(eval: &mut SurfaceEval<'_>) -> Result<Point3> {
     match eval.pos() {
         Ok(p) => Ok(p),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(eval
             .values()
             .first()
@@ -2141,7 +2141,7 @@ pub fn sector_classify_curve_on(
         let use_3d_only = !input.uv_space_okay; // was FALSE [B462]
         let bin1_eval = match evaluate_binormal(k, b, cp_eu1, new_eu1_param, use_3d_only) {
             Ok(v) => v,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => {
                 res.possible_problem = true;
                 res.problem = ClassifyProblem::UnresolvedClassification;
@@ -2200,7 +2200,7 @@ pub fn sector_classify_curve_on(
                     }
                 }
             }
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => {}
         }
 
@@ -2497,7 +2497,7 @@ pub fn sector_classify_curve_on(
 
     let mut guess_uv = match vertexuse::compute_uv_point(k, b, vtxuse, true) {
         Ok(uv) => uv,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Ok(res), // just revert to old behavior.
     };
 
@@ -2568,7 +2568,7 @@ pub fn sector_classify_curve_on(
                 },
             ) {
             Ok(d) => d,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(res), // just revert to old behavior.
         };
         let step_uv = drop.result_uv;

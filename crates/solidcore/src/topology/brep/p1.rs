@@ -522,6 +522,7 @@ pub fn tessellate_boundaries(
             "angle tolerance must be finite and positive",
         ));
     }
+    k.check_cancelled(OP)?;
 
     let mut out = BoundaryTessellation {
         edges: edges(b, None)?,
@@ -529,13 +530,16 @@ pub fn tessellate_boundaries(
         ..BoundaryTessellation::default()
     };
     for &e in &out.edges {
+        k.check_cancelled(OP)?;
         let edge = b.edge(e)?;
         let points = match edge.curve.as_ref() {
             None => None,
             Some(curve) => match curve.tessellate(k, &edge.interval, 0.0, angle_tol_deg, 1) {
                 Ok(t) if !t.points.is_empty() => Some(t.points),
                 Err(
-                    err @ (SolidError::Unported { .. } | SolidError::PreparationRequired { .. }),
+                    err @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::PreparationRequired { .. }),
                 ) => return Err(err),
                 Ok(_) | Err(_) => None,
             },
@@ -1706,7 +1710,7 @@ fn evaluate_binormal_status_ignored(
     }
     match evaluate_binormal(k, b, eu, parameter, true) {
         Ok(eval) => Ok(eval),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(
             e @ SolidError::InvalidInput {
                 operation: "topology::edgeuse::p3",
@@ -1881,7 +1885,7 @@ pub fn find_sector_of_face(
             } else {
                 match crate::query::face::p2::face_surface_cache(k, b, face) {
                     Ok(lease) => Some(lease),
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => return Err(SolidError::null_pointer(OP)),
                 }
             };
@@ -2363,7 +2367,7 @@ pub(crate) fn is_first_nonseparating_seam(
 ) -> Result<bool> {
     // upstream's statuses inside this SmBoolean function are FALSE answers
     let no = |r: Result<bool>| match r {
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(false),
         ok => ok,
     };
@@ -2519,7 +2523,7 @@ fn first_nonseparating_seam(
             true,
         ) {
             Ok(OrientType::Opposite) => {}
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             _ => return Ok(false),
         }
 

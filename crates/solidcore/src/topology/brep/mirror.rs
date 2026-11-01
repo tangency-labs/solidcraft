@@ -268,7 +268,7 @@ fn make_missing_nurbs(k: &Kernel, b: &mut Brep) -> Result<()> {
 /// tie). Unported dependencies and preparation requests still propagate.
 fn fold_status(worst: &mut Option<SolidError>, r: Result<()>) -> Result<()> {
     let Err(e) = r else { return Ok(()) };
-    if e.is_unported() || matches!(e, SolidError::PreparationRequired { .. }) {
+    if e.is_unported_or_cancelled() || matches!(e, SolidError::PreparationRequired { .. }) {
         return Err(e);
     }
     let code = |e: &SolidError| e.sm_status().unwrap_or(crate::error::SM_ERR);
@@ -373,7 +373,7 @@ pub fn transform_matrix_with_notifications(
     // whatever the failed call left)
     let (d_diag, mut ut) = match sv.sv_decompose() {
         Ok(r) => r,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Err(SolidError::sm_err(OP)),
     };
     ut.transpose()?;

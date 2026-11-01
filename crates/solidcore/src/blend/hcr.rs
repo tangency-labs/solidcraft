@@ -567,13 +567,13 @@ fn standalone_surface_cache(
 ) -> Result<Option<ListedCache>> {
     let mut cache = match surface_cache::<usize>(k, surface, Some(handle)) {
         Ok(cache) => cache,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Ok(None),
     };
     // `AddSurfaceToGrid` lists the surface only once its tree has a top node
     let has_top = match cache.get_tree(k) {
         Ok(tree) => tree.top_node().is_some(),
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => false,
     };
     Ok(has_top.then_some(ListedCache::Lazy(cache)))
@@ -609,12 +609,12 @@ fn face_surface_cache(
     let mut mapped = match MappedCacheFace::new(BrepCacheFace { b: scene, f }, handle_of, entity_of)
     {
         Ok(mapped) => mapped,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Ok(None),
     };
     let mut cache = match get_surface_cache_with_face(k, &surface, Some(handle), &mut mapped) {
         Ok(cache) => cache,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Ok(None),
     };
     // AddSurfaceToGrid: GetTree() == NULL, GetTree()->GetTopNode(); ExpandHierarchy:
@@ -623,7 +623,7 @@ fn face_surface_cache(
         match cache.get_tree_with_face(k, &mut mapped) {
             Ok(tree) if check_top && tree.top_node().is_none() => return Ok(None),
             Ok(_) => {}
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(None),
         }
     }
@@ -674,17 +674,17 @@ fn silhouette_cache(
     let mut mapped =
         match MappedCacheFace::new(BrepCacheFace { b: scene, f }, &handle_of, &entity_of) {
             Ok(mapped) => mapped,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(None),
         };
     let mut cache = match get_surface_cache_with_face(k, surface, Some(handle), &mut mapped) {
         Ok(cache) => cache,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Ok(None),
     };
     match cache.get_tree_with_face(k, &mut mapped) {
         Ok(_) => {}
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Ok(None),
     }
     let mut cache = cache.into_base();
@@ -771,7 +771,7 @@ impl RayFaceClassifier for SceneFaceClassifier<'_> {
         );
         match classified {
             Ok(()) => {}
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // signal an error and keep the point just in case
             Err(_) => return Ok((true, None)),
         }
@@ -1550,7 +1550,7 @@ impl Hcr {
                     }
                 }
                 // SER in a SmBoolean function: the status reads as TRUE
-                Err(err) if err.is_unported() => return Err(err),
+                Err(err) if err.is_unported_or_cancelled() => return Err(err),
                 Err(_) => return Ok(true),
             }
         }
@@ -1744,7 +1744,7 @@ impl Hcr {
 
         match tracer.fire_ray(k, ray_start, ray_vec, max_distance) {
             Ok(hit) => Ok(!hit.hits_something),
-            Err(err) if err.is_unported() => Err(err),
+            Err(err) if err.is_unported_or_cancelled() => Err(err),
             // signal an error and guess that the point is visible
             Err(_) => Ok(true),
         }

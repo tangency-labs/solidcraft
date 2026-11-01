@@ -757,6 +757,8 @@ impl<'t, 'a, O: SolutionObject + 't> TopologySolver<'t, 'a, O> {
     /// The body of [`TopologySolver::solve_trees`] once the local solver is in
     /// place.
     fn solve_trees_inner(&mut self, tree1: &'t Tree<O>, tree2: &'t Tree<O>) -> Result<()> {
+        self.kernel
+            .check_cancelled("intersect::topology_solver::TopologySolver::solve_trees")?;
         let s = &mut self.base;
         s.num_variables = 0;
         s.trees = [None; MAX_SOLVER_TREES];
@@ -812,6 +814,7 @@ impl<'t, 'a, O: SolutionObject + 't> TopologySolver<'t, 'a, O> {
         self.base.num_trees = 2;
 
         for id in list_ids {
+            self.kernel.check_cancelled(OP_TWO_TREES)?;
             let item = *tree1.list(id)?;
             object_tree.node_mut(node)?.bbox = item.bbox;
             let entry = object_tree.list_mut(list)?;
@@ -849,6 +852,7 @@ impl<'t, 'a, O: SolutionObject + 't> TopologySolver<'t, 'a, O> {
     pub(super) fn restore_base(&mut self, s: GlobalSolver<'_, O>, tree2: &'t Tree<O>) {
         let GlobalSolver {
             fixes,
+            cancel,
             operation,
             category,
             projected_operation,
@@ -867,6 +871,7 @@ impl<'t, 'a, O: SolutionObject + 't> TopologySolver<'t, 'a, O> {
         } = s;
         self.base = GlobalSolver {
             fixes,
+            cancel,
             operation,
             category,
             projected_operation,
@@ -2244,6 +2249,7 @@ pub(super) fn face_point_classify<O: Copy>(
     match result {
         Err(
             e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::PreparationRequired { .. }),
@@ -2298,7 +2304,7 @@ fn face_classifies_on_face<O: Copy>(
             Point3dClassifyOptions::default(),
         ) {
             Ok(()) => Ok(true),
-            Err(e @ SolidError::Unported { .. }) => Err(e),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
             Err(_) => Ok(false),
         }
     };

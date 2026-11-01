@@ -822,7 +822,7 @@ fn c1_collect_points(
             &mut new_pnt,
         ) {
             Ok(()) => {}
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // SolidCraft (tangency-labs/solidcore#1952, WR-641, under
             // `fillet_through_extended_rail_end`): an extended rail end's knot is a
             // through point only where its section can be solved. Where the edge's end
@@ -2487,6 +2487,7 @@ fn c4_trace(
     // while (!bFoundAllPoints): the flag starts FALSE, and the only assignment that
     // can leave it TRUE is followed by the `break` at :2278.
     loop {
+        cx.k.check_cancelled(OP)?;
         loop_count += 1;
         if loop_count > max_loop_count {
             // Either too many self-intersections or other

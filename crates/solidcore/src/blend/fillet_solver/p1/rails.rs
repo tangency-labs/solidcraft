@@ -416,7 +416,7 @@ impl Rails<'_> {
             },
         );
         let mut curve = match outcome {
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Ok(Some(curve)) => curve,
             _ => {
                 self.fillets

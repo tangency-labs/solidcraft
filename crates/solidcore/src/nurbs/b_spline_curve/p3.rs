@@ -379,7 +379,7 @@ fn is_zero_speed_tangent_end(
             }
             Some(_) => {}
         },
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Ok(false),
     }
 
@@ -424,7 +424,7 @@ fn zero_speed_radius_stretch(
     let param = if end == 0 { ivl.min() } else { ivl.max() };
     let pv = match curve.evaluate(param, 3, end == 0, false) {
         Ok(pv) => pv,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Ok(None),
     };
     let (Some(&d2), Some(&d3)) = (pv.get(2), pv.get(3)) else {
@@ -447,7 +447,7 @@ fn zero_speed_radius_stretch(
     };
     let at = match curve.evaluate(at_param, 2, true, false) {
         Ok(at) => at,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Ok(None),
     };
     let (Some(&a1), Some(&a2)) = (at.get(1), at.get(2)) else {
@@ -477,7 +477,7 @@ fn first_fundamental_form(
 ) -> Result<Option<[f64; 3]>> {
     match surface.evaluate_1st_derivatives(k, uv, u_from_left, v_from_left) {
         Ok((_, du, dv)) => Ok(Some([du.dot(du), du.dot(dv), dv.dot(dv)])),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -514,13 +514,13 @@ fn trim_metric(
     };
     let mut form = match trim.evaluate_point(domain.evaluate(0.5)) {
         Ok(mid) => form_at(Point2::new(mid.x, mid.y))?,
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => None,
     };
     if form.is_none() {
         let centre = match surface.natural_uv_domain_with_nurb(k) {
             Ok(d) => Some(d.evaluate(0.5, 0.5)),
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => None,
         };
         if let Some(centre) = centre {
@@ -1045,7 +1045,7 @@ impl BSplineCurve {
         *other = other_back;
         let composite = match composite {
             Ok(c) => c,
-            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
             Err(_) => return Err(SolidError::sm_err(OP_JOIN)),
         };
         self.set_from_gw_nurb(composite.gw_nurb())

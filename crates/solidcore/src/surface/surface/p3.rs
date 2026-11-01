@@ -1987,7 +1987,7 @@ fn clip_to_big_domain(domain: &Extent2d, big_domain: &Extent2d) -> Extent2d {
 fn eval_pos(eval: &mut super::p2::SurfaceEval<'_>, pass_on: bool) -> Result<Point3> {
     match passed_on(eval.pos(), pass_on)? {
         Ok(p) => Ok(p),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(eval
             .values()
             .first()

@@ -179,6 +179,7 @@ const fn is_status(e: &SolidError) -> bool {
     !matches!(
         e,
         SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }
@@ -510,6 +511,7 @@ fn edgeuse_evaluate_binormal<O: ClassObject, G: ClassGeometry<O>>(
         }
         Err(
             e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }),
         ) => Err(e),

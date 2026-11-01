@@ -746,7 +746,7 @@ impl Hyperbola {
         // read the base type (status ignored upstream)
         match BSplineCurve::read_from_db(db, dim, version) {
             Ok(base) => h.base = base,
-            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
             Err(_) => {}
         }
 

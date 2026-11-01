@@ -788,7 +788,7 @@ impl Cone {
     fn finish_canonical(mut self, k: &Kernel, operation: &'static str) -> Result<Self> {
         // Build NURB; fail cleanly if degenerate (single zero-radius apex is valid).
         match self.make_nurb(k) {
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Err(SolidError::sm_err(operation)),
             Ok(()) => {}
         }
@@ -1325,7 +1325,7 @@ impl Cone {
         let (param_type, iso) = match self.convert_uv_from_step_to_nurbs(k, step_uv) {
             Ok(nurb_uv) if self.rev.swap_uv => (SurfParamType::U, nurb_uv.x),
             Ok(nurb_uv) => (SurfParamType::V, nurb_uv.y),
-            Err(e) if e.is_unported() || !self.rev.swap_uv => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() || !self.rev.swap_uv => return Err(e),
             Err(e) => match self.sweep_nurbs_param_written(k, step_uv.x)? {
                 Some(x) => (SurfParamType::U, x),
                 None => return Err(e),
@@ -1476,7 +1476,7 @@ impl Cone {
                     }
                     rows
                 }
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => return Err(SolidError::sm_err(OP_EVAL)),
             }
         } else {

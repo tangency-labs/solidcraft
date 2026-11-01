@@ -156,6 +156,7 @@ fn ser_as_true(e: &SolidError) -> bool {
     !matches!(
         e,
         SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }
@@ -186,6 +187,7 @@ pub(crate) fn binormal_ignoring_status(
     ) {
         Err(
             e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
@@ -708,7 +710,7 @@ pub fn check_and_set_uv_trim_curve(
     );
     let mut first_err = None;
     match rtn {
-        Err(err) if err.is_unported() => return Err(err),
+        Err(err) if err.is_unported_or_cancelled() => return Err(err),
         Err(err) => first_err = Some(err),
         // when MaxDist was computed without hiccups (the incorrect-direction flag is
         // set on every path a sampled measurement takes)
@@ -1222,7 +1224,7 @@ pub fn has_dog_leg_near_pole(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<DogL
     // to dog-leg (tangency-labs/smlib 666242b); upstream's polygon error is the port's
     let no_evidence = k.fixes.query_statuses_pass_on;
     let control_points = match base.polygon(&base.natural_interval()) {
-        Err(e) if no_evidence && !e.is_unported() => return Ok(out),
+        Err(e) if no_evidence && !e.is_unported_or_cancelled() => return Ok(out),
         r => r?,
     };
     let num = control_points.len();
@@ -1370,7 +1372,7 @@ pub fn has_dog_leg_near_pole(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<DogL
 fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
     }
 }

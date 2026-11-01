@@ -572,7 +572,7 @@ impl SurfOfExtrusion {
                 [plane_owner, PlaneOwner::NoFace],
             ) {
                 Ok(r) => r,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => (false, SurfaceIntersection::default()),
             };
             out.needs_more_intersections = needs_more;
@@ -787,7 +787,7 @@ impl SurfOfExtrusion {
                 };
                 let crv = match self.create_directrix_from_point(k, pt0, EFF_ZERO_SQRT) {
                     Ok(c) => c,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => continue, // pCrv stays NULL
                 };
                 let mut crv = crv;
@@ -965,7 +965,7 @@ impl SurfOfExtrusion {
         let other_gen_curve =
             match cylinder.create_iso_circle_from_point(k, other_axis_segment_start_point, tol) {
                 Ok(c) => c,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => None,
             };
 
@@ -1074,7 +1074,7 @@ impl SurfOfExtrusion {
         ) {
             Ok(r) => Ok(r.needs_more_intersections),
             Err(e)
-                if e.is_unported()
+                if e.is_unported_or_cancelled()
                     || matches!(
                         e,
                         SolidError::InvalidInput { .. } | SolidError::PortInvariant { .. }

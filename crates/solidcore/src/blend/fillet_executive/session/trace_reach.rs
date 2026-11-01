@@ -144,7 +144,7 @@ pub(crate) fn extend_trace_to_its_rails(
             // SmVariableRadiusFS::GetFilletRadius: SER inside a `double` function
             let r = match vr.law.evaluate(t, &law_ivl, vr.law_orientation) {
                 Ok(values) => values.first().copied().unwrap_or(0.0),
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(e) => f64::from(status_of(&e)),
             };
             radius = smos_max(radius, r.abs());
@@ -184,10 +184,10 @@ pub(crate) fn extend_trace_to_its_rails(
         match get_or_create_uv_trim_curve(k, target, edgeuse, false, false, true) {
             Ok(fetch) => match fetch.status {
                 Ok(()) => {}
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => continue,
             },
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => continue,
         }
         let Some(uv) = eu::uv_trim_curve(target, edgeuse)?.0 else {

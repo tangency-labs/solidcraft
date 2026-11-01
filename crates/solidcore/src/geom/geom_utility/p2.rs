@@ -361,7 +361,7 @@ pub fn triangle_point_distance(
 
     let uv = match vec_lin_comb_two_vectors(vec_x, vec_y, test_vec) {
         Ok(uv) => uv,
-        Err(e @ SolidError::Unported { .. }) => return Err(e),
+        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
         Err(_) => {
             // collinear points: nearest of the two edges from p0
             let (dist1, u) = segment_point_distance(p0, p1, test);
@@ -418,7 +418,7 @@ pub fn line_line_at_distance(
     const OP: &str = "geom::geom_utility::p2::line_line_at_distance";
     let (cl1, cl2) = match line_line_closest_point(line_pnt1, line_vec1, line_pnt2, line_vec2) {
         Ok(v) => v,
-        Err(e @ SolidError::Unported { .. }) => return Err(e),
+        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
         Err(_) => return Err(sm_err(OP)),
     };
     let p1 = line_pnt1 + cl1 * line_vec1;
@@ -626,7 +626,7 @@ pub fn segment_segment_intersect(
     let (mut param1, mut param2) =
         match line_line_closest_point(line_start, line_vec, other_start, other_vec) {
             Ok(v) => v,
-            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
             // parallel lines
             Err(_) => return Ok(points),
         };
@@ -730,7 +730,7 @@ pub fn segment_segment_closest_point(
     let (mut param1, mut param2) =
         match line_line_closest_point(line_start, line_vec, other_start, other_vec) {
             Ok(v) => v,
-            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
             // parallel lines
             Err(_) => return Ok(hits),
         };
@@ -846,7 +846,7 @@ pub fn sphere_circle_sphere_circle_intersect(
 
     let planes = match intersect_two_planes(cir1_center, cir1_normal, cir2_center, cir2_normal) {
         Ok(PlanesIntersection::Line { point, direction }) => Some((point, direction)),
-        Err(e @ SolidError::Unported { .. }) => return Err(e),
+        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
         Ok(PlanesIntersection::Parallel { .. }) | Err(_) => None,
     };
     let Some((line_pt, line_vec)) = planes else {
@@ -862,7 +862,7 @@ pub fn sphere_circle_sphere_circle_intersect(
     let (mut count, mut params) =
         match line_intersect_sphere(line_pt, line_vec, sphere_center, sphere_radius, tol3d) {
             Ok(v) => v,
-            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
             // only for a zero line vector, which cannot happen here
             Err(_) => return Ok(CurveIntersection::Points(Vec::new())),
         };

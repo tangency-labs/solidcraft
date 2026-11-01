@@ -46,7 +46,7 @@ pub struct CoincidenceResult {
 fn ignored<T>(value: Result<T>) -> Result<Option<T>> {
     match value {
         Ok(value) => Ok(Some(value)),
-        Err(error) if error.is_unported() => Err(error),
+        Err(error) if error.is_unported_or_cancelled() => Err(error),
         Err(_) => Ok(None),
     }
 }

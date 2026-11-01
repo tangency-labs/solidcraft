@@ -482,7 +482,7 @@ pub fn point_3d_classify(
     // (SmCacheMgr::GetObjectCache) and classifies through its leaf nodes first.
     let mut lease = FaceSurfaceCacheGuard(match face_surface_cache(k, b, f) {
         Ok(lease) => Some(lease),
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(SolidError::Upstream {
             code: crate::error::SM_ERR_NULL_POINTER,
             ..

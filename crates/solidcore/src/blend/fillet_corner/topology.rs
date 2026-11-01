@@ -225,7 +225,7 @@ fn same_convexity_edges(
 /// `Unported` one still propagates.
 fn or_false(r: Result<bool>) -> Result<bool> {
     match r {
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(false),
         Ok(v) => Ok(v),
     }

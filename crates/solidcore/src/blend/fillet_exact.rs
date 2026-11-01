@@ -199,7 +199,9 @@ fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Re
         } else {
             match Sphere::is_nurb_surface_sphere(k, bss, 1.0) {
                 Ok(Some(s)) => sphere = Some((s.base().position().origin(), s.radius())),
-                Err(e @ SolidError::Unported { .. }) => return Err(e),
+                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                    return Err(e)
+                }
                 // no sphere, or TRUE without a sphere (its SER statuses)
                 Ok(None) | Err(_) => {}
             }

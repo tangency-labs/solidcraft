@@ -638,7 +638,7 @@ impl<'t, O: SolutionObject + 't> CciGlobalSolver<'t, O> {
                                         return Ok(needs_more_subdivision);
                                     }
                                 }
-                                Err(e) if e.is_unported() => return Err(e),
+                                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                                 Err(_) => {
                                     if dir1.dot(dir2) < EFF_ZERO {
                                         // Curves are parallel and point in opposite
@@ -1146,7 +1146,7 @@ impl Curve {
         // make sure curve has a cache and get its decomposition tree
         let cache = match make_curve_cache::<O>(k, self, opts.handle) {
             Ok(c) => c,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Err(SolidError::null_pointer(OP_GPA)),
         };
         let curve_tree = cache.tree().ok_or(SolidError::null_pointer(OP_GPA))?;
@@ -1409,7 +1409,7 @@ impl Curve {
                         let mag = pv[1].length();
                         let flip = match line_line_closest_point(o0, o1, pv[0], pv[1]) {
                             Ok((t0, t1)) => t0 * t1 < 0.0, // If opposite signs, flip.
-                            Err(e) if e.is_unported() => return Err(e),
+                            Err(e) if e.is_unported_or_cancelled() => return Err(e),
                             Err(_) => {
                                 // Curve tangent is either parallel to given vector,
                                 // or zero.

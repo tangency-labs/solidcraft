@@ -185,7 +185,7 @@ const NO_CURVE: usize = 9999;
 fn ignore_status<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -2716,7 +2716,7 @@ impl FilletBrep {
         let mut create_crv_on_3d = false;
         let is_plane = match Plane::is_nurb_surface_plane(k, &surf_net, 1.0) {
             Ok(p) => p.is_some(),
-            Err(err) if err.is_unported() => return Err(err),
+            Err(err) if err.is_unported_or_cancelled() => return Err(err),
             // an SER status inside is a TRUE return upstream
             Err(_) => true,
         };

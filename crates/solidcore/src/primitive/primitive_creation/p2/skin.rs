@@ -200,7 +200,7 @@ fn skin_with_scratch(
             }
 
             match status {
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(e) => {
                     // A partially transferred closed profile is not reinterpreted as open.
                     if partial_transfer {

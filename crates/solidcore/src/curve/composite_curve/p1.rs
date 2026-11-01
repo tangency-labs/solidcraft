@@ -1018,7 +1018,7 @@ impl CompositeCurve {
                     // tesselate curve to current dAngleDeg - skip failures
                     match bsc.tessellate(k, &bsc.natural_interval(), 0.0, angle_deg, 3) {
                         Ok(t) => bsc_poly = t.points,
-                        Err(e) if e.is_unported() => return Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
                         Err(_) => continue,
                     }
                 }

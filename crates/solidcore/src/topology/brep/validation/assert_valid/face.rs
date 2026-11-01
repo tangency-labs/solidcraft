@@ -194,7 +194,7 @@ pub(super) fn face(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, f: FaceId) -> 
                             vertex_index.as_ref(),
                         ))?;
                     }
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => {
                         let point = b.vertex(v)?.point;
                         crate::error::ignored(point_3d_classify(

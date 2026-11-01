@@ -204,6 +204,7 @@ fn interval_at<'a>(ivls: &'a mut ExtentNd, i: usize, op: &'static str) -> Result
 fn as_sm_err(e: SolidError, op: &'static str) -> SolidError {
     match e {
         SolidError::Unported { .. }
+        | SolidError::Cancelled { .. }
         | SolidError::InvalidInput { .. }
         | SolidError::PortInvariant { .. } => e,
         _ => SolidError::sm_err(op),

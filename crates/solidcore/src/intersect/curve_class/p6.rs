@@ -2064,7 +2064,7 @@ fn homogenize_boundaries<O: ClassObject>(
                 // Ordinary projection failures turn the classification into UNKNOWN.
                 match access.compute(k, &mut new_pc, point) {
                     Ok(()) => {}
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => new_pc.set_class_object(Pc::Unknown, None),
                 }
             }

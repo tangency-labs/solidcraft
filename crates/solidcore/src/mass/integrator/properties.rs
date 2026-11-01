@@ -410,6 +410,8 @@ pub fn boundary_properties(
             }
             let mut status = Err(SolidError::sm_err(OP));
             for divisor in [2.0, 8.0, 64.0, 512.0, 4096.0] {
+                k.check_cancelled(OP)?;
+                let mut eval_calls = 0u64;
                 status = OdeIntegrator::default()
                     .integrate(
                         &mut span_y,
@@ -422,6 +424,10 @@ pub fn boundary_properties(
                             scale: Some(&scale),
                         },
                         |t, _, dy| {
+                            eval_calls += 1;
+                            if (eval_calls & 63) == 1 {
+                                k.check_cancelled(OP)?;
+                            }
                             // A zero U tangent leaves the caller's derivative array
                             // untouched upstream. Preserve this particular stage's
                             // values, rather than another stage's shared scratch.
@@ -449,7 +455,10 @@ pub fn boundary_properties(
                 if status.is_ok() {
                     break;
                 }
-                if status.as_ref().is_err_and(SolidError::is_unported) {
+                if status
+                    .as_ref()
+                    .is_err_and(SolidError::is_unported_or_cancelled)
+                {
                     break;
                 }
             }
@@ -567,6 +576,7 @@ pub fn brep_properties(
     let estimated = estimated * estimated / 100.0;
     let mut total = PreciseProperties::default();
     for f in faces(b)? {
+        k.check_cancelled(OP)?;
         let mut mass = attributes.mass_vector(
             EntityRef::Face(f),
             Vec3::new(behavior.density, behavior.face_thickness, 0.0),

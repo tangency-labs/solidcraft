@@ -229,7 +229,7 @@ fn null(reason: &'static str) -> SolidError {
 fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -912,7 +912,7 @@ pub(crate) fn classify_interval_on_face(
         true,
     );
     if let Err(error) = result {
-        if error.is_unported() {
+        if error.is_unported_or_cancelled() {
             return Err(error);
         }
     }
@@ -1034,6 +1034,7 @@ fn runge_kutta_ode_integrate(
     y_scale: &[f64],
 ) -> Result<()> {
     let mut scratch = vec![0.0; y.len() + 1];
+    let mut eval_calls = 0u64;
     crate::mass::integrator::OdeIntegrator::default().integrate(
         y,
         x1,
@@ -1045,6 +1046,10 @@ fn runge_kutta_ode_integrate(
             scale: Some(y_scale),
         },
         |t, _, dy| {
+            eval_calls += 1;
+            if (eval_calls & 63) == 1 {
+                eval.kernel.check_cancelled(OP)?;
+            }
             eval.evaluate(t, &mut scratch)?;
             for (d, v) in dy.iter_mut().zip(scratch.iter().skip(1)) {
                 *d = *v;
@@ -1633,7 +1638,7 @@ pub fn points_in_face(
         // domain, which CalculateUVDomainFromUVTrimCurves sets first)
         let trim_uv_domain = match pass(k, calculate_uv_domain_from_uv_trim_curves(k, b, f))? {
             Ok(d) => d,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => b.face(f)?.uv_domain,
         };
         let srf_dom = surf.natural_uv_domain_with_nurb(k)?;

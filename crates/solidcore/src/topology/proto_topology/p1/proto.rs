@@ -297,6 +297,7 @@ fn curve_of<O: Copy>(geometry: &impl ClassGeometry<O>, o: Option<O>) -> Result<&
 fn ignore_soft<T>(r: Result<T>) -> Result<()> {
     if let Err(
         e @ (SolidError::Unported { .. }
+        | SolidError::Cancelled { .. }
         | SolidError::InvalidInput { .. }
         | SolidError::PortInvariant { .. }),
     ) = r
@@ -838,6 +839,7 @@ fn degen_face_choice(r: Result<u64>) -> Result<u64> {
         Ok(n) => Ok(n),
         Err(
             e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }),
         ) => Err(e),
@@ -1688,7 +1690,7 @@ impl<O: ClassObject> EdgeDefinition<O> {
         // See whether the split point is interior to this EdgeDef (in 3d).
         let edge_pt = match self.evaluate(k, geometry, param, true, false) {
             Ok((Some(p), _)) => p,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // fork bcc6f01: no value, no evidence
             Err(_) if k.fixes.ssi_proto_topology_statuses_pass_on => return Ok((false, param)),
             _ => Vec3::UNDEF,
@@ -3670,6 +3672,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 Ok((Some(p), _)) => p,
                 Err(
                     e @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
                     | SolidError::InvalidInput { .. }
                     | SolidError::PortInvariant { .. }),
                 ) => return Err(e),

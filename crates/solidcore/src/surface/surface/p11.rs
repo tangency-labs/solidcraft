@@ -1084,7 +1084,7 @@ impl<'t, O: SolutionObject + 't> CsGlobalSolver<'t, '_, O> {
             // interest has no answers, WR-663, tangency-labs/smlib 21dcf69)
             ivl = match ivl.intersect(&self.interval) {
                 Ok(i) => i,
-                Err(e) if k.fixes.query_statuses_pass_on && !e.is_unported() => {
+                Err(e) if k.fixes.query_statuses_pass_on && !e.is_unported_or_cancelled() => {
                     return Ok(false);
                 }
                 Err(e) => return Err(e),
@@ -2061,7 +2061,7 @@ impl Surface {
                 );
                 let cache = match cache {
                     Ok(c) => c,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => return Err(SolidError::null_pointer(OP_LIFT)),
                 };
 

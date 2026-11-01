@@ -1219,7 +1219,7 @@ impl SurfOfRevolution {
         let mut written = Point2::new(0.0, 0.0);
         match self.convert_uv_from_nurbs_to_step_into(k, nurbs_uv, &mut written) {
             Ok(p) => Ok(p),
-            Err(e) if e.is_unported() => Err(e),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
             Err(_) => Ok(written),
         }
     }
@@ -1979,7 +1979,7 @@ pub fn test_for_iso_circles(
                     (true, false)
                 }
                 Ok(PlanesIntersection::Parallel { coincident }) => (false, coincident),
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => (false, false),
             };
 

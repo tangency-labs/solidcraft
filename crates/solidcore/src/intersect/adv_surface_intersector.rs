@@ -341,7 +341,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         base.advanced = true;
 
         // global solver members, as SmSurfaceIntersector's constructor sets them
-        let mut solver = GlobalSolver::new();
+        let mut solver = GlobalSolver::new_with_kernel(k);
         solver.operation = SolverOperation::Intersect;
         solver.projected_operation = false;
         solver.solution_requested = SolutionRequested::Nodes;
@@ -391,7 +391,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
                 .get_mut(i)
                 .ok_or(SolidError::null_pointer(OP_SET_CACHES))?;
             c.get_tree(k).map_err(|e| {
-                if e.is_unported() {
+                if e.is_unported_or_cancelled() {
                     e
                 } else {
                     SolidError::null_pointer(OP_SET_CACHES)
@@ -734,7 +734,7 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             let start_tsp = self.base.alloc_point(TsectPnt::zeroed());
             self.base.curve_trace_direction = 1.0;
             match compute_point_values(k, &mut self.base, uv_pts, start_tsp) {
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => continue,
                 Ok(()) => {}
             }
@@ -932,6 +932,12 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
 
     /// The body of [`GlobalSolve::solve_branch`] (`SolveBranch`).
     fn solve_branch_at_depth(&mut self, k: &Kernel, branch: &Branch) -> Result<()> {
+        if self.solver.operation == SolverOperation::Intersect {
+            self.solver.branches_visited += 1;
+            if (self.solver.branches_visited & 31) == 1 {
+                k.check_cancelled(OP_SOLVE)?;
+            }
+        }
         self.separate_gauss_maps = true;
 
         if !self.branch_may_contain_answers(branch)? {

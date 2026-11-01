@@ -317,7 +317,7 @@ pub fn min_edge_bbox_size(k: &Kernel, b: &Brep) -> Result<(f64, Option<EdgeId>)>
                     bbox = n;
                 }
             }
-            Err(err) if err.is_unported() => return Err(err),
+            Err(err) if err.is_unported_or_cancelled() => return Err(err),
             Err(_) => {}
         }
         let diff = bbox.size();
@@ -433,7 +433,7 @@ pub fn rebuild_uv_trim_curves(k: &Kernel, b: &mut Brep) -> Result<()> {
         // rebuild UVTrimCurve
         match eu2::rebuild_uv_trim_curve(k, b, eu) {
             Ok(()) => {}
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(e) => ret = Err(e),
         }
     }
@@ -486,7 +486,7 @@ pub fn swap_uv(
         // swap the face's orientation - watch for composites (sm_SwapFaceUV is void:
         // only an unported callee stops the loop)
         if let Err(e) = p1::swap_face_uv(k, b, marks, f, mark, env) {
-            if e.is_unported() {
+            if e.is_unported_or_cancelled() {
                 res = Err(e);
                 break;
             }
@@ -1191,7 +1191,7 @@ fn add_to_tree(
     .ok_or(null_deref("B-rep cache without spatial tree"))?;
     match tree.add_to_spatial_tree(bbox, object, NodeGeomType::Default) {
         Ok(()) => return Ok(()),
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => {}
     }
     let kernel = s.kernel;
@@ -1202,7 +1202,7 @@ fn add_to_tree(
     };
     let cache = match rebuilt {
         Ok(c) => Some(c),
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => None,
     };
     if let Some(s) = slot.as_deref_mut() {
@@ -1335,7 +1335,7 @@ fn rm_from_spatial_tree(
             };
             let bbox = match curve.calculate_bounding_box(k, &domain, req, true) {
                 Ok(boxes) => boxes.normal.unwrap_or_else(Extent3d::new),
-                Err(err) if err.is_unported() => return Err(err),
+                Err(err) if err.is_unported_or_cancelled() => return Err(err),
                 Err(_) => Extent3d::new(),
             };
             rm_from_tree(slot, TreeKind::Curve, &bbox, CacheObject::Curve(e))
@@ -1372,7 +1372,7 @@ fn edge_box(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Extent3d> {
     };
     match qedge::calculate_bounding_box(k, b, e, req, false) {
         Ok(boxes) => Ok(boxes.normal.unwrap_or_else(Extent3d::new)),
-        Err(err) if err.is_unported() => Err(err),
+        Err(err) if err.is_unported_or_cancelled() => Err(err),
         Err(_) => Ok(Extent3d::new()),
     }
 }
@@ -1382,7 +1382,7 @@ fn edge_box(k: &Kernel, b: &Brep, e: EdgeId) -> Result<Extent3d> {
 fn face_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<Extent3d> {
     match qface1::calculate_bounding_box(k, b, f, false) {
         Ok(bbox) => Ok(bbox),
-        Err(err) if err.is_unported() => Err(err),
+        Err(err) if err.is_unported_or_cancelled() => Err(err),
         Err(_) => Ok(Extent3d::new()),
     }
 }
@@ -2498,7 +2498,7 @@ fn merge_curves_body<O: ClassObject + Copy>(
             // (the new faces made before a failure are kept, as upstream's list)
             let (new_faces, r) = merge_intervals(k, objects, &mut cc)?;
             if let Err(e) = r {
-                if e.is_unported() {
+                if e.is_unported_or_cancelled() {
                     return Err(e);
                 }
             }
@@ -2732,7 +2732,7 @@ pub fn mate_lamina_edge_to_surface(
         domain.expand_absolute(domain.size().length() * surface_extension_factor);
         // status ignored
         if let Err(e) = p.adjust_step_uv_domain(&domain) {
-            if e.is_unported() {
+            if e.is_unported_or_cancelled() {
                 return Err(e);
             }
         }
@@ -2894,7 +2894,7 @@ pub fn mate_lamina_edge_to_surface(
     // may snap sIvl by tol to existing knots
     match ccw_ext.trim(k, &mut ccw_trim_ivl, TrimMode::Notify) {
         Ok(()) => {}
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Ok(()),
     }
 
@@ -2911,7 +2911,7 @@ pub fn mate_lamina_edge_to_surface(
     )?)?;
     match cw_ext.trim(k, &mut cw_trim_ivl, TrimMode::Notify) {
         Ok(()) => {}
-        Err(e) if e.is_unported() => return Err(e),
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
         Err(_) => return Ok(()),
     }
 
@@ -3142,7 +3142,7 @@ fn trim_uv_trim_curve(k: &Kernel, b: &mut Brep, eu: EdgeuseId, ivl: &Extent1d) -
     // may snap sIvl by tol to existing knots
     let mut trim_ivl = *ivl;
     match curve.trim(k, &mut trim_ivl, TrimMode::Notify) {
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         // (fork 60a8a51 passes the trim's status on: `SER`)
         Err(e) if k.fixes.brep_edit_statuses_pass_on => Err(e),
         _ => Ok(()),

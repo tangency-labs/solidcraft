@@ -17,6 +17,7 @@
 //! | [`SM_ERR_NULL_POINTER`], [`SolidError::null_pointer`] | `SM_ERR_NULL_POINTER`, `NER(...)` on `NULL` |
 //! | [`SolidError::Nlib`], [`SolidError::nlib`] | NLib error flag + `NL_ERROR.eno` (`N_ErrSet`) |
 //! | [`SolidError::Unported`], [`SolidError::unported`], [`SolidError::is_unported`] | (none: call into a unit not ported yet) |
+//! | [`SolidError::Cancelled`], [`SolidError::cancelled`], [`SolidError::is_cancelled`] | (none: cooperative cancellation on [`crate::Kernel`]) |
 //! | [`SolidError::invalid_input`] | (none: out-of-range reads / null dereferences upstream) |
 //! | `ignored`, `ignore_status` (crate) | a call whose `SmStatus` upstream ignores    |
 //! | `checked_or_ignored` (crate) | per-call opt-in status policy (#483); legacy helpers unchanged |
@@ -41,11 +42,17 @@ use crate::topology::{
 pub type Result<T, E = SolidError> = core::result::Result<T, E>;
 
 /// The value of a call whose failing status upstream ignores: `Some` on success,
-/// `None` on failure; unported dependencies and preparation requests still propagate.
+/// `None` on failure; unported dependencies, cooperative cancellations, and preparation
+/// requests still propagate.
 pub(crate) fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_unported() || matches!(e, SolidError::PreparationRequired { .. }) => Err(e),
+        Err(e)
+            if e.is_unported_or_cancelled()
+                || matches!(e, SolidError::PreparationRequired { .. }) =>
+        {
+            Err(e)
+        }
         Err(_) => Ok(None),
     }
 }
@@ -53,7 +60,7 @@ pub(crate) fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
 /// The value of a call whose failing status upstream handles as an ordinary failure
 /// (e.g. a missed ray it retries): `Some` on success, `None` on an error that may stand
 /// for an upstream status. Errors with no upstream status propagate, so a port defect
-/// cannot pass for that failure: [`SolidError::Unported`],
+/// cannot pass for that failure: [`SolidError::Unported`], [`SolidError::Cancelled`],
 /// [`SolidError::PreparationRequired`], [`SolidError::PortInvariant`] (an owner, handle
 /// or identity the port could not resolve) and [`SolidError::NotFound`] (a stale typed
 /// id, where upstream follows a pointer).
@@ -62,6 +69,7 @@ pub(crate) fn native_failure<T>(r: Result<T>) -> Result<Option<T>> {
         Ok(v) => Ok(Some(v)),
         Err(
             e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
             | SolidError::PreparationRequired { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
@@ -71,7 +79,8 @@ pub(crate) fn native_failure<T>(r: Result<T>) -> Result<Option<T>> {
 }
 
 /// The status of a call upstream ignores: `Ok` for any result but
-/// [`SolidError::Unported`] or [`SolidError::PreparationRequired`].
+/// [`SolidError::Unported`], [`SolidError::Cancelled`], or
+/// [`SolidError::PreparationRequired`].
 pub(crate) fn ignore_status<T>(r: Result<T>) -> Result<()> {
     ignored(r).map(|_| ())
 }
@@ -92,7 +101,7 @@ pub(crate) fn checked_or_ignored<T>(r: Result<T>, checked: bool) -> Result<Optio
 /// `ignore_status(passed_on(r, false)?)` is `ignore_status(r)`.
 pub(crate) fn passed_on<T>(r: Result<T>, pass_on: bool) -> Result<Result<T>> {
     match r {
-        Err(e) if pass_on => Err(e),
+        Err(e) if pass_on || e.is_unported_or_cancelled() => Err(e),
         r => Ok(r),
     }
 }
@@ -111,10 +120,11 @@ pub(crate) fn ignored_or_pass_on<T>(r: Result<T>, pass_on: bool) -> Result<Optio
 
 /// A status a port helper hands back in its value (`None` for `SM_SUCCESS`) where SMLib
 /// drops it and the fork passes it on (`SER(...)`): returned as the error with
-/// `pass_on`, dropped without.
+/// `pass_on`, dropped without (except [`SolidError::Unported`] and
+/// [`SolidError::Cancelled`], which always propagate).
 pub(crate) fn status_passed_on(status: Option<SolidError>, pass_on: bool) -> Result<()> {
     match status {
-        Some(e) if pass_on => Err(e),
+        Some(e) if pass_on || e.is_unported_or_cancelled() => Err(e),
         _ => Ok(()),
     }
 }
@@ -258,6 +268,16 @@ pub enum SolidError {
     #[error("{operation}: geometry preparation required")]
     PreparationRequired {
         /// The read-only operation that must be resumed after preparation.
+        operation: &'static str,
+    },
+
+    /// The caller's cooperative cancellation check on [`crate::Kernel`] fired.
+    ///
+    /// Propagates past status-ignoring fallbacks alongside [`SolidError::Unported`], so a
+    /// cancelled call never returns a partial or different geometric result.
+    #[error("operation cancelled in {operation}")]
+    Cancelled {
+        /// Operation `path::to::fn` that observed cancellation.
         operation: &'static str,
     },
 
@@ -473,11 +493,12 @@ impl SolidError {
     }
 
     /// Maps the error of a failed NLib call inside an `Sm*` method to `SM_ERR` (upstream
-    /// `if (NL_YES == N_...) SER(SM_ERR)`), letting [`SolidError::Unported`] through.
+    /// `if (NL_YES == N_...) SER(SM_ERR)`), letting [`SolidError::Unported`] and
+    /// [`SolidError::Cancelled`] through.
     /// Use as `.map_err(SolidError::nl_ser(OP))`.
     pub(crate) fn nl_ser(operation: &'static str) -> impl Fn(Self) -> Self {
         move |e| match e {
-            Self::Unported { .. } | Self::PreparationRequired { .. } => e,
+            Self::Unported { .. } | Self::Cancelled { .. } | Self::PreparationRequired { .. } => e,
             _ => Self::sm_err(operation),
         }
     }
@@ -521,8 +542,28 @@ impl SolidError {
             | Self::Unsupported { .. }
             | Self::PortInvariant { .. }
             | Self::PreparationRequired { .. }
+            | Self::Cancelled { .. }
             | Self::Unported { .. } => None,
         }
+    }
+
+    /// [`SolidError::Cancelled`]: cooperative cancellation observed in `operation`.
+    #[must_use]
+    pub const fn cancelled(operation: &'static str) -> Self {
+        Self::Cancelled { operation }
+    }
+
+    /// True when this error is [`SolidError::Cancelled`].
+    #[must_use]
+    pub const fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Cancelled { .. })
+    }
+
+    /// True when this error must never be swallowed or remapped by an upstream
+    /// status-ignoring fallback ([`SolidError::Unported`] or [`SolidError::Cancelled`]).
+    #[must_use]
+    pub(crate) const fn is_unported_or_cancelled(&self) -> bool {
+        matches!(self, Self::Unported { .. } | Self::Cancelled { .. })
     }
 
     /// [`SolidError::Unported`]: a call into `upstream` (a C++ symbol) of `unit`,
@@ -572,7 +613,8 @@ impl SolidError {
             | Self::PortInvariant { operation, .. }
             | Self::Upstream { operation, .. }
             | Self::Nlib { operation, .. }
-            | Self::PreparationRequired { operation } => operation,
+            | Self::PreparationRequired { operation }
+            | Self::Cancelled { operation } => operation,
             Self::Unported { upstream, .. } => upstream,
         }
     }
@@ -589,6 +631,7 @@ impl SolidError {
             | Self::PortInvariant { .. }
             | Self::Nlib { .. }
             | Self::Unported { .. }
+            | Self::Cancelled { .. }
             | Self::PreparationRequired { .. } => None,
         }
     }
@@ -747,5 +790,21 @@ mod tests {
         );
         assert_eq!(u.operation(), "SmCurve::Evaluate");
         assert_eq!(u.entity(), None);
+
+        let c = SolidError::cancelled("boolean::merge::p4::manifold_boolean");
+        assert!(c.is_cancelled());
+        assert!(!c.is_unported());
+        assert!(c.is_unported_or_cancelled());
+        assert_eq!(c.sm_status(), None);
+        assert_eq!(c.operation(), "boolean::merge::p4::manifold_boolean");
+        assert_eq!(c.entity(), None);
+        assert_eq!(
+            c.to_string(),
+            "operation cancelled in boolean::merge::p4::manifold_boolean"
+        );
+        assert_eq!(ignored::<()>(Err(c.clone())), Err(c.clone()));
+        assert_eq!(ignore_status::<()>(Err(c.clone())), Err(c.clone()));
+        assert_eq!(native_failure::<()>(Err(c.clone())), Err(c.clone()));
+        assert_eq!(SolidError::nl_ser("native")(c.clone()), c);
     }
 }

@@ -182,7 +182,7 @@ fn rail_solve_options(curve: &Curve) -> GlobalPointSolveOptions<'static, CurveOb
 /// Ignores a status upstream does not check, but never an [`SolidError::Unported`].
 fn ignore_non_unported<T>(r: Result<T>) -> Result<()> {
     match r {
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         _ => Ok(()),
     }
 }
@@ -721,7 +721,7 @@ impl FilletBrep {
                 None,
             );
             let curves = match result {
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Ok(SrfSrfCurves {
                     curve_3d: Some(c),
                     uv_curve1,
@@ -1379,7 +1379,7 @@ impl FilletBrep {
                 }
             };
             match intersection {
-                Err(err) if err.is_unported() => return Err(err),
+                Err(err) if err.is_unported_or_cancelled() => return Err(err),
                 Ok(c) if c.curve_3d.is_some() => new_curves = Some(c),
                 _ => {
                     self.fillet_edge_mut(e)?
@@ -2429,7 +2429,7 @@ impl FilletBrep {
                                     t = d.parameter;
                                 }
                             }
-                            Err(e) if e.is_unported() => return Err(e),
+                            Err(e) if e.is_unported_or_cancelled() => return Err(e),
                             // TrimRailCurve(): Suffered a SmCurve::DropPoint() failure
                             Err(_) => success = false,
                         }
@@ -2803,7 +2803,7 @@ impl FilletBrep {
                                 SolverOperation::Minimize,
                             ) {
                                 Ok(d) if d.success => Ok(Some(d.parameter)),
-                                Err(e) if e.is_unported() => Err(e),
+                                Err(e) if e.is_unported_or_cancelled() => Err(e),
                                 _ => Ok(None),
                             }
                         };

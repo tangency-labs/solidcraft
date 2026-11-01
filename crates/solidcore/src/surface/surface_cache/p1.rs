@@ -793,7 +793,7 @@ impl PatchBoundaryBoundingPlanes {
             SurfaceKind::Plane(p) => p.base_for_query(),
             SurfaceKind::SurfOfExtrusion(_) => match surface.extrusion_base_with_nurb(k) {
                 Ok(base) => base,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => std::borrow::Cow::Borrowed(
                     bspline_of(surface).ok_or(SolidError::null_pointer(OP_PLANES))?,
                 ),
@@ -2466,7 +2466,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     pub fn polar_box(&mut self, k: &Kernel, node: NodeId) -> Result<PolarBox> {
         if self.aux(node)?.polar_box.state() == PolarBoxState::Uninitialized {
             match self.build_polar_box(k, node) {
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) | Ok(()) => {}
             }
         }
@@ -2544,7 +2544,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     pub fn polar_box_unstored(&self, k: &Kernel, node: NodeId) -> Result<PolarBox> {
         if self.aux(node)?.polar_box.state() == PolarBoxState::Uninitialized {
             match self.build_polar_box_unstored(k, node) {
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => {}
                 Ok(b) => return Ok(b),
             }
@@ -2904,6 +2904,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
 
         // while unMarked Nodes remain with classification SM_NC_UNKNOWN
         while let Some(curr_node) = curr {
+            k.check_cancelled(OP_MARK)?;
             let curr_fields = self
                 .surface_fields(curr_node, OP_MARK)?
                 .ok_or_else(|| invalid(OP_MARK, "node has no surface data"))?;

@@ -270,13 +270,13 @@ impl<'s> SurfaceSilhouette<'s> {
         let surface = self.surface();
         let normal = match evaluate_normal(k, surface, *uv) {
             Ok(n) => n,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(true),
         };
         let vec = if self.perspective {
             let pnt = match surface.evaluate_point(k, *uv) {
                 Ok(p) => p,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => return Ok(true),
             };
             (pnt - self.eye).unitize_or_z()
@@ -294,13 +294,13 @@ impl<'s> SurfaceSilhouette<'s> {
         if let Some(found_uv) = found {
             let normal2 = match evaluate_normal(k, surface, found_uv) {
                 Ok(n) => n,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => return Ok(true),
             };
             if self.perspective {
                 let pnt = match surface.evaluate_point(k, found_uv) {
                     Ok(p) => p,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => return Ok(true),
                 };
                 let vec2 = pnt - self.eye;
@@ -476,7 +476,7 @@ impl<'s> SurfaceSilhouette<'s> {
                     let mut ls = LocalSolve1d::with_interval(ivl, false);
                     ls.set_failed_guess_no_sign_change(k.fixes.oscillating_skips_failed_guesses);
                     match ls.solve_it(&mut efo, 0.5, 1.0e-8) {
-                        Err(e) if e.is_unported() => return Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
                         Err(_) => {}
                         Ok(outcome) => {
                             // Found an answer in the solver -- use that new parameter
@@ -570,7 +570,7 @@ impl<'s> SurfaceSilhouette<'s> {
                     }
 
                     match ls.solve_it(&mut efo, guess_t, 1.0e-8) {
-                        Err(e) if e.is_unported() => return Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
                         Err(_) => {}
                         Ok(outcome) => {
                             if ls.found_accuracy().abs() > EFF_ZERO_SQRT {
@@ -956,7 +956,7 @@ impl<'s> SurfaceSilhouette<'s> {
         }
         let (polar_box, pseudo_box) = match patch() {
             Ok(Some(b)) => b,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // NER: SM_ERR_NULL_POINTER reads as TRUE, as does any failure status
             Ok(None) | Err(_) => return Ok(true),
         };

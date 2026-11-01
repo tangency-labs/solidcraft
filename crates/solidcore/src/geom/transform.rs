@@ -687,7 +687,7 @@ impl Transform {
                         // EvaluatePoint (status ignored: a fresh, undefined point)
                         let xyz = match evaluate_point(uvw) {
                             Ok(p) => p,
-                            Err(e) if e.is_unported() => return Err(e),
+                            Err(e) if e.is_unported_or_cancelled() => return Err(e),
                             Err(_) => Vec3::UNDEF,
                         };
                         if let Some(b) = proj_box.as_deref_mut() {

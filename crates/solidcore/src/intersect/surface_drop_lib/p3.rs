@@ -953,7 +953,7 @@ impl Surface {
                         start.uv_pd[0] = d.uv;
                         d.converged
                     }
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => false,
                 };
 
@@ -1141,7 +1141,7 @@ impl Surface {
             if curve_cache.is_none() {
                 curve_cache = Some(match make_curve_cache::<()>(k, curve, None) {
                     Ok(c) => c,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => return Err(SolidError::null_pointer(OP)),
                 });
             }
@@ -1227,7 +1227,7 @@ impl Surface {
                     &mut end,
                 ) {
                     Ok(c) => c,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(e) => status_of(&e),
                 };
                 if ret_status == SM_SUCCESS {
@@ -1410,7 +1410,7 @@ impl Surface {
                             &mut end,
                         ) {
                             Ok(c) => c,
-                            Err(e) if e.is_unported() => return Err(e),
+                            Err(e) if e.is_unported_or_cancelled() => return Err(e),
                             Err(e) => status_of(&e),
                         };
                         if ret_status == SM_SUCCESS {

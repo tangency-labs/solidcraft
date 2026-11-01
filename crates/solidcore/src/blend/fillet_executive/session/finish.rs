@@ -89,7 +89,7 @@ fn failure() -> SolidError {
 fn ignore<T>(result: Result<T>) -> Result<Option<T>> {
     match result {
         Ok(value) => Ok(Some(value)),
-        Err(error) if error.is_unported() => Err(error),
+        Err(error) if error.is_unported_or_cancelled() => Err(error),
         Err(_) => Ok(None),
     }
 }
@@ -286,7 +286,7 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
                 max_vertex_gap: done.max_vertex_gap,
                 max_edge_gap: done.max_edge_gap,
             }),
-            Err(error) if error.is_unported() => Err(error),
+            Err(error) if error.is_unported_or_cancelled() => Err(error),
             Err(error) => Ok(StitchAttempt {
                 status: Some(error),
                 stitched: 0,

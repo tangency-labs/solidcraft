@@ -178,7 +178,7 @@ fn unlink(list: &mut Vec<TsectId>, id: TsectId) {
 fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
     }
 }
@@ -261,7 +261,7 @@ impl SurfaceIntersector<'_> {
         // get surface caches (NER: no cache is SM_ERR_NULL_POINTER)
         let get = |i: SrfIndex| match surface_cache::<SrfIndex>(k, self.surface(i), Some(i)) {
             Ok(c) => Ok(c),
-            Err(e) if e.is_unported() => Err(e),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
             Err(_) => Err(SolidError::Upstream {
                 operation: OP_FBSP,
                 code: SM_ERR_NULL_POINTER,
@@ -943,7 +943,7 @@ impl SurfaceIntersector<'_> {
                 do_boundary_testing,
             ) {
                 Ok(r) => Ok(r),
-                Err(e) if e.is_unported() => Err(e),
+                Err(e) if e.is_unported_or_cancelled() => Err(e),
                 Err(_) => Ok(None),
             }
         };

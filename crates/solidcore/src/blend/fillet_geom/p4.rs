@@ -1044,7 +1044,7 @@ pub fn create_uv_curve_on_face(
                         out.uv_curve1 = r.uv_curve1.filter(|c| as_b_spline(c).is_some());
                         return Ok(out);
                     }
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => {}
                 }
 
@@ -1241,7 +1241,7 @@ impl FilletBrep {
             Ok(SrfSrfCurves {
                 curve_3d: Some(c), ..
             }) => c,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             _ => {
                 self.fillet_vertex_mut(fv)?
                     .set_status(FilStatus::SurfIntFailure);
@@ -1380,7 +1380,7 @@ impl FilletBrep {
                     uv_curve1,
                     uv_curve2,
                 }) => (c, uv_curve1, uv_curve2),
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 _ => {
                     self.fillet_vertex_mut(v)?
                         .set_status(FilStatus::SurfIntFailure);
@@ -1671,7 +1671,7 @@ impl FilletBrep {
                 uv_curve1,
                 uv_curve2,
             }) => (c, uv_curve1, uv_curve2),
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             _ => {
                 self.fillet_vertex_mut(v)?
                     .set_status(FilStatus::SurfIntFailure);
@@ -2436,7 +2436,7 @@ impl FilletBrep {
                                 .clear_fillet_brep_edges(&deleted_edges);
                             context.update_topology(self, target, marker, face)?;
                             if let Err(error) = merged {
-                                if error.is_unported() {
+                                if error.is_unported_or_cancelled() {
                                     return Err(error);
                                 }
                                 if let Some(edgeuse) = solver.edgeuse(0)? {

@@ -253,7 +253,7 @@ pub(super) fn test_and_convert_big_rad_fillet(
             pseudo.calc_rail_int_rail_with_solver_ops(k, sv_sq, lookup, live, target),
             k.fixes.fillet_statuses_pass_on,
         )? {
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             _ => {}
         }
     }

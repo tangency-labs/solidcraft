@@ -190,7 +190,7 @@ pub fn create_skin_primitive(
                 &mut transferred,
             );
             match status {
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 // Ownership is indeterminate for copies without a report entry.
                 _ if transferred.len() != copy_count => {
                     return Err(SolidError::sm_err(OP_SKIN_PRIMITIVE));

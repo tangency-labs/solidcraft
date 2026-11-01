@@ -504,7 +504,7 @@ impl<O: ClassObject> CurveClassification<O> {
             Some(Side::Source(source.natural_interval())),
         ) {
             Ok(c) => c,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Err(SolidError::null_pointer(OP)),
         };
         let tree = cache.tree().ok_or(SolidError::null_pointer(OP))?;

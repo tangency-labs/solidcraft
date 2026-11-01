@@ -167,7 +167,7 @@ fn check_edge_curve_line(curve: Option<&Curve>, interval: &Extent1d, eps: f64) -
     let sample_points = 5;
     match bsp.is_segment_line(interval, sample_points, eps) {
         Ok(seg) => Ok(seg.is_line),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         // SER inside an SmBoolean function: the nonzero status reads as TRUE
         Err(_) => Ok(true),
     }

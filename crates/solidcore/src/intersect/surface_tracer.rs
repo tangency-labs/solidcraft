@@ -1190,7 +1190,7 @@ pub fn trace_curve_base<'s, T: SurfaceTrace<'s> + ?Sized>(
         *t.tracer_mut().point_mut(start)? = sp;
         match r {
             Ok(()) => {}
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Ok(()), // Bad start point just go to next one
         }
 
@@ -1281,7 +1281,7 @@ pub fn trace_curve_base<'s, T: SurfaceTrace<'s> + ?Sized>(
             // Given current TracePnt and new UVStepSize, compute and classify NextPoint
             match t.compute_next_point(k, tsp, step_size, &mut next_pnt) {
                 Ok(r) => np = r,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => {
                     // the outputs initialised before the failure stay set
                     np = NextPoint {
@@ -1900,7 +1900,7 @@ where
     // Find pairs of tree nodes containing possible solutions from which StartPoints can be found
     let mut solutions = SolutionArray::new();
     {
-        let mut solver = GlobalSolver::with_tree(tree, 2);
+        let mut solver = GlobalSolver::with_tree_and_kernel(k, tree, 2);
         solver.set_solver_operation(SolverOperation::Intersect);
         solver.set_solution_requested(SolutionRequested::Nodes);
         solver.set_best_answer_so_far_sq(0.0);
@@ -1965,7 +1965,7 @@ where
             // get curve->Cache (skip unexpected curves without curve caches)
             let cc = match make_curve_cache::<()>(k, curve, None) {
                 Ok(cc) => cc,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => continue,
             };
             let Some(ctree) = cc.tree() else { continue };
@@ -1996,7 +1996,7 @@ where
         // Now test start point to see if it drops to any of the existing 3D curves.
         let surf_pnt = match t.tracer().surface.evaluate_point(k, found_uv) {
             Ok(p) => p,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => continue,
         };
         if t.is_point_on_curve(k, surf_pnt, &out.curves_3d)? {
@@ -2009,7 +2009,7 @@ where
         start.point_type = TracePointType::Normal;
         match t.compute_point_values(k, found_uv, &mut start, None, None) {
             Ok(()) => {}
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => continue,
         }
         let start_id = t.tracer_mut().new_point(start);
@@ -2018,7 +2018,7 @@ where
         t.tracer_mut().curve_trace_direction = 1.0; // Forward
         match t.trace_curve(k, start_id, &out.curves_3d) {
             Ok(()) => {}
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => continue,
         }
 
@@ -2027,7 +2027,7 @@ where
         if !t.tracer().curve_is_closed && start_type != TracePointType::Singularity {
             match t.reverse_curve_direction() {
                 Ok(()) => {}
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => {
                     // Note, if this failed, we want to call FlushCurve()
                     ignore_status(flush_curve(k, t.tracer_mut(), out, None))?;
@@ -2130,7 +2130,7 @@ where
                 // output curve
                 flush_curve(k, t.tracer_mut(), &mut out, None)?;
             }
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => {}
         }
     }
@@ -2156,7 +2156,7 @@ pub fn tracer_surface_cache<O: Copy + PartialEq>(
 ) -> Result<SurfaceCache<O>> {
     let mut cache = surface_cache(k, t.surface, None)?;
     match cache.get_tree(k) {
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         _ => Ok(cache),
     }
 }

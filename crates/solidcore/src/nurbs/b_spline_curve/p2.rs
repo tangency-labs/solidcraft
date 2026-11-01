@@ -1430,7 +1430,9 @@ impl BSplineCurve {
         // `query_statuses_pass_on` a curve without one is not shown degenerate,
         // tangency-labs/smlib 8843967)
         let cur = match self.nurb_ref() {
-            Err(e) if k.fixes.query_statuses_pass_on && !e.is_unported() => return Ok(false),
+            Err(e) if k.fixes.query_statuses_pass_on && !e.is_unported_or_cancelled() => {
+                return Ok(false)
+            }
             r => r?,
         };
 
@@ -1806,7 +1808,9 @@ impl BSplineCurve {
                 if !ivl.contains_value(param, tol) {
                     match self.create_extended_curve(param, ContinuityType::CInfinity, true) {
                         Ok(Some(ext)) if ext.nurb.is_some() => self.nurb = ext.nurb,
-                        Err(e @ SolidError::Unported { .. }) => return Err(e),
+                        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                            return Err(e)
+                        }
                         _ => {}
                     }
                 }

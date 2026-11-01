@@ -686,6 +686,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
         let mut splits: u64 = 0;
         // 2. for every unique curve parameter span
         for (i, seg) in beziers.iter().enumerate() {
+            k.check_cancelled(OP_TESS)?;
             let mut bez = seg.clone();
             let mut span_ivl = Extent1d::from_min_max(
                 bez.knots().first().copied().unwrap_or(0.0),
@@ -782,6 +783,9 @@ impl<O: Copy + PartialEq> CurveCache<O> {
             let mut first_in_seg = true;
             while let Some(top) = stack.pop() {
                 splits += 1;
+                if (splits & 15) == 1 {
+                    k.check_cancelled(OP_TESS)?;
+                }
                 if splits > MAX_TESS_SPLITS {
                     return Err(invalid(
                         OP_TESS,

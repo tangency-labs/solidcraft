@@ -95,7 +95,7 @@ fn drop_distance(k: &Kernel, c: &Curve, x: Vec3, tol: f64) -> Result<Option<f64>
         SolverOperation::Minimize,
     ) {
         Ok(d) if d.success => Ok(Some(d.distance)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Ok(_) | Err(_) => Ok(None),
     }
 }
@@ -105,7 +105,7 @@ fn drop_distance(k: &Kernel, c: &Curve, x: Vec3, tol: f64) -> Result<Option<f64>
 fn curve_point(k: &Kernel, c: &Curve, t: f64) -> Result<Option<Point3>> {
     match c.evaluate_point(k, t) {
         Ok(p) => Ok(Some(p)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
     }
 }

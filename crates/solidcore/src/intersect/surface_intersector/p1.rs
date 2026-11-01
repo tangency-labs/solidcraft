@@ -674,7 +674,7 @@ fn bad_id() -> SolidError {
 fn or_keep<T>(r: Result<T>, fallback: T) -> Result<T> {
     match r {
         Ok(v) => Ok(v),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(fallback),
     }
 }

@@ -873,7 +873,7 @@ pub fn compute_loop_orientation(
             uv_bounds.as_deref_mut(),
         ) {
             Ok(o) if o != OrientType::Unknown => return Ok(o),
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // a failure or an unknown orientation falls through to the 3D walk
             _ => {}
         }
@@ -1654,7 +1654,7 @@ pub fn is_degenerate(
             // failure case - quit and return False as the do the least harm answer
             let found = match found {
                 Ok(c) => c,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => return Ok(false),
             };
 
@@ -2385,7 +2385,7 @@ pub fn face_intersect_breps_cached(
                 }
                 let mut new_crv = match edge_crv.copy(k) {
                     Ok(c) => c,
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => {
                         have_curves = false;
                         break 'faces;

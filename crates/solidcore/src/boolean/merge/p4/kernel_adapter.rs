@@ -66,6 +66,7 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         upstream_ub_passed: Vec::new(),
         memoize_curve_caches: k.memoize_curve_caches,
         fixes: k.fixes,
+        cancel: k.cancel.clone(),
         notify_records: crate::topology::topology::NotifyRecords::new(),
     }
 }

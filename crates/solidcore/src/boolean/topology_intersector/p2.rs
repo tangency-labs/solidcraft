@@ -1301,12 +1301,14 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 // `SetRelationships` (which only reads the proto topology) and the same
                 // manager teardown, so UB-175 is decided here as below
                 if let Some(mut mgr) = self.proto_topo_mgr.take() {
-                    if teardown_reads_freed(&mgr) {
+                    if !e.is_cancelled() && teardown_reads_freed(&mgr) {
                         k.note_upstream_ub("UB-175");
                     }
                     let _ = mgr.destroy();
                 }
-                k.note_upstream_ub("UB-242");
+                if !e.is_cancelled() {
+                    k.note_upstream_ub("UB-242");
+                }
                 return Err(e);
             }
         }
@@ -1397,22 +1399,26 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // Opt-in (WR-527, #1526/#1527): each face's bounding box, for skipping the pairs
         // below that lie apart. A box that cannot be computed, or holds nothing, rules
         // nothing out.
-        let face_boxes = |faces: &[O]| -> Vec<Extent3d> {
-            faces
-                .iter()
-                .map(|&f| match brep.face_calculate_bounding_box(k, f, false) {
+        let face_boxes = |faces: &[O]| -> Result<Vec<Extent3d>> {
+            let mut out = Vec::with_capacity(faces.len());
+            for &f in faces {
+                k.check_cancelled(OP_INTERSECT_TOPOLOGY)?;
+                let b = match brep.face_calculate_bounding_box(k, f, false) {
                     Ok(b) if !b.has_negative_volume() => b,
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     _ => {
                         let mut b = Extent3d::new();
                         b.set_unbounded();
                         b
                     }
-                })
-                .collect()
+                };
+                out.push(b);
+            }
+            Ok(out)
         };
         let skip_apart = k.fixes.boolean_skips_faces_apart;
         let (boxes1, boxes2) = if skip_apart {
-            (face_boxes(&faces1), face_boxes(&faces2))
+            (face_boxes(&faces1)?, face_boxes(&faces2)?)
         } else {
             (Vec::new(), Vec::new())
         };
@@ -1425,11 +1431,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // Finally, the Face-Face intersections.
         for (ii, &f1) in faces1.iter().enumerate() {
+            k.check_cancelled(OP_INTERSECT_TOPOLOGY)?;
             let pairs: Vec<usize> = match (&pair_search, boxes1.get(ii)) {
                 (Some(search), Some(box1)) => search.boxes_in_box(box1, self.this_approx_tol_3d()),
                 _ => (0..faces2.len()).collect(),
             };
             for jj in pairs {
+                k.check_cancelled(OP_INTERSECT_TOPOLOGY)?;
                 let Some(&f2) = faces2.get(jj) else {
                     continue;
                 };
@@ -1610,6 +1618,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // (the list is re-read after each split: splitting appends proto edges)
         let mut ii = 0usize;
         while ii < mgr.proto_edges().len() {
+            k.check_cancelled(OP_INTERSECT_TOPOLOGY)?;
             let pe1 = *mgr
                 .proto_edges()
                 .get(ii)
@@ -1986,6 +1995,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         let mut ii = 0usize;
         while ii < edges1.len() {
+            k.check_cancelled("boolean::topology_intersector::p2::edge_edge_intersect")?;
             let Some(e1) = edges1.get(ii).copied().flatten() else {
                 ii += 1;
                 continue;
@@ -2036,6 +2046,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     Ok(s) => s,
                     Err(
                         e @ (SolidError::Unported { .. }
+                        | SolidError::Cancelled { .. }
                         | SolidError::InvalidInput { .. }
                         | SolidError::PortInvariant { .. }),
                     ) => return Err(e),
@@ -2370,6 +2381,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                             Ok(()) => out.imprinted_edges.push(e),
                             Err(
                                 err @ (SolidError::Unported { .. }
+                                | SolidError::Cancelled { .. }
                                 | SolidError::InvalidInput { .. }
                                 | SolidError::PortInvariant { .. }),
                             ) => return Err(err),

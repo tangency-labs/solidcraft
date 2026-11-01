@@ -871,7 +871,7 @@ impl CrvOnSurf {
 
         // If the surface can't handle this many derivatives (default bNonZeroTangents)
         while let Err(e) = &srf {
-            if e.is_unported() || n_eval == 0 {
+            if e.is_unported_or_cancelled() || n_eval == 0 {
                 break;
             }
             n_eval -= 1;
@@ -1096,7 +1096,7 @@ impl CrvOnSurf {
             &self.surface,
         ) {
             Ok(classes) => classes,
-            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
             Err(e) => {
                 let status = Err(e);
                 return Ok(KnotsWithStatus {
@@ -1483,7 +1483,7 @@ impl CrvOnSurf {
     ) -> Result<BoundingBoxes> {
         match self.get_or_create_bs_approx_as(k, APPROX_TOL_3D, None, None, derived) {
             Ok(bs) => bs.calculate_bounding_box(interval, req),
-            Err(e) if e.is_unported() => Err(e),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
             Err(_) => {
                 calculate_bounding_box_base(k, &self.as_curve(derived), interval, req, expand)
             }
@@ -1595,7 +1595,7 @@ impl CrvOnSurf {
 
         let bs = match self.get_or_create_bs_approx_as(k, APPROX_TOL_3D, None, None, derived) {
             Ok(bs) => bs,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => {
                 return self.drop_point_base_preserving_breaks(
                     k,

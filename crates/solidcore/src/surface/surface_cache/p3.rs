@@ -869,6 +869,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 "subdivision deeper than MAX_SUBDIVISION_DEPTH",
             ));
         }
+        k.check_cancelled(OP_TOL)?;
 
         // test to see if subdivision is required and pick a split direction
         let test = tester(self, k, node)?;
@@ -1297,7 +1298,7 @@ fn zeroed_like(like: &NurbSurface) -> Result<NurbSurface> {
 fn ignore<T>(r: Result<T>) -> Result<Option<T>> {
     match r {
         Ok(v) => Ok(Some(v)),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(None),
     }
 }

@@ -131,7 +131,7 @@ impl SurfPtGlobalSolver<'_> {
                 suspicious = g.suspicious;
                 true
             }
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => false,
         };
 
@@ -299,7 +299,7 @@ impl SurfPtGlobalSolver<'_> {
                 }
                 suspicious
             }
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             // (the control net could not be read: only the rational warning is set)
             Err(_) => bspl.is_rational(),
         };
@@ -373,7 +373,7 @@ impl SurfPtGlobalSolver<'_> {
                 uv_guess_poly = g;
                 true
             }
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => false,
         };
 
@@ -439,7 +439,7 @@ impl SurfPtGlobalSolver<'_> {
         if let Some((tri_uv, tri_u, tri_v)) = triangle {
             let on_surface = |guess: Point2| match self.calc_func_val(k, guess) {
                 Ok(v) => Ok(Some(v)),
-                Err(e) if e.is_unported() => Err(e),
+                Err(e) if e.is_unported_or_cancelled() => Err(e),
                 Err(_) => Ok(None),
             };
             if let (Some(tri), Some(cpt)) = (on_surface(tri_uv)?, on_surface(uv)?) {
@@ -466,7 +466,7 @@ impl SurfPtGlobalSolver<'_> {
     fn leg_or_none(&self, idx_u: usize, idx_v: usize) -> Result<Option<Point2>> {
         match self.refine_guess_polygon_leg(idx_u, idx_v) {
             Ok(g) => Ok(Some(g)),
-            Err(e) if e.is_unported() => Err(e),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
             Err(_) => Ok(None),
         }
     }
@@ -631,7 +631,7 @@ impl SurfPtGlobalSolver<'_> {
     fn seams_status_ignored(&mut self, k: &Kernel, uv: Point2) -> Result<Point2> {
         match self.check_guess_for_seams(k, uv) {
             Ok(u) => Ok(u),
-            Err(e) if e.is_unported() => Err(e),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
             Err(_) => Ok(uv),
         }
     }
@@ -1019,7 +1019,7 @@ impl SurfPtGlobalSolver<'_> {
 
         let rough = match self.find_rough_guess(k) {
             Ok(r) => r,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => return Err(SolidError::sm_err(OP_SOLVE)),
         };
         let (best_idx_u, best_idx_v) = (rough.best_idx_u, rough.best_idx_v);
@@ -1042,7 +1042,7 @@ impl SurfPtGlobalSolver<'_> {
             // Refine the guess (status ignored, as upstream).
             let mut uv_guess = rough.uv;
             if let Err(e) = self.refine_guess(k, &mut uv_guess) {
-                if e.is_unported() {
+                if e.is_unported_or_cancelled() {
                     return Err(e);
                 }
             }
@@ -1071,7 +1071,7 @@ impl SurfPtGlobalSolver<'_> {
                     sol = s;
                     stat_ok = true;
                 }
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => stat_ok = false,
             }
 
@@ -1123,7 +1123,7 @@ impl SurfPtGlobalSolver<'_> {
                         // guess did not move and the first local solve failed.
                         stat_ok = true;
                     }
-                    Err(error) if error.is_unported() => return Err(error),
+                    Err(error) if error.is_unported_or_cancelled() => return Err(error),
                     Err(_) => stat_ok = false,
                 }
 
@@ -1147,7 +1147,7 @@ impl SurfPtGlobalSolver<'_> {
                                     .set_uv(Point2::new(sol.start.param(0)?, sol.start.param(1)?));
                             }
                         }
-                        Err(e) if e.is_unported() => return Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => return Err(e),
                         Err(_) => stat_ok = false,
                     }
                 }
@@ -1308,7 +1308,7 @@ fn out_of_bounds_base(surface: &Surface) -> Option<&BSplineSurface> {
 fn eval_point(k: &Kernel, surface: &Surface, uv: Point2, prev: Point3) -> Result<Point3> {
     match surface.evaluate_point(k, uv) {
         Ok(p) => Ok(p),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(prev),
     }
 }
@@ -1632,7 +1632,7 @@ impl SurfPtSolveStepper<'_> {
                     self.set_uv(inverted.uv);
                     return Ok(TerminationReason::FoundAnswerConverged); // end iteration.
                 }
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => {}
             }
         }

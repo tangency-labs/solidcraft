@@ -4115,7 +4115,7 @@ impl SolverLoadingAccess<FilletObject> for SessionObjects<'_> {
                 Some(crate::topology::edge::tolerance(self.target, id)?),
             )
             .map_err(|error| {
-                if error.is_unported() {
+                if error.is_unported_or_cancelled() {
                     error
                 } else {
                     SolidError::null_pointer(LOADER)

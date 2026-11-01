@@ -109,7 +109,7 @@ pub(super) fn offset_surface_assert_valid(
         ),
     };
     if let Err(e) = status {
-        if e.is_unported() {
+        if e.is_unported_or_cancelled() {
             return Err(e);
         }
     }

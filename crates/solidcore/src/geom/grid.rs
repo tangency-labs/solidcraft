@@ -194,7 +194,7 @@ impl<O: Copy> SurfaceGridElement<O> {
         // derivatives, which is what `non_zero_tangents: false` gives.
         let eval = match surface.evaluate(k, uv_mid, 1, 1, eval_flags(true)) {
             Ok(eval) => eval,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => surface.evaluate(k, uv_mid, 1, 1, eval_flags(false))?,
         };
         let at = |i: usize, j: usize| -> Result<Vec3> {
@@ -214,7 +214,7 @@ impl<O: Copy> SurfaceGridElement<O> {
             // `m_sMidNormal` is whatever the call left in it; see findings.md)
             mid_normal = match surface.evaluate_normal(k, uv_mid, Side::Left, Side::Left) {
                 Ok(n) => n,
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => mid_normal,
             };
         }

@@ -401,7 +401,9 @@ impl FilletBrep {
             // fork 9b7cd48 passes this on (SER)
             match main(self, target, solvers, main_fv) {
                 Err(e)
-                    if e.is_unported() || is_depth_error(&e) || k.fixes.fillet_statuses_pass_on =>
+                    if e.is_unported_or_cancelled()
+                        || is_depth_error(&e)
+                        || k.fixes.fillet_statuses_pass_on =>
                 {
                     return Err(e)
                 }
@@ -820,7 +822,7 @@ impl FilletBrep {
                 },
             );
             let (curve_3d, uv_curve1, uv_curve2) = match xsect {
-                Err(err) if err.is_unported() => return Err(err),
+                Err(err) if err.is_unported_or_cancelled() => return Err(err),
                 Ok(SrfSrfCurves {
                     curve_3d: Some(c),
                     uv_curve1,
@@ -869,7 +871,7 @@ impl FilletBrep {
         );
         let param1 = match drop1 {
             Ok(d) if d.success => d.parameter,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             _ => {
                 // error: DropPoint to Curve from StartFV failed
                 self.fillet_edge_mut(e)?
@@ -896,7 +898,7 @@ impl FilletBrep {
             );
         let param2 = match drop2 {
             Ok(d) if d.success => d.parameter,
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             _ => {
                 // error: DropPoint to Curve from EndFV failed
                 self.fillet_edge_mut(e)?

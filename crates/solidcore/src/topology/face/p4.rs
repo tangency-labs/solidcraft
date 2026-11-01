@@ -173,6 +173,7 @@ const fn must_propagate(e: &SolidError) -> bool {
     matches!(
         e,
         SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }
@@ -922,7 +923,7 @@ fn surface_singularities(
             u64::from(s.singular),
             s.pole_points.unwrap_or([Vec3::UNDEF; 4]),
         )),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         // a failing evaluation inside it leaves its initial outputs (SM_SS_NONE)
         Err(_) => Ok((SS_NONE, [Vec3::UNDEF; 4])),
     }
@@ -2628,7 +2629,7 @@ fn loop_sample_uv_point(k: &Kernel, b: &mut Brep, l: LoopId) -> Result<Option<Po
     for eu in edgeuses {
         match eu3::normalized_evaluate(k, b, eu, 0.5, true, false, true) {
             Ok(e) => return Ok(Some(Point2::new(e.point.x, e.point.y))),
-            Err(e) if e.is_unported() => return Err(e),
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => (),
         }
     }

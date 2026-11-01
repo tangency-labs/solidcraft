@@ -77,7 +77,7 @@ pub struct LocalPointSolve<O: Copy> {
 fn boundary_or_false(value: Result<bool>) -> Result<bool> {
     match value {
         Ok(v) => Ok(v),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(_) => Ok(false),
     }
 }
@@ -177,7 +177,7 @@ impl SurfPtSolveStepper<'_> {
                     sol = solution;
                     found
                 }
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => false,
             }
         };
@@ -269,7 +269,7 @@ impl SurfPtSolveStepper<'_> {
                         self.set_nr_suspect(true);
                     }
                 }
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => {
                     self.set_nr_suspect(true);
                     got_nr = false;
@@ -318,7 +318,7 @@ impl SurfPtSolveStepper<'_> {
                         return Ok(NextStep::success(reason));
                     }
                 }
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(_) => got_plane = false,
             }
         }
@@ -362,13 +362,13 @@ impl SurfPtSolveStepper<'_> {
         }
         if got_nr {
             match nr.line_search(k, previous) {
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 _ => {}
             }
         }
         if got_plane {
             match plane.line_search(k, previous) {
-                Err(e) if e.is_unported() => return Err(e),
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 _ => {}
             }
         }

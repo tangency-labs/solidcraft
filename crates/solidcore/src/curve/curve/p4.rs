@@ -1799,7 +1799,7 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 // Determine which case we have (ahead / behind on both tangents).
                 let flip = match line_line_closest_point(p, tan0, c[0], c[1]) {
                     Ok((t0, t1)) => t0 * t1 < 0.0, // If opposite signs, flip.
-                    Err(e) if e.is_unported() => return Err(e),
+                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => {
                         // parallel (or anti-parallel) tangents
                         let dot = c[1].dot(tan0);

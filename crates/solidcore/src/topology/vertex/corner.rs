@@ -593,7 +593,7 @@ pub fn is_on_face_corner(k: &Kernel, b: &mut Brep, v: VertexId) -> Result<(bool,
         // the opt-in fix any failure is no best point (tangency-labs/smlib 7a35f33)
         Err(e)
             if matches!(e, SolidError::Upstream { operation: OP, .. })
-                || (k.fixes.query_statuses_pass_on && !e.is_unported()) =>
+                || (k.fixes.query_statuses_pass_on && !e.is_unported_or_cancelled()) =>
         {
             FaceCorner {
                 found_point: false,

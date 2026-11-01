@@ -87,7 +87,7 @@ pub fn is_knife_edge(
     let angle = match crate::topology::edgeuse::p3::calc_sector_angle(k, target, primary, parameter)
     {
         Ok(angle) => angle,
-        Err(e @ SolidError::Unported { .. }) => return Err(e),
+        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
         Err(_) => return Ok(false),
     };
     // smos_Min

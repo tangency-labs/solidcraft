@@ -1267,13 +1267,17 @@ impl BSplineSurface {
             };
             match create_skin_srf_boundary_continuity(&mut curves, &mut sk) {
                 Ok(s) => s,
-                Err(e @ SolidError::Unported { .. }) => return Err(e),
+                Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                    return Err(e)
+                }
                 Err(_) => {
                     // If not successful try without knots.
                     sk.kns = None;
                     match create_skin_srf_boundary_continuity(&mut curves, &mut sk) {
                         Ok(s) => s,
-                        Err(e @ SolidError::Unported { .. }) => return Err(e),
+                        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => {
+                            return Err(e)
+                        }
                         Err(_) => {
                             // It failed with derivative fields try it without them
                             if has_dir_array {

@@ -1777,6 +1777,7 @@ impl<'c> Stitch<'c> {
             min_unstitched_vert_gap: BIG_DOUBLE,
         };
         let tol = self.tol_3d;
+        k.check_cancelled("heal::stitch::p1::Stitch::stitch_vertex_pairs")?;
 
         let n1 = list1.len();
         if n1 < 1 {
@@ -2112,6 +2113,7 @@ impl<'c> Stitch<'c> {
         };
 
         for &v in verts {
+            k.check_cancelled("heal::stitch::p1::Stitch::stitch_edges_of_vertices")?;
             let Some(v) = v else {
                 continue; // Can this happen? Don't really care.
             };

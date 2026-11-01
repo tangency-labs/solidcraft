@@ -237,6 +237,7 @@ pub(super) fn ignore_soft<T>(r: Result<T>) -> Result<Option<T>> {
         Ok(v) => Ok(Some(v)),
         Err(
             e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }),
         ) => Err(e),
@@ -1902,6 +1903,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // Resolve every ProtoVertex
         let pvs = mgr.proto_vertices().to_vec();
         for pv in pvs {
+            k.check_cancelled("boolean::topology_intersector::p1::resolve_intersections")?;
             // resolve ProtoVertex; a problem only warns
             ignore_soft(mgr.resolve_proto_vertex(k, brep, pv))?;
         }
@@ -1909,6 +1911,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // Resolve every ProtoEdge
         let pes = mgr.proto_edges().to_vec();
         for pe in pes {
+            k.check_cancelled("boolean::topology_intersector::p1::resolve_intersections")?;
             if let Some(d) = ignore_soft(mgr.resolve_proto_edge(k, brep, pe))? {
                 deleted.extend(d);
             }
@@ -2015,6 +2018,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         let pvs = mgr.proto_vertices().to_vec();
         for pv in pvs {
+            k.check_cancelled("boolean::topology_intersector::p1::imprint_intersections")?;
             // Q: if a PV has more than one VD, do we connect them with a new Edge?
             // A: No: if they're meant to be connected, then there will be a ProtoEdge
             //    indicating that.
@@ -2040,6 +2044,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 .edge_definitions()
                 .get(jj)
             {
+                k.check_cancelled("boolean::topology_intersector::p1::imprint_intersections")?;
                 let (result, edited) = mgr.imprint_edge_definition_reporting_edits(k, brep, ed);
                 if record(result, ret)? {
                     jj += 1;

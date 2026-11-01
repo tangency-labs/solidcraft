@@ -927,7 +927,7 @@ fn intersection_inversion(
 fn nurbs_uv_status_ignored(cone: &Cone, k: &Kernel, step_uv: Point2) -> Result<Point2> {
     match cone.convert_uv_from_step_to_nurbs(k, step_uv) {
         Ok(uv) => Ok(uv),
-        Err(e) if e.is_unported() => Err(e),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
         Err(e) => {
             let circle = cone.rev().polar_curve().ok_or(e)?;
             let x = cone

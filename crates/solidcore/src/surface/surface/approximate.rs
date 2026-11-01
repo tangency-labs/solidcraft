@@ -182,7 +182,10 @@ impl Surface {
             just_copy_b_splines,
         ) {
             Ok(surface) => (surface, None),
-            Err(e) if e.is_unported() || matches!(e, SolidError::PreparationRequired { .. }) => {
+            Err(e)
+                if e.is_unported_or_cancelled()
+                    || matches!(e, SolidError::PreparationRequired { .. }) =>
+            {
                 return Err(e)
             }
             Err(e) => (None, Some(e)),
@@ -657,7 +660,7 @@ impl Surface {
                     // a failed make leaves the surface without NURB (status ignored)
                     return match cur.extrusion_base_with_nurb(k) {
                         Ok(base) => Ok(Some(base)),
-                        Err(e) if e.is_unported() => Err(e),
+                        Err(e) if e.is_unported_or_cancelled() => Err(e),
                         Err(_) => match cur.kind() {
                             SurfaceKind::SurfOfExtrusion(s) => Ok(Some(Cow::Borrowed(s.base()))),
                             _ => Ok(None),

@@ -1827,9 +1827,7 @@ impl BSplineSurface {
         let mut esur = None;
         let d = match eval_pt_derivs_unbounded(sur, uv.x, uv.y, 0, cflg, &mut esur) {
             Ok(d) => d,
-            Err(SolidError::Unported { upstream, unit }) => {
-                return Err(SolidError::Unported { upstream, unit })
-            }
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
             Err(_) => eval_pt_derivs_unbounded(sur, uv.x, uv.y, 0, cflg, &mut esur)
                 .map_err(SolidError::nl_ser(OP))?,
         };
@@ -2091,7 +2089,7 @@ fn extend_side(
     loop {
         match extend_by_dist_in_place(esur, *ext_dist, dir, end, gflg) {
             Ok(()) => break,
-            Err(e @ SolidError::Unported { .. }) => return Err(e),
+            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
             Err(_) => {
                 *ext_dist /= 2.0;
                 if *ext_dist < dist / 100.0 {

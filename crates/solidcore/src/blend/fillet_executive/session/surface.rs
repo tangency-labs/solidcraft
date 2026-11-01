@@ -492,7 +492,7 @@ impl FilletSession<'_> {
                 .objects
                 .calc_solver_geometry(k, id, &mut self.executive)
             {
-                Err(error) if error.is_unported() => return Err(error),
+                Err(error) if error.is_unported_or_cancelled() => return Err(error),
                 Err(_) => continue,
                 Ok(()) => {}
             }
@@ -503,7 +503,7 @@ impl FilletSession<'_> {
         // status is not read (void upstream)
         let zone = crate::geom::tol::zone_tol3d(k, tol);
         match self.objects.faces_set_tolerance(k, fillet, zone) {
-            Err(error) if error.is_unported() => return Err(error),
+            Err(error) if error.is_unported_or_cancelled() => return Err(error),
             _ => {}
         }
 
@@ -535,7 +535,7 @@ impl FilletSession<'_> {
                 .objects
                 .stitch_attribute(edge, self.executive.edge_attribute)
             {
-                Err(error) if error.is_unported() => return Err(error),
+                Err(error) if error.is_unported_or_cancelled() => return Err(error),
                 _ => {}
             }
         }

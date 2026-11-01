@@ -474,7 +474,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             // trim leafNode domain down to intersection domain
             uv_domain = match uv_domain.intersect(&self.uv_domain) {
                 Ok(d) => d,
-                Err(e) if pass && !e.is_unported() => return Ok(false),
+                Err(e) if pass && !e.is_unported_or_cancelled() => return Ok(false),
                 Err(e) => return Err(e),
             };
 
@@ -527,7 +527,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         if let Some(line_ivl) = &self.line_interval {
             bound_ivl = match bound_ivl.intersect(line_ivl) {
                 Ok(i) => i,
-                Err(e) if pass && !e.is_unported() => return Ok(false),
+                Err(e) if pass && !e.is_unported_or_cancelled() => return Ok(false),
                 Err(_) => Extent1d::new(),
             };
         }
