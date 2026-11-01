@@ -59,6 +59,11 @@ pub fn tip() -> String {
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
     poll(app, &ctx);
+    // The reply hit-region is measured again below, only while the panel is drawn (#10882).
+    app.agent_chat.sel_menu.begin_frame();
+    if !app.agent_chat.open {
+        app.agent_chat.sel_menu.close_menu();
+    }
     // Set again below if the chat is drawn this frame.
     app.agent_chat.drop_rect = None;
     // Retain the previous card for shortcut hover routing below; clear it when hidden.
@@ -85,6 +90,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !app.agent_chat.open {
         return;
     }
+    // The Copy menu goes above the reply, drawn before its labels so a Copy click lands on the
+    // selection while it is still alive this frame (#10882).
+    super::selection_menu::show(app, &ctx);
     // Look for installed agents the first time the panel opens (in the background).
     #[cfg(not(target_arch = "wasm32"))]
     if app.agent_chat.detection.is_none() && app.agent_chat.detecting.is_none() {
@@ -1619,7 +1627,11 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if *thought {
                     ui.add(egui::Label::new(RichText::new(text).italics().color(t.text_dim)).selectable(true).wrap());
                 } else {
+                    let top = ui.cursor().min.y;
                     ui_kit::assistant_prose(ui, |ui| super::markdown_view::show(ui, n, text));
+                    // Where the reply sits, so a right-click there can keep its selection (#10882).
+                    let r = egui::Rect::from_min_max(egui::pos2(ui.max_rect().left(), top), egui::pos2(ui.max_rect().right(), ui.cursor().min.y));
+                    app.agent_chat.sel_menu.note_reply(r);
                 }
             }
             Item::Tool { .. } => {

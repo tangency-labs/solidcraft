@@ -2839,6 +2839,8 @@ impl SolveApp {
     /// capture hides the report waits for it (the control channel's typing too).
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
         self.synthetic_input(raw);
+        // A right-click over a reply's selection is caught before egui's label selection sees it.
+        agent_chat::selection_menu::guard(self, raw);
         issue_report::hold_input(self, raw);
     }
 
@@ -3105,6 +3107,9 @@ impl SolveApp {
         shortcut_box::show(self, ui.ctx());
         prefs::show(self, ui.ctx());
         toolbar_custom::window(self, ui.ctx());
+        // Next frame's guard wants to know whether a label selection survived this frame's
+        // labels, before egui's end-of-pass bookkeeping (#10882).
+        self.agent_chat.sel_menu.note_selection(agent_chat::selection_menu::selection_alive(ui.ctx()));
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
