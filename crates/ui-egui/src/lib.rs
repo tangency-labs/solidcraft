@@ -709,6 +709,8 @@ pub struct SolveApp {
     pub synthetic: Vec<egui::Event>,
     /// The modifiers of the synthetic press in progress (a Ctrl-drag keeps Ctrl while it moves).
     pub synthetic_mods: egui::Modifiers,
+    /// A synthetic press is held: its drag never moves the real cursor (`navigation::wrap_cursor`).
+    pub(crate) synthetic_press: bool,
     control_rx: Option<Receiver<ControlRequest>>,
     /// Control requests that change the design, held while a file loads or an agent's design
     /// change computes.
@@ -884,6 +886,7 @@ impl SolveApp {
             frame_rate: frame_rate::FrameRate::default(),
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
+            synthetic_press: false,
             control_rx: None,
             agent_chat: Default::default(),
             ai_connect: Default::default(),
@@ -2877,6 +2880,7 @@ impl SolveApp {
                     raw.events.push(egui::Event::ModifiersChanged(*modifiers));
                     // A drag keeps its press's modifiers until the release.
                     self.synthetic_mods = if *pressed { *modifiers } else { egui::Modifiers::NONE };
+                    self.synthetic_press = *pressed;
                 }
                 egui::Event::Key { modifiers, .. } => raw.events.push(egui::Event::ModifiersChanged(*modifiers)),
                 egui::Event::PointerMoved(_) => raw.events.push(egui::Event::ModifiersChanged(self.synthetic_mods)),

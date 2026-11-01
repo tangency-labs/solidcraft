@@ -477,6 +477,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `navigator_fit` (default false: a view chosen on the view cube or the axis gizmo also looks at the middle of the model from the one distance that fits its bounding sphere in the free part of the view, at `home_fit_size`; Home and an opened design use the same zoom and centre while it is on, so views chosen after them only turn; #10091)
 - `offer_stand_up`
 - `orbit_around` (`view_centre` (default: what Pan moves and Fit frames), `origin` (the world origin stays still on screen), `cursor` (the model point under the pointer when the drag began); the older `orbit_cursor` boolean still sets `cursor` when true)
+- `orbit_cursor_wrap` (default true: an orbit or pan drag that reaches the edge of the view, in the view or on the axis view or cube, moves the cursor to the opposite edge and keeps going)
 - `orbit_reverse` (default false: Shift with two-finger scrolling orbits the other way)
 - `origin_plane_names` (`xyz` (default) or `top_front_right`: the browser, dialogs and lists call the origin planes Top, Front and Right; their ids, commands and saved designs keep XY, XZ and YZ)
 - `pan_reverse_x` (default false: horizontal scrolling pans the other way)

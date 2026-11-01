@@ -1,0 +1,26 @@
+{
+  "en": {
+    "nav.orbit_cursor_wrap.label": "Wrap the cursor while orbiting or panning",
+    "nav.orbit_cursor_wrap.help": "An orbit or pan drag that reaches the edge of the view, in the view or on the axis view or cube, moves the cursor to the opposite edge and keeps going. Off: every drag stops at the edge of the screen. Has no effect on Wayland or in the browser."
+  },
+  "ar": {
+    "nav.orbit_cursor_wrap.label": "نقل المؤشر إلى الجهة المقابلة أثناء التدوير أو الإزاحة",
+    "nav.orbit_cursor_wrap.help": "عندما يصل سحب التدوير أو الإزاحة إلى حافة العرض، سواء في العرض أو على عرض المحور أو المكعب، ينتقل المؤشر إلى الحافة المقابلة ويستمر السحب. عند الإيقاف: يتوقف كل سحب عند حافة الشاشة. لا تأثير له على Wayland أو داخل المتصفح."
+  },
+  "he": {
+    "nav.orbit_cursor_wrap.label": "העברת הסמן לצד השני בזמן סיבוב או הזזה",
+    "nav.orbit_cursor_wrap.help": "גרירת סיבוב או הזזה שמגיעה לקצה המבט, במבט עצמו או על תצוגת הצירים או הקובייה, מעבירה את הסמן לקצה הנגדי וממשיכה. כבוי: כל גרירה נעצרת בקצה המסך. ללא השפעה ב־Wayland או בדפדפן."
+  },
+  "ja": {
+    "nav.orbit_cursor_wrap.label": "回転・移動中にカーソルを反対側へ移す",
+    "nav.orbit_cursor_wrap.help": "回転または移動のドラッグがビューの端に達すると（ビュー内でも、軸ビューやキューブ上でも）、カーソルが反対側の端へ移り、そのまま続きます。オフ：どのドラッグも画面の端で止まります。Wayland とブラウザーでは効果がありません。"
+  },
+  "vi": {
+    "nav.orbit_cursor_wrap.label": "Chuyển con trỏ sang cạnh đối diện khi xoay hoặc trượt góc nhìn",
+    "nav.orbit_cursor_wrap.help": "Khi thao tác kéo để xoay hoặc trượt góc nhìn chạm tới cạnh khung nhìn, trong khung nhìn hoặc trên góc nhìn theo trục hay khối lập phương, con trỏ được chuyển sang cạnh đối diện và tiếp tục. Khi tắt: mọi thao tác kéo dừng lại ở cạnh màn hình. Không có tác dụng trên Wayland hoặc trên trình duyệt."
+  },
+  "zh": {
+    "nav.orbit_cursor_wrap.label": "环绕或平移时光标循环",
+    "nav.orbit_cursor_wrap.help": "环绕或平移拖动到达视图边缘时（在视图中，或在轴视图、立方体上），光标移到对侧边缘并继续。关闭时，所有拖动都在屏幕边缘停止。在 Wayland 和浏览器中无效。"
+  }
+}
