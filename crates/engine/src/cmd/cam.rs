@@ -176,7 +176,7 @@ fn setup_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     setup.flip_z = bool_(p, "flip_z").unwrap_or(existing.as_ref().map(|e| e.flip_z).unwrap_or(false));
     setup.flip_x = bool_(p, "flip_x").unwrap_or(existing.as_ref().map(|e| e.flip_x).unwrap_or(false));
     setup.model_bodies = if p.get("model_bodies").is_some() {
-        string_list(p, "model_bodies")
+        string_list(cmd, p, "model_bodies")?
     } else {
         existing.as_ref().map(|e| e.model_bodies.clone()).unwrap_or_default()
     };
