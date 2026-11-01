@@ -1381,9 +1381,11 @@ fn window_system_override(preference: Option<&str>) -> Option<&'static str> {
 
 /// Whether to run through XWayland rather than native Wayland. winit has no file drag-and-drop
 /// on Wayland (only on X11), so dropping files from the file manager showed a "no" cursor: use
-/// XWayland when it's there. Except on niri, whose XWayland (xwayland-satellite) breaks window
-/// management (maximize/restore), so it stays on native Wayland and gives up file drops.
-/// `SOLIDCRAFT_WAYLAND=1` keeps native Wayland, `SOLIDCRAFT_WAYLAND=0` forces XWayland.
+/// XWayland when it's there. Except on compositors where XWayland is a worse default: niri
+/// (xwayland-satellite breaks maximize/restore) and Hyprland (fractional scale with
+/// `force_zero_scaling` plus `GDK_SCALE` makes the UI ~2.5× oversized, #10480). Those stay on
+/// native Wayland and give up file drops. `SOLIDCRAFT_WAYLAND=1` keeps native Wayland,
+/// `SOLIDCRAFT_WAYLAND=0` forces XWayland.
 #[cfg(all(unix, not(target_os = "macos")))]
 fn prefer_x11(display: bool, wayland_display: bool, desktop: Option<&str>, wayland_override: Option<&str>) -> bool {
     match wayland_override.map(str::trim) {
@@ -1391,8 +1393,18 @@ fn prefer_x11(display: bool, wayland_display: bool, desktop: Option<&str>, wayla
         Some(_) => return false,
         None => {}
     }
-    let niri = desktop.is_some_and(|d| d.split(':').any(|name| name.trim().eq_ignore_ascii_case("niri")));
-    display && !(niri && wayland_display)
+    display && !(native_wayland_desktop(desktop) && wayland_display)
+}
+
+/// Desktops that keep Automatic on native Wayland when a Wayland socket is present.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn native_wayland_desktop(desktop: Option<&str>) -> bool {
+    desktop.is_some_and(|d| {
+        d.split(':').any(|name| {
+            let name = name.trim();
+            name.eq_ignore_ascii_case("niri") || name.eq_ignore_ascii_case("Hyprland")
+        })
+    })
 }
 
 #[cfg(all(test, unix, not(target_os = "macos")))]
@@ -1400,20 +1412,24 @@ mod backend_tests {
     use super::prefer_x11;
 
     #[test]
-    fn xwayland_by_default_native_wayland_on_niri_and_the_override_wins() {
+    fn xwayland_by_default_native_wayland_on_niri_hyprland_and_the_override_wins() {
         // XWayland whenever there's an X display, for file drag-and-drop.
         assert!(prefer_x11(true, true, Some("GNOME"), None));
         assert!(prefer_x11(true, false, None, None));
         assert!(!prefer_x11(false, true, Some("KDE"), None));
-        // niri (alone or in a desktop list) under Wayland stays native.
+        // niri / Hyprland (alone or in a desktop list) under Wayland stays native.
         assert!(!prefer_x11(true, true, Some("niri"), None));
         assert!(!prefer_x11(true, true, Some("niri:GNOME"), None));
-        // niri without a Wayland socket (nested X session) still uses X11.
+        assert!(!prefer_x11(true, true, Some("Hyprland"), None));
+        assert!(!prefer_x11(true, true, Some("hyprland"), None));
+        // Without a Wayland socket (nested X session) still uses X11.
         assert!(prefer_x11(true, false, Some("niri"), None));
+        assert!(prefer_x11(true, false, Some("Hyprland"), None));
         // SOLIDCRAFT_WAYLAND: anything but 0 keeps Wayland, 0 forces XWayland (when present).
         assert!(!prefer_x11(true, true, Some("GNOME"), Some("1")));
         assert!(!prefer_x11(true, true, Some("GNOME"), Some("")));
         assert!(prefer_x11(true, true, Some("niri"), Some("0")));
+        assert!(prefer_x11(true, true, Some("Hyprland"), Some("0")));
         assert!(!prefer_x11(false, true, Some("niri"), Some("0")));
     }
 

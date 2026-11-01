@@ -87,13 +87,15 @@ For older builds, including 0.3.0, set Anti-aliasing to 1x and restart when usin
 If that window cannot show the settings dialog, edit only the `msaa` field to `1` in
 `~/.local/share/solidcraft/graphics.json`; preserve any other settings.
 
-## Wayland, XWayland and niri
+## Wayland, XWayland, niri and Hyprland
 
 On Linux the app runs through XWayland whenever an X display is available, because
 winit only supports dragging files from a file manager into the window on X11. On
-niri (detected from `XDG_CURRENT_DESKTOP` with a Wayland socket present) it stays on
-native Wayland instead, since window management such as maximize/restore misbehaves
-under niri's XWayland. The trade-off: **on native Wayland, dropping files onto the
+niri and Hyprland (detected from `XDG_CURRENT_DESKTOP` with a Wayland socket present)
+it stays on native Wayland instead: niri's XWayland (xwayland-satellite) misbehaves
+for window management such as maximize/restore, and Hyprland's common
+`force_zero_scaling` plus `GDK_SCALE` makes an XWayland UI ~2.5× oversized under
+fractional scale (#10480). The trade-off: **on native Wayland, dropping files onto the
 window does not work**; use File > Open or pass the file on the command line.
 This applies to every build, not only the Nix package.
 
@@ -105,6 +107,8 @@ windows are then drawn at 100 % and stretched, so the interface looks soft and s
 the case with **fractional scaling** (a monitor at 125 % or 140 %), and on GNOME 47 (RHEL and
 Rocky Linux 10) at any scale, 200 % included; see
 [the troubleshooting page](book/src/guide/troubleshooting.md#the-interface-looks-blurry-on-linux-with-display-scaling).
+On Hyprland under XWayland you can also set `WINIT_X11_SCALE_FACTOR` to the compositor
+scale (for example `1.6`) if you keep Window system on X11.
 
 The environment overrides the preference: `SOLIDCRAFT_WAYLAND=1` (always native Wayland) or
 `SOLIDCRAFT_WAYLAND=0` (XWayland whenever an X display is available).

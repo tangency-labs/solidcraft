@@ -97,16 +97,18 @@ D300/D500/D700 (Mac Pro 2013). On another GPU that does this, start SolidCraft w
 ## The interface looks blurry on Linux with display scaling
 
 On Linux, SolidCraft runs through XWayland whenever an X display is available, because file
-drag and drop from a file manager only works there (niri is the exception and stays on native
-Wayland). A compositor that doesn't let X11 apps scale themselves draws an XWayland window at
-100 % and stretches it to the monitor's scale, so text and icons look soft. That happens with
-fractional scaling (125 %, 140 %), and on GNOME 47 (RHEL and Rocky Linux 10) at any scale,
-200 % included. The diagnostics in a bug report show it as about 1 physical pixel per point at
-a scale of 200 %.
+drag and drop from a file manager only works there (niri and Hyprland stay on native Wayland
+when Automatic is selected). A compositor that doesn't let X11 apps scale themselves draws an
+XWayland window at 100 % and stretches it to the monitor's scale, so text and icons look soft.
+That happens with fractional scaling (125 %, 140 %), and on GNOME 47 (RHEL and Rocky Linux 10)
+at any scale, 200 % included. The diagnostics in a bug report show it as about 1 physical pixel
+per point at a scale of 200 %. On Hyprland with `force_zero_scaling` and `GDK_SCALE` set, an
+XWayland UI can instead look ~2.5× oversized relative to the desktop (#10480).
 
 Run SolidCraft on native Wayland instead: Preferences › Graphics › **Window system** ›
-Wayland, which applies at the next start. Versions without that setting (0.21.0 and earlier)
-take `SOLIDCRAFT_WAYLAND=1` in the environment:
+Wayland, which applies at the next start (Automatic already picks Wayland on niri and Hyprland).
+Versions without that setting (0.21.0 and earlier) take `SOLIDCRAFT_WAYLAND=1` in the
+environment:
 
 ```
 SOLIDCRAFT_WAYLAND=1 solidcraft
@@ -114,7 +116,7 @@ SOLIDCRAFT_WAYLAND=1 solidcraft
 
 On native Wayland, dropping files onto the window doesn't work; use File > Open or pass the file
 on the command line.
-[Wayland, XWayland and niri](https://github.com/tangency-labs/solidcraft/blob/main/docs/nix.md#wayland-xwayland-and-niri)
+[Wayland, XWayland, niri and Hyprland](https://github.com/tangency-labs/solidcraft/blob/main/docs/nix.md#wayland-xwayland-niri-and-hyprland)
 has the details.
 
 ## Trackpad pinch does nothing on Linux
