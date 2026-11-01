@@ -674,6 +674,16 @@ pub struct UpstreamFixes {
     pub validate_tolerances_fixes_reported_gaps: bool,
     /// Before the piecewise merge, `do_extended_offset` rebuilds every offset face whose loops cross from the stretches of its loops that bound it (WR-345, #854).
     pub offset_resolve_crossing_loops: bool,
+    /// [`crate::topology::edgeuse::p2::is_convex_radial_sector`]
+    /// (`SmEdgeuse::IsConvexRadialSector`) propagates a failing
+    /// [`crate::topology::edgeuse::p2::evaluate_binormal_step_off`] status on either this
+    /// edge use or its radial partner as `Err` instead of returning `Ok(true)` (pinned
+    /// v1.0.1's `SER(...)` inside an `SmBoolean` function returns the non-zero `SmStatus` as
+    /// `TRUE`, so a step-off that leaves a face's UV domain or a failed binormal evaluation
+    /// falsely classifies even a concave sector as convex; `WR-84`,
+    /// `plan/upstream-issues/WR-84--addendum-2026-11-01-propagate-step-off-failure.md`).
+    /// Off by default for pinned C++ parity.
+    pub edgeuse_convexity_propagates_step_off_failure: bool,
     /// `SmPointSet3d::SetUpCentroid` sums every full 50-point block when the point count
     /// is a positive multiple of 50 (`extras == 0`) instead of starting with a 0-point
     /// block that drops the last 50 points (returning `(0, 0, 0)` for 50 points), and

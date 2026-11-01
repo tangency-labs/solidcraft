@@ -46,10 +46,13 @@
 //!   outputs unset, which upstream reads as uninitialised locals
 //!   (`SmVector3d() = default`); the port uses the `SM_UNDEF_DOUBLE` defaults
 //!   (`binormal_ignoring_status`).
-//!   `IsConvexRadialSector` likewise ignores its `Unitize` statuses, and returns a
-//!   failing `EvaluateBinormalStepOff` status through `SER` from an `SmBoolean`
-//!   function, i.e. as `TRUE` (`plan/upstream-issues.md` WR-84); the port returns
-//!   `Ok(true)` for such an error.
+//!   `IsConvexRadialSector` likewise ignores its `Unitize` statuses, and by default
+//!   returns a failing `EvaluateBinormalStepOff` status through `SER` from an
+//!   `SmBoolean` function, i.e. as `TRUE` (`WR-84`,
+//!   `plan/upstream-issues/WR-84--smedgeuse-isconvexradialsector-reports-a-failed-binormal.md`
+//!   and its 2026-11-01 addendum); the port returns `Ok(true)` for such an error unless
+//!   [`crate::kernel::UpstreamFixes::edgeuse_convexity_propagates_step_off_failure`] is
+//!   enabled, in which case the `Err` propagates.
 //! - **Unported callees.** `SmEdgeuse::EvaluateBinormal` and
 //!   `SmEdgeuse::CreateUVTrimCurve` (unit `topology.edgeuse_p3`, ported: only their
 //!   own deferred callees remain) and
@@ -145,9 +148,10 @@ fn edge_set_tolerance(b: &mut Brep, eu: EdgeuseId, tolerance: f64) -> Result<()>
 }
 
 /// Whether `SER` of a failing status in an `SmBoolean` function returns `TRUE`
-/// (`plan/upstream-issues.md` WR-52): every upstream status does;
+/// (`WR-52`, `WR-84` in `plan/upstream-issues/`): every upstream status does;
 /// [`SolidError::Unported`] and [`SolidError::InvalidInput`] (a null pointer
-/// upstream dereferences) and [`SolidError::NotFound`] propagate.
+/// upstream dereferences), [`SolidError::PortInvariant`] and [`SolidError::NotFound`]
+/// propagate.
 fn ser_as_true(e: &SolidError) -> bool {
     !matches!(
         e,
@@ -501,8 +505,10 @@ pub fn evaluate_binormal_step_off_into(
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] where
 /// upstream dereferences null (no edge, no primary edge use, no radial partner);
 /// [`SolidError::Unported`] and the null dereferences of
-/// [`evaluate_binormal_step_off`] (its other errors make the result `true`, as
-/// upstream's `SER`).
+/// [`evaluate_binormal_step_off`]. By default its other errors make the result `true`,
+/// as upstream's `SER` (`WR-84`); with
+/// [`crate::kernel::UpstreamFixes::edgeuse_convexity_propagates_step_off_failure`]
+/// enabled, every [`evaluate_binormal_step_off`] error on either edge use propagates.
 pub fn is_convex_radial_sector(
     k: &Kernel,
     b: &mut Brep,
@@ -528,17 +534,19 @@ pub fn is_convex_radial_sector(
         (PI * (90.0 - tol_deg) / 180.0).cos()
     };
 
+    let propagate_step_off_err = k.fixes.edgeuse_convexity_propagates_step_off_failure;
     let options = StepOffOptions::default();
     // for every requested sample point
     for i in 0..num_samples {
         // sample evenly skipping endPoints
         let t = (i as f64 + 1.0) / (num_samples as f64 + 1.0);
 
-        // SER in an SmBoolean function: a failing status is returned as TRUE
+        // SER in an SmBoolean function: a failing status is returned as TRUE unless
+        // `edgeuse_convexity_propagates_step_off_failure` is enabled (WR-84).
         let r = match evaluate_binormal_step_off(k, b, eu, ivl.evaluate(t), step_off_dist, &options)
         {
             Ok(r) => r,
-            Err(e) if ser_as_true(&e) => return Ok(true),
+            Err(e) if !propagate_step_off_err && ser_as_true(&e) => return Ok(true),
             Err(e) => return Err(e),
         };
         let radial_eu =
@@ -552,7 +560,7 @@ pub fn is_convex_radial_sector(
             &options,
         ) {
             Ok(r) => r,
-            Err(e) if ser_as_true(&e) => return Ok(true),
+            Err(e) if !propagate_step_off_err && ser_as_true(&e) => return Ok(true),
             Err(e) => return Err(e),
         };
         let (mut bin, mut norm, mut bin2, mut norm2) =
@@ -1370,7 +1378,7 @@ fn ignored<T>(r: Result<T>) -> Result<Option<T>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::topology::{Edge, Edgeuse, EdgeuseOwner, Vertex};
+    use crate::topology::{Edge, EdgeId, Edgeuse, EdgeuseOwner, Vertex};
 
     /// A B-rep with one edge holding a single loop-less edge use.
     fn lone_edgeuse() -> (Brep, EdgeuseId) {
@@ -1513,5 +1521,282 @@ mod tests {
         let e = check_and_set_uv_trim_curve(&Kernel::default(), &mut b, eu, c, false, None)
             .unwrap_err();
         assert!(matches!(e, SolidError::InvalidInput { .. }));
+    }
+
+    fn kernel_with_wr84_fix() -> Kernel {
+        let mut k = Kernel::default();
+        k.fixes.edgeuse_convexity_propagates_step_off_failure = true;
+        k
+    }
+
+    /// A `1 x 2 x 3` box and one of its edges `(brep, edge_id, convex_eu, concave_eu)`,
+    /// where `convex_eu` lies in the solid shell (`IsConvexRadialSector == true`) and
+    /// `concave_eu` (`mate` of `convex_eu`) lies in the infinite void shell
+    /// (`IsConvexRadialSector == false`), with UV trim curves populated on the valid box.
+    fn box_convex_and_concave_edgeuses() -> (Brep, EdgeId, EdgeuseId, EdgeuseId) {
+        let mut k = Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 1.0, 2.0, 3.0)
+            .unwrap();
+        let e = b.edges().ids().next().unwrap();
+        let first = *b.edge(e).unwrap().edgeuses.first().unwrap();
+        let other = mate(&b, first).unwrap().unwrap();
+        let first_convex = is_convex_radial_sector(&k, &mut b, first, 3, false, 0.0).unwrap();
+        let other_convex = is_convex_radial_sector(&k, &mut b, other, 3, false, 0.0).unwrap();
+        assert_ne!(first_convex, other_convex);
+        let (convex_eu, concave_eu) = if first_convex {
+            (first, other)
+        } else {
+            (other, first)
+        };
+        (b, e, convex_eu, concave_eu)
+    }
+
+    #[test]
+    fn wr84_flag_default_off_and_lookup_by_name() {
+        let mut k = Kernel::default();
+        assert!(!k.fixes.edgeuse_convexity_propagates_step_off_failure);
+        let slot = k
+            .fixes
+            .flag_mut("edgeuse_convexity_propagates_step_off_failure")
+            .unwrap();
+        assert!(!*slot);
+        *slot = true;
+        assert!(k.fixes.edgeuse_convexity_propagates_step_off_failure);
+    }
+
+    #[test]
+    fn wr84_valid_convex_and_concave_sectors_agree_across_modes() {
+        let (b0, _, convex_eu, concave_eu) = box_convex_and_concave_edgeuses();
+        let default_k = Kernel::default();
+        let opt_in_k = kernel_with_wr84_fix();
+
+        for step_off in [false, true] {
+            for tol_deg in [0.0, 2.0] {
+                let mut b_def = b0.clone();
+                let mut b_opt = b0.clone();
+                assert!(is_convex_radial_sector(
+                    &default_k, &mut b_def, convex_eu, 3, step_off, tol_deg
+                )
+                .unwrap());
+                assert!(is_convex_radial_sector(
+                    &opt_in_k, &mut b_opt, convex_eu, 3, step_off, tol_deg
+                )
+                .unwrap());
+                assert!(!is_convex_radial_sector(
+                    &default_k, &mut b_def, concave_eu, 3, step_off, tol_deg
+                )
+                .unwrap());
+                assert!(!is_convex_radial_sector(
+                    &opt_in_k, &mut b_opt, concave_eu, 3, step_off, tol_deg
+                )
+                .unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn wr84_step_off_leaving_face_domain_propagates_under_opt_in() {
+        let (mut b0, e, _, concave_eu) = box_convex_and_concave_edgeuses();
+        let default_k = Kernel::default();
+        let opt_in_k = kernel_with_wr84_fix();
+
+        // Inflate the edge tolerance so `20 * tolerance = 20.0` steps well outside the
+        // `1 x 2 x 3` box face's UV domain (`EvaluateBinormalStepOff` -> `SM_ERR` 1001).
+        b0.edge_mut(e).unwrap().tolerance = 1.0;
+        let mid_t = b0.edge(e).unwrap().interval.evaluate(0.5);
+        let step_err = evaluate_binormal_step_off(
+            &default_k,
+            &mut b0.clone(),
+            concave_eu,
+            mid_t,
+            20.0,
+            &StepOffOptions::default(),
+        )
+        .unwrap_err();
+        assert!(matches!(step_err, SolidError::Upstream { code: 1001, .. }));
+
+        // Default (`false`): `SER` inside `SmBoolean` falsely classifies the concave
+        // sector as convex (`Ok(true)`).
+        let mut b_def = b0.clone();
+        assert!(is_convex_radial_sector(&default_k, &mut b_def, concave_eu, 3, true, 0.0).unwrap());
+
+        // Opt-in (`true`): propagates the step-off `Err` instead of reporting convex.
+        let mut b_opt = b0;
+        let err =
+            is_convex_radial_sector(&opt_in_k, &mut b_opt, concave_eu, 3, true, 0.0).unwrap_err();
+        assert!(matches!(err, SolidError::Upstream { code: 1001, .. }));
+
+        // Without step-off (`step_off_dist == 0.0`), the concave sector still evaluates
+        // as `false` under both modes, and `num_samples == 0` stays `true`.
+        assert!(
+            !is_convex_radial_sector(&default_k, &mut b_def, concave_eu, 3, false, 0.0).unwrap()
+        );
+        assert!(
+            !is_convex_radial_sector(&opt_in_k, &mut b_opt, concave_eu, 3, false, 0.0).unwrap()
+        );
+        assert!(is_convex_radial_sector(&default_k, &mut b_def, concave_eu, 0, true, 0.0).unwrap());
+        assert!(is_convex_radial_sector(&opt_in_k, &mut b_opt, concave_eu, 0, true, 0.0).unwrap());
+    }
+
+    #[test]
+    fn wr84_radial_partner_step_off_failure_propagates_under_opt_in() {
+        let (mut b0, e, _, concave_eu) = box_convex_and_concave_edgeuses();
+        let default_k = Kernel::default();
+        let opt_in_k = kernel_with_wr84_fix();
+
+        let radial_eu = radial(&b0, concave_eu).unwrap().unwrap();
+        let f_self = face(&b0, concave_eu).unwrap().unwrap();
+        let f_radial = face(&b0, radial_eu).unwrap().unwrap();
+        assert_ne!(f_self, f_radial);
+
+        let mid_t = b0.edge(e).unwrap().interval.evaluate(0.5);
+        let radial_at_edge = evaluate_binormal(
+            &default_k,
+            &mut b0,
+            radial_eu,
+            mid_t,
+            false,
+            &BinormalOptions::default(),
+        )
+        .unwrap();
+
+        // Shrink only the radial partner's face UV domain around its midpoint UV so a
+        // `0.2` step (`20 * 0.01`) succeeds on `concave_eu` (`1 x 2 x 3` face) and fails
+        // on `radial_eu` (`2e-4 x 2e-4` sliver domain), exercising the second `SER` site.
+        b0.face_mut(f_radial).unwrap().uv_domain = crate::geom::extent2d::Extent2d::from_bounds(
+            radial_at_edge.uv.x - 1e-4,
+            radial_at_edge.uv.y - 1e-4,
+            radial_at_edge.uv.x + 1e-4,
+            radial_at_edge.uv.y + 1e-4,
+        );
+        b0.edge_mut(e).unwrap().tolerance = 0.01;
+
+        assert!(evaluate_binormal_step_off(
+            &default_k,
+            &mut b0.clone(),
+            concave_eu,
+            mid_t,
+            0.2,
+            &StepOffOptions::default(),
+        )
+        .is_ok());
+        let radial_err = evaluate_binormal_step_off(
+            &default_k,
+            &mut b0.clone(),
+            radial_eu,
+            mid_t,
+            0.2,
+            &StepOffOptions::default(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            radial_err,
+            SolidError::Upstream { code: 1001, .. }
+        ));
+
+        assert!(
+            is_convex_radial_sector(&default_k, &mut b0.clone(), concave_eu, 1, true, 2.0).unwrap()
+        );
+        let err =
+            is_convex_radial_sector(&opt_in_k, &mut b0, concave_eu, 1, true, 2.0).unwrap_err();
+        assert!(matches!(err, SolidError::Upstream { code: 1001, .. }));
+    }
+
+    #[test]
+    fn wr84_degenerate_binormal_without_step_off_propagates_under_opt_in() {
+        use crate::nurbs::crv_basic::Curve as NlCurve;
+        use crate::nurbs::math::{CPoint, NOW};
+
+        let (b0, e, _, concave_eu) = box_convex_and_concave_edgeuses();
+        let default_k = Kernel::default();
+        let opt_in_k = kernel_with_wr84_fix();
+
+        let ivl = b0.edge(e).unwrap().interval;
+        let mid_t = ivl.evaluate(0.5);
+        let mid_pt = b0
+            .edge(e)
+            .unwrap()
+            .curve
+            .as_ref()
+            .unwrap()
+            .evaluate_point(&default_k, mid_t)
+            .unwrap();
+
+        // Replace the edge's 3D curve with a constant B-spline at `mid_pt` whose tangent
+        // vanishes everywhere (`EvaluateBinormal` fails with `SM_ERR` 1001 even when
+        // `opt_step_off == false`).
+        let pw = vec![
+            CPoint::new(mid_pt.x, mid_pt.y, mid_pt.z, NOW),
+            CPoint::new(mid_pt.x, mid_pt.y, mid_pt.z, NOW),
+        ];
+        let nl = NlCurve::new(pw, 1, vec![ivl.min(), ivl.min(), ivl.max(), ivl.max()]).unwrap();
+        let mut b_const = b0.clone();
+        b_const.edge_mut(e).unwrap().curve = Some(Curve::from(
+            crate::nurbs::b_spline_curve::BSplineCurve::from_nurb(nl, 3, false),
+        ));
+
+        assert!(is_convex_radial_sector(
+            &default_k,
+            &mut b_const.clone(),
+            concave_eu,
+            1,
+            false,
+            0.0
+        )
+        .unwrap());
+        let err = is_convex_radial_sector(&opt_in_k, &mut b_const, concave_eu, 1, false, 0.0)
+            .unwrap_err();
+        assert!(matches!(err, SolidError::Upstream { code: 1001, .. }));
+
+        // Uninitialised 3D B-spline curve (`nurb == None` -> `SM_ERR` 1001) also masks as
+        // `Ok(true)` by default and propagates as `Err` under opt-in.
+        let mut b_uninit = b0;
+        b_uninit.edge_mut(e).unwrap().curve = Some(Curve::from(
+            crate::nurbs::b_spline_curve::BSplineCurve::new(3),
+        ));
+        assert!(is_convex_radial_sector(
+            &default_k,
+            &mut b_uninit.clone(),
+            concave_eu,
+            1,
+            false,
+            0.0
+        )
+        .unwrap());
+        let uninit_err =
+            is_convex_radial_sector(&opt_in_k, &mut b_uninit, concave_eu, 1, false, 0.0)
+                .unwrap_err();
+        assert!(matches!(
+            uninit_err,
+            SolidError::Upstream { code: 1001, .. }
+        ));
+
+        // Loop-less edge use (`EvaluateBinormal` -> `SM_ERR_INVALID_INPUT` 1007): `Ok(true)`
+        // by default, `Err(Upstream { code: 1007 })` under opt-in.
+        let (mut lone_b, lone_eu) = lone_edgeuse();
+        assert!(is_convex_radial_sector(&default_k, &mut lone_b, lone_eu, 1, false, 0.0).unwrap());
+        let lone_err =
+            is_convex_radial_sector(&opt_in_k, &mut lone_b, lone_eu, 1, false, 0.0).unwrap_err();
+        assert!(matches!(lone_err, SolidError::Upstream { code: 1007, .. }));
+
+        // Null-dereference (`edge: None`) and dangling-id errors propagate under both modes.
+        let edgeless = lone_b.add_edgeuse_record(Edgeuse::default()).unwrap();
+        assert!(matches!(
+            is_convex_radial_sector(&default_k, &mut lone_b, edgeless, 1, false, 0.0),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            is_convex_radial_sector(&opt_in_k, &mut lone_b, edgeless, 1, false, 0.0),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        let dangling = EdgeuseId::from_index(999);
+        assert!(matches!(
+            is_convex_radial_sector(&default_k, &mut lone_b, dangling, 1, false, 0.0),
+            Err(SolidError::NotFound { .. })
+        ));
+        assert!(matches!(
+            is_convex_radial_sector(&opt_in_k, &mut lone_b, dangling, 1, false, 0.0),
+            Err(SolidError::NotFound { .. })
+        ));
     }
 }
