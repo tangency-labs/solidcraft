@@ -2885,7 +2885,7 @@ fn entry_row(
             label: &e.label,
             name: true,
             selected,
-            dim: !e.visible || parent_hidden,
+            dim: !visible || parent_hidden,
             cut,
             color: e.color,
             swatch: appearance.swatch,

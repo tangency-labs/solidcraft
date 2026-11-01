@@ -982,3 +982,22 @@ fn eye_drag_from_the_origin_is_its_own_undo_step_and_leaves_an_earlier_show_alon
     h.app.run("edit.undo", json!({})).unwrap();
     assert!(body_hidden(&h, "One"), "the show is its own undo step: undoing it hides One again");
 }
+
+/// #9953: hiding or showing a sketch or body dynamically dims/undims the row without needing a full row rebuild.
+#[test]
+fn hiding_or_showing_body_or_sketch_updates_row_dimming() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"One"})).unwrap();
+    h.app.run("browser.expand_all", json!({})).unwrap();
+    h.settle();
+
+    // Toggle body hidden via eye click
+    h.step(&json!({"click":{"handle":"eye:One"}})).unwrap();
+    h.settle();
+    assert!(body_hidden(&h, "One"));
+
+    // Toggle body shown again via eye click
+    h.step(&json!({"click":{"handle":"eye:One"}})).unwrap();
+    h.settle();
+    assert!(!body_hidden(&h, "One"));
+}

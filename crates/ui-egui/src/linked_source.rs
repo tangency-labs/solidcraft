@@ -36,7 +36,10 @@ pub(crate) fn start(app: &mut SolveApp, component: u64) {
         return;
     }
     let document = app.session.doc.clone();
-    app.pick_open_for(&solidcraft_engine::io::DESIGN_EXTS, move |app, path| {
+    // A design of any release, or a plain JSON design: what Insert Design takes.
+    let mut extensions = solidcraft_engine::io::DESIGN_EXTS.to_vec();
+    extensions.push("json");
+    app.pick_open_for(&extensions, move |app, path| {
         let Some(path) = path else { return };
         // A host or programmatic caller can replace/edit a design while a native picker is
         // pending. Never apply that old component id to a different design or newer revision.
@@ -295,7 +298,7 @@ mod tests {
 
     fn answer(app: &mut SolveApp, path: Option<String>) {
         app.services.pick_open = Some(Box::new(move |extensions| {
-            assert_eq!(extensions, &["sc", "solidcraft", "solvecraft"], "a design of any release");
+            assert_eq!(extensions, &["sc", "solidcraft", "solvecraft", "json"], "a design of any release, or a plain JSON design");
             let result = path.clone();
             Box::pin(async move { result })
         }));
@@ -365,6 +368,20 @@ mod tests {
         assert!(app.file_picker_busy());
         crate::file_picker::tick(&mut app, &egui::Context::default());
         assert!(app.session.doc.links[&component].path.ends_with("moved.solidcraft"));
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn relink_picks_a_plain_json_design_as_insert_design_does() {
+        let (mut app, component, _, folder, _) = fixture("json");
+        let plain = folder.join("plain.json");
+        let mut part = Session::default();
+        part.execute("solid.box", &json!({"length": 10, "width": 20, "height": 45})).unwrap();
+        part.execute("file.save", &json!({"path": plain})).unwrap();
+        answer(&mut app, Some(plain.to_string_lossy().into_owned()));
+        start(&mut app, component);
+        crate::file_picker::tick(&mut app, &egui::Context::default());
+        assert!(app.session.doc.links[&component].path.ends_with("plain.json"));
         let _ = std::fs::remove_dir_all(folder);
     }
 

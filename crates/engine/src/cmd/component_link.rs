@@ -41,7 +41,7 @@ pub static COMMANDS: &[CommandSpec] = &[
          joints whose faces are gone or that no longer solve)",
     ),
     CommandSpec::new("component.relink", "Relink Source", relink).icon("update").params(
-        "component: id or name of a linked component; path: a saved .sc design — replaces the source and linked bodies for all its occurrences, preserving identities and placements; returns path, previous_path, warnings, joint_errors and joint_conflicts",
+        "component: id or name of a linked component; path: a saved design (.sc or .json) — replaces the source and linked bodies for all its occurrences, preserving identities and placements; returns path, previous_path, warnings, joint_errors and joint_conflicts",
     ),
     CommandSpec::new("component.break_link", "Break Link", break_link)
         .icon("break")
@@ -722,8 +722,9 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let given = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "`path` is required"))?;
     let file = absolute(Path::new(given));
-    if !solidcraft_io::is_design_container_path(&file) {
-        return Err(bad(cmd, "choose a saved .sc design"));
+    // Any design Insert Design takes: a .sc container (or a legacy one) or a plain JSON design.
+    if !solidcraft_io::is_design_path(given) {
+        return Err(bad(cmd, "choose a saved design (.sc or .json)"));
     }
     // A network or device path is judged from its text before the disk is asked anything.
     link_refused(s.path.as_deref(), given).map_err(|e| bad(cmd, e.to_string()))?;
