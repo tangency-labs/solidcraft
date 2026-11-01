@@ -37,6 +37,9 @@ pub struct ConstructionLineParams {
     /// sketch Y axis. A typed value becomes a driving dimension.
     #[serde(default)]
     pub offset: Option<LengthExpr>,
+    /// `false` makes a line with a `length` a normal sketch line, ready for a profile, instead
+    /// of construction geometry (default `true`). An infinite line is always construction.
+    pub construction: Option<bool>,
     /// The sketch (default: the one being edited).
     pub sketch: Option<SketchRef>,
 }

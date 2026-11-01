@@ -132,9 +132,19 @@ Parallel and perpendicular lines ask for a straight sketch line, then a point;
 the reference stays picked so you can place several lines. Right-click clears the current
 points and references; Escape ends the tool.
 
+The horizontal, vertical, parallel and perpendicular tools show a **Length** box beside the
+pointer, which stays empty (infinite) until you type a digit: letters still start other tools.
+With a length, the first click sets the start and a second click the side the segment runs to;
+the angle tool has the Length box beside its Angle box. The segment gets a length dimension
+that follows the typed expression. An empty box keeps the infinite line. The
+**Construction | Normal** switch under the Length box makes such a segment a normal sketch line,
+ready to close a profile; it starts at Construction, is greyed out while the line is infinite
+(an infinite line is always construction), and leaves the Sketch Palette's line type alone.
+
 A command call can cut a horizontal, vertical, angle, parallel or perpendicular construction
 line to a length instead: `length` makes a segment from the point `at`, running towards `near`,
-and adds a length dimension that follows its expression (#10258).
+and adds a length dimension that follows its expression (#10258). With `construction: false` that
+segment is a normal sketch line, ready to close a profile.
 
 Tangents through an external point take a circle or circular arc, the external point, and a
 click choosing the desired preview. A common tangent takes two circles/arcs and a click choosing
