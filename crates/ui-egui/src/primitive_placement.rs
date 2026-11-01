@@ -36,7 +36,9 @@ const BOX_PLACEMENTS: [&str; 2] = ["Corner", "Center"];
 /// the Sphere and Torus for their centre.
 pub(crate) fn inputs(cmd: &str) -> Vec<SelInput> {
     match cmd {
-        "solid.box" | "solid.sphere" | "solid.torus" => vec![SelInput::new("Point", VERTICES | EDGES | FACES | ORIGIN, false)],
+        "solid.box" | "solid.sphere" | "solid.torus" => {
+            vec![SelInput::new("Point", VERTICES | EDGES | FACES | ORIGIN, false).tip("dialog.primitive_point_tip")]
+        }
         _ => Vec::new(),
     }
 }

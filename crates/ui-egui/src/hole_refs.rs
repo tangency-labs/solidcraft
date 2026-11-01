@@ -59,12 +59,12 @@ struct Framed {
 
 /// The reference edge inputs a Single hole's dialog has after its face input.
 pub(crate) fn inputs() -> [SelInput; 2] {
-    REFERENCES.map(|label| SelInput::new(label, EDGES, false))
+    REFERENCES.map(|label| SelInput::new(label, EDGES, false).tip("dialog.reference_edge_tip"))
 }
 
 /// The Cylinder window's inputs: where it stands (a face, or a vertex), then the reference edges.
 pub(crate) fn cylinder_inputs() -> Vec<SelInput> {
-    let mut v = vec![SelInput::new("Face", PLANAR_FACES | FACES | VERTICES, false)];
+    let mut v = vec![SelInput::new("Face", PLANAR_FACES | FACES | VERTICES, false).tip("dialog.cylinder_face_tip")];
     v.extend(inputs());
     v
 }

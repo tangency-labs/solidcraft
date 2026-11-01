@@ -271,3 +271,41 @@ fn a_cylinder_started_first_takes_its_face_then_its_edges() {
     let FeatureKind::Cylinder { references, .. } = &f.kind else { panic!("the last feature is a cylinder") };
     assert_eq!(references.len(), 2);
 }
+
+/// Clicked into, a pick field keeps the keyboard until a click picks something (#10428): a click
+/// that picks nothing (off the model) leaves it waiting and says what it is for, instead of giving
+/// the keyboard to Diameter; the next click on a face fills it. Each placement field of the
+/// primitives says what it is for.
+#[test]
+fn a_pick_field_clicked_into_waits_for_its_pick_and_says_what_it_takes() {
+    let mut h = plate();
+    h.step(&json!({"start": "solid.cylinder"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click": {"handle": "dialog:Face"}})).unwrap();
+    h.frames(2);
+    let off = screen(&mut h, Vec3::new(-8.0, 20.0, 0.0));
+    h.step(&json!({"click": off})).unwrap();
+    h.frames(3);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!((d.active, d.awaiting_pick), (0, true), "Face still waits for its pick");
+    assert!(d.inputs[0].items.is_empty(), "nothing was picked off the model");
+    assert_eq!(d.pick_refused, Some("dialog.cylinder_face_tip"));
+    assert!(crate::scenario::rect_of("dialog:pick_refused").is_some(), "the note shows under the form");
+    assert_eq!(h.ctx.memory(|m| m.focused()), None, "no value field took the keyboard");
+    let at = screen(&mut h, Vec3::new(30.0, 25.0, 10.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.frames(2);
+    assert!(cylinder_dialog(&h).1.dist(Vec3::new(30.0, 25.0, 10.0)) < 0.5, "the face is picked: {:?}", cylinder_dialog(&h).1);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!((d.awaiting_pick, d.pick_refused), (false, None));
+
+    let tips: Vec<_> = crate::hole_refs::cylinder_inputs().iter().map(|i| i.tip).collect();
+    assert_eq!(tips, [Some("dialog.cylinder_face_tip"), Some("dialog.reference_edge_tip"), Some("dialog.reference_edge_tip")]);
+    for cmd in ["solid.box", "solid.sphere", "solid.torus"] {
+        let tips: Vec<_> = crate::primitive_placement::inputs(cmd).iter().map(|i| i.tip).collect();
+        assert_eq!(tips, [Some("dialog.primitive_point_tip")], "{cmd}");
+    }
+    for id in ["dialog.cylinder_face_tip", "dialog.reference_edge_tip", "dialog.primitive_point_tip"] {
+        assert_ne!(crate::i18n::tr(id), id, "{id} is in the catalog");
+    }
+}

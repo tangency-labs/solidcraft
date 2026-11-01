@@ -1,0 +1,62 @@
+{
+  "en": {
+    "dialog.cylinder_face_tip": "The face or vertex of the model the cylinder stands on: click here, then click it in the view. Left empty, X, Y and Z place it.",
+    "dialog.primitive_point_tip": "A point that fills X, Y and Z: click here, then click a vertex, edge or face of the model, or the origin.",
+    "dialog.reference_edge_tip": "A straight edge of the picked face to measure the distance below from: click here, then click the edge."
+  },
+  "ar": {
+    "dialog.cylinder_face_tip": "وجه النموذج أو رأسه الذي تقوم عليه الأسطوانة: انقر هنا ثم انقر عليه في العرض. إذا تُرك فارغًا، تحدد X وY وZ موضعها.",
+    "dialog.primitive_point_tip": "نقطة تملأ X وY وZ: انقر هنا ثم على رأس أو حافة أو وجه من النموذج، أو على نقطة الأصل.",
+    "dialog.reference_edge_tip": "حافة مستقيمة من الوجه المختار تُقاس منها المسافة أدناه: انقر هنا ثم على الحافة."
+  },
+  "de": {
+    "dialog.cylinder_face_tip": "Die Fläche oder der Eckpunkt des Modells, auf dem der Zylinder steht: hier klicken, dann in der Ansicht darauf klicken. Leer gelassen platzieren ihn X, Y und Z.",
+    "dialog.primitive_point_tip": "Ein Punkt, der X, Y und Z füllt: hier klicken, dann einen Eckpunkt, eine Kante oder Fläche des Modells oder den Ursprung anklicken.",
+    "dialog.reference_edge_tip": "Eine gerade Kante der gewählten Fläche, von der aus der Abstand darunter gemessen wird: hier klicken, dann die Kante anklicken."
+  },
+  "es": {
+    "dialog.cylinder_face_tip": "La cara o el vértice del modelo sobre el que se apoya el cilindro: haz clic aquí y después haz clic en él en la vista. Si se deja vacío, lo colocan X, Y y Z.",
+    "dialog.primitive_point_tip": "Un punto que rellena X, Y y Z: haz clic aquí y después en un vértice, una arista o una cara del modelo, o en el origen.",
+    "dialog.reference_edge_tip": "Una arista recta de la cara elegida desde la que se mide la distancia de abajo: haz clic aquí y después en la arista."
+  },
+  "fr": {
+    "dialog.cylinder_face_tip": "La face ou le sommet du modèle sur lequel le cylindre est posé : cliquer ici, puis dessus dans la vue. Laissé vide, X, Y et Z le placent.",
+    "dialog.primitive_point_tip": "Un point qui remplit X, Y et Z : cliquer ici, puis sur un sommet, une arête ou une face du modèle, ou sur l'origine.",
+    "dialog.reference_edge_tip": "Une arête droite de la face choisie, depuis laquelle la distance ci-dessous est mesurée : cliquer ici, puis sur l'arête."
+  },
+  "he": {
+    "dialog.cylinder_face_tip": "הפאה או הקודקוד של המודל שעליהם הגליל ניצב: יש ללחוץ כאן ואז עליהם בתצוגה. אם נשאר ריק, X, Y ו-Z ממקמים אותו.",
+    "dialog.primitive_point_tip": "נקודה שממלאת את X, Y ו-Z: יש ללחוץ כאן ואז על קודקוד, מקצוע או פאה של המודל, או על הראשית.",
+    "dialog.reference_edge_tip": "מקצוע ישר של הפאה שנבחרה שממנו נמדד המרחק שלמטה: יש ללחוץ כאן ואז על המקצוע."
+  },
+  "it": {
+    "dialog.cylinder_face_tip": "La faccia o il vertice del modello su cui poggia il cilindro: fai clic qui, poi su di esso nella vista. Se resta vuoto, lo posizionano X, Y e Z.",
+    "dialog.primitive_point_tip": "Un punto che compila X, Y e Z: fai clic qui, poi su un vertice, uno spigolo o una faccia del modello, oppure sull'origine.",
+    "dialog.reference_edge_tip": "Uno spigolo rettilineo della faccia scelta da cui si misura la distanza sotto: fai clic qui, poi sullo spigolo."
+  },
+  "ja": {
+    "dialog.cylinder_face_tip": "円柱が立つモデルの面または頂点: ここをクリックしてから、ビューでそれをクリック。空のままなら X、Y、Z で配置します。",
+    "dialog.primitive_point_tip": "X、Y、Z を埋める点: ここをクリックしてから、モデルの頂点、エッジ、面、または原点をクリック。",
+    "dialog.reference_edge_tip": "下の距離を測る基準となる、選んだ面の直線エッジ: ここをクリックしてからエッジをクリック。"
+  },
+  "ko": {
+    "dialog.cylinder_face_tip": "원기둥이 놓일 모델의 면 또는 꼭짓점: 여기를 클릭한 다음 뷰에서 그것을 클릭. 비워 두면 X, Y, Z로 배치합니다.",
+    "dialog.primitive_point_tip": "X, Y, Z를 채우는 점: 여기를 클릭한 다음 모델의 꼭짓점, 모서리, 면 또는 원점을 클릭.",
+    "dialog.reference_edge_tip": "아래 거리를 재는 기준이 되는, 선택한 면의 직선 모서리: 여기를 클릭한 다음 모서리를 클릭."
+  },
+  "vi": {
+    "dialog.cylinder_face_tip": "Bề mặt hoặc đỉnh của mô hình mà khối trụ đứng trên đó: nhấp vào đây, sau đó nhấp vào nó trong khung nhìn. Để trống thì X, Y và Z đặt vị trí.",
+    "dialog.primitive_point_tip": "Một điểm điền vào X, Y và Z: nhấp vào đây, sau đó nhấp vào một đỉnh, cạnh hoặc bề mặt của mô hình, hoặc gốc tọa độ.",
+    "dialog.reference_edge_tip": "Một cạnh thẳng của bề mặt đã chọn, từ đó đo khoảng cách bên dưới: nhấp vào đây, sau đó nhấp vào cạnh."
+  },
+  "zh": {
+    "dialog.cylinder_face_tip": "圆柱体所立的模型面或顶点：先单击此处，再在视图中单击它。留空时由 X、Y、Z 放置。",
+    "dialog.primitive_point_tip": "填入 X、Y、Z 的点：先单击此处，再单击模型的顶点、边或面，或原点。",
+    "dialog.reference_edge_tip": "所选面上的一条直边，下方的距离从它量起：先单击此处，再单击该边。"
+  },
+  "zh-TW": {
+    "dialog.cylinder_face_tip": "圓柱體所立的模型面或頂點：先點擊此處，再在視圖中點擊它。留空時由 X、Y、Z 放置。",
+    "dialog.primitive_point_tip": "填入 X、Y、Z 的點：先點擊此處，再點擊模型的頂點、邊或面，或原點。",
+    "dialog.reference_edge_tip": "所選面上的一條直邊，下方的距離從它量起：先點擊此處，再點擊該邊。"
+  }
+}
