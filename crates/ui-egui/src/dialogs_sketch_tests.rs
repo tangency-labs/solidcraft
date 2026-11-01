@@ -28,10 +28,7 @@ fn a_context_error_offers_no_create_issue_button_10181() {
     h.app.session.selection = vec![Sel::Face { body: "Body1".into(), index: 5, point: solidcraft_engine::geom::Vec3::new(20.0, 15.0, 20.0) }];
     h.app.start("sketch.project");
     h.frames(4);
-    assert!(
-        h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::SketchProject { .. })),
-        "the Project panel opens for the live sketch"
-    );
+    assert!(h.app.dialog.as_ref().is_some_and(|d| matches!(d.kind, Kind::SketchProject { .. })), "the Project panel opens for the live sketch");
     // The sketch ends while the Project panel is still open.
     h.app.finish_sketch();
     h.frames(4);
@@ -40,10 +37,7 @@ fn a_context_error_offers_no_create_issue_button_10181() {
         h.settle();
     }
     let error = h.app.dialog.as_ref().and_then(|d| d.error.clone());
-    assert!(
-        scenario::handle_at("dialog:create_issue").is_none(),
-        "the Project panel offers its context error as something to report: {error:?}"
-    );
+    assert!(scenario::handle_at("dialog:create_issue").is_none(), "the Project panel offers its context error as something to report: {error:?}");
 }
 
 fn picked(h: &Harness, command: &str) -> Dialog {
