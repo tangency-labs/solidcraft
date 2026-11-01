@@ -210,6 +210,27 @@ fn zero_distance_edits_preserve_dimension_rank() {
     }
 }
 
+/// A length dimension of zero still constrains the sketch: the two ends of the line meet, and
+/// the dimension holds them together instead of leaving a degree of freedom behind (#5505).
+#[test]
+fn zero_length_keeps_the_line_constrained() {
+    for seed in [false, true] {
+        seeded(seed, || {
+            let mut sk = Sketch::new();
+            let a = sk.add_point(v(0.0, 0.0), None).unwrap();
+            let b = sk.add_point(v(10.0, 0.0), None).unwrap();
+            let l = sk.add_line_pts(a, b, None).unwrap();
+            sk.add_constraint(ConstraintKind::Fix { p: a }, None).unwrap();
+            let id = sk.add_constraint(ConstraintKind::Length { l, value: 0.0 }, None).unwrap();
+            let report = solve(&mut sk);
+            assert!(report.ok(), "{report:?}");
+            assert_eq!(report.dof, 0, "a zero length holds the line's ends together: {report:?}");
+            assert!(!report.redundant.contains(&id), "a zero length is not redundant: {report:?}");
+            assert!(sk.point(b).unwrap().dist(v(0.0, 0.0)) < 1e-6, "{:?}", sk.point(b));
+        });
+    }
+}
+
 #[test]
 fn under_constrained_reports_dof() {
     let mut sk = Sketch::new();
