@@ -173,7 +173,7 @@ fn a_drawing_of_the_design_is_kept_in_it_and_opened() {
     assert!(d.sheets[0].border.is_some(), "the ISO border");
     let built_in = template::built_in("iso-a3-part").unwrap().unwrap();
     assert_eq!(d.sheets[0].title_block, built_in.sheets[0].title_block, "the part template's block");
-    assert_eq!(sheet["title_block"]["size_mm"], json!([180.0, 54.0]));
+    assert_eq!(sheet["title_block"]["size_mm"], json!([180.0, 49.0]));
     assert_eq!((s.doc.drawings.len(), s.open_drawing), (1, Some(d.id)));
     assert_eq!((s.undo.len(), s.undo.last().map(|u| u.part)), (undo + 1, Some(None)), "a step of the model");
     assert_eq!((s.evaluations, &s.doc.features), (evaluations, &features), "nothing evaluated, the model as it was");

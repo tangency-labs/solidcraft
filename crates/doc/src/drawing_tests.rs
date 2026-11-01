@@ -349,7 +349,7 @@ fn a_sheets_title_block_is_a_copy_on_its_border() {
 }
 
 /// A sheet's title block sits on its drawing border's lower-right corner: on A3 with the ISO
-/// border, (230, 10) to (410, 64); none without a block.
+/// border, (230, 10) to (410, 59); none without a block.
 #[test]
 fn a_sheets_title_block_outline() {
     let mut d = Drawing::new(
@@ -365,7 +365,7 @@ fn a_sheets_title_block_outline() {
     assert_eq!(d.sheets[0].title_block_outline().unwrap(), None);
     Arc::make_mut(&mut d.sheets[0]).title_block = Some(solidcraft_geom::title_block::default_block());
     let outline = d.sheets[0].title_block_outline().unwrap().unwrap();
-    assert_eq!((outline.min, outline.max), (Vec2::new(230.0, 10.0), Vec2::new(410.0, 64.0)));
+    assert_eq!((outline.min, outline.max), (Vec2::new(230.0, 10.0), Vec2::new(410.0, 59.0)));
 }
 
 /// The most a drawing's blocks can ask of every edit's check: 1000 sheets, each with a 64-cell block.
