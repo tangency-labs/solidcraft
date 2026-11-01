@@ -1560,6 +1560,50 @@ fn auth_box(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
 }
 
+/// The visible **Copy message** button of one transcript message (#10675): copies the whole
+/// message — the prompt as entered, or the assistant's original Markdown — and nothing else.
+/// A streaming reply copies the stable text received so far, which is what `text` holds.
+#[cfg(not(target_arch = "wasm32"))]
+fn copy_message_button(ui: &mut egui::Ui, n: usize, text: &str) {
+    let b = ui_kit::button(ui, tr("ui.agent_chat_copy_message"), ui_kit::Button::Small);
+    crate::scenario::publish_handle(&format!("agent_chat:copy:{n}"), b.rect.center());
+    if b.clicked() {
+        ui.ctx().copy_text(text.to_owned());
+    }
+}
+
+/// The right-click menu of one transcript message (#10675): the same single action as the
+/// visible button, on the whole message area, beside the composer's own text menu.
+/// The area stays hover-only so partial text selection keeps working, so the menu opens on a
+/// right-click released over it rather than on a click the response itself would report.
+#[cfg(not(target_arch = "wasm32"))]
+fn copy_message_menu(ui: &egui::Ui, response: &egui::Response, n: usize, text: &str) {
+    crate::scenario::publish_rect(&format!("agent_chat:msg:{n}"), response.rect);
+    let opened = ui.input(|i| {
+        i.pointer.button_released(egui::PointerButton::Secondary)
+            && i.pointer.interact_pos().is_some_and(|p| response.rect.contains(p))
+    });
+    let mut copy = false;
+    egui::Popup::menu(response)
+        .at_pointer_fixed()
+        .frame(ui_kit::Menu::frame())
+        .open_memory(if opened { Some(egui::SetOpenCommand::Bool(true)) } else { None })
+        .show(|ui| {
+            ui_kit::Menu::show(ui, crate::context_menu::LIST_W, |ui| {
+                let item = ui_kit::MenuItem::new("copy_message", tr("ui.agent_chat_copy_message"), "copy");
+                let row = item.show(ui);
+                crate::scenario::publish_handle(&format!("agent_chat:copy_menu:{n}"), row.rect.center());
+                if row.clicked() {
+                    copy = true;
+                    ui.close();
+                }
+            });
+        });
+    if copy {
+        ui.ctx().copy_text(text.to_owned());
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
@@ -1573,6 +1617,9 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
     for (n, item) in app.agent_chat.items.iter().enumerate() {
         match item {
             Item::User { text, image, pictures, context, files } => {
+                // A picture-only prompt has no text to copy: no action rather than an empty copy (#10675).
+                let copyable = !text.is_empty();
+                let before = ui.min_rect();
                 ui_kit::assistant_bubble(ui, |ui| {
                     if !text.is_empty() {
                         ui.add(egui::Label::new(RichText::new(text).color(t.text)).selectable(true).wrap());
@@ -1587,13 +1634,28 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                     context_chips(ui, context, false);
                     files_line(ui, files.iter().map(String::as_str));
+                    if copyable {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| copy_message_button(ui, n, text));
+                    }
                 });
+                if copyable {
+                    let drawn = ui.min_rect().subtract(before);
+                    let resp = ui.interact(drawn, Id::new(("agent_chat_msg", n)), Sense::hover());
+                    copy_message_menu(ui, &resp, n, text);
+                }
             }
             Item::Agent { thought, text } => {
                 if *thought {
                     ui.add(egui::Label::new(RichText::new(text).italics().color(t.text_dim)).selectable(true).wrap());
                 } else {
+                    let before = ui.min_rect();
                     ui_kit::assistant_prose(ui, |ui| super::markdown_view::show(ui, n, text));
+                    if !text.is_empty() {
+                        copy_message_button(ui, n, text);
+                        let drawn = ui.min_rect().subtract(before);
+                        let resp = ui.interact(drawn, Id::new(("agent_chat_msg", n)), Sense::hover());
+                        copy_message_menu(ui, &resp, n, text);
+                    }
                 }
             }
             Item::Tool { .. } => {

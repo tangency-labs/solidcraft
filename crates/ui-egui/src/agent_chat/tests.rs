@@ -3698,3 +3698,98 @@ fn tool_room_beside_the_docked_assistant_survives_an_inside_out_view() {
         assert!(free.min.x.is_finite() && free.max.x.is_finite(), "{side}: {free:?}");
     }
 }
+
+// ---- Copy message (#10675) ----
+
+/// A chat with a multi-paragraph prompt and a Markdown reply, both drawn.
+fn chat_with_copiable_messages() -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.frames(3);
+    h.app.agent_chat.items.push(Item::User {
+        text: "make a plate\n\nwith two holes:\n- 6 mm\n- 8 mm".into(),
+        image: false,
+        pictures: Vec::new(),
+        files: Vec::new(),
+        context: Context::default(),
+    });
+    h.app.agent_chat.items.push(Item::Agent {
+        thought: false,
+        text: "# Result\n\nA plate with holes.\n\n```rust\nlet x = 1;\n```".into(),
+    });
+    h.frames(3);
+    h
+}
+
+/// The text the last frame copied to the clipboard, if any.
+fn copied_text(h: &crate::scenario::Harness) -> Option<String> {
+    h.output.commands.iter().rev().find_map(|c| match c {
+        egui::OutputCommand::CopyText(t) => Some(t.clone()),
+        _ => None,
+    })
+}
+
+fn click_at(h: &mut crate::scenario::Harness, at: egui::Pos2, button: egui::PointerButton) {
+    h.frame_with(vec![egui::Event::PointerMoved(at)]);
+    h.frame_with(vec![egui::Event::PointerButton { pos: at, button, pressed: true, modifiers: egui::Modifiers::NONE }]);
+    h.frame_with(vec![egui::Event::PointerButton { pos: at, button, pressed: false, modifiers: egui::Modifiers::NONE }]);
+    h.frames(2);
+}
+
+/// The visible button on a sent prompt copies the whole prompt, as entered.
+#[test]
+fn the_copy_message_button_copies_the_prompt_as_entered() {
+    let mut h = chat_with_copiable_messages();
+    let at = crate::scenario::handle_at("agent_chat:copy:0").expect("the prompt's Copy message button");
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    assert_eq!(copied_text(&h).as_deref(), Some("make a plate\n\nwith two holes:\n- 6 mm\n- 8 mm"), "the whole prompt, paragraphs and list items");
+}
+
+/// The visible button on a reply copies its original Markdown: heading, paragraphs, list and
+/// fenced code, not the laid-out text.
+#[test]
+fn the_copy_message_button_copies_the_reply_as_original_markdown() {
+    let mut h = chat_with_copiable_messages();
+    let at = crate::scenario::handle_at("agent_chat:copy:1").expect("the reply's Copy message button");
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    assert_eq!(copied_text(&h).as_deref(), Some("# Result\n\nA plate with holes.\n\n```rust\nlet x = 1;\n```"));
+}
+
+/// Right-clicking a message opens its menu, and its row copies the same whole reply.
+#[test]
+fn right_clicking_a_message_offers_copy_message() {
+    let mut h = chat_with_copiable_messages();
+    let msg = crate::scenario::rect_of("agent_chat:msg:1").expect("the reply's message area");
+    click_at(&mut h, msg.center(), egui::PointerButton::Secondary);
+    let item = crate::scenario::handle_at("agent_chat:copy_menu:1").expect("the right-click menu's Copy message row");
+    click_at(&mut h, item, egui::PointerButton::Primary);
+    assert_eq!(copied_text(&h).as_deref(), Some("# Result\n\nA plate with holes.\n\n```rust\nlet x = 1;\n```"));
+}
+
+/// A reply that is still streaming copies the stable text received so far.
+#[test]
+fn a_streaming_reply_copies_the_text_received_so_far() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.frames(3);
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "half a repl".into() });
+    h.frames(3);
+    let at = crate::scenario::handle_at("agent_chat:copy:0").expect("the streaming reply's button");
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    assert_eq!(copied_text(&h).as_deref(), Some("half a repl"));
+}
+
+/// A picture-only prompt has no text to copy: no button, no menu, and a thought has none
+/// either — the clipboard is never overwritten with an empty string.
+#[test]
+fn a_picture_only_prompt_and_a_thought_have_no_copy_message_action() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.frames(3);
+    h.app.agent_chat.items.push(Item::User { text: String::new(), image: true, pictures: Vec::new(), files: Vec::new(), context: Context::default() });
+    h.app.agent_chat.items.push(Item::Agent { thought: true, text: "pondering".into() });
+    h.frames(3);
+    assert!(crate::scenario::handle_at("agent_chat:copy:0").is_none(), "a picture-only prompt hides the text-copy action");
+    assert!(crate::scenario::handle_at("agent_chat:copy:1").is_none(), "a thought has no copy action");
+    assert!(h.widget("Copy message").is_none(), "nothing to click");
+}
