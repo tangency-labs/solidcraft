@@ -560,8 +560,8 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         )
     });
     let hover = hover.filter(|p| !crate::frame::dock_dragging(ui.ctx()) && !crate::shell::covered(app, *p));
-    // The right button belongs to the marking menu while it is open.
-    let secondary_down = secondary_down && app.viewport.context_menu.is_none();
+    // The right button belongs to the marking menu while it is open, or held to open it.
+    let secondary_down = secondary_down && app.viewport.context_menu.is_none() && !crate::context_menu::holding(app);
     // The axis view handles its own clicks; the model underneath must not see them.
     let axes = if caps.orbit { axis_rect(app, rect) } else { Rect::NOTHING };
     // So is the View angles readout under it (#6032).
