@@ -963,6 +963,30 @@ fn coil_from_a_profile_hides_the_primitive_section() {
     assert!(p.get("operation").is_some(), "{p}");
 }
 
+#[test]
+fn coil_turns_about_a_picked_axis() {
+    // #7286: the Coil dialog has an Axis input; the pick sets the coil's axis line.
+    let h = fixture();
+    let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
+    assert_eq!(d.inputs.get(1).map(|i| i.label), Some("Axis (optional)"));
+    let sketch = h.app.session.world_state().sketches[0].feature;
+    d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
+    let (_, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert!(p.get("axis").is_none(), "no axis picked keeps the default: {p}");
+    d.inputs[1].items = vec![Sel::Axis { name: "Y".into() }];
+    let (_, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(p["axis"], json!([0.0, 1.0, 0.0]), "{p}");
+    assert_eq!(p["base"], json!([0.0, 0.0, 0.0]), "{p}");
+    // "Reverse direction" turns the axis around, picked or default, and is not sent on.
+    d.extra.insert("reverse_direction".into(), json!(true));
+    let (_, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(p["axis"].as_array().map(|a| a.iter().filter_map(|v| v.as_f64()).collect::<Vec<_>>()), Some(vec![0.0, -1.0, 0.0]), "{p}");
+    assert!(p.get("reverse_direction").is_none(), "{p}");
+    d.inputs[1].items.clear();
+    let (_, p) = apply_commands(&h.app, &d).unwrap().remove(0);
+    assert_eq!(p["axis"].as_array().map(|a| a.iter().filter_map(|v| v.as_f64()).collect::<Vec<_>>()), Some(vec![0.0, 0.0, -1.0]), "{p}");
+}
+
 fn extrude_focus_fixture() -> Harness {
     let mut h = Harness::new();
     h.app.home.open = false;

@@ -660,7 +660,7 @@ fn coil_rows(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> b
             extra.insert("start_angle".into(), json!(angle));
         }
     }
-    extra_options(ui, "coil_options", extra, &[("Clockwise", "clockwise")]);
+    extra_options(ui, "coil_options", extra, &[("Clockwise", "clockwise"), ("Reverse direction", "reverse_direction")]);
     enter
 }
 
@@ -856,6 +856,8 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         Kind::Primitive { cmd, fields, operation, at, .. } => {
             let from_sketch = *cmd == "solid.coil" && d.inputs.first().is_some_and(|i| i.accept & selection::PROFILES != 0 && !i.items.is_empty());
+            // A picked axis places the coil, so its placement rows are not shown (#7286).
+            let axis_picked = *cmd == "solid.coil" && d.inputs.get(1).is_some_and(|i| !i.items.is_empty());
             for (k, v) in fields.iter_mut() {
                 if from_sketch && (*k == "diameter" || *k == "section_size") {
                     continue;
@@ -865,10 +867,12 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             if *cmd == "solid.coil" {
                 enter |= coil_rows(ui, &mut d.extra);
             }
-            if at.is_none() {
+            if at.is_none() && !axis_picked {
                 enter |= crate::primitive_placement::rows(ui, &app.session, cmd, &mut d.extra);
             }
-            if let Some((p, _)) = *at {
+            if let Some((p, _)) = *at
+                && !axis_picked
+            {
                 form_row(ui, "Position", |ui| {
                     ui.horizontal(|ui| {
                         ui.label(format!("{:.2}, {:.2}, {:.2}", p.x, p.y, p.z));
