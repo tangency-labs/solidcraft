@@ -3,14 +3,10 @@
 #[cfg(test)]
 use solidcraft_geom::Mesh;
 use solidcraft_geom::{Aabb3, Vec2, Vec3};
-use solidcraft_io::{DxfEntity, DxfShape};
 use solidcraft_render::Camera;
 use std::collections::BTreeMap;
 
-#[path = "view_dxf_scene.rs"]
-mod scene;
-
-pub(super) struct Drawing {
+pub(crate) struct Drawing {
     pub lines: Vec<Line>,
     pub work: usize,
     pub segments: usize,
@@ -22,81 +18,86 @@ pub(super) struct Drawing {
 
 /// A connected run of a projected sketch curve.
 #[derive(Clone, Debug)]
-pub(super) struct Path {
+pub(crate) struct Path {
     pub points: Vec<Vec2>,
     pub hidden: bool,
 }
 
-pub(super) fn drawing(meshes: &super::meshes::Scene, sketch: &[super::sketch::Part], cam: &Camera) -> Result<Drawing, &'static str> {
-    scene::drawing(meshes, sketch, cam)
+/// One connected run of a sketch curve in world coordinates.
+pub(crate) struct Part {
+    pub points: Vec<Vec3>,
+    /// Drawn over the bodies (the sketch being edited) rather than hidden behind them.
+    pub on_top: bool,
 }
 
-/// Keep the hidden curves connected: restarting a dash on every short chord would make a
-/// small circular hole look solid. Degree-two joins continue; junctions end the polyline.
-pub(super) fn connect(entities: Vec<DxfEntity>) -> Vec<DxfEntity> {
-    let mut result = Vec::new();
-    let mut lines = Vec::new();
-    for entity in entities {
-        match entity {
-            DxfEntity { layer, shape: DxfShape::Line(a, b) } if layer == "HIDDEN" => lines.push((a, b)),
-            e => result.push(e),
-        }
+/// Where lines are seen from: an origin, its right, up and back directions, and for a
+/// perspective view the eye's distance behind the origin, whose plane lines are projected onto.
+pub(crate) struct View {
+    origin: Vec3,
+    right: Vec3,
+    up: Vec3,
+    back: Vec3,
+    perspective: Option<f64>,
+}
+
+impl View {
+    /// A viewport camera's view: perspective onto the plane through its target when it has a
+    /// field of view.
+    pub(crate) fn from_camera(cam: &Camera) -> Self {
+        let (right, up, back) = cam.basis();
+        Self { origin: cam.target, right, up, back, perspective: (cam.fov > 0.).then_some(cam.distance) }
     }
-    let extent = lines.iter().flat_map(|(a, b)| [a, b]).fold(1.0_f64, |s, p| s.max(p.x.abs()).max(p.y.abs()));
-    let eps = extent * 1e-8;
-    let key = |p: Vec2| [(p.x / eps).round() as i64, (p.y / eps).round() as i64];
-    let mut nodes: BTreeMap<[i64; 2], Vec<usize>> = BTreeMap::new();
-    for (i, (a, b)) in lines.iter().enumerate() {
-        nodes.entry(key(*a)).or_default().push(i);
-        nodes.entry(key(*b)).or_default().push(i);
-    }
-    let mut used = vec![false; lines.len()];
-    for (i, (a, b)) in lines.iter().enumerate() {
-        if used.get(i).copied().unwrap_or(true) {
-            continue;
+
+    /// `p` in the view: right and up, and a depth that grows toward the eye (the distance
+    /// along back, or its reciprocal's change in perspective).
+    pub(super) fn project(&self, p: Vec3) -> Result<Vec3, &'static str> {
+        if !p.is_finite() {
+            return Err("model contains invalid coordinates");
         }
-        if let Some(v) = used.get_mut(i) {
-            *v = true;
-        }
-        let mut points = vec![*a, *b];
-        for _ in 0..2 {
-            while let Some(end) = points.last().copied() {
-                let Some(neighbours) = nodes.get(&key(end)).filter(|n| n.len() == 2) else { break };
-                let Some(next) = neighbours.iter().copied().find(|i| used.get(*i) == Some(&false)) else { break };
-                let Some((a, b)) = lines.get(next) else { break };
-                if let Some(v) = used.get_mut(next) {
-                    *v = true;
-                }
-                points.push(if key(*a) == key(end) { *b } else { *a });
+        let d = p - self.origin;
+        let z = d.dot(self.back);
+        let projected = if let Some(distance) = self.perspective {
+            let w = distance - z;
+            if w <= distance * 1e-6 {
+                return Err("model crosses the camera eye plane; zoom out before exporting");
             }
-            points.reverse();
+            Vec3::new(d.dot(self.right) * distance / w, d.dot(self.up) * distance / w, 1. / w)
+        } else {
+            Vec3::new(d.dot(self.right), d.dot(self.up), z)
+        };
+        if !projected.is_finite() || projected.len() > 1e12 {
+            return Err("projected coordinates exceed the export range");
         }
-        result.push(DxfEntity { layer: "HIDDEN".into(), shape: DxfShape::Polyline { points } });
+        Ok(projected)
     }
-    result
+
+    /// How far behind a surface a line must be to count as covered, in the depth `project` gives.
+    pub(super) fn depth_eps(&self, eps: f64) -> f64 {
+        self.perspective.map_or(eps, |distance| 1e-8 / distance)
+    }
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct Line {
+pub(crate) struct Line {
     pub a: Vec2,
     pub b: Vec2,
     pub hidden: bool,
 }
 
-fn xy(p: Vec3) -> Vec2 {
+pub(super) fn xy(p: Vec3) -> Vec2 {
     Vec2::new(p.x, p.y)
 }
-fn cross(a: Vec2, b: Vec2) -> f64 {
+pub(super) fn cross(a: Vec2, b: Vec2) -> f64 {
     a.x * b.y - a.y * b.x
 }
-fn bounds(points: impl IntoIterator<Item = Vec3>) -> Aabb3 {
+pub(super) fn bounds(points: impl IntoIterator<Item = Vec3>) -> Aabb3 {
     let mut b = Aabb3::EMPTY;
     for p in points {
         b.add(p);
     }
     b
 }
-fn overlap(a: &Aabb3, b: &Aabb3) -> bool {
+pub(super) fn overlap(a: &Aabb3, b: &Aabb3) -> bool {
     a.min.x <= b.max.x && b.min.x <= a.max.x && a.min.y <= b.max.y && b.min.y <= a.max.y
 }
 
@@ -149,7 +150,7 @@ impl Tree {
 }
 
 /// Clip [lo,hi] by the linear inequality f(t) >= 0.
-fn clip(lo: &mut f64, hi: &mut f64, f0: f64, f1: f64) -> bool {
+pub(super) fn clip(lo: &mut f64, hi: &mut f64, f0: f64, f1: f64) -> bool {
     if f0 < 0.0 && f1 < 0.0 {
         return false;
     }
@@ -163,7 +164,7 @@ fn clip(lo: &mut f64, hi: &mut f64, f0: f64, f1: f64) -> bool {
     }
     *hi > *lo
 }
-fn occluded(a: Vec3, b: Vec3, t: [Vec3; 3], eps: f64) -> Option<(f64, f64)> {
+pub(super) fn occluded(a: Vec3, b: Vec3, t: [Vec3; 3], eps: f64) -> Option<(f64, f64)> {
     let [p, q, r] = t;
     let area = cross(xy(q - p), xy(r - p));
     if area.abs() < 1e-20 {
@@ -184,13 +185,13 @@ fn occluded(a: Vec3, b: Vec3, t: [Vec3; 3], eps: f64) -> Option<(f64, f64)> {
     clip(&mut lo, &mut hi, depth(a), depth(b)).then_some((lo, hi))
 }
 
-fn key(p: Vec3, eps: f64) -> [i64; 3] {
+pub(super) fn key(p: Vec3, eps: f64) -> [i64; 3] {
     [(p.x / eps).round() as i64, (p.y / eps).round() as i64, (p.z / eps).round() as i64]
 }
 
 /// Merge collinear projected intervals, giving visible strokes precedence. This also removes
 /// a rear edge underneath only part of a visible edge, and rejoins subdivided silhouettes.
-fn merge_lines(lines: Vec<Line>, eps: f64) -> Vec<Line> {
+pub(super) fn merge_lines(lines: Vec<Line>, eps: f64) -> Vec<Line> {
     type Events = (Vec2, Vec2, Vec<(f64, i32, i32)>);
     let mut groups: BTreeMap<[i64; 3], Events> = BTreeMap::new();
     for line in lines {
@@ -273,7 +274,7 @@ fn edges(mesh: &Mesh, cam: &Camera, eps: f64) -> Vec<(Vec3, Vec3)> {
 }
 
 #[cfg(test)]
-fn reference_drawing(meshes: &[Mesh], cam: &Camera) -> Result<Vec<Line>, &'static str> {
+pub(super) fn reference_drawing(meshes: &[Mesh], cam: &Camera) -> Result<Vec<Line>, &'static str> {
     let (right, up, back) = cam.basis();
     let scale = meshes.iter().fold(Aabb3::EMPTY, |b, m| b.union(&m.bounds())).diagonal().max(1.0);
     let eps = scale * 1e-8;

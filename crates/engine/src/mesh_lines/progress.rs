@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 pub(super) const CANCELLED: &str = "DXF export cancelled";
 
-pub(super) struct Stage {
+pub(crate) struct Stage {
     watch: Option<Arc<dyn solidcraft_kernel::watch::Watch>>,
     name: &'static str,
     total: usize,
