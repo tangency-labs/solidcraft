@@ -1,6 +1,5 @@
 {
   "source": "analytic",
-  "known_failure": "SMLib variable fillet: STEP export finds edges 4.6e-5 to 6.1e-5 off their surfaces against 2e-5",
   "method": "box 40x30x20 with its top front edge (y=0, z=20) rounded at a radius running straight from 2 (x=0) to 5 (x=40): sections are quarter rounds, V = abc - (1 - pi/4) L (a^2 + ab + b^2) / 3; moments and the round's area integrated along the edge (tools/oracle-analytic/cases_fillets.py)",
   "body_count": 1,
   "volume_mm3": 23888.407044966672,
