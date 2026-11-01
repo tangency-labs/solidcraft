@@ -41,7 +41,7 @@
 //! - `Evaluate` returns `num_derivs + 1` vectors. Upstream zeroes derivatives
 //!   `4..num_derivs` (exclusive) and leaves entry `num_derivs` (for
 //!   `num_derivs >= 4`) as the caller had it; the port returns zero there too
-//!   (`plan/findings.md`).
+//!   (WR-26).
 //! - `ReadFromDB` always builds a new curve (upstream's "fill the curve passed in"
 //!   branch and its `IsKindOf` check have no counterpart; its type, dimension,
 //!   context and version arguments are unused upstream and dropped). The new curve
@@ -534,6 +534,8 @@ impl HermiteCurve {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::curve::curve::Curve;
+    use crate::kernel::Kernel;
 
     fn sample() -> HermiteCurve {
         HermiteCurve::new(
@@ -658,5 +660,85 @@ mod tests {
         assert_eq!(h.start_point(), Vec3::new(1.0, 2.0, 3.0));
         assert_eq!(h.power_basis().1, Vec3::new(3.0, 3.0, 3.0));
         assert_eq!(h.dim(), 3);
+    }
+
+    #[test]
+    fn wr26_evaluate_zeroes_all_higher_derivative_slots_including_last() {
+        let p1 = Vec3::new(1.0, -2.0, 0.5);
+        let d1 = Vec3::new(2.5, 1.0, -3.0);
+        let p2 = Vec3::new(-1.5, 4.0, 2.0);
+        let d2 = Vec3::new(-0.5, 3.0, 1.25);
+        let h = HermiteCurve::new(p1, d1, p2, d2, 3);
+        let (c, d) = h.power_basis();
+        assert!(c.x != 0.0 && c.y != 0.0 && c.z != 0.0);
+        assert!(d.x != 0.0 && d.y != 0.0 && d.z != 0.0);
+
+        for u in [0.0, 0.35, 0.7, 1.0] {
+            let expected_0 = p1 + u * (d1 + u * (c + u * d));
+            let expected_1 = d1 + u * (2.0 * c + 3.0 * u * d);
+            let expected_2 = 2.0 * c + 6.0 * u * d;
+            let expected_3 = 6.0 * d;
+
+            for num_derivs in [4, 5, 6, 10] {
+                for non_zero_tangents in [false, true] {
+                    let out = h.evaluate(u, num_derivs, non_zero_tangents);
+                    assert_eq!(out.len(), num_derivs + 1);
+                    assert_eq!(out[0], expected_0);
+                    assert_eq!(out[1], expected_1);
+                    assert_eq!(out[2], expected_2);
+                    assert_eq!(out[3], expected_3);
+                    assert_eq!(out[num_derivs], Vec3::ZERO);
+                    for (k, &deriv) in out.iter().enumerate().skip(4) {
+                        assert_eq!(deriv, Vec3::ZERO, "non-zero derivative at order {k}");
+                    }
+                }
+            }
+        }
+
+        // Zero start tangent at u = 0 with non_zero_tangents = true exercises the
+        // second-derivative fallback branch while still zero-filling orders 4..=num_derivs.
+        let h_zero_start = HermiteCurve::new(p1, Vec3::ZERO, p2, d2, 3);
+        let (c0, d0) = h_zero_start.power_basis();
+        let scaled_zero = EFF_ZERO * (1.0 + p1.max_dimension());
+        let new_len = 1.1 * scaled_zero;
+        let second = 2.0 * c0;
+        let expected_fixed_d1 = (new_len / second.length()) * second;
+        for num_derivs in [4, 5, 6, 10] {
+            let out = h_zero_start.evaluate(0.0, num_derivs, true);
+            assert_eq!(out.len(), num_derivs + 1);
+            assert_eq!(out[0], p1);
+            assert_eq!(out[1], expected_fixed_d1);
+            assert!(out[1].length() > 0.0);
+            assert_eq!(out[2], second);
+            assert_eq!(out[3], 6.0 * d0);
+            assert_eq!(out[num_derivs], Vec3::ZERO);
+            for (k, &deriv) in out.iter().enumerate().skip(4) {
+                assert_eq!(deriv, Vec3::ZERO, "non-zero derivative at order {k}");
+            }
+        }
+    }
+
+    #[test]
+    fn wr26_curve_dispatch_preserves_zero_last_slot() {
+        let h = HermiteCurve::new(
+            Vec3::new(1.0, -2.0, 0.5),
+            Vec3::new(2.5, 1.0, -3.0),
+            Vec3::new(-1.5, 4.0, 2.0),
+            Vec3::new(-0.5, 3.0, 1.25),
+            3,
+        );
+        let curve = Curve::from(h);
+        let k = Kernel::default();
+        let out = curve.evaluate(&k, 0.4, 5, true, false).unwrap();
+        assert_eq!(out.len(), 6);
+        assert_eq!(&out[..4], h.evaluate(0.4, 3, false).as_slice());
+        assert_eq!(out[4], Vec3::ZERO);
+        assert_eq!(out[5], Vec3::ZERO);
+
+        let mut buf = [Vec3::UNDEF; 6];
+        curve.evaluate_into(&k, 0.4, true, false, &mut buf).unwrap();
+        assert_eq!(buf.as_slice(), out.as_slice());
+        assert_eq!(buf[4], Vec3::ZERO);
+        assert_eq!(buf[5], Vec3::ZERO);
     }
 }
