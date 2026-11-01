@@ -4771,5 +4771,7 @@
   "web.open_link_confirm": "保存していない変更があります。リンク先のデザインを新しいタブで開きますか？",
   "↑ ↓ choose · Enter / Tab complete · Esc dismiss": "↑ ↓ 選択 · Enter / Tab 補完 · Esc 閉じる",
   "↑ ↓ choose · Enter applies what you typed · Esc dismiss": "↑ ↓ 選択 · Enter 入力どおりに適用 · Esc 閉じる",
-  "⌘Enter continues on GitHub.": "⌘EnterでGitHubに進みます。"
+  "⌘Enter continues on GitHub.": "⌘EnterでGitHubに進みます。",
+  "cmd.drawing_view_base": "ベースビュー",
+  "cmd.drawing_view_projected": "投影ビュー"
 }

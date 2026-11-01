@@ -366,6 +366,197 @@ fn a_side_view_copied_alone_is_a_base_view_looking_the_way_it_did() {
     assert_eq!(saved(&s, of_right).settings, own, "the copy follows nothing");
 }
 
+/// `cmd` makes a view as `p` says, in one undo step: its reply, which matches its schema, and the
+/// new view's id.
+fn create(s: &mut Session, cmd: &str, p: Value) -> (Value, u64) {
+    let steps = s.undo.len();
+    let reply = run(s, cmd, p);
+    assert_eq!(s.undo.len(), steps + 1, "one undo step");
+    let schema = output_schema_for::<CreateResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    let id = ids::decode(reply["view"].as_str().unwrap()).unwrap();
+    (reply, id)
+}
+
+/// `cmd` refuses `p`, leaving the drawing and the undo steps as they were: why.
+fn create_refused(s: &mut Session, cmd: &str, p: Value) -> String {
+    let (record, steps) = (s.drawing("test").ok().cloned(), s.undo.len());
+    let message = s.execute(cmd, &p).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {p}"));
+    assert_eq!((s.drawing("test").ok().cloned(), s.undo.len()), (record, steps), "{p}");
+    message
+}
+
+/// A drawing of the block, with no views yet.
+fn block_drawing() -> Session {
+    let mut s = block();
+    run(&mut s, "drawing.create", json!({}));
+    s
+}
+
+/// A base view with no scale takes the largest preset at which it lies inside the sheet's drawing
+/// space (not the paper), centred where it goes, its margin included: the 100 x 20 front view on A3
+/// at 2:1, as the snapshot fits it; that scale is saved as the view's own. A scale given is kept,
+/// the settings given are the view's own, each view is one undo step ([`create`]), and with nothing
+/// to measure the view takes 1:1.
+#[test]
+fn a_base_view_fits_its_sheet_and_saves_the_scale() {
+    let mut s = block_drawing();
+    let source = s.drawing("test").unwrap().sources[0].id;
+    let (made, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1"}));
+    assert_eq!((made["scale"]["text"].as_str(), made["scale"]["fitted"].as_bool()), (Some("2:1"), Some(true)));
+    assert_box(&made, [110.0, 128.5], [310.0, 168.5]);
+    assert!(made.get("outside").is_none(), "{made}");
+    let view = saved(&s, front);
+    assert_eq!((view.kind, view.place), (ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) }, ViewPlace::At([210.0, 148.5])));
+    assert_eq!(view.settings, ViewOverrides { scale: Some("2:1".parse().unwrap()), ..ViewOverrides::default() }, "the fitted scale is saved");
+    assert_eq!(inspect_view(&mut s, front)["settings"]["scale"], json!({"value": "2:1", "from": "this", "set": "2:1"}));
+    let near_the_left = create(&mut s, BASE, json!({"sheet": "Sheet 1", "position_mm": [108, 148.5]})).0;
+    assert_eq!(near_the_left["scale"]["text"], "1:1", "98 mm to the drawing border: 196 mm of room (the paper's edge would give 216)");
+    let with_margin = create(&mut s, BASE, json!({"sheet": "Sheet 1", "reference_margin_mm": 60})).0;
+    assert_eq!(with_margin["scale"]["text"], "1:1", "220 x 140 with the margin: 440 mm at 2:1");
+    let p = json!({"sheet": "Sheet 1", "view": "top", "scale": "1:5", "position_mm": [100, 100], "display_style": "visible_hidden", "reference_margin_mm": 5});
+    let (given, top) = create(&mut s, BASE, p);
+    assert_eq!((given["scale"]["text"].as_str(), given["scale"]["fitted"].as_bool()), (Some("1:5"), Some(false)));
+    assert_box(&given, [89.0, 94.0], [111.0, 106.0]);
+    let view = saved(&s, top);
+    assert_eq!(
+        view.settings,
+        ViewOverrides { scale: Some("1:5".parse().unwrap()), display_style: Some(VisualStyle::VisibleHidden), ..ViewOverrides::default() }
+    );
+    assert_eq!(view.reference_margin_mm, 5.0);
+    let before = s.drawing("test").unwrap().views.len();
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.drawing("test").unwrap().views.len(), before - 1, "one undo takes the view away");
+    assert!(s.drawing("test").unwrap().views.iter().all(|v| v.id != top));
+    // Nothing to measure: one sketch, something to draw (an empty design isn't), and no bodies.
+    let mut sketch_only = Session::default();
+    run(&mut sketch_only, "sketch.create", json!({"plane": "XY"}));
+    run(&mut sketch_only, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 5]}));
+    run(&mut sketch_only, "sketch.finish", json!({}));
+    run(&mut sketch_only, "drawing.create", json!({}));
+    let (placeholder, _) = create(&mut sketch_only, BASE, json!({"sheet": "Sheet 1"}));
+    assert_eq!((placeholder["scale"]["text"].as_str(), placeholder["scale"]["fitted"].as_bool()), (Some("1:1"), Some(false)));
+    assert_box(&placeholder, [200.0, 138.5], [220.0, 158.5]);
+}
+
+/// A projected view is lined up with its parent, its boundary 20 mm past the parent's on its side,
+/// and follows its parent's scale and settings: right of the 50 x 10 front view at 1:2 (185..235 x
+/// 143.5..153.5) the 25 x 10 right view goes to 255..280, left of it to 140..165, the 50 x 25 views
+/// above and below to 173.5..198.5 and 98.5..123.5. The view above shows the top in third angle and
+/// the bottom in first. A place given is kept; one past the drawing space is listed, not moved.
+#[test]
+fn a_projected_view_lines_up_a_gap_past_its_parent() {
+    let mut s = block_drawing();
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let project = |s: &mut Session, side: &str| create(s, PROJECTED, json!({"parent": ids::encode(front), "side": side}));
+    let (right, right_id) = project(&mut s, "right");
+    assert_box(&right, [255.0, 143.5], [280.0, 153.5]);
+    assert_eq!(right["scale"]["text"], "1:2");
+    assert_eq!(right["sheet"], json!(ids::encode(saved(&s, front).sheet)));
+    let view = saved(&s, right_id);
+    assert_eq!(
+        (view.kind, view.place, view.settings),
+        (ViewKind::Projected { parent: front, side: ProjectedSide::Right }, ViewPlace::Aligned(267.5), ViewOverrides::default())
+    );
+    let d = s.drawing("test").unwrap().clone();
+    assert!((d.view_centre(right_id).unwrap() - Vec2::new(267.5, 148.5)).len() < EPS, "on the parent's line");
+    assert_box(&project(&mut s, "left").0, [140.0, 143.5], [165.0, 153.5]);
+    let (above, above_id) = project(&mut s, "above");
+    assert_box(&above, [185.0, 173.5], [235.0, 198.5]);
+    assert_box(&project(&mut s, "below").0, [185.0, 98.5], [235.0, 123.5]);
+    assert_eq!(inspect_view(&mut s, above_id)["direction"]["named"], "top", "third angle");
+    set_projection(&mut s, Projection::First);
+    assert_eq!(inspect_view(&mut s, above_id)["direction"]["named"], "bottom", "first angle");
+    let at = json!({"parent": ids::encode(front), "side": "right", "place": {"at": [300.0, 60.0]}});
+    let (_, apart) = create(&mut s, PROJECTED, at);
+    assert_eq!(saved(&s, apart).place, ViewPlace::At([300.0, 60.0]));
+    let past = json!({"parent": ids::encode(front), "side": "right", "place": {"aligned": 405.0}});
+    let (beyond, beyond_id) = create(&mut s, PROJECTED, past);
+    assert_eq!(outside(&beyond).1, [beyond_id], "listed: {beyond}");
+    assert_eq!(saved(&s, beyond_id).place, ViewPlace::Aligned(405.0), "not moved");
+    // A projected view of a projected view lines up with its own parent.
+    let (_, back) = create(&mut s, PROJECTED, json!({"parent": ids::encode(right_id), "side": "right"}));
+    assert_eq!(saved(&s, back).place, ViewPlace::Aligned(267.5 + 12.5 + 20.0 + 25.0));
+    // On its parent's sheet, whichever that is.
+    let second = second_sheet(&mut s);
+    let (_, other) = create(&mut s, BASE, json!({"sheet": ids::encode(second), "scale": "1:2"}));
+    let (beside, beside_id) = create(&mut s, PROJECTED, json!({"parent": ids::encode(other), "side": "below"}));
+    assert_eq!((beside["sheet"].clone(), saved(&s, beside_id).sheet), (json!(ids::encode(second)), second));
+}
+
+/// What view creation refuses, each with the drawing and the undo steps unchanged: no drawing, a
+/// drawing that draws no design, unknown or badly given sheets, parents and sides, places and
+/// margins past their limits, a scale that doesn't fit, unknown fields, and a 33rd view in a chain.
+#[test]
+fn hostile_view_creation_is_refused() {
+    let mut s = block();
+    assert!(create_refused(&mut s, BASE, json!({"sheet": "Sheet 1"})).contains("drawing"));
+    let mut s = block_drawing();
+    let base = |p: Value| {
+        let mut p = p;
+        p["sheet"] = p.get("sheet").cloned().unwrap_or(json!("Sheet 1"));
+        p
+    };
+    for p in [
+        json!({"sheet": "Sheet 9"}),
+        json!({"sheet": 1}),
+        json!({"sheet": null}),
+        base(json!({"view": "sideways"})),
+        base(json!({"scale": "0:1"})),
+        base(json!({"scale": "1:1", "position_mm": [1e300, 0]})),
+        base(json!({"position_mm": [1e300, 0]})),
+        base(json!({"position_mm": [5, 148.5]})),
+        base(json!({"reference_margin_mm": 1e6})),
+        base(json!({"reference_margin_mm": -1})),
+        base(json!({"display_style": "glossy"})),
+        base(json!({"colour": "red"})),
+        base(json!({"position_mm": null})),
+    ] {
+        create_refused(&mut s, BASE, p);
+    }
+    assert!(create_refused(&mut s, BASE, json!({})).contains("sheet"));
+    let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1", "scale": "1:2"}));
+    let parent = json!(ids::encode(front));
+    for p in [
+        json!({"parent": ids::encode(99), "side": "right"}),
+        json!({"parent": 1, "side": "right"}),
+        json!({"parent": parent, "side": "behind"}),
+        json!({"parent": parent}),
+        json!({"parent": parent, "side": "right", "place": {"aligned": 1e300}}),
+        json!({"parent": parent, "side": "right", "place": {"at": [0, 1e300]}}),
+        json!({"parent": parent, "side": "right", "place": null}),
+        json!({"parent": parent, "side": "right", "scale": "1:1"}),
+    ] {
+        create_refused(&mut s, PROJECTED, p);
+    }
+    // A chain is at most 32 views: the base view and 31 projected from it, one from the next.
+    let mut last = front;
+    for _ in 1..32 {
+        last = create(&mut s, PROJECTED, json!({"parent": ids::encode(last), "side": "above", "place": {"at": [100.0, 100.0]}})).1;
+    }
+    let message = create_refused(&mut s, PROJECTED, json!({"parent": ids::encode(last), "side": "above"}));
+    assert!(message.contains("at most 32"), "{message}");
+    // A drawing that draws no design.
+    let mut d = (**s.drawing("test").unwrap()).clone();
+    d.sources.clear();
+    d.views.clear();
+    s.doc_mut().put_drawing(Arc::new(d));
+    assert!(create_refused(&mut s, BASE, json!({"sheet": "Sheet 1"})).contains("draws no design"));
+}
+
+/// A view's ids come from the session's id source: sessions seeded alike make the same ids.
+#[test]
+fn a_new_views_id_comes_from_the_sessions_seed() {
+    let made = |seed: u64| {
+        let mut s = block_drawing();
+        s.seed_ids(seed);
+        let (_, front) = create(&mut s, BASE, json!({"sheet": "Sheet 1"}));
+        [front, create(&mut s, PROJECTED, json!({"parent": ids::encode(front), "side": "right"})).1]
+    };
+    assert_eq!(made(7), made(7));
+    assert_ne!(made(7), made(8));
+}
+
 /// The block's boundary in each view at 1:2, worked by hand: front 50 x 10, top 50 x 25, right
 /// 25 x 10, and from an isometric corner (100 + 50)/sqrt(2)/2 by (100 + 50 + 2 x 20)/sqrt(6)/2.
 /// The centre lands on the position, and the extents are the model's own millimetres.

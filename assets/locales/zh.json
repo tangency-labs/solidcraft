@@ -4771,5 +4771,7 @@
   "web.open_link_confirm": "有未保存的更改。要在新标签页中打开链接的设计吗？",
   "↑ ↓ choose · Enter / Tab complete · Esc dismiss": "↑ ↓ 选择 · Enter / Tab 补全 · Esc 关闭",
   "↑ ↓ choose · Enter applies what you typed · Esc dismiss": "↑ ↓ 选择 · Enter 按原样应用 · Esc 关闭",
-  "⌘Enter continues on GitHub.": "按⌘Enter在GitHub中继续。"
+  "⌘Enter continues on GitHub.": "按⌘Enter在GitHub中继续。",
+  "cmd.drawing_view_base": "基础视图",
+  "cmd.drawing_view_projected": "投影视图"
 }

@@ -4771,5 +4771,7 @@
   "web.open_link_confirm": "There are unsaved changes. Open the linked design in a new tab?",
   "↑ ↓ choose · Enter / Tab complete · Esc dismiss": "↑ ↓ choose · Enter / Tab complete · Esc dismiss",
   "↑ ↓ choose · Enter applies what you typed · Esc dismiss": "↑ ↓ choose · Enter applies what you typed · Esc dismiss",
-  "⌘Enter continues on GitHub.": "⌘Enter continues on GitHub."
+  "⌘Enter continues on GitHub.": "⌘Enter continues on GitHub.",
+  "cmd.drawing_view_base": "Base View",
+  "cmd.drawing_view_projected": "Projected View"
 }

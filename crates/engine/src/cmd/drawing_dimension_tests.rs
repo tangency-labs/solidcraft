@@ -52,12 +52,12 @@ fn edge_index(s: &Session, a: [f64; 3], b: [f64; 3]) -> usize {
     mesh.edges.iter().position(|line| joins(ends(line))).unwrap()
 }
 
-/// The index of the box's edge whose every point is `radius` from `centre`, as `{body, index}`
+/// The index of `body`'s edge whose every point is `radius` from `centre`, as `{body, index}`
 /// names it: one of a circle's or an arc's.
-fn round_index(s: &Session, centre: [f64; 3], radius: f64) -> usize {
+pub(crate) fn round_index(s: &Session, body: &str, centre: [f64; 3], radius: f64) -> usize {
     let centre = Vec3::from(centre);
     let state = s.model.state();
-    let mesh = state.body("Box").unwrap().mesh();
+    let mesh = state.body(body).unwrap().mesh();
     mesh.edges.iter().position(|line| line.iter().all(|p| (p.dist(centre) - radius).abs() < 1e-6)).unwrap()
 }
 
@@ -185,11 +185,11 @@ fn a_radial_dimension_reads_a_hole_and_an_edit_makes_it_a_diameter() {
     run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 42, "base": [40, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"]}));
     run(&mut s, "solid.fillet", json!({"edges": [[80, 20, 30]], "radius": 5, "body": "Box"}));
     run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
-    let hole = json!({"body": "Box", "index": round_index(&s, [40.0, 0.0, 15.0], 6.0)});
+    let hole = json!({"body": "Box", "index": round_index(&s, "Box", [40.0, 0.0, 15.0], 6.0)});
     let across = add(&mut s, view, json!({"radial": {"edge": hole}}));
     reads(&across, 12.0, "Ø12.00");
     assert_eq!(across["record"]["kind"]["radial"]["diameter"], json!(true), "{across}");
-    let fillet = json!({"body": "Box", "index": round_index(&s, [75.0, 0.0, 25.0], 5.0)});
+    let fillet = json!({"body": "Box", "index": round_index(&s, "Box", [75.0, 0.0, 25.0], 5.0)});
     let arc = add(&mut s, view, json!({"radial": {"edge": fillet}}));
     reads(&arc, 5.0, "R5.00");
     assert_eq!(arc["record"]["kind"]["radial"].get("diameter"), None, "{arc}");
@@ -250,7 +250,7 @@ fn a_linear_dimension_measures_from_a_holes_centre() {
     run(&mut s, "solid.cylinder", json!({"radius": 6, "height": 42, "base": [40, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"]}));
     run(&mut s, "solid.fillet", json!({"edges": [[80, 20, 30]], "radius": 5, "body": "Box"}));
     run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
-    let centre = |at: [f64; 3], radius: f64| json!({"centre": {"body": "Box", "index": round_index(&s, at, radius)}});
+    let centre = |at: [f64; 3], radius: f64| json!({"centre": {"body": "Box", "index": round_index(&s, "Box", at, radius)}});
     let (hole, arc) = (centre([40.0, 0.0, 15.0], 6.0), centre([75.0, 0.0, 25.0], 5.0));
     let along = add(&mut s, view, json!({"linear": {"a": [0, 0, 0], "b": hole, "direction": "horizontal"}}));
     reads(&along, 40.0, "40.00");
@@ -288,7 +288,7 @@ fn a_chain_reads_holes_at_10_30_and_60_as_10_20_and_30() {
         run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 42, "base": [x, -1, 15], "axis": "Y", "operation": "cut", "targets": ["Box"]}));
     }
     run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
-    let hole = |x: f64| json!({"centre": {"body": "Box", "index": round_index(&s, [x, 0.0, 15.0], 3.0)}});
+    let hole = |x: f64| json!({"centre": {"body": "Box", "index": round_index(&s, "Box", [x, 0.0, 15.0], 3.0)}});
     let (h10, h30, h60) = (hole(10.0), hole(30.0), hole(60.0));
     let steps = s.undo.len();
     let chain = add(&mut s, view, json!({"chain": {"points": [[0, 0, 0], h10, h30, h60], "direction": "horizontal"}}));
@@ -796,4 +796,173 @@ fn a_copied_dimension_keeps_its_saved_value() {
     let d = opened.drawing("test").unwrap();
     let copy = d.dimensions.iter().find(|x| x.id != dimension).unwrap();
     assert_eq!(copy.last_good, Some(80.0));
+}
+
+/// One command-script plate with two independently authored, positioned bore dimensions.
+fn workshop_plate_dimensions() -> (Session, u64, Value, Value) {
+    let mut s = Session::default();
+    let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/drawing_m2.json")).unwrap();
+    let made = s.run_script(&script).unwrap();
+    let top = made.last().unwrap()["view"].clone();
+    let drawing = s.drawing("test").unwrap().id;
+    let bore1 = json!({"body": "Plate", "index": round_index(&s, "Plate", [20.0, 20.0, 20.0], 5.0)});
+    let bore2 = json!({"body": "Plate", "index": round_index(&s, "Plate", [60.0, 50.0, 20.0], 5.0)});
+    let first = run(&mut s, "drawing.dimension.add", json!({"view": top, "kind": {"radial": {"edge": bore1}}, "text": {"at": [12.0, 24.0]}}));
+    let second = run(&mut s, "drawing.dimension.add", json!({"view": top, "kind": {"radial": {"edge": bore2}}, "text": {"at": [-18.0, 15.0]}}));
+    reads(&first, 10.0, "Ø10.00");
+    reads(&second, 10.0, "Ø10.00");
+    assert_ne!(first["dimension"], second["dimension"], "each bore needs its own dimension");
+    (s, drawing, first, second)
+}
+
+/// A lost workshop bore retains its last Ø10 measurement without becoming a live value.
+fn reads_lost_bore(reply: &Value) {
+    assert_eq!(reply["status"], "lost", "{reply}");
+    assert!(reply.get("value").is_none(), "{reply}");
+    assert!(reply["why"].as_str().is_some_and(|why| !why.is_empty()), "{reply}");
+    assert!(reply["last_good"].as_f64().is_some_and(|value| (value - 10.0).abs() < 1e-9), "last measured diameter must stay Ø10: {reply}");
+}
+
+/// Changing Bore1's diameter updates its measurement without rebinding the reference.
+#[test]
+fn changing_a_bores_diameter_keeps_its_dimension() {
+    let (mut s, drawing, first, second) = workshop_plate_dimensions();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "parameters.change", json!({"name": "bore1_d", "expression": "12 mm"}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+
+    let changed = run(&mut s, "drawing.dimension.inspect", json!({"dimension": first["dimension"]}));
+    assert_eq!(changed["record"]["kind"], first["record"]["kind"], "Bore1 reference moved");
+    reads(&changed, 12.0, "Ø12.00");
+    let other = run(&mut s, "drawing.dimension.inspect", json!({"dimension": second["dimension"]}));
+    assert_eq!(other["record"]["kind"], second["record"]["kind"], "Bore2 reference moved");
+    reads(&other, 10.0, "Ø10.00");
+}
+
+/// Deleting Bore1 loses its own measured reference without rebinding it to Bore2.
+#[test]
+fn deleting_a_bore_loses_its_dimension_and_never_moves_it() {
+    let (mut s, drawing, first, second) = workshop_plate_dimensions();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "timeline.delete", json!({"feature": "Bore1"}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+
+    let lost = run(&mut s, "drawing.dimension.inspect", json!({"dimension": first["dimension"]}));
+    assert_eq!(lost["record"]["kind"], first["record"]["kind"], "deleted Bore1 reference moved");
+    reads_lost_bore(&lost);
+    let surviving = run(&mut s, "drawing.dimension.inspect", json!({"dimension": second["dimension"]}));
+    assert_eq!(surviving["record"]["kind"], second["record"]["kind"], "Bore2 reference moved");
+    reads(&surviving, 10.0, "Ø10.00");
+}
+
+/// Undo and redo of a bore resize leave the authored drawing and labels unchanged.
+#[test]
+fn undo_and_redo_a_diameter_change_keep_its_dimension() {
+    let (mut s, drawing, first, second) = workshop_plate_dimensions();
+    let authored = s.drawing("test").unwrap().to_json().unwrap();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "parameters.change", json!({"name": "bore1_d", "expression": "12 mm"}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let changed = run(&mut s, "drawing.dimension.inspect", json!({"dimension": first["dimension"]}));
+    assert_eq!(changed["record"]["kind"], first["record"]["kind"]);
+    reads(&changed, 12.0, "Ø12.00");
+
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), authored, "model undo changed the authored drawing");
+    let undone = run(&mut s, "drawing.dimension.inspect", json!({"dimension": first["dimension"]}));
+    assert_eq!(undone["record"]["kind"], first["record"]["kind"]);
+    reads(&undone, 10.0, "Ø10.00");
+    let other = run(&mut s, "drawing.dimension.inspect", json!({"dimension": second["dimension"]}));
+    assert_eq!(other["record"]["kind"], second["record"]["kind"]);
+    reads(&other, 10.0, "Ø10.00");
+
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.redo", json!({}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), authored, "model redo changed the authored drawing");
+    let redone = run(&mut s, "drawing.dimension.inspect", json!({"dimension": first["dimension"]}));
+    assert_eq!(redone["record"]["kind"], first["record"]["kind"]);
+    reads(&redone, 12.0, "Ø12.00");
+    let other = run(&mut s, "drawing.dimension.inspect", json!({"dimension": second["dimension"]}));
+    assert_eq!(other["record"]["kind"], second["record"]["kind"]);
+    reads(&other, 10.0, "Ø10.00");
+}
+
+/// Undo and redo of deleting Bore1 preserve both authored references and their positions.
+#[test]
+fn undo_and_redo_a_deleted_bore_restore_its_dimension() {
+    let (mut s, drawing, first, second) = workshop_plate_dimensions();
+    let authored = s.drawing("test").unwrap().to_json().unwrap();
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "timeline.delete", json!({"feature": "Bore1"}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    let deleted = run(&mut s, "drawing.dimension.inspect", json!({"dimension": first["dimension"]}));
+    assert_eq!(deleted["record"]["kind"], first["record"]["kind"]);
+    reads_lost_bore(&deleted);
+    let other = run(&mut s, "drawing.dimension.inspect", json!({"dimension": second["dimension"]}));
+    assert_eq!(other["record"]["kind"], second["record"]["kind"]);
+    reads(&other, 10.0, "Ø10.00");
+
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), authored, "undo changed authored drawing");
+    let recovered = run(&mut s, "drawing.dimension.inspect", json!({"dimension": first["dimension"]}));
+    assert_eq!(recovered["record"]["kind"], first["record"]["kind"]);
+    reads(&recovered, 10.0, "Ø10.00");
+
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "edit.redo", json!({}));
+    run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+    assert_eq!(s.drawing("test").unwrap().to_json().unwrap(), authored, "redo changed authored drawing");
+    let lost_again = run(&mut s, "drawing.dimension.inspect", json!({"dimension": first["dimension"]}));
+    assert_eq!(lost_again["record"]["kind"], first["record"]["kind"]);
+    reads_lost_bore(&lost_again);
+    let other = run(&mut s, "drawing.dimension.inspect", json!({"dimension": second["dimension"]}));
+    assert_eq!(other["record"]["kind"], second["record"]["kind"]);
+    reads(&other, 10.0, "Ø10.00");
+}
+
+/// Save/reopen keeps the workshop plate's references, authored positions and lost value.
+#[test]
+fn reopening_a_plate_keeps_dimensions_and_a_lost_bores_last_value() {
+    for state in ["unchanged", "resized", "deleted"] {
+        let (mut s, drawing, first, second) = workshop_plate_dimensions();
+        run(&mut s, "drawing.close", json!({}));
+        match state {
+            "resized" => {
+                run(&mut s, "parameters.change", json!({"name": "bore1_d", "expression": "12 mm"}));
+            }
+            "deleted" => {
+                run(&mut s, "timeline.delete", json!({"feature": "Bore1"}));
+            }
+            _ => {}
+        }
+        run(&mut s, "drawing.open", json!({"drawing": ids::encode(drawing)}));
+        if state == "deleted" {
+            let lost = run(&mut s, "drawing.dimension.inspect", json!({"dimension": first["dimension"]}));
+            assert_eq!(lost["record"]["kind"], first["record"]["kind"]);
+            reads_lost_bore(&lost);
+        } else {
+            let expected = if state == "resized" { 12.0 } else { 10.0 };
+            let text = if state == "resized" { "Ø12.00" } else { "Ø10.00" };
+            reads(&run(&mut s, "drawing.dimension.inspect", json!({"dimension": first["dimension"]})), expected, text);
+        }
+        let mut opened = reopened(&mut s, drawing, &format!("w23a-e2e04-{state}.solidcraft"));
+        let bore1 = run(&mut opened, "drawing.dimension.inspect", json!({"dimension": first["dimension"]}));
+        let bore2 = run(&mut opened, "drawing.dimension.inspect", json!({"dimension": second["dimension"]}));
+        assert_eq!(bore1["record"]["kind"], first["record"]["kind"], "{state}: Bore1 reference changed");
+        assert_eq!(bore2["record"]["kind"], second["record"]["kind"], "{state}: Bore2 reference changed");
+        assert_eq!(bore1["record"]["text"], first["record"]["text"], "{state}: Bore1 label moved");
+        assert_eq!(bore2["record"]["text"], second["record"]["text"], "{state}: Bore2 label moved");
+        reads(&bore2, 10.0, "Ø10.00");
+        match state {
+            "unchanged" => reads(&bore1, 10.0, "Ø10.00"),
+            "resized" => reads(&bore1, 12.0, "Ø12.00"),
+            "deleted" => reads_lost_bore(&bore1),
+            _ => unreachable!(),
+        }
+    }
 }

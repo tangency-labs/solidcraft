@@ -2,6 +2,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
 
 use super::*;
+use crate::cmd::drawing_dimension::tests::round_index;
 use crate::drawing_scene::tests::{front_and_top, nest};
 use crate::schema::output_schema_for;
 use crate::schema::tests::conforms;
@@ -116,4 +117,52 @@ fn what_it_cant_write_is_refused() {
     assert_eq!(std::fs::read_dir(&folder.0).unwrap().count(), 0);
     run(&mut s, "drawing.close", json!({}));
     assert!(refused(&mut s, json!({"sheet": id})).contains("open a drawing first"));
+}
+
+/// The drawing milestone's plate (acceptance case 84, #4894) by commands alone: modelled from its
+/// parameters, a top view at 1:2 and the views projected below and right of it, its length, width
+/// and first bore dimensioned. Saved with the design and opened again, the sheet exports the same
+/// SVG, byte for byte, and each dimension reads the same.
+#[test]
+fn the_milestone_plate_exports_the_same_after_it_is_saved_and_opened() {
+    let mut s = Session::default();
+    let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/drawing_m2.json")).unwrap();
+    let made = s.run_script(&script).unwrap();
+    let size = |reply: &Value| {
+        let b = &reply["boundary_mm"];
+        [0, 1].map(|i| b["max"][i].as_f64().unwrap() - b["min"][i].as_f64().unwrap())
+    };
+    let top = made.last().unwrap();
+    let below = run(&mut s, "drawing.view.projected", json!({"parent": top["view"], "side": "below"}));
+    let right = run(&mut s, "drawing.view.projected", json!({"parent": top["view"], "side": "right"}));
+    // 100 x 80 x 20 at half size: the top shows length by width, below it length by thickness,
+    // right of it thickness by width.
+    for (view, expected) in [(top, [50.0, 40.0]), (&below, [50.0, 10.0]), (&right, [10.0, 40.0])] {
+        let [w, h] = size(view);
+        assert!((w - expected[0]).abs() < 1e-6 && (h - expected[1]).abs() < 1e-6, "{view}");
+    }
+    // The first bore's rim by its index: a point on the circle may lie off its edge's chords.
+    let bore = json!({"body": "Plate", "index": round_index(&s, "Plate", [20.0, 20.0, 20.0], 5.0)});
+    let mut dimensions = Vec::new();
+    for (kind, value) in [
+        (json!({"length": {"edge": [50, 0, 20]}}), 100.0),
+        (json!({"length": {"edge": [0, 40, 20]}}), 80.0),
+        (json!({"radial": {"edge": bore}}), 10.0),
+    ] {
+        let added = run(&mut s, "drawing.dimension.add", json!({"view": top["view"], "kind": kind}));
+        assert!((added["value"].as_f64().unwrap() - value).abs() < 1e-9, "{added}");
+        dimensions.push((added["dimension"].clone(), added["value"].clone(), added["text"].clone()));
+    }
+    let svg = run(&mut s, CMD, json!({"sheet": "Sheet 1"}))["svg"].clone();
+    let drawing = ids::encode(s.drawing("test").unwrap().id);
+    let folder = Folder::new("drawing-m2-plate");
+    run(&mut s, "file.save", json!({"path": folder.path("plate.solidcraft")}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": folder.path("plate.solidcraft")}));
+    run(&mut opened, "drawing.open", json!({"drawing": drawing}));
+    assert_eq!(run(&mut opened, CMD, json!({"sheet": "Sheet 1"}))["svg"], svg);
+    for (dimension, value, text) in dimensions {
+        let read = run(&mut opened, "drawing.dimension.inspect", json!({"dimension": dimension}));
+        assert_eq!((&read["value"], &read["text"], &read["status"]), (&value, &text, &json!("ok")), "{read}");
+    }
 }
