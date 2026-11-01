@@ -4242,6 +4242,21 @@ impl Document {
                 report = retried;
             }
         }
+        // The 3D constraints, with the planar geometry as it now is (#10608). A sketch without
+        // them is left as the planar solve left it.
+        let wires = sk.solve_wires(None);
+        report.dof = report.dof.saturating_add(wires.dof);
+        if !wires.ok {
+            report.status = solidcraft_sketch::SolveStatus::Failed;
+            for id in wires.failing {
+                if !report.failing.contains(&id) {
+                    report.failing.push(id);
+                }
+            }
+            if report.oversized.is_none() {
+                report.oversized = wires.oversized;
+            }
+        }
         Ok(report)
     }
 }

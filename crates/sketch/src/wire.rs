@@ -407,6 +407,7 @@ impl Sketch {
     /// Remove wires by id.
     pub fn remove_wires(&mut self, ids: &[String]) {
         self.wires.retain(|w| !ids.contains(&w.id));
+        self.prune_wire_constraints();
         self.prune_links();
     }
 }
