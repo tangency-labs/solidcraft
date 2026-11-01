@@ -2270,6 +2270,7 @@
   "prefs.placement": "Placement",
   "prefs.prefer_free_sketch_points": "Prefer movable sketch points when points overlap",
   "prefs.preview_choices": "Preview of your choices",
+  "prefs.preview_reselect_modifier": "Hide preview for reselect",
   "prefs.print_face_highlight": "Print face highlight",
   "prefs.print_face_highlight_tip": "How strongly the print face of a body is tinted and outlined in the view. 0 % shows no highlight.",
   "prefs.profile_active": "Active profile",

@@ -562,18 +562,32 @@ fn modifier_keys(app: &mut SolveApp, ui: &mut egui::Ui, query: &str) {
             ui.label(egui::RichText::new(app.tr_label(key)).strong());
             return;
         }
-        let combo = egui::ComboBox::from_id_salt("preview_reselect_modifier").selected_text(app.tr_label(key)).width(110.0).show_ui(ui, |ui| {
-            for choice in PreviewModifier::CHOICES {
-                if platform != Platform::Mac && choice == PreviewModifier::Primary {
-                    continue;
+        let combo = ui.allocate_ui(egui::vec2(110.0, ui_kit::row_height()), |ui| {
+            ui_kit::dropdown_menu(ui, "preview_reselect_modifier", app.tr_label(key), |ui| {
+                for choice in PreviewModifier::CHOICES {
+                    if platform != Platform::Mac && choice == PreviewModifier::Primary {
+                        continue;
+                    }
+                    let handle = format!("prefs:preview_modifier:{choice:?}");
+                    let response = ui_kit::list_picker(
+                        ui,
+                        &handle,
+                        crate::i18n::tr_label(choice.label(platform)),
+                        app.preferences.preview_reselect_modifier == choice,
+                    );
+                    if response.clicked() {
+                        app.preferences.preview_reselect_modifier = choice;
+                        ui.close();
+                    }
+                    crate::scenario::publish_handle(&handle, response.rect.center());
                 }
-                let response =
-                    ui.selectable_value(&mut app.preferences.preview_reselect_modifier, choice, crate::i18n::tr_label(choice.label(platform)));
-                crate::scenario::publish_handle(&format!("prefs:preview_modifier:{choice:?}"), response.rect.center());
-            }
+            })
         });
-        crate::scenario::publish_handle("prefs:preview_modifier", combo.response.rect.center());
-        if ui.add_enabled(binding != PreviewModifier::default(), egui::Button::new(app.tr_label("Reset")).small()).clicked() {
+        crate::scenario::publish_handle("prefs:preview_modifier", combo.inner.rect.center());
+        let reset =
+            ui.add_enabled_ui(binding != PreviewModifier::default(), |ui| ui_kit::button(ui, app.tr_label("Reset"), ui_kit::Button::Small)).inner;
+        crate::scenario::publish_handle("prefs:preview_modifier_reset", reset.rect.center());
+        if reset.clicked() {
             app.preferences.preview_reselect_modifier = PreviewModifier::default();
         }
     });
