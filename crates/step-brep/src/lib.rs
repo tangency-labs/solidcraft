@@ -4,10 +4,14 @@
 //! [`brep_to_model()`] is the export counterpart: exact geometry and topology become a
 //! neutral model that `step-export` writes as analytic/NURBS STEP.
 //!
-//! This is the production counterpart of the difftest `build_rust` recipe: each STEP
-//! body's faces, surfaces, curves and loops are turned into a `Brep`, then stitched
-//! into a solid. Unsupported geometry returns an [`BuildError`]; the caller decides
-//! whether to reject the whole file or skip a body.
+//! A body is built topology first ([`build_body`]): from the file's own topology, its
+//! shared edges and vertices joined as the file joins them through the kernel's
+//! `BrepConstructor`, leaving out a face whose construction fails. Where that does not
+//! give a closed solid, the stitched build runs as before, the production counterpart
+//! of the difftest `build_rust` recipe: each STEP body's faces, surfaces, curves and
+//! loops are turned into a `Brep`, then stitched into a solid. Unsupported geometry
+//! returns an [`BuildError`]; the caller decides whether to reject the whole file or
+//! skip a body.
 //!
 //! Every build is display-ready: after stitching, faces on periodic surfaces get the
 //! seam edges the file omits (a cylinder band written as two circles, a cone apex, ...),
@@ -32,8 +36,10 @@
 //! different trims but their areas sum to SMLib's.
 
 pub mod brep_to_model;
+mod constructor;
 
 pub use brep_to_model::{brep_to_model, ExportModelError};
+pub use constructor::FaceFailure;
 
 use std::fmt;
 
@@ -614,6 +620,20 @@ fn face_input(kernel: &Kernel, body: &Body, face: &sm::Face) -> Result<FaceInput
     Ok(out)
 }
 
+/// How [`build_body`] chooses between the topology-first and the stitched build.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum BuildMode {
+    /// Topology first; then stitched; then, where stitching fails, the open topology
+    /// build with its left-out faces.
+    #[default]
+    Default,
+    /// As [`BuildMode::Default`], but where stitching fails its error is returned
+    /// instead of the open topology build.
+    Strict,
+    /// The stitched build only, as before the topology-first build.
+    StitchOnly,
+}
+
 /// Options for [`build_with_options`].
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BuildOptions {
@@ -624,9 +644,36 @@ pub struct BuildOptions {
     /// Skip inserted seams on non-cylindrical cones. Fallback for unbounded ST-ACIS
     /// cones whose generated seam runs out to `SolidCore`'s infinity marker.
     pub skip_cone_seams: bool,
+    /// How the build is chosen ([`build_body`]).
+    pub mode: BuildMode,
 }
 
-/// Builds one neutral body into a solidcore B-rep and stitches it.
+/// Which way [`build_body`] built a body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuildPath {
+    /// From the file's topology: its shared edges and vertices joined as the file joins
+    /// them (`SmBrepConstructor`).
+    Topology,
+    /// Each face built on its own, then stitched by geometry.
+    Stitch,
+}
+
+/// A body [`build_body`] built.
+pub struct BuiltBody {
+    /// The B-rep.
+    pub brep: Brep,
+    /// How it was built.
+    pub path: BuildPath,
+    /// With [`BuildPath::Topology`]: the faces the build left out, and those whose seam
+    /// fix or UV trim failed (kept as built).
+    pub face_failures: Vec<FaceFailure>,
+    /// With [`BuildPath::Stitch`]: why the topology-first build was not kept (its
+    /// error, or the check it failed); `None` when it did not run.
+    pub topology_note: Option<String>,
+}
+
+/// Builds one neutral body into a solidcore B-rep ([`build_body`]: from its topology,
+/// else stitched).
 pub fn build(body: &Body) -> Result<Brep, BuildError> {
     build_with_options(body, BuildOptions::default())
 }
@@ -656,8 +703,206 @@ pub fn build_without_cone_seams(body: &Body) -> Result<Brep, BuildError> {
     )
 }
 
-/// Builds one neutral body into a solidcore B-rep with explicit options.
+/// Builds one neutral body into a solidcore B-rep with explicit options
+/// ([`build_body`]).
 pub fn build_with_options(body: &Body, options: BuildOptions) -> Result<Brep, BuildError> {
+    build_body(body, options).map(|built| built.brep)
+}
+
+/// Builds one body, topology first.
+///
+/// The body is built from the file's topology (the faces' shared edges and vertices
+/// joined as the file joins them, no geometric stitching), leaving out a face whose
+/// construction fails, then gets the seam fix, the UV trims and, with
+/// [`BuildOptions::heal`], the healer (a face whose seam fix or UV trim fails is kept
+/// as built and reported). The stitched build runs too. The topology build is kept
+/// when it is a closed solid ([`is_closed_solid`]), except where the stitched build is
+/// also closed and their volumes differ by more than 1e-4 relative: then the topology
+/// build is made again with the healer before the seam fix, and that is kept if it
+/// agrees with the stitched build (the file's topology closed with the wrong trims),
+/// else the first topology build. A topology build that is not closed gives way to
+/// the stitched build; where stitching fails too, [`BuildMode::Default`] keeps the
+/// open topology build (its left-out faces in [`BuiltBody::face_failures`]) and
+/// [`BuildMode::Strict`] returns the stitched build's error. [`BuildMode::StitchOnly`]
+/// builds by stitching only.
+///
+/// # Errors
+///
+/// The stitched build's error when it fails and the topology build gives no B-rep
+/// (or in [`BuildMode::Strict`]).
+pub fn build_body(body: &Body, options: BuildOptions) -> Result<BuiltBody, BuildError> {
+    let stitched_body = |brep, topology_note| BuiltBody {
+        brep,
+        path: BuildPath::Stitch,
+        face_failures: Vec::new(),
+        topology_note,
+    };
+    if options.mode == BuildMode::StitchOnly {
+        return build_stitched(body, options).map(|brep| stitched_body(brep, None));
+    }
+    let topology_built = |heal_first| {
+        build_topology(body, options, heal_first).map(|(brep, face_failures)| BuiltBody {
+            brep,
+            path: BuildPath::Topology,
+            face_failures,
+            topology_note: None,
+        })
+    };
+    let topology = topology_built(false);
+    let topology_volume = topology
+        .as_ref()
+        .ok()
+        .and_then(|built| closed_volume(&built.brep));
+    let stitched = build_stitched(body, options);
+    let Some(topology_volume) = topology_volume else {
+        // not a closed solid: the stitched build, else (by default) the open topology
+        // build
+        let note = match &topology {
+            Ok(_) => "not a closed solid".to_string(),
+            Err(error) => error.clone(),
+        };
+        return match stitched {
+            Ok(brep) => Ok(stitched_body(brep, Some(note))),
+            Err(error) if options.mode == BuildMode::Strict => Err(error),
+            Err(error) => topology.map_err(|_| error),
+        };
+    };
+    // Closed. Checked against a closed stitched build: where their volumes disagree,
+    // the file's topology may close with the wrong trims, which the healer mends; the
+    // healed topology build is kept when it then agrees with the stitched one, else
+    // the topology build (the closer of the two to the reference in most such cases).
+    let stitched_volume = stitched.as_ref().ok().and_then(closed_volume);
+    let agrees = |a: f64, b: f64| (a - b).abs() <= AGREEMENT * a.abs().max(b.abs());
+    if let Some(stitched_volume) = stitched_volume {
+        if !agrees(topology_volume, stitched_volume) && !options.heal {
+            if let Ok(healed) = topology_built(true) {
+                if closed_volume(&healed.brep).is_some_and(|v| agrees(v, stitched_volume)) {
+                    return Ok(healed);
+                }
+            }
+        }
+    }
+    topology.map_err(|message| BuildError { message })
+}
+
+/// The relative volume difference within which the topology-first and stitched builds
+/// of a body agree ([`build_body`]).
+const AGREEMENT: f64 = 1e-4;
+
+/// The accuracy of the volume [`closed_volume`] integrates.
+const VOLUME_ACCURACY: f64 = 1e-5;
+
+/// The volume of `brep` when it is a closed solid ([`is_closed_solid`]).
+fn closed_volume(brep: &Brep) -> Option<f64> {
+    if !solidcore::query::api_queries::brep_is_manifold_solid(brep).unwrap_or(false)
+        || validate_for_display(brep).is_err()
+    {
+        return None;
+    }
+    let kernel = Kernel::default();
+    let store = solidcore::geom::attribute::AttributeStore::default();
+    let attrs = solidcore::mass::integrator::properties::PropertyAttributes {
+        store: &store,
+        key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
+    };
+    let mut copy = brep.clone();
+    solidcore::mass::integrator::properties::brep_volume(
+        &kernel,
+        &mut copy,
+        VOLUME_ACCURACY,
+        &attrs,
+    )
+    .ok()
+    .filter(|volume| volume.is_finite() && *volume > 0.0)
+}
+
+/// Whether `brep` is a closed solid: a manifold solid, display-ready (every face
+/// trimmed), with a finite positive volume (integrated to accuracy 1e-5).
+pub fn is_closed_solid(brep: &Brep) -> bool {
+    closed_volume(brep).is_some()
+}
+
+/// The topology-first build alone, with its passes (as [`build_body`] makes it, before
+/// it is checked or replaced by the stitched build): for diagnostics.
+///
+/// # Errors
+///
+/// Why the topology-first build gave no B-rep.
+pub fn build_from_topology(body: &Body, options: BuildOptions) -> Result<BuiltBody, BuildError> {
+    build_topology(body, options, false)
+        .map(|(brep, face_failures)| BuiltBody {
+            brep,
+            path: BuildPath::Topology,
+            face_failures,
+            topology_note: None,
+        })
+        .map_err(|message| BuildError { message })
+}
+
+/// The topology-first build with the seam fix, the UV trims and, with
+/// [`BuildOptions::heal`], the healer, as the stitched build gets them; `heal_first`
+/// heals the built B-rep before the seam fix instead. A face whose seam fix or UV trim
+/// fails is kept as built and reported.
+fn build_topology(
+    body: &Body,
+    options: BuildOptions,
+    heal_first: bool,
+) -> Result<(Brep, Vec<FaceFailure>), String> {
+    let constructor::Constructed {
+        mut kernel,
+        mut brep,
+        faces: made,
+        mut failures,
+    } = constructor::construct(body)?;
+    let file_face = |face: FaceId| {
+        made.iter()
+            .find(|(id, _)| *id == face)
+            .map_or(0, |&(_, file)| file)
+    };
+    if heal_first {
+        api_heal_brep(&mut kernel, Some(&mut brep)).map_err(|e| format!("heal: {e}"))?;
+    }
+    let faces: Vec<FaceId> = brep.face_list().to_vec();
+    for face in faces {
+        let cone = options.skip_cone_seams
+            && fp2::surface(&brep, face).ok().flatten().is_some_and(
+                |surface| matches!(surface.kind(), SurfaceKind::Cone(cone) if !cone.is_cylinder()),
+            );
+        if !cone {
+            if let Err(error) = trimming_tools::split_at_seams(&mut kernel, &mut brep, face) {
+                failures.push(FaceFailure {
+                    body: body.step_id,
+                    face: file_face(face),
+                    reason: format!("seam fix: {error}"),
+                });
+            }
+        }
+    }
+    let faces: Vec<FaceId> = brep.face_list().to_vec();
+    for face in faces {
+        let trimmed = trimming_tools::face_uv_curves_present(&brep, face).and_then(|present| {
+            if present {
+                Ok(())
+            } else {
+                trimming_tools::create_uv_trim_curves(&kernel, &mut brep, face)
+            }
+        });
+        if let Err(error) = trimmed {
+            failures.push(FaceFailure {
+                body: body.step_id,
+                face: file_face(face),
+                reason: format!("UV trims: {error}"),
+            });
+        }
+    }
+    if options.heal && !heal_first {
+        api_heal_brep(&mut kernel, Some(&mut brep)).map_err(|e| e.to_string())?;
+    }
+    Ok((brep, failures))
+}
+
+/// The stitched build: each face on its own, stitched, seam-fixed and trimmed.
+fn build_stitched(body: &Body, options: BuildOptions) -> Result<Brep, BuildError> {
     let mut kernel = Kernel::default();
     let mut brep = p3::new_brep(
         &mut kernel,
@@ -796,6 +1041,10 @@ pub struct ImportReport {
     pub skipped: Vec<step_import::model::Skipped>,
     /// Mapper diagnostics in their original order.
     pub diagnostics: Vec<step_import::model::Diagnostic>,
+    /// Bodies built from the file's topology ([`BuildPath::Topology`]).
+    pub constructed: usize,
+    /// Faces the topology-first build left out of the bodies it built, in body order.
+    pub face_failures: Vec<FaceFailure>,
 }
 
 /// Parses STEP bytes and builds every mapped body, preserving mapper findings.
@@ -808,11 +1057,23 @@ pub fn import_with_report(
     let model = step_import::import(bytes, limits).map_err(|error| BuildError {
         message: error.to_string(),
     })?;
-    let bodies = model.bodies.iter().map(build).collect::<Result<_, _>>()?;
+    let mut bodies = Vec::new();
+    let mut constructed = 0;
+    let mut face_failures = Vec::new();
+    for body in &model.bodies {
+        let built = build_body(body, BuildOptions::default())?;
+        bodies.push(built.brep);
+        if built.path == BuildPath::Topology {
+            constructed += 1;
+        }
+        face_failures.extend(built.face_failures);
+    }
     Ok(ImportReport {
         bodies,
         skipped: model.skipped,
         diagnostics: model.diagnostics,
+        constructed,
+        face_failures,
     })
 }
 
