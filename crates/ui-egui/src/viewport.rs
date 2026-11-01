@@ -2750,21 +2750,19 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     hits
 }
 
-/// The section cut shown now: the open Section Analysis dialog's plane, else the session's.
 /// The active sketch's display options (defaults when not sketching).
 pub fn active_view(app: &SolveApp) -> solidcraft_engine::sketch::SketchView {
     let st = crate::open_meshing::shown_world(app);
     app.session.active_sketch.and_then(|s| st.sketch(s)).map(|ss| ss.sketch.view.clone()).unwrap_or_default()
 }
 
+/// The section cut shown now: the open Section Analysis dialog's plane, else the session's.
 pub fn section_plane(app: &SolveApp) -> Option<(Vec3, Vec3)> {
     if let Some(d) = app.dialog.as_ref().filter(|d| matches!(d.kind, crate::dialogs::Kind::Section { .. })) {
-        let cmds = crate::dialogs::apply_commands(app, d).ok()?;
-        let (_, p) = cmds.into_iter().next()?;
-        let mut scratch = app.session.scratch();
-        scratch.execute("inspect.section", &p).ok()?;
-        return scratch.section;
+        return dialog_section_plane(app, d);
     }
+    // No dialog: let go of the design the last one's plane was worked out in.
+    DIALOG_SECTION.with(|c| c.borrow_mut().take());
     // Slice (Sketch Palette): cut the model at the plane of the sketch being edited.
     if app.session.section.is_none() {
         let st = crate::open_meshing::shown_world(app);
@@ -2773,6 +2771,88 @@ pub fn section_plane(app: &SolveApp) -> Option<(Vec3, Vec3)> {
         }
     }
     app.session.section
+}
+
+/// What an open Section Analysis dialog's plane is worked out from: the dialog's values and picks,
+/// and the session it runs in (its design, model, revision and section). The design and model are
+/// held, not just their addresses, so another design never matches a freed one's.
+struct DialogSectionKey {
+    doc: std::sync::Arc<solidcraft_engine::doc::Document>,
+    model: std::sync::Arc<solidcraft_engine::doc::ModelState>,
+    world: std::sync::Arc<solidcraft_engine::doc::ModelState>,
+    uid: u64,
+    revision: u64,
+    section: Option<(Vec3, Vec3)>,
+    kind: String,
+    inputs: Vec<crate::selection::SelInput>,
+    extra: serde_json::Map<String, serde_json::Value>,
+    editing: Option<(u64, Option<usize>)>,
+}
+
+impl DialogSectionKey {
+    fn of(app: &SolveApp, d: &crate::dialogs::Dialog) -> DialogSectionKey {
+        let s = &app.session;
+        DialogSectionKey {
+            doc: s.doc.clone(),
+            model: s.model.state(),
+            world: s.world_state(),
+            uid: s.uid,
+            revision: s.revision,
+            section: s.section,
+            kind: format!("{:?}", d.kind),
+            inputs: d.inputs.clone(),
+            extra: d.extra.clone(),
+            editing: d.editing,
+        }
+    }
+
+    fn same(&self, o: &DialogSectionKey) -> bool {
+        use std::sync::Arc;
+        Arc::ptr_eq(&self.doc, &o.doc)
+            && Arc::ptr_eq(&self.model, &o.model)
+            && Arc::ptr_eq(&self.world, &o.world)
+            && (self.uid, self.revision, self.section, self.editing) == (o.uid, o.revision, o.section, o.editing)
+            && self.kind == o.kind
+            && self.inputs == o.inputs
+            && self.extra == o.extra
+    }
+}
+
+thread_local! {
+    /// The open Section Analysis dialog's plane and what it was worked out from.
+    static DIALOG_SECTION: std::cell::RefCell<Option<(DialogSectionKey, Option<(Vec3, Vec3)>)>> = const { std::cell::RefCell::new(None) };
+    #[cfg(test)]
+    static DIALOG_SECTION_RUNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// How many times an open Section Analysis dialog's plane has been worked out on this thread.
+#[cfg(test)]
+fn dialog_section_runs() -> usize {
+    DIALOG_SECTION_RUNS.with(std::cell::Cell::get)
+}
+
+/// The plane an open Section Analysis dialog previews: its command run on a scratch copy of the
+/// session. The viewport asks for it many times a frame (the scene key, the clip, picking, the
+/// status), so it is worked out once and kept until the dialog or the session changes.
+fn dialog_section_plane(app: &SolveApp, d: &crate::dialogs::Dialog) -> Option<(Vec3, Vec3)> {
+    let key = DialogSectionKey::of(app, d);
+    let kept = DIALOG_SECTION.with(|c| c.borrow().as_ref().filter(|(k, _)| k.same(&key)).map(|(_, plane)| *plane));
+    if let Some(plane) = kept {
+        return plane;
+    }
+    #[cfg(test)]
+    DIALOG_SECTION_RUNS.with(|n| n.set(n.get() + 1));
+    let plane = preview_section(app, d);
+    DIALOG_SECTION.with(|c| *c.borrow_mut() = Some((key, plane)));
+    plane
+}
+
+fn preview_section(app: &SolveApp, d: &crate::dialogs::Dialog) -> Option<(Vec3, Vec3)> {
+    let cmds = crate::dialogs::apply_commands(app, d).ok()?;
+    let (_, p) = cmds.into_iter().next()?;
+    let mut scratch = app.session.scratch();
+    scratch.execute("inspect.section", &p).ok()?;
+    scratch.section
 }
 
 /// Whether the section [`section_plane`] shows has hatched cut faces: an open Section Analysis
@@ -7756,6 +7836,64 @@ mod tests {
         assert!(whole.iter().zip(&sliced).filter(|(a, b)| a != b).count() > 100, "the picture ignored the active Sketch Slice");
         h.app.run("sketch.options", json!({"slice":false})).unwrap();
         assert_eq!(whole, pixels(&mut h, cam), "disabling Slice restores the whole-body pixels");
+    }
+
+    /// The viewport asks for the section plane many times a frame (the scene key, the clip,
+    /// picking, the status): an open Section Analysis dialog's plane is worked out once, then
+    /// again only when the dialog or the design changes, and follows every such change.
+    #[test]
+    fn an_open_section_dialog_works_out_its_plane_once_and_follows_changes() {
+        fn set(h: &mut crate::scenario::Harness, distance: &str, flipped: bool) {
+            let Some(crate::dialogs::Kind::Section { offset, flip, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) else {
+                panic!("section dialog")
+            };
+            *offset = distance.into();
+            *flip = flipped;
+        }
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("parameters.add", json!({"name":"cut","expression":"4 mm"})).unwrap();
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+        h.app.session.selection = vec![Sel::Plane { name: "XY".into() }];
+        h.app.start("inspect.section");
+        set(&mut h, "cut", false);
+        let runs = dialog_section_runs();
+        h.frames(1);
+        assert_eq!(dialog_section_runs() - runs, 1, "worked out once in the frame");
+        assert_eq!(section_plane(&h.app), Some((Vec3::new(0.0, 0.0, 4.0), Vec3::Z)));
+
+        // Frames that change nothing the plane comes from, hovering included, reuse it.
+        let runs = dialog_section_runs();
+        for x in [400.0, 430.0, 460.0] {
+            h.step(&json!({"move":[x, 300.0]})).unwrap();
+        }
+        h.frames(2);
+        assert_eq!(dialog_section_runs(), runs, "nothing changed: the plane is not worked out again");
+
+        // The dialog's values.
+        set(&mut h, "12 mm", false);
+        h.frames(1);
+        assert_eq!(dialog_section_runs() - runs, 1);
+        assert_eq!(section_plane(&h.app), Some((Vec3::new(0.0, 0.0, 12.0), Vec3::Z)));
+        set(&mut h, "12 mm", true);
+        assert_eq!(section_plane(&h.app), Some((Vec3::new(0.0, 0.0, 12.0), -Vec3::Z)));
+
+        // The design: the distance names a parameter that changes under the open dialog.
+        set(&mut h, "cut", false);
+        h.app.run("parameters.change", json!({"name":"cut","expression":"7 mm"})).unwrap();
+        assert!(h.app.dialog.is_some());
+        assert_eq!(section_plane(&h.app), Some((Vec3::new(0.0, 0.0, 7.0), Vec3::Z)));
+
+        // Another design under the same dialog: worked out in that one.
+        let mut other = solidcraft_engine::Session::default();
+        other.execute("parameters.add", &json!({"name":"cut","expression":"9 mm"})).unwrap();
+        h.app.session = other;
+        assert_eq!(section_plane(&h.app), Some((Vec3::new(0.0, 0.0, 9.0), Vec3::Z)));
+
+        // With the dialog closed the committed section shows, and nothing is kept.
+        h.app.dialog = None;
+        assert_eq!(section_plane(&h.app), None);
+        assert!(DIALOG_SECTION.with(|c| c.borrow().is_none()));
     }
 
     #[test]
