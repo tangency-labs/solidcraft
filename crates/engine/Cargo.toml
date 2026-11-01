@@ -17,6 +17,9 @@ raytrace-cpu = ["solidcraft-render/raytrace-cpu"]
 # `src/schema/record.rs`), for checking a new contract against the whole test suite.
 param-audit = []
 solver-profiling = ["solidcraft-sketch/solver-profiling"]
+# An SFTP server in the process (`remote_sftp::test_server`), for the app's tests of SFTP network
+# folders; never in a release build.
+sftp-test-server = []
 
 [[example]]
 name = "sketch_analysis_bench"
@@ -47,11 +50,21 @@ thiserror = { workspace = true }
 log = { workspace = true }
 web-time = { workspace = true }
 
+# SFTP network targets for Send to Slicer (src/remote_sftp.rs); the browser build has none.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+russh = { workspace = true }
+russh-sftp = { workspace = true }
+tokio = { workspace = true }
+
 [dev-dependencies]
 # Model-cache tests also run in a source tarball build (no git commit).
 solidcraft-io = { workspace = true, features = ["trust-unknown-source"] }
 # Normal CI exercises profiling assertions without enabling the production feature.
 solidcraft-sketch = { workspace = true, features = ["solver-profiling"] }
+
+# The SFTP tests run an ssh-agent of their own (src/remote_sftp.rs).
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+futures = "0.3"
 
 [[example]]
 name = "render_resource_workflow"

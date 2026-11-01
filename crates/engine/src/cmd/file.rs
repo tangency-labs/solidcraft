@@ -111,7 +111,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("consent: bool (required: true only once the user has agreed to upload the model to Printables' servers; it stays there for 30 minutes and opening it needs a Printables sign-in); bodies?: [names] (default: the selected bodies); format?: 3mf|stl (default 3mf, in millimetres) → uploads the bodies to EasyPrint, Printables' slicer in the browser, and opens it in the browser. 100 MB at most. Works in the desktop app and the browser build; the CLI has no way to upload yet"),
     CommandSpec::new("file.slicers", "Installed Slicers", slicers).icon("export")
         .noundo()
-        .params("→ the network folders the user added, then the slicers found on this machine: [{id, name, program, icon?}] for a slicer, [{id: remote:<name>, name, remote: true, kind: folder, folder}] for a network folder (file.slicers.add_remote); pass an id, a name or the program path as file.send_to_slicer's or file.save_mesh's `slicer`"),
+        .params("→ the network folders the user added, then the slicers found on this machine: [{id, name, program, icon?}] for a slicer, [{id: remote:<name>, name, remote: true, kind: folder|sftp, folder, sftp?, key?, host_key?}] for a network folder, on this computer or on an SFTP server (file.slicers.add_remote); pass an id, a name or the program path as file.send_to_slicer's or file.save_mesh's `slicer`"),
 ];
 
 fn new_doc(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1006,8 +1006,7 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn slicers(s: &mut Session, _: &Value) -> Result<Value> {
     // The network folders first, as the Send to Slicer list shows them.
-    let mut list: Vec<Value> =
-        s.network_folders.iter().map(|t| json!({"id": t.id(), "name": t.name, "remote": true, "kind": t.kind(), "folder": t.folder()})).collect();
+    let mut list: Vec<Value> = s.network_folders.iter().map(crate::remote_slicers::RemoteTarget::listing).collect();
     list.extend(
         crate::slicers::detect()
             .iter()

@@ -79,6 +79,13 @@ cadmpeg-core = "=0.6.3"
 cadmpeg-ir = "=0.6.3"
 cadmpeg-registry = { version = "=0.6.3", default-features = false, features = ["fcstd", "rhino", "step"] }
 
+# SFTP for Send to Slicer's network targets (#2304; Apache-2.0 and MIT, pure Rust, native builds
+# only). Crypto through ring, already in the tree through rustls; no `rsa` feature, whose crate has
+# an open advisory (RUSTSEC-2023-0071), so keys are Ed25519 or ECDSA.
+russh = { version = "0.65", default-features = false, features = ["ring"] }
+russh-sftp = "3.0"
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "io-util", "sync"] }
+
 # fonts (sketch text outlines; MIT OR Apache-2.0, pure Rust)
 ttf-parser = { version = "0.25", default-features = false, features = ["std", "variable-fonts"] }
 

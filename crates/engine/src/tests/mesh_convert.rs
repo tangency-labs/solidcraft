@@ -638,6 +638,7 @@ impl NetworkFolders {
 impl Drop for NetworkFolders {
     fn drop(&mut self) {
         *crate::remote_slicers::TEST_MAX_BYTES.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        *crate::remote_sftp::TEST_SETUP.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         let _ = std::fs::remove_dir_all(&self.root);
     }
 }
@@ -759,6 +760,80 @@ fn sending_to_a_network_folder_writes_a_readable_name_and_never_replaces_a_file(
         .unwrap()
         .unwrap();
     assert_eq!(done.path, net.share().join("Untitled - Mesh (3).stl"));
+}
+
+#[test]
+fn an_sftp_server_is_tested_trusted_and_sent_to_by_command() {
+    use crate::remote_sftp::test_server;
+    let net = NetworkFolders::new("sftp");
+    // Not the user's own known_hosts or ssh-agent: a server only this test knows.
+    *crate::remote_sftp::TEST_SETUP.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(crate::remote_sftp::Setup { known_hosts: None, agent: None, confirmed: None, limit: std::time::Duration::from_secs(10) });
+    let key = net.root.join("id_ed25519");
+    std::fs::write(&key, test_server::key(7).to_openssh(russh::keys::ssh_key::LineEnding::LF).unwrap().as_bytes()).unwrap();
+    let authorized = vec![test_server::key(7).public_key().clone()];
+    let running = test_server::start(1, test_server::Options { authorized, ..Default::default() }, &net.root).unwrap();
+    let fp = running.host_key.public_key().fingerprint(russh::keys::HashAlg::Sha256).to_string();
+    let server = format!("maker@127.0.0.1:{}", running.port);
+    let (share, key) = (net.share().to_string_lossy().into_owned(), key.to_string_lossy().into_owned());
+    let mut s = imported_box();
+
+    // An unknown server is never written to: the test says its key, to check and confirm.
+    let unknown = s.execute("file.slicers.test", &json!({"sftp": server, "folder": share, "key": key})).unwrap();
+    assert_eq!((unknown["ok"].as_bool(), unknown["sftp"].as_str()), (Some(false), Some(server.as_str())), "{unknown}");
+    assert_eq!((unknown["host_key"]["fingerprint"].as_str(), unknown["host_key"]["trusted"].as_bool()), (Some(fp.as_str()), Some(false)));
+    let confirmed = s.execute("file.slicers.test", &json!({"sftp": server, "folder": share, "key": key, "confirm": fp})).unwrap();
+    assert_eq!((confirmed["ok"].as_bool(), confirmed["host_key"]["trusted"].as_bool()), (Some(true), Some(true)), "{confirmed}");
+    assert!(net.files().is_empty(), "the test file is deleted");
+
+    // Added without trusting its key, sending to it saves the file here and says why it went no further.
+    s.execute("file.slicers.add_remote", &json!({"name": "Orca box", "sftp": server, "folder": share, "key": key})).unwrap();
+    let refused = s.execute("file.send_to_slicer", &json!({"slicer": "Orca box", "bodies": ["Mesh"]})).unwrap();
+    assert!(refused["slicer_error"].as_str().unwrap().contains("not a server you trust"), "{refused}");
+    assert!(net.files().is_empty() && std::path::Path::new(refused["path"].as_str().unwrap()).exists());
+
+    let added =
+        s.execute("file.slicers.add_remote", &json!({"name": "Orca box", "sftp": server, "folder": share, "key": key, "host_key": fp})).unwrap();
+    assert_eq!(
+        (added["kind"].as_str(), added["sftp"].as_str(), added["host_key"].as_str(), added["replaced"].as_bool()),
+        (Some("sftp"), Some(server.as_str()), Some(fp.as_str()), Some(true))
+    );
+    let listed = s.execute("file.slicers", &json!({})).unwrap();
+    assert_eq!((listed["slicers"][0]["remote"].as_bool(), listed["slicers"][0]["kind"].as_str()), (Some(true), Some("sftp")));
+    let tested = s.execute("file.slicers.test", &json!({"name": "remote:Orca box"})).unwrap();
+    assert_eq!(tested["ok"], true, "{tested}");
+
+    let send =
+        |s: &mut Session| s.execute("file.send_to_slicer", &json!({"slicer": "remote:Orca box", "bodies": ["Mesh"], "quality": "fine"})).unwrap();
+    let (first, second) = (send(&mut s), send(&mut s));
+    let url = format!("sftp://{server}{share}/Untitled - Mesh");
+    assert_eq!(first["sent_to"].as_str(), Some(format!("{url}.3mf").as_str()), "{first}");
+    assert_eq!(second["sent_to"].as_str(), Some(format!("{url} (2).3mf").as_str()), "{second}");
+    assert_eq!(net.files(), ["Untitled - Mesh (2).3mf", "Untitled - Mesh.3mf"]);
+    assert_eq!(std::fs::read(net.share().join("Untitled - Mesh.3mf")).unwrap(), std::fs::read(first["path"].as_str().unwrap()).unwrap());
+
+    for bad in [
+        json!({"name": "B", "sftp": "printbox", "folder": share}),
+        json!({"name": "B", "sftp": "maker@box:0", "folder": share}),
+        json!({"name": "B", "sftp": server, "folder": ""}),
+        json!({"name": "B", "sftp": server, "folder": share, "key": "id_ed25519"}),
+        json!({"name": "B", "sftp": server, "folder": share, "host_key": "MD5:00:11"}),
+        json!({"name": "B", "folder": share, "key": key}),
+    ] {
+        assert!(s.execute("file.slicers.add_remote", &bad).is_err(), "{bad}");
+    }
+    assert!(s.execute("file.slicers.test", &json!({"folder": share, "confirm": fp})).is_err(), "confirm goes with a server");
+    assert!(s.execute("file.slicers.test", &json!({"name": "Orca box", "sftp": server})).is_err());
+
+    // An agent limited to folders sends to the server the user added, but names no server itself.
+    let scope = solidcraft_io::vfs::PathScope::new([net.root.clone()]);
+    solidcraft_io::vfs::scoped(Some(scope), || {
+        let other = json!({"name": "Elsewhere", "sftp": server, "folder": share, "host_key": fp});
+        assert!(s.execute("file.slicers.add_remote", &other).unwrap_err().to_string().contains("--allow-path"));
+        assert!(s.execute("file.slicers.test", &json!({"sftp": server, "folder": share})).is_err());
+        assert_eq!(s.execute("file.slicers.test", &json!({"name": "Orca box"})).unwrap()["ok"], true);
+    });
+    assert!(!s.doc.to_json().contains(&server), "never saved in the design");
 }
 
 #[test]
