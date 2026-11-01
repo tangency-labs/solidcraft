@@ -116,10 +116,11 @@ pub struct LiveBrepObjects<'a, 'i> {
     faces: BrepFaceServices<'a>,
     identity: &'a BrepIdentity<'i>,
     cache: Option<&'a BrepCache>,
-    /// The evaluation copy of each edge curve, made on first read.
-    curves: BTreeMap<EdgeId, OnceCell<Curve>>,
-    /// The evaluation copy of each face surface, made on first read.
-    surfaces: BTreeMap<FaceId, OnceCell<Surface>>,
+    /// The evaluation copy of each edge curve, made on first read (boxed, so the map
+    /// built for every solve holds a pointer per edge, not an empty curve).
+    curves: BTreeMap<EdgeId, OnceCell<Box<Curve>>>,
+    /// The evaluation copy of each face surface, made on first read (boxed, as `curves`).
+    surfaces: BTreeMap<FaceId, OnceCell<Box<Surface>>>,
 }
 
 impl LiveBrepObjects<'_, '_> {
@@ -239,7 +240,7 @@ impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
         };
         let cell = self.curves.get(&edge).ok_or(SolidError::null_pointer(OP))?;
         if let Some(curve) = cell.get() {
-            return Ok(curve);
+            return Ok(curve.as_ref());
         }
         let copy = self.with_brep(|b| {
             b.edge(edge)?
@@ -247,8 +248,9 @@ impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
                 .as_ref()
                 .ok_or(SolidError::null_pointer(OP))?
                 .clone_for_evaluation()
+                .map(Box::new)
         })?;
-        Ok(cell.get_or_init(|| copy))
+        Ok(cell.get_or_init(|| copy).as_ref())
     }
     fn surface(&self, object: CacheObject) -> Result<&Surface> {
         let CacheObject::Surface(face) = object else {
@@ -259,7 +261,7 @@ impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
             .get(&face)
             .ok_or(SolidError::null_pointer(OP))?;
         if let Some(surface) = cell.get() {
-            return Ok(surface);
+            return Ok(surface.as_ref());
         }
         let copy = self.with_brep(|b| {
             b.face(face)?
@@ -267,8 +269,9 @@ impl TopologyObjects<CacheObject> for LiveBrepObjects<'_, '_> {
                 .as_ref()
                 .ok_or(SolidError::null_pointer(OP))?
                 .clone_for_evaluation()
+                .map(Box::new)
         })?;
-        Ok(cell.get_or_init(|| copy))
+        Ok(cell.get_or_init(|| copy).as_ref())
     }
     fn analytic_curve_handle(&self, curve: CacheObject) -> Option<CacheObject> {
         Some(curve)
