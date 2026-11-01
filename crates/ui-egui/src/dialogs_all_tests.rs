@@ -579,6 +579,38 @@ fn new_cards_settle_before_the_first_click_in_both_layouts() {
 }
 
 #[test]
+fn the_loft_dialog_widens_its_label_column_for_the_current_language() {
+    // #10620: German "Anpassung an Leitkurve" (Rail Fit) clipped to "Anpassung an Leit…" in
+    // the fixed-width Loft card. The label column now measures the dialog's labels in the
+    // active language and the card widens by the same amount, so the label fits and the
+    // control column keeps its design width. English, whose labels fit the design, is unchanged.
+    let t = Tokens::get();
+    let shoot = |language: &str| {
+        let mut h = fixture();
+        h.call("ui.resize", json!({"width": 1400, "height": 950}));
+        h.app.preferences.language = language.into();
+        h.app.dialog = Some(representative(&h, "solid.loft"));
+        h.frames(4);
+        (h, scenario::rect_of("dialog:card").unwrap(), scenario::rect_of("dialog:label:Rail Fit").unwrap())
+    };
+    let (h, card, label) = shoot("de");
+    let (_, english_card, english_label) = shoot("en");
+    assert!(card.width() > english_card.width(), "the German card widened: {card:?} vs {english_card:?}");
+    assert!(label.width() > t.form_label_width * 1.6, "past the ordinary cap: {label:?}");
+    assert!(english_label.width() <= t.form_label_width * 1.6, "English keeps the design's label column: {english_label:?}");
+    // The drawn galley holds the whole translation: no ellipsis.
+    let drawn = h
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.job.text.contains("Anpassung") => Some(text.galley.job.text.to_string()),
+            _ => None,
+        })
+        .expect("the Rail Fit row drew its German label");
+    assert!(drawn.contains("Leitkurve") && !drawn.contains('…'), "the label is not ellipsized: {drawn:?}");
+}
+
+#[test]
 fn remaining_dialogs_keep_kit_chrome_and_cancel_restores_preview() {
     for command in [
         "contact.create",

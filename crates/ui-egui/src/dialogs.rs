@@ -3359,6 +3359,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let (ok_label, close_label) = action_labels(&d.kind);
     // What the footer's OK takes, for the check in the view's corner too (#6709).
     let ok_enabled = valid && !ok_label.is_empty() && app.applying.is_none();
+    // #10620: the card widens to fit its widest label in the current language. The body
+    // publishes the extra it needs under this key each pass; the card applies it next pass,
+    // so the label column grows and the control column keeps its design width.
+    let grow_key = egui::Id::new(("sc_dialog_label_grow", raw_title));
+    let label_grow = ctx.data(|data| data.get_temp::<f32>(grow_key)).unwrap_or(0.0).min((vp.width() - t.space_24 - card_width(&d)).max(0.0));
     let panel = crate::ui_kit::Panel::new(&heading, egui::Id::new(("sc_dialog", title(&d.kind))), anchor, drag_bounds, side, frame)
         .actions(ok_label, close_label);
     let panel = if let Some(column) = column {
@@ -3367,7 +3372,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         let available = app.viewport.palette_rect.map_or(vp.width(), |r| (r.left() - vp.left() - t.space_8).max(0.0));
         panel.width(card_width(&d).min(available))
     } else {
-        panel.width(card_width(&d))
+        panel.width(card_width(&d) + label_grow)
     };
     let reset_scroll = d.reset_scroll;
     let panel =
@@ -3434,7 +3439,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             let (closed, action) = if manager {
                 panel.feature_collapsible(ui, heading, applying, valid, &mut collapsed, body)
             } else {
-                panel.feature(ui, heading, applying, valid, body)
+                panel.feature(ui, heading, applying, valid, |ui| crate::ui_kit::grow_form(ui, grow_key, |ui| body(ui)))
             };
             d.reset_scroll = false;
             d.collapsed = collapsed;

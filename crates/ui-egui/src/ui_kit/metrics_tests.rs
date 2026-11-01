@@ -23,6 +23,38 @@ fn non_finite_and_tiny_row_widths_are_sanitized() {
 }
 
 #[test]
+fn a_growing_form_widens_past_the_cap_and_publishes_the_card_extra() {
+    // #10620: inside `grow_form` the label column takes the width the widest label needs,
+    // past the 1.6x cap an ordinary form clamps to, and the card's owner is told by how much
+    // the card must widen so the control column keeps its room.
+    let ctx = egui::Context::default();
+    crate::fonts::setup_fonts(&ctx);
+    let t = Tokens::get();
+    let key = egui::Id::new("grow-test");
+    let long = "Anpassung an Leitkurve";
+    let mut label = None;
+    for _ in 0..3 {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_width(300.0);
+            scope(ui, |ui| {
+                grow_form(ui, key, |ui| {
+                    let mut value = String::new();
+                    row(ui, long, |ui| field(ui, &mut value));
+                });
+            });
+        });
+        output.textures_delta.clear();
+        label = scenario::rect_of(&format!("dialog:label:{long}"));
+    }
+    let label = label.unwrap();
+    let measured = ctx.fonts(|f| f.layout_no_wrap(long.to_owned(), egui::FontId::proportional(t.font_label), t.dialog_label)).size().x;
+    assert!(label.width() > t.form_label_width * 1.6, "past the ordinary cap: {label:?}");
+    assert!(label.width() >= measured, "the label fits its column: {label:?} vs {measured}");
+    let extra = ctx.data(|d| d.get_temp::<f32>(key)).unwrap();
+    assert!((extra - (label.width() - t.form_label_width)).abs() < 0.01, "the card grows by the column's extra: {extra}");
+}
+
+#[test]
 fn file_tiles_are_fixed_height_bounded_and_disabled_actions_stay_inert() {
     let ctx = crate::fonts::test_context();
     for width in [80.0, 264.0, 680.0] {
