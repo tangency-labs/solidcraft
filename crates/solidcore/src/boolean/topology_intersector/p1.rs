@@ -1243,9 +1243,10 @@ pub struct ImprintOutcome<O> {
     pub deleted: Vec<O>,
     /// `eRetStat`: the first failing imprint or glue status.
     pub status: Result<()>,
-    /// Whether a failing imprint or glue may have edited a B-rep. False when every
-    /// failure was an edge definition that stopped before its first `MakeEdgeInFace`
-    /// (e.g. no final vertex), which leaves the B-reps as they were.
+    /// Whether a failing imprint may have edited a B-rep. False when every failure was
+    /// an edge definition that stopped before its first edit (no final vertex, or a
+    /// `MakeEdgeInFace` that finds no vertex sector), which leaves the B-reps as they
+    /// were, or a failing `GlueCoincidentBrepVertices`, which upstream goes on past.
     pub failure_edited: bool,
 }
 
@@ -2119,8 +2120,11 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         match glued {
             Ok(d) => deleted.extend(d),
             Err(e) => {
+                // A failing glue does not count as an edit that stops the boolean:
+                // upstream goes on, and at the failing glues the fixtures reach the
+                // port's B-reps are in the same state as upstream's (UB-242 addendum
+                // 2026-10-31, glue failure).
                 record(Err(e), ret)?;
-                *failure_edited = true;
             }
         }
 

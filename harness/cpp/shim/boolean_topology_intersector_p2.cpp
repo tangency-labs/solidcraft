@@ -225,9 +225,10 @@ bool set_rels_maps_ok(SmProtoTopologyManager* mgr, int64_t ctor_kind)
 // byte-identical in v1.0.1 3fd5b95 at the same lines) VERBATIM, apart from the SM_DEBUG_CODE
 // blocks and the members reached through accessors,
 // plus one addition: `edited` answers whether a failing imprint may have edited a B-rep,
-// as the port's ImprintOutcome::failure_edited does. A vertex definition's imprint and the
-// glue edit first; an edge definition's imprint edits nothing when it stops before its
-// first MakeEdgeInFace (a NULL final vertex or source face, SmProtoTopology.cpp:1375-1445)
+// as the port's ImprintOutcome::failure_edited does. A vertex definition's imprint edits
+// first. A failing glue does not count: upstream goes on past it, and so does the port (the
+// UB-242 glue-failure addendum). An edge definition's imprint edits nothing when it stops
+// before its first MakeEdgeInFace (a NULL final vertex or source face, SmProtoTopology.cpp:1375-1445)
 // or when a MakeEdgeInFace stops at its const FindVertexSector checks, which the addition
 // tests with the same const calls beforehand (ed_fails_unedited).
 bool ed_stops_before_edit(SmEdgeDefinition* pED)
@@ -363,7 +364,6 @@ SmStatus ii_verbatim(SmTopologyIntersector* ti, bool& edited)
 
   eStat = m_pProtoTopoMgr->GlueCoincidentBrepVertices();
 
-  if ( eStat != SM_SUCCESS ) { edited = true; } // (addition)
   if(eStat != SM_SUCCESS && eRetStat == SM_SUCCESS) // Record the first problem.
     { eRetStat = eStat; }
 

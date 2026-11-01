@@ -71,7 +71,8 @@
 //!   goes on with both B-reps half imprinted (upstream: reads of freed vertex uses).
 //!   The port deletes the manager and returns the imprint's error, unless every
 //!   failing imprint stopped before editing a B-rep (an edge definition without a
-//!   final vertex): the B-reps are then consistent and the port goes on as upstream.
+//!   final vertex, or whose `MakeEdgeInFace` finds no vertex sector) or the only
+//!   other failure is `GlueCoincidentBrepVertices`: the port then goes on as upstream.
 //! - **Statuses upstream ignores** (`SmBrep` edits whose status is unchecked,
 //!   `RemoveRelationship` in `DeleteFaces` / `FixGaps`, bounding boxes, `DropPoint`,
 //!   `SimpleCoincidenceChecker`, `CalculateUVDomainFromUVTrimCurves`, `Relate` in
@@ -1206,7 +1207,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// it); every error of the imprint that may have edited a B-rep, after deleting
     /// the manager (SolidCraft fix af8db37: upstream goes on with the half-imprinted
     /// B-reps, UB-242, which [`Kernel::note_upstream_ub`] records); an imprint failure
-    /// that edited nothing only warns, as upstream;
+    /// that edited nothing, or a failing `GlueCoincidentBrepVertices`, only warns, as
+    /// upstream;
     /// [`SolidError::InvalidInput`] without both B-reps. Where the manager's
     /// destructor would read a freed proto edge upstream (UB-175) the port's defined
     /// teardown goes on and [`Kernel::note_upstream_ub`] records `"UB-175"`, also when
@@ -1259,7 +1261,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // measure them (SolidCraft change, tangency-labs/smlib af8db37; upstream only
         // warns and overwrites the status). A failure that edited nothing (an edge
         // definition without a final vertex, or a MakeEdgeInFace that finds no vertex
-        // sector before its first edit) leaves the Breps consistent, and upstream goes on.
+        // sector before its first edit) leaves the Breps consistent, and upstream goes on;
+        // so does a failing GlueCoincidentBrepVertices (UB-242 addendum, glue failure).
         let outcome = self
             .imprint_intersections_reporting_edits(k, brep)
             .and_then(|o| {

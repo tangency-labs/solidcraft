@@ -10,3 +10,13 @@ case = "single_face_box_with_large_fillet_2"
 libc = "glibc"
 cpp_defect = "UB-280"
 why = "C++ heap-layout dependent (UB-280): crashes or returns a build-dependent result; the Rust output is the same in every build"
+
+# A Rust divergence, not a C++ defect: the port's B-reps already differ from the C++ before
+# the failing GlueCoincidentBrepVertices of the 19th IntersectInsertRelate (primary body
+# faces/edges/vertices 43/100/58 against 43/101/59), from the merge's earlier imprints
+# (plan/upstream-issues/UB-242--addendum-2026-10-31-glue-failure.md). The case passed only
+# while the port stopped at that glue; going on past it as upstream exposes the divergence.
+[[mismatch]]
+unit = "blend.feature_executive"
+case = "fillet_each_torii_fillet_b"
+why = "Rust divergence before the failing glue of IntersectInsertRelate #19 (pre-glue imprints: primary body 43/100/58 vs C++ 43/101/59); exposed once a failing glue goes on as upstream (UB-242 glue-failure addendum); open, being traced"
