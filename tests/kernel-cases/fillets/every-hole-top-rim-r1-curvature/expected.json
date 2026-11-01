@@ -20,5 +20,6 @@
  },
  "continuity": {
   "order": "g2"
- }
+ },
+ "timeout_s": 600
 }
