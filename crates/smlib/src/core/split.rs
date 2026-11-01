@@ -499,7 +499,9 @@ pub(crate) fn split_body_by_sheet(body: &Body, sheet: &Body, face: usize) -> Res
                 brep_copy(k, &g)?
             };
             let Some(&f) = brep_p1::faces(&copy, None)?.get(face) else { return Ok(Err(Error::Argument)) };
-            let turned = orient_sheet_surfaces(k, &mut copy, Some(f), !flip);
+            // The UV swaps notify as SMLib's objects do: through the kernel's callbacks, with
+            // the sheet's own attributes, so its faces' tags see each swap.
+            let turned = with_kernel_callbacks(k, &mut copy, |k, b, env| orient_sheet_surfaces(k, b, Some(f), !flip, env));
             copy.refresh_cached_topology();
             Ok(match turned {
                 Ok(()) => Ok(copy),
