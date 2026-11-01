@@ -522,11 +522,98 @@ fn thread_on_impl(
     })
 }
 
+/// What a modelled thread fills in before it cuts (#1443): a hole too wide for the groove to cut
+/// into (under a quarter of the thread's depth, as an M5 in a 5 mm hole) is filled in to the tap
+/// drill (major − pitch), and a shaft too thin is built up to the major diameter, over the
+/// threaded length: the thread comes out as it would in a hole drilled, or on a shaft turned, to
+/// that size. The ring to join and the face's radius after it; None when the groove cuts into
+/// the face as it is, or when the face is not a `whole` band (a ring would fill a notch, a flat
+/// or a cross hole too, or stand out of a slanted end), which is then refused as before. The
+/// ring reaches a twentieth of the pitch into the wall and stops as far short of the ends of the
+/// threaded length, so it meets nothing but the wall (not the face round a hole's mouth, a
+/// drill point or a countersink): that much of each end keeps the face's own size.
+fn thread_fill(t: &ThreadInfo, radius: f64, whole: bool) -> Result<Option<(Body, f64)>> {
+    let (p, d) = (t.pitch, t.major_diameter);
+    let basic = 5.0 * (p * 3f64.sqrt() / 2.0) / 8.0;
+    // The groove's depth into the material, as `thread_groove` measures it.
+    let depth = if t.internal { d / 2.0 - radius } else { radius - (d / 2.0 - basic) };
+    if !(depth < basic / 4.0 && whole) {
+        return Ok(None);
+    }
+    let into = 0.05 * p;
+    // (inner and outer radius of the ring, the face's radius after it)
+    let (inner, outer, after) = if t.internal { ((d - p) / 2.0, radius + into, (d - p) / 2.0) } else { (radius - into, d / 2.0, d / 2.0) };
+    let (s0, s1) = (t.start + into, t.end - into);
+    if !(inner > 0.0 && outer > inner && s1 - s0 > 2.0 * into) {
+        return Ok(None);
+    }
+    let plane = Plane { origin: t.axis_point, x: thread_across(t)?, y: *t.axis };
+    let ring = [Vec2::new(inner, s0), Vec2::new(outer, s0), Vec2::new(outer, s1), Vec2::new(inner, s1)];
+    let region = Region2 { outer: solidcraft_geom::Loop2::polygon(&ring), holes: vec![] };
+    let ring = kernel::revolve(&plane, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| DocError::Invalid("thread: the fill to the thread's diameter".into()))?;
+    Ok(Some((ring, after)))
+}
+
+/// A direction square to a thread's axis.
+fn thread_across(t: &ThreadInfo) -> Result<Vec3> {
+    let k = t.axis;
+    k.cross(if k.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) })
+        .normalized()
+        .ok_or_else(|| DocError::Invalid("thread axis".into()))
+}
+
+/// How a modelled thread's groove ends at one end of the threaded length.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ThreadEnd {
+    /// A free end of the face: the groove runs out into the air past it.
+    Free,
+    /// Inside the face: the groove stops square there.
+    Square,
+    /// An end of the face the part goes on past (the bottom of a blind hole, a drill point, a
+    /// shoulder): the groove stops square short of it, so that it cuts nothing past it.
+    Blocked,
+}
+
+/// How the groove ends at the start and the end of the threaded length (#524). At an end of the
+/// face (`at_face`) it runs out into the air only when nothing of `body` lies past it within the
+/// groove's reach (halfway across it, half a pitch on, all round); otherwise it would cut into the
+/// part there. `radius` is the face's radius as the groove meets it.
+fn thread_ends(t: &ThreadInfo, body: &Body, radius: f64, at_face: (bool, bool)) -> Result<(ThreadEnd, ThreadEnd)> {
+    if !(at_face.0 || at_face.1) {
+        return Ok((ThreadEnd::Square, ThreadEnd::Square));
+    }
+    let (p, d) = (t.pitch, t.major_diameter);
+    let root = d / 2.0 - 5.0 * (p * 3f64.sqrt() / 2.0) / 8.0;
+    let r = if t.internal { (radius + d / 2.0) / 2.0 } else { (radius + root) / 2.0 };
+    let (k, u) = (t.axis, thread_across(t)?);
+    let v = k.cross(u);
+    let mesh = body.tessellate(p * 0.02)?;
+    let free = |s: f64| {
+        (0..6).all(|i| {
+            let a = std::f64::consts::TAU * f64::from(i) / 6.0;
+            !mesh.contains(t.axis_point + k * s + (u * a.cos() + v * a.sin()) * r)
+        })
+    };
+    let end = |at: bool, past: f64| {
+        if !at {
+            ThreadEnd::Square
+        } else if free(past) {
+            ThreadEnd::Free
+        } else {
+            ThreadEnd::Blocked
+        }
+    };
+    Ok((end(at_face.0, t.start - 0.5 * p), end(at_face.1, t.end + 0.5 * p)))
+}
+
 /// The helical space between the teeth of a modelled ISO metric thread (ISO 68-1 basic
 /// profile, 60° flanks): cut from the shaft (external) or the hole wall (internal), running from
-/// `start` to `end` along the axis. `radius` is the face's own radius; `open` says which ends
-/// of the threaded length are free ends of the face.
-fn thread_groove(t: &ThreadInfo, radius: f64, open: (bool, bool)) -> Result<solidcraft_geom::Mesh> {
+/// `start` to `end` along the axis. `radius` is the face's own radius; `ends` says how it ends at
+/// the start and the end of the threaded length.
+fn thread_groove(t: &ThreadInfo, radius: f64, ends: (ThreadEnd, ThreadEnd)) -> Result<solidcraft_geom::Mesh> {
     let (p, d) = (t.pitch, t.major_diameter);
     let h = p * 3f64.sqrt() / 2.0;
     let slope = (std::f64::consts::PI / 6.0).tan();
@@ -587,9 +674,18 @@ fn thread_groove(t: &ThreadInfo, radius: f64, open: (bool, bool)) -> Result<soli
     let k = t.axis;
     let u = k.cross(if k.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) });
     let u = u.normalized().ok_or_else(|| DocError::Invalid("thread axis".into()))?;
-    // Past a free end of the face the groove runs out into the air; elsewhere it stops square
-    // at the threaded length's end.
-    let (s0, s1) = (if open.0 { t.start - p } else { t.start }, if open.1 { t.end + p } else { t.end });
+    // Past a free end of the face the groove runs out into the air; inside the face it stops
+    // square at the threaded length's end, and before an end the part goes on past, its widest
+    // half width short of it.
+    let at = |end: ThreadEnd, s: f64, out: f64| match end {
+        ThreadEnd::Free => s + out * p,
+        ThreadEnd::Square => s,
+        ThreadEnd::Blocked => s - out * w0.max(w1),
+    };
+    let (s0, s1) = (at(ends.0, t.start, -1.0), at(ends.1, t.end, 1.0));
+    if !(s1 - s0 > 1e-6) {
+        return Err(DocError::Invalid("thread too short".into()));
+    }
     let base = t.axis_point + k * s0;
     let plane = Plane { origin: base, x: u, y: *k };
     let section = [Vec2::new(r0, -w0), Vec2::new(r1, -w1), Vec2::new(r1, w1), Vec2::new(r0, w0)];
@@ -639,9 +735,9 @@ mod thread_handedness_tests {
                     start: 1.3,
                     end: 4.3,
                 };
-                let right = thread_groove(&info, radius, (false, true)).unwrap();
+                let right = thread_groove(&info, radius, (ThreadEnd::Square, ThreadEnd::Free)).unwrap();
                 info.handedness = crate::ThreadHandedness::Left;
-                let left = thread_groove(&info, radius, (false, true)).unwrap();
+                let left = thread_groove(&info, radius, (ThreadEnd::Square, ThreadEnd::Free)).unwrap();
                 // Reflection in the radial plane of the initial profile, independent of the
                 // helix parameterization: the projected coordinate along the axis stays fixed.
                 let seed = if axis.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
@@ -7474,19 +7570,26 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             let i = st.bodies.iter().position(|b| b.name == t.body).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
-            let cyl = kernel::cylinder_face_at(&mb.body, face.0).ok_or_else(|| DocError::Invalid("no cylindrical face there to thread".into()))?;
+            let (cyl, whole) =
+                kernel::cylinder_band_at(&mb.body, face.0).ok_or_else(|| DocError::Invalid("no cylindrical face there to thread".into()))?;
             let tol = t.pitch * 1e-3;
-            // A shaft thicker than the thread is turned down to its major diameter first.
+            let at_face = ((t.start - cyl.start).abs() < tol, (t.end - cyl.end).abs() < tol);
+            // The face is brought to the thread's size first (the two never both apply): a shaft
+            // thicker than the thread is turned down to its major diameter, a hole too wide for it
+            // filled in to the tap drill, a shaft too thin built up.
             let input = mb.traced();
-            let (input, radius) = match thread_turn(&t, &cyl, &mb)? {
-                Some(ring) => {
-                    let turned = kernel::boolean(&input.body, &ring.body, BoolOp::Cut)?
-                        .ok_or_else(|| DocError::Invalid("turning the shaft down removed everything".into()))?;
-                    (Traced::step(turned, &[&input, &ring]), t.major_diameter / 2.0)
-                }
-                None => (input, cyl.radius),
+            let (input, radius) = if let Some(ring) = thread_turn(&t, &cyl, &mb)? {
+                let turned = kernel::boolean(&input.body, &ring.body, BoolOp::Cut)?
+                    .ok_or_else(|| DocError::Invalid("turning the shaft down removed everything".into()))?;
+                (Traced::step(turned, &[&input, &ring]), t.major_diameter / 2.0)
+            } else if let Some((ring, radius)) = thread_fill(&t, cyl.radius, whole)? {
+                let filled = kernel::boolean(&input.body, &ring, BoolOp::Union)?
+                    .ok_or_else(|| DocError::Invalid("thread: the fill to the thread's diameter".into()))?;
+                (Traced::step(filled, &[&input, &Traced::unnamed(ring)]), radius)
+            } else {
+                (input, cyl.radius)
             };
-            let groove = thread_groove(&t, radius, ((t.start - cyl.start).abs() < tol, (t.end - cyl.end).abs() < tol))?;
+            let groove = thread_groove(&t, radius, thread_ends(&t, &input.body, radius, at_face)?)?;
             // The B-rep boolean can't take helical walls in reasonable time: the body is cut
             // faceted (curved faces within a two-hundredth of the pitch).
             let nb = kernel::faceted_boolean(&input.body, &groove, BoolOp::Cut, t.pitch * 0.005)?
