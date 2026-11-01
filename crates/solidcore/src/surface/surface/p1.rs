@@ -3203,7 +3203,7 @@ pub(crate) fn plane_bounding_box(
         .calculate_bounding_box(k, uv_domain, &base_req)?;
     if req.polar {
         let mut pb = PolarBox::new();
-        pb.add_vector(plane.evaluate_normal(), None);
+        pb.add_vector_with_kernel(k, plane.evaluate_normal(), None);
         r.polar = Some(pb);
     }
     Ok(r)

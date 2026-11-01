@@ -23,7 +23,7 @@
 //! | [`PolarBox::are_disjoint`]                   | `AreDisjoint`                                |
 //! | [`PolarBox::cross`]                          | `Cross`                                      |
 //! | [`PolarBox::evaluate_normalized`]            | `EvaluateNormalized`                         |
-//! | [`PolarBox::add_vector`]                     | `AddVector3d`                                |
+//! | [`PolarBox::add_vector`], [`PolarBox::add_vector_opt_in`], [`PolarBox::add_vector_with_kernel`] | `AddVector3d` |
 //! | [`PolarBox::boundary_vectors`]               | `GetBoundaryVectors`                         |
 //! | [`PolarBox::has_perpendicular_to_vector`]    | `HasPerpendicularToVector`                   |
 //! | [`PolarBox::union`], [`PolarBox::union_assign`] | `Union` (`union_assign`: result aliases `this`) |
@@ -63,11 +63,16 @@
 //!   glibc sincos differs from sin by 1 ulp for some arguments, and without the
 //!   barrier LLVM sinks `sin` past the 90-degree early return and does not fuse
 //!   (issue #357). Pure codegen hint: same values on targets without sincos (wasm32).
+//! - [`PolarBox::add_vector_opt_in`] and [`PolarBox::add_vector_with_kernel`] expose
+//!   the opt-in WR-9 fix
+//!   ([`crate::kernel::UpstreamFixes::polar_box_region_to_arc_transposes_domain`]);
+//!   [`PolarBox::add_vector`] retains the pinned C++ behaviour.
 
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{acos, Vec3};
+use crate::kernel::Kernel;
 use crate::math::{EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 
 /// State of a [`PolarBox`] (`SmPolarBoxState`), ordered from most degenerate to most
@@ -551,6 +556,30 @@ impl PolarBox {
     /// used for the first vector: `basis[2]` is then set to it and `basis[0]` to the
     /// projection of `v` onto its normal plane.
     pub fn add_vector(&mut self, v: Vec3, opt_basis2: Option<Vec3>) {
+        self.add_vector_opt_in(v, opt_basis2, false);
+    }
+
+    /// [`PolarBox::add_vector`] consulting [`Kernel::fixes`]'s
+    /// [`polar_box_region_to_arc_transposes_domain`](crate::kernel::UpstreamFixes::polar_box_region_to_arc_transposes_domain)
+    /// (`WR-9`).
+    pub fn add_vector_with_kernel(&mut self, k: &Kernel, v: Vec3, opt_basis2: Option<Vec3>) {
+        self.add_vector_opt_in(
+            v,
+            opt_basis2,
+            k.fixes.polar_box_region_to_arc_transposes_domain,
+        );
+    }
+
+    /// [`PolarBox::add_vector`], with `transpose_collapsed_arc` selecting whether a
+    /// [`PolarBoxState::Region`] box whose `x` span stays below [`EFF_ZERO_SQRT`]
+    /// rotates its domain to `[lo.y, hi.y] × [-hi.x, -lo.x]` when relabelled as
+    /// [`PolarBoxState::Arc`] (`WR-9`) instead of keeping `[lo.x, hi.x] × [lo.y, hi.y]`.
+    pub fn add_vector_opt_in(
+        &mut self,
+        v: Vec3,
+        opt_basis2: Option<Vec3>,
+        transpose_collapsed_arc: bool,
+    ) {
         // zero vector
         if v.length_squared() < EFF_ZERO_SQ {
             return;
@@ -574,7 +603,7 @@ impl PolarBox {
                             self.basis[2] = basis2;
                             self.basis[1] = self.basis[2].cross(self.basis[0]);
                             self.state = PolarBoxState::PointWithBasis;
-                            self.add_vector(v, None);
+                            self.add_vector_opt_in(v, None, transpose_collapsed_arc);
                         } else {
                             self.set_ortho_basis(v);
                         }
@@ -647,9 +676,15 @@ impl PolarBox {
                         let tmp = -self.basis[1];
                         self.basis[1] = self.basis[2];
                         self.basis[2] = tmp;
-                        // Upstream re-sets the domain to its own bounds (no transpose).
                         let (lo, hi) = (self.domain.min(), self.domain.max());
-                        self.set_domain(lo.x, lo.y, hi.x, hi.y);
+                        if transpose_collapsed_arc {
+                            // In the rotated basis `(b0, b2, -b1)`, polar angles
+                            // `(u, v)` become `(v, -u)` (WR-9).
+                            self.set_domain(lo.y, -hi.x, hi.y, -lo.x);
+                        } else {
+                            // Upstream re-sets the domain to its own bounds (no transpose).
+                            self.set_domain(lo.x, lo.y, hi.x, hi.y);
+                        }
                         self.state = PolarBoxState::Arc;
                     }
                 }
@@ -987,5 +1022,167 @@ mod tests {
         let mut d = PolarBox::new();
         d.add_vector(v(0.0, 0.0, 3.0), Some(v(0.0, 0.0, 1.0)));
         assert_eq!(d.state(), PolarBoxState::SinglePoint);
+    }
+
+    fn dir_from_polar(b0: Vec3, b1: Vec3, b2: Vec3, ax: f64, ay: f64) -> Vec3 {
+        let (sa1, ca1) = ax.sin_cos();
+        let (sa2, ca2) = ay.sin_cos();
+        (ca1 * b0 - sa1 * b2 + sa2 * ca1 / ca2 * b1).unitize_or_z()
+    }
+
+    #[test]
+    fn wr9_preset_basis_region_collapse_transposes_arc_domain() {
+        let basis2 = v(0.0, 0.0, 1.0);
+        let v0 = v(1.0, 0.0, 0.0);
+        let v1 = v(0.25_f64.cos(), 0.25_f64.sin(), 0.0);
+        let v2 = v((-0.15_f64).cos(), (-0.15_f64).sin(), 0.0);
+
+        let mut b_def = PolarBox::new();
+        b_def.add_vector_opt_in(v0, Some(basis2), false);
+        assert_eq!(b_def.state(), PolarBoxState::PointWithBasis);
+        b_def.add_vector_opt_in(v1, None, false);
+        assert_eq!(b_def.state(), PolarBoxState::Region);
+        assert!(b_def.domain().x_length().abs() < EFF_ZERO_SQRT);
+        b_def.add_vector_opt_in(v2, None, false);
+        assert_eq!(b_def.state(), PolarBoxState::Arc);
+        // Default pinned behaviour leaves the span in y and x collapsed at 0.
+        assert!(b_def.domain().x_length().abs() < 1e-14);
+        assert!((b_def.domain().min().y - (-0.15)).abs() < 1e-14);
+        assert!((b_def.domain().max().y - 0.25).abs() < 1e-14);
+        assert!((b_def.evaluate_normalized(0.0, 0.0) - v0).length() < 1e-12);
+        assert!((b_def.evaluate_normalized(1.0, 1.0) - v0).length() < 1e-12);
+        let pc1_def = b_def.compute_polar_coord(v1).unwrap();
+        assert!(!b_def.domain().contains_point(pc1_def, 1e-9));
+        assert!(b_def.domain().inversion(pc1_def, EFF_ZERO).is_err());
+        assert!(b_def.is_disjoint_with_cone(v1, 0.05));
+
+        let mut b_plain = PolarBox::new();
+        b_plain.add_vector(v0, Some(basis2));
+        b_plain.add_vector(v1, None);
+        b_plain.add_vector(v2, None);
+        assert_eq!(b_def, b_plain);
+
+        let mut b_fix = PolarBox::new();
+        b_fix.add_vector_opt_in(v0, Some(basis2), true);
+        b_fix.add_vector_opt_in(v1, None, true);
+        b_fix.add_vector_opt_in(v2, None, true);
+        assert_eq!(b_fix.state(), PolarBoxState::Arc);
+        assert_eq!(
+            *b_fix.basis(),
+            [v(1.0, 0.0, 0.0), v(0.0, 0.0, 1.0), v(0.0, -1.0, 0.0)]
+        );
+        assert!((b_fix.domain().min().x - (-0.15)).abs() < 1e-14);
+        assert!((b_fix.domain().max().x - 0.25).abs() < 1e-14);
+        assert!(b_fix.domain().y_length().abs() < 1e-14);
+        assert!((b_fix.evaluate_normalized(0.0, 0.0) - v2).length() < 1e-12);
+        assert!((b_fix.evaluate_normalized(1.0, 1.0) - v1).length() < 1e-12);
+        let corners = b_fix.boundary_vectors().unwrap();
+        assert_eq!(corners.len(), 2);
+        assert!((corners[0] - v2).length() < 1e-12);
+        assert!((corners[1] - v1).length() < 1e-12);
+
+        for w in [v0, v1, v2] {
+            let pc = b_fix.compute_polar_coord(w).unwrap();
+            assert!(b_fix.domain().contains_point(pc, 1e-12));
+            let norm = b_fix.domain().inversion(pc, EFF_ZERO).unwrap();
+            let recon = b_fix.evaluate_normalized(norm.x, norm.y);
+            assert!((recon - w).length() < 1e-12);
+            assert!(!b_fix.is_disjoint_with_cone(w, 1e-12));
+        }
+    }
+
+    #[test]
+    fn wr9_nonzero_subthreshold_x_span_negates_into_y_bounds() {
+        let (b0, b1, b2) = (v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0), v(0.0, 0.0, 1.0));
+        let v0 = b0;
+        let v_a = dir_from_polar(b0, b1, b2, 2.0e-5, 0.35);
+        let v_b = dir_from_polar(b0, b1, b2, 1.0e-5, -0.20);
+
+        let mut b_fix = PolarBox::new();
+        b_fix.add_vector_opt_in(v0, Some(b2), true);
+        b_fix.add_vector_opt_in(v_a, None, true);
+        b_fix.add_vector_opt_in(v_b, None, true);
+        assert_eq!(b_fix.state(), PolarBoxState::Region);
+
+        // Shrink `x` from `[0, 2e-5]` to `[9.8e-6, 1.02e-5]` (`x_length = 4e-7 < EFF_ZERO_SQRT`,
+        // while staying above `projected_angle`'s `dot > 1 - EFF_ZERO` zero-clamp at ~1.41e-6),
+        // then add a vector inside that narrow strip to trigger `Region -> Arc` collapse.
+        b_fix.expand_absolute(-9.8e-6);
+        let lo_before = b_fix.domain().min();
+        let hi_before = b_fix.domain().max();
+        assert!((lo_before.x - 9.8e-6).abs() < 1e-9);
+        assert!((hi_before.x - 1.02e-5).abs() < 1e-9);
+        assert!(b_fix.domain().x_length() < EFF_ZERO_SQRT);
+
+        let v_mid = dir_from_polar(b0, b1, b2, 1.0e-5, 0.10);
+        b_fix.add_vector_opt_in(v_mid, None, true);
+        assert_eq!(b_fix.state(), PolarBoxState::Arc);
+
+        // Under `(b1, b2) -> (b2, -b1)`, `(u, v)` maps to `(v, -u)`, so
+        // `[lo_x, hi_x] × [lo_y, hi_y]` becomes `[lo_y, hi_y] × [-hi_x, -lo_x]`.
+        assert!((b_fix.domain().min().x - lo_before.y).abs() < 1e-12);
+        assert!((b_fix.domain().max().x - hi_before.y).abs() < 1e-12);
+        assert!((b_fix.domain().min().y - (-hi_before.x)).abs() < 1e-12);
+        assert!((b_fix.domain().max().y - (-lo_before.x)).abs() < 1e-12);
+
+        let pc_mid = b_fix.compute_polar_coord(v_mid).unwrap();
+        assert!(b_fix.domain().contains_point(pc_mid, 1e-9));
+        assert!(!b_fix.is_disjoint_with_cone(v_mid, 1e-9));
+
+        // Promoting the collapsed arc back to a region preserves containment of both
+        // `v_mid` and the newly added out-of-plane vector.
+        let [nb0, nb1, nb2] = *b_fix.basis();
+        let v_c = dir_from_polar(nb0, nb1, nb2, 0.10, 0.12);
+        b_fix.add_vector_opt_in(v_c, None, true);
+        assert_eq!(b_fix.state(), PolarBoxState::Region);
+        for w in [v_mid, v_c] {
+            let pc = b_fix.compute_polar_coord(w).unwrap();
+            assert!(b_fix.domain().contains_point(pc, 1e-9));
+            let norm = b_fix.domain().inversion(pc, EFF_ZERO).unwrap();
+            let recon = b_fix.evaluate_normalized(norm.x, norm.y);
+            assert!((recon - w).length() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn wr9_single_point_arc_region_collapse_and_kernel_flag() {
+        let v0 = v(1.0, 0.0, 0.0);
+        let v1 = v(1.0, 0.0, 4.0e-7).unitize_or_z();
+        let v2 = v(0.30_f64.cos(), 0.30_f64.sin(), 0.0);
+        let v3 = v((-0.18_f64).cos(), (-0.18_f64).sin(), 0.0);
+
+        let k_off = Kernel::default();
+        let mut k_on = Kernel::default();
+        k_on.fixes.polar_box_region_to_arc_transposes_domain = true;
+
+        let mut b_plain = PolarBox::new();
+        let mut b_k_off = PolarBox::new();
+        let mut b_opt_on = PolarBox::new();
+        let mut b_k_on = PolarBox::new();
+        for w in [v0, v1, v2, v3] {
+            b_plain.add_vector(w, None);
+            b_k_off.add_vector_with_kernel(&k_off, w, None);
+            b_opt_on.add_vector_opt_in(w, None, true);
+            b_k_on.add_vector_with_kernel(&k_on, w, None);
+        }
+
+        assert_eq!(b_k_off, b_plain);
+        assert_eq!(b_k_on, b_opt_on);
+        assert_eq!(b_plain.state(), PolarBoxState::Arc);
+        assert_eq!(b_k_on.state(), PolarBoxState::Arc);
+        assert!(b_plain.domain().x_length() < EFF_ZERO_SQRT);
+        assert!((b_k_on.domain().x_length() - 0.48).abs() < 1e-12);
+        assert!(b_k_on.domain().y_length() < EFF_ZERO_SQRT);
+
+        for w in [v0, v1, v2, v3] {
+            let pc = b_k_on.compute_polar_coord(w).unwrap();
+            assert!(b_k_on.domain().contains_point(pc, 1e-13));
+        }
+        for w in [v0, v2, v3] {
+            let pc = b_k_on.compute_polar_coord(w).unwrap();
+            let norm = b_k_on.domain().inversion(pc, EFF_ZERO).unwrap();
+            let recon = b_k_on.evaluate_normalized(norm.x, norm.y);
+            assert!((recon - w).length() < 1e-12);
+        }
     }
 }

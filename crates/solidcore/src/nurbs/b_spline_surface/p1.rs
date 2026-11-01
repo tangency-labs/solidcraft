@@ -1468,9 +1468,9 @@ impl BSplineSurface {
             norm[9] = evaluate_normal(k, self, uv_domain.evaluate(0.5, 0.5))?;
 
             if planar {
-                pol.add_vector(norm[9], None);
+                pol.add_vector_with_kernel(k, norm[9], None);
                 if polar_guess.is_some() {
-                    trial_polar_box.add_vector(norm[9], None);
+                    trial_polar_box.add_vector_with_kernel(k, norm[9], None);
                 }
             } else {
                 // get corner normals
@@ -1497,14 +1497,14 @@ impl BSplineSurface {
                     // build the polar box by adding all the vectors
                     pol.reset();
                     for v in norm {
-                        pol.add_vector(v, None);
+                        pol.add_vector_with_kernel(k, v, None);
                     }
 
                     if let Some(g) = polar_guess {
                         guess_basis = Some(polar_guess_basis(g));
                         trial_polar_box.reset();
                         for v in norm {
-                            trial_polar_box.add_vector(v, guess_basis);
+                            trial_polar_box.add_vector_with_kernel(k, v, guess_basis);
                         }
                     }
                 }
@@ -1515,18 +1515,18 @@ impl BSplineSurface {
         // derivatives of the midpoints to establish the base line vector.
         if let (Some(pol), false) = (polar_box.as_mut(), analytic) {
             let n0 = evaluate_normal(k, self, uv_domain.evaluate(0.5, 0.5))?;
-            pol.add_vector(n0, None);
+            pol.add_vector_with_kernel(k, n0, None);
             let n1 = evaluate_normal(k, self, uv_domain.evaluate(1.0, 0.5))?;
-            pol.add_vector(n1, None);
+            pol.add_vector_with_kernel(k, n1, None);
             let n2 = evaluate_normal(k, self, uv_domain.evaluate(0.5, 1.0))?;
-            pol.add_vector(n2, None);
+            pol.add_vector_with_kernel(k, n2, None);
 
             if let Some(g) = polar_guess {
                 guess_basis = Some(polar_guess_basis(g));
                 trial_polar_box.reset();
-                trial_polar_box.add_vector(n0, guess_basis);
-                trial_polar_box.add_vector(n1, guess_basis);
-                trial_polar_box.add_vector(n2, guess_basis);
+                trial_polar_box.add_vector_with_kernel(k, n0, guess_basis);
+                trial_polar_box.add_vector_with_kernel(k, n1, guess_basis);
+                trial_polar_box.add_vector_with_kernel(k, n2, guess_basis);
             }
         }
 
@@ -1555,9 +1555,9 @@ impl BSplineSurface {
                     if let (Some(pol), true) = (polar_box.as_mut(), net_polar) {
                         // get control net tangent vectors
                         let mut add = |cross: Vec3, pol: &mut PolarBox| {
-                            pol.add_vector(cross, None);
+                            pol.add_vector_with_kernel(k, cross, None);
                             if polar_guess.is_some() {
-                                trial_polar_box.add_vector(cross, guess_basis);
+                                trial_polar_box.add_vector_with_kernel(k, cross, guess_basis);
                             }
                         };
                         let dv0 = if j > 1 {

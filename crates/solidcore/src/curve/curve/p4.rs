@@ -859,7 +859,7 @@ pub fn approximate_polar_box<C: CurveEvaluate + ?Sized>(
     polar_box.reset();
     // (statuses ignored; passed on with the opt-in fix, tangency-labs/smlib 8311f8e)
     eval_into_or_pass_on(k, curve, ivl.evaluate(0.5), 1, true, &mut pv)?;
-    polar_box.add_vector(at(&pv, 1), None);
+    polar_box.add_vector_with_kernel(k, at(&pv, 1), None);
 
     // iteration locals
     let mut param = ivl.min();
@@ -871,7 +871,7 @@ pub fn approximate_polar_box<C: CurveEvaluate + ?Sized>(
         eval_into_or_pass_on(k, curve, param, 1, true, &mut pv)?;
 
         // add the tangent to the PolarBox
-        polar_box.add_vector(at(&pv, 1), None);
+        polar_box.add_vector_with_kernel(k, at(&pv, 1), None);
         param += step;
     }
 

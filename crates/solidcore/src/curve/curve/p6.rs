@@ -430,7 +430,7 @@ pub fn calculate_bounding_box_base(
     if req.polar {
         polar.reset();
         let mid = tangents.len() / 2;
-        polar.add_vector(tangent(mid)?, None);
+        polar.add_vector_with_kernel(k, tangent(mid)?, None);
     }
 
     // for every sample point - accumulate bounding boxes
@@ -442,7 +442,7 @@ pub fn calculate_bounding_box_base(
             pseudo.add_point(p);
         }
         if req.polar {
-            polar.add_vector(tangent(i)?, None);
+            polar.add_vector_with_kernel(k, tangent(i)?, None);
         }
     }
 

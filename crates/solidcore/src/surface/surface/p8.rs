@@ -2740,7 +2740,7 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
                 if tmp_polar.state() == PolarBoxState::Unbounded {
                     break;
                 }
-                tmp_polar.add_vector(corner - test_pnt, None);
+                tmp_polar.add_vector_with_kernel(k, corner - test_pnt, None);
             }
 
             // when SurfacePatch/Temp PolarBoxes are disjoint
