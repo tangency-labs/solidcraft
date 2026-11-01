@@ -385,3 +385,43 @@ fn a_design_saved_before_names_were_pinned_opens_pinned_and_unchanged() {
     }
     let _ = std::fs::remove_file(&path);
 }
+
+/// A saved model is its kernel's: the two differ in tolerances and in what they refuse, so a design
+/// opened on the other kernel is evaluated on it, in both directions; on the kernel that saved it the
+/// model is taken as it is. A process each, since the kernel is chosen for the process.
+#[cfg(feature = "smlib")]
+#[test]
+fn a_model_saved_on_one_kernel_is_evaluated_again_on_the_other() {
+    let cli = || {
+        let mut c = std::process::Command::new(env!("CARGO_BIN_EXE_solidcraft-cli"));
+        c.env_remove("SOLIDCRAFT_NO_MODEL_CACHE");
+        c
+    };
+    // Under the build's own temporary folder: the files are the command line's, not this process's.
+    let temp = |name: &str| Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("model-cache-{}-{name}.solidcraft", std::process::id()));
+    let script = temp("kernels-script").with_extension("json");
+    let recipe = json!({"commands": [
+        {"command": "solid.box", "params": {"length": 20, "width": 20, "height": 10, "body_name": "Plate"}},
+        {"command": "solid.cylinder", "params": {"diameter": 8, "height": 10, "base": [10, 10, 10], "operation": "join", "targets": ["Plate"]}},
+    ]});
+    std::fs::write(&script, recipe.to_string()).unwrap();
+    // Whether opening found a model in the file it may take, whether it took it, and how many
+    // features it evaluated.
+    let open = |design: &Path, kernel: &str| {
+        let out = cli().env("SOLIDCRAFT_KERNEL", kernel).arg("bench-open").arg(design).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        let lines: Vec<Value> = String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+        let step = |name: &str| lines.iter().find(|l| l["step"] == name).cloned().unwrap();
+        let (parse, evaluated) = (step("parse"), step("evaluate"));
+        (parse["saved_model"].as_bool().unwrap(), evaluated["adopted"].as_bool().unwrap(), evaluated["recomputed"].as_u64().unwrap())
+    };
+    for (saved, other) in [("solidcore", "smlib"), ("smlib", "solidcore")] {
+        let design = temp(&format!("kernels-{saved}"));
+        let out = cli().env("SOLIDCRAFT_KERNEL", saved).arg("run").arg(&script).arg("--save").arg(&design).output().unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(open(&design, saved), (true, true, 0), "saved on {saved}, opened on it");
+        assert_eq!(open(&design, other), (false, false, 2), "saved on {saved}, opened on {other}");
+        std::fs::remove_file(&design).unwrap();
+    }
+    std::fs::remove_file(&script).unwrap();
+}
