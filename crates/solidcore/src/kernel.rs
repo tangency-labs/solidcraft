@@ -139,7 +139,8 @@ impl Caches {
 }
 
 /// Emits the [`UpstreamFixes`] definition it wraps unchanged, plus
-/// [`UpstreamFixes::NAMES`], [`UpstreamFixes::flags`] and [`UpstreamFixes::flag_mut`]
+/// [`UpstreamFixes::NAMES`], [`UpstreamFixes::flags`], [`UpstreamFixes::all`] and
+/// [`UpstreamFixes::flag_mut`]
 /// read from that same field list, so a new field is listed by name with no second
 /// place to edit (#2014). It
 /// accepts only `pub <name>: bool` fields (each with its doc comment), so a field of
@@ -172,6 +173,17 @@ macro_rules! upstream_fixes {
                 Self::NAMES.iter().copied().zip([$(self.$field),*])
             }
 
+            /// Every flag on: all the opt-in fixes, none of upstream's behaviour where
+            /// a fix exists. Unlike [`Default`] (every flag off, the pinned C++), this
+            /// includes fixes that are known not to combine cleanly or to be
+            /// incomplete; each field's doc and its `plan/upstream-issues/` record say
+            /// which.
+            pub fn all() -> Self {
+                Self {
+                    $($field: true,)*
+                }
+            }
+
             /// The flag whose field name is `name` (one of [`Self::NAMES`]), to set
             /// or read by name; `None` for any other name.
             pub fn flag_mut(&mut self, name: &str) -> Option<&mut bool> {
@@ -191,7 +203,8 @@ upstream_fixes! {
 ///
 /// [`UpstreamFixes::flags`] lists every field with its value and
 /// [`UpstreamFixes::NAMES`] every field name, both in declaration order;
-/// [`UpstreamFixes::flag_mut`] finds a field by its name. `upstream_fixes!` generates
+/// [`UpstreamFixes::flag_mut`] finds a field by its name; [`UpstreamFixes::all`] turns
+/// every field on. `upstream_fixes!` generates
 /// them from this definition, so a new field needs no other edit to be listed.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 #[allow(clippy::struct_excessive_bools)]
@@ -1190,6 +1203,16 @@ impl Kernel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn all_turns_every_flag_on_and_default_none() {
+        assert!(UpstreamFixes::all().flags().all(|(_, on)| on));
+        assert!(UpstreamFixes::default().flags().all(|(_, on)| !on));
+        assert_eq!(
+            UpstreamFixes::all().flags().count(),
+            UpstreamFixes::NAMES.len()
+        );
+    }
 
     #[test]
     fn kernel_is_send() {
