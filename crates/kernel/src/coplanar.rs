@@ -212,6 +212,12 @@ pub(crate) fn push_faces_exact(b: &Body, n: Vec3, d: f64, delta: f64) -> Result<
                     });
                     let base = base.ok_or_else(|| fail("a curved side without an edge in the plane"))?;
                     let height = f.vertex_iter().map(|v| n.dot(from_p3(v.point())) - d).fold(0.0f64, |m, x| if x.abs() > m.abs() { x } else { m });
+                    // A side standing on the face reaches off the plane. One whose vertices all lie in
+                    // it (a spherical cap's face, its one vertex on the base circle) would be swept
+                    // into a disc on the far side of the plane, in place of the cap.
+                    if height.abs() <= tol * 10.0 {
+                        return Err(fail("a curved side does not reach off the plane"));
+                    }
                     let swept: mt::Face = builder::tsweep(base, v3(n * (height - delta)));
                     let mut s = swept.surface();
                     // Same normal as the old side at a point both share.
