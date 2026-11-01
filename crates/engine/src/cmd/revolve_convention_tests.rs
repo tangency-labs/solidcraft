@@ -342,6 +342,29 @@ fn construction_axis_revolve_follows_the_axis() {
     assert!((volume(&s) - 80.0 * PI).abs() < 0.05, "{}", volume(&s));
 }
 
+/// A revolve finds its construction axis among the features before it, so moving the axis
+/// behind the revolve breaks it, and moving it back mends it, at once (#9544).
+#[test]
+fn construction_axis_moved_behind_its_revolve_and_back() {
+    let mut s = Session::default();
+    run(&mut s, "construct.axis.two_points", json!({"a":{"point":[0,0,0]},"b":{"point":[0,30,0]},"name":"Axis1"}));
+    profile(&mut s, false);
+    run(&mut s, "solid.revolve", json!({"sketch":"Profile","axis":"Axis1","angle":"180 deg","operation":"new","profiles":[0],"name":"Turn"}));
+    let error = s.execute("timeline.reorder", &json!({"feature":"Axis1","position":2})).unwrap_err().to_string();
+    assert!(error.contains("moving Axis1 there breaks Turn"), "{error}");
+    assert_eq!(s.doc.features[0].name, "Axis1");
+    let moved = run(&mut s, "timeline.reorder", json!({"feature":"Axis1","position":2,"allow_errors":true}));
+    assert_eq!(moved["broken"][0]["feature"], "Turn", "{moved}");
+    let turn = s.doc.find_feature("Turn").unwrap().id;
+    let error = |s: &Session| s.model.result(turn).and_then(|r| r.error.clone());
+    assert!(error(&s).is_some_and(|e| e.contains("Axis1")), "{:?}", error(&s));
+    assert!(s.model.state().bodies.is_empty());
+    // Moved back, the revolve finds its axis again.
+    run(&mut s, "timeline.reorder", json!({"feature":"Axis1","position":0}));
+    assert_eq!(error(&s), None);
+    assert!((solidcraft_kernel::measure(&s.model.state().bodies[0].body).unwrap().volume - 60.0 * PI).abs() < 0.05);
+}
+
 #[test]
 fn construction_axis_revolve_rejects_invalid_axes_atomically() {
     for (a, b, message) in [

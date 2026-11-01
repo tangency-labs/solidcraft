@@ -900,7 +900,7 @@ impl ModelState {
     }
 
     /// A digest of everything later features can read: bodies (by content identity), sketches,
-    /// the body counter, threads and sheet bodies.
+    /// the body counter, threads, sheet bodies and construction geometry.
     fn digest(&self) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         for b in &self.bodies {
@@ -942,6 +942,12 @@ impl ModelState {
         }
         serde_json::to_string(&self.threads).unwrap_or_default().hash(&mut h);
         serde_json::to_string(&self.sheets).unwrap_or_default().hash(&mut h);
+        // Construction axes, planes and points so far: features find them here by name, and a
+        // result taken from the cache brings back the ones it was made with, so one moved past
+        // a feature must change the key (#9544). A state without any hashes as before.
+        if !self.construct.is_empty() {
+            serde_json::to_string(&self.construct).unwrap_or_default().hash(&mut h);
+        }
         h.finish()
     }
 
