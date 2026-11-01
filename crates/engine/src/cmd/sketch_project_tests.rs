@@ -861,9 +861,13 @@ fn projecting_what_the_face_sketch_already_shows_adds_no_second_copy() {
     let border = shown(&mut s);
     assert_eq!(border.0, 8, "four sides and four rounded corners");
     let corner = 5.0 - 5.0 * std::f64::consts::FRAC_1_SQRT_2;
-    for refs in [json!([{"face":[20,15,10]}]), json!([{"edge":[20,0,10]}]), json!([{"edge":[corner,corner,10]}])] {
+    // These references name no body, so the refusal names the kind alone: it must not end in
+    // "face of " with nothing after the "of" (#4929).
+    let cases = [(json!([{"face":[20,15,10]}]), "face"), (json!([{"edge":[20,0,10]}]), "edge"), (json!([{"edge":[corner,corner,10]}]), "edge")];
+    for (refs, what) in cases {
         let e = s.execute("sketch.project", &json!({"refs": refs})).unwrap_err().to_string();
         assert!(e.contains("already projected"), "{refs}: {e}");
+        assert!(e.ends_with(&format!("already projected into this sketch: {what}")), "{refs}: {e}");
         assert_eq!(shown(&mut s), border, "{refs}");
     }
     // Something new still projects, and alongside it a reference already shown is skipped.
