@@ -22,7 +22,7 @@
 //! range) and the sweep results are covered. Every run has at least [`MIN_GENERATED`]
 //! generated cases.
 //!
-//! Linear fixtures may opt into `observe_geometry` (default false). The additive
+//! Linear and rotational fixtures may opt into `observe_geometry` (default false). The additive
 //! record contains actual reachable vertices, edge intervals and samples at
 //! 0.17/0.37/0.83, followed by manifold and volume queries (accuracy 1e-6).
 //! Evaluation/query statuses are retained; no healing or extra stitching is done.
@@ -118,6 +118,8 @@ enum Inputs {
         cap: bool,
     },
     Rotational {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        observe_geometry: bool,
         curves: Vec<CrvIn>,
         base: P3,
         axis: P3,
@@ -264,6 +266,7 @@ fn call_of(i: &Inputs) -> Call {
             axis,
             angle_deg,
             cap,
+            ..
         } => Call::Rotational {
             curves: specs(curves),
             base: *base,
@@ -449,7 +452,7 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
         let observation = flat
             .get(at..)
             .ok_or_else(|| harness("missing observation record"))?;
-        out = decode_observation(out, observation, nv, ne)?;
+        out = decode_observation(out, observation, nv, ne, rotational(i))?;
         at = flat.len();
     }
     if at != flat.len() {
@@ -637,6 +640,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             axis,
             angle_deg,
             cap,
+            ..
         } => {
             let cs = curves(&k, cs)?;
             api::create_rotational_sweep(&mut k, &refs(&cs), pt(base), v(axis), *angle_deg, *cap)
@@ -845,8 +849,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let ne = solidcore::topology::brep::p1::edges(body, None)
                 .map_err(|e| harness(e.to_string()))?
                 .len();
-            match rust_observation(&k, body) {
-                Ok(flat) => decode_observation(out, &flat, nv, ne),
+            match rust_observation(&k, body, rotational(i)) {
+                Ok(flat) => decode_observation(out, &flat, nv, ne, rotational(i)),
                 Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
             }
         }
@@ -998,8 +1002,16 @@ fn observes(i: &Inputs) -> bool {
         Inputs::Linear {
             observe_geometry: true,
             ..
+        } | Inputs::Rotational {
+            observe_geometry: true,
+            ..
         }
     )
+}
+
+/// Whether `i` is a rotational sweep, whose observation adds a volume at accuracy 1e-8.
+fn rotational(i: &Inputs) -> bool {
+    matches!(i, Inputs::Rotational { .. })
 }
 
 fn decode_observation(
@@ -1007,6 +1019,7 @@ fn decode_observation(
     flat: &[f64],
     nv: usize,
     ne: usize,
+    fine: bool,
 ) -> Result<Output, HarnessError> {
     if nv > 4096 || ne > 4096 {
         return Err(harness("observation too large"));
@@ -1039,6 +1052,14 @@ fn decode_observation(
         )
         .int("linear_volume_status", *volume_status as i64)
         .scalar("linear_volume", *volume);
+    if fine {
+        let [fine_status, fine_volume] = take(flat, &mut at, 2)? else {
+            return Err(harness("missing fine volume record"));
+        };
+        out = out
+            .int("rotational_volume_1e8_status", *fine_status as i64)
+            .scalar("rotational_volume_1e8", *fine_volume);
+    }
     if at != flat.len() {
         return Err(harness("trailing observation values"));
     }
@@ -1061,7 +1082,7 @@ fn box_volume(k: &Kernel, body: &mut Brep) -> solidcore::Result<(i64, f64)> {
     }
 }
 
-fn rust_observation(k: &Kernel, body: &mut Brep) -> solidcore::Result<Vec<f64>> {
+fn rust_observation(k: &Kernel, body: &mut Brep, fine: bool) -> solidcore::Result<Vec<f64>> {
     use solidcore::geom::attribute::{AttributeStore, ObjectKey};
     use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
     use solidcore::topology::brep::p1;
@@ -1110,6 +1131,13 @@ fn rust_observation(k: &Kernel, body: &mut Brep) -> solidcore::Result<Vec<f64>> 
         Ok(v) => flat.extend([0.0, v]),
         Err(e) if e.is_unported() => return Err(e),
         Err(e) => flat.extend([status(&e), 0.0]),
+    }
+    if fine {
+        match brep_volume(k, body, 1e-8, &attrs) {
+            Ok(v) => flat.extend([0.0, v]),
+            Err(e) if e.is_unported() => return Err(e),
+            Err(e) => flat.extend([status(&e), 0.0]),
+        }
     }
     Ok(flat)
 }
@@ -1338,6 +1366,7 @@ fn gen_case_at(rng: &mut Rng, s: f64) -> Inputs {
         1 => {
             let (curves, base, axis, angle_deg) = gen_rotational(rng, s);
             Inputs::Rotational {
+                observe_geometry: false,
                 curves,
                 base,
                 axis,

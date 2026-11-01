@@ -262,7 +262,7 @@ struct Owned
 
 // Opt-in only: read the actual result before put_brep destroys it. No mutation,
 // healing or additional stitching; geometry precedes manifold and volume queries.
-void observe_linear(std::vector<double>& o, SmBrep* result)
+void observe_linear(std::vector<double>& o, SmBrep* result, bool fine = false)
 {
     SmTArray<SmVertex*> vertices; result->GetVertices(vertices);
     SmTArray<SmEdge*> edges; result->GetEdges(edges);
@@ -293,10 +293,18 @@ void observe_linear(std::vector<double>& o, SmBrep* result)
     const SmStatus volume_status = SmApiBrepComputeVolume(result, 1e-6, volume);
     o.push_back(st(volume_status));
     o.push_back(volume_status == SM_SUCCESS ? volume : 0.0);
+    // rotational observations only: the volume again at accuracy 1e-8
+    if (fine) {
+        double fine_volume = 0.0;
+        const SmStatus fine_status = SmApiBrepComputeVolume(result, 1e-8, fine_volume);
+        o.push_back(st(fine_status));
+        o.push_back(fine_status == SM_SUCCESS ? fine_volume : 0.0);
+    }
 }
 
 // The status then, on success, `has [faces edges vertices]`.
-void put_brep(std::vector<double>& o, SmApiStatus stat, SmBrep* res, bool observe = false)
+void put_brep(std::vector<double>& o, SmApiStatus stat, SmBrep* res, bool observe = false,
+              bool fine = false)
 {
     o.push_back(st(stat));
     if (stat == SM_SUCCESS)
@@ -311,7 +319,7 @@ void put_brep(std::vector<double>& o, SmApiStatus stat, SmBrep* res, bool observ
     }
     // Retain owning cleanup even if observing throws.
     std::unique_ptr<SmBrep> cleanup(res);
-    if (observe && stat == SM_SUCCESS && res) observe_linear(o, res);
+    if (observe && stat == SM_SUCCESS && res) observe_linear(o, res, fine);
 }
 
 // The attributed ops' first attribute id (as boolean.api_brep's OP_ATTRIBUTED).
@@ -444,7 +452,7 @@ SmSweepOptions options_of(const SweepArgs& a)
 void run(Rd& rd, std::vector<double>& o, bool observe = false)
 {
     int32_t op = (int32_t)rd.idx(1, 14);
-    if (observe && op != OP_LINEAR) throw Bad();
+    if (observe && op != OP_LINEAR && op != OP_ROTATIONAL) throw Bad();
     // the attributed curve sweeps: the behaviour of the inputs' tags, then the plain op
     int64_t behavior = -1;
     if (op == OP_FROM_FACES_ATTRIBUTED || op == OP_FROM_EDGES_ATTRIBUTED)
@@ -493,7 +501,7 @@ void run(Rd& rd, std::vector<double>& o, bool observe = false)
                 : SmApiCreateRotationalSweepWithRepetitions(curves, v3(ax.data()),
                                                             v3(ax.data() + 3), ax[6], reps,
                                                             cap ? TRUE : FALSE, res);
-        put_brep(o, stat, res);
+        put_brep(o, stat, res, observe && op == OP_ROTATIONAL, true);
         break;
     }
     case OP_DRAFT:
@@ -677,7 +685,8 @@ SC_EXPORT int32_t sc_sweep_api_brep_run(const double* in, int64_t n_in, double* 
     SC_CATCH
 }
 
-// Additive entry: the legacy entry and its wire format remain unchanged.
+// Additive entry (linear and rotational sweeps): the legacy entry and its wire format
+// remain unchanged.
 SC_EXPORT int32_t sc_sweep_api_brep_observe_linear(const double* in, int64_t n_in,
     double* out, int64_t cap, int64_t* out_len)
 {
