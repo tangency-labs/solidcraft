@@ -380,6 +380,16 @@ pub struct UpstreamFixes {
     pub keep_operand_uv_trims: bool,
     /// `smgu_EvaluateCurveContinuity`'s G2 test compares the two sides' Frenet curvatures and normals (WR-380, #933/#838).
     pub geometric_g2_continuity: bool,
+    /// `SmSurface::FindDegenParamForDirection` compares the actual singular parameter
+    /// mapped into `sSIvl` (`s_ivl.evaluate(this_param)` and
+    /// `s_ivl.evaluate(near_best_param)`) with the caller's singular parameter `dS` in
+    /// the "nearly as good and closer to the input" tie-break, so the nearest candidate
+    /// starting guess is chosen on degenerate boundaries whose singular domain is not
+    /// `[0, 1]`; pinned v1.0.1 compares the `[0, 1]` sample fractions `dThisParam` and
+    /// `dNearBestParam` directly against `dS` (WR-57, #2209;
+    /// `plan/upstream-issues/WR-57--addendum-2026-11-01-degen-param-tiebreak.md`). Off
+    /// by default for pinned C++ parity.
+    pub degen_param_tiebreak_uses_actual_param: bool,
     /// `smgu_BestFitLineToPoints` takes the unit eigenvector of the largest eigenvalue of
     /// the symmetric scatter matrix `M = sum_i Y_i Y_i^T` (`vectors[2]` of
     /// `Compute3x3EigenVectors`, maximising `v^T M v` and minimising the sum of squared
