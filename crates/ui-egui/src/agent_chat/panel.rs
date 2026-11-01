@@ -1582,7 +1582,8 @@ fn copy_message_menu(ui: &egui::Ui, response: &egui::Response, n: usize, text: &
     let opened = ui
         .input(|i| i.pointer.button_released(egui::PointerButton::Secondary) && i.pointer.interact_pos().is_some_and(|p| response.rect.contains(p)));
     let mut copy = false;
-    egui::Popup::menu(response)
+    Container::new(ui.ctx(), Surface::Popup)
+        .menu(response)
         .at_pointer_fixed()
         .frame(ui_kit::Menu::frame())
         .open_memory(if opened { Some(egui::SetOpenCommand::Bool(true)) } else { None })
