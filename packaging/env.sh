@@ -5,6 +5,7 @@
 # Exports:
 #   ROOT                    workspace root
 #   VERSION                 [workspace.package] version from Cargo.toml (override: SOLIDCRAFT_VERSION)
+#   SOLIDCRAFT_VERSION      the same version, embedded by Cargo for update checks
 #
 # Every SOLIDCRAFT_* override also accepts the pre-rename SOLVECRAFT_* name when the new one is
 # unset (compatibility shim, see docs/compatibility.md).
@@ -29,6 +30,9 @@ if [ -z "$VERSION" ]; then
   exit 1
 fi
 export VERSION
+# Package metadata and the compiled updater must agree, including local packages and the legacy
+# version override. Plain cargo builds do not source this file and remain development builds.
+export SOLIDCRAFT_VERSION="$VERSION"
 
 DIST="${DIST:-$ROOT/dist/release}"
 mkdir -p "$DIST"

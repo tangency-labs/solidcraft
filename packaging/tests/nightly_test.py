@@ -1,4 +1,4 @@
-"""Exercise the real nightly decision script without GitHub or repository mutations."""
+"""Exercise release selection and package build metadata without GitHub or repository mutations."""
 
 import json
 import os
@@ -6,10 +6,42 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import tomllib
 import unittest
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "nightly.sh"
+
+
+class PackageVersion(unittest.TestCase):
+    def build_versions(self, overrides):
+        env = os.environ.copy()
+        for key in ("SOLIDCRAFT_VERSION", "SOLVECRAFT_VERSION"):
+            env.pop(key, None)
+        env.update(overrides)
+        with tempfile.TemporaryDirectory() as directory:
+            env["DIST"] = directory
+            result = subprocess.run(
+                ["bash", "-c", '. "$1"; python3 -c \'import json, os; '
+                 'print(json.dumps([os.environ.get("VERSION"), os.environ.get("SOLIDCRAFT_VERSION")]))\'',
+                 "package-version", str(SCRIPT.parent / "env.sh")],
+                env=env, capture_output=True, text=True, check=True,
+            )
+        return json.loads(result.stdout)
+
+    def test_default_package_version_reaches_the_compiler(self):
+        manifest = tomllib.loads((SCRIPT.parent.parent / "Cargo.toml").read_text())
+        version = manifest["workspace"]["package"]["version"]
+        self.assertEqual(self.build_versions({}), [version, version])
+
+    def test_legacy_version_override_reaches_the_compiler(self):
+        version = "0.28.0-nightly.20261031.1"
+        self.assertEqual(self.build_versions({"SOLVECRAFT_VERSION": version}), [version, version])
+        self.assertEqual(self.build_versions({"SOLIDCRAFT_VERSION": "", "SOLVECRAFT_VERSION": version}), [version, version])
+
+    def test_canonical_version_override_wins_for_package_and_compiler(self):
+        self.assertEqual(self.build_versions({"SOLIDCRAFT_VERSION": "0.29.0-rc.1", "SOLVECRAFT_VERSION": "0.28.0"}),
+                         ["0.29.0-rc.1", "0.29.0-rc.1"])
 
 
 def release(tag, published, *, draft=False, prerelease=False):
