@@ -643,3 +643,109 @@ fn editing_a_move_about_a_world_axis_keeps_the_angle_expression() {
     let Kind::Move { rx, ry, rz, .. } = &d.kind else { panic!("not a move") };
     assert_eq!((rx.as_str(), ry.as_str(), rz.as_str()), ("0 deg", "0 deg", "45 deg"));
 }
+
+/// A design with a component `Part` holding a 20 mm cube at the origin, seen from above, with no
+/// dialog open. Returns the harness and the part's placement.
+fn part_harness() -> (crate::scenario::Harness, u64) {
+    let mut h = crate::scenario::Harness::new();
+    let made = h.app.run("component.create", json!({"name": "Part", "grounded": false})).unwrap();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Peg"})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.ui.show_browser = false;
+    h.app.ui.show_timeline = false;
+    h.app.set_origin_shown(false);
+    h.step(&json!({"call": "ui.view", "params": {"view": "top"}})).unwrap();
+    (h, made["occurrence"].as_u64().unwrap())
+}
+
+/// Opens Move/Copy with the viewport in component (`components`) or body pick mode, Create Copy
+/// ticked or not, then clicks the top of the cube.
+fn click_cube_in_move(components: bool, copy: bool) -> (crate::scenario::Harness, u64) {
+    let (mut h, occurrence) = part_harness();
+    h.app.start("solid.move");
+    h.settle();
+    h.app.ui.pick_components = components;
+    h.app.ui.pick_bodies = !components;
+    if copy {
+        h.app.dialog.as_mut().unwrap().extra.insert("copy".into(), json!(true));
+    }
+    h.step(&json!({"click": {"world": [10, 10, 20]}})).unwrap();
+    (h, occurrence)
+}
+
+#[test]
+fn a_component_picked_with_create_copy_is_moved_as_a_component_copy() {
+    let (h, occurrence) = click_cube_in_move(true, true);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[0].items, vec![Sel::Occurrence { path: vec![occurrence] }]);
+    let p = crate::dialogs_move::params(&h.app, d).unwrap();
+    assert_eq!(p["occurrences"], json!([[occurrence]]));
+    assert_eq!(p["bodies"], json!([]));
+    assert_eq!(p["copy"], json!(true));
+}
+
+#[test]
+fn a_body_picked_with_create_copy_is_still_a_body_copy() {
+    let (h, _) = click_cube_in_move(false, true);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert!(matches!(d.inputs[0].items.as_slice(), [Sel::Body { .. }]), "{:?}", d.inputs[0].items);
+    let p = crate::dialogs_move::params(&h.app, d).unwrap();
+    assert_eq!(p["bodies"].as_array().map(Vec::len), Some(1));
+    assert!(p.get("occurrences").is_none());
+    assert_eq!(p["copy"], json!(true));
+}
+
+#[test]
+fn a_component_picked_without_create_copy_moves_its_bodies_as_before() {
+    let (h, occurrence) = click_cube_in_move(true, false);
+    let d = h.app.dialog.as_ref().unwrap();
+    assert_eq!(d.inputs[0].items, vec![Sel::Occurrence { path: vec![occurrence] }]);
+    let p = crate::dialogs_move::params(&h.app, d).unwrap();
+    assert_eq!(p["bodies"].as_array().map(Vec::len), Some(1), "the component's body moves");
+    assert!(p.get("occurrences").is_none());
+    assert!(p.get("copy").is_none());
+}
+
+#[test]
+fn a_component_picked_before_create_copy_is_ticked_is_copied_as_a_component() {
+    let (mut h, occurrence) = click_cube_in_move(true, false);
+    h.app.dialog.as_mut().unwrap().extra.insert("copy".into(), json!(true));
+    let p = crate::dialogs_move::params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(p["occurrences"], json!([[occurrence]]));
+    let placements = h.app.session.doc.occurrences.len();
+    h.app.session.execute("solid.move", &p).unwrap();
+    assert_eq!(h.app.session.doc.occurrences.len(), placements + 1, "OK copies the component");
+}
+
+#[test]
+fn editing_a_move_never_takes_a_component_pick() {
+    // An existing move of another body is edited, and the component is clicked in component mode.
+    let (mut h, _) = part_harness();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "body_name": "Plate"})).unwrap();
+    let moved = h.app.run("solid.move", json!({"bodies": ["Plate"], "translate": [0, 0, 5]})).unwrap()["feature"].as_u64().unwrap();
+    h.app.dialog = Some(crate::dialogs::for_feature(&h.app, moved, None).unwrap());
+    h.settle();
+    h.app.ui.pick_components = true;
+    h.app.ui.pick_bodies = false;
+    h.step(&json!({"click": {"world": [10, 10, 20]}})).unwrap();
+    let items = h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
+    assert!(items.iter().any(|s| matches!(s, Sel::Body { name } if name == "Peg")), "the click picks the body: {items:?}");
+    assert!(!items.iter().any(|s| matches!(s, Sel::Occurrence { .. })), "an edited move's picks stay bodies: {items:?}");
+}
+
+#[test]
+fn selected_components_are_copied_when_create_copy_is_ticked_after_them() {
+    // One selected placement starts the Browser's own component move, so two are selected here.
+    let (mut h, first) = part_harness();
+    let second = h.app.run("occurrence.copy", json!({"occurrence": first, "translate": [50, 0, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.session.selection = vec![Sel::Occurrence { path: vec![first] }, Sel::Occurrence { path: vec![second] }];
+    h.app.start("solid.move");
+    let picked = vec![Sel::Occurrence { path: vec![first] }, Sel::Occurrence { path: vec![second] }];
+    assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items, picked);
+    let p = crate::dialogs_move::params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(p["bodies"].as_array().map(Vec::len), Some(2), "without a copy the components' bodies move");
+    assert!(p.get("occurrences").is_none());
+    h.app.dialog.as_mut().unwrap().extra.insert("copy".into(), json!(true));
+    let p = crate::dialogs_move::params(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(p["occurrences"], json!([[first], [second]]));
+}

@@ -167,7 +167,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("presspull")
         .key("Q")
         .params("face: [x,y,z] and distance: expr (positive adds material, negative cuts), or edges: [[x,y,z]…] and distance (a fillet)"),
-    CommandSpec::new("solid.move", "Move/Copy", move_bodies).at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch).params("bodies: [names]; translate?: [x,y,z] (exprs or numbers); axis?: [x,y,z]; angle?: expr; copy?: bool (default false: keeps the original bodies and transforms a new copy instead of moving them in place)"),
+    CommandSpec::new("solid.move", "Move/Copy", move_bodies).at("SOLID", "MODIFY").icon("move").key("M").enabled(not_in_sketch).params("bodies: [names]; translate?: [x,y,z] (exprs or numbers); axis?: [x,y,z]; angle?: expr; copy?: bool (default false: keeps the original bodies and transforms a new copy instead of moving them in place); occurrences?: [occurrence paths, root first] (only with copy: each component is copied as an independent component, as Paste New copies it, and the copy moves by the same translate, axis and angle in the world; the reply lists the copies in occurrences)"),
 ];
 
 /// Where an extrude starts and which way is positive: a point inside the (first) profile or
@@ -1804,16 +1804,38 @@ fn combine(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
+    if let Some(paths) = copied_components(p)? {
+        return copy_components(s, p, paths);
+    }
     if let Some(plan) = crate::frames::placements_moved(s, p) {
         return move_placements(s, p, plan);
     }
     move_body_feature(s, p)
 }
 
-/// A move of several placements of one part (`frames::placements_moved`, #4768): each placement
-/// moved in the world by the move's translation and turn (about the world origin, as the Move
-/// feature turns bodies), and the root component's bodies listed moved as bodies, in one step.
-fn move_placements(s: &mut Session, p: &Value, plan: crate::frames::PlacementMove) -> Result<Value> {
+/// The occurrence paths a copying move copies (`occurrences`, root first), `None` when it names
+/// none. A component is only ever copied, so the move must set `copy`.
+fn copied_components(p: &Value) -> Result<Option<Vec<Vec<u64>>>> {
+    let cmd = "solid.move";
+    let Some(list) = p.get("occurrences") else { return Ok(None) };
+    let paths: Vec<Vec<u64>> = list
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|path| path.as_array().and_then(|ids| ids.iter().map(Value::as_u64).collect::<Option<Vec<u64>>>()).filter(|ids| !ids.is_empty()))
+        .collect::<Option<_>>()
+        .ok_or_else(|| bad(cmd, "`occurrences` must list occurrence paths, each a list of occurrence ids"))?;
+    if paths.is_empty() || paths.len() > 1000 {
+        return Err(bad(cmd, "`occurrences` must list 1…1000 occurrence paths"));
+    }
+    if p.get("copy").and_then(Value::as_bool) != Some(true) {
+        return Err(bad(cmd, "`occurrences` are copied: set `copy` to true"));
+    }
+    Ok(Some(paths))
+}
+
+/// The translation (mm) and turn (radians, if any) of a move in the world.
+fn world_move(s: &Session, p: &Value) -> Result<(Vec<f64>, Option<f64>)> {
     let cmd = "solid.move";
     let length = |v: &Value| -> Result<f64> {
         match v {
@@ -1831,6 +1853,76 @@ fn move_placements(s: &mut Session, p: &Value, plan: crate::frames::PlacementMov
         Some(a) => Some(s.doc.eval(&a, Kind::Angle).map_err(|e| bad(cmd, format!("angle: {e}")))?),
         None => None,
     };
+    Ok((translate, angle))
+}
+
+/// A copying move of components (`occurrences`, with `copy`): each picked placement's component is
+/// copied as an independent component, as Paste New copies it (`component.paste_new`), placed where
+/// the placement is; the copy then moves by the move's translation and turn in the world, as
+/// `occurrence.move` moves a placement. The bodies listed are copied as bodies (see
+/// `move_body_feature`) in the same command, so the whole move is one undo step.
+fn copy_components(s: &mut Session, p: &Value, paths: Vec<Vec<u64>>) -> Result<Value> {
+    let cmd = "solid.move";
+    let (translate, angle) = world_move(s, p)?;
+    let paste = super::find_command("component.paste_new").ok_or_else(|| EngineError::UnknownCommand("component.paste_new".into()))?;
+    let mover = super::find_command("occurrence.move").ok_or_else(|| EngineError::UnknownCommand("occurrence.move".into()))?;
+    // A component inside another one copied here comes with its parent's copy.
+    let mut paths: Vec<Vec<u64>> = paths.into_iter().fold(Vec::new(), |mut out, path| {
+        if !out.contains(&path) {
+            out.push(path);
+        }
+        out
+    });
+    let all = paths.clone();
+    paths.retain(|p| !all.iter().any(|q| q.len() < p.len() && p.starts_with(q)));
+    // The bodies are given in the world; their own component's frame turns them, as a move of bodies
+    // alone is turned, so they are mapped the same way, before any copy is made.
+    let has_bodies = match p.get("bodies") {
+        None => false,
+        Some(Value::Array(bodies)) => !bodies.is_empty(),
+        Some(_) => return Err(bad(cmd, "`bodies` must list bodies")),
+    };
+    let mut rest = p.clone();
+    if let Some(object) = rest.as_object_mut() {
+        object.remove("occurrences");
+    }
+    let bodies = has_bodies.then(|| crate::frames::to_local(s, cmd, &rest).unwrap_or_else(|| rest.clone()));
+    let mut copies = Vec::new();
+    for path in &paths {
+        let Some(&source) = path.last() else { continue };
+        let component =
+            s.doc.occurrences.iter().find(|o| o.id == source).map(|o| o.component).ok_or_else(|| bad(cmd, "`occurrences` names no occurrence"))?;
+        let made = paste.run_nested(s, &json!({"component": component, "occurrence": source, "path": path}))?;
+        let copy = made.get("occurrence").and_then(Value::as_u64).ok_or_else(|| bad(cmd, "the copy has no occurrence"))?;
+        // The copy is placed by the same parent placement as its source.
+        let mut at = path[..path.len() - 1].to_vec();
+        at.push(copy);
+        let mut q = json!({"occurrence": copy, "path": at, "space": "world", "translate": translate});
+        if let Some(axis) = p.get("axis") {
+            q["axis"] = axis.clone();
+        }
+        if let Some(angle) = angle {
+            q["angle"] = json!(angle);
+        }
+        mover.run_nested(s, &q)?;
+        copies.push(copy);
+    }
+    // The reply is a solid.move reply: the bodies' feature reply, with the copies made alongside.
+    let mut out = match bodies {
+        Some(local) => move_body_feature(s, &local)?,
+        None => json!({}),
+    };
+    if let Some(object) = out.as_object_mut() {
+        object.insert("occurrences".into(), json!(copies));
+    }
+    Ok(out)
+}
+
+/// A move of several placements of one part (`frames::placements_moved`, #4768): each placement
+/// moved in the world by the move's translation and turn (about the world origin, as the Move
+/// feature turns bodies), and the root component's bodies listed moved as bodies, in one step.
+fn move_placements(s: &mut Session, p: &Value, plan: crate::frames::PlacementMove) -> Result<Value> {
+    let (translate, angle) = world_move(s, p)?;
     let spec = super::find_command("occurrence.move").ok_or_else(|| EngineError::UnknownCommand("occurrence.move".into()))?;
     let mut moved = Vec::new();
     for path in &plan.paths {

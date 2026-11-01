@@ -1120,6 +1120,19 @@ impl Dialog {
                     continue;
                 }
             }
+            // Move/Copy keeps a selected component as the component, so Create Copy can still be
+            // ticked after it (the bodies are what a move without a copy moves).
+            if matches!(d.kind, Kind::Move { .. })
+                && let Sel::Occurrence { path } = sel
+                && !path.is_empty()
+                && let Some(inp) = d.inputs.first_mut()
+                && inp.accept == BODIES
+            {
+                if !inp.items.contains(sel) {
+                    inp.items.push(sel.clone());
+                }
+                continue;
+            }
             let as_body = match sel {
                 Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => Some(Sel::Body { name: body.to_string() }),
                 _ => None,

@@ -430,8 +430,9 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> Option<Value> {
         return Some(out);
     }
     // Several placements of one part moved together are moved as placements, in the world
-    // (`placements_moved`): their names and vectors stay as given.
-    if id == "solid.move" && placements_moved(s, params).is_some() {
+    // (`placements_moved`), and components copied (`occurrences`) likewise: their names and vectors
+    // stay as given. Bodies listed with them are mapped by `copy_components`.
+    if id == "solid.move" && (params.get("occurrences").is_some() || placements_moved(s, params).is_some()) {
         return None;
     }
     if id == "timeline.redefine" {

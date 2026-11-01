@@ -237,6 +237,15 @@ fn body_names(app: &crate::SolveApp) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The bodies the open Move/Copy would move, a picked component's bodies included.
+fn move_bodies(app: &crate::SolveApp) -> Vec<String> {
+    let Some(d) = app.dialog.as_ref() else { return Vec::new() };
+    crate::dialogs_move::params(app, d)
+        .ok()
+        .and_then(|p| p["bodies"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()))
+        .unwrap_or_default()
+}
+
 fn two_bodies(h: &mut crate::scenario::Harness) {
     h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Left"})).unwrap();
     h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [30, 0, 0], "body_name": "Right"})).unwrap();
@@ -309,7 +318,7 @@ fn browser_move_copy_takes_a_component_clicked_in_the_tree() {
     open_move(&mut h);
     h.frames(2);
     click(&mut h, &format!("row:occurrence:{occurrence}"));
-    assert_eq!(body_names(&h.app), owned, "the component's bodies are the Move/Copy selection");
+    assert_eq!(move_bodies(&h.app), owned, "the component's bodies are the Move/Copy selection");
     assert!(h.app.tree.occurrence_move.is_none(), "the open body dialog stays; this click does not switch to component Move");
 
     h.app.dialog = None;
@@ -318,7 +327,7 @@ fn browser_move_copy_takes_a_component_clicked_in_the_tree() {
     click(&mut h, "row:Untitled");
     assert_eq!(h.app.tree.picked_components, vec![0]);
     h.app.start("solid.move");
-    let names = body_names(&h.app);
+    let names = move_bodies(&h.app);
     assert!(names.iter().any(|n| owned.contains(n)), "Move/Copy starts from the component picked in the tree: {names:?}");
 }
 

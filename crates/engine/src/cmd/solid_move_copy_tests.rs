@@ -181,3 +181,133 @@ fn an_older_design_with_no_copy_key_at_all_still_loads_and_moves_in_place() {
     let moved = state.body("Cube").unwrap();
     assert!(moved.mesh().bounds().min.dist(Vec3::new(5.0, 0.0, 0.0)) < 1e-6);
 }
+
+/// A component `Part` holding a 20 mm cube at the origin, placed once at the root.
+fn part_with_cube(s: &mut Session) -> (u64, u64) {
+    let made = run(s, "component.create", json!({"name": "Part", "grounded": false}));
+    cube20(s, "Peg");
+    run(s, "component.activate", json!({"component": "root"}));
+    (made["component"].as_u64().unwrap(), made["occurrence"].as_u64().unwrap())
+}
+
+/// The component an occurrence is an instance of.
+fn component_of(s: &Session, occurrence: u64) -> u64 {
+    s.doc.occurrences.iter().find(|o| o.id == occurrence).expect("the occurrence exists").component
+}
+
+/// The lowest corner of the first body a placement shows, in the world.
+fn world_min(s: &Session, path: &[u64]) -> Vec3 {
+    let names = s.occurrence_bodies(path, true).unwrap();
+    s.world_state().body(&names[0]).unwrap().mesh().bounds().min
+}
+
+#[test]
+fn copying_a_picked_component_makes_an_independent_component_at_the_moved_place() {
+    let mut s = Session::default();
+    let (part, occurrence) = part_with_cube(&mut s);
+    let before = s.doc.clone();
+    let source = world_min(&s, &[occurrence]);
+    let reply = run(&mut s, "solid.move", json!({"bodies": [], "occurrences": [[occurrence]], "copy": true, "translate": [50, 0, 0]}));
+    let copy = reply["occurrences"][0].as_u64().expect("the move reports the copy it made");
+    let copied = component_of(&s, copy);
+    assert_ne!(copied, part, "an independent copy of the component, not another instance of it");
+    let name = &s.doc.components.iter().find(|c| c.id == copied).expect("the copy is a component").name;
+    assert_eq!(name, "Part (2)", "named the way Paste New names its copies");
+    assert!(world_min(&s, &[copy]).dist(Vec3::new(source.x + 50.0, source.y, source.z)) < 1e-6, "the copy lands at the moved place");
+    assert!(world_min(&s, &[occurrence]).dist(source) < 1e-6, "the original component stays where it was");
+    assert_eq!(s.occurrence_bodies(&[occurrence], true).unwrap().len(), 1, "the original keeps its body");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc, before, "one undo removes the copy");
+}
+
+#[test]
+fn a_copied_component_turns_with_the_move() {
+    let mut s = Session::default();
+    let (_, occurrence) = part_with_cube(&mut s);
+    let reply = run(
+        &mut s,
+        "solid.move",
+        json!({"bodies": [], "occurrences": [[occurrence]], "copy": true, "translate": [0, 0, 0], "axis": [0, 0, 1], "angle": "90 deg"}),
+    );
+    let copy = reply["occurrences"][0].as_u64().unwrap();
+    // A quarter turn about the origin takes the cube's x from 0..20 to -20..0 and y to 0..20.
+    assert!(world_min(&s, &[copy]).dist(Vec3::new(-20.0, 0.0, 0.0)) < 1e-6, "the copy turns with the move");
+    assert!(world_min(&s, &[occurrence]).dist(Vec3::ZERO) < 1e-6, "the original does not turn");
+}
+
+#[test]
+fn bodies_and_a_component_copied_together_are_one_undo_step() {
+    let mut s = Session::default();
+    let (_, occurrence) = part_with_cube(&mut s);
+    cube20_at(&mut s, "Top", [0, 0, 50]);
+    let before = s.doc.clone();
+    let count = s.model.state().bodies.len();
+    let reply = run(&mut s, "solid.move", json!({"bodies": ["Top"], "occurrences": [[occurrence]], "copy": true, "translate": [50, 0, 0]}));
+    assert_eq!(reply["occurrences"].as_array().map(Vec::len), Some(1));
+    assert!(reply.get("feature").is_some(), "the reply is a solid.move reply: the body feature's, with the copies alongside");
+    assert_eq!(s.model.state().bodies.len(), count + 2, "a copy of the body and of the component");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc, before, "one undo removes both copies");
+}
+
+#[test]
+fn a_component_picked_with_its_parent_is_copied_once_inside_the_parents_copy() {
+    let mut s = Session::default();
+    // `Outer` at the root holds `Inner`, which holds a 20 mm cube.
+    let outer = run(&mut s, "component.create", json!({"name": "Outer", "grounded": false}))["occurrence"].as_u64().unwrap();
+    let inner = run(&mut s, "component.create", json!({"name": "Inner", "parent": "Outer"}))["occurrence"].as_u64().unwrap();
+    cube20(&mut s, "Peg");
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let counts = |s: &Session| (s.doc.components.len(), s.doc.occurrences.len(), s.model.state().bodies.len());
+    assert_eq!(counts(&s), (2, 2, 1), "components, occurrences and bodies before the move");
+    let before = s.doc.clone();
+    let source = world_min(&s, &[outer, inner]);
+
+    // Both are picked, Inner inside Outer: Inner comes with its parent's copy, so one copy is made.
+    let reply = run(&mut s, "solid.move", json!({"bodies": [], "occurrences": [[outer], [outer, inner]], "copy": true, "translate": [50, 0, 0]}));
+    assert_eq!(reply["occurrences"].as_array().map(Vec::len), Some(1), "one copy: Inner is copied inside Outer's copy");
+    let copy = reply["occurrences"][0].as_u64().unwrap();
+    assert_eq!(counts(&s), (4, 4, 2), "the copy of Outer and its own Inner, with the cube copied once");
+    assert!(
+        world_min(&s, &[copy]).dist(Vec3::new(source.x + 50.0, source.y, source.z)) < 1e-6,
+        "the copied cube sits 50 mm along X from the original"
+    );
+    assert!(world_min(&s, &[outer, inner]).dist(source) < 1e-6, "the original cube stays where it was");
+
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(counts(&s), (2, 2, 1), "one undo puts back the two components, two occurrences and one body");
+    assert_eq!(s.doc, before, "one undo removes the whole copy");
+}
+
+#[test]
+fn a_copy_that_fails_part_way_changes_nothing() {
+    let mut s = Session::default();
+    let (_, occurrence) = part_with_cube(&mut s);
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+    // The first component copies; the second names no occurrence, so the whole move is refused.
+    let error = s.execute("solid.move", &json!({"bodies": [], "occurrences": [[occurrence], [999_999]], "copy": true, "translate": [50, 0, 0]}));
+    assert!(error.is_err());
+    assert_eq!(s.doc, before, "the first copy is rolled back with the rest");
+    assert_eq!(s.undo.len(), undo, "a refused move leaves no undo step");
+}
+
+#[test]
+fn components_move_only_as_copies() {
+    let mut s = Session::default();
+    let (_, occurrence) = part_with_cube(&mut s);
+    let before = s.doc.clone();
+    let error = s.execute("solid.move", &json!({"bodies": [], "occurrences": [[occurrence]], "translate": [50, 0, 0]})).unwrap_err();
+    assert!(error.to_string().contains("copy"), "{error}");
+    assert_eq!(s.doc, before, "a refused move changes nothing");
+}
+
+#[test]
+fn bodies_that_are_not_a_list_are_refused_with_components() {
+    let mut s = Session::default();
+    let (_, occurrence) = part_with_cube(&mut s);
+    let before = s.doc.clone();
+    let error = s.execute("solid.move", &json!({"bodies": "Peg", "occurrences": [[occurrence]], "copy": true, "translate": [50, 0, 0]})).unwrap_err();
+    assert!(error.to_string().contains("bodies"), "{error}");
+    assert_eq!(s.doc, before, "a refused move changes nothing");
+}

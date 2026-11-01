@@ -1701,7 +1701,7 @@ fn occurrence_rows_inner(
     if r.double && !takes_components && app.session.doc.parts.contains_key(&placement.component) {
         crate::dialogs_part_size::open(app, placement.component);
     }
-    if r.clicked && takes_components {
+    if r.clicked && (takes_components || crate::dialogs_move::picks_components(app)) {
         if let Some(mut d) = app.dialog.take() {
             d.pick(&app.session, Sel::Occurrence { path: path.to_vec() });
             app.dialog = Some(d);
