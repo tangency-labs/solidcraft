@@ -1010,7 +1010,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         let grounded = occ.is_some_and(|o| o.grounded);
         let oid = occ.map(|o| o.id).unwrap_or(0);
         v.push(act("ui.activate", "Activate", "component").with(json!({ "component": id })).on(!active));
-        if doc.links.contains_key(&id) {
+        if doc.links.get(&id).is_some_and(|link| link.step_names.is_none()) {
             v.push(act("ui.editInPlace", "Edit in Place", "edit").with(json!({ "component": id })));
             v.push(act("ui.openLinkedDesign", "Open Linked Design", "open").with(json!({ "component": id })));
         }
@@ -1049,6 +1049,10 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     v.push(act("ui.properties", "Properties", "measure").with(json!({ "component": id })));
     if doc.links.contains_key(&id) {
+        v.push(cmd(app, "component.update_links", "Update Links"));
+        v.push(cmd(app, "component.break_link", "Break Link").with(json!({"component": id})));
+    }
+    if doc.links.get(&id).is_some_and(|link| link.step_names.is_none()) {
         v.push(act("ui.relinkSource", "Relink Source (All Instances)…", "update").with(json!({"component": id})));
     } else if id != 0 && app.session.can_extract(id) {
         v.push(act("ui.extractComponent", "Extract to File…", "export").with(json!({"component": id})));

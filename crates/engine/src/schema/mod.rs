@@ -55,6 +55,7 @@ mod tests;
 
 // The contracts, by command file.
 pub mod component;
+pub mod component_link;
 pub mod construct;
 pub mod edit;
 pub mod features;

@@ -86,6 +86,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     origin_plane_names(app, ui);
     ui_kit::settings_section(ui, "linked_designs", app.tr("prefs.linked_designs"), |ui| {
         setting::update_changed_links(app, ui);
+        setting::link_step_inserts(app, ui).on_hover_text(app.tr("settings.link_step_inserts_help"));
         setting::double_click_components(app, ui);
         setting::insert_lists_open_designs(app, ui);
     });

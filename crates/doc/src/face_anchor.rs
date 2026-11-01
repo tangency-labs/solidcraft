@@ -118,6 +118,134 @@ fn has_face_reference(plane: &PlaneRef) -> bool {
 }
 
 impl Document {
+    /// Renew exact import certificates after an explicit linked-source replacement. Match
+    /// only the old face's persistent name, as linked joints do; never use its picked point.
+    /// Persisting the renewed certificate also keeps the attachment valid after Break Link.
+    pub fn rebind_linked_faces(&mut self, feature: u64, before: &ModelState, after: &ModelState) -> Vec<String> {
+        use crate::config::FaceCertificate;
+        use crate::feature_geometry::Geo;
+        use crate::walk::Walk;
+
+        fn plane<'a>(p: &'a mut PlaneRef, depth: usize, targets: &mut Vec<&'a mut ConfigFaceTarget>) {
+            if depth > 64 {
+                return;
+            }
+            match p {
+                PlaneRef::Face { anchor: Some(anchor), .. } => targets.push(&mut anchor.target),
+                PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => plane(base, depth + 1, targets),
+                PlaneRef::ThroughPoint { base, point } => {
+                    plane(base, depth + 1, targets);
+                    geometry(point, depth + 1, targets);
+                }
+                PlaneRef::AtAngle { base, line, .. } => {
+                    plane(base, depth + 1, targets);
+                    if let Some(line) = line {
+                        geometry(line, depth + 1, targets);
+                    }
+                }
+                PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } => {
+                    geometry(a, depth + 1, targets);
+                    geometry(b, depth + 1, targets);
+                }
+                PlaneRef::AxisPoint { axis, point } => {
+                    geometry(axis, depth + 1, targets);
+                    geometry(point, depth + 1, targets);
+                }
+                PlaneRef::ThreePoints { a, b, c } => {
+                    geometry(a, depth + 1, targets);
+                    geometry(b, depth + 1, targets);
+                    geometry(c, depth + 1, targets);
+                }
+                PlaneRef::Tangent { face, .. } => geometry(face, depth + 1, targets),
+                PlaneRef::AlongPath { path, .. } => geometry(path, depth + 1, targets),
+                PlaneRef::Perpendicular { plane, line } => {
+                    geometry(plane, depth + 1, targets);
+                    geometry(line, depth + 1, targets);
+                }
+                _ => {}
+            }
+        }
+        fn geometry<'a>(g: &'a mut crate::construct::GeoRef, depth: usize, targets: &mut Vec<&'a mut ConfigFaceTarget>) {
+            if let crate::construct::GeoRef::Plane { plane: p } = g {
+                plane(p, depth + 1, targets);
+            }
+        }
+
+        let doc = self.clone();
+        let mut warnings = Vec::new();
+        let mut renew = |target: &mut ConfigFaceTarget, label: &str| {
+            if target.origin_feature != feature || !matches!(target.certificate, Some(FaceCertificate::Imported { .. })) {
+                return;
+            }
+            let certificate = || -> Result<FaceCertificate> {
+                let missing = || DocError::Unknown(format!("linked face `{}` on `{}` no longer exists", target.name, target.body));
+                let old = before.bodies.iter().find(|b| b.definition_name() == target.body).ok_or_else(missing)?;
+                doc.configuration_face_indices(old, target)?;
+                let new = after.bodies.iter().find(|b| b.definition_name() == target.body).ok_or_else(missing)?;
+                let indices = crate::naming::faces_with_stem(new, &target.name);
+                let mut certificate = None;
+                for index in indices {
+                    if !matches!(new.body.face_sources().and_then(|sources| sources.get(index)), Some(Some(solidcraft_kernel::FaceSource::Imported { producer: Some(id), .. })) if *id == feature)
+                    {
+                        return Err(missing());
+                    }
+                    let current = doc.configuration_face_certificate(new, index)?.ok_or_else(missing)?;
+                    if certificate.as_ref().is_some_and(|previous| previous != &current) {
+                        return Err(DocError::Invalid("linked face name is ambiguous after update".into()));
+                    }
+                    certificate = Some(current);
+                }
+                certificate.ok_or_else(missing)
+            };
+            match certificate() {
+                Ok(certificate) => {
+                    target.certificate = Some(certificate);
+                    if target.name.starts_with(&format!("F{feature}:face:")) {
+                        warnings.push(format!("{label} refers to a linked face by its place in the file; check its attachment after this update"));
+                    }
+                }
+                Err(error) => warnings.push(format!("{label}: {error}")),
+            }
+        };
+        for f in &mut self.features {
+            let mut targets = Vec::new();
+            f.kind.walk_geometry_mut(&mut |g| match g {
+                Geo::Plane(p) => plane(p, 0, &mut targets),
+                Geo::Construct(g) => geometry(g, 0, &mut targets),
+                _ => {}
+            });
+            for target in targets {
+                renew(target, &format!("feature {}", f.name));
+            }
+        }
+        for column in &mut self.configs.columns {
+            if let crate::config::Column::FaceAppearance(target) = column {
+                renew(target, "configured face appearance");
+            }
+        }
+        for (name, target) in &mut self.print_faces {
+            renew(target, &format!("print face {name}"));
+        }
+        let faces =
+            self.appearances.faces.iter_mut().chain(
+                self.links.values_mut().flat_map(|link| link.inherited.iter_mut().flat_map(|properties| properties.faces.iter_mut().flatten())),
+            );
+        for face in faces {
+            if let Some(name) = &face.name {
+                let mut target = ConfigFaceTarget {
+                    body: face.body.clone(),
+                    origin_feature: crate::persistent_name::made_by(name).unwrap_or_default(),
+                    name: name.clone(),
+                    point: face.point,
+                    certificate: face.certificate.clone(),
+                };
+                renew(&mut target, "face appearance");
+                face.certificate = target.certificate;
+            }
+        }
+        warnings
+    }
+
     pub fn resolve_attached_plane(
         &self,
         vals: &std::collections::BTreeMap<String, crate::expr::Value>,

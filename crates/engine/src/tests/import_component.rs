@@ -478,3 +478,163 @@ fn renaming_an_imported_body_after_a_repeated_part_keeps_every_body_in_its_compo
     assert_eq!(names(&s), ["Bracket", "Peg", "Base plate", "Handle"]);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn step_source_link_is_recorded_saved_relative_updated_and_broken() {
+    let dir = temp_dir("source-link");
+    let path = part_file(&dir, "bracket");
+    let mut s = Session::default();
+    s.param_check = crate::schema::ParamCheck::Strict;
+    let inserted = run(&mut s, "file.insert_step", json!({"path": path, "up": "y"}));
+    let comp = inserted["component"].as_u64().unwrap();
+    let feature = inserted["feature"].as_u64().unwrap();
+    let occurrence = inserted["occurrence"].as_u64().unwrap();
+    let placement = s.doc.occurrences.iter().find(|o| o.id == occurrence).unwrap().transform;
+    assert_eq!(s.doc.links[&comp].step_names.as_deref(), Some("auto"));
+    assert!(std::path::Path::new(&s.doc.links[&comp].path).is_absolute());
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["changed"], false);
+    let saved = dir.join("assembly.sc");
+    run(&mut s, "file.save", json!({"path": saved}));
+    let (doc, _) = solidcraft_io::read_design_file(&saved.to_string_lossy(), None::<fn(solidcraft_io::DesignPreview)>).unwrap();
+    assert_eq!(doc.links[&comp].path, "bracket.step");
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": saved}));
+    assert_eq!(opened.doc.links[&comp].step_names.as_deref(), Some("auto"));
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"length": 40, "width": 20, "height": 10}));
+    run(&mut source, "file.export", json!({"path": path}));
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["changed"], true);
+    let old = shown_boxes(&s);
+    let undo = s.undo.len();
+    let reply = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(reply["updated"], json!(["bracket"]));
+    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.doc.links[&comp].feature, feature);
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == occurrence).unwrap().transform, placement);
+    let volume: f64 = s.world_state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum();
+    assert!((volume - 8000.0).abs() < 1e-6, "{volume}");
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["changed"], false);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(shown_boxes(&s), old);
+    run(&mut s, "component.update_links", json!({}));
+    let before = shown_boxes(&s);
+    run(&mut s, "component.break_link", json!({"component": comp}));
+    assert!(s.doc.links.is_empty());
+    assert_eq!(shown_boxes(&s), before);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.links.contains_key(&comp));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn step_source_link_failures_keep_bodies_and_do_not_hold_up_other_links() {
+    let dir = temp_dir("link-failures");
+    let missing = part_file(&dir, "missing");
+    let corrupt = part_file(&dir, "corrupt");
+    let good = part_file(&dir, "good");
+    let mut s = Session::default();
+    let a = run(&mut s, "file.insert_step", json!({"path": missing}))["component"].as_u64().unwrap();
+    let b = run(&mut s, "file.insert_step", json!({"path": corrupt}))["component"].as_u64().unwrap();
+    let c = run(&mut s, "file.insert_step", json!({"path": good}))["component"].as_u64().unwrap();
+    let original = s.doc.links.clone();
+    std::fs::remove_file(&missing).unwrap();
+    std::fs::write(&corrupt, b"ISO-10303-21; hostile incomplete file").unwrap();
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut source, "file.export", json!({"path": good}));
+    let before = s.undo.len();
+    let r = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(r["updated"], json!(["good"]));
+    assert_eq!(r["failed"].as_array().unwrap().len(), 2);
+    assert_eq!(s.doc.links[&a], original[&a]);
+    assert_eq!(s.doc.links[&b], original[&b]);
+    assert_eq!(s.undo.len(), before + 1);
+    let volume: f64 = s.world_state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum();
+    assert!((volume - 13000.0).abs() < 1e-6, "{volume}");
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][1]["changed"], true);
+    // A repaired source is retried, even after the other source already updated.
+    part_file(&dir, "corrupt");
+    run(&mut s, "component.update_links", json!({"components": [b, c]}));
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][1]["changed"], false);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn step_source_link_opt_out_and_old_designs_stay_independent() {
+    let dir = temp_dir("link-old");
+    let path = part_file(&dir, "part");
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path, "link": false}));
+    assert!(s.doc.links.is_empty());
+    let mut old: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    old.as_object_mut().unwrap().remove("links");
+    let doc = solidcraft_doc::Document::from_json(&old.to_string()).unwrap();
+    let mut opened = Session::opened(doc, None);
+    assert!(opened.doc.links.is_empty());
+    let before = shown_boxes(&opened);
+    std::fs::remove_file(&path).unwrap();
+    let r = run(&mut opened, "component.update_links", json!({}));
+    assert_eq!(r["updated"], json!([]));
+    assert_eq!(shown_boxes(&opened), before);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn step_source_link_assembly_update_keeps_repeated_bodies_and_components() {
+    let dir = temp_dir("link-assembly");
+    let path = rig_file(&dir);
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let before = shown_boxes(&s);
+    let comps = s.doc.components.clone();
+    // A harmless header change still exercises reading and replacing an assembly source.
+    let text = std::fs::read_to_string(&path).unwrap().replace("ISO-10303-21;", "ISO-10303-21;\n/* changed source */");
+    std::fs::write(&path, text).unwrap();
+    run(&mut s, "component.update_links", json!({}));
+    assert_eq!(shown_boxes(&s), before);
+    assert_eq!(s.doc.components, comps);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn step_source_link_update_rebuilds_downstream_features() {
+    let dir = temp_dir("link-downstream");
+    let path = part_file(&dir, "bracket");
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let sketch = run(&mut s, "sketch.create", json!({"plane": {"face": [5, 5, 10]}}))["sketch"].clone();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [3, 3], "p1": [7, 7]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let cut = run(&mut s, "solid.extrude", json!({"sketch": sketch, "distance": -20, "operation": "cut"}))["feature"].as_u64().unwrap();
+    let volume = |s: &Session| s.world_state().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum::<f64>();
+    assert!((volume(&s) - (6000.0 - 160.0)).abs() < 1e-5);
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"length": 40, "width": 20, "height": 10}));
+    run(&mut source, "file.export", json!({"path": path}));
+    let updated = run(&mut s, "component.update_links", json!({}));
+    assert!(s.model.result(cut).unwrap().error.is_none(), "{updated}: {:?}", s.model.result(cut).unwrap().error);
+    assert!((volume(&s) - (8000.0 - 160.0)).abs() < 1e-5);
+    run(&mut s, "edit.undo", json!({}));
+    assert!((volume(&s) - (6000.0 - 160.0)).abs() < 1e-5);
+    run(&mut s, "edit.redo", json!({}));
+    assert!((volume(&s) - (8000.0 - 160.0)).abs() < 1e-5);
+    let mut sphere = Session::default();
+    run(&mut sphere, "solid.sphere", json!({"radius": 5}));
+    run(&mut sphere, "file.export", json!({"path": path}));
+    let lost = run(&mut s, "component.update_links", json!({}));
+    assert!(lost["warnings"].to_string().contains("no longer exists"), "{lost}");
+    assert!(s.model.result(cut).unwrap().error.is_some());
+    run(&mut s, "edit.undo", json!({}));
+    assert!((volume(&s) - (8000.0 - 160.0)).abs() < 1e-5);
+    let component = *s.doc.links.keys().next().unwrap();
+    run(&mut s, "component.break_link", json!({"component": component}));
+    assert!(s.model.result(cut).unwrap().error.is_none());
+    let saved = dir.join("attached.sc");
+    run(&mut s, "file.save", json!({"path": saved}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": saved}));
+    assert!(opened.doc.links.is_empty());
+    assert!(opened.model.result(cut).unwrap().error.is_none());
+    assert!((volume(&opened) - (8000.0 - 160.0)).abs() < 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
+}

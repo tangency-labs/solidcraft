@@ -21,7 +21,6 @@ canvas.delete
 canvas.edit
 canvas.insert
 component.activate
-component.break_link
 component.capture_position
 component.copies
 component.create
@@ -29,7 +28,6 @@ component.delete
 component.extract
 component.from_bodies
 component.insert_design
-component.links
 component.list
 component.metadata
 component.metadata.set
@@ -42,7 +40,6 @@ component.rename
 component.replace_with_link
 component.revert_position
 component.unlock
-component.update_links
 config.activate
 config.column
 config.configure
@@ -85,7 +82,6 @@ face.delete
 file.export
 file.export_view_dxf
 file.insert_mesh
-file.insert_step
 file.new
 file.save
 file.save_as
