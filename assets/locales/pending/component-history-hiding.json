@@ -6,5 +6,45 @@
     "ui.show_component_history": "Show its History",
     "ui.history_show_hidden": "Show Hidden Components",
     "ui.history_hide_hidden": "Hide Hidden Components"
+  },
+  "ar": {
+    "cmd.component_hide_history": "إخفاء سجل المكوّن",
+    "cmd.component_show_history": "إظهار سجل المكوّن",
+    "ui.hide_component_history": "إخفاء سجله",
+    "ui.show_component_history": "إظهار سجله",
+    "ui.history_show_hidden": "إظهار المكونات المخفية",
+    "ui.history_hide_hidden": "إخفاء المكونات المخفية"
+  },
+  "he": {
+    "cmd.component_hide_history": "הסתר היסטוריית רכיב",
+    "cmd.component_show_history": "הצג היסטוריית רכיב",
+    "ui.hide_component_history": "הסתר את ההיסטוריה שלו",
+    "ui.show_component_history": "הצג את ההיסטוריה שלו",
+    "ui.history_show_hidden": "הצג רכיבים מוסתרים",
+    "ui.history_hide_hidden": "הסתר רכיבים מוסתרים"
+  },
+  "ja": {
+    "cmd.component_hide_history": "コンポーネントの履歴を非表示",
+    "cmd.component_show_history": "コンポーネントの履歴を表示",
+    "ui.hide_component_history": "このコンポーネントの履歴を非表示",
+    "ui.show_component_history": "このコンポーネントの履歴を表示",
+    "ui.history_show_hidden": "非表示のコンポーネントを表示",
+    "ui.history_hide_hidden": "非表示のコンポーネントを隠す"
+  },
+  "vi": {
+    "cmd.component_hide_history": "Ẩn lịch sử thành phần",
+    "cmd.component_show_history": "Hiện lịch sử thành phần",
+    "ui.hide_component_history": "Ẩn lịch sử của nó",
+    "ui.show_component_history": "Hiện lịch sử của nó",
+    "ui.history_show_hidden": "Hiện các thành phần bị ẩn",
+    "ui.history_hide_hidden": "Ẩn các thành phần bị ẩn"
+  },
+  "zh": {
+    "cmd.component_hide_history": "隐藏组件历史记录",
+    "cmd.component_show_history": "显示组件历史记录",
+    "ui.hide_component_history": "隐藏其历史记录",
+    "ui.show_component_history": "显示其历史记录",
+    "ui.history_show_hidden": "显示隐藏的组件",
+    "ui.history_hide_hidden": "隐藏已隐藏的组件"
   }
 }
