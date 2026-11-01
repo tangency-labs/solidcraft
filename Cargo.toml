@@ -15,7 +15,7 @@ repository = "https://github.com/bherbruck/solidcraft"
 [workspace.dependencies]
 robust = "1.2"
 # CAM engine (MIT): adaptive clearing over planar regions (crates/cam)
-raygeo = "1.68.0-beta3"
+raygeo = "1.68.0"
 # internal
 solidcraft-geom = { path = "crates/geom" }
 solidcraft-sketch = { path = "crates/sketch" }

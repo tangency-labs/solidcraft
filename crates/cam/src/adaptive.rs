@@ -8,26 +8,20 @@
 //! other operation, so a path that breaks a safety rule never leaves this
 //! function.
 //!
-//! Two limits come with the engine's model: a narrow slot between two wide
-//! areas is crossed, not cleared (the in-tree [`crate::ops::pocket`] clears
-//! those), and the planner works on approximated regions — so every move
-//! target is snapped into the exact valid tool-center region (this crate's
-//! own offsetting) and an arc that would cross a wall is flattened into
-//! cuts. Walls end up safe but may keep up to the region tolerance of
-//! material; a finishing contour pass (`cam.op.contour`) cleans them, as
-//! adaptive workflows do anyway.
+//! One limit comes with the engine's model: the planner works on approximated
+//! regions — so every move target is snapped into the exact valid tool-center
+//! region (this crate's own offsetting) and an arc that would cross a wall is
+//! flattened into cuts. Walls end up safe but may keep up to the region
+//! tolerance of material; a finishing contour pass (`cam.op.contour`) cleans
+//! them, as adaptive workflows do anyway.
 
-use std::sync::{Arc, Mutex};
-
-use raygeo::cnc::execution::intent::create_intent;
-use raygeo::cnc::execution::specs::AggregateOutput;
+use raygeo::cnc::execution::run::run_plan;
 use raygeo::cnc::plan::clearing::{ClearingWorkplanOptions, plan_clearing};
+use raygeo::error::RaygeoError;
 use raygeo::geo::types::{Point, Polygon};
 use raygeo::ops::container::Ops;
 use raygeo::ops::part::part::Part;
 use raygeo::ops::{MoveCmd, OpCategory};
-use raygeo::pipeline::completed::CompletedNode;
-use raygeo::pipeline::pipeline::Pipeline;
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::{Loop2, Region2, Vec2, Vec3};
 
@@ -142,21 +136,6 @@ fn bounds(polygon: &[Point]) -> (f64, f64) {
     ((max.x - min.x).max(0.0), (max.y - min.y).max(0.0))
 }
 
-/// The islands inside a plan step's area, for the step's own scoping.
-fn islands_inside(outer: &Polygon, islands: &[Polygon]) -> Vec<Polygon> {
-    islands.iter().filter(|island| island.first().is_some_and(|p| contains(outer, *p))).cloned().collect()
-}
-
-/// Even-odd containment against the ring's segments.
-fn contains(ring: &[Point], p: Point) -> bool {
-    let mut inside = false;
-    for (a, b) in ring.iter().zip(ring.iter().cycle().skip(1)) {
-        if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
-            inside = !inside;
-        }
-    }
-    inside
-}
 /// A loop as a polygon for the engine, within `tol`.
 fn polygon(loop2: &Loop2, tol: f64) -> Polygon {
     loop2.polyline(tol.max(1e-4)).into_iter().map(|p| Point::new(p.x, p.y)).collect()
@@ -165,10 +144,9 @@ fn polygon(loop2: &Loop2, tol: f64) -> Polygon {
 /// One depth level of one region through the raygeo clearing planner.
 ///
 /// The planner splits the pocket around narrow passages, orders the areas and
-/// plans their entries and passage crossings; the pipeline runs the plan and
-/// links the steps' cleared state. The planner scopes each area without its
-/// islands, so they are attached to the plan's steps again before it runs —
-/// without them the area's clearing would cut into the island.
+/// plans their entries and passage crossings; its steps carry their region
+/// scopes with the islands attached, and [`run_plan`] runs the plan and links
+/// the steps' cleared state.
 fn clear_level(
     boundary: &Polygon,
     islands: &[Polygon],
@@ -197,45 +175,18 @@ fn clear_level(
         area_tolerance: 1.0,
         max_deflection_deg: 30.0,
         finishing: false,
+        // Feeds are chosen per move below, from the operation's own feeds.
+        feed_rate: None,
     };
-    let mut plan = plan_clearing(&part, "", &options).map_err(|e| CamError::Invalid(format!("the clearing planner failed: {e}")))?;
-    for step in &mut plan.steps {
-        if let Some((polygon, scoped)) = &mut step.region_boundary
-            && scoped.is_empty()
-        {
-            *scoped = islands_inside(polygon, islands);
-        }
-    }
-    let nodes = create_intent(&plan, &part, 0);
-    if nodes.is_empty() {
+    let plan = plan_clearing(&part, "", &options).map_err(|e| CamError::Invalid(format!("the clearing planner failed: {e}")))?;
+    if plan.steps.is_empty() {
         return Ok(Ops::new());
     }
-    let result: Arc<Mutex<Option<std::result::Result<Ops, String>>>> = Arc::new(Mutex::new(None));
-    let sink = result.clone();
-    let captured = move |node: CompletedNode| {
-        let mut slot = match sink.lock() {
-            Ok(slot) => slot,
-            Err(_) => return,
-        };
-        if slot.is_some() {
-            return;
-        }
-        if let Some(error) = &node.error {
-            *slot = Some(Err(format!("the clearing engine failed: {error:?}")));
-            return;
-        }
-        if let Some(output) = &node.output
-            && let Some(aggregate) = output.downcast_ref::<AggregateOutput>()
-        {
-            *slot = Some(Ok(aggregate.ops.clone()));
-        }
-    };
-    Pipeline::default().execute(nodes, captured, None).map_err(|_| CamError::Invalid("the clearing engine was cancelled".into()))?;
-    match result.lock().map_err(|_| CamError::Invalid("the clearing engine panicked".into()))?.take() {
-        Some(Ok(ops)) => Ok(ops),
-        Some(Err(message)) => Err(CamError::Invalid(message)),
-        None => Ok(Ops::new()),
-    }
+    let output = run_plan(&plan, &part).map_err(|e| match e {
+        RaygeoError::Cancelled => CamError::Invalid("the clearing engine was cancelled".into()),
+        other => CamError::Invalid(format!("the clearing engine failed: {other}")),
+    })?;
+    Ok(output.ops)
 }
 
 /// The farthest point toward `to` (from a valid `from`) that stays `keep_out`
