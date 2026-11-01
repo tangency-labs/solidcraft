@@ -9071,14 +9071,34 @@ mod coplanar_growth_tests {
 /// attachment that follows the plane (#565); the box's other faces never reach the part.
 fn split_by_plane_traced(input: &Traced, plane: &Plane) -> Result<Vec<Traced>> {
     let mut parts = Vec::new();
+    let mut boolean_failed = false;
     for positive in [true, false] {
-        let (part, tool) = kernel::half_space(&input.body, plane, positive)?;
+        let (part, tool) = match kernel::half_space(&input.body, plane, positive) {
+            Ok(result) => result,
+            Err(_) => {
+                boolean_failed = true;
+                break;
+            }
+        };
         let Some(part) = part else { continue };
         // The box's cap in the plane: its start cap on the positive side, its end cap on the other.
         let section = Some("section".to_string());
         let caps = if positive { [section, None] } else { [None, section] };
         let tool = crate::lineage::ProfileRoles { sketch: None, region: None, caps, thin: None }.tool(tool, None);
         parts.push(Traced::step(part, &[input, &tool]));
+    }
+    if boolean_failed {
+        // The half-space boolean can fail on an imported body (#2979: every plane near a face of
+        // it). The imprint splitter traces the plane over the faces instead, with no boolean;
+        // its section is new, so it has no cap of the box to trace back to.
+        let parts = kernel::split_body(&input.body, &kernel::SplitTool::Plane(*plane))?;
+        return parts
+            .into_iter()
+            .map(|part| {
+                let part = part.with_preserved_planar_sources(&input.body)?;
+                Ok(Traced::step(part, &[input]))
+            })
+            .collect();
     }
     Ok(parts)
 }
