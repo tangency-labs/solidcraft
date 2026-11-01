@@ -73,11 +73,13 @@ commands:
                   that exist, that the router table lists exactly the skills there are, and that
                   AGENTS.md and new skills stay short
   test [CARGO ARGS] [-- TEST ARGS]
-                  build the tests with the ci profile, then run every test binary at once
-                  (and the doc tests alongside); SOLIDCRAFT_TEST_JOBS=N bounds concurrent test
-                  and side commands for test/ci and splits each binary's test threads and action
+                  build with the ci profile; run CPU-only binaries concurrently and GPU binaries
+                  in one serial lane (one libtest thread each unless overridden), with docs alongside;
+                  SOLIDCRAFT_TEST_JOBS=N bounds concurrent test and side commands for test/ci
+                  and splits CPU-only test threads and every binary's action
                   matrix workers across the binaries in flight; explicit RUST_TEST_THREADS and
-                  ACTION_MATRIX_JOBS overrides still win
+                  ACTION_MATRIX_JOBS overrides still win; SOLIDCRAFT_GPU_TEST_JOBS=N changes
+                  the GPU lane count (default 1, still subject to the shared command bound)
   wasm            cargo check every library crate and the web app for wasm32-unknown-unknown
   web-offline [DIR]
                   write the web build's service worker (sw.js: offline use, updates); run by

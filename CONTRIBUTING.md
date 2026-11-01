@@ -190,17 +190,35 @@ Either include the fix in the same PR, or mark the test `#[ignore = "fails until
 **Use the `ci` profile.** CI runs the tests with `--profile ci`: light optimisation, line tables,
 no LTO, and debug assertions off (truck has debug-only assertions that reject valid geometry). It
 builds several times faster than `--release`. If a test fails only in a plain debug build, say so
-in the PR. `cargo xtask test` builds the tests with it and then runs every test binary at once
-(`cargo test` runs them one after another); arguments after `--` go to each binary, e.g.
+in the PR. `cargo xtask test` builds the tests with it and runs CPU-only binaries concurrently.
+Binaries whose packages depend on wgpu (including transitive, optional and dev dependencies)
+share one serial lane and default to one libtest thread, so GPU devices are not opened by
+many binaries or tests at once. Arguments after `--` go to each binary, e.g.
 `cargo xtask test -- shell`. Set `SOLIDCRAFT_TEST_JOBS` to a positive integer to opt into a
 shared bound on top-level test/side commands for `cargo xtask test` and `cargo xtask ci`.
 For example, `SOLIDCRAFT_TEST_JOBS=2` allows two commands at once; the sequential wasm/doc
 worker consumes one of those slots. Every binary and side check still runs after failures.
-Without the variable the existing concurrency is unchanged. With it set, each test binary
-inherits `RUST_TEST_THREADS` and `ACTION_MATRIX_JOBS` of `max(1, cpus / jobs)` — the machine's
+Without the variable CPU-only concurrency is unchanged; GPU binaries still share their serial
+lane. With it set, CPU-only binaries inherit `RUST_TEST_THREADS` and every binary inherits
+`ACTION_MATRIX_JOBS` of `max(1, cpus / jobs)` — the machine's
 parallelism shared between the binaries in flight — unless you set either one explicitly;
-explicit caller overrides always win. Cargo's build-job setting remains an independent caller
-override; this limit does not change test filters, timeouts or baselines.
+explicit caller overrides always win (including `--test-threads` passed after `--`).
+`SOLIDCRAFT_GPU_TEST_JOBS=N` explicitly changes the GPU lane count from one; combined with an
+explicit `RUST_TEST_THREADS` it can restore the old GPU concurrency. A global
+`SOLIDCRAFT_TEST_JOBS` bound still limits the whole run, including those lanes.
+Cargo's build-job setting remains an independent caller override; these limits do not change
+test filters, timeouts or baselines. These settings apply to the libtest runner used by default,
+not the optional nextest backend.
+
+On a laptop whose desktop shares the GPU, keep the default serial GPU lane. To also bound CPU
+and build load, for example, run `CARGO_BUILD_JOBS=2 SOLIDCRAFT_TEST_JOBS=2 cargo xtask ci`.
+This reduces concurrency; it cannot prevent a driver bug or move tests off the GPU.
+`SOLIDCRAFT_GPU=software` requests software rendering, but older offscreen tests ignore that
+policy (tracked separately in #9040 / #9052). On Linux, to exclude hardware adapters for a gate,
+also set `WGPU_BACKEND=vulkan` and `VK_DRIVER_FILES` to your installed lavapipe ICD JSON; its
+path is distribution-specific. Do not point it at a hardware ICD. Setting `SOLIDCRAFT_GPU=cpu`
+can skip GPU tests and is not equivalent to validating them on software Vulkan.
+
 Tests run beside each other on a busy machine, so a test must not depend on wall-clock timing.
 
 **Ready pull requests test what they touch.** CI maps changed files to workspace packages and
