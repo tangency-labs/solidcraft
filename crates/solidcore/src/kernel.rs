@@ -958,6 +958,18 @@ pub struct UpstreamFixes {
     pub internal_pole_row_through_knot: bool,
     /// `SmSurfOfExtrusion::AssertValid` test 8 point-solves the origin on the generating curve with an unscaled `SM_EFF_ZERO`, so an origin evaluated on the curve at coordinates of about 10 (a text outline's quadratic Bezier) resolves to a few 1e-12 and is reported missing; with this fix that solve uses the issue's coordinate-aware zero `SM_EFF_ZERO * (1.0 + origin.max_dimension())`, its own factor rather than the factor 100 of the neighbouring point tests (WR-511, #1508; tangency-labs/smlib#31).
     pub extrusion_origin_scaled_zero: bool,
+    /// `SmSurfaceIntersector::IsPointOnCurve` (`SmSurfaceIntersector.cpp:7376`, `:7391`,
+    /// [`crate::intersect::surface_intersector::p1::SurfaceIntersector::is_point_on_curve`])
+    /// and `sm_IsPointOnCurve` (`SmSurfaceIntersector.cpp:4195`,
+    /// [`crate::intersect::surface_intersector::p1::is_point_on_tsect_curve`]) propagate
+    /// a failing `EvaluatePoint`, `DropPoint`, or Hermite `LocalPointSolve` error as
+    /// `Err(...)` instead of reproducing upstream's `SER(...)` inside an `SmBoolean`
+    /// return — where a non-zero `SmStatus` converts to `TRUE` (`Ok(true)`) and makes
+    /// the test point count as lying on the curve (`WR-52`; see
+    /// `plan/upstream-issues/WR-52--addendum-2026-11-01-is-point-on-curve-eval-failure.md`).
+    /// [`SolidError::Unported`](crate::error::SolidError::Unported) always propagates in
+    /// both modes. Off by default for pinned C++ parity.
+    pub is_point_on_curve_propagates_eval_failure: bool,
     /// `SmSurfOfExtrusion::EvaluateSTEP` and `EvaluateSTEPPoint` evaluate the clamped
     /// copy of the STEP parameters ("clamp input point to surface domain"), not the
     /// caller's unclamped `crUV`: with out-of-bounds evaluation off, a parameter
