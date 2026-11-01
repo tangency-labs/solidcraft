@@ -8,6 +8,8 @@ pub const MAX_POINTS: usize = 20_000;
 pub const MAX_CONSTRAINTS: usize = 40_000;
 /// Curves need points, so this follows the point cap.
 pub const MAX_CURVES: usize = MAX_POINTS;
+// [`SketchError::TooLarge`]'s message names this number; keep them matched (#10874).
+const _: () = assert!(MAX_POINTS == 20_000);
 
 /// Largest coordinate or dimension value (mm) a sketch accepts.
 pub const MAX_COORD: f64 = 1e9;
@@ -37,7 +39,12 @@ pub enum SketchError {
     Duplicate(String),
     #[error("invalid value: {0}")]
     Invalid(String),
-    #[error("sketch is too large")]
+    /// Cap hit on points, curves or constraints ([`MAX_POINTS`], [`MAX_CURVES`],
+    /// [`MAX_CONSTRAINTS`]). Insert SVG/DXF of a dense drawing (a floorplan) often hits this;
+    /// scale alone does not reduce how many curves the file has (#10874).
+    #[error(
+        "sketch is too large (at most 20000 points or curves); simplify the drawing or split it across sketches — changing scale does not reduce how many curves it has"
+    )]
     TooLarge,
 }
 
