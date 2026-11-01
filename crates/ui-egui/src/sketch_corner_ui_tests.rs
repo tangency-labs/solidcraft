@@ -1210,3 +1210,64 @@ fn a_corner_rows_x_turns_its_own_cut_off_and_the_buttons_line_up() {
     h.frames(2);
     assert_eq!(enabled(&h), 4, "the same button shows the cut again");
 }
+
+/// Two profiles meeting at one point have a corner each: the lines of one pair give their ends
+/// at the place, and the lines of the other pair still have theirs, so both corners are cut. Four
+/// lines at one point make two rows of two, not one row and two lines waiting.
+#[test]
+fn two_profiles_meeting_at_one_place_make_a_corner_for_each_pair() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    // Two profiles' corners on the origin, the way two rectangles drawn from it meet there.
+    for (id, points) in [
+        ("left", [[-10.0, -10.0], [0.0, 0.0]]),
+        ("up", [[0.0, 0.0], [0.0, 10.0]]),
+        ("down", [[0.0, 0.0], [0.0, -10.0]]),
+        ("right", [[10.0, 0.0], [0.0, 0.0]]),
+    ] {
+        h.app.run("sketch.line", json!({"points": points, "ids": [id]})).unwrap();
+    }
+    h.settle();
+    assert_eq!(labels(&h, &["left", "up"]), ["left-up"]);
+    assert_eq!(labels(&h, &["left", "up", "down", "right"]), ["left-up", "down-right"]);
+    // Each row is a corner of its own two lines, in the order they were picked.
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.model.state();
+    let sk = &state.sketch(sid).unwrap().sketch;
+    let rows = crate::sketch_corner_rows::rows(sk, &line_picks(&h, &["left", "up", "down", "right"]), &serde_json::Map::new());
+    assert_eq!(crate::sketch_corner_rows::params(sk, &rows[0]), json!({"a": "left", "b": "up"}));
+    assert_eq!(crate::sketch_corner_rows::params(sk, &rows[1]), json!({"a": "down", "b": "right"}));
+}
+
+/// A corner row's X hides its cut, and that hiding outlives the row: when the lines leave the
+/// list and are picked again the row comes back as the user left it, rather than cutting again.
+#[test]
+fn a_hidden_corner_stays_hidden_when_its_lines_leave_the_list_and_come_back() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.fillet"})).unwrap();
+    h.frames(2);
+    let rows = |h: &crate::scenario::Harness| crate::sketch_modify_ui::dialog_rows(&h.app.session, h.app.dialog.as_ref().unwrap());
+    let set = |h: &mut crate::scenario::Harness, picks: Vec<solidcraft_engine::Sel>| {
+        if let Some(input) = h.app.dialog.as_mut().and_then(|d| d.inputs.first_mut()) {
+            input.items = picks;
+        }
+        h.frames(2);
+    };
+    let picks = line_picks(&h, &["l1", "l2"]);
+    set(&mut h, picks.clone());
+    assert_eq!(rows(&h).len(), 1);
+    h.step(&json!({"click":{"handle":"dialog:list:corner:0:remove"}})).unwrap();
+    h.frames(2);
+    assert!(!rows(&h)[0].enabled, "the X takes the cut away");
+    // The lines leave the list, so no corner is shown...
+    set(&mut h, Vec::new());
+    assert!(rows(&h).is_empty());
+    // ...and come back: the corner is still the one the user left.
+    set(&mut h, picks);
+    let back = rows(&h);
+    assert_eq!(back.len(), 1);
+    assert!(!back[0].enabled, "a corner the user hid stays hidden");
+}

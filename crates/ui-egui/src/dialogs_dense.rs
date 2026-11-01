@@ -188,9 +188,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     placement_row(d, ui, app);
     if crate::hole_refs::takes(d) {
         // Each reference edge with its distance (#37, #6380).
-        enter |= crate::hole_refs::input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
+        enter |= crate::hole_refs::input_rows(d, ui, &app.session, app.preferences.origin_plane_names, &mut app.corner_kept);
     } else {
-        input_rows(d, ui, &app.session, app.preferences.origin_plane_names);
+        input_rows(d, ui, &app.session, app.preferences.origin_plane_names, &mut app.corner_kept);
     }
     d.sync_material(&app.session);
     // The Hole dialog's dropdowns preview each choice on a copy of the form as it stands.

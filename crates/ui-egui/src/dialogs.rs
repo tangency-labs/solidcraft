@@ -2652,8 +2652,8 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
 
 /// Selection input rows: label, "N selected" (or a hint) and a clear button; clicking a row
 /// makes it the active input.
-fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames) {
-    input_rows_range(d, ui, s, names, 0..d.inputs.len());
+fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames, kept: &mut crate::sketch_corner_rows::Kept) {
+    input_rows_range(d, ui, s, names, 0..d.inputs.len(), kept);
 }
 
 /// Saved vectors/axes are real inputs even when they have no origin-axis selection chip.
@@ -2702,7 +2702,14 @@ fn first_click(ui: &egui::Ui, key: &str) -> bool {
     true
 }
 
-pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames, range: std::ops::Range<usize>) {
+pub(crate) fn input_rows_range(
+    d: &mut Dialog,
+    ui: &mut egui::Ui,
+    s: &Session,
+    names: crate::prefs::OriginPlaneNames,
+    range: std::ops::Range<usize>,
+    kept: &mut crate::sketch_corner_rows::Kept,
+) {
     // Edit Text shows its Path input among its own rows.
     if matches!(d.kind, Kind::Text(_)) {
         return;
@@ -2714,6 +2721,16 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     // Only one field may look active at a time (#10066): while a text editor holds the keyboard,
     // no pick field draws its accent ring, and clicking a pick field takes the keyboard back.
     let text_focus = crate::ui_kit::editor_has_focus(ui.ctx());
+    // The corner rows' own X and Flip state outlives the rows themselves: it is kept with the
+    // application, so a corner whose lines leave the list and come back is still the corner the
+    // user left. Another sketch starts with every corner cut.
+    let corner = matches!(d.kind, Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. }));
+    if corner {
+        let kept = kept.of(s.active_sketch);
+        for (key, value) in kept {
+            d.extra.insert(key.clone(), value.clone());
+        }
+    }
     // The corner rows replace a bare list of picks: a row is one corner, made of the lines
     // picked for it, and keeps its own X and Flip.
     let corner_rows = match &d.kind {
@@ -2842,6 +2859,9 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
             crate::sketch_corner_rows::Change::Off(off) => crate::sketch_corner_rows::set_off(&mut d.extra, &key, off),
             crate::sketch_corner_rows::Change::Flip(flip) => crate::sketch_corner_rows::set_flip(&mut d.extra, &key, flip),
         }
+    }
+    if corner {
+        kept.remember(&d.extra);
     }
     if let Some(i) = activate {
         d.active = i;
@@ -3661,6 +3681,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         app.applying = None;
     }
     if !keep || cancel {
+        // The window's corner rows' state belongs to it: a new Fillet or Chamfer starts with
+        // every corner cut again.
+        app.corner_kept = Default::default();
         app.session.feature_edit_sketch = None;
         crate::dialogs_motion::closed(app, &mut d, applied);
         if let Kind::Text(k) = &mut d.kind {
@@ -3697,6 +3720,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Close the dialog without applying it (Esc, Cancel). An edit puts the timeline marker back.
 pub fn cancel(app: &mut SolveApp) {
+    app.corner_kept = Default::default();
     app.session.feature_edit_sketch = None;
     if let Some(pending) = &mut app.pending_feature_edit {
         pending.cancel();

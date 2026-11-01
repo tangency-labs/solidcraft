@@ -238,10 +238,16 @@ pub(crate) fn sync(s: &Session, d: &mut Dialog) {
 
 /// The Single hole's (or the Cylinder's) selection rows, each reference edge with its distance on
 /// the row below it once it is picked. Whether Enter was pressed in a distance.
-pub(crate) fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, names: crate::prefs::OriginPlaneNames) -> bool {
+pub(crate) fn input_rows(
+    d: &mut Dialog,
+    ui: &mut egui::Ui,
+    s: &Session,
+    names: crate::prefs::OriginPlaneNames,
+    kept: &mut crate::sketch_corner_rows::Kept,
+) -> bool {
     let mut enter = false;
     for i in 0..d.inputs.len() {
-        crate::dialogs::input_rows_range(d, ui, s, names, i..i + 1);
+        crate::dialogs::input_rows_range(d, ui, s, names, i..i + 1, kept);
         let Some(k) = d.inputs.get(i).filter(|inp| !inp.items.is_empty()).and_then(|inp| REFERENCES.iter().position(|l| *l == inp.label)) else {
             continue;
         };
