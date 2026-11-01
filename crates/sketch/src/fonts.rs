@@ -207,9 +207,24 @@ pub fn families_in(dirs: &[PathBuf]) -> Vec<String> {
 /// Largest name table read when listing families.
 const MAX_NAME_TABLE: u32 = 1 << 20;
 
-/// The family names of each face of a font file, from its name tables alone: the file's table
-/// directory says where they are, so a large font costs a few small reads, not its whole size.
+/// The family names of each face of a font file, from its name tables alone.
 fn file_families(path: &Path) -> Vec<String> {
+    let names = face_tables(path, b"name", MAX_NAME_TABLE);
+    names.iter().filter_map(|face| ttf_parser::name::Table::parse(face.table.as_deref()?).and_then(|table| family_name(&table))).collect()
+}
+
+/// One table of one face of a font file, and what its table directory says of the face.
+struct FaceTable {
+    index: u32,
+    /// Whether it has outlines to fill: a bitmap or colour-only face has none.
+    outlines: bool,
+    /// The table: None when the face has none, or one over the size asked for.
+    table: Option<Vec<u8>>,
+}
+
+/// One table of each face of a font file: the file's table directory says where they are, so a
+/// large font costs a few small reads, not its whole size.
+fn face_tables(path: &Path, tag: &[u8; 4], largest: u32) -> Vec<FaceTable> {
     use std::io::{Read, Seek, SeekFrom};
     let Ok(mut file) = std::fs::File::open(path) else { return Vec::new() };
     let mut read_at = |offset: u64, len: usize| -> Option<Vec<u8>> {
@@ -228,21 +243,33 @@ fn file_families(path: &Path) -> Vec<String> {
         vec![0]
     };
     let mut out = Vec::new();
-    for face in faces {
+    for (index, face) in (0u32..).zip(faces) {
         let Some(dir) = read_at(u64::from(face), 12) else { continue };
         let tables = usize::from(be16(&dir, 4).unwrap_or(0).min(512));
         let Some(records) = read_at(u64::from(face) + 12, tables * 16) else { continue };
-        let Some(record) = (0..tables).map(|i| i * 16).find(|&r| records.get(r..r + 4) == Some(b"name")) else { continue };
-        let (Some(offset), Some(len)) = (be32(&records, record + 8), be32(&records, record + 12)) else { continue };
-        if len == 0 || len > MAX_NAME_TABLE {
-            continue;
-        }
-        let Some(data) = read_at(u64::from(offset), len as usize) else { continue };
-        if let Some(family) = ttf_parser::name::Table::parse(&data).and_then(|table| family_name(&table)) {
-            out.push(family);
-        }
+        let has = |want: &[u8; 4]| (0..tables).map(|i| i * 16).find(|&r| records.get(r..r + 4) == Some(want));
+        let outlines = has(b"glyf").or_else(|| has(b"CFF ")).or_else(|| has(b"CFF2")).is_some();
+        let table = has(tag).and_then(|record| {
+            let (offset, len) = (be32(&records, record + 8)?, be32(&records, record + 12)?);
+            if len == 0 || len > largest {
+                return None;
+            }
+            read_at(u64::from(offset), len as usize)
+        });
+        out.push(FaceTable { index, outlines, table });
     }
     out
+}
+
+/// The face `index` of the font file at `path`, for a font found by searching.
+pub(crate) fn face_at(path: &Path, index: u32) -> Option<FontData> {
+    Some(FontData { bytes: FontBytes::File(path.to_path_buf(), read_font(path).ok()?), index, weight: None })
+}
+
+/// The family name of a face.
+pub(crate) fn face_family(data: &FontData) -> Option<String> {
+    let face = ttf_parser::Face::parse(data.bytes(), data.index).ok()?;
+    family_name(&face.tables().name?)
 }
 
 /// A face's family name as people know it: the English one when there is one.

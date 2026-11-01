@@ -10,6 +10,7 @@ use solidcraft_geom::Vec2;
 use solidcraft_geom::paper::text::{Embed, Font, TextRun};
 use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
 
+use crate::fonts::fallback::{Han, Query};
 use crate::fonts::font_data;
 use crate::tests::v;
 use crate::*;
@@ -17,7 +18,7 @@ use crate::*;
 const AT: Vec2 = Vec2 { x: 100.0, y: 50.0 };
 
 fn set(text: &str, style: &TextStyle) -> (Vec<TextRun>, Font) {
-    one(paper_text(text, None, AT, 5.0, 0.0, style).unwrap().unwrap())
+    one(paper_text(text, None, "", AT, 5.0, 0.0, style).unwrap().unwrap())
 }
 
 /// The runs and their one font: the fonts come back once each, in order of id, each run's among them
@@ -29,8 +30,62 @@ fn one((runs, mut fonts): (Vec<TextRun>, Vec<Font>)) -> (Vec<TextRun>, Font) {
         assert!(font.glyphs.keys().copied().eq(placed), "{} holds exactly its runs' glyphs", font.postscript_name);
     }
     assert!(runs.iter().all(|r| fonts.iter().any(|f| f.id == r.font)), "each run's font is listed");
-    assert_eq!(fonts.len(), 1, "one font a text so far");
+    assert_eq!(fonts.len(), 1, "one font");
     (runs, fonts.remove(0))
+}
+
+/// The runs and fonts of a text that falls back, each font holding exactly the glyphs its runs place,
+/// and a scene that takes them.
+fn mixed((runs, fonts): (Vec<TextRun>, Vec<Font>)) -> (Vec<TextRun>, Vec<Font>) {
+    assert!(fonts.windows(2).all(|w| w[0].id < w[1].id), "once each, in order of id");
+    for font in &fonts {
+        let placed: std::collections::BTreeSet<u16> = runs.iter().filter(|r| r.font == font.id).flat_map(|r| r.glyphs.iter().map(|g| g.id)).collect();
+        assert!(font.glyphs.keys().copied().eq(placed), "{} holds exactly its runs' glyphs", font.postscript_name);
+    }
+    let items = runs.iter().cloned().map(Item::Text).collect();
+    let mut scene = Scene::new(v(420.0, 297.0), vec![Group { object: 1, kind: ObjectKind::TitleBlock, items }]);
+    scene.add_fonts(fonts.iter().cloned());
+    scene.validate().unwrap();
+    (runs, fonts)
+}
+
+fn set_mixed(text: &str, family: Option<&str>, language: &str) -> (Vec<TextRun>, Vec<Font>) {
+    mixed(paper_text_in(&repo_fonts(), text, family, language, AT, 5.0, 0.0, &TextStyle::default()).unwrap().unwrap())
+}
+
+/// A folder of its own for a search, emptied when dropped, holding copies of BIZ UDPGothic.
+struct Folder(PathBuf);
+
+impl Folder {
+    fn new(name: &str, copies: &[&str]) -> Folder {
+        let folder = std::env::temp_dir().join(format!("solidcraft-fallback-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        for copy in copies {
+            std::fs::write(folder.join(copy), gothic()).unwrap();
+        }
+        Folder(folder)
+    }
+
+    fn dirs(&self) -> Vec<PathBuf> {
+        vec![self.0.clone()]
+    }
+
+    /// The file the search finds for `ch`, by its name.
+    fn found(&self, han: Han, ch: char) -> Option<String> {
+        let answer = crate::fonts::fallback::answers(&[Query::new(&self.dirs(), han, false, false, ch)], true).unwrap().remove(0);
+        answer.map(|(path, _)| path.file_name().unwrap().to_string_lossy().into_owned())
+    }
+}
+
+impl Drop for Folder {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn gothic() -> Vec<u8> {
+    std::fs::read(repo_fonts()[0].join("biz-udp-gothic/BIZUDPGothic-Regular.ttf")).unwrap()
 }
 
 /// The runs on an A3 sheet as one group, with their font: what `Scene::validate` holds them to.
@@ -46,7 +101,7 @@ fn width(line: &str) -> f64 {
 }
 
 fn err(text: &str, family: Option<&str>, style: &TextStyle) -> String {
-    paper_text_in(&repo_fonts(), text, family, AT, 5.0, 0.0, style).unwrap_err().to_string()
+    paper_text_in(&repo_fonts(), text, family, "", AT, 5.0, 0.0, style).unwrap_err().to_string()
 }
 
 /// The repository's fonts as the only installed ones: Liberation Sans, IBM Plex Mono, BIZ
@@ -56,7 +111,7 @@ fn repo_fonts() -> Vec<PathBuf> {
 }
 
 fn set_in(text: &str, family: &str) -> (Vec<TextRun>, Font) {
-    one(paper_text_in(&repo_fonts(), text, Some(family), AT, 5.0, 0.0, &TextStyle::default()).unwrap().unwrap())
+    one(paper_text_in(&repo_fonts(), text, Some(family), "", AT, 5.0, 0.0, &TextStyle::default()).unwrap().unwrap())
 }
 
 #[test]
@@ -115,7 +170,7 @@ fn a_space_has_its_advance_and_no_outline() {
 fn lines_break_a_pitch_apart_and_align_as_sketch_text_does() {
     let style = TextStyle { align: TextAlign::Center, ..TextStyle::default() };
     let angle = std::f64::consts::FRAC_PI_2;
-    let (runs, font) = one(paper_text("AB\nC", None, AT, 5.0, angle, &style).unwrap().unwrap());
+    let (runs, font) = one(paper_text("AB\nC", None, "", AT, 5.0, angle, &style).unwrap().unwrap());
     let pitch = TextMetrics::new(&font_data(None).unwrap(), &style).unwrap().line_pitch(5.0).unwrap();
     // Turned a quarter: along the baseline is up the sheet, down a line is to the right.
     for (run, along, down) in [(&runs[0], -width("AB") / 2.0, 0.0), (&runs[1], -width("C") / 2.0, pitch)] {
@@ -140,11 +195,316 @@ fn a_right_to_left_line_is_a_run_per_direction_with_marks_in_their_letters_clust
 }
 
 #[test]
-fn a_character_the_font_lacks_is_refused_by_name() {
-    let e = err("Size \u{4e2d}", None, &TextStyle::default());
-    assert!(e.contains("no glyph for '\u{4e2d}'"), "{e}");
+fn a_character_no_font_has_is_refused_by_name() {
+    let e = err("Size \u{d55c}", None, &TextStyle::default());
+    assert!(e.contains("no glyph for '\u{d55c}'"), "{e}");
     let e = err("a\tb", None, &TextStyle::default());
     assert!(e.contains("'\\t'"), "{e}");
+}
+
+#[test]
+fn a_line_falls_back_per_character_at_the_same_em_on_its_baseline() {
+    let (runs, fonts) = set_mixed("Size \u{30c6}\u{30b9}\u{30c8} 12 A", None, "");
+    assert_eq!(fonts.len(), 2, "{runs:?}");
+    let own = fonts.iter().find(|f| f.postscript_name.starts_with("Liberation")).unwrap();
+    let other = fonts.iter().find(|f| f.id != own.id).unwrap();
+    let texts: Vec<(&str, bool)> = runs.iter().map(|r| (r.text.as_str(), r.font == own.id)).collect();
+    // A space and digits stay with the run they follow, when its font has them.
+    assert_eq!(texts, [("Size ", true), ("\u{30c6}\u{30b9}\u{30c8} 12 ", false), ("A", true)]);
+    let k = 5.0 / f64::from(own.metrics.cap_height);
+    assert!((runs[0].scale - k).abs() < 1e-12);
+    assert!((runs[1].scale - k * f64::from(own.units_per_em) / f64::from(other.units_per_em)).abs() < 1e-12);
+    assert!(runs.iter().all(|r| r.origin == AT), "every run starts where the line does");
+    // Along the whole line, one run after another.
+    let end = |r: &TextRun| r.glyphs.last().map(|g| g.x + g.advance).unwrap();
+    assert!((runs[1].glyphs[0].x - end(&runs[0])).abs() < 1e-9);
+    assert!((runs[2].glyphs[0].x - end(&runs[1])).abs() < 1e-9);
+    assert_eq!(runs.iter().map(|r| r.text.len()).sum::<usize>(), "Size \u{30c6}\u{30b9}\u{30c8} 12 A".len());
+}
+
+/// Fonts of different units per em: the same em on paper.
+#[test]
+fn a_fallback_takes_the_em_of_the_text_font() {
+    let (runs, fonts) = set_mixed("A\u{30c6}", Some("IBM Plex Mono"), "");
+    let em = |run: &TextRun, units: u16| run.scale * f64::from(fonts.iter().find(|f| f.units_per_em == units).unwrap().units_per_em);
+    assert!((em(&runs[0], 1000) - em(&runs[1], 2048)).abs() < 1e-12, "{runs:?}");
+}
+
+/// Beside a fallback the text's own font stays as it is alone, as sketch text sets it: no pair
+/// closed up by a shaper's kerning.
+#[test]
+fn the_own_font_beside_a_fallback_is_set_as_it_is_alone() {
+    let (alone, _) = set("AVAV", &TextStyle::default());
+    let (runs, _) = set_mixed("AVAV\u{30c6}", None, "");
+    assert_eq!(runs[0].glyphs, alone[0].glyphs);
+}
+
+#[test]
+fn letter_spacing_goes_between_the_runs_too() {
+    let style = TextStyle { letter_spacing: 0.5, ..TextStyle::default() };
+    let (runs, _) = mixed(paper_text_in(&repo_fonts(), "A\u{30c6}B", None, "", AT, 5.0, 0.0, &style).unwrap().unwrap());
+    assert_eq!(runs.len(), 3);
+    let end = |r: &TextRun| r.glyphs.last().map(|g| g.x + g.advance).unwrap();
+    assert!((runs[1].glyphs[0].x - end(&runs[0]) - 0.5).abs() < 1e-9);
+    assert!((runs[2].glyphs[0].x - end(&runs[1]) - 0.5).abs() < 1e-9);
+}
+
+#[test]
+fn alignment_counts_every_run_of_the_line() {
+    // Spaced, and ending in the text's own font: the width stops at the last glyph's advance.
+    let spaced = TextStyle { letter_spacing: 0.5, ..TextStyle::default() };
+    let left = mixed(paper_text_in(&repo_fonts(), "\u{30c6}A", None, "", AT, 5.0, 0.0, &spaced).unwrap().unwrap()).0;
+    let width = left[1].glyphs.last().map(|g| g.x + g.advance).unwrap();
+    let style = TextStyle { align: TextAlign::Right, ..spaced };
+    let (runs, _) = mixed(paper_text_in(&repo_fonts(), "\u{30c6}A", None, "", AT, 5.0, 0.0, &style).unwrap().unwrap());
+    assert!((runs[0].origin.x - (AT.x - width)).abs() < 1e-9, "{:?}", runs[0].origin);
+}
+
+/// Pieces of one right-to-left stretch in different fonts stand in display order: the last first.
+#[test]
+fn fonts_within_a_right_to_left_stretch_stand_in_display_order() {
+    let (runs, fonts) = set_mixed("\u{5d0}\u{30fb}\u{5d1}", Some("BIZ UDPGothic"), "");
+    assert_eq!(fonts.len(), 2);
+    let texts: Vec<&str> = runs.iter().map(|r| r.text.as_str()).collect();
+    assert_eq!(texts, ["\u{5d1}", "\u{30fb}", "\u{5d0}"]);
+    assert!(runs.iter().all(|r| r.rtl), "{runs:?}");
+}
+
+/// The text's own font is set as sketch text sets it, glyph by glyph, beside a run that falls back.
+#[test]
+fn the_own_fonts_run_stays_unshaped_beside_a_fallback() {
+    let (alone, _) = set("office", &TextStyle::default());
+    let (runs, _) = set_mixed("office\u{30c6}", None, "");
+    assert_eq!(runs[0].glyphs, alone[0].glyphs);
+}
+
+/// A text wholly in fonts fallen back to lists only those.
+#[test]
+fn a_font_no_run_uses_isnt_listed() {
+    let (_, fonts) = set_mixed("\u{30c6}", None, "");
+    assert_eq!(fonts.len(), 1);
+    assert!(fonts[0].postscript_name.starts_with("BIZ"), "{}", fonts[0].postscript_name);
+}
+
+#[test]
+fn each_script_has_its_list() {
+    let han = Han::Korean;
+    for (ch, script) in [
+        ('\u{5d0}', "Hebrew"),
+        ('\u{fb1d}', "Hebrew"),
+        ('\u{628}', "Arabic"),
+        ('\u{fefc}', "Arabic"),
+        ('\u{e01}', "Thai"),
+        ('\u{1100}', "Hangul"),
+        ('\u{d55c}', "Hangul"),
+        ('\u{3042}', "Kana"),
+        ('\u{ff66}', "Kana"),
+        ('\u{4e2d}', "Han"),
+        ('\u{3001}', "Han"),
+        ('\u{20000}', "Han"),
+        ('\u{416}', "Other text"),
+    ] {
+        assert_eq!(crate::fonts::fallback::script_name(ch, han).0, script, "{ch}");
+    }
+    assert_eq!(crate::fonts::fallback::script_name('\u{4e2d}', han).1, Some("Korean"));
+    assert_eq!(crate::fonts::fallback::script_name('\u{3042}', han).1, None);
+}
+
+/// A right-to-left line in a font with no Hebrew: its letters come from one that has them, shaped,
+/// with their points, and the runs stand in display order.
+#[test]
+fn a_right_to_left_run_falls_back_shaped_and_in_display_order() {
+    let line = "ab \u{5e9}\u{5c1}\u{5b8}\u{5dc}\u{5d5}\u{5b9}\u{5dd} cd";
+    let (runs, fonts) = set_mixed(line, Some("IBM Plex Mono"), "");
+    assert_eq!(fonts.len(), 2);
+    let hebrew = runs.iter().find(|r| r.text.contains('\u{5e9}')).unwrap();
+    assert!(hebrew.rtl);
+    assert!(hebrew.clusters.len() < hebrew.text.chars().count(), "marks in their letters' clusters: {:?}", hebrew.clusters);
+    let xs: Vec<f64> = runs.iter().map(|r| r.glyphs[0].x).collect();
+    assert!(xs.windows(2).all(|w| w[0] < w[1]), "left to right along the line: {xs:?}");
+    assert_eq!(runs.first().unwrap().text, "ab ");
+    assert_eq!(runs.last().unwrap().text, "cd");
+}
+
+/// A line its own font has all of is set as it always was, even beside one that falls back.
+#[test]
+fn a_line_with_nothing_lacking_is_set_as_before() {
+    let (alone, _) = set("Size", &TextStyle::default());
+    let (runs, _) = set_mixed("Size\n\u{30c6}", None, "");
+    assert_eq!(runs[0].glyphs, alone[0].glyphs);
+    assert_eq!(runs[0].clusters, alone[0].clusters);
+}
+
+/// A mark stays in its letter's font: one that font lacks is refused, not set apart.
+#[test]
+fn a_mark_never_leaves_its_letter() {
+    let e = paper_text_in(&repo_fonts(), "\u{30c6}\u{5b8}", None, "", AT, 5.0, 0.0, &TextStyle::default()).unwrap_err().to_string();
+    assert!(e.contains("no glyph for '\\u{5b8}'"), "{e}");
+}
+
+#[test]
+fn han_takes_the_drawings_language_then_what_the_text_shows() {
+    for (language, text, han) in [
+        ("ja", "\u{4e2d}", Han::Japanese),
+        ("ja-JP", "\u{4e2d}", Han::Japanese),
+        ("ko", "\u{4e2d}", Han::Korean),
+        ("zh", "\u{4e2d}", Han::SimplifiedChinese),
+        ("zh-Hans", "\u{4e2d}", Han::SimplifiedChinese),
+        ("zh-TW", "\u{4e2d}", Han::TraditionalChinese),
+        ("zh-Hant-HK", "\u{4e2d}", Han::TraditionalChinese),
+        ("zh_hk", "\u{4e2d}", Han::TraditionalChinese),
+        ("en", "\u{4e2d}\u{30c6}", Han::Japanese),
+        ("", "\u{4e2d}\u{d55c}", Han::Korean),
+        ("de", "\u{4e2d}", Han::SimplifiedChinese),
+        // The language wins over what the text shows.
+        ("zh", "\u{4e2d}\u{30c6}", Han::SimplifiedChinese),
+    ] {
+        assert_eq!(Han::of(language, text), han, "{language} {text}");
+    }
+}
+
+/// The script's list comes before the rest, in the list's order and by the language; then the first
+/// file in sorted order.
+#[test]
+fn the_list_is_tried_first_then_the_first_file_in_order() {
+    let both = Folder::new("list", &["aaa.ttf", "msyh.ttc", "msgothic.ttc", "msjh.ttc"]);
+    assert_eq!(both.found(Han::Japanese, '\u{4e2d}').as_deref(), Some("msgothic.ttc"));
+    assert_eq!(both.found(Han::SimplifiedChinese, '\u{4e2d}').as_deref(), Some("msyh.ttc"));
+    assert_eq!(both.found(Han::TraditionalChinese, '\u{4e2d}').as_deref(), Some("msjh.ttc"));
+    assert_eq!(both.found(Han::SimplifiedChinese, '\u{30c6}').as_deref(), Some("msgothic.ttc"), "kana is Japanese whatever the language");
+    assert_eq!(both.found(Han::Japanese, 'A').as_deref(), Some("aaa.ttf"), "a script with no list goes straight to the rest");
+    let lacking = Folder::new("lacking", &["malgun.ttf"]);
+    assert_eq!(lacking.found(Han::Korean, '\u{d55c}'), None, "a known file without the character is no answer");
+    let rest = Folder::new("rest", &["c.ttf", "b.ttf"]);
+    assert_eq!(rest.found(Han::Japanese, '\u{30c6}').as_deref(), Some("b.ttf"));
+}
+
+/// A known file that can't be read as a font doesn't end the list.
+#[test]
+fn a_broken_known_file_is_passed_over() {
+    let folder = Folder::new("broken", &["aaa.ttf", "msgothic.ttc"]);
+    std::fs::write(folder.0.join("meiryo.ttc"), b"not a font").unwrap();
+    assert_eq!(folder.found(Han::Japanese, '\u{30c6}').as_deref(), Some("msgothic.ttc"));
+}
+
+/// A file with a character it can't draw isn't an answer: a bitmap face, as an emoji font is.
+#[test]
+fn a_face_with_no_outlines_is_passed_over() {
+    let folder = Folder::new("bitmap", &["b.ttf"]);
+    let mut bitmap = gothic();
+    without(&mut bitmap, b"glyf");
+    std::fs::write(folder.0.join("a.ttf"), bitmap).unwrap();
+    assert_eq!(folder.found(Han::Japanese, '\u{30c6}').as_deref(), Some("b.ttf"));
+}
+
+/// "None has it" is kept for the process, as an answer is: no second search of every font.
+#[test]
+fn a_miss_is_kept() {
+    let folder = Folder::new("miss", &[]);
+    assert_eq!(folder.found(Han::Japanese, '\u{30c6}'), None);
+    std::fs::write(folder.0.join("a.ttf"), gothic()).unwrap();
+    assert_eq!(folder.found(Han::Japanese, '\u{30c6}'), None);
+    assert_eq!(folder.found(Han::Japanese, '\u{30b9}').as_deref(), Some("a.ttf"), "another character is another search");
+}
+
+/// The window's way in never searches: it says the fonts are being looked for until they are found.
+#[test]
+fn the_windows_way_in_waits_for_no_search() {
+    let folder = Folder::new("thread", &["a.ttf"]);
+    let dirs = folder.dirs();
+    let plain = TextStyle::default();
+    let now = || paper_text_now(&dirs, "A\u{30c6}", None, "", AT, 5.0, 0.0, &plain);
+    assert!(matches!(now(), Err(SketchError::FontPending)));
+    // Nothing to fall back to is never pending.
+    assert!(paper_text_now(&dirs, "A", None, "", AT, 5.0, 0.0, &plain).unwrap().is_some());
+    let answer = loop {
+        match now() {
+            Err(SketchError::FontPending) => std::thread::yield_now(),
+            other => break other,
+        }
+    };
+    let (runs, fonts) = mixed(answer.unwrap().unwrap());
+    assert_eq!((runs.len(), fonts.len()), (2, 2));
+}
+
+#[test]
+fn a_font_fallen_back_to_takes_its_nearest_style() {
+    // BIZ UDPGothic has no italic and no bold: it leans, and bold isn't refused for it.
+    let style = TextStyle { italic: true, ..TextStyle::default() };
+    let (runs, _) = mixed(paper_text_in(&repo_fonts(), "A\u{30c6}", None, "", AT, 5.0, 0.0, &style).unwrap().unwrap());
+    assert!(runs.iter().all(|r| r.slant > 0.0), "{runs:?}");
+    // Each font's own: a chosen face that is italic doesn't lean, the one fallen back to does.
+    let leaning = Folder::new("italic", &["a.ttf"]);
+    let mut mono = std::fs::read(repo_fonts()[0].join("ibm-plex-mono/IBMPlexMono-Regular.ttf")).unwrap();
+    os2(&mut mono, 62, 0x01);
+    std::fs::write(leaning.0.join("mono.ttf"), mono).unwrap();
+    let (runs, _) = mixed(paper_text_in(&leaning.dirs(), "A\u{30c6}", Some("IBM Plex Mono"), "", AT, 5.0, 0.0, &style).unwrap().unwrap());
+    assert_eq!(runs[0].slant, 0.0);
+    assert!(runs[1].slant > 0.0);
+    let bold = TextStyle { bold: true, ..TextStyle::default() };
+    // A bold face to choose: IBM Plex Mono, marked bold in its OS/2 fsSelection.
+    let folder = Folder::new("bold", &["a.ttf"]);
+    let mut mono = std::fs::read(repo_fonts()[0].join("ibm-plex-mono/IBMPlexMono-Regular.ttf")).unwrap();
+    os2(&mut mono, 62, 0x20);
+    std::fs::write(folder.0.join("mono.ttf"), mono).unwrap();
+    let (runs, fonts) = mixed(paper_text_in(&folder.dirs(), "A\u{30c6}", Some("IBM Plex Mono"), "", AT, 5.0, 0.0, &bold).unwrap().unwrap());
+    assert_eq!((runs.len(), fonts.len()), (2, 2));
+}
+
+#[test]
+fn the_status_names_what_fell_back_and_looks_for_nothing() {
+    let folder = Folder::new("notes", &["a.ttf"]);
+    let dirs = folder.dirs();
+    // Nothing searched yet: nothing to say, and nothing was looked for.
+    assert!(paper_fallback_notes(&dirs, "", "ja", ["\u{4e2d}\u{30c6}"]).is_empty());
+    assert_eq!(folder.found(Han::Japanese, '\u{4e2d}').as_deref(), Some("a.ttf"));
+    assert_eq!(folder.found(Han::Japanese, '\u{30c6}').as_deref(), Some("a.ttf"));
+    assert_eq!(
+        paper_fallback_notes(&dirs, "", "ja", ["A\u{4e2d}\u{30c6}", "B"]),
+        ["Han set in BIZ UDPGothic for Japanese", "Kana set in BIZ UDPGothic"]
+    );
+}
+
+/// The same text and fonts give the same runs and fonts, however the answers came.
+#[test]
+fn the_same_text_sets_the_same() {
+    let text = "Size \u{4e2d}\u{6587} \u{5e9}\u{5dc}\u{5d5}\u{5dd} 12";
+    let first = set_mixed(text, Some("IBM Plex Mono"), "ja");
+    let again = set_mixed(text, Some("IBM Plex Mono"), "ja");
+    assert_eq!(first.0, again.0);
+    assert_eq!(
+        first.1.iter().map(|f| (f.id, f.glyphs.len())).collect::<Vec<_>>(),
+        again.1.iter().map(|f| (f.id, f.glyphs.len())).collect::<Vec<_>>()
+    );
+}
+
+/// Random lines mixing what each font has: set into runs a scene accepts, every byte in a run, or
+/// refused by name, never a panic.
+#[test]
+fn fuzz_fallback_is_a_scene_or_a_refusal() {
+    let chars: Vec<char> = "Ab9 .(-\n\u{5e9}\u{5dc}\u{5b8}\u{5c1}\u{301}\u{200d}\u{30c6}\u{30b9}\u{4e2d}\u{3001}\u{d55c}\t".chars().collect();
+    let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+    let mut next = |n: usize| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed % n as u64) as usize
+    };
+    for _ in 0..300 {
+        let text: String = (0..next(24)).map(|_| chars[next(chars.len())]).collect();
+        let family = [None, Some("IBM Plex Mono"), Some("BIZ UDPGothic")][next(3)];
+        let style = TextStyle { italic: next(2) == 0, letter_spacing: [0.0, 0.5, -0.3][next(3)], ..TextStyle::default() };
+        match paper_text_in(&repo_fonts(), &text, family, ["", "ja", "zh-TW"][next(3)], AT, 2.5 + next(4) as f64, 0.5, &style) {
+            Ok(Some(set)) => {
+                let (runs, _) = mixed(set);
+                let bytes = text.bytes().filter(|b| *b != b'\n').count();
+                assert_eq!(runs.iter().map(|r| r.text.len()).sum::<usize>(), bytes, "{text:?}");
+            }
+            Ok(None) => assert!(text.chars().all(|c| c == '\n'), "{text:?}"),
+            Err(SketchError::Invalid(why)) => assert!(why.contains("no glyph for"), "{text:?}: {why}"),
+            Err(e) => panic!("{text:?}: {e}"),
+        }
+    }
 }
 
 #[test]
@@ -291,7 +651,7 @@ fn what_a_face_lacks_is_made_up_for() {
     assert!(!pitch("no-advances", glyphs, 0));
     // Text set in either is text the scene takes.
     for patched in [&v1, &no_post] {
-        let set = paper_text_in(std::slice::from_ref(&patched.0), "Title 12", Some("IBM Plex Mono"), AT, 5.0, 0.0, &TextStyle::default());
+        let set = paper_text_in(std::slice::from_ref(&patched.0), "Title 12", Some("IBM Plex Mono"), "", AT, 5.0, 0.0, &TextStyle::default());
         let (runs, font) = one(set.unwrap().unwrap());
         scene(&runs, &font).validate().unwrap();
     }
@@ -391,7 +751,8 @@ fn bold_takes_a_bold_face_and_italic_leans_without_one() {
     assert!(e.contains("the font Liberation Sans has no bold face"), "{e}");
     let e = err("A", Some("IBM Plex Mono"), &bold);
     assert!(e.contains("the font IBM Plex Mono has no bold face"), "{e}");
-    let (runs, _) = paper_text("A", Some(" liberation sans "), AT, 5.0, 0.0, &TextStyle { italic: true, ..TextStyle::default() }).unwrap().unwrap();
+    let (runs, _) =
+        paper_text("A", Some(" liberation sans "), "", AT, 5.0, 0.0, &TextStyle { italic: true, ..TextStyle::default() }).unwrap().unwrap();
     assert_eq!(runs[0].slant, 12f64.to_radians().tan(), "a made-up italic leans as sketch text's");
     let e = err("A", None, &TextStyle { path: Some("c1".into()), ..TextStyle::default() });
     assert!(e.contains("follows no path"), "{e}");
@@ -400,7 +761,7 @@ fn bold_takes_a_bold_face_and_italic_leans_without_one() {
 #[test]
 fn empty_lines_set_nothing() {
     for text in ["", "\n", "\n\n"] {
-        assert!(paper_text(text, None, AT, 5.0, 0.0, &TextStyle::default()).unwrap().is_none(), "{text:?}");
+        assert!(paper_text(text, None, "", AT, 5.0, 0.0, &TextStyle::default()).unwrap().is_none(), "{text:?}");
     }
     let (runs, _) = set("A\n\nB", &TextStyle::default());
     assert_eq!(runs.len(), 2);
@@ -410,10 +771,10 @@ fn empty_lines_set_nothing() {
 fn hostile_numbers_and_sizes_are_refused() {
     let plain = TextStyle::default();
     for (at, height, angle) in [(AT, f64::NAN, 0.0), (AT, 0.0, 0.0), (AT, 1e7, 0.0), (v(f64::NAN, 0.0), 5.0, 0.0), (AT, 5.0, f64::INFINITY)] {
-        assert!(paper_text("A", None, at, height, angle, &plain).is_err(), "{at:?} {height} {angle}");
+        assert!(paper_text("A", None, "", at, height, angle, &plain).is_err(), "{at:?} {height} {angle}");
     }
-    assert!(matches!(paper_text(&"A".repeat(MAX_TEXT_CHARS + 1), None, AT, 5.0, 0.0, &plain), Err(SketchError::TooLarge)));
-    assert!(paper_text("A", None, AT, 5.0, 0.0, &TextStyle { letter_spacing: f64::NAN, ..TextStyle::default() }).is_err());
+    assert!(matches!(paper_text(&"A".repeat(MAX_TEXT_CHARS + 1), None, "", AT, 5.0, 0.0, &plain), Err(SketchError::TooLarge)));
+    assert!(paper_text("A", None, "", AT, 5.0, 0.0, &TextStyle { letter_spacing: f64::NAN, ..TextStyle::default() }).is_err());
 }
 
 /// Random lines of Latin, Hebrew with its points, digits, spaces and breaks, in random styles:
@@ -437,7 +798,7 @@ fn fuzz_whatever_is_set_is_a_scene() {
             ..TextStyle::default()
         };
         let angle = next(8) as f64 * 0.7;
-        match paper_text(&text, None, AT, 2.5 + next(4) as f64, angle, &style) {
+        match paper_text(&text, None, "", AT, 2.5 + next(4) as f64, angle, &style) {
             Ok(Some(set)) => {
                 let (runs, font) = one(set);
                 scene(&runs, &font).validate().unwrap_or_else(|e| panic!("{text:?} {style:?}: {e:?}"));

@@ -67,7 +67,7 @@ pub use model::{
 };
 pub use offset::OffsetChain;
 pub use offset_topology::{OffsetCreated, OffsetRole, OffsetRoleFlags, OffsetRoleKind, OffsetTopology};
-pub use paper_text::{paper_font_note, paper_text, paper_text_in};
+pub use paper_text::{paper_fallback_notes, paper_font_note, paper_text, paper_text_in, paper_text_now};
 pub use pattern::{PatternAlignment, PatternInstance, SketchPattern, SketchPatternKind};
 pub use periodic::periodic_beziers;
 pub use profiles::{
