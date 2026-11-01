@@ -29,6 +29,9 @@
 //!   so the window never waits for it: [`paper_text_now`] asks a thread (`font-search`) and refuses
 //!   with [`SketchError::FontPending`] until the answers are in. Answers, misses too, are kept for
 //!   the process. [`paper_text`] does the search where it is called.
+//! - The browser has no font folders: there the web covers Japanese for now ([`fallback`]). Its text
+//!   is refused with [`SketchError::FontPending`], whichever way it's asked for, until the font the web
+//!   app fetches comes.
 //! - Lines break at `\n`, a line pitch apart, and are aligned as sketch text's are. A line with
 //!   right-to-left characters is a run per direction, shaped. Every run of a line starts where the
 //!   line does, its glyphs placed along the whole line.
@@ -141,8 +144,11 @@ fn set_text(
     let lean = SLANT_DEG.to_radians().tan();
     let mut placed: Vec<(usize, TextRun)> = Vec::new();
     for (row, line) in text.split('\n').enumerate() {
-        let laid =
-            if metrics.missing(line).is_empty() { metrics.laid_out(line, k) } else { mixed_line(line, &faces, &found, &scales, language, &family)? };
+        let laid = if metrics.missing(line).is_empty() {
+            metrics.laid_out(line, k)
+        } else {
+            mixed_line(line, &faces, &found, &scales, language, &family, dirs.is_empty())?
+        };
         // The line's start: along the baseline by its alignment, then down a pitch a row.
         let (along, down) = (style.align.start(laid.width), row as f64 * pitch);
         let origin = at + Vec2::new(along * cos + down * sin, along * sin - down * cos);
@@ -210,11 +216,20 @@ fn fallback_faces(
 }
 
 /// A line some of whose characters its own font lacks: its runs split by direction, then by font.
-fn mixed_line(line: &str, faces: &[&TextMetrics], found: &HashMap<char, usize>, scales: &[f64], language: &str, family: &str) -> Result<LaidLine> {
+fn mixed_line(
+    line: &str,
+    faces: &[&TextMetrics],
+    found: &HashMap<char, usize>,
+    scales: &[f64],
+    language: &str,
+    family: &str,
+    on_the_web: bool,
+) -> Result<LaidLine> {
     let invalid = || SketchError::Invalid("a run of text the font can't shape".into());
     let spans = font_spans(line, faces, found).map_err(|missing| {
         let chars: String = missing.iter().map(|c| format!(" {c:?}")).collect();
-        SketchError::Invalid(format!("the font {family} has no glyph for{chars}, and no other font here has one"))
+        let web = if on_the_web { ": the web covers Japanese for now" } else { "" };
+        SketchError::Invalid(format!("the font {family} has no glyph for{chars}, and no other font here has one{web}"))
     })?;
     let info = unicode_bidi::BidiInfo::new(line, None);
     let mut laying = Laying::default();

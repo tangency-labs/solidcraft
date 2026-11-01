@@ -123,6 +123,7 @@ under SIL OFL 1.1) within the web distribution artifacts only. The font is loade
 origin (`./fonts/BIZUDPGothic-Regular.ttf`) on-demand when the interface language is a CJK one, or, with
 any other interface language, the first time Japanese text (kana, kanji or full-width forms in a design name,
 file name, body name or typed text) is drawn, without contacting any external CDNs or third-party servers.
+A drawing's text asks for the same font: the web covers Japanese for now, and refuses other scripts its fonts lack by name.
 A session that never shows such text downloads no font. If font loading fails with a CJK interface, the web
 interface shows English for that session only to prevent missing glyphs (tofu); the saved language
 preference is kept, so the next visit tries again. The bundled font specifically targets Japanese; it also
