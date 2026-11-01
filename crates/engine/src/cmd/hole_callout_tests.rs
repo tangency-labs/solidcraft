@@ -1,7 +1,8 @@
 //! Hole callouts follow the model's Hole features (#7605). The parts are made with SolidCraft's
 //! own commands and checked against hand-worked values: a 100 x 60 x 40 bearing block with a
 //! 50 x 40 x 5 pocket, a Ø35 bore through from the pocket floor and Ø6.6 counterbored holes; a
-//! flange with 6 Ø9 holes at sketch points; an M8 tapped blind hole.
+//! flange with 6 Ø9 holes at sketch points; an M8 tapped blind hole; plates moved, in sheet metal
+//! and in a part placed twice.
 
 use serde_json::{Value, json};
 use solidcraft_geom::Vec3;
@@ -384,4 +385,126 @@ fn hostile_callout_input_is_refused_without_a_panic() {
     }
     s.refresh();
     assert!(refused(&mut s, json!({"feature": holes, "point": "p1"})).contains("10000"));
+}
+
+#[test]
+fn a_callout_reads_with_a_drawing_open_and_takes_its_unit_and_language() {
+    let mut s = Session::default();
+    bearing_block(&mut s);
+    run(&mut s, "solid.hole", json!({"position": [10, 30, 40], "diameter": 6.6, "name": "H"}));
+    run(&mut s, "drawing.create", json!({"language": "de-DE", "units": "in"}));
+    assert!(s.open_drawing.is_some());
+    // The drawing's unit and language, unless the call names others.
+    assert_eq!(lines(&callout(&mut s, "H")), ["Ø0.2598 DURCH"]);
+    assert_eq!(lines(&callout_with(&mut s, "H", None, json!({"units": "mm", "language": "en"}))), ["Ø6.60 THRU"]);
+    // A drawing that follows the model: the design's unit.
+    run(&mut s, "drawing.close", json!({}));
+    run(&mut s, "drawing.create", json!({"name": "Second"}));
+    assert_eq!(lines(&callout(&mut s, "H")), ["Ø6.60 THRU"]);
+    // Closed: the design's unit and English, as before.
+    run(&mut s, "drawing.close", json!({}));
+    assert!(s.open_drawing.is_none());
+    assert_eq!(lines(&callout(&mut s, "H")), ["Ø6.60 THRU"]);
+}
+
+#[test]
+fn a_thread_depth_of_its_own_gets_its_own_line() {
+    let mut s = Session::default();
+    bearing_block(&mut s);
+    // Drilled 15 deep, threaded 10: the drill and the thread each say their own depth.
+    run(&mut s, "solid.hole", json!({"position": [90, 30, 40], "thread": "M8", "depth": 15, "thread_depth": 10, "name": "Tapped"}));
+    let c = callout(&mut s, "Tapped");
+    assert!(near(&c["callout"]["thread_depth"], 10.0), "{c}");
+    assert_eq!(lines(&c), ["Ø6.75 ↧ 15.00", "M8 ↧ 10.00"]);
+    // Through, threaded 10: the tap drill goes through, the thread doesn't.
+    run(&mut s, "solid.hole", json!({"position": [10, 30, 40], "thread": "M6", "thread_depth": 10, "name": "ThroughTapped"}));
+    assert_eq!(lines(&callout(&mut s, "ThroughTapped")), ["Ø5.00 THRU", "M6 ↧ 10.00"]);
+}
+
+#[test]
+fn a_tapped_hole_takes_every_thread_the_hole_feature_takes() {
+    let mut s = Session::default();
+    bearing_block(&mut s);
+    for (position, thread, name) in [([10, 30, 40], "G 1/4", "G"), ([90, 30, 40], "Rp 1/4", "Rp"), ([10, 52, 40], "1/4-20 unc", "Unc")] {
+        run(&mut s, "solid.hole", json!({"position": position, "thread": thread, "depth": 12, "name": name}));
+    }
+    let g = callout(&mut s, "G");
+    assert_eq!(g["status"], "resolved", "{g}");
+    assert!(near(&g["callout"]["diameter"], 11.75), "G's tap drill: {g}");
+    assert_eq!(lines(&g), ["G 1/4 ↧ 12.00"]);
+    assert_eq!(lines(&callout(&mut s, "Rp")), ["Rp 1/4 ↧ 12.00"]);
+    // A catalogued size by its designation, however it was typed.
+    let unc = callout(&mut s, "Unc");
+    assert!(near(&unc["callout"]["diameter"], 5.1054), "{unc}");
+    assert_eq!(lines(&unc), ["1/4-20 UNC ↧ 12.00"]);
+}
+
+#[test]
+fn a_hole_in_a_moved_body_follows_the_move() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 30, "height": 8, "body_name": "Plate"}));
+    run(&mut s, "solid.hole", json!({"position": [15, 15, 8], "diameter": 6.6, "name": "H"}));
+    run(&mut s, "solid.hole", json!({"position": [45, 15, 8], "diameter": 5, "depth": 4, "name": "Blind"}));
+    run(&mut s, "solid.move", json!({"bodies": ["Plate"], "translate": [100, 0, 0]}));
+    let h = callout(&mut s, "H");
+    assert_eq!(h["status"], "resolved", "{h}");
+    assert_eq!(lines(&h), ["Ø6.60 THRU"]);
+    // Where the hole is now.
+    assert!(near(&h["callout"]["start"][0], 115.0) && near(&h["callout"]["start"][2], 8.0), "{h}");
+    // Turned over about X: still blind, now drilled upwards from z = -8.
+    run(&mut s, "solid.move", json!({"bodies": ["Plate"], "axis": [1, 0, 0], "angle": "180 deg"}));
+    let b = callout(&mut s, "Blind");
+    assert_eq!(lines(&b), ["Ø5.00 ↧ 4.00"], "{b}");
+    let at = |k: usize| b["callout"]["start"][k].as_f64().unwrap_or(f64::NAN);
+    let dir = |k: usize| b["callout"]["direction"][k].as_f64().unwrap_or(f64::NAN);
+    assert!((at(0) - 145.0).abs() < 1e-6 && (at(1) + 15.0).abs() < 1e-6 && (at(2) + 8.0).abs() < 1e-6, "{b}");
+    assert!((dir(2) - 1.0).abs() < 1e-6, "{b}");
+    // A copy moved away leaves the hole where it was.
+    let mut c = Session::default();
+    run(&mut c, "solid.box", json!({"length": 60, "width": 30, "height": 8, "body_name": "Plate"}));
+    run(&mut c, "solid.hole", json!({"position": [15, 15, 8], "diameter": 6.6, "name": "H"}));
+    run(&mut c, "solid.move", json!({"bodies": ["Plate"], "translate": [100, 0, 0], "copy": true}));
+    let h = callout(&mut c, "H");
+    assert!(near(&h["callout"]["start"][0], 15.0), "{h}");
+}
+
+#[test]
+fn one_feature_can_drill_through_on_one_hole_and_blind_on_another() {
+    let mut s = Session::default();
+    bearing_block(&mut s);
+    // 37 deep from z = 40 at q1 (blind), and from the pocket floor at z = 35 under q2 (through).
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 40], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pts"}));
+    run(&mut s, "sketch.point", json!({"point": [10, 30], "id": "q1"}));
+    run(&mut s, "sketch.point", json!({"point": [50, 30], "id": "q2"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.hole", json!({"sketch": "Pts", "points": ["q1", "q2"], "diameter": 6, "depth": 37, "name": "Stepped"}));
+    // The count is the feature's, the extent each hole's own.
+    assert_eq!(lines(&callout_with(&mut s, "Stepped", Some("q1"), json!({}))), ["2× Ø6.00 ↧ 37.00"]);
+    assert_eq!(lines(&callout_with(&mut s, "Stepped", Some("q2"), json!({}))), ["2× Ø6.00 THRU"]);
+}
+
+#[test]
+fn a_hole_in_sheet_metal_is_not_supported_yet_and_one_in_a_part_placed_twice_reads_once() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "R1", "thickness": "1 mm", "bend_radius": "1 mm", "active": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    run(&mut s, "solid.hole", json!({"position": [50, 30, 1], "diameter": 6.6, "name": "SheetHole"}));
+    // Not supported yet, and saying so: the sheet is rebuilt with the hole in it, so no face is
+    // named after the hole to tell it by.
+    let c = callout(&mut s, "SheetHole");
+    assert_eq!(c["status"], "failed", "{c}");
+    assert!(c["reason"].as_str().is_some_and(|r| r.contains("not supported yet") && r.contains("sheet metal")), "{c}");
+    // A part placed twice: one callout of its one hole, in the part's own frame.
+    let mut a = Session::default();
+    let part = run(&mut a, "component.create", json!({"name": "Bracket"}))["component"].as_u64().unwrap_or_default();
+    run(&mut a, "solid.box", json!({"length": 60, "width": 30, "height": 8, "name": "Plate"}));
+    run(&mut a, "solid.hole", json!({"position": [15, 15, 8], "diameter": 6.6, "name": "H"}));
+    run(&mut a, "occurrence.copy", json!({"component": part, "translate": [0, 100, 0]}));
+    let h = callout(&mut a, "H");
+    assert_eq!(h["status"], "resolved", "{h}");
+    assert_eq!(lines(&h), ["Ø6.60 THRU"]);
+    assert!(near(&h["callout"]["start"][0], 15.0) && near(&h["callout"]["start"][1], 15.0), "{h}");
 }
