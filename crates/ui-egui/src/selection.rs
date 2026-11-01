@@ -113,7 +113,11 @@ impl SelInput {
             Hit::Plane { name, .. } if a & PLANES != 0 => Some(Sel::Plane { name: name.clone() }),
             Hit::Axis { name } if a & AXES != 0 => Some(Sel::Axis { name: name.clone() }),
             Hit::ConstructionPoint { name } if a & CONSTRUCTION_POINTS != 0 => Some(Sel::ConstructionPoint { name: name.clone() }),
-            Hit::SketchCurve { sketch, id, straight: true, .. } if a & AXES != 0 => Some(curve_pick(id, *sketch, active)),
+            // A straight sketch line stands for an axis only in an input that takes axes for
+            // what they are: an input that takes curves too (Measure) takes the line as its curve.
+            Hit::SketchCurve { sketch, id, straight: true, .. } if a & AXES != 0 && a & CURVES == 0 => {
+                Some(curve_pick(id, *sketch, active))
+            }
             Hit::SketchCurve { sketch, id, .. } if a & SKETCH_LINES != 0 => Some(Sel::ExternalSketchCurve { sketch: *sketch, id: id.clone() }),
             Hit::SketchCurve { sketch, id, .. } if a & CURVES != 0 => Some(curve_pick(id, *sketch, active)),
             Hit::SketchPoint { sketch, id, .. } if a & EXTERNAL_POINTS != 0 => Some(Sel::ExternalSketchPoint { sketch: *sketch, id: id.clone() }),
