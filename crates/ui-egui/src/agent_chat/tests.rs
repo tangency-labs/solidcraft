@@ -1400,6 +1400,54 @@ fn models_reply(current: &str) -> Event {
     Event::Models { current: current.into(), available: vec![m("fast"), m("smart")] }
 }
 
+/// Models from several providers fold under their providers inside the picker: the current model's
+/// provider is open and the others folded; a header opens or folds its group; a typed search opens
+/// every group with a match but one folded by hand; the provider asked for over the control channel
+/// is open at the next opening.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_header_groups_models_by_provider_and_folds_them() {
+    use crate::scenario::handle_at;
+    let mut h = narrow_chat();
+    let script = Script::default();
+    h.app.agent_chat.backend = Some(Box::new(script.clone()));
+    h.app.agent_chat.state = Some(State::Ready);
+    h.app.agent_chat.running_id = "claude".into();
+    let m = |id: &str, name: &str| acp::ModelInfo { id: id.into(), name: name.into(), description: String::new() };
+    script.report(Event::Models {
+        current: "a".into(),
+        available: vec![m("a", "Host · Alpha"), m("c", "Nous Portal · Gamma"), m("b", "Host · Beta"), m("d", "Nous Portal · Delta")],
+    });
+    h.frames(4);
+    assert!(handle_at("agent_chat:provider").is_none(), "no provider drop-down of its own");
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:group:Host").is_some() && handle_at("agent_chat:model:group:Nous Portal").is_some());
+    assert!(handle_at("agent_chat:model:a").is_some() && handle_at("agent_chat:model:b").is_some(), "the current model's provider is open");
+    assert!(handle_at("agent_chat:model:c").is_none() && handle_at("agent_chat:model:d").is_none(), "the other provider is folded");
+    h.step(&json!({"click": {"handle": "agent_chat:model:group:Nous Portal"}})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:c").is_some(), "a header opens its group");
+    h.step(&json!({"click": {"handle": "agent_chat:model:group:Host"}})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:a").is_none(), "and folds it");
+    h.step(&json!({"text": "ta"})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:b").is_none(), "a fold made by hand stays while searching, Beta or not");
+    assert!(handle_at("agent_chat:model:d").is_some() && handle_at("agent_chat:model:c").is_none(), "Delta matches, Gamma does not");
+    h.step(&json!({"click": {"handle": "agent_chat:model:d"}})).unwrap();
+    h.frames(3);
+    assert_eq!(script.calls(), ["set_model: d"]);
+    assert_eq!(h.app.agent_chat.model, "d");
+    assert!(handle_at("agent_chat:model:search").is_none(), "a choice closes it");
+
+    control(&mut h.app, &h.ctx, &json!({"provider": "Host"})).unwrap();
+    h.step(&json!({"click": {"handle": "agent_chat:model"}})).unwrap();
+    h.frames(3);
+    assert!(handle_at("agent_chat:model:a").is_some(), "the provider asked for is open");
+    assert!(handle_at("agent_chat:model:d").is_some(), "and the current model's");
+}
+
 /// Choosing a model tells the agent, shows it as current and remembers it for this agent; a model
 /// the agent did not offer is ignored.
 #[test]

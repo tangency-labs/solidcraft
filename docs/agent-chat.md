@@ -75,10 +75,11 @@ clicks and scrolling over the panel stay in the chat. The docked layout retains 
   the last model choice for each agent and puts it back on the next session when still available.
   An endpoint's agent also keeps it as its default model. An agent that reports no choices shows
   no drop-down. When these model lists include more than one provider (Hermes and OpenCode name
-  each model `Provider · model`, or say `Provider: …` in its description), a provider drop-down
-  comes first and the model drop-down lists only that provider's models, without the provider in
-  front. It opens on the provider of the model in use; picking another provider changes nothing
-  until one of its models is chosen. Models with no provider named are listed under *Other*.
+  each model `Provider · model`, or say `Provider: …` in its description), the picker groups the
+  models under their providers, each a header with the count of its models that a click folds or
+  opens: the provider of the model in use starts open and the others folded, a search opens every
+  provider with a match, and a provider folded by hand stays folded until the picker closes. Models
+  with no provider named are listed under *Other*.
 - **Picking a model.** Every model picker opens on a search box over the list the agent or endpoint
   gave at this connection: SolidCraft has no list of its own. The search covers ids, names and
   descriptions, and Enter takes the exact match or the first one shown. A model that isn't listed

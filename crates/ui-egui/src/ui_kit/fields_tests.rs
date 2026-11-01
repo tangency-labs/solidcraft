@@ -146,6 +146,7 @@ fn search_picker_filters_focuses_picks_and_takes_custom_values() {
                     choices: &choices,
                     custom: custom.get(),
                     note: Some("Listing models…"),
+                    open_group: None,
                     enabled: enabled.get(),
                 },
             );
@@ -283,6 +284,7 @@ fn search_picker_keeps_every_row_reachable_as_its_contents_change() {
                             choices: &choices,
                             custom: true,
                             note: note.get(),
+                            open_group: None,
                             enabled: true,
                         },
                     );
@@ -381,6 +383,7 @@ fn search_picker_lays_out_the_rows_in_view_inside_a_narrow_window() {
                     choices: &choices,
                     custom: false,
                     note: None,
+                    open_group: None,
                     enabled: true,
                 },
             );
@@ -398,6 +401,74 @@ fn search_picker_lays_out_the_rows_in_view_inside_a_narrow_window() {
     assert!(row.left() >= 0.0 && row.right() <= 320.0, "{row:?} reaches past the window");
     let search = scenario::rect_of("test:long:search").unwrap();
     assert!(search.left() >= 0.0 && search.right() <= 320.0, "{search:?} reaches past the window");
+}
+
+/// Several groups fold under their headers: at first only the current value's group and the one
+/// asked for are open; a header opens or folds its group; a typed search opens the groups with a
+/// match but one folded by hand; Enter takes the first row shown; a fresh opening forgets the folds.
+#[test]
+fn search_picker_folds_groups_under_their_headers() {
+    let ctx = crate::fonts::test_context();
+    let picked = std::cell::RefCell::new(Vec::new());
+    let open_group = std::cell::Cell::new(None::<&'static str>);
+    let choices = [
+        SearchChoice { value: "a1", label: "Alpha one", tip: "", group: Some("A") },
+        SearchChoice { value: "b1", label: "Beta one", tip: "", group: Some("B") },
+        SearchChoice { value: "a2", label: "Alpha two", tip: "", group: Some("A") },
+        SearchChoice { value: "c1", label: "Gamma one", tip: "", group: Some("C") },
+    ];
+    let draw = |ui: &mut Ui| {
+        row(ui, "Model", |ui| {
+            let shown = search_picker(
+                ui,
+                SearchPicker {
+                    id: "search_picker_groups",
+                    handles: "grp",
+                    current: "Beta one",
+                    current_value: "b1",
+                    hint: "",
+                    choices: &choices,
+                    custom: false,
+                    note: None,
+                    open_group: open_group.get(),
+                    enabled: true,
+                },
+            );
+            picked.borrow_mut().extend(shown.inner);
+        });
+    };
+    let click = |name: &str| {
+        let at = scenario::handle_at(name).unwrap_or_else(|| panic!("no {name}"));
+        frame(&ctx, pointer(at, true), draw);
+        frame(&ctx, pointer(at, false), draw);
+        frame(&ctx, vec![], draw);
+    };
+    let typing = |text: &str| {
+        frame(&ctx, vec![egui::Event::Text(text.into())], draw);
+        frame(&ctx, vec![], draw);
+    };
+    let has = |name: &str| scenario::handle_at(name).is_some();
+    frame(&ctx, vec![], draw);
+    click("grp");
+    assert!(has("grp:group:A") && has("grp:group:B") && has("grp:group:C"), "a header per group");
+    assert!(has("grp:b1") && !has("grp:a1") && !has("grp:c1"), "only the current value's group is open");
+    click("grp:group:A");
+    assert!(has("grp:a1") && has("grp:a2"), "a header opens its group");
+    click("grp:group:A");
+    assert!(!has("grp:a1"), "and folds it again");
+    typing("one");
+    assert!(!has("grp:a1"), "a fold made by hand stays while searching");
+    assert!(has("grp:b1") && has("grp:c1"), "groups with a match open");
+    frame(&ctx, key(egui::Key::Enter), draw);
+    frame(&ctx, vec![], draw);
+    assert_eq!(picked.take(), [Picked::Listed("b1".into())], "Enter takes the first row shown, not one folded away");
+    assert!(!has("grp:search"));
+
+    open_group.set(Some("C"));
+    click("grp");
+    assert!(!has("grp:a1") && has("grp:b1") && has("grp:c1"), "C opens as asked, B as the current value's, A folds");
+    frame(&ctx, key(egui::Key::Escape), draw);
+    frame(&ctx, vec![], draw);
 }
 
 #[test]

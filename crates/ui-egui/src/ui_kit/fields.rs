@@ -285,6 +285,10 @@ pub(crate) struct SearchPicker<'a> {
     pub custom: bool,
     /// A dim line under the list: still listing, or why it could not.
     pub note: Option<&'a str>,
+    /// With two or more groups, each folds under its header. Before anything is typed, only the
+    /// current value's group and this one are open; a group with a match opens once something is
+    /// typed; a fold made by hand stays until the popup closes.
+    pub open_group: Option<&'a str>,
     pub enabled: bool,
 }
 
@@ -326,6 +330,7 @@ pub(crate) fn search_picker(ui: &mut Ui, p: SearchPicker<'_>) -> egui::InnerResp
                     data.remove::<String>(state.with("filter"));
                     data.remove::<bool>(state.with("focused"));
                     data.remove::<f32>(state.with("height"));
+                    data.remove::<SearchFolds>(state.with("folds"));
                 });
             }
             response
@@ -339,7 +344,7 @@ pub(crate) fn search_picker(ui: &mut Ui, p: SearchPicker<'_>) -> egui::InnerResp
 /// What a `search_picker` shows while it is open; the pick, if one was made this frame.
 fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Option<Picked> {
     let t = Tokens::get();
-    let (filter_id, focused_id) = (state.with("filter"), state.with("focused"));
+    let (filter_id, focused_id, folds_id) = (state.with("filter"), state.with("focused"), state.with("folds"));
     // Esc closes this popup only: left in the input, it would also cancel a dialog around it.
     if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         ui.close();
@@ -387,10 +392,22 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
         searched.contains(&query)
     };
     let visible: Vec<&SearchChoice<'_>> = p.choices.iter().filter(|choice| query.is_empty() || hit(choice)).collect();
+    // Two or more groups fold under their headers: open by default are the current value's group,
+    // `open_group`, and every group once something is typed; a fold made by hand stays until the
+    // popup closes.
+    let grouped = search_groups(p.choices).iter().filter(|(group, _)| group.is_some()).count() >= 2;
+    let folds: SearchFolds = ui.data(|data| data.get_temp(folds_id)).unwrap_or_default();
+    let current_group = p.choices.iter().find(|c| c.value == p.current_value).and_then(|c| c.group).filter(|g| !g.is_empty());
+    let is_open = |group: &str| {
+        folds.get(group).copied().unwrap_or(!query.is_empty() || Some(group) == p.open_group || Some(group) == current_group)
+    };
+    let rows = search_rows(&visible, grouped, &is_open);
+    let shown: Vec<&SearchChoice<'_>> = rows.iter().filter_map(|row| if let SearchRow::Choice(c) = row { Some(*c) } else { None }).collect();
     let custom = (p.custom && !typed.is_empty() && !p.choices.iter().any(|c| c.value == typed)).then_some(typed);
     let mut picked = None;
+    let mut toggled: Option<(String, bool)> = None;
     if search.lost_focus() && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
-        let found = visible.iter().find(|c| c.value == typed).or_else(|| visible.first());
+        let found = visible.iter().find(|c| c.value == typed).or_else(|| shown.first());
         picked = match (typed.is_empty(), found, custom) {
             // Nothing asked for: the choice stands.
             (true, ..) => {
@@ -418,8 +435,7 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
     // that can change below the box shares a height fixed when it opens, the list taking the rest.
     let height = ui.data_mut(|data| {
         *data.get_temp_mut_or_insert_with(state.with("height"), || {
-            let mut group = None;
-            let rows = p.choices.len() + p.choices.iter().filter(|choice| search_heading_of(&mut group, choice).is_some()).count();
+            let rows = p.choices.len() + search_groups(p.choices).iter().filter(|(group, _)| group.is_some()).count();
             // No rows yet: they may still be on their way, and this can't grow to take them.
             let rows = if rows == 0 { SEARCH_ROWS_AWAITED } else { rows };
             let heading = t.space_16 + gap;
@@ -443,7 +459,6 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
             search_heading(ui, crate::i18n::tr("ui.agent_chat_models_heading"), t.space_16);
             // Rows of one height, group headings too: only those in view are laid out.
             let list = (ui.available_height() - note_height).max(row_height);
-            let rows = search_rows(&visible);
             egui::ScrollArea::vertical()
                 .id_salt(state.with("list"))
                 .max_height(list)
@@ -453,6 +468,13 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
                     for row in rows.get(range).unwrap_or_default() {
                         match row {
                             SearchRow::Heading(group) => search_heading(ui, group, row_height),
+                            SearchRow::Group { name, count, open } => {
+                                let response = search_group_row(ui, name, *count, *open);
+                                scenario::publish_target(&format!("{}:group:{}", p.handles, name), response.rect);
+                                if response.clicked() {
+                                    toggled = Some(((*name).to_owned(), !*open));
+                                }
+                            }
                             SearchRow::Choice(choice) => {
                                 let response = search_row(ui, &compact(choice.label, SEARCH_LABEL_CAP), choice.value == p.current_value);
                                 scenario::publish_target(&format!("{}:{}", p.handles, choice.value), response.rect);
@@ -465,6 +487,13 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
                         }
                     }
                 });
+        }
+        if let Some((group, open)) = toggled {
+            let mut folds = folds;
+            folds.insert(group, open);
+            ui.data_mut(|data| data.insert_temp(folds_id, folds));
+            // The click took the focus from the box; typing goes on filtering.
+            search.request_focus();
         }
         if let Some(note) = note {
             let response = ui.add(egui::Label::new(note));
@@ -480,29 +509,90 @@ fn search_picker_popup(ui: &mut Ui, p: &SearchPicker<'_>, state: egui::Id) -> Op
 }
 
 enum SearchRow<'a> {
+    /// A lone group's dim heading.
     Heading(&'a str),
+    /// One of several groups: its header, with how many of its choices are listed, folded or open.
+    Group { name: &'a str, count: usize, open: bool },
     Choice(&'a SearchChoice<'a>),
 }
 
-/// The list's rows: the choices, each group's heading before its first choice.
-fn search_rows<'a>(choices: &[&'a SearchChoice<'a>]) -> Vec<SearchRow<'a>> {
-    let mut rows = Vec::with_capacity(choices.len());
-    let mut group = None;
+/// The folds made by hand in one opening of a `search_picker`: group name to open.
+type SearchFolds = std::collections::HashMap<String, bool>;
+
+/// The groups among `choices` in order of first appearance, each with its choices; `None` is the
+/// choices with no group.
+fn search_groups<'a, 'c, I>(choices: I) -> Vec<(Option<&'a str>, Vec<&'c SearchChoice<'a>>)>
+where
+    'a: 'c,
+    I: IntoIterator<Item = &'c SearchChoice<'a>>,
+{
+    let mut groups: Vec<(Option<&'a str>, Vec<&'c SearchChoice<'a>>)> = Vec::new();
     for choice in choices {
-        if let Some(heading) = search_heading_of(&mut group, choice) {
-            rows.push(SearchRow::Heading(heading));
+        let group = choice.group.filter(|g| !g.is_empty());
+        match groups.iter_mut().find(|(name, _)| *name == group) {
+            Some((_, members)) => members.push(choice),
+            None => groups.push((group, vec![choice])),
         }
-        rows.push(SearchRow::Choice(choice));
+    }
+    groups
+}
+
+/// The list's rows: each group's choices under its header, which folds them when there are several
+/// groups and is a plain heading when there is one; choices with no group as they are.
+fn search_rows<'a>(visible: &[&'a SearchChoice<'a>], grouped: bool, is_open: &dyn Fn(&str) -> bool) -> Vec<SearchRow<'a>> {
+    let mut rows = Vec::with_capacity(visible.len());
+    for (group, members) in search_groups(visible.iter().copied()) {
+        match group {
+            Some(name) if grouped => {
+                let open = is_open(name);
+                rows.push(SearchRow::Group { name, count: members.len(), open });
+                if open {
+                    rows.extend(members.into_iter().map(SearchRow::Choice));
+                }
+            }
+            Some(name) => {
+                rows.push(SearchRow::Heading(name));
+                rows.extend(members.into_iter().map(SearchRow::Choice));
+            }
+            None => rows.extend(members.into_iter().map(SearchRow::Choice)),
+        }
     }
     rows
 }
 
-/// The heading `choice` opens after a row of `group`, if any; `group` becomes its group.
-fn search_heading_of<'a>(group: &mut Option<&'a str>, choice: &SearchChoice<'a>) -> Option<&'a str> {
-    let next = choice.group.filter(|g| !g.is_empty());
-    let heading = next.filter(|_| next != *group);
-    *group = next;
-    heading
+/// The header of one of several groups in a `search_picker`: a chevron, the name, how many of its
+/// choices are listed, and a rule. A click folds or opens the group.
+fn search_group_row(ui: &mut Ui, name: &str, count: usize, open: bool) -> Response {
+    let t = Tokens::get();
+    let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::click());
+    if !ui.is_rect_visible(rect) {
+        return response;
+    }
+    let painter = ui.painter();
+    if response.hovered() {
+        painter.rect_filled(rect, t.radius_sm, t.hover);
+    }
+    let y = rect.center().y;
+    super::disclosure(painter, egui::pos2(rect.left() + t.form_inset + t.space_8 * 0.5, y), open, t.text_dim);
+    let small = egui::FontId::proportional(t.font_small);
+    let title = painter.layout_no_wrap(compact(&name.to_uppercase(), SEARCH_LABEL_CAP), small.clone(), t.text);
+    let title_pos = egui::pos2(rect.left() + t.form_inset + t.space_16, y - title.size().y / 2.0);
+    let title_width = title.size().x;
+    painter.galley(title_pos, title, t.text);
+    let number = painter.layout_no_wrap(count.to_string(), small, t.text_dim);
+    let pad = t.space_8 * 0.75;
+    let badge_height = (number.size().y + pad).min(rect.height());
+    let badge = egui::Rect::from_min_size(
+        egui::pos2(title_pos.x + title_width + t.space_8, y - badge_height / 2.0),
+        vec2(number.size().x + pad * 2.0, badge_height),
+    );
+    painter.rect_filled(badge, t.radius_sm, t.chip);
+    painter.galley(egui::pos2(badge.left() + pad, y - number.size().y / 2.0), number, t.text_dim);
+    let (rule_from, rule_to) = (badge.right() + t.space_8, rect.right() - t.form_inset);
+    if rule_from < rule_to {
+        painter.hline(rule_from..=rule_to, y, egui::Stroke::new(1.0, t.border));
+    }
+    response.on_hover_text(crate::i18n::format("ui.agent_chat_provider_models", &[("count", &count.to_string())]))
 }
 
 /// A `search_picker` row: as `list_picker`, but read from the left, as a list of ids is.

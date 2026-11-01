@@ -2178,8 +2178,29 @@ pub fn listed_models(app: &SolveApp) -> Vec<(acp::ModelInfo, String)> {
         .collect()
 }
 
-/// Show one provider's models in the model picker (the header's provider picker). The agent keeps
-/// its model until one of them is chosen. A provider the agent does not offer is ignored.
+/// Every model the header's picker lists, with the name it shows and the group it folds under:
+/// with several providers, the name without the provider in front and the provider as the group;
+/// otherwise the name as it is and no group.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub fn grouped_models(app: &SolveApp) -> Vec<(acp::ModelInfo, String, Option<String>)> {
+    let grouped = !model_providers(app).is_empty();
+    app.agent_chat
+        .models
+        .iter()
+        .map(|m| {
+            if grouped {
+                let (provider, name) = model_provider(m).unwrap_or_else(|| (provider_of(m), m.name.clone()));
+                (m.clone(), name, Some(provider))
+            } else {
+                (m.clone(), m.name.clone(), None)
+            }
+        })
+        .collect()
+}
+
+/// The provider whose group the header's model picker opens first (the control channel's
+/// `provider`). The agent keeps its model until one is chosen. A provider the agent does not offer
+/// is ignored.
 pub fn set_model_provider(app: &mut SolveApp, provider: &str) {
     if model_providers(app).iter().any(|(n, _)| n == provider) {
         app.agent_chat.model_provider = Some(provider.to_string());

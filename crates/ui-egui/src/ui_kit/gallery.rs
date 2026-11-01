@@ -1303,6 +1303,7 @@ const ELEMENTS: &[Element] = &[
                     choices: &[SearchChoice { value: "one", label: "One", tip: "", group: None }],
                     custom: true,
                     note: None,
+                    open_group: None,
                     enabled: true,
                 },
             );

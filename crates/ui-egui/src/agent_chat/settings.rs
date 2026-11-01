@@ -721,6 +721,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                         choices: &choices,
                                         custom: true,
                                         note: note.as_deref(),
+                                        open_group: None,
                                         enabled: true,
                                     },
                                 );
@@ -981,6 +982,7 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                                 choices: &choices,
                                 custom: true,
                                 note: note.as_deref(),
+                                open_group: None,
                                 enabled: true,
                             },
                         );
@@ -1467,6 +1469,11 @@ mod card_tests {
             let add = h.app.agent_chat.settings.add.as_ref().unwrap();
             listed_for(&h.app.agent_chat.settings.endpoint_models, add.listing.as_ref()).1.unwrap_or_default()
         };
+        // What the dialog's listing holds for the fields as they are (the words are the language's).
+        let listing = |h: &Harness| {
+            let add = h.app.agent_chat.settings.add.as_ref().unwrap();
+            add.listing.as_ref().and_then(|key| h.app.agent_chat.settings.endpoint_models.get(key)).cloned()
+        };
         let ask = |h: &mut Harness, url: &str| {
             let add = h.app.agent_chat.settings.add.as_mut().unwrap();
             add.base_url = url.into();
@@ -1475,12 +1482,14 @@ mod card_tests {
         };
         ask(&mut h, "http://localhost:18789/page/v1");
         assert_eq!(requests(), 2);
-        assert!(note(&h).contains(tr("ui.agent_chat_models_not_a_list")), "{}", note(&h));
+        assert!(matches!(listing(&h), Some(Err(_))), "a page where the list should be is an error: {:?}", listing(&h));
+        assert!(!note(&h).is_empty(), "and the picker says so");
         ask(&mut h, "http://localhost:18789/page/v1");
         assert_eq!(requests(), 3, "a page where the list should be is asked for again");
         ask(&mut h, "http://localhost:18789/empty/v1");
         assert_eq!(requests(), 4);
-        assert_eq!(note(&h), tr("ui.agent_chat_models_none"));
+        assert!(matches!(listing(&h), Some(Ok(models)) if models.is_empty()), "{:?}", listing(&h));
+        assert!(!note(&h).is_empty(), "an empty list is said so too");
         ask(&mut h, "http://localhost:18789/empty/v1");
         assert_eq!(requests(), 5, "an empty list is asked for again");
         ask(&mut h, "http://localhost:11434/v1");
