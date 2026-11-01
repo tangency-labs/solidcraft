@@ -237,6 +237,7 @@ settings_monitor	false
 settings_mouse	false
 settings_palette	false
 settings_plug	false
+settings_profile	false
 sheet	false
 sheet_rules	false
 shell	false

@@ -576,7 +576,9 @@ fn tool_sheet_dropdowns_and_preferences_still_open_above_the_sheet() {
         let overlap = sheet.intersect(preferences);
         assert!(overlap.is_positive(), "Preferences overlaps the feature dialog");
         assert_eq!(h.ctx.layer_id_at(overlap.center()).unwrap().id, egui::Id::new("sc_prefs"), "Preferences receives input above the sheet");
-        h.step(&json!({"widget":"Cancel"})).unwrap();
+        let cancel = rect_of("prefs:cancel").expect("Preferences Cancel");
+        assert_eq!(h.ctx.layer_id_at(cancel.center()).unwrap().id, egui::Id::new("sc_prefs"), "Preferences owns its Cancel target");
+        h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
         assert!(!h.app.prefs_window.open && h.app.dialog.is_some(), "Cancel closes Preferences, leaving the feature dialog open");
         h.step(&json!({"widget":"Cancel"})).unwrap();
         assert!(h.app.dialog.is_none());

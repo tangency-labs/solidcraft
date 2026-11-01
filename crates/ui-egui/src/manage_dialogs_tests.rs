@@ -388,6 +388,7 @@ fn appearance_card_keeps_the_approved_width_with_no_preselection() {
 #[test]
 fn parameter_inventory_remains_reachable_with_regular_draft_rows() {
     let mut h = fixture();
+    h.app.preferences.language = "en".into();
     h.app.start("parameters.change");
     h.frames(4);
     for label in ["Filter", "Import…", "Export CSV…", "Export JSON…", "User Parameters", "Model Parameters"] {
