@@ -2301,7 +2301,9 @@ impl SolveApp {
 
     /// Is the origin widget shown? Origin planes and axes are drawn and pickable. While a dialog
     /// picks a plane ([`SolveApp::picking_plane`]) the Origin is always shown, drawn through the
-    /// model (a plane inside a body stays visible), even when the browser hides it.
+    /// model (a plane inside a body stays visible), even when the browser hides it — except the
+    /// origin planes for Project ([`SolveApp::picking_project_geometry`], #10778), which keep a
+    /// hidden Origin hidden.
     pub fn origin_visible(&self) -> bool {
         self.origin_shown() || self.picking_plane()
     }
@@ -2316,6 +2318,15 @@ impl SolveApp {
     /// shown for it, so they can be picked in the view rather than only in the browser (#2581).
     pub fn picking_plane(&self) -> bool {
         self.picking_sketch_plane() || self.dialog.as_ref().is_some_and(|d| d.inputs.get(d.active).is_some_and(|i| i.accept & selection::PLANES != 0))
+    }
+
+    /// Is the Sketch Project dialog open, picking its geometry? Its pick takes origin planes,
+    /// but Project must not bring hidden origin planes back (#10778): every line a plane
+    /// projects, an origin axis already gives, so the planes only add noise over the geometry
+    /// being picked. Other dialogs that pick a plane keep the reveal ([`Self::picking_plane`],
+    /// #2581).
+    pub fn picking_project_geometry(&self) -> bool {
+        self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::SketchProject { .. }))
     }
 
     /// The field of view the view is drawn with: the `perspective_fov` preference while the view is
