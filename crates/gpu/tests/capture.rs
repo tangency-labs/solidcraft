@@ -26,6 +26,33 @@ fn capturer() -> Option<&'static Capturer> {
     }
 }
 
+/// #1789: a failed device can return an invalid mapped-at-creation background buffer.
+/// Use a dedicated software device so this never resets hardware or affects other tests.
+#[cfg(target_os = "windows")]
+#[test]
+fn a_destroyed_device_returns_a_capture_error_without_panicking() {
+    use solidcraft_engine::render::{Camera, Scene};
+    use solidcraft_gpu::select::{self, Policy};
+
+    let Some((adapter, _)) = select::pick(Policy::Software) else {
+        assert!(std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "a software adapter is required for the capture regression");
+        eprintln!("skipping: no software adapter for the capture regression");
+        return;
+    };
+    let (device, queue) = pollster::block_on(
+        adapter.request_device(&wgpu::DeviceDescriptor { required_features: solidcraft_gpu::depth_features(&adapter), ..Default::default() }),
+    )
+    .unwrap();
+    let capture = Capturer::new(&adapter, device.clone(), queue).unwrap();
+    assert_eq!(capture.rgba(&Scene::default(), &Camera::default(), 16, 16).unwrap().len(), 16 * 16 * 4);
+    device.destroy();
+    for _ in 0..2 {
+        let error = capture.rgba(&Scene::default(), &Camera::default(), 16, 16).unwrap_err();
+        assert!(matches!(error, GpuError::Render(_)), "{error}");
+        assert!(error.to_string().contains("mapping the picture background"), "{error}");
+    }
+}
+
 /// RGBA pixels as `[r, g, b, a]`.
 fn pixels(img: &[u8]) -> impl Iterator<Item = [u8; 4]> + '_ {
     img.as_chunks::<4>().0.iter().copied()

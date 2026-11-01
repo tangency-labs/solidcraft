@@ -277,6 +277,10 @@ pub struct RenderState {
     /// Wgpu queue used for rendering, created from the adapter.
     pub queue: wgpu::Queue,
 
+    /// SolidCraft: excludes background submissions while a surface waits for the device
+    /// to become idle. Hosts sharing this queue with offscreen rendering must use it too.
+    pub queue_access: Arc<std::sync::Mutex<()>>,
+
     /// The target texture format used for presenting to the window.
     pub target_format: wgpu::TextureFormat,
 
@@ -509,6 +513,7 @@ impl RenderState {
             available_adapters,
             device,
             queue,
+            queue_access: Arc::new(std::sync::Mutex::new(())),
             target_format,
             msaa_samples: options.msaa_samples,
             msaa_supported,
