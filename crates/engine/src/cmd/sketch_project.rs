@@ -168,6 +168,63 @@ fn state_for_sketch<'a>(
     Ok(solidcraft_doc::with_placed_copies(doc, st, framed, &frame, named))
 }
 
+/// The placed bodies of a design (`Document::body_frames_with_source`): world name, definition
+/// name, component, occurrence path and frame.
+pub(super) type PlacedBodies = Vec<(String, String, u64, Vec<u64>, solidcraft_doc::Mat)>;
+
+/// Sketch links keep a further placement's body by the name the world gives it (`Block (Part:2)`,
+/// #9957), which a rename of the body or of its component changes: each link naming one of
+/// `before` (the placed bodies before the rename) now names what that body is called in `doc`.
+/// `renamed` is the body renamed (old name, new name), if one was.
+pub(super) fn follow_placed_renames(doc: &mut Document, st: &solidcraft_doc::ModelState, before: &PlacedBodies, renamed: Option<(&str, &str)>) {
+    let renames: std::collections::HashMap<String, String> = {
+        let names = solidcraft_doc::WorldNames::new(doc, st);
+        before
+            .iter()
+            .filter(|(world, own, ..)| world != own)
+            .filter_map(|(world, own, component, path, _)| {
+                let source = match renamed {
+                    Some((old, new)) if own == old => new,
+                    _ => own.as_str(),
+                };
+                let now = names.name(source, *component, path);
+                (now != *world).then(|| (world.clone(), now))
+            })
+            .collect()
+    };
+    if renames.is_empty() {
+        return;
+    }
+    for f in &mut doc.features {
+        if let FeatureKind::Sketch { sketch, .. } = &mut f.kind {
+            for link in &mut sketch.links {
+                rename_link_body(&mut link.source, &renames);
+            }
+        }
+    }
+}
+
+fn rename_link_body(source: &mut LinkSource, renames: &std::collections::HashMap<String, String>) {
+    match source {
+        LinkSource::Edge { body, .. }
+        | LinkSource::Face { body, .. }
+        | LinkSource::Body { body }
+        | LinkSource::Vertex { body, .. }
+        | LinkSource::OnSurface { body, .. }
+        | LinkSource::Iso { body, .. }
+        | LinkSource::Spun { body, .. } => {
+            if let Some(new) = renames.get(body.as_str()) {
+                body.clone_from(new);
+            }
+        }
+        LinkSource::Intersection { a, b } => {
+            rename_link_body(a, renames);
+            rename_link_body(b, renames);
+        }
+        _ => {}
+    }
+}
+
 /// Keep candidate feature edits while overlaying uncommitted occurrence placements.
 fn placed_candidate<'a>(s: &Session, doc: &'a Document) -> std::borrow::Cow<'a, Document> {
     if s.pending_moves.is_empty() {
