@@ -8,6 +8,34 @@ Each one can be edited (double-click), suppressed, renamed, reordered (if nothin
 moves after it), rolled back to, and deleted. Deleting asks first when other features depend on
 it.
 
+## Step by step
+
+The sketch from [Sketching step by step](sketching.md#step-by-step) becomes an open box: extruded,
+hollowed, its rim rounded, then made taller from the timeline. In each dialog, Enter is the same
+as OK.
+
+**1. Extrude.** Click **Extrude**, then the sketch's profile: a preview appears with an arrow.
+Drag the arrow, or type the distance (12) and press Enter.
+
+<video src="../media/features/extrude.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Extruding the sketch's profile: clicking it, dragging the arrow, then typing 12 and pressing Enter"></video>
+
+**2. Shell.** Click **Shell**, then the face to leave open (the top). Keep the 2 mm wall and press
+Enter.
+
+<video src="../media/features/shell.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Shelling the block with its top face removed and a 2 mm wall, then turning the view to look inside"></video>
+
+**3. Fillet.** Click **Fillet**, then the four outer top edges, type the radius (1.5) and press
+Enter. Rounding after the shell keeps it simple: Shell doesn't have to follow the rounds.
+
+<video src="../media/features/fillet.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Rounding the four outer top edges of the box with a 1.5 mm fillet"></video>
+
+**4. Change it.** Double-click **Extrude1** on the timeline: the model rolls back to it and its
+dialog opens. Type 20 and press Enter. The shell and the fillet rebuild on the taller block.
+
+<video src="../media/features/edit.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Double-clicking Extrude1 on the timeline, changing its distance to 20: the shell and the fillet rebuild"></video>
+
+## The features
+
 | Panel | Features |
 |---|---|
 | Create | extrude (one side, two sides, symmetric, taper, start offset, to a distance or through all; new body, join, cut, intersect; thin walls along curves), revolve, sweep, loft, box, cylinder, sphere, torus, coil, pipe, rib, web, emboss, hole (simple, counterbore, countersink, tapped; on faces, at distances from edges, or at sketch points), thread, rectangular/circular/path patterns, mirror |
