@@ -415,6 +415,32 @@ fn redefining_an_extrude_names_new_optional_inputs() {
 }
 
 #[test]
+fn redefining_a_cut_saved_without_targets_keeps_cutting_hidden_bodies() {
+    use solidcraft_doc::FeatureKind;
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [20, 0, 0], "operation": "new", "body_name": "B"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Slot"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 2], "p1": [25, 4]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Slot", "distance": 5, "operation": "cut", "name": "Cut"}));
+    run(&mut s, "browser.visibility", json!({"items": ["B"], "visible": false}));
+    let visibility = s.visibility.clone();
+    run(
+        &mut s,
+        "timeline.redefine",
+        json!({"feature": "Cut", "command": "solid.extrude", "params": {"sketch": "Slot", "distance": 5, "operation": "cut"}}),
+    );
+    assert!(matches!(&s.doc.find_feature("Cut").unwrap().kind, FeatureKind::Extrude { targets, .. } if targets.is_empty()));
+    let st = s.model.state();
+    for body in ["A", "B"] {
+        let volume = solidcraft_doc::kernel::measure(&st.body(body).unwrap().body).unwrap().volume;
+        assert!((volume - 450.0).abs() < 1e-6, "{body}: {volume}");
+    }
+    assert_eq!(s.visibility, visibility);
+}
+
+#[test]
 fn redefining_a_shell_replaces_persistent_face_selection() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "name": "Base"}));

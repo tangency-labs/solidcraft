@@ -318,6 +318,13 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             if crate::op_auto::op_row(ui, "ex_op", operation) {
                 *auto_op = false;
             }
+            // A new body changes no other body.
+            if *operation != 0 {
+                let placeholder = targets_placeholder(kept_without_targets(&app.session, d.editing), &d.extra);
+                targets_rows(ui, &mut d.inputs, &mut d.active, &mut d.targets_follow, placeholder);
+            } else if d.inputs.get(d.active).is_some_and(|i| i.label == TARGETS) {
+                d.active = 0;
+            }
             ui_kit::section(ui, "extrude_options", "Options", true, |ui| {
                 let was_thin = *thin;
                 let was_direction = *direction;

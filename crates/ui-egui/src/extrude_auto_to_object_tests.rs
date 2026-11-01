@@ -74,14 +74,16 @@ fn face_off_the_profile_plane_turns_the_extent_to_that_face() {
     let d = dialog(&h);
     assert!(matches!(to_object(d), Some(Sel::Face { .. })));
     assert_eq!(d.inputs[0].items.len(), 1, "the profile stays the only profile");
-    assert_eq!(d.active, 1, "the To Object input is active");
+    assert_eq!(d.inputs.get(d.active).map(|i| i.label), Some("To Object"), "the To Object input is active");
     assert_eq!(distance(d), "20 mm", "the length is the target's");
     let commands = apply_commands(&h.app, d).unwrap();
     let params = &commands[0].1;
     assert!(params.get("to").is_some());
     let reach = solidcraft_engine::extrude_reach(&h.app.session, params).unwrap();
     assert!((reach - 20.0).abs() < 1e-9, "{reach}");
-    // OK builds the extrude up to the face.
+    // OK builds the extrude up to the face, once the check has made it a New Body (which hides
+    // the Targets row, moving OK).
+    h.settle();
     h.step(&json!({"widget": "OK"})).unwrap();
     h.frames(4);
     let state = h.app.session.world_state();
