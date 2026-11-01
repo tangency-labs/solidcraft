@@ -358,6 +358,103 @@ fn an_inserted_assembly_exports_its_nested_parts_where_they_are() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A file from the STEP corpus (`tests/step-conformance`).
+fn corpus(name: &str) -> String {
+    format!("{}/../../tests/step-conformance/{name}.step", env!("CARGO_MANIFEST_DIR"))
+}
+
+/// A file that brings more than one item into the history (its Import feature and the rigid
+/// joints holding its parts: one cylinder placed twice, an assembly) gets a history folder of
+/// its own, `Group #N` with the first free number, holding its Import feature and those joints,
+/// made by the same command and undone with it; a file with one object gets none. Inserted
+/// between the features of a folder, the import's folder nests in it.
+#[test]
+fn a_multi_object_step_insert_is_one_history_folder() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [100, 0, 0], "name": "Mine"}));
+    let r = run(&mut s, "file.insert_step", json!({"path": corpus("cylinder")}));
+    assert!(r.get("group").is_none() && s.doc.timeline_groups.is_empty(), "one object: no folder: {r}");
+
+    let undo = s.undo.len();
+    let r = run(&mut s, "file.insert_step", json!({"path": corpus("cylinder_twice")}));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    let feature = r["feature"].as_u64().unwrap();
+    let [folder] = s.doc.timeline_groups.as_slice() else { panic!("one folder: {:?}", s.doc.timeline_groups) };
+    assert_eq!(
+        (json!(folder.id), folder.name.as_str(), folder.features.as_slice(), folder.parent),
+        (r["group"].clone(), "Group #1", &[feature][..], None),
+        "{r}"
+    );
+    let mut rigid: Vec<u64> = s.doc.assembly.joints.iter().map(|j| j.id).collect();
+    rigid.sort_unstable();
+    let mut held = folder.joints.clone();
+    held.sort_unstable();
+    assert!(!rigid.is_empty() && held == rigid, "the folder holds the import's joints: {held:?} of {rigid:?}");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.timeline_groups.is_empty() && s.doc.feature(feature).is_none(), "undo takes the folder with the import");
+
+    // An assembly, inserted with the marker inside a folder: its folder nests in that one.
+    let dir = temp_dir("folder");
+    let path = rig_file(&dir);
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [200, 0, 0], "operation": "new_body", "name": "Later"}));
+    let all: Vec<u64> = s.doc.features.iter().map(|f| f.id).collect();
+    let outer = run(&mut s, "timeline.group", json!({"name": "Everything", "features": all}))["group"].as_u64().unwrap();
+    run(&mut s, "timeline.roll_to", json!({"feature": "Mine"}));
+    let r = run(&mut s, "file.insert_step", json!({"path": path}));
+    let folder = s.doc.timeline_groups.iter().find(|f| json!(f.id) == r["group"]).unwrap();
+    assert_eq!((folder.name.as_str(), folder.parent), ("Group #1", Some(outer)), "{r}");
+    assert_eq!(folder.features, [r["feature"].as_u64().unwrap()]);
+    // The next one takes the next free number.
+    let r = run(&mut s, "file.insert_step", json!({"path": path}));
+    let folder = s.doc.timeline_groups.iter().find(|f| json!(f.id) == r["group"]).unwrap();
+    assert_eq!(folder.name, "Group #2", "{r}");
+    assert!(solidcraft_doc::non_contiguous_timeline_group(&s.doc.features, &s.doc.timeline_groups).is_none());
+    // Opening a file as a design folds it the same way.
+    let r = run(&mut s, "doc.open", json!({"path": corpus("cylinder_twice")}));
+    assert_eq!(s.doc.timeline_groups.len(), 1, "{r}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `folder: false` (the app's "Fold the History bar into groups" turned off) keeps a
+/// multi-object import out of a folder, as before, when inserted and when opened as a design; a
+/// value that isn't true or false is refused.
+#[test]
+fn a_step_import_told_no_folder_makes_none() {
+    let mut s = Session::default();
+    let r = run(&mut s, "file.insert_step", json!({"path": corpus("cylinder_twice"), "folder": false}));
+    assert!(r.get("group").is_none() && s.doc.timeline_groups.is_empty(), "no folder: {r}");
+    assert_eq!(s.doc.assembly.joints.len(), 2, "its rigid joints are there all the same");
+    let r = run(&mut s, "doc.open", json!({"path": corpus("cylinder_twice"), "folder": false}));
+    assert!(s.doc.timeline_groups.is_empty(), "opened as a design, no folder either: {r}");
+    let e = s.execute("file.insert_step", &json!({"path": corpus("cylinder_twice"), "folder": "no"})).unwrap_err();
+    assert!(e.to_string().contains("`folder` must be true"), "{e}");
+}
+
+/// Grouping is refused, with a reason a menu can show, when the features aren't one run of the
+/// history or would split another folder; one or several neighbours group.
+#[test]
+fn group_refusal_says_why_a_selection_cannot_be_grouped() {
+    let mut s = Session::default();
+    for (i, name) in ["A", "B", "C", "D"].iter().enumerate() {
+        let corner = [20.0 * i as f64, 0.0, 0.0];
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": corner, "operation": "new_body", "name": name}));
+    }
+    let id = |s: &Session, n: &str| s.doc.find_feature(n).unwrap().id;
+    let (a, b, c, d) = (id(&s, "A"), id(&s, "B"), id(&s, "C"), id(&s, "D"));
+    assert_eq!(s.group_refusal(&[b], None), None);
+    assert_eq!(s.group_refusal(&[b, c], None), None);
+    let apart = s.group_refusal(&[a, c], None).unwrap();
+    assert!(apart.contains("next to each other"), "{apart}");
+    assert!(s.execute("timeline.group", &json!({"features": [a, c]})).is_err(), "the command refuses it too");
+    run(&mut s, "timeline.group", json!({"name": "Run", "features": [a, b, c]}));
+    let split = s.group_refusal(&[b], None).unwrap();
+    assert!(split.contains("Run"), "taking the middle out splits the folder: {split}");
+    let run_id = s.doc.timeline_groups.first().unwrap().id;
+    assert_eq!(s.group_refusal(&[b], Some(run_id)), None, "inside the folder it nests");
+    assert_eq!(s.group_refusal(&[c, d], None), None, "a folder's last feature leaves it for the new folder");
+    assert!(s.group_refusal(&[], None).is_some());
+}
+
 /// The parts of one STEP import share their face names, and each keeps its body where the file
 /// has it, placed in its component by an offset. A joint on one part's hole takes that part's
 /// hole, not the other part's hole of that name, though the pick (in the part's own coordinates)

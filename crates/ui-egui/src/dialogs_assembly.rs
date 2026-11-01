@@ -5,6 +5,8 @@
 //! before the click. Joints and drives preview on the placed (world) model: the moving
 //! component shows where it goes, and with Animate the joint plays its motion.
 
+use std::collections::HashSet;
+
 use crate::fonts::RichTextExt as _;
 use crate::ui_kit::{choice_row, expr_row, text_row};
 use egui::{Color32, Pos2, RichText, Stroke, vec2};
@@ -1422,19 +1424,121 @@ fn timeline_joint_items(app: &SolveApp, ids: Option<&[u64]>) -> Vec<(u64, String
         .collect()
 }
 
-/// Joints after the features in the timeline: double-click edits, the menu drives, suppresses
-/// or deletes. Returns the x after them.
-pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, x: f32, r: egui::Rect) -> f32 {
-    timeline_joint_tiles(app, ui, p, x, r, None)
+/// More joints than this (an imported assembly makes one per placed part) start grouped in the
+/// timeline as one button with their count, from the second joint on; clicking it shows each joint.
+const JOINT_GROUP_MIN: usize = 1;
+/// The browser-state key that remembers the timeline's joints were shown one by one.
+const JOINTS_KEY: &str = "timeline_joints";
+
+/// Which joints a row of joint chips in the History bar shows: those no feature folder holds
+/// (after the features), or a folder's (an import's rigid group, see `timeline_folders`).
+#[derive(Clone, Copy)]
+pub(crate) enum JointRun<'a> {
+    Loose,
+    Folder { id: u64, name: &'a str },
 }
 
-pub(crate) fn timeline_joint_tiles(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, mut x: f32, r: egui::Rect, ids: Option<&[u64]>) -> f32 {
+impl JointRun<'_> {
+    /// The browser-state key that remembers the joints were shown one by one.
+    fn key(self) -> String {
+        match self {
+            Self::Loose => JOINTS_KEY.to_string(),
+            Self::Folder { id, .. } => format!("{JOINTS_KEY}:{id}"),
+        }
+    }
+
+    /// The scenario handle of their grouped chip.
+    fn handle(self) -> String {
+        match self {
+            Self::Loose => "timeline:joints".to_string(),
+            Self::Folder { name, .. } => format!("timeline-folder-joints:{name}"),
+        }
+    }
+}
+
+/// Whether `count` joints group as one button: from the second joint, once the preference is on
+/// (Preferences > Layout, "Group joints in the History"; off by default, which shows each joint).
+fn grouped(app: &SolveApp, count: usize) -> bool {
+    count > JOINT_GROUP_MIN && app.preferences.history_group_joints
+}
+
+fn joints_open(app: &SolveApp, count: usize, run: JointRun) -> bool {
+    !grouped(app, count) || crate::browser::is_open(app, &run.key(), false)
+}
+
+fn toggle_joints(app: &mut SolveApp, run: JointRun) {
+    crate::browser::toggle(app, &run.key(), false);
+}
+
+/// The button that stands for `count` grouped joints, its top left at `at` (see
+/// `HistoryGroupChip`). Returns its width and whether it was clicked.
+fn joint_group_button(
+    ui: &mut egui::Ui,
+    p: &egui::Painter,
+    at: egui::Pos2,
+    count: usize,
+    open: bool,
+    accent: crate::theme::TabAccent,
+    run: JointRun,
+) -> (f32, bool) {
+    let chip = crate::ui_kit::HistoryGroupChip {
+        icon: "joint",
+        name: "",
+        count,
+        open,
+        selected: false,
+        hovered: false,
+        dim: false,
+        error: false,
+        warning: false,
+        accent,
+    };
+    let br = egui::Rect::from_min_size(at, chip.size(p));
+    let resp = ui.interact(br, ui.id().with(("joint_group", run.key())), egui::Sense::click());
+    let handle = run.handle();
+    crate::scenario::publish_handle(&handle, br.center());
+    crate::scenario::publish_target(&format!("{handle}_arrow"), crate::ui_kit::HistoryGroupChip::well(br));
+    let pointer = resp.hover_pos();
+    let on_arrow = crate::ui_kit::HistoryGroupChip::on_arrow(br, pointer);
+    crate::scenario::publish_count(&format!("{handle}_arrow_hot"), f64::from(u8::from(on_arrow)));
+    chip.paint(p, br, pointer);
+    let tip = if open { "click to group them" } else { "click to show each one" };
+    let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text(format!("{count} joints: {tip}"));
+    (br.width(), resp.clicked())
+}
+
+/// Joints after the features in the timeline, except those a feature folder holds (`held`):
+/// double-click edits, the menu drives, suppresses or deletes. Returns the x after them.
+pub fn timeline_joints(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, x: f32, r: egui::Rect, held: &HashSet<u64>) -> f32 {
+    let loose: Vec<u64> = app.session.doc.assembly.joints.iter().map(|j| j.id).filter(|id| !held.contains(id)).collect();
+    if loose.is_empty() {
+        return x;
+    }
+    joint_chips(app, ui, p, x + 8.0, r, &loose, JointRun::Loose)
+}
+
+/// The joints `ids` as chips from `x` on, grouped into one chip (open to show each) when there
+/// are many. Returns the x after them.
+pub(crate) fn joint_chips(app: &mut SolveApp, ui: &mut egui::Ui, p: &egui::Painter, mut x: f32, r: egui::Rect, ids: &[u64], set: JointRun) -> f32 {
     let t = Tokens::get();
-    let joints = timeline_joint_items(app, ids);
+    let wanted: HashSet<u64> = ids.iter().copied().collect();
+    let joints: Vec<(u64, String, JointKind, bool)> =
+        app.session.doc.assembly.joints.iter().filter(|j| wanted.contains(&j.id)).map(|j| (j.id, j.name.clone(), j.kind, j.suppressed)).collect();
     if joints.is_empty() {
         return x;
     }
-    x += 8.0;
+    if grouped(app, joints.len()) {
+        let open = joints_open(app, joints.len(), set);
+        let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
+        let (width, clicked) = joint_group_button(ui, p, egui::pos2(x, r.top() + 6.0), joints.len(), open, accent, set);
+        if clicked {
+            toggle_joints(app, set);
+        }
+        x += width + 4.0;
+        if !open {
+            return x;
+        }
+    }
     let mut open: Option<Dialog> = None;
     let mut run: Option<(&'static str, Value)> = None;
     for (id, name, kind, suppressed) in joints {
@@ -1492,7 +1596,30 @@ pub(crate) fn timeline_joint_rows(app: &mut SolveApp, ui: &mut egui::Ui, ids: Op
     }
     if ids.is_none() {
         ui.add_space(4.0);
-        ui.label(egui::RichText::new("JOINTS").size(crate::theme::Tokens::get().font_micro).semibold().color(t.text_dim));
+        if grouped(app, joints.len()) {
+            let shown = joints_open(app, joints.len(), JointRun::Loose);
+            let header = format!("JOINTS ({})", joints.len());
+            let clicked = ui
+                .horizontal(|ui| {
+                    let (rect, _) = ui.allocate_exact_size(vec2(t.form_section_icon_size, t.form_section_icon_size), egui::Sense::hover());
+                    let fold = crate::ui_kit::disclosure_button_at(ui, rect, shown, &header);
+                    let response = ui.add(
+                        egui::Label::new(egui::RichText::new(&header).size(crate::theme::Tokens::get().font_micro).semibold().color(t.text_dim))
+                            .sense(egui::Sense::click()),
+                    );
+                    crate::scenario::publish_handle("timeline:joints", response.rect.center());
+                    fold.clicked() || response.clicked()
+                })
+                .inner;
+            if clicked {
+                toggle_joints(app, JointRun::Loose);
+            }
+            if !shown {
+                return;
+            }
+        } else {
+            ui.label(egui::RichText::new("JOINTS").size(crate::theme::Tokens::get().font_micro).semibold().color(t.text_dim));
+        }
     }
     let mut open = None;
     let mut run = None;

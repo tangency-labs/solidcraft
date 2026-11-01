@@ -101,6 +101,11 @@ fn put_work(app: &mut SolveApp, mut work: DocWork, before: u64) {
 #[derive(Clone, Debug, Default)]
 struct DocView {
     render: crate::render_workspace::ViewState,
+    /// The runs and folders opened and folded in its History, and which part of the design it
+    /// shows.
+    history_folds: crate::history_folds::Folds,
+    timeline_scope: crate::timeline_scope::Scope,
+    timeline_followed: Option<Option<u64>>,
     /// Bodies, components and features copied or cut in this design: their names and paths mean nothing
     /// in another one (copied features stay with the session the same way). Another design
     /// pastes them from `SolveApp::foreign_copy`.
@@ -175,6 +180,9 @@ impl Documents {
 fn take_view(app: &mut SolveApp) -> DocView {
     DocView {
         render: std::mem::take(&mut app.render_workspace.view),
+        history_folds: std::mem::take(&mut app.tree.history_folds),
+        timeline_scope: std::mem::take(&mut app.tree.timeline_scope),
+        timeline_followed: app.tree.timeline_followed.take(),
         copied_bodies: std::mem::take(&mut app.copied_bodies),
         copied_placements: std::mem::take(&mut app.copied_placements),
         cut: std::mem::take(&mut app.cut),
@@ -187,6 +195,9 @@ fn put_view(app: &mut SolveApp, v: DocView) {
     crate::render_workspace::invalidate_images(app);
     crate::render_workspace::invalidate_scene(app);
     crate::render_workspace::sync_backend(app);
+    app.tree.history_folds = v.history_folds;
+    app.tree.timeline_scope = v.timeline_scope;
+    app.tree.timeline_followed = v.timeline_followed;
     app.copied_bodies = v.copied_bodies;
     app.copied_placements = v.copied_placements;
     app.cut = v.cut;
@@ -418,6 +429,7 @@ pub fn open_tab(app: &mut SolveApp, session: Session) -> Result<(), String> {
     let at = app.docs.active + 1;
     app.docs.slots.insert(at, Some(DocSlot::new(session)));
     crate::agent_chat::follow_new_tab(app, |app| switch(app, at));
+    crate::history_folds::load(app);
     app.fit_view();
     Ok(())
 }
@@ -441,6 +453,7 @@ pub fn adopt(app: &mut SolveApp, session: Session) {
         reset_chat(app);
         // The blank design's record of its links goes with it; the new one's start now.
         app.docs.link_stamps.clear();
+        crate::history_folds::load(app);
         crate::render_workspace::reset_document(app);
         app.session.invalidate_view(rev);
         app.cam = Camera::default();

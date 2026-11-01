@@ -293,6 +293,16 @@ pub(super) fn layout(app: &mut SolveApp, ui: &mut egui::Ui) {
                         let check = setting::history_play_button(app, ui).on_hover_text(app.tr("prefs.history_play_button_note"));
                         crate::scenario::publish_target("prefs:history_play_button", check.rect);
                     });
+                    // A design's joints as one button in the History, from the second joint (#8884).
+                    ui_kit::row(ui, "", |ui| {
+                        let check = setting::history_group_joints(app, ui).on_hover_text(app.tr("prefs.history_group_joints_note"));
+                        crate::scenario::publish_target("prefs:history_group_joints", check.rect);
+                    });
+                    // Folds in the History bar, and a folder for a STEP insert's items (#8885).
+                    ui_kit::row(ui, "", |ui| {
+                        let check = setting::history_bar_groups(app, ui).on_hover_text(app.tr("prefs.history_bar_groups_note"));
+                        crate::scenario::publish_target("prefs:history_bar_groups", check.rect);
+                    });
                     ui_kit::row(ui, app.tr("prefs.browser"), |ui| {
                         ui.add_enabled_ui(app.ui.layout == crate::shell::LayoutMode::Floating, |ui| {
                             let mut selected = usize::from(app.preferences.browser_float);
