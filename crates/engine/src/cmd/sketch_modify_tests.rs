@@ -141,7 +141,7 @@ fn explicit_ellipse_break_keeps_closed_profile() {
     let out = run(&mut s, "sketch.break", json!({"curve": id, "points": [[10,0], [0,4], [10,0]]}));
     assert_eq!(ids(&out["curves"]).len(), 4, "{out}");
     let after = sketch(&s);
-    assert!(after.curves.iter().all(|c| matches!(c.kind, CurveKind::Conic { .. })));
+    assert!(after.curves.iter().filter(|c| !c.construction).all(|c| matches!(c.kind, CurveKind::Conic { .. })));
     assert_eq!(profiles(&s).len(), 1);
     assert!((profiles(&s)[0] - area).abs() < 1e-6);
     run(&mut s, "edit.undo", json!({}));
@@ -173,6 +173,42 @@ fn explicit_break_rejects_bad_points_atomically_and_merges_duplicates() {
     }
 }
 
+/// An ellipse moved, turned or scaled on its own takes its axes along, as a drag does: they
+/// stay its axes and nothing is left failing.
+#[test]
+fn an_ellipse_moved_turned_or_scaled_alone_takes_its_axes_along() {
+    // With the minor axis deleted, the major axis that is left still goes along.
+    let mut s = new_sketch();
+    let e = ids(&run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8}))["curves"])[0].clone();
+    let minor = sketch(&s).curves.iter().rev().find(|c| matches!(c.kind, CurveKind::Line { .. })).unwrap().id.clone();
+    run(&mut s, "sketch.delete", json!({"entities": [minor]}));
+    let r = run(&mut s, "sketch.move", json!({"entities": [e], "translate": [0, 30]}));
+    assert_eq!(r["sketch"]["solved"], json!(true), "{r}");
+    let sk = sketch(&s);
+    let (major, _) = sk.ellipse_axis_lines(sk.curve_index(&e).unwrap()).and_then(|(major, _)| major).expect("its major axis");
+    let CurveKind::Line { a, b } = sk.curves[major].kind else { panic!("a line") };
+    assert!(sk.point(a).unwrap().dist(Vec2::new(-20.0, 30.0)) < 1e-6 && sk.point(b).unwrap().dist(Vec2::new(20.0, 30.0)) < 1e-6);
+    for (cmd, params, centre, major) in [
+        ("sketch.move", json!({"translate": [0, 30]}), Vec2::new(0.0, 30.0), Vec2::new(20.0, 30.0)),
+        ("sketch.move", json!({"angle": 90, "center": [0, 0]}), Vec2::ZERO, Vec2::new(0.0, 20.0)),
+        ("sketch.scale", json!({"base": [0, 0], "factor": 2}), Vec2::ZERO, Vec2::new(40.0, 0.0)),
+        ("sketch.transform", json!({"translate": [5, 0]}), Vec2::new(5.0, 0.0), Vec2::new(25.0, 0.0)),
+    ] {
+        let mut s = new_sketch();
+        let e = ids(&run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8}))["curves"])[0].clone();
+        let mut p = params.clone();
+        p["entities"] = json!([e]);
+        let r = run(&mut s, cmd, p);
+        assert_eq!(r["sketch"]["solved"], json!(true), "{cmd} {params}: {r}");
+        let sk = sketch(&s);
+        let ei = sk.curve_index(&e).unwrap();
+        let axes = sk.ellipse_axes(ei).unwrap_or_else(|| panic!("{cmd} {params}: still its axes"));
+        let ends: Vec<Vec2> = axes.ends.iter().map(|q| sk.point(*q).unwrap()).collect();
+        assert!(ends[0].dist(major) < 1e-6 && ends[1].dist(centre * 2.0 - major) < 1e-6, "{cmd} {params}: the major axis follows: {ends:?}");
+        assert!(((ends[2] + ends[3]) * 0.5).dist(centre) < 1e-6, "{cmd} {params}: the minor axis follows: {ends:?}");
+    }
+}
+
 #[test]
 fn analytic_trim_and_break_use_freeform_cutters() {
     let mut s = new_sketch();
@@ -189,11 +225,57 @@ fn analytic_trim_and_break_use_freeform_cutters() {
     let mut s = new_sketch();
     let circle = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0,0], "radius": 5}))["curves"])[0].clone();
     run(&mut s, "sketch.ellipse", json!({"center": [0,0], "major": [8,0], "minor": [0,3]}));
-    run(&mut s, "sketch.trim", json!({"curve": circle, "at": [5,0]}));
+    // Picked 15 degrees round from where the major axis crosses the circle: the piece from the
+    // axis to the ellipse's crossing goes, the rest stays. Its construction axes cut too (see
+    // the next test).
+    run(&mut s, "sketch.trim", json!({"curve": circle, "at": [4.8296,1.2941]}));
     let sk = sketch(&s);
     let ci = sk.curve_index(&circle).unwrap();
-    assert!(matches!(sk.curves[ci].kind, CurveKind::Arc { .. }));
-    assert!(sk.shape(ci).unwrap().dist(Vec2::new(-5.0, 0.0)) < 1e-6);
+    let CurveKind::Arc { a, b, .. } = sk.curves[ci].kind else { panic!("{:?}", sk.curves[ci].kind) };
+    let crossing = Vec2::new((25.0f64 - 351.0 / 55.0).sqrt(), (351.0f64 / 55.0).sqrt());
+    let mut ends = [sk.point(a).unwrap(), sk.point(b).unwrap()];
+    ends.sort_by(|p, q| p.y.total_cmp(&q.y));
+    assert!(ends[0].dist(Vec2::new(5.0, 0.0)) < 1e-6 && ends[1].dist(crossing) < 1e-6, "{ends:?}");
+    let shape = sk.shape(ci).unwrap();
+    assert!(shape.dist(Vec2::new(-5.0, 0.0)) < 1e-6 && shape.dist(Vec2::new(4.8296, -1.2941)) < 1e-3);
+    assert!(shape.dist(Vec2::new(4.8296, 1.2941)) > 0.5);
+}
+
+/// An ellipse's construction axes cut a trim, as a Center Rectangle's construction diagonals
+/// do: a line inside the ellipse trims back to the minor axis, one inside the rectangle to the
+/// diagonals.
+#[test]
+fn an_ellipse_s_axes_cut_as_a_center_rectangle_s_diagonals_do() {
+    // What is left of the line at y = 1, as x ranges.
+    let lines = |s: &Session| {
+        let sk = sketch(s);
+        let mut ends: Vec<[f64; 2]> = sk
+            .curves
+            .iter()
+            .filter_map(|c| match c.kind {
+                CurveKind::Line { a, b } => {
+                    let (a, b) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+                    (close(a.y, 1.0) && close(b.y, 1.0)).then(|| [a.x.min(b.x), a.x.max(b.x)])
+                }
+                _ => None,
+            })
+            .collect();
+        ends.sort_by(|x, y| x[0].total_cmp(&y[0]));
+        ends
+    };
+    let mut s = new_sketch();
+    run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8}));
+    let line = ids(&run(&mut s, "sketch.line", json!({"points": [[-3, 1], [3, 1]], "connect": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.trim", json!({"curve": line, "at": [1, 1]}));
+    let ends = lines(&s);
+    assert!(ends.len() == 1 && close(ends[0][0], -3.0) && close(ends[0][1], 0.0), "{ends:?}");
+
+    let mut s = new_sketch();
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [20, 8]}));
+    let line = ids(&run(&mut s, "sketch.line", json!({"points": [[-3, 1], [3, 1]], "connect": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.trim", json!({"curve": line, "at": [1, 1]}));
+    let ends = lines(&s);
+    assert!(ends.len() == 2 && close(ends[0][1], -2.5) && close(ends[1][0], 2.5), "{ends:?}");
 }
 
 #[test]
@@ -1823,6 +1905,110 @@ fn ellipse_radii_dimensions() {
     assert!((a - std::f64::consts::PI * 60.0).abs() < 1e-6, "{a}");
 }
 
+/// An ellipse comes with its major and minor axes as construction lines through its centre.
+/// They add no freedom (the ellipse keeps 5 degrees), follow its size, and stay when the
+/// ellipse is deleted, as a Center Rectangle's construction diagonals stay with its edges gone.
+#[test]
+fn an_ellipse_comes_with_its_axes_as_construction_lines() {
+    let axes = |s: &Session| {
+        let sk = sketch(s);
+        let mut lengths: Vec<f64> = sk
+            .curves
+            .iter()
+            .filter_map(|c| match c.kind {
+                CurveKind::Line { a, b } if c.construction => Some(sk.point(a).unwrap().dist(sk.point(b).unwrap())),
+                _ => None,
+            })
+            .collect();
+        lengths.sort_by(f64::total_cmp);
+        lengths
+    };
+    let mut s = new_sketch();
+    let out = run(&mut s, "sketch.ellipse", json!({"center": [5, 3], "major": [25, 3], "minor_radius": 8}));
+    let e = ids(&out["curves"])[0].clone();
+    assert_eq!(out["created"]["curves"].as_array().map(Vec::len), Some(3), "{out}");
+    assert_eq!(run(&mut s, "sketch.inspect", json!({}))["dof"], json!(5));
+    let lengths = axes(&s);
+    assert!(lengths.len() == 2 && close(lengths[0], 16.0) && close(lengths[1], 40.0), "{lengths:?}");
+    assert!(profiles(&s).len() == 1 && close(profiles(&s)[0], std::f64::consts::PI * 160.0), "{:?}", profiles(&s));
+    // Dragging either axis moves the ellipse and its axes as one, sizes kept, as dragging a
+    // Center Rectangle's diagonal moves the rectangle.
+    let half_axes = |s: &Session| {
+        let sk = sketch(s);
+        let Some(CurveKind::Ellipse { c, m, r }) = sk.curves.iter().map(|x| x.kind.clone()).find(|k| matches!(k, CurveKind::Ellipse { .. })) else {
+            panic!("the ellipse")
+        };
+        (sk.point(c).unwrap(), sk.point(c).unwrap().dist(sk.point(m).unwrap()), r)
+    };
+    let (centre, ..) = half_axes(&s);
+    let (major, minor) = {
+        let sk = sketch(&s);
+        let mut lines: Vec<(f64, String)> = sk
+            .curves
+            .iter()
+            .filter_map(|c| match c.kind {
+                CurveKind::Line { a, b } => Some((sk.point(a).unwrap().dist(sk.point(b).unwrap()), c.id.clone())),
+                _ => None,
+            })
+            .collect();
+        lines.sort_by(|x, y| y.0.total_cmp(&x.0));
+        (lines[0].1.clone(), lines[1].1.clone())
+    };
+    let mut moved = centre;
+    for (line, by) in [(&major, Vec2::new(4.0, 6.0)), (&minor, Vec2::new(-3.0, 2.0))] {
+        let from = moved + if *line == major { Vec2::new(-12.0, 0.0) } else { Vec2::new(0.0, 4.0) };
+        run(&mut s, "sketch.drag", json!({"entity": line, "from": [from.x, from.y], "to": [from.x + by.x, from.y + by.y]}));
+        run(&mut s, "sketch.drag_end", json!({}));
+        moved += by;
+        let (at, a, b) = half_axes(&s);
+        assert!(at.dist(moved) < 1e-6 && close(a, 20.0) && close(b, 8.0), "dragging {line}: centre {at:?}, half-axes {a} {b}");
+        let lengths = axes(&s);
+        assert!(close(lengths[0], 16.0) && close(lengths[1], 40.0), "dragging {line}: {lengths:?}");
+    }
+    // Dragging the outline still sets the minor half-axis, the axes following it.
+    run(&mut s, "sketch.drag", json!({"entity": &e, "from": [moved.x, moved.y + 8.0], "to": [moved.x, moved.y + 10.0]}));
+    run(&mut s, "sketch.drag_end", json!({}));
+    let (at, a, b) = half_axes(&s);
+    assert!(at.dist(moved) < 1e-6 && close(a, 20.0) && close(b, 10.0), "dragging the outline: centre {at:?}, half-axes {a} {b}");
+    let lengths = axes(&s);
+    assert!(close(lengths[0], 20.0) && close(lengths[1], 40.0), "dragging the outline: {lengths:?}");
+    // Sizing the ellipse resizes its axes, and they stay through its centre.
+    run(&mut s, "sketch.dimension", json!({"entities": [&e], "type": "major", "value": 30}));
+    run(&mut s, "sketch.dimension", json!({"entities": [&e], "type": "minor", "value": 10}));
+    let lengths = axes(&s);
+    assert!(close(lengths[0], 20.0) && close(lengths[1], 60.0), "{lengths:?}");
+    assert!(close(profiles(&s)[0], std::f64::consts::PI * 300.0), "{:?}", profiles(&s));
+    // A double-click on the ellipse or on either axis selects all three, as one on a Center
+    // Rectangle's edge or diagonal selects its edges and both diagonals.
+    let curves: Vec<String> = sketch(&s).curves.iter().map(|c| c.id.clone()).collect();
+    for id in &curves {
+        let mut chain = ids(&run(&mut s, "sketch.chain", json!({"curve": id}))["curves"]);
+        chain.sort();
+        assert_eq!(chain, curves, "double-click on {id}");
+    }
+    // Deleting it leaves the two axes, still construction and still perpendicular.
+    run(&mut s, "sketch.delete", json!({"entities": [&e]}));
+    let sk = sketch(&s);
+    assert_eq!(sk.curves.len(), 2);
+    assert!(sk.curves.iter().all(|c| c.construction && matches!(c.kind, CurveKind::Line { .. })));
+    assert!(sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Perpendicular { .. })));
+    // The same as a Center Rectangle whose edges are deleted: its diagonals stay.
+    let mut s = new_sketch();
+    let edges = ids(&run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [20, 10]}))["curves"]);
+    assert_eq!(ids(&run(&mut s, "sketch.chain", json!({"curve": &edges[0]}))["curves"]).len(), 6);
+    run(&mut s, "sketch.delete", json!({"entities": edges}));
+    let sk = sketch(&s);
+    assert!(sk.curves.len() == 2 && sk.curves.iter().all(|c| c.construction), "{:?}", sk.curves);
+    // With axes: false (the Sketch preference off), the ellipse alone, as before its axes.
+    let mut s = new_sketch();
+    let r = run(&mut s, "sketch.ellipse", json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8, "axes": false}));
+    let sk = sketch(&s);
+    assert!(sk.curves.len() == 1 && sk.constraints.is_empty(), "{r}");
+    assert_eq!(r["sketch"]["dof"], json!(5));
+    let refused = s.execute("sketch.ellipse", &json!({"center": [0, 0], "major": [20, 0], "minor_radius": 8, "axes": "false"}));
+    assert!(refused.is_err_and(|e| e.to_string().contains("true or false")));
+}
+
 /// #1026: a construction diagonal ending at a rectangle's corner is not one of the corner's
 /// sides. The corner is rounded, and the diagonal keeps its end on the virtual sharp corner.
 #[test]
@@ -2149,7 +2335,8 @@ fn certified_offset_delete_output_undo_reopen_and_refuse_dependent_source() {
     run(&mut s, "sketch.delete", json!({"entities":[node]}));
     assert!(sketch(&s).freeform_offsets.is_empty());
     assert!(sketch(&s).curve_index(&id).is_none());
-    assert_eq!(sketch(&s).points.len(), 3, "all private derived nodes must be removed");
+    // The origin, the ellipse's centre and major end, and its three other axis ends.
+    assert_eq!(sketch(&s).points.len(), 6, "all private derived nodes must be removed");
 }
 
 #[test]

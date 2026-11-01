@@ -26,6 +26,11 @@ pub enum DimFrame {
     Angular { vertex: Vec2, d0: Vec2, sweep: f64 },
     /// Length along an arc around `center` from angle `start` by `sweep`.
     ArcLength { center: Vec2, radius: f64, start: f64, sweep: f64 },
+    /// An ellipse's minor half-axis: `len` from `center` along the unit `dir` or against it,
+    /// drawn as a linear dimension to the minor axis end on the text's side, as the distance
+    /// to that end is when the ellipse has its axes. The text is stored from `center`, as a
+    /// radius's is, so a radius placed before it was drawn this way keeps its text.
+    HalfAxis { center: Vec2, dir: Vec2, len: f64 },
 }
 
 /// A drawn dimension (sketch coordinates).
@@ -125,6 +130,10 @@ pub fn dim_frame(sk: &Sketch, k: &ConstraintKind) -> Option<DimFrame> {
             DimFrame::Linear { p0, p1, dir: u }
         }
         Radius { c, .. } | Diameter { c, .. } => {
+            if let (Radius { .. }, CurveKind::Ellipse { c: centre, m, r }) = (k, &sk.curves.get(c)?.kind) {
+                let center = sk.point(*centre)?;
+                return Some(DimFrame::HalfAxis { center, dir: unit(sk.point(*m)? - center, Vec2::X).perp(), len: *r });
+            }
             let (radius, arc) = match sk.curves.get(c)?.kind {
                 CurveKind::Ellipse { r, .. } => (r, None),
                 CurveKind::Arc { .. } => match sk.segs(c).first()? {
@@ -171,7 +180,16 @@ pub fn encode_text(f: &DimFrame, at: Vec2) -> Vec2 {
         }
         DimFrame::Radial { center, .. } | DimFrame::ArcLength { center, .. } => at - center,
         DimFrame::Angular { vertex, .. } => at - vertex,
+        DimFrame::HalfAxis { center, .. } => at - center,
     }
+}
+
+/// The linear frame a [`DimFrame::HalfAxis`] is drawn as for the stored text `t`: to the end
+/// on the text's side, with `t` re-expressed for that frame.
+fn half_axis_side(center: Vec2, dir: Vec2, len: f64, t: Vec2) -> (DimFrame, Vec2) {
+    let dir = if t.dot(dir) < 0.0 { -dir } else { dir };
+    let linear = DimFrame::Linear { p0: center, p1: center + dir * len, dir };
+    (linear, encode_text(&linear, center + t))
 }
 
 /// Per point: the centre of the connected geometry it belongs to (points joined by curves),
@@ -213,6 +231,8 @@ pub fn default_text(f: &DimFrame, away: Vec2, px: f64) -> Option<Vec2> {
 pub fn default_text_offset(f: &DimFrame, px: f64) -> Vec2 {
     match *f {
         DimFrame::Linear { .. } => Vec2::new(0.0, 22.0 * px),
+        // Where a linear dimension to the minor axis end puts it.
+        DimFrame::HalfAxis { dir, len, .. } => dir * (len * 0.5) + dir.perp() * (22.0 * px),
         DimFrame::Radial { radius, .. } => Vec2::new(1.0, 1.0) * ((radius + 18.0 * px) * std::f64::consts::FRAC_1_SQRT_2),
         DimFrame::Angular { d0, sweep, .. } => Vec2::from_angle(d0.angle() + sweep * 0.5) * (48.0 * px),
         DimFrame::ArcLength { radius, start, sweep, .. } => Vec2::from_angle(start + sweep * 0.5) * (radius + 20.0 * px),
@@ -292,6 +312,11 @@ pub fn dim_layout_reaching(f: &DimFrame, text: Option<Vec2>, px: f64, half: Vec2
     let over = 4.0 * px;
     let mut out = DimLayout::default();
     match *f {
+        DimFrame::HalfAxis { center, dir, len } => {
+            let t = text.unwrap_or_else(|| default_text_offset(f, px));
+            let (linear, t) = half_axis_side(center, dir, len, t);
+            return dim_layout_reaching(&linear, Some(t), px, half, reach);
+        }
         DimFrame::Linear { p0, p1, dir } => {
             let n = dir.perp();
             let m = (p0 + p1) * 0.5;
@@ -462,6 +487,42 @@ mod tests {
         assert!(close(dim_layout(&f, Some(enc), 0.1, Vec2::ZERO).text, at));
         let r = DimFrame::Radial { center: Vec2::new(5.0, 5.0), radius: 3.0, diameter: true, arc: None };
         assert!(close(dim_layout(&r, Some(encode_text(&r, at)), 0.1, Vec2::ZERO).text, at));
+    }
+
+    #[test]
+    fn an_ellipse_s_minor_radius_is_drawn_as_the_distance_to_its_axis_end() {
+        // A turned ellipse whose minor axis line was deleted: its minor radius is drawn as the
+        // distance from the centre to the minor axis end would be, on whichever side the text is.
+        let mut sk = Sketch::new();
+        let major = Vec2::new(1.0, 1.0) * (20.0 * std::f64::consts::FRAC_1_SQRT_2);
+        let c = sk.add_point(Vec2::ZERO, None).unwrap_or(0);
+        let m = sk.add_point(major, None).unwrap_or(0);
+        let e = sk.add_curve(CurveKind::Ellipse { c, m, r: 8.0 }, None).unwrap_or(0);
+        let f =
+            dim_frame(&sk, &ConstraintKind::Radius { c: e, value: 8.0 }).unwrap_or(DimFrame::Linear { p0: Vec2::ZERO, p1: Vec2::ZERO, dir: Vec2::X });
+        assert!(matches!(f, DimFrame::HalfAxis { .. }), "{f:?}");
+        // Its text is stored from the centre, as it was while it was drawn as a radius, so a
+        // design saved then keeps the text where it was placed.
+        let at = Vec2::new(3.0, 17.0);
+        let radial = DimFrame::Radial { center: Vec2::ZERO, radius: 8.0, diameter: false, arc: None };
+        assert!(close(encode_text(&f, at), encode_text(&radial, at)));
+        assert!(close(dim_layout(&f, Some(encode_text(&radial, at)), 0.1, Vec2::ZERO).text, at));
+        let minor = Vec2::new(-1.0, 1.0) * (8.0 * std::f64::consts::FRAC_1_SQRT_2);
+        for end in [minor, minor * -1.0] {
+            let to_end = DimFrame::Linear { p0: Vec2::ZERO, p1: end, dir: end * (1.0 / 8.0) };
+            for at in [end * 1.6 + major * 0.2, end * 0.5 - major * 0.9] {
+                let half = dim_layout(&f, Some(encode_text(&f, at)), 0.1, Vec2::new(2.0, 1.0));
+                let axis = dim_layout(&to_end, Some(encode_text(&to_end, at)), 0.1, Vec2::new(2.0, 1.0));
+                let same = |a: &[Vec2], b: &[Vec2]| a.len() == b.len() && a.iter().zip(b).all(|(p, q)| close(*p, *q));
+                assert!(close(half.text, at) && close(half.text, axis.text), "{at:?}");
+                assert!(
+                    half.lines.len() == axis.lines.len() && half.lines.iter().zip(&axis.lines).all(|(a, b)| same(a, b)),
+                    "{at:?}: {half:?} {axis:?}"
+                );
+                let tips = |l: &DimLayout| l.arrows.iter().map(|a| a.0).collect::<Vec<_>>();
+                assert!(same(&tips(&half), &tips(&axis)), "{at:?}");
+            }
+        }
     }
 
     #[test]

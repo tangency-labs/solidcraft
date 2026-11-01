@@ -191,8 +191,11 @@ fn an_ellipse_takes_a_typed_major_and_minor_radius() {
     h.step(&json!({"key": "Enter"})).unwrap();
     let state = h.app.session.world_state();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
-    assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status);
-    let CurveKind::Ellipse { c, m, r } = sk.curves[0].kind.clone() else { panic!("{:?}", sk.curves[0].kind) };
+    // The ellipse and its two axes (the default ellipse_axes preference).
+    assert_eq!(sk.curves.len(), 3, "{:?}", h.app.status);
+    let Some(CurveKind::Ellipse { c, m, r }) = sk.curves.iter().map(|k| k.kind.clone()).find(|k| matches!(k, CurveKind::Ellipse { .. })) else {
+        panic!("{:?}", sk.curves)
+    };
     let (c, m) = (sk.point(c).unwrap(), sk.point(m).unwrap());
     // From the centre (the origin) toward the cursor at (20, 10).
     let dir = solidcraft_engine::geom::Vec2::new(20.0, 10.0).normalized().unwrap();

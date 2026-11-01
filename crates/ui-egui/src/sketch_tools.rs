@@ -1276,7 +1276,7 @@ fn run_points(app: &mut SolveApp, t: &Tool) -> bool {
     let params = match (t.cmd, p.as_slice()) {
         ("sketch.line.midpoint", [m, e]) => json!({"mid": arg(m), "end": xy(e.0)}),
         ("sketch.arc.tangent", [s, e]) => json!({"start": arg(s), "end": xy(e.0)}),
-        ("sketch.ellipse", [c, m, q]) => json!({"center": xy(c.0), "major": xy(m.0), "minor": xy(q.0)}),
+        ("sketch.ellipse", [c, m, q]) => json!({"center": xy(c.0), "major": xy(m.0), "minor": xy(q.0), "axes": app.preferences.ellipse_axes}),
         ("sketch.conic", [a, b, x]) => {
             // The typed Rho box, or the parabola the command defaults to.
             let rho = crate::sketch_dims::locked_value(app, t, "Rho").unwrap_or(0.5);

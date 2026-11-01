@@ -173,15 +173,17 @@ fn clicked_extend_endpoint_reaches_exact_ellipse_and_preserves_support() {
     h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
     h.app.run("sketch.ellipse", json!({"center":[20,0],"major":[30,0],"minor_radius":5})).unwrap();
     h.app.run("sketch.constraint.fix", json!({"entity":"e1"})).unwrap();
-    h.app.run("sketch.line", json!({"points":[[0,3],[5,3]],"connect":false,"infer":false})).unwrap();
+    // The ellipse's construction axes come first, so the line's id is read from the reply.
+    let line =
+        h.app.run("sketch.line", json!({"points":[[0,3],[5,3]],"connect":false,"infer":false})).unwrap()["curves"][0].as_str().unwrap().to_string();
     h.frames(2);
     h.step(&json!({"start":"sketch.extend"})).unwrap();
     h.step(&json!({"click":{"world":[5,3,0]}})).unwrap();
     let st = h.app.session.world_state();
     let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
-    let end = ss.sketch.point(ss.sketch.resolve_point("l1.end").unwrap()).unwrap();
+    let end = ss.sketch.point(ss.sketch.resolve_point(&format!("{line}.end")).unwrap()).unwrap();
     assert!(end.dist(Vec2::new(12.0, 3.0)) < 1e-7, "clicked endpoint must extend: {end:?}, {:?}", h.app.status);
-    assert_eq!(ss.sketch.point(ss.sketch.resolve_point("l1.start").unwrap()), Some(Vec2::new(0.0, 3.0)));
+    assert_eq!(ss.sketch.point(ss.sketch.resolve_point(&format!("{line}.start")).unwrap()), Some(Vec2::new(0.0, 3.0)));
 }
 
 #[test]
