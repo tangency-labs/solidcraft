@@ -134,7 +134,7 @@ pub fn refine_for_image(
     let lens = Lens::new(camera, f64::from(height));
     let aspect = f64::from(width) / f64::from(height);
     let world = s.world_state();
-    let mut wanted = Vec::new();
+    let mut needs = Vec::new();
     for (index, (product, body)) in scene.meshes.iter().zip(world.bodies.iter().filter(|b| s.body_visible(&b.name))).enumerate() {
         if product.name != body.name || body.body.is_mesh() || !curved(&product.mesh) {
             continue;
@@ -146,13 +146,13 @@ pub fn refine_for_image(
         let err = q.chord(body.body.size()) * lens.px_per_mm(&bounds);
         let steps = steps_to(err, IMAGE_TARGET_PX, MAX_REFINE);
         if steps > 0 {
-            wanted.push((index, body, err, steps));
+            needs.push((index, body, err, steps));
         }
     }
-    wanted.sort_by(|a, b| b.2.total_cmp(&a.2));
+    needs.sort_by(|a, b| b.2.total_cmp(&a.2));
     // Triangles refinement may still add.
     let mut spare = max_triangles.saturating_sub(reference_triangles);
-    for (index, body, err, wanted) in wanted {
+    for (index, body, err, wanted) in needs {
         let Some(product) = scene.meshes.get_mut(index) else { continue };
         let base = product.mesh.triangles.len() as u64;
         // The viewport's estimate: a step at most doubles a body's triangles. Start at the
