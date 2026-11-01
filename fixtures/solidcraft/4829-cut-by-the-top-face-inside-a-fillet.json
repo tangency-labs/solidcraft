@@ -1,0 +1,138 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/4829",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: open on SolidCraft's truck kernel (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's",
+ "summary": "A cut whose outline is exactly the flat top face left inside a fillet failed on SolidCraft's truck kernel (#4829; also #10422 and #3968). An r 10 post 40 tall has its top circle rounded r 2, leaving a flat top of radius 8; that top face is cut 14 down. As the face's own prism (sweep_face) and as an r 8 cylinder, whose wall meets the round exactly along the top face's edge.",
+ "cases": [
+  {
+   "name": "prism_of_the_top_face",
+   "note": "The rounded top face swept 14 down (sweep_face) and cut.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "post",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 10,
+     "height": 40
+    },
+    {
+     "op": "fillet",
+     "id": "rounded",
+     "body": "post",
+     "edges": [
+      [
+       10,
+       0,
+       40
+      ]
+     ],
+     "radius": 2
+    },
+    {
+     "op": "sweep_face",
+     "id": "tool",
+     "body": "rounded",
+     "face": [
+      0,
+      0,
+      40
+     ],
+     "direction": [
+      0,
+      0,
+      -1
+     ],
+     "distance": 14
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "rounded",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 9699.977756920827,
+     "tol": 0.0001,
+     "formula": "pi*10^2*40 - (1 - pi/4)*2^2 * 2*pi*(10 - c) - pi*8^2*14, c = 2*(10 - 3*pi)/(3*(4 - pi))"
+    }
+   }
+  },
+  {
+   "name": "cylinder_on_the_top_face_edge",
+   "note": "An r 8 cylinder over z 26..40 cut: its wall meets the round along the top face's edge.",
+   "steps": [
+    {
+     "op": "cylinder",
+     "id": "post",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 10,
+     "height": 40
+    },
+    {
+     "op": "fillet",
+     "id": "rounded",
+     "body": "post",
+     "edges": [
+      [
+       10,
+       0,
+       40
+      ]
+     ],
+     "radius": 2
+    },
+    {
+     "op": "cylinder",
+     "id": "tool",
+     "origin": [
+      0,
+      0,
+      26
+     ],
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "radius": 8,
+     "height": 14
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "rounded",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 9699.977756920827,
+     "tol": 0.0001,
+     "formula": "pi*10^2*40 - (1 - pi/4)*2^2 * 2*pi*(10 - c) - pi*8^2*14, c = 2*(10 - 3*pi)/(3*(4 - pi))"
+    }
+   }
+  }
+ ]
+}
