@@ -19,5 +19,8 @@
   },
   "vi": {
     "cmd.drawing_hole_callout": "Chú thích lỗ"
+  },
+  "ko": {
+    "cmd.drawing_hole_callout": "구멍 주석"
   }
 }
