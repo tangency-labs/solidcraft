@@ -19,7 +19,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("surface.patch", "Patch", patch)
         .at("SURFACE", "CREATE")
         .icon("surface_patch")
-        .params("sketch?: id|name and profiles? (planar patches of sketch regions) | edges: [[x,y,z]] (points on a closed loop of a body's edges: one face on them, planar when the loop is, else a smooth B-spline surface) and body?; continuity?: g0|g1|g2 (edges only, default g0: how the patch meets the faces beside the loop — g1 their tangent planes, g2 also their curvature across the edges) or [{edge: [x,y,z], g: g0|g1|g2}] (those edges so, the rest g0) or {all, edges}; points?: [[x,y,z]] (edges only, up to 64: points the patch passes through); crown?: number −0.9…3 (default 0: only a fitted patch, whose middle becomes fuller by this many times the loop's size — the bump vanishes on the loop, so the face still meets the picked edges and the continuity across them; a loop that is planar and g0 is the exact plane whatever the crown; with points, crown needs a g1 or g2 edge); name?, body_name?"),
+        .params("sketch?: id|name and profiles? (planar patches of sketch regions) or profiles_3d: [indices] (the sketch's planar 3D-sketch loops, each patched in its own plane, as listed by sketch.inspect) | edges: [[x,y,z]] (points on a closed loop of a body's edges: one face on them, planar when the loop is, else a smooth B-spline surface) and body?; continuity?: g0|g1|g2 (edges only, default g0: how the patch meets the faces beside the loop — g1 their tangent planes, g2 also their curvature across the edges) or [{edge: [x,y,z], g: g0|g1|g2}] (those edges so, the rest g0) or {all, edges}; points?: [[x,y,z]] (edges only, up to 64: points the patch passes through); crown?: number −0.9…3 (default 0: only a fitted patch, whose middle becomes fuller by this many times the loop's size — the bump vanishes on the loop, so the face still meets the picked edges and the continuity across them; a loop that is planar and g0 is the exact plane whatever the crown; with points, crown needs a g1 or g2 edge); name?, body_name?"),
     CommandSpec::new("surface.stitch", "Stitch", stitch)
         .at("SURFACE", "MODIFY")
         .icon("surface_stitch")
@@ -91,8 +91,12 @@ fn patch(s: &mut Session, p: &Value) -> Result<Value> {
     let crown = crown_param(p, cmd)?;
     let continuity = patch_continuity(p, cmd)?;
     let points: Vec<Position> = patch_points(p, cmd)?.into_iter().map(Position).collect();
+    let profiles_3d = profiles_3d_param(p, cmd)?;
     let edges: Vec<solidcraft_geom::Vec3> = p.get("edges").and_then(Value::as_array).map(|a| a.iter().filter_map(vec3).collect()).unwrap_or_default();
     let mut v = if !edges.is_empty() {
+        if !profiles_3d.is_empty() {
+            return Err(bad(cmd, "`profiles_3d` is for a patch on a sketch"));
+        }
         if edges.len() > 10_000 {
             return Err(bad(cmd, "too many edges"));
         }
@@ -103,6 +107,7 @@ fn patch(s: &mut Session, p: &Value) -> Result<Value> {
             FeatureKind::Patch {
                 sketch: None,
                 profiles: ProfileSel::All,
+                profiles_3d: Vec::new(),
                 body: body.map(BodyName),
                 edges: edges.into_iter().map(Position).collect(),
                 crown,
@@ -115,10 +120,13 @@ fn patch(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "`continuity` and `points` are for a patch on a loop of edges"));
         }
         let sketch = feature_sketch(s, p, cmd)?;
-        let profiles = profiles(p, cmd)?;
+        // With only 3D loops asked for, the sketch's own-plane profiles stay untouched.
+        let profiles =
+            if !profiles_3d.is_empty() && p.get("profiles").is_none() { ProfileSel::Indices { indices: Vec::new() } } else { profiles(p, cmd)? };
         let kind = FeatureKind::Patch {
             sketch: Some(SketchId(sketch)),
             profiles,
+            profiles_3d,
             body: None,
             edges: Vec::new(),
             crown,
@@ -132,6 +140,22 @@ fn patch(s: &mut Session, p: &Value) -> Result<Value> {
         o.insert("continuity".into(), serde_json::to_value(&continuity).unwrap_or(Value::Null));
     }
     Ok(v)
+}
+
+/// Indices of the sketch's planar 3D loops (#741): `profiles_3d: [0, 2]`, as listed by
+/// `sketch.inspect`.
+fn profiles_3d_param(p: &Value, cmd: &str) -> Result<Vec<usize>> {
+    let Some(v) = p.get("profiles_3d") else { return Ok(Vec::new()) };
+    let a = v.as_array().ok_or_else(|| bad(cmd, "`profiles_3d` must be a list of indices"))?;
+    if a.is_empty() || a.len() > 128 {
+        return Err(bad(cmd, "`profiles_3d` needs 1 to 128 indices"));
+    }
+    a.iter()
+        .map(|i| {
+            let n = i.as_u64().ok_or_else(|| bad(cmd, "`profiles_3d` indices must be whole numbers"))?;
+            usize::try_from(n).map_err(|_| bad(cmd, format!("there is no profile {n}")))
+        })
+        .collect()
 }
 
 /// A continuity word for a patch: g0, g1 or g2 (a patch does not hold g3).

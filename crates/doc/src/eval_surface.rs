@@ -8,13 +8,20 @@ use solidcraft_geom::Seg2;
 
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState, warning: &mut Option<String>) -> Result<()> {
     match &f.kind {
-        FeatureKind::Patch { sketch, profiles, body, edges, crown, continuity, points } => {
+        FeatureKind::Patch { sketch, profiles, profiles_3d, body, edges, crown, continuity, points } => {
             let mut made = Vec::new();
             if let Some(sk) = sketch {
                 let ss = st.sketch(sk.0).ok_or_else(|| DocError::Unknown(format!("sketch {sk} (it must come earlier in the timeline)")))?;
-                let regions = solidcraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
-                for r in &regions {
-                    made.push(kernel::patch_region(&ss.plane, r)?);
+                // An empty index list means the caller asked only for 3D loops (#741).
+                if !matches!(profiles, ProfileSel::Indices { indices } if indices.is_empty()) {
+                    let regions = solidcraft_sketch::merge_regions(&select_profiles(ss, profiles)?);
+                    for r in &regions {
+                        made.push(kernel::patch_region(&ss.plane, r)?);
+                    }
+                }
+                for &i in profiles_3d {
+                    let p = ss.profiles_3d.get(i).ok_or_else(|| DocError::Invalid(format!("sketch {sk} has no 3D profile {i}")))?;
+                    made.push(kernel::patch_region(&p.plane, &p.region)?);
                 }
             }
             if !edges.is_empty() {
@@ -29,7 +36,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
                 made.push(kernel::patch_edges_with(&b.body, &crate::plain(edges), &spec)?);
             }
             if made.is_empty() {
-                return Err(DocError::Invalid("a patch needs a sketch region or a loop of edges".into()));
+                return Err(DocError::Invalid("a patch needs a sketch region, a 3D sketch loop, or a loop of edges".into()));
             }
             for (k, b) in made.into_iter().enumerate() {
                 let name = new_name(st, f, k);
