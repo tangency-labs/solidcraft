@@ -66,8 +66,10 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
             depth,
         });
     };
-    // Nine coplanar patches per square face. The middle and four side patches
-    // share the face target; three corner squares share one isometric target.
+    // Nine coplanar patches per square face. The middle patch is the face, the
+    // four side patches are the cube's edges (two-axis views such as TOP · FRONT),
+    // and three corner squares share one isometric target. Each edge strip lies
+    // on both adjacent faces and yields the same bisecting direction from either.
     for (n, r, u) in [
         (Vec3::X, Vec3::Y, Vec3::Z),
         (-Vec3::X, -Vec3::Y, Vec3::Z),
@@ -80,7 +82,7 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
         for (x0, x1, sx) in bands {
             for (y0, y1, sy) in bands {
                 add(
-                    if sx != 0.0 && sy != 0.0 { n + r * sx + u * sy } else { n },
+                    n + r * sx + u * sy,
                     n,
                     [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].into_iter().map(|(x, y)| n + r * x + u * y).collect(),
                     if sx == 0.0 && sy == 0.0 { Some((r, u)) } else { None },
@@ -299,7 +301,7 @@ mod tests {
     }
 
     #[test]
-    fn cube_targets_are_only_six_faces_and_eight_corners_in_both_up_frames() {
+    fn cube_targets_are_faces_edges_and_corners_in_both_up_frames() {
         for up in [UpAxis::Z, UpAxis::Y] {
             let mut directions = Vec::new();
             for view in [StandardView::Front, StandardView::Back, StandardView::Top, StandardView::Bottom, StandardView::Left, StandardView::Right] {
@@ -307,54 +309,68 @@ mod tests {
                 cam.set_view(view);
                 for facet in facets(&cam, Pos2::ZERO, HALF) {
                     let axes = [facet.direction.x, facet.direction.y, facet.direction.z].into_iter().filter(|v| *v != 0.0).count();
-                    assert!(axes == 1 || axes == 3, "cube edges must not be independent targets: {}", facet.label);
+                    assert!((1..=3).contains(&axes), "cube targets are faces, edges or corners: {}", facet.label);
                     if !directions.contains(&facet.direction) {
                         directions.push(facet.direction);
                     }
                 }
             }
-            assert_eq!(directions.len(), 14);
+            assert_eq!(directions.len(), 26, "six faces, twelve edge views and eight corner views");
+            let axes = |d: Vec3| [d.x, d.y, d.z].into_iter().filter(|v| *v != 0.0).count();
+            assert_eq!(directions.iter().filter(|d| axes(**d) == 1).count(), 6);
+            assert_eq!(directions.iter().filter(|d| axes(**d) == 2).count(), 12, "every cube edge is an in-between view (#103)");
+            assert_eq!(directions.iter().filter(|d| axes(**d) == 3).count(), 8);
         }
     }
 
     #[test]
-    fn former_edge_strips_click_the_face_and_hover_without_internal_seams() {
+    fn edge_strips_select_in_between_views_and_hover_outlines_their_targets() {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"navigator_style":"cube"}));
         let ctx = crate::fonts::test_context();
         h.app.preferences.look_at_anim = false;
         for up in ["z", "y"] {
             h.call("ui.prefs", json!({"up_axis":up}));
-            h.call("ui.view", json!({"view":"front"}));
-            let camera = h.app.cam;
-            let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
-            let half = HALF * f64::from(outer.width() / DESIGN_SIZE);
-            let faces = facets(&camera, outer.center(), half);
-            assert!(crate::scenario::handle_at("navigation_cube:front_right").is_none());
-            assert!(crate::scenario::handle_at("navigation_cube:top_front").is_none());
-            for direction in [Vec3::X, -Vec3::X, Vec3::Z, -Vec3::Z] {
-                let p = outer.center() + project(&camera, direction * 0.84, half);
+            for (offset, want) in
+                [(Vec3::X, -Vec3::Y + Vec3::X), (-Vec3::X, -Vec3::Y - Vec3::X), (Vec3::Z, -Vec3::Y + Vec3::Z), (-Vec3::Z, -Vec3::Y - Vec3::Z)]
+            {
+                h.call("ui.view", json!({"view":"front"}));
+                let camera = h.app.cam;
+                let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
+                assert!(crate::scenario::handle_at("navigation_cube:top_front").is_some(), "#103 edge views publish handles");
+                let half = HALF * f64::from(outer.width() / DESIGN_SIZE);
+                let faces = facets(&camera, outer.center(), half);
+                let p = outer.center() + project(&camera, offset * 0.84, half);
                 let hovered = hit(&faces, p).unwrap();
-                assert_eq!(faces[hovered].direction, -Vec3::Y);
+                assert_eq!(faces[hovered].direction, want, "the strip along a front edge is the in-between view");
                 h.call("ui.move", json!({"x":p.x,"y":p.y}));
                 h.call("ui.click", json!({"x":p.x,"y":p.y}));
-                assert_eq!(h.app.cam, camera, "a former edge strip must select FRONT, never a diagonal view");
+                assert!(
+                    h.app.cam.back().dist(camera.from_frame(want.normalized().unwrap())) < 2e-6,
+                    "clicking the {want:?} strip must turn to that edge view"
+                );
                 let t = Tokens::light();
                 let output = paint_frame(&ctx, |ui| {
                     paint_cube(ui.painter(), &faces, Some(hovered), t, false, 1.0);
                 });
-                let centre = Rect::from_center_size(outer.center(), vec2(2.0, 2.0) * (INSET * half) as f32);
+                let centre = Rect::from_center_size(outer.center(), vec2(2.0, 2.0) * (INSET * half) as f32).shrink(1.0);
                 let mut outline = 0;
                 for shape in &output.shapes {
                     if let Shape::LineSegment { points: [a, b], stroke } = &shape.shape
                         && stroke.color == t.accent
                     {
                         outline += 1;
-                        assert!(!centre.contains(a.lerp(*b, 0.5)), "face subdivisions must not draw hover seams");
+                        assert!(!centre.contains(a.lerp(*b, 0.5)), "edge targets must not draw seams through the face centre");
                     }
                 }
-                assert_eq!(outline, 12, "one continuous face outline around the four corner targets");
+                assert_eq!(outline, 4, "the hovered edge strip is outlined as its own target");
             }
+            // The middle patch still selects the plain face view.
+            h.call("ui.view", json!({"view":"front"}));
+            let camera = h.app.cam;
+            let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
+            h.call("ui.click", json!({"x":outer.center().x,"y":outer.center().y}));
+            assert_eq!(h.app.cam, camera, "the middle patch still selects FRONT");
         }
     }
 
