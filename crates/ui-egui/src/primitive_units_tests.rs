@@ -720,3 +720,37 @@ fn a_point_picked_in_the_sphere_or_torus_dialog_becomes_its_centre() {
         h.app.dialog = None;
     }
 }
+
+#[test]
+fn a_sketch_point_places_the_box_sphere_and_torus() {
+    // #9403: a point of a sketch, clicked in the window or selected before it opens, is where the
+    // primitive goes, where the sketch puts it in the world (here 20 mm up, on an offset plane).
+    use solidcraft_engine::Sel;
+    let mut h = design("mm");
+    h.app.run("sketch.create", json!({"plane": "XY", "offset": 20, "name": "Marks"})).unwrap();
+    h.app.run("sketch.point", json!({"point": [12, 7], "id": "m"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.frames(3);
+    for (cmd, key) in [("solid.sphere", "center"), ("solid.torus", "center"), ("solid.box", "corner")] {
+        h.app.start(cmd);
+        h.frames(3);
+        h.step(&json!({"click": {"world": [12, 7, 20]}})).unwrap();
+        h.frames(2);
+        assert_shown(&h, &[("X", "12 mm".into()), ("Y", "7 mm".into()), ("Z", "20 mm".into())]);
+        assert_eq!(sent(&h)[key], json!(["12 mm", "7 mm", "20 mm"]), "{cmd}");
+        let d = h.app.dialog.as_ref().unwrap();
+        let chip = crate::dialogs::selection_label(&h.app.session, crate::prefs::OriginPlaneNames::Xyz, d, &d.inputs[0], &d.inputs[0].items[0]);
+        // Numbered as Select Other numbers it: the sketch's origin is point 1.
+        assert_eq!(chip, "Point 2 · Marks", "the chip names the point and its sketch");
+        h.app.dialog = None;
+    }
+    let sketch = h.app.session.doc.features.iter().find(|f| f.name == "Marks").map(|f| f.id).unwrap();
+    h.app.session.selection = vec![Sel::ExternalSketchPoint { sketch, id: "m".into() }];
+    h.app.start("solid.sphere");
+    h.frames(3);
+    assert_eq!(sent(&h)["center"], json!([12.0, 7.0, 20.0]));
+    ok(&mut h);
+    let made = bounds(&mut h.app.session);
+    assert_within(made[0].0, [2.0, -3.0, 10.0], 0.05);
+    assert_within(made[0].1, [22.0, 17.0, 30.0], 0.05);
+}

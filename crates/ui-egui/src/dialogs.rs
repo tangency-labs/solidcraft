@@ -1179,11 +1179,16 @@ impl Dialog {
             }
         }
         Self::take_component_bodies(app, &mut d);
-        // A primitive goes where a face or vertex is picked, standing on a planar face.
-        if let Kind::Primitive { at, .. } = &mut d.kind {
+        // A primitive goes where a face or vertex is picked, standing on a planar face. The Box,
+        // Sphere and Torus also go to a sketch point (#9403).
+        if let Kind::Primitive { cmd, at, .. } = &mut d.kind {
+            let sketch_points = !crate::primitive_placement::inputs(cmd).is_empty();
             *at = s.selection.iter().find_map(|sel| match sel {
                 Sel::Face { body, index, point } => Some((*point, planar_face(s, body, *index).map(|(_, n)| n))),
                 Sel::Vertex { point, .. } => Some((*point, None)),
+                Sel::ExternalSketchPoint { .. } | Sel::SketchPoint { .. } if sketch_points => {
+                    crate::primitive_placement::world_point(s, sel).map(|p| (p, None))
+                }
                 _ => None,
             });
         }
@@ -2630,6 +2635,12 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
     match item {
         Sel::SketchCurve { id, .. } => id.clone(),
         Sel::SketchPoint { id } => crate::sketch_modify_ui::point_id(s, item).unwrap_or(id).to_string(),
+        // Another sketch's point (a Sphere's centre, #9403), named as Select Other names it.
+        Sel::ExternalSketchPoint { sketch, id } => {
+            let point = s.world_state().sketch(*sketch).map_or_else(|| id.clone(), |ss| crate::select_other::point_label(&ss.sketch, id));
+            let name = s.doc.feature(*sketch).map_or_else(|| format!("Sketch {sketch}"), |f| f.name.clone());
+            format!("{point} · {name}")
+        }
         Sel::Plane { name } => names.label(name).to_string(),
         Sel::Axis { name } | Sel::ConstructionPoint { name } | Sel::Body { name } => name.clone(),
         Sel::Face { body, index, .. } if axis => format!("{body} · face {index} axis"),
