@@ -38,6 +38,7 @@ mod pills;
 #[cfg(not(target_arch = "wasm32"))]
 mod process;
 mod select_all;
+pub(crate) mod selection_menu;
 pub mod settings;
 pub mod summary;
 mod times;
@@ -478,6 +479,8 @@ pub struct AgentChat {
     pub(crate) forget_width: bool,
     /// Select All (Ctrl+A) in the transcript took the whole conversation (#10676).
     all_selected: bool,
+    /// Right-click Copy over a reply's text selection (#10882).
+    pub(crate) sel_menu: selection_menu::State,
     /// Unreserved sheet space, shared by the actual dock and its drag preview.
     pub(crate) dock_space: Option<egui::Rect>,
     /// The last message sent, kept to send again after a sign-in (its files too).

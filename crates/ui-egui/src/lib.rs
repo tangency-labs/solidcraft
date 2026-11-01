@@ -3413,6 +3413,8 @@ impl SolveApp {
         self.synthetic_input(raw);
         finite_input(raw);
         self.hold_click_after_typing(raw);
+        // A right-click over a reply's selection is caught before egui's label selection sees it.
+        agent_chat::selection_menu::guard(self, raw);
         issue_report::hold_input(self, raw);
     }
 
@@ -3748,6 +3750,9 @@ impl SolveApp {
             self.resolve_fit(ui.ctx());
         }
         panel_runtime::finish_app_host(self, ui);
+        // Next frame's guard wants to know whether a label selection survived this frame's
+        // labels, before egui's end-of-pass bookkeeping (#10882).
+        self.agent_chat.sel_menu.note_selection(agent_chat::selection_menu::selection_alive(ui.ctx()));
     }
 
     fn show_workspace(&mut self, ui: &mut egui::Ui) {
