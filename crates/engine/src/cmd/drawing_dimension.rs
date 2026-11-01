@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 use solidcraft_doc::drawing::Drawing;
-use solidcraft_doc::drawing::dimension::{Candidate, Dimension, DimensionKind, Silhouette, Status, TextPlace, check_chain_length};
+use solidcraft_doc::drawing::dimension::{Candidate, DEFAULT_DECIMALS, Dimension, DimensionKind, Silhouette, Status, TextPlace, check_chain_length};
 use solidcraft_doc::ids;
 use solidcraft_geom::Vec3;
 use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
@@ -33,8 +33,6 @@ const INSPECT_CONTRACT: TypedContract<InspectParams> = TypedContract::new();
 /// How far a new dimension's line is from what it measures, on paper, until a dimension style
 /// gives it (D1).
 const DEFAULT_OFFSET_MM: f64 = 10.0;
-/// How many decimals a new dimension shows unless told.
-const DEFAULT_DECIMALS: u8 = 2;
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new(ADD, "Add Drawing Dimension", crate::checked!("drawing.dimension.add", add))

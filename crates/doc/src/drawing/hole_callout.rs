@@ -31,13 +31,14 @@ use solidcraft_geom::Vec3;
 use crate::expr::{Kind, Value};
 use crate::{DocError, Document, Feature, FeatureKind, HoleKind, Model, ModelState, Result, display_units};
 
+/// The decimals a callout's numbers get unless asked for others: the one default dimensions take
+/// too, so a callout and a dimension on one sheet read alike.
+pub use super::dimension::DEFAULT_DECIMALS;
+
 /// The most bytes of a sketch point id a callout takes.
 pub const MAX_POINT_BYTES: usize = 256;
 /// The most decimals a callout's numbers take.
 pub const MAX_DECIMALS: u8 = 6;
-/// The decimals a callout's numbers get unless asked for others: the length-decimals preference's
-/// default, as dimensions take theirs, so a callout and a dimension on one sheet read alike.
-pub const DEFAULT_DECIMALS: u8 = 2;
 /// The most holes one Hole feature drills (as the feature itself takes).
 const MAX_HOLES: usize = 10_000;
 /// The largest length or diameter a callout shows, in millimetres.
