@@ -921,6 +921,7 @@
   "cmd.drawing_dimension_edit": "编辑绘图尺寸",
   "cmd.drawing_dimension_inspect": "检查绘图尺寸",
   "cmd.drawing_export": "导出图纸",
+  "cmd.drawing_hole_callout": "孔标注",
   "cmd.drawing_inspect": "检查绘图",
   "cmd.drawing_list": "列出绘图",
   "cmd.drawing_open": "打开绘图",
