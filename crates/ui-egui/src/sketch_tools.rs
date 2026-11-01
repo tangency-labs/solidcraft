@@ -838,6 +838,47 @@ fn active_sketch(app: &SolveApp) -> Option<u64> {
     app.session.active_sketch
 }
 
+/// A click with Project. An edge, face, vertex or other sketch entity projects as itself.
+/// The centre of a hole is none of those — the opening has no triangles — so the ray is
+/// tested against hole openings and the rim's edges are projected. Anything else is said
+/// out loud: a miss used to return without running the command, so the click did nothing.
+fn project_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, hits: &[Hit]) {
+    let picked = hits.iter().find_map(|h| match h {
+        Hit::Vertex { .. } | Hit::Edge { .. } | Hit::Face { .. } | Hit::SketchCurve { .. } | Hit::SketchPoint { .. } => model_ref(app, h),
+        _ => None,
+    });
+    let refs = if let Some(r) = picked {
+        vec![r]
+    } else if let Some(rim) = hole_under_cursor(app, proj, pos) {
+        rim
+    } else if let Some(r) = hits.iter().find_map(|h| model_ref(app, h)) {
+        vec![r]
+    } else {
+        app.set_status("Project: nothing under the cursor", true);
+        return;
+    };
+    if refs.is_empty() {
+        app.set_status("Project: nothing under the cursor", true);
+        return;
+    }
+    // A command failure is already reported by `SolveApp::run`. A refusal that returns
+    // before that (a file operation in progress) is not, so surface it here.
+    if let Err(error) = app.run("sketch.project", json!({"refs": refs}))
+        && !app.status.as_ref().is_some_and(|(_, _, is_error)| *is_error)
+    {
+        app.set_status(error, true);
+    }
+}
+
+/// Edge references for the hole opening under the cursor, when the ray passes through one.
+fn hole_under_cursor(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Vec<Value>> {
+    let (origin, dir) = proj.ray(pos);
+    let state = crate::open_meshing::shown_world(app);
+    let rim = solidcraft_engine::doc::project::hole_rim_along_ray(&state, origin, dir, |name| app.session.body_visible(name))?;
+    let refs: Vec<Value> = rim.edges.iter().filter(|p| p.is_finite()).map(|p| json!({"edge": [p.x, p.y, p.z], "body": rim.body})).collect();
+    (!refs.is_empty()).then_some(refs)
+}
+
 /// A model reference for a hit (for Project and friends).
 pub(crate) fn model_ref(app: &SolveApp, h: &Hit) -> Option<Value> {
     let active = active_sketch(app);
@@ -1078,6 +1119,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 }
             }
         }
+        Mode::ModelRef if cmd == "sketch.project" => project_click(app, proj, pos, &hits),
         Mode::ModelRef => {
             let r = hits.iter().find_map(|h| model_ref(app, h));
             let Some(r) = r else { return };

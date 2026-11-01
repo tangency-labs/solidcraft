@@ -1341,3 +1341,69 @@ fn the_silhouette_of_conic_rounds_closes() {
     let area = profiles[0]["area_mm2"].as_f64().unwrap();
     assert!((area - exact).abs() < exact * 2e-4, "area {area}, exact {exact}");
 }
+
+fn assert_rim(s: &mut Session, radius: f64, center: [f64; 2]) {
+    let si = inspect(s);
+    let arcs: Vec<Value> = linked_curves(&si).into_iter().filter(|c| c["type"] == "arc" || c["type"] == "circle").collect();
+    assert!(arcs.len() >= 2, "the opening is a full circle, got {si}");
+    for c in &arcs {
+        let r = c["radius"].as_f64().unwrap_or(f64::NAN);
+        assert!((r - radius).abs() < 1e-4, "{c}");
+        let at = &c["center_at"];
+        assert!((at[0].as_f64().unwrap_or(f64::NAN) - center[0]).abs() < 1e-4, "{c}");
+        assert!((at[1].as_f64().unwrap_or(f64::NAN) - center[1]).abs() < 1e-4, "{c}");
+        assert!(c["link"].as_str().is_some(), "{c}");
+    }
+}
+
+/// A click in a hole hits no face. The ray through the opening still names the rim, and
+/// projecting those edges draws the circle. A large hole is too far from every face for a
+/// point dropped in the opening to resolve, which is why the rim has to be found as a loop.
+#[test]
+fn a_ray_through_a_hole_opening_projects_its_rim() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "solid.hole", json!({"position": [20, 15, 20], "diameter": 10, "depth": 20}));
+    let st = s.model.state();
+    let down = solidcraft_geom::Vec3::new(0.0, 0.0, -1.0);
+    let rim = solidcraft_doc::project::hole_rim_along_ray(&st, solidcraft_geom::Vec3::new(20.0, 15.0, 80.0), down, |_| true)
+        .expect("the ray through the opening names the rim");
+    assert_eq!(rim.edges.len(), 2, "{rim:?}");
+    assert!(rim.at.dist(solidcraft_geom::Vec3::new(20.0, 15.0, 20.0)) < 1e-4, "{rim:?}");
+    let angled = solidcraft_geom::Vec3::new(0.0, 45.0, -30.0);
+    let from_side = solidcraft_doc::project::hole_rim_along_ray(&st, solidcraft_geom::Vec3::new(20.0, -30.0, 50.0), angled, |_| true);
+    assert!(from_side.as_ref().is_some_and(|r| r.edges.len() == 2), "{from_side:?}");
+    assert!(solidcraft_doc::project::hole_rim_along_ray(&st, solidcraft_geom::Vec3::new(5.0, 5.0, 80.0), down, |_| true).is_none());
+    assert!(
+        solidcraft_doc::project::hole_rim_along_ray(
+            &st,
+            solidcraft_geom::Vec3::new(20.0, 15.0, 80.0),
+            solidcraft_geom::Vec3::new(0.0, 0.0, 1.0),
+            |_| true
+        )
+        .is_none()
+    );
+    assert!(solidcraft_doc::project::hole_rim_along_ray(&st, solidcraft_geom::Vec3::new(20.0, 15.0, 80.0), down, |_| false).is_none());
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 30}));
+    let refs: Vec<Value> = rim.edges.iter().map(|p| json!({"edge": [p.x, p.y, p.z], "body": rim.body})).collect();
+    let projected = run(&mut s, "sketch.project", json!({"refs": refs}));
+    assert_eq!(projected["links"].as_array().map(|a| a.len()), Some(2), "{projected}");
+    assert_rim(&mut s, 5.0, [20.0, 15.0]);
+
+    // Diameter 80 in a 100 plate: the opening's centre is farther from every face than
+    // sketch.project will travel to find one, so a point dropped there is not a face.
+    let mut wide = Session::default();
+    run(&mut wide, "solid.box", json!({"length": 100, "width": 100, "height": 10}));
+    run(&mut wide, "solid.hole", json!({"position": [50, 50, 10], "diameter": 80, "depth": 10}));
+    let st = wide.model.state();
+    run(&mut wide, "sketch.create", json!({"plane": "XY", "offset": 20}));
+    let err = wide.execute("sketch.project", &json!({"refs": [{"face": [50.0, 50.0, 10.0]}]})).expect_err("a point in a large opening is not a face");
+    let msg = err.to_string();
+    assert!(msg.contains("the face no longer exists"), "{msg}");
+    assert!(!msg.contains("no sketch is being edited"), "{msg}");
+    let rim = solidcraft_doc::project::hole_rim_along_ray(&st, solidcraft_geom::Vec3::new(50.0, 50.0, 40.0), down, |_| true).expect("large opening");
+    assert_eq!(rim.edges.len(), 2, "{rim:?}");
+    let refs: Vec<Value> = rim.edges.iter().map(|p| json!({"edge": [p.x, p.y, p.z], "body": rim.body})).collect();
+    run(&mut wide, "sketch.project", json!({"refs": refs}));
+    assert_rim(&mut wide, 40.0, [50.0, 50.0]);
+}

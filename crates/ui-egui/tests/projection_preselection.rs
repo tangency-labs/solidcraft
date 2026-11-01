@@ -154,3 +154,46 @@ fn a_rectangle_put_onto_a_projected_edge_is_still_a_profile_to_click() {
     assert_eq!(bounded_by, sides);
     assert!(ss.sketch.curves.iter().any(|curve| curve.id == projected && curve.link.is_some()), "the projected edge stays");
 }
+
+/// A click in the dark centre of a hole hits no face. Project still draws the rim, and a click
+/// on empty space says so instead of returning as if the tool were not running.
+#[test]
+fn clicking_a_hole_opening_projects_its_rim_and_a_miss_is_an_error() {
+    let mut h = Harness::new();
+    // These cover the direct pick workflow; the options dialog is covered in dialogs_sketch_tests.
+    h.app.preferences.project_options_dialog = false;
+    h.app.run("solid.box", json!({"length": 40, "width": 30, "height": 20})).unwrap();
+    h.app.run("solid.hole", json!({"position": [20, 15, 20], "diameter": 10, "depth": 20})).unwrap();
+    // Above the part, so creating the sketch does not already project the face (and its hole).
+    h.app.run("sketch.create", json!({"plane": "XY", "offset": 30})).unwrap();
+    h.call("ui.view", json!({"view": "top"}));
+    h.step(&json!({"start": "sketch.project"})).unwrap();
+    assert_eq!(h.app.tool.as_ref().map(|tool| tool.cmd), Some("sketch.project"));
+    // The origin is shown. Its plane can sit on this ray; the opening still wins.
+    h.step(&json!({"click": {"world": [20.0, 15.0, 20.0]}})).unwrap();
+    assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
+    let si = h.app.run("sketch.inspect", json!({})).unwrap();
+    let arcs: Vec<_> =
+        si["curves"].as_array().unwrap().iter().filter(|c| c.get("link").is_some() && (c["type"] == "arc" || c["type"] == "circle")).collect();
+    assert!(arcs.len() >= 2, "{si}");
+    for c in &arcs {
+        let r = c["radius"].as_f64().unwrap();
+        assert!((r - 5.0).abs() < 1e-3, "{c}");
+        assert!((c["center_at"][0].as_f64().unwrap() - 20.0).abs() < 1e-3, "{c}");
+        assert!((c["center_at"][1].as_f64().unwrap() - 15.0).abs() < 1e-3, "{c}");
+    }
+    let n = si["curves"].as_array().unwrap().len();
+    while h.app.cam_anim.is_some() {
+        h.frames(4);
+    }
+    h.app.set_origin_shown(false);
+    // Left and below the plate, inside the fitted top view. A vertical ray here misses the
+    // solid and the hole. The view's top edge is covered by chrome, so this stays clear of it.
+    let miss = [-50.0, -30.0, 20.0];
+    h.step(&json!({"click": {"world": miss}})).unwrap();
+    let after = h.app.run("sketch.inspect", json!({})).unwrap();
+    let status = h.app.status.clone().expect("a click on empty space is an error");
+    assert!(status.2 && status.0.contains("nothing"), "{status:?} curves {n} -> {}", after["curves"].as_array().map(|a| a.len()).unwrap_or(0));
+    assert_eq!(after["curves"].as_array().unwrap().len(), n);
+    assert_eq!(h.app.tool.as_ref().map(|tool| tool.cmd), Some("sketch.project"));
+}
