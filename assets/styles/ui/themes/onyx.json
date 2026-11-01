@@ -67,8 +67,8 @@
     "glyph_bg": "#34373a",
     "glyph_edge": "#d7938f",
     "glyph_text": "#d7938f",
-    "grid": "#2a2d30",
-    "grid_major": "#34383b",
+    "grid": "#252729",
+    "grid_major": "#2e3235",
     "hover": "#3b4852",
     "hover_edge": "#b1c1ce",
     "hover_edge_halo": "#181a1c",
@@ -126,9 +126,9 @@
     "sel_vertex": "#9eafbd",
     "selected_bg": "#3b4852",
     "selected_ink": "#dededc",
-    "sheet_fill": "#91b7a5",
-    "sheet_ink": "#91b7a5",
-    "sheet_soft": "#2f3632",
+    "sheet_fill": "#9eb9bd",
+    "sheet_ink": "#9eb9bd",
+    "sheet_soft": "#29363a",
     "sketch": "#9eafbd",
     "sketch_accent": "#b2b995",
     "sketch_centerline": "#c7b28b",
@@ -614,8 +614,8 @@
         "form_accent": "#c78bff",
         "form_fill": "#c78bff",
         "form_tab_ink": "#c78bff",
-        "sheet_fill": "#42d9dd",
-        "sheet_ink": "#42d9dd",
+        "sheet_fill": "#63cbd5",
+        "sheet_ink": "#63cbd5",
         "render_accent": "#ff6d79",
         "render_fill": "#ff6d79",
         "render_ink": "#ff6d79",
@@ -626,7 +626,8 @@
           "#ffd166",
           "#c78bff"
         ],
-        "origin_plane_edge": "#ffb16694"
+        "origin_plane_edge": "#ffb16694",
+        "sheet_soft": "#283a3e"
       },
       "icon_palette": {
         "ink": "#1b1d1f",
@@ -695,9 +696,9 @@
       "panel": "#343137"
     },
     "SHEET METAL": {
-      "viewport_top": "#222923",
-      "viewport_bottom": "#1a211c",
-      "panel": "#303631"
+      "viewport_top": "#22282a",
+      "viewport_bottom": "#1b2022",
+      "panel": "#303638"
     },
     "RENDER": {
       "viewport_top": "#2b2423",
