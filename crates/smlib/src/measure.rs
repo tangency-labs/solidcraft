@@ -143,6 +143,59 @@ mod tests {
         assert!(t[0][1].abs() < 1e-9 * m.moments[2]);
     }
 
+    /// The box is the exact extent, not the control hull: a sphere's and a torus's reach their
+    /// round faces' extremes, and a box turned about z its turned corners.
+    #[test]
+    fn the_box_is_the_exact_extent() {
+        let close = |got: ([f64; 3], [f64; 3]), want: ([f64; 3], [f64; 3]), what: &str| {
+            for i in 0..3 {
+                assert!((got.0[i] - want.0[i]).abs() < 1e-9 && (got.1[i] - want.1[i]).abs() < 1e-9, "{what}: {got:?}, want {want:?}");
+            }
+        };
+        close(Brep::make_box([1.0, -2.0, 3.0], [4.0, 5.0, 6.0]).unwrap().bounds().unwrap(), ([1.0, -2.0, 3.0], [5.0, 3.0, 9.0]), "box");
+        close(Brep::make_sphere([1.0, 2.0, 3.0], 5.0).unwrap().bounds().unwrap(), ([-4.0, -3.0, -2.0], [6.0, 7.0, 8.0]), "sphere");
+        close(Brep::make_torus([0.0; 3], 10.0, 3.0).unwrap().bounds().unwrap(), ([-13.0, -13.0, -3.0], [13.0, 13.0, 3.0]), "torus");
+        let (s, c) = (PI / 6.0).sin_cos();
+        let turned = Brep::make_box([0.0; 3], [4.0, 2.0, 1.0])
+            .unwrap()
+            .transformed(&[[c, s, 0.0, 0.0], [-s, c, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+            .unwrap();
+        close(turned.bounds().unwrap(), ([-2.0 * s, 0.0, 0.0], [4.0 * c, 4.0 * s + 2.0 * c, 1.0]), "turned box");
+    }
+
+    /// The inertia tensor of a box turned about z is R·diag(principal moments)·Rᵀ: its
+    /// off-diagonal terms are the negated products, each in its place.
+    #[test]
+    fn a_turned_box_has_the_turned_inertia_tensor() {
+        let (a, b, c) = (4.0, 2.0, 1.0);
+        let (sin, cos) = (PI / 6.0).sin_cos();
+        let r = [[cos, -sin, 0.0], [sin, cos, 0.0], [0.0, 0.0, 1.0]];
+        // About x by 30°, about z by 30°, then tipped about x by 90°: every product nonzero.
+        let tip = [[1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0]];
+        let mul = |p: [[f64; 3]; 3], q: [[f64; 3]; 3]| {
+            std::array::from_fn::<_, 3, _>(|i| std::array::from_fn::<_, 3, _>(|j| (0..3).map(|k| p[i][k] * q[k][j]).sum::<f64>()))
+        };
+        let rot = mul(tip, mul(r, [[1.0, 0.0, 0.0], [0.0, cos, -sin], [0.0, sin, cos]]));
+        let m4 = [
+            [rot[0][0], rot[1][0], rot[2][0], 0.0],
+            [rot[0][1], rot[1][1], rot[2][1], 0.0],
+            [rot[0][2], rot[1][2], rot[2][2], 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        let body = Brep::make_box([0.0; 3], [a, b, c]).unwrap().transformed(&m4).unwrap();
+        let v = a * b * c;
+        let principal = [[v * (b * b + c * c) / 12.0, 0.0, 0.0], [0.0, v * (a * a + c * c) / 12.0, 0.0], [0.0, 0.0, v * (a * a + b * b) / 12.0]];
+        let rt = std::array::from_fn::<_, 3, _>(|i| std::array::from_fn::<_, 3, _>(|j| rot[j][i]));
+        let want = mul(rot, mul(principal, rt));
+        let got = body.mass_properties(MEASURE_ACCURACY).unwrap().inertia_tensor();
+        for i in 0..3 {
+            for j in 0..3 {
+                assert!((got[i][j] - want[i][j]).abs() < 1e-9 * v, "[{i}][{j}]: {got:?}, want {want:?}");
+            }
+            assert!(want[i].iter().enumerate().all(|(j, x)| j == i || x.abs() > 0.1), "every product nonzero: {want:?}");
+        }
+    }
+
     /// Reads `tests/oracle/<case>/expected.json`.
     #[allow(clippy::unwrap_used)] // test fixture
     fn oracle(case: &str) -> serde_json::Value {

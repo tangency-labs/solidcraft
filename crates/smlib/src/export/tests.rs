@@ -39,6 +39,22 @@ mod native_tests {
             assert_eq!(native.regions.len(), 2, "{name}");
             assert!(!native.regions[0].void && !native.regions[1].void, "{name}");
             assert!(native.edges.iter().all(|e| matches!(e.curve, b::Curve::Line { .. } | b::Curve::Circle { .. })), "{name}");
+            // Each round face keeps its analytic surface, a NURBS form beside it or not.
+            let round = |f: &&b::Face| match (name, &f.surface) {
+                ("cylinder", b::Surface::Cylinder { radius, .. }) => *radius == 5.0,
+                ("sphere", b::Surface::Sphere { radius, .. }) => *radius == 5.0,
+                ("frustum" | "widening frustum" | "cone", b::Surface::Cone { .. }) => true,
+                ("torus", b::Surface::Torus { major_radius, minor_radius, .. }) => (*major_radius, *minor_radius) == (10.0, 3.0),
+                _ => false,
+            };
+            let planes = native.faces.iter().filter(|f| matches!(f.surface, b::Surface::Plane { .. })).count();
+            assert_eq!(
+                native.faces.iter().filter(round).count() + planes,
+                native.faces.len(),
+                "{name}: {:?}",
+                native.faces.iter().map(|f| &f.surface).collect::<Vec<_>>()
+            );
+            assert_eq!(planes == native.faces.len(), name == "box", "{name}");
         }
     }
 
@@ -111,6 +127,104 @@ mod native_tests {
         let cone = Brep::make_cone([0.0; 3], 5.0, 0.0, 10.0).unwrap().to_native().unwrap();
         let half = cone.faces.iter().find_map(|f| if let b::Surface::Cone { half_angle, .. } = f.surface { Some(half_angle) } else { None });
         assert!((half.unwrap() + 0.5f64.atan()).abs() < 1e-12);
+    }
+
+    /// A circle or ellipse edge on its NURBS form has its frame turned so its angle grows along
+    /// the form: sampled along the edge's interval, the form's points are on the curve, at angles
+    /// that grow from the start of [`b::Edge::curve_interval`] to its end. Mirrored bodies and
+    /// holes run their circles the other way round SMLib's frames.
+    #[test]
+    fn circles_on_their_nurbs_forms_turn_with_them() {
+        let mirror = [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        let block = Brep::make_box([0.0; 3], [20.0, 20.0, 10.0]).unwrap();
+        let hole = Brep::make_cylinder([10.0, 10.0, -1.0], 4.0, 12.0).unwrap();
+        let tilted = Brep::make_cylinder([10.0, 10.0, -1.0], 4.0, 12.0)
+            .unwrap()
+            .transformed(&[[1.0, 0.0, 0.0, 0.0], [0.0, 0.8, -0.6, 6.0], [0.0, 0.6, 0.8, 0.0], [0.0, 0.0, 0.0, 1.0]])
+            .unwrap();
+        let mut bodies: Vec<(String, Brep)> = Vec::new();
+        for (name, b, _) in primitives() {
+            // Not the torus: SMLib's transform sizes the tolerances by the box round the vertices,
+            // and the torus has one, so every tolerance comes back 0.
+            if name != "torus" {
+                bodies.push((format!("mirrored {name}"), b.transformed(&mirror).unwrap()));
+            }
+            bodies.push((name.to_string(), b));
+        }
+        let drilled = block.boolean(&hole, crate::BooleanOp::Subtract).unwrap().unwrap();
+        bodies.push(("mirrored drilled block".into(), drilled.transformed(&mirror).unwrap()));
+        bodies.push(("drilled block".into(), drilled));
+        bodies.push(("slanted hole".into(), block.boolean(&tilted, crate::BooleanOp::Subtract).unwrap().unwrap()));
+        bodies.push(("boss".into(), block.boolean(&hole, crate::BooleanOp::Union).unwrap().unwrap()));
+        bodies.push(("filleted block".into(), block.fillet(&[[10.0, 0.0, 10.0], [0.0, 10.0, 10.0]], 1e-6, 2.0).unwrap()));
+        let mut on_forms = 0;
+        for (name, body) in &bodies {
+            let record = body.to_native().unwrap_or_else(|e| panic!("{name}: {e}"));
+            for (i, e) in record.edges.iter().enumerate() {
+                let (frame, radii) = match &e.curve {
+                    b::Curve::Circle { frame, radius } => (frame, [*radius; 2]),
+                    b::Curve::Ellipse { frame, radii } => (frame, *radii),
+                    _ => continue,
+                };
+                let Some(form) = &e.nurbs else { continue };
+                on_forms += 1;
+                let eval = b::eval::CurveEval::new(form).unwrap();
+                let [a0, a1] = e.curve_interval().unwrap_or_else(|| panic!("{name}: edge {i}"));
+                let (o, x, y) = (Vec3::from(frame.origin), Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+                let z = x.cross(y);
+                let [t0, t1] = e.interval;
+                let mut last = a0;
+                for k in 0..=16 {
+                    let p = eval.point(t0 + (t1 - t0) * f64::from(k) / 16.0).unwrap() - o;
+                    let (px, py) = (p.dot(x) / radii[0], p.dot(y) / radii[1]);
+                    assert!(p.dot(z).abs() < 1e-9 && ((px * px + py * py).sqrt() - 1.0).abs() < 1e-9, "{name}: edge {i} off its curve");
+                    // Unwrapped onto the turn after the last sample: never back, never past the end.
+                    let mut a = py.atan2(px);
+                    a += TAU * ((last - a) / TAU).ceil();
+                    if k == 16 {
+                        assert!((a - a1).abs() < 1e-9 || (a + TAU - a1).abs() < 1e-9, "{name}: edge {i} ends at {a}, its interval {a0}..{a1}");
+                    } else {
+                        assert!(a - last < PI && a <= a1 + 1e-9, "{name}: edge {i} at sample {k}: {a} after {last}, its interval {a0}..{a1}");
+                        last = a;
+                    }
+                }
+            }
+        }
+        assert!(on_forms > 0, "no circle edge on a NURBS form");
+    }
+
+    /// A round face's NURBS form is its surface: points of the form over the face's domain lie on
+    /// the analytic surface. A body with several forms of different sizes and weights reads each
+    /// form's own block of the arrays.
+    #[test]
+    fn nurbs_forms_lie_on_their_surfaces() {
+        let ring = Brep::make_torus([0.0; 3], 10.0, 3.0).unwrap();
+        let post = Brep::make_cylinder([0.0, 0.0, -5.0], 4.0, 10.0).unwrap();
+        let ball = Brep::make_sphere([0.0, 0.0, 5.0], 4.5).unwrap();
+        let mut bodies: Vec<(String, Brep)> = primitives().into_iter().map(|(n, b, _)| (n.to_string(), b)).collect();
+        bodies.push(("ring on a post".into(), ring.boolean(&post, crate::BooleanOp::Union).unwrap().unwrap()));
+        bodies.push(("ball on a post".into(), post.boolean(&ball, crate::BooleanOp::Union).unwrap().unwrap()));
+        let mut forms = 0;
+        for (name, body) in &bodies {
+            let record = body.to_native().unwrap_or_else(|e| panic!("{name}: {e}"));
+            record.check_geometry().unwrap_or_else(|e| panic!("{name}: {e}"));
+            for (i, f) in record.faces.iter().enumerate() {
+                let Some(form) = &f.nurbs else { continue };
+                forms += 1;
+                let (on, exact) = (b::eval::SurfaceEval::new(form).unwrap(), b::eval::SurfaceEval::new(&f.surface).unwrap());
+                let [[u0, u1], [v0, v1]] = f.domain;
+                for j in 0..=8 {
+                    for k in 0..=8 {
+                        let uv = [u0 + (u1 - u0) * f64::from(j) / 8.0, v0 + (v1 - v0) * f64::from(k) / 8.0];
+                        let p = on.point(uv).unwrap();
+                        let q = exact.project(p, None, 1e-3).and_then(|st| exact.point(st));
+                        let gap = q.map_or(f64::INFINITY, |q| q.dist(p));
+                        assert!(gap < 1e-7, "{name}: face {i} form at {uv:?} is {gap} off its {:?}", f.surface);
+                    }
+                }
+            }
+        }
+        assert!(forms >= 9, "{forms} forms");
     }
 
     /// A hole tangent to the block's outline from inside: the material touches itself along the

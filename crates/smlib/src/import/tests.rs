@@ -318,3 +318,178 @@ fn a_patch_across_an_extruded_circles_seam_is_its_exact_cylinder() {
     let start = (-half).sin_cos();
     assert!((frame.x_axis[0] - start.1).abs() <= 1e-12 && (frame.x_axis[1] - start.0).abs() <= 1e-12, "x {:?}", frame.x_axis);
 }
+
+/// A one-face record of `surface` trimmed by the rectangle `domain` (its four sides as pcurves,
+/// on placeholder edges): what the import of a spline face reads its range from.
+fn rectangle(surface: Surface, domain: [[f64; 2]; 2]) -> Record {
+    let [[u0, u1], [v0, v1]] = domain;
+    let corners = [[u0, v0], [u1, v0], [u1, v1], [u0, v1]];
+    let edges: Vec<OrientedEdge> = (0..4)
+        .map(|k| OrientedEdge {
+            edge: k as u32,
+            forward: true,
+            pcurve: Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![corners[k], corners[(k + 1) % 4]] },
+        })
+        .collect();
+    let line = Curve::Line { start: [0.0; 3], end: [1.0, 0.0, 0.0] };
+    Record {
+        version: b::VERSION,
+        tolerance: 1e-6,
+        regions: Vec::new(),
+        shells: Vec::new(),
+        faces: vec![Face { surface, nurbs: None, domain, loops: vec![Loop::Edges { edges }] }],
+        edges: (0..4)
+            .map(|_| Edge { nurbs: None, curve: line.clone(), interval: [0.0, 1.0], vertices: [0, 0], tolerance: 1e-6, uses: Vec::new() })
+            .collect(),
+        vertices: Vec::new(),
+    }
+}
+
+/// Every revolution truck makes for an analytic surface comes to SMLib as that surface, placed
+/// off the world's axes and with the profile along either parameter, and a rational spline that
+/// is an extruded circle as a cylinder: points of the record's surface over its domain lie on
+/// the analytic surface, and the analytic surface over its range (but a plane's, the box round
+/// the face) on the record's.
+#[test]
+fn revolutions_and_extruded_circles_become_their_analytic_surfaces() {
+    use solidcraft_geom::brep::{Frame, eval::SurfaceEval, form};
+    use std::f64::consts::{FRAC_PI_2, TAU};
+    let line = |a: [f64; 3], z: [f64; 3]| (Curve::Line { start: a, end: z }, [0.0, 1.0]);
+    let xz = |o: [f64; 3]| Frame { origin: o, x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 0.0, 1.0] };
+    let arc = |o: [f64; 3], r: f64, t: [f64; 2]| form::curve(&Curve::Circle { frame: xz(o), radius: r }, t).unwrap();
+    let profiles: Vec<(&str, (Curve, [f64; 2]))> = vec![
+        ("plane", line([1.0, 0.0, 0.0], [3.0, 0.0, 0.0])),
+        ("cylinder", line([2.0, 0.0, 0.0], [2.0, 0.0, 4.0])),
+        ("cone", line([1.0, 0.0, 0.0], [3.0, 0.0, 4.0])),
+        ("sphere", arc([0.0; 3], 2.0, [-FRAC_PI_2 + 0.2, FRAC_PI_2 - 0.2])),
+        ("torus", arc([5.0, 0.0, 0.0], 1.0, [-1.0, 2.0])),
+    ];
+    // As they are; turned about (1, 1, 1) by 120° (x → y → z) and moved; mirrored.
+    let placements = [
+        [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+        [[0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [1.0, 0.0, 0.0, 0.0], [3.0, -1.0, 2.0, 1.0]],
+        // Mirrored in x = 0: the revolution turns the other way about its placed axis.
+        [[-1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+    ];
+    let single = |surface: Surface, domain: [[f64; 2]; 2]| Record {
+        version: b::VERSION,
+        tolerance: 1e-6,
+        regions: Vec::new(),
+        shells: Vec::new(),
+        faces: vec![Face { surface, nurbs: None, domain, loops: Vec::new() }],
+        edges: Vec::new(),
+        vertices: Vec::new(),
+    };
+    let mut cases: Vec<(String, Surface, [[f64; 2]; 2])> = Vec::new();
+    for (name, (profile, t)) in &profiles {
+        for matrix in placements {
+            for forward in [true, false] {
+                let surface =
+                    Surface::PlacedRevolution { profile: Box::new(profile.clone()), origin: [0.0; 3], axis: [0.0, 0.0, 1.0], matrix, forward };
+                let angles = [0.3, 0.3 + 0.75 * TAU];
+                let domain = if forward { [*t, angles] } else { [angles, *t] };
+                cases.push((format!("{name}, forward {forward}, placed {:?}", matrix[3]), surface, domain));
+            }
+        }
+    }
+    let frame = Frame { origin: [1.0, 2.0, 3.0], x_axis: [0.0, 1.0, 0.0], y_axis: [0.0, 0.0, 1.0] };
+    let (extruded, range) = form::surface(&Surface::Cylinder { frame, radius: 2.5 }, [[0.2, 2.0], [-1.0, 4.0]]).unwrap();
+    assert!(matches!(extruded, Surface::RationalSpline { .. }));
+    cases.push(("extruded circle".into(), extruded, range));
+    for (name, surface, domain) in &cases {
+        // A spline face's range comes from its trims; a revolution's from its domain.
+        let record =
+            if matches!(surface, Surface::RationalSpline { .. }) { rectangle(surface.clone(), *domain) } else { single(surface.clone(), *domain) };
+        let made = analytic::analytic(&record).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let face = &made.faces[0];
+        let kind = name.split(',').next().unwrap();
+        let want = match kind {
+            "plane" => matches!(face.surface, Surface::Plane { .. }),
+            "cylinder" | "extruded circle" => matches!(face.surface, Surface::Cylinder { .. }),
+            "cone" => matches!(face.surface, Surface::Cone { .. }),
+            "sphere" => matches!(face.surface, Surface::Sphere { .. }),
+            "torus" => matches!(face.surface, Surface::Torus { .. }),
+            _ => false,
+        };
+        assert!(want, "{name}: {:?}", face.surface);
+        if kind == "plane" {
+            // The box round the annulus' sector from 0.3 rad through three quarter turns, radii 1
+            // to 3: its corners where the sector reaches x = -3, y = -3 and y = 3.
+            let want = [[-3.0, 3.0 * 0.3f64.cos()], [-3.0, 3.0]];
+            let close = face.domain.iter().flatten().zip(want.iter().flatten()).all(|(a, b)| (a - b).abs() < 1e-9);
+            assert!(close, "{name}: range {:?}, the sector's box {want:?}", face.domain);
+        }
+        let (old, new) = (SurfaceEval::new(surface).unwrap(), SurfaceEval::new(&face.surface).unwrap());
+        // A plane's range is the box round the face, not all of it on the revolution.
+        let both = if kind == "plane" { 1 } else { 2 };
+        for ((from, d), onto) in [((&old, *domain), &new), ((&new, face.domain), &old)].into_iter().take(both) {
+            let [[u0, u1], [v0, v1]] = d;
+            for j in 0..=6 {
+                for k in 0..=6 {
+                    let p = from.point([u0 + (u1 - u0) * f64::from(j) / 6.0, v0 + (v1 - v0) * f64::from(k) / 6.0]).unwrap();
+                    let gap = onto.project(p, None, 1e-3).and_then(|uv| onto.point(uv)).map_or(f64::INFINITY, |q| q.dist(p));
+                    assert!(gap < 1e-8, "{name}: {p:?} is {gap} off the other surface ({:?} on {:?})", face.surface, face.domain);
+                }
+            }
+        }
+    }
+}
+
+/// A revolution SMLib has no analytic surface for stays a revolution (the import sends its
+/// rational B-spline): a profile line off the plane through the axis, a cone across its apex, a
+/// line on the axis, a circle out of that plane, a sphere's arc past a pole, a spline profile,
+/// and a placement that is not a rigid motion. A rational spline that is no extruded circle stays
+/// a spline.
+#[test]
+fn revolutions_with_no_analytic_surface_stay_revolutions() {
+    use solidcraft_geom::brep::{Frame, form};
+    use std::f64::consts::{FRAC_PI_2, TAU};
+    let line = |a: [f64; 3], z: [f64; 3]| (Curve::Line { start: a, end: z }, [0.0, 1.0]);
+    let arc = |frame: Frame, r: f64, t: [f64; 2]| form::curve(&Curve::Circle { frame, radius: r }, t).unwrap();
+    let xz = |o: [f64; 3]| Frame { origin: o, x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 0.0, 1.0] };
+    let tilted = Frame { origin: [5.0, 0.0, 0.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 0.6, 0.8] };
+    let wave =
+        (Curve::Spline { knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], points: vec![[2.0, 0.0, 0.0], [4.0, 0.0, 1.0], [2.0, 0.0, 2.0]] }, [0.0, 1.0]);
+    let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+    let doubled = [[2.0, 0.0, 0.0, 0.0], [0.0, 2.0, 0.0, 0.0], [0.0, 0.0, 2.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+    let cases = [
+        ("skew line", line([2.0, 0.0, 0.0], [2.0, 1.0, 3.0]), identity),
+        ("cone across its apex", line([-1.0, 0.0, 0.0], [3.0, 0.0, 4.0]), identity),
+        ("line on the axis", line([0.0, 0.0, 0.0], [0.0, 0.0, 4.0]), identity),
+        ("tilted circle", arc(tilted, 1.0, [-1.0, 2.0]), identity),
+        ("arc past a pole", arc(xz([0.0; 3]), 2.0, [0.0, FRAC_PI_2 + 0.5]), identity),
+        ("spline", wave, identity),
+        ("scaled placement", line([2.0, 0.0, 0.0], [2.0, 0.0, 4.0]), doubled),
+    ];
+    for (name, (profile, t), matrix) in cases {
+        let surface = Surface::PlacedRevolution { profile: Box::new(profile), origin: [0.0; 3], axis: [0.0, 0.0, 1.0], matrix, forward: true };
+        let face = Face { surface, nurbs: None, domain: [t, [0.0, 0.75 * TAU]], loops: Vec::new() };
+        let record = Record {
+            version: b::VERSION,
+            tolerance: 1e-6,
+            regions: Vec::new(),
+            shells: Vec::new(),
+            faces: vec![face],
+            edges: Vec::new(),
+            vertices: Vec::new(),
+        };
+        let made = analytic::analytic(&record).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert!(matches!(made.faces[0].surface, Surface::PlacedRevolution { .. }), "{name}: {:?}", made.faces[0].surface);
+    }
+    // A rational spline swept along a line that is not square to its circle, and one whose
+    // section is no circle (its middle weight off), stay splines.
+    let frame = Frame { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] };
+    let (round, range) = form::surface(&Surface::Cylinder { frame, radius: 2.0 }, [[0.0, FRAC_PI_2], [0.0, 3.0]]).unwrap();
+    let Surface::RationalSpline { u_knots, v_knots, homogeneous } = round else { panic!("rational") };
+    let sheared: Vec<Vec<[f64; 4]>> = homogeneous.iter().map(|row| row.iter().map(|h| [h[0] + 0.5 * h[2], h[1], h[2], h[3]]).collect()).collect();
+    let mut bent = homogeneous.clone();
+    for p in bent.iter_mut().flat_map(|row| row.iter_mut()).filter(|h| h[3] < 1.0) {
+        *p = p.map(|x| x * 1.2);
+    }
+    for (name, net) in [("sheared", sheared), ("bent", bent)] {
+        let surface = Surface::RationalSpline { u_knots: u_knots.clone(), v_knots: v_knots.clone(), homogeneous: net };
+        let record = rectangle(surface, range);
+        let made = analytic::analytic(&record).unwrap();
+        assert!(matches!(made.faces[0].surface, Surface::RationalSpline { .. }), "{name}: {:?}", made.faces[0].surface);
+    }
+}

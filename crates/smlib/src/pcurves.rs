@@ -189,3 +189,33 @@ fn sheet(face: &TrimFace<'_>) -> Result<(b::Brep, HashSet<(u32, u32, u32)>), Str
     };
     Ok((record, bare))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// SMLib's interval [0.1, 9.9] on our line edge [0, 10], within its 0.5 mm tolerance: every
+    /// knot moves by the affine change of parameter, the ends onto ours exactly, the points stay.
+    /// Ends farther than the tolerance, or turned round, are refused.
+    #[test]
+    fn a_pcurve_on_smlibs_interval_maps_onto_ours() {
+        let line = b::Curve::Line { start: [0.0; 3], end: [1.0, 0.0, 0.0] };
+        let edge = solidcraft_geom::brep::pcurve::TrimEdge { curve: &line, nurbs: None, interval: [0.0, 10.0], vertices: [0, 1], tolerance: 0.5 };
+        let points = vec![[0.0, 0.0], [1.0, 2.0], [3.0, 2.0], [4.0, 0.0]];
+        let pc = Curve2::Spline { knots: vec![0.1, 0.1, 0.1, 2.5, 9.9, 9.9, 9.9], points: points.clone() };
+        let Curve2::Spline { knots, points: kept } = on_our_interval(pc.clone(), &edge, [0.1, 9.9], 0.5).unwrap() else { panic!("a spline") };
+        assert_eq!(kept, points);
+        assert_eq!(&knots[..3], &[0.0; 3]);
+        assert_eq!(&knots[4..], &[10.0; 3]);
+        assert!((knots[3] - 2.4 * 10.0 / 9.8).abs() < 1e-12, "{knots:?}");
+        // Rational: the weights go with the points, the knots as for the spline.
+        let h: Vec<[f64; 3]> = points.iter().map(|p| [p[0] * 2.0, p[1] * 2.0, 2.0]).collect();
+        let r = Curve2::RationalSpline { knots: vec![0.1, 0.1, 0.1, 2.5, 9.9, 9.9, 9.9], homogeneous: h.clone() };
+        let Curve2::RationalSpline { knots: rk, homogeneous } = on_our_interval(r, &edge, [0.1, 9.9], 0.5).unwrap() else { panic!("rational") };
+        assert_eq!((rk, homogeneous), (knots, h));
+        // The same interval is kept as it is.
+        assert_eq!(on_our_interval(pc.clone(), &edge, [0.0, 10.0], 0.5).unwrap(), pc);
+        assert!(on_our_interval(pc.clone(), &edge, [0.1, 9.9], 0.05).is_err(), "ends 0.1 mm off, tolerance 0.05");
+        assert!(on_our_interval(pc, &edge, [9.9, 0.1], 20.0).is_err(), "turned round");
+    }
+}
