@@ -109,6 +109,11 @@ pub enum Target {
         folder: String,
         scope: String,
     },
+    /// A projection (link) listed under its sketch.
+    SketchLink {
+        sketch: u64,
+        link: String,
+    },
 }
 
 /// One menu entry: a command id (run with `params` when given, else started like a toolbar
@@ -400,6 +405,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Folder { component, folder, scope } => crate::browser::folder_items(app, *component, folder, scope),
         Target::Canvas { id } => crate::browser::canvas_items(app, *id),
         Target::PointCloud { id } => crate::browser::point_cloud_items(app, *id),
+        Target::SketchLink { sketch, link } => sketch_link_items(app, *sketch, link),
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
         Target::Section => crate::browser::section_items(app),
@@ -1095,6 +1101,56 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     v
 }
 
+/// A projection's menu (its row under the sketch): update it where its source is now, freeze
+/// or resume it, show or hide it, switch its curves between profile and construction lines,
+/// remove it, or break it into normal geometry.
+fn sketch_link_items(app: &SolveApp, sketch: u64, link: &str) -> Vec<Item> {
+    let Ok(sk) = app.session.doc.sketch(sketch) else { return Vec::new() };
+    let Some(l) = sk.link(link) else { return Vec::new() };
+    let editing = app.session.active_sketch == Some(sketch);
+    let curves: Vec<String> = sk.link_curves(link).iter().filter_map(|c| sk.curves.get(*c)).map(|c| c.id.clone()).collect();
+    let one = json!({"sketch": sketch, "link": link});
+    let mut v = vec![
+        cmd(app, "sketch.update_references", "Update References").with(json!({"sketch": sketch})),
+        if l.frozen {
+            cmd(app, "sketch.resume_link", "Resume Link").with(one.clone())
+        } else {
+            cmd(app, "sketch.freeze_link", "Freeze Link").with(one.clone())
+        },
+        cmd(app, "sketch.link_visibility", if l.hidden { "Show" } else { "Hide" }).with(json!({"sketch": sketch, "link": link, "visible": l.hidden})),
+    ];
+    // A lost projection (as the model shows it) takes a new source, picked in the model.
+    let lost = app.session.model.result(sketch).and_then(|r| r.state.sketch(sketch)).and_then(|ss| ss.sketch.link(link).map(|l| l.lost));
+    if lost.unwrap_or(l.lost) {
+        v.insert(0, act("ui.repairLink", "Repair Link…", "project").with(json!({"link": link})).on(editing));
+    }
+    // Line type and Break Link work on the sketch being edited.
+    v.push(cmd(app, "sketch.construction", "Normal/Construction").with(json!({"curves": curves})).on(editing && !curves.is_empty()));
+    v.push(Item::sep());
+    v.push(cmd(app, "sketch.remove_link", "Remove Projection").with(one));
+    v.push(cmd(app, "sketch.break_link", "Break Link").with(json!({"link": link})).on(editing));
+    v
+}
+
+/// The links (projections, not text) owning the selected sketch entities.
+fn selected_links(sk: &solidcraft_engine::sketch::Sketch, ents: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for e in ents {
+        let link = sk
+            .curves
+            .iter()
+            .find(|c| c.id == *e)
+            .and_then(|c| c.link.clone())
+            .or_else(|| sk.points.iter().find(|p| p.id == *e).and_then(|p| p.link.clone()));
+        if let Some(link) = link.filter(|l| sk.link(l).is_some_and(|l| l.kind != solidcraft_engine::sketch::LinkKind::Text))
+            && !out.contains(&link)
+        {
+            out.push(link);
+        }
+    }
+    out
+}
+
 /// Explode Text (#1842): the selected text's outlines become normal sketch lines, arcs and
 /// curves, no longer tied to the text, so they can be picked, trimmed and edited one by one.
 fn explode_text(app: &SolveApp) -> Option<Item> {
@@ -1222,7 +1278,10 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         v.push(cmd(app, "sketch.edit_text", "Edit Text"));
         v.extend(explode_text(app));
     }
-    v.extend(break_link(app, &ss.sketch, &ents));
+    // A projection's own Break Link is in its section below, which says when it frees more than the selection.
+    if selected_links(&ss.sketch, &ents).is_empty() {
+        v.extend(break_link(app, &ss.sketch, &ents));
+    }
     if let Some(curve) = crate::sketch_modify_ui::selected_equation(app) {
         v.push(act("ui.editEquationCurve", "Edit Equation Curve", "equation_curve").with(json!({ "curve": curve })));
     }
@@ -1244,6 +1303,26 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         .collect();
     if !lines.is_empty() {
         v.push(cmd(app, "sketch.infinite", "Infinite Line").with(json!({ "curves": lines })));
+    }
+    // Projected geometry: the whole projection, or just the selected members (Delete).
+    let links = selected_links(&ss.sketch, &ents);
+    if !links.is_empty() {
+        let frozen = links.iter().all(|l| ss.sketch.link(l).is_some_and(|l| l.frozen));
+        let p = json!({"links": links});
+        v.push(Item::heading("Projection"));
+        v.push(cmd(app, "sketch.update_references", "Update References").with(json!({"sketch": sid})));
+        v.push(if frozen { cmd(app, "sketch.resume_link", "Resume Link") } else { cmd(app, "sketch.freeze_link", "Freeze Link") }.with(p.clone()));
+        if let [link] = links.as_slice()
+            && ss.sketch.link(link).is_some_and(|l| l.lost)
+        {
+            v.push(act("ui.repairLink", "Repair Link…", "project").with(json!({"link": link})));
+        }
+        v.push(cmd(app, "sketch.link_visibility", "Hide Projection").with(json!({"links": links, "visible": false})));
+        v.push(cmd(app, "sketch.remove_link", "Remove Projection").with(p));
+        // Break Link frees every member of the projection, not only the ones selected.
+        let partial = links.iter().any(|l| ss.sketch.link_curves(l).iter().filter_map(|c| ss.sketch.curves.get(*c)).any(|c| !ents.contains(&c.id)));
+        v.push(cmd(app, "sketch.break_link", if partial { "Break Link (whole projection)" } else { "Break Link" }).with(json!({"entities": ents})));
+        v.push(Item::sep());
     }
     if curves.len() == 1 && ss.sketch.offset_distance(&curves[0]).is_some() {
         v.push(cmd(app, "sketch.offset.break", "Break Offset Association").with(json!({"curve":curves[0]})));
@@ -1269,7 +1348,14 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     {
         v.push(cmd(app, "sketch.spline.reverse", "Reverse Spline Direction").with(json!({ "curve": curve })));
     }
-    v.push(act("ui.fix", "Fix/Unfix", "c_fix").with(json!({ "entities": ents })));
+    // Projected geometry is fixed by its source already.
+    let projected = ents.iter().all(|e| {
+        ss.sketch.curve_index(e).map_or_else(
+            || ss.sketch.point_index(e).is_some_and(|i| ss.sketch.points.get(i).is_some_and(|p| p.link.is_some())),
+            |c| ss.sketch.is_linked_curve(c),
+        )
+    });
+    v.push(act("ui.fix", "Fix/Unfix", "c_fix").with(json!({ "entities": ents })).on(!projected));
     // The clipboard beside Delete, as in every menu.
     v.push(act("ui.cut", "Cut", "cut").key("Ctrl+X"));
     v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C"));
@@ -1588,6 +1674,11 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.home" => app.animate_view("home"),
         // One command for the whole selection: all fixed unless all already are.
         "ui.fix" => drop(app.run("sketch.constraint.fix", json!({ "entities": strs(&p, "entities") }))),
+        "ui.repairLink" => {
+            if let Some(link) = p.get("link").and_then(Value::as_str) {
+                crate::sketch_tools::start_repair(app, link);
+            }
+        }
         "ui.editSketch" => {
             if let Some(id) = id_of(&p, "sketch") {
                 app.edit_sketch(id);
@@ -2850,7 +2941,9 @@ mod tests {
         assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: edge.clone(), sketch: None }]);
         let menu = items(&h.app, &Target::Viewport);
         let item = menu.iter().find(|item| item.id == "sketch.break_link").expect("a projected edge must offer Break Link");
-        assert_eq!(item.label, "Break Link");
+        // The body's outline is one projection: breaking it frees every edge, not only this one.
+        assert_eq!(item.label, "Break Link (whole projection)");
+        assert_eq!(menu.iter().filter(|item| item.id == "sketch.break_link").count(), 1, "one Break Link");
         assert!(item.enabled);
         assert_eq!(item.params, Some(json!({"entities":[edge]})));
         h.step(&json!({"click":{"handle":"menu:sketch.break_link"}})).unwrap();

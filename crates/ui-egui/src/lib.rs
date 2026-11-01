@@ -259,6 +259,7 @@ mod sketch_families;
 #[cfg(test)]
 mod sketch_guidance_ui_tests;
 pub(crate) mod sketch_line_arc;
+mod sketch_link_tree;
 pub mod sketch_modify_ui;
 #[cfg(test)]
 mod sketch_modify_ui_tests;

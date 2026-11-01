@@ -194,8 +194,9 @@ fn projected_geometry_counts_as_fixed() {
     let id = sk.curves[ci].id.clone();
     assert!(sk.curve_locked(ci));
     let r = run(&mut s, "sketch.constraint.fix", json!({"entity": id}));
-    // Already fixed: the toggle unfixes, which projected geometry ignores.
+    // Already fixed: the toggle unfixes, which projected geometry ignores, and says why.
     assert_eq!(r["result"]["changed"], 0);
+    assert!(r["result"]["note"].as_str().is_some_and(|n| n.contains("Break Link")), "{r}");
     assert!(sketch(&s).curve_locked(ci));
 }
 
