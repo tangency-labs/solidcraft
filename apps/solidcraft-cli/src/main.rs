@@ -514,12 +514,12 @@ fn open_validating(
     let load = |p: &str| load_with(p, check, validation);
     match (base, path) {
         (Some(b), Some(p)) => {
-            let mut s = load_checked(b, check)?;
+            let mut s = load(b)?;
             run_script_warning(&mut s, p, &read_json(p)?)?;
             Ok(s)
         }
-        (Some(b), None) => load_checked(b, check),
-        (None, Some(p)) => load_checked(p, check),
+        (Some(b), None) => load(b),
+        (None, Some(p)) => load(p),
         (None, None) => Err(usage()),
     }
 }

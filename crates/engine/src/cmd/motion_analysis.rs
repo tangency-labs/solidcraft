@@ -382,7 +382,6 @@ pub(super) fn checked_pairs(s: &Session, p: &Value, cmd: &str) -> Result<Contact
 }
 
 pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
-    let s: &Session = s;
     let cmd = "motion.interference";
     let seconds = match p.get("budget_s") {
         None | Some(Value::Null) => None,

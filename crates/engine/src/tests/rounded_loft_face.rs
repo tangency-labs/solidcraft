@@ -27,7 +27,7 @@ fn a_sketch_on_either_end_of_a_rounded_loft_takes_the_whole_face() {
     let mut s = Session::default();
     rounded_loft(&mut s);
     for up in [-1.0, 1.0] {
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let loft = world.body("Loft").unwrap();
         let face = loft.body.faces(0.01).unwrap().into_iter().find(|f| f.plane_normal.is_some_and(|n| n.dot(Vec3::Z * up) > 0.999)).unwrap();
         let pick = json!({"body": "Loft", "index": face.index, "face": [face.centroid.x, face.centroid.y, face.centroid.z]});
@@ -37,7 +37,7 @@ fn a_sketch_on_either_end_of_a_rounded_loft_takes_the_whole_face() {
         run(&mut s2, "solid.extrude", json!({"sketch": id, "distance": 5, "operation": "new", "body_name": "Pad"}));
         let state = s2.model.state();
         let pad = state.bodies.iter().find(|b| b.name == "Pad").unwrap();
-        let v = pad.body.tessellate(1e-2).unwrap().measure().volume;
+        let v = pad.body.mesh(&crate::kernel::MeshTolerance::chord(1e-2)).unwrap().measure().volume;
         // The projected outline fits the round with splines, so it is close to the face, not exact.
         assert!(rel(v, face.area * 5.0) < 1e-2, "end {up}: {v} vs {}", face.area * 5.0);
     }

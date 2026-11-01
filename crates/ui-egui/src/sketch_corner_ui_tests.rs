@@ -224,7 +224,7 @@ fn shift_clicks_on_two_curves_extend_both_to_where_they_meet() {
     shift_click(&mut h, &json!({"sketch": [12, 3]}));
     assert_eq!(h.app.session.undo.len(), undo + 1, "the second runs the two-curve extend, in one step");
 
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let ss = st.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     for end in ["l1.end", "l2.end"] {
         let p = ss.sketch.point(ss.sketch.resolve_point(end).unwrap()).unwrap();
@@ -948,7 +948,7 @@ fn corner_candidates_agree_with_engine_spatial_curve_filter() {
     for cmd in ["sketch.fillet", "sketch.chamfer.equal_distance", "sketch.chamfer.two_distance", "sketch.chamfer.distance_angle"] {
         h.app.start(cmd);
         for id in [&line, &spline, &linked, &"side".to_owned()] {
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let sk = &state.sketch(sketch).unwrap().sketch;
             let hit = Hit::SketchCurve { sketch, id: id.clone(), straight: true, point: solidcraft_engine::geom::Vec3::ZERO };
             let offered = candidate(h.app.dialog.as_ref().unwrap(), &h.app.session, &hit).is_some();

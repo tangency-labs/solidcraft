@@ -4237,7 +4237,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-profile"
-version = "0.24.0"
+version = "0.29.0"
 dependencies = [
  "serde_json",
  "web-time",
@@ -4272,7 +4272,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-smlib"
-version = "0.24.0"
+version = "0.29.0"
 dependencies = [
  "cc",
  "flate2",
@@ -4292,7 +4292,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-step"
-version = "0.24.0"
+version = "0.29.0"
 dependencies = [
  "solidcraft-geom",
  "solidcraft-profile",

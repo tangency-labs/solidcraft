@@ -439,7 +439,7 @@ fn align_components_mode_switches_and_aligns_only_selected_instance() {
         h.app.run(&command, params).unwrap();
     }
 
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let b1 = st.body("Beam").unwrap().mesh().bounds();
     assert!((b1.min.x - 0.0).abs() < 1e-5 && (b1.max.x - 10.0).abs() < 1e-5, "{b1:?}");
     let b2 = st.body("Beam (Extrusion:2)").unwrap().mesh().bounds();
@@ -1018,7 +1018,7 @@ fn a_dialog_field_typed_as_a_definition_defines_the_parameter() {
     let extrude = doc.features.iter().rev().find(|f| f.name.starts_with("Extrude")).unwrap();
     assert!(extrude.kind.inputs().iter().any(|(label, e, _)| *label == "Distance" && e == "depth"), "{:?}", extrude.kind.inputs());
     assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
-    let bounds = h.app.session.world_state().bodies.first().unwrap().mesh().bounds();
+    let bounds = crate::open_meshing::session_world(&h.app.session).bodies.first().unwrap().mesh().bounds();
     assert!((bounds.max.z - bounds.min.z - 30.0).abs() < 1e-7);
 }
 
@@ -1119,7 +1119,7 @@ fn align_components_picks_the_placement_under_the_active_component_and_warns_whe
     let bracket = h.app.run("component.create", json!({"name": "Bracket", "grounded": false})).unwrap()["occurrence"].as_u64().unwrap();
     h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 4, "body_name": "Plate"})).unwrap();
     h.app.run("component.activate", json!({"component": "root"})).unwrap();
-    let plate = h.app.session.world_state().bodies.first().map(|b| b.name.clone()).unwrap();
+    let plate = crate::open_meshing::session_world(&h.app.session).bodies.first().map(|b| b.name.clone()).unwrap();
 
     // With the design active, a click on the part inside Frame picks the Frame placement.
     assert_eq!(occurrence_path_of_body(&h.app.session, &plate), Some(vec![a]));

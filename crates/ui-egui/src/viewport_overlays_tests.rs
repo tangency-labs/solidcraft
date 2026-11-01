@@ -1674,7 +1674,7 @@ fn selected_sketch_point_aliases_respect_owner_and_visibility() {
     h.call("ui.view", json!({"view":"top"}));
     h.settle();
     let sid = h.app.session.active_sketch.unwrap();
-    let origin = h.app.session.world_state().sketch(sid).unwrap().sketch.points[0].id.clone();
+    let origin = crate::open_meshing::session_world(&h.app.session).sketch(sid).unwrap().sketch.points[0].id.clone();
     let ids = [origin, "custom:point".into(), "l1.end".into(), format!("{sid}:l1.end"), format!("{}:l1.start", sid + 1)];
     h.app.run("select.set", json!({"items":ids.iter().map(|id| json!({"type":"sketch_point","id":id})).collect::<Vec<_>>()})).unwrap();
     let rings = point_selection_rings(&point_overlays(&h.app));

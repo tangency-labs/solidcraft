@@ -404,7 +404,7 @@ fn two_recent_midpoints_snap_where_their_guides_meet() {
     step(&mut h, json!({"click":{"sketch":[0.4,3.3]}}));
     let placed = h.app.tool.as_ref().unwrap().pts[0].0;
     assert!(placed.dist(cross) < 1e-6, "{placed:?}");
-    let curves = h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.len();
+    let curves = crate::open_meshing::session_world(&h.app.session).sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.len();
     assert_eq!(curves, 5, "the snap adds no construction geometry");
     h.call("ui.prefs", json!({"sketch_tracking_guides":false}));
     h.frames(2);
@@ -484,7 +484,7 @@ fn lining_up_fixture(points: &[(&str, Value)]) -> Harness {
 /// constraints tie it to.
 fn point_and_alignments(h: &Harness, at: [f64; 2]) -> Option<(String, Vec<(&'static str, String)>)> {
     use solidcraft_engine::sketch::ConstraintKind::{HorizontalPoints, VerticalPoints};
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let sk = &st.sketch(h.app.session.active_sketch?)?.sketch;
     let at = solidcraft_engine::geom::Vec2::new(at[0], at[1]);
     let i = sk.points.iter().position(|p| p.pos.dist(at) < 1e-9)?;
@@ -562,7 +562,7 @@ fn a_horizontal_line_ends_plumb_with_a_point_above_and_keeps_both() {
     step(&mut h, json!({"key":"Escape"}));
     let (_, tied) = point_and_alignments(&h, [20.37, 0.0]).expect("the end is level with the start and plumb with the point");
     assert_eq!(tied, [("Vertical", above)]);
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert!(
         sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Horizontal { .. })),

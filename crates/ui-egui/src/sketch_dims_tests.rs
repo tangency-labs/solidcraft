@@ -373,7 +373,7 @@ fn a_line_end_on_a_spline_snaps_on_it_and_stays_on_it() {
     h.settle();
     let sid = h.app.session.active_sketch.unwrap();
     let (spline, on) = {
-        let st = h.app.session.world_state();
+        let st = crate::open_meshing::session_world(&h.app.session);
         let sk = &st.sketch(sid).unwrap().sketch;
         let ci = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Spline { .. })).unwrap();
         let poly = sk.polyline(ci);
@@ -387,7 +387,7 @@ fn a_line_end_on_a_spline_snaps_on_it_and_stays_on_it() {
     let hover = h.app.tool.as_ref().unwrap().hover.clone().unwrap();
     assert!(hover.1.as_deref().is_some_and(|s| s.starts_with("on:")), "{hover:?}");
     h.step(&json!({"click": {"world": [on.x, on.y, 0]}})).unwrap();
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let sk = &st.sketch(sid).unwrap().sketch;
     let b = sk
         .curves
@@ -599,7 +599,7 @@ fn polygon_inputs_clear_each_other_and_the_preview() {
             let tool = h.app.tool.as_ref().unwrap();
             let end = crate::sketch_dims::shown(&h.app, tool, tool.hover.as_ref().unwrap());
             let outline = crate::tools::polygon_outline(tool, end, 6.0).unwrap();
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let plane = state.sketch(h.app.session.active_sketch.unwrap()).unwrap().plane;
             let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
             let points: Vec<_> = outline.iter().map(|p| proj.to_screen(plane.to_world(*p)).unwrap()).collect();
@@ -614,7 +614,7 @@ fn polygon_inputs_clear_each_other_and_the_preview() {
             assert_focus(&h, 1);
             type_value(&mut h, "6");
             h.step(&json!({"key":"Enter"})).unwrap();
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
             assert_eq!(sketch.sketch.curves.iter().filter(|c| !c.construction).count(), 6);
             assert_eq!(sketch.profiles.len(), 1);
@@ -634,7 +634,7 @@ fn a_box_typed_name_equals_value_defines_the_parameter_driving_the_dimension() {
     let tool = h.app.tool.as_ref().unwrap();
     assert_eq!(crate::sketch_dims::locked_value(&h.app, tool, "Diameter"), Some(20.0), "the preview follows the typed size");
     h.step(&json!({"key": "Enter"})).unwrap();
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status);
     assert!(sk.radius(0).is_some_and(|r| (r - 10.0).abs() < 1e-6), "{:?}", sk.radius(0));
@@ -708,7 +708,7 @@ fn a_second_circle_on_the_same_centre_keeps_its_diameter_box_after_release() {
             h.ctx.memory(|m| m.focused()),
             tool.hover
         );
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert_eq!(sk.curves.len(), 1, "{label}: unexpected curves {}", sk.curves.len());
     }
@@ -757,7 +757,7 @@ fn a_definition_in_a_box_that_is_not_a_dimension_is_refused() {
         }
         type_value(&mut h, text);
         h.step(&json!({"key": "Enter"})).unwrap();
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         assert!(sk.curves.is_empty(), "{command} {text}: placed {:?}", h.app.status);
         assert!(h.app.session.doc.params.iter().all(|p| p.model), "{command} {text}: no user parameter");

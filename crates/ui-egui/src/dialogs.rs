@@ -1621,8 +1621,7 @@ impl Dialog {
         {
             return false;
         }
-        let profiles: Vec<Sel> = s
-            .world_state()
+        let profiles: Vec<Sel> = crate::open_meshing::session_world(s)
             .sketch(id)
             .map(|ss| outermost_profiles(&ss.profiles).map(|index| Sel::Profile { sketch: id, index }).collect())
             .unwrap_or_default();
@@ -2241,7 +2240,7 @@ fn sketch_curve_edge(s: &Session, sel: &Sel) -> Option<Sel> {
         Sel::ExternalSketchCurve { sketch, id } => (*sketch, id),
         _ => return None,
     };
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(&s);
     let ss = st.sketch(sketch)?;
     let segs = ss.sketch.segs(ss.sketch.curve_index(id)?);
     let (a, b) = (ss.plane.to_world(segs.first()?.start()), ss.plane.to_world(segs.last()?.end()));
@@ -2653,7 +2652,7 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
 /// active a part inside a subassembly picks the subassembly; with the subassembly (or the part)
 /// active it picks the part. A body outside the active component picks its top-level placement.
 pub(crate) fn occurrence_path_of_body(s: &Session, body: &str) -> Option<Vec<u64>> {
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(&s);
     let b = st.body(body)?;
     if s.doc.model_body_component(b) == 0 {
         return None;

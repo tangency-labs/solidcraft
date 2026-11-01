@@ -1247,7 +1247,7 @@ fn selection_item(s: &Session, value: Value) -> Result<Sel> {
         point: Option<Vec3>,
     }
     let Pick { body, index, point } = serde_json::from_value(value).map_err(|e| bad("select.set", e.to_string()))?;
-    let state = s.world_state();
+    let state = s.world_state()?;
     let b = state.body(&body).ok_or_else(|| bad("select.set", format!("no body `{body}`")))?;
     let missing = || bad("select.set", format!("no {} of `{body}` at the given index or point", if face { "face" } else { "edge" }));
     let (index, point) = match (index, point) {
@@ -1304,7 +1304,7 @@ fn select_set(s: &mut Session, p: &Value) -> Result<Value> {
             // nothing, or the next body to take that name (#9737).
             other => {
                 if let Some(name) = other.body_name()
-                    && s.world_state().body(name).is_none()
+                    && s.world_state()?.body(name).is_none()
                 {
                     return Err(bad("select.set", format!("no body `{name}`")));
                 }
@@ -1355,7 +1355,7 @@ fn select_same_look(s: &mut Session, p: &Value) -> Result<Value> {
             _ => None,
         })
         .ok_or_else(|| bad("select.same_look", "select an object or face"))?;
-    let state = s.world_state();
+    let state = s.world_state()?;
     let body = state.body(name).ok_or_else(|| bad("select.same_look", "unknown object"))?;
     let face = request.face.or(match selected {
         Some(Sel::Face { body, index, .. }) if request.body.is_none() && body == name => Some(*index),

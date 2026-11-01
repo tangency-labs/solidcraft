@@ -5,6 +5,7 @@ use solidcraft_engine::Session;
 fn volume_of(session: &Session, prefix: &str) -> f64 {
     session
         .world_state()
+        .unwrap()
         .bodies
         .iter()
         .filter(|b| b.name.starts_with(prefix))

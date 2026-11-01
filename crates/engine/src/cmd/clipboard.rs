@@ -325,15 +325,15 @@ mod tests {
             [0]["id"]
             .as_u64()
             .unwrap();
-        let original = source.world_state().sketch(1).unwrap().plane;
-        let pasted = target.world_state().sketch(id).unwrap().plane;
+        let original = source.world_state().unwrap().sketch(1).unwrap().plane;
+        let pasted = target.world_state().unwrap().sketch(id).unwrap().plane;
         assert!(pasted.origin.dist(original.origin) < 1e-6, "{original:?} vs {pasted:?}");
         assert!(pasted.x.dist(original.x) < 1e-6);
         assert!(pasted.y.dist(original.y) < 1e-6);
         assert!((sketch_area(&target, id) - 200.).abs() < 1e-6);
         assert_eq!(target.doc.feature(id).unwrap().component, component);
         for (original, pasted) in
-            source.world_state().sketch(1).unwrap().sketch.wires.iter().zip(&target.world_state().sketch(id).unwrap().sketch.wires)
+            source.world_state().unwrap().sketch(1).unwrap().sketch.wires.iter().zip(&target.world_state().unwrap().sketch(id).unwrap().sketch.wires)
         {
             for (a, b) in original.pts.iter().chain(&original.fit).zip(pasted.pts.iter().chain(&pasted.fit)) {
                 assert!(a.dist(*b) < 1e-6, "wire {:?}: {a:?} vs {b:?}", original.space);
@@ -352,8 +352,15 @@ mod tests {
             .unwrap();
         let frame = target.placed_document().path_transform(component, &[occurrence]).unwrap();
         let delta = solidcraft_doc::apply_vector(&frame, Vec3::new(2., 3., 4.));
-        for (original, pasted) in
-            source.world_state().sketch(1).unwrap().sketch.wires.iter().zip(&target.world_state().sketch(moved).unwrap().sketch.wires)
+        for (original, pasted) in source
+            .world_state()
+            .unwrap()
+            .sketch(1)
+            .unwrap()
+            .sketch
+            .wires
+            .iter()
+            .zip(&target.world_state().unwrap().sketch(moved).unwrap().sketch.wires)
         {
             for (a, b) in original.pts.iter().chain(&original.fit).zip(pasted.pts.iter().chain(&pasted.fit)) {
                 assert!((*a + delta).dist(*b) < 1e-6, "translated wire {:?}: {a:?} vs {b:?}", original.space);

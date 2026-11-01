@@ -255,7 +255,7 @@ fn project_dialog_keeps_geometry_targets_and_can_project_whole_bodies_unlinked()
     h.settle();
     assert!(h.app.dialog.is_none());
     let sketch = h.app.session.active_sketch.expect("Project leaves the sketch active");
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let sketch = &state.sketch(sketch).unwrap().sketch;
     assert!(sketch.links.is_empty());
     assert!(!sketch.curves.is_empty());

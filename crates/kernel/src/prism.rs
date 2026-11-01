@@ -328,10 +328,11 @@ mod planar_tests {
                 (22.5, 10.0, None),
                 (25.0, 10.0, None),
             ] {
-                let a = crate::cylinder(Vec3::new(12.5, 5.0, 5.0) * k, Vec3::Z, 2.5 * k, 17.5 * k).unwrap();
-                let b = crate::box_solid(Vec3::new(10.0, 5.0, lo) * k, Vec3::new(22.5, 10.0, lo + height) * k).unwrap();
+                let a = crate::cylinder(solidcraft_geom::Vec3::new(12.5, 5.0, 5.0) * k, solidcraft_geom::Vec3::Z, 2.5 * k, 17.5 * k).unwrap();
+                let b =
+                    crate::box_solid(solidcraft_geom::Vec3::new(10.0, 5.0, lo) * k, solidcraft_geom::Vec3::new(22.5, 10.0, lo + height) * k).unwrap();
                 for (lhs, rhs) in [(&a, &b), (&b, &a)] {
-                    let result = simple_prism_boolean(lhs, rhs, BoolOp::Intersect).expect("the exact prism route applies").unwrap();
+                    let result = crate::boolean(lhs, rhs, BoolOp::Intersect).unwrap();
                     if let Some((bottom, top)) = expected {
                         let body = result.expect("a positive-height half disc is a solid");
                         assert!(body.validity().is_empty());
@@ -339,7 +340,7 @@ mod planar_tests {
                         let expected = std::f64::consts::PI * (2.5 * k).powi(2) * (top - bottom) * k / 2.0;
                         let actual = crate::measure(&body).unwrap().volume;
                         assert!((actual - expected).abs() < expected * 2e-3, "{lo} {height} {k}: {actual} != {expected}");
-                        let bounds = body.tessellate(k * 1e-3).unwrap().bounds();
+                        let bounds = body.mesh(&crate::MeshTolerance::chord(k * 1e-3)).unwrap().bounds();
                         assert!((bounds.min.z - bottom * k).abs() < k * 1e-7);
                         assert!((bounds.max.z - top * k).abs() < k * 1e-7);
                     } else {

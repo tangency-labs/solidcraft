@@ -187,7 +187,7 @@ pub(crate) fn grab_inside(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<Hit>
         return None;
     }
     let id = crate::sketch_text::selected_entity(app)?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let ss = state.sketch(sketch)?;
     let curve = ss.sketch.curves.iter().find(|c| c.id == id)?;
     let straight = matches!(curve.kind, CurveKind::Line { .. });

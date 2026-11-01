@@ -2077,7 +2077,8 @@ impl Model {
                     name: f.name.clone(),
                     error: Some(e),
                     warning: None,
-                    boolean_diagnostics: Default::default(),
+                    import_report: None,
+                    repair: None,
                     ms: 0.0,
                     skipped: false,
                     stale: false,
@@ -3354,7 +3355,8 @@ fn named_pieces_of(
         } else {
             let kept = stored.get(*extra).filter(|n| !n.trim().is_empty() && !taken.contains(*n)).cloned();
             *extra += 1;
-            let name = kept.unwrap_or_else(|| (k..=k + taken.len()).map(|j| format!("{} ({j})", mb.name)).find(|n| !taken.contains(n)).unwrap_or_default());
+            let name =
+                kept.unwrap_or_else(|| (k..=k + taken.len()).map(|j| format!("{} ({j})", mb.name)).find(|n| !taken.contains(n)).unwrap_or_default());
             (name, feature)
         };
         taken.insert(name.clone());

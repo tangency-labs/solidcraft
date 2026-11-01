@@ -403,7 +403,7 @@ mod tests {
     fn part_size_without_a_part_explains_itself_and_standard_parts_opens_the_library() {
         let mut app = SolveApp::new(Session::default(), crate::Services::default());
         app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
-        let body = app.session.world_state().bodies.first().map(|b| b.name.clone()).unwrap();
+        let body = crate::open_meshing::session_world(&app.session).bodies.first().map(|b| b.name.clone()).unwrap();
         for selection in [vec![], vec![Sel::Body { name: body }]] {
             app.session.selection = selection;
             app.status = None;

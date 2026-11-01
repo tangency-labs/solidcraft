@@ -1402,7 +1402,7 @@ mod tests {
         h.settle();
         h.app.run("parameters.change", json!({"name":param,"expression":"30"})).unwrap();
         h.settle();
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         let c = solved.sketch.constraints.iter().find(|c| c.param.as_deref() == Some(param.as_str())).unwrap();
         // The placed offset (15 above the measured line) is kept with the dimension.

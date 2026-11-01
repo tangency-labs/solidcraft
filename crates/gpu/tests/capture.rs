@@ -129,8 +129,8 @@ fn the_renderer_counts_what_it_draws() {
 fn pictures_drawn_at_once_each_count_their_own() {
     let Some(c) = capturer() else { return };
     let scene = |s: &Session| {
-        let cam = view::home_camera(s);
-        (view::scene_with_guides(s, &cam, None, Guides { grid: false, axes: false }), cam)
+        let cam = view::home_camera(s).unwrap();
+        (view::scene_with_guides(s, &cam, None, Guides { grid: false, axes: false }).unwrap(), cam)
     };
     let empty = scene(&Session::default());
     let solid = scene(&session(&[("solid.box", json!({"length": 40, "width": 30, "height": 20}))]));
@@ -330,12 +330,12 @@ fn zebra_on_flat_faces_holds_still_while_the_view_turns() {
     let Some(c) = capturer() else { return };
     let mut s = session(&[("solid.box", json!({"length": 60, "width": 40, "height": 20}))]);
     s.execute("inspect.zebra", &json!({})).unwrap();
-    let home = view::home_camera(&s);
+    let home = view::home_camera(&s).unwrap();
     let whites: Vec<usize> = (0..24)
         .map(|step| {
             let mut cam = home;
             cam.yaw += f64::from(step) * 0.11_f64.to_radians();
-            let img = c.rgba(&view::scene_with_guides(&s, &cam, None, Guides { grid: false, axes: false }), &cam, 320, 200).unwrap();
+            let img = c.rgba(&view::scene_with_guides(&s, &cam, None, Guides { grid: false, axes: false }).unwrap(), &cam, 320, 200).unwrap();
             pixels(&img).filter(|p| p[0] > 225 && p[1] > 225 && p[2] > 225).count()
         })
         .collect();

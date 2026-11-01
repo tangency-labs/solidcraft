@@ -445,7 +445,7 @@ fn center_of_mass(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.center_of_mass";
     let names = string_list(cmd, p, "bodies")?;
     // The world state, as Measure reads: placed occurrences where they are, each placement once.
-    let st = s.world_state();
+    let st = s.world_state()?;
     let mut out = Vec::new();
     let (mut vol, mut moment) = (0.0, Vec3::ZERO);
     let mut skipped = Vec::new();

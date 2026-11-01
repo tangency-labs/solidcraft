@@ -3261,7 +3261,7 @@ fn hit_candidate(app: &SolveApp, h: &Hit) -> Option<(Hit, Sel)> {
 /// Root bodies have no occurrence row, so retain their body identity.
 pub(crate) fn component_selection(app: &SolveApp, body: &str) -> Sel {
     let doc = app.session.placed_document();
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     if let Some(b) = state.body(body) {
         let component = doc.model_body_component(b);
         let model = app.session.model.state();
@@ -3919,12 +3919,10 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         face_tris(&mut sc, &shown(b), *face, c4(t.error.gamma_multiply(0.35)), false);
         let m = drawn_mesh(app, b);
         let hidden = sc.color(c4(t.error.gamma_multiply(0.45)));
+        let colours = EdgeColours { halo: sc.color(c4(t.error.gamma_multiply(0.5))), core: sc.color(c4(t.error)), hidden };
         for (ei, e) in m.edges.iter().enumerate() {
             if m.edge_faces.get(ei).is_some_and(|f| f.iter().any(|x| *x as usize == *face)) && m.edge_pickable(ei) {
-                edge_lines(&mut sc, e, t.error, t.error.gamma_multiply(0.5), 3.0, &edge_normals(&m, e));
-                for p in e.windows(2) {
-                    sc.hidden_line(p[0].to_f32(), p[1].to_f32(), hidden, 1.4);
-                }
+                edge_lines(&mut sc, e, colours, 3.0, &edge_normals(&m, e));
             }
         }
     }
@@ -9845,7 +9843,7 @@ mod tests {
     fn body_input_hover_lights_the_whole_body_and_refreshes_for_face_inputs() {
         let mut app = cylinder_app();
         app.set_origin_shown(false);
-        let body = app.session.world_state().bodies[0].clone();
+        let body = crate::open_meshing::session_world(&app.session).bodies[0].clone();
         let hit = Hit::Face { body: body.name.clone(), index: 0, point: Vec3::ZERO };
         app.start("file.save_mesh");
         app.viewport.hover = Some(hit.clone());
@@ -11825,9 +11823,9 @@ mod tests {
         let imported = h.app.run("sketch.insert_svg", json!({"text": svg})).unwrap();
         let sketch = imported["sketch"].as_u64().unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
-        assert!(h.app.session.world_state().bodies.is_empty(), "the import leaves a sketch, not a body");
+        assert!(crate::open_meshing::session_world(&h.app.session).bodies.is_empty(), "the import leaves a sketch, not a body");
         h.call("ui.view", json!({"view": "top"}));
-        let st = h.app.session.world_state();
+        let st = crate::open_meshing::session_world(&h.app.session);
         let ss = st.sketch(sketch).unwrap();
         assert_eq!(ss.profiles.len(), 1, "the imported square is one region");
         let (low, high) = ss.sketch.bounds().unwrap();
@@ -11848,7 +11846,7 @@ mod tests {
         h.app.run("sketch.finish", json!({})).unwrap();
         h.call("ui.view", json!({"view": "top"}));
         h.call("ui.view", json!({"view": "fit"}));
-        let st = h.app.session.world_state();
+        let st = crate::open_meshing::session_world(&h.app.session);
         let ss = st.sketch(sketch).unwrap();
         assert_eq!(ss.profiles.len(), 2, "the imported squares are two regions");
         // The world box of each region, a little outside its edges.
@@ -11892,13 +11890,13 @@ mod tests {
         let sketch = imported["sketch"].as_u64().unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
         h.settle();
-        assert_eq!(h.app.session.world_state().bodies.len(), 1, "the design has a body and a sketch");
-        assert!(!h.app.session.world_state().bodies[0].mesh().edges.is_empty(), "the body is meshed");
+        assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 1, "the design has a body and a sketch");
+        assert!(!crate::open_meshing::session_world(&h.app.session).bodies[0].mesh().edges.is_empty(), "the body is meshed");
         h.call("ui.view", json!({"view": "top"}));
         h.settle();
         h.call("ui.view", json!({"view": "fit"}));
         h.settle();
-        let st = h.app.session.world_state();
+        let st = crate::open_meshing::session_world(&h.app.session);
         let ss = st.sketch(sketch).unwrap();
         let (low, high) = ss.sketch.bounds().unwrap();
         // The screen box of the body and of the region: the marquee covers both.
@@ -11961,7 +11959,7 @@ mod tests {
         // The Patch dialog takes its boundary from profiles or edges.
         h.step(&json!({"start": "surface.patch"})).unwrap();
         assert!(h.app.dialog.is_some(), "the patch dialog is open");
-        let st = h.app.session.world_state();
+        let st = crate::open_meshing::session_world(&h.app.session);
         let ss = st.sketch(sketch).unwrap();
         let (low, high) = ss.sketch.bounds().unwrap();
         let a = ss.plane.to_world(Vec2::new(low.x - 5.0, low.y - 5.0));
@@ -12742,7 +12740,7 @@ mod grid_plane_tests {
         assert_eq!(h.app.viewport.hover_plane.as_deref(), Some("XY"));
         assert!(on(previewed_sketch_plane(&h.app), "XY"), "XY under the pointer in the browser");
         h.step(&json!({"click":{"plane":"XZ"}})).unwrap();
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         assert!(on(state.sketches.first().map(|s| s.plane), "XZ"), "the click sketches on XZ");
         assert!(previewed_sketch_plane(&h.app).is_none(), "the open sketch has its own grid");
     }

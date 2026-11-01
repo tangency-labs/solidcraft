@@ -292,7 +292,7 @@ fn line3d_tool_draws_polyline_off_plane() {
         h.step(&json!({"click": {"world": p}})).unwrap();
     }
     h.step(&json!({"key": "Escape"})).unwrap();
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let wires = &state.sketch(sketch).unwrap().sketch.wires;
     assert_eq!(wires.len(), 2, "three off-plane clicks finish as two joined 3D segments");
     let expected = [[Vec3::new(10.0, 0.0, 10.0), Vec3::new(20.0, 10.0, 10.0)], [Vec3::new(20.0, 10.0, 10.0), Vec3::new(10.0, 10.0, 10.0)]];
@@ -312,7 +312,7 @@ fn spline3d_tool_fit_points_off_plane() {
         h.step(&json!({"click": {"world": p}})).unwrap();
     }
     h.step(&json!({"key": "Escape"})).unwrap();
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let wires = &state.sketch(sketch).unwrap().sketch.wires;
     assert_eq!(wires.len(), 1, "three off-plane clicks finish as one 3D spline");
     let w = &wires[0];
@@ -332,7 +332,7 @@ fn point3d_tool_places_points_and_stays() {
     for p in [OFF_PLANE[0], OFF_PLANE[1]] {
         h.step(&json!({"click": {"world": p}})).unwrap();
     }
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let wires = &state.sketch(sketch).unwrap().sketch.wires;
     assert_eq!(wires.len(), 2, "two clicks place two drawn 3D points");
     assert!(wires.iter().all(|w| w.fit.len() == 1), "{:?}", wires.iter().map(|w| &w.fit).collect::<Vec<_>>());

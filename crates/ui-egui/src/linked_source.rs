@@ -446,7 +446,11 @@ mod tests {
         let mut app = SolveApp::new(Session::default(), Default::default());
         app.run("component.insert_design", json!({"path": file})).unwrap();
         let volume = |app: &SolveApp| {
-            app.session.world_state().bodies.iter().map(|b| solidcraft_engine::kernel::measure(&b.body).unwrap().volume).sum::<f64>()
+            crate::open_meshing::session_world(&app.session)
+                .bodies
+                .iter()
+                .map(|b| solidcraft_engine::kernel::measure(&b.body).unwrap().volume)
+                .sum::<f64>()
         };
         let ctx = egui::Context::default();
         let settle = |app: &mut SolveApp| {
@@ -539,7 +543,7 @@ mod tests {
     }
 
     fn volume(app: &SolveApp) -> f64 {
-        app.session.world_state().bodies.iter().map(|b| solidcraft_engine::kernel::measure(&b.body).unwrap().volume).sum()
+        crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| solidcraft_engine::kernel::measure(&b.body).unwrap().volume).sum()
     }
 
     /// Away to the blank tab and back to the assembly.

@@ -2579,7 +2579,7 @@ impl SolveApp {
     /// Move to `to` and frame the whole model from there at Home's zoom (animated): the
     /// navigators' Home, faces, corners, arrows and axes (`navigator_fitted`).
     pub fn animate_to_fitted(&mut self, to: Camera) {
-        let bounds = solidcraft_engine::view::bounds(&self.session);
+        let Ok(bounds) = solidcraft_engine::view::bounds(&self.session) else { return };
         let shared = self.preferences.navigator_fit;
         let framed = if shared { self.navigator_fitted(to) } else { self.fitted(to) };
         self.animate_to(framed);
@@ -2660,7 +2660,7 @@ impl SolveApp {
         let to = self.fitted_bounds(from, &bounds);
         self.pending_fit = None;
         self.animate_to(to);
-        self.pending_fit = Some((from, bounds, true));
+        self.pending_fit = Some((from, bounds, true, false));
     }
 
     /// Move the viewport to the camera a command asked for (`view.apply`): animated like a view

@@ -56,7 +56,7 @@ pub(crate) fn transport_items(app: &SolveApp) -> Vec<crate::context_menu::Item> 
 /// that made the body.
 fn geometry_feature(app: &SolveApp, body: &str, face: Option<usize>) -> Option<u64> {
     face.and_then(|index| crate::context_menu::face_feature(app, body, index))
-        .or_else(|| app.session.world_state().body(body).map(|b| b.feature))
+        .or_else(|| crate::open_meshing::session_world(&app.session).body(body).map(|b| b.feature))
         .filter(|id| app.session.doc.feature(*id).is_some())
 }
 
@@ -1925,7 +1925,7 @@ mod tests {
             let shown = |h: &Harness| h.app.shell.history.unwrap().contains(crate::scenario::handle_at("timeline:Hole").unwrap());
             assert!(!shown(&h), "left={left}: the hole starts outside the timeline");
 
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let body = state.bodies.first().unwrap();
             let names = solidcraft_engine::doc::naming::face_names(body);
             let index = names.iter().position(|name| solidcraft_engine::doc::persistent_name::made_by(name) == Some(hole)).unwrap();

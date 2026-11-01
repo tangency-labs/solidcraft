@@ -63,7 +63,7 @@ fn f2_on_a_clicked_browser_group_renames_the_group() {
             .unwrap();
         h.app.preferences.browser_bodies_folders = crate::prefs::BodiesFolders::Always;
         h.settle();
-        let world_body = h.app.session.world_state().bodies[0].name.clone();
+        let world_body = crate::open_meshing::session_world(&h.app.session).bodies[0].name.clone();
         h.app.run("select.set", json!({"items":[Sel::Body { name: world_body.clone() }]})).unwrap();
         h.step(&json!({"click":{"handle":"row:Group (1)"}})).unwrap();
         h.step(&json!({"key":"F2"})).unwrap();
@@ -81,7 +81,7 @@ fn f2_on_a_clicked_browser_group_renames_the_group() {
         assert!(h.app.menu.rename.is_none());
         let names: Vec<&str> = h.app.session.doc.browser_groups.iter().map(|g| g.name.as_str()).collect();
         assert_eq!(names, ["Fasteners"], "component {inside_component}: Enter renames the group; status {:?}", h.app.status);
-        assert!(h.app.session.world_state().body(&world_body).is_some(), "the body keeps its name");
+        assert!(crate::open_meshing::session_world(&h.app.session).body(&world_body).is_some(), "the body keeps its name");
     }
 }
 
@@ -679,7 +679,7 @@ fn mesh_and_solid_body_rows_have_different_icons_and_tooltips() {
     use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
     use solidcraft_engine::geom::Vec3;
     let solid = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap();
-    let mesh = solid.tessellate(0.01).unwrap();
+    let mesh = solid.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(0.01)).unwrap();
     let mut doc = Document::default();
     doc.add_feature(
         FeatureKind::MeshImport {

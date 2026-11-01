@@ -7,7 +7,7 @@ use crate::icons::markers::glyph_icon;
 use crate::icons::markers::glyph_letter;
 use std::cell::{Cell, RefCell};
 
-use egui::{Color32, Pos2, Stroke};
+use egui::{Pos2, Stroke};
 use serde_json::{Value, json};
 use solidcraft_engine::geom::{Plane, Vec2, Vec3};
 use solidcraft_engine::kernel::Continuity;
@@ -544,7 +544,7 @@ pub(crate) fn lined_at(at: Vec2) -> Vec<Lined> {
 
 /// The active sketch's point ids, to tell the points a command makes from those it had.
 pub(crate) fn point_ids(app: &SolveApp) -> Vec<String> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     app.session.active_sketch.and_then(|id| st.sketch(id)).map(|ss| ss.sketch.points.iter().map(|p| p.id.clone()).collect()).unwrap_or_default()
 }
 
@@ -554,7 +554,7 @@ pub(crate) fn point_ids(app: &SolveApp) -> Vec<String> {
 pub(crate) fn constrain_lined(app: &mut SolveApp, tool: &mut Tool, placed: &[Vec2], before: &[String]) {
     let lined = std::mem::take(&mut tool.lined);
     let new: Vec<(String, Vec2)> = {
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         let Some(ss) = app.session.active_sketch.and_then(|id| st.sketch(id)) else { return };
         ss.sketch.points.iter().filter(|p| !before.contains(&p.id)).map(|p| (p.id.clone(), p.pos)).collect()
     };

@@ -3,7 +3,7 @@
 //! continuity seams, isocurves and curvature combs) are one group: one at a time is on, and
 //! `inspect.analysis` says which or turns it off.
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use solidcraft_geom::Vec3;
 
 use super::CommandSpec;
@@ -1169,12 +1169,12 @@ mod tests {
         let revision = s.revision;
         assert!(!s.continuity_details()[0].current);
         assert_eq!(s.revision, revision, "descriptor does not prepare a stale world or mutate it");
-        let _placed = s.world_state();
+        let _placed = s.world_state().unwrap();
         assert!(!s.continuity_details()[0].current, "a warmed moved occurrence is still different geometry placement");
         assert!(s.continuity_target_points(&record.body, record.edge).is_none());
         s.execute("component.revert_position", &json!({"occurrences":[occurrence]})).unwrap();
         assert!(!s.pending_moves.contains_key(&occurrence));
-        let _restored = s.world_state();
+        let _restored = s.world_state().unwrap();
         assert!(s.continuity_details()[0].current, "matching restored placement is validated by real geometry identity");
     }
 

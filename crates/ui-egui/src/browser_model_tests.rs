@@ -209,7 +209,7 @@ fn render_browser_swatch_resolves_face_body_component_then_physical_material() {
     assert_eq!(swatch(&h).name, "ABS - Blue");
     let point = solidcraft_engine::geom::Vec3::new(0.0, 5.0, 5.0);
     h.app.run("appearance.assign", json!({"body":"Body1","faces":[point],"appearance":"ABS - Red"})).unwrap();
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let body = state.body("Body1").unwrap();
     let face = solidcraft_engine::doc::appearance::face_index_at(body, point).unwrap();
     h.app.run("select.set", json!({"items":[Sel::Face{body:"Body1".into(),index:face,point}]})).unwrap();

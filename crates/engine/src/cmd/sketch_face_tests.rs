@@ -799,7 +799,7 @@ fn a_sketch_on_the_mirrored_half_of_a_combined_body_sits_on_that_half() {
     run(&mut s, "solid.mirror", json!({"bodies":["Part"],"plane":"XY","combine":true,"name":"Mirror1"}));
     assert_eq!(s.model.state().bodies.len(), 1, "the mirror combined");
     let pick = |s: &Session, normal: Vec3, point: Vec3| {
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let body = world.body("Part").unwrap();
         let face = body
             .body
@@ -833,7 +833,7 @@ fn a_sketch_on_the_ring_of_a_lid_underside_parted_by_its_lip_keeps_the_cap() {
     let mut s = Session::default();
     let script: Value = serde_json::from_str(include_str!("../../../../examples/acceptance/sensor_enclosure.json")).unwrap();
     s.run_script(&script).unwrap();
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let lid = world.body("Lid").unwrap();
     let names = solidcraft_doc::naming::face_names(lid);
     let down: Vec<usize> = (0..names.len())
@@ -881,7 +881,7 @@ fn activate_part_makes_the_sketch_in_the_faces_component() {
             assert_eq!(s.active_component, 0);
             assert!(out.get("activated").is_none());
         }
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let plane = world.sketch(id).unwrap().plane;
         assert!((plane.origin.z - 10.).abs() < 1e-6 && plane.normal().z > 1. - 1e-9, "{activate}: {plane:?}");
         draw(&mut s);

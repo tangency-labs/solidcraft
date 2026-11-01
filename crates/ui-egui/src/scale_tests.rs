@@ -591,7 +591,7 @@ fn zoomed_view_frame_cost() {
         (t[3], frames.stats().triangles)
     };
     let (whole, whole_tris) = still(&h, &mut frames);
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let b = st.bodies.iter().find(|b| b.component == 0).unwrap().mesh().bounds();
     drop(st);
     h.app.cam.target = b.center();

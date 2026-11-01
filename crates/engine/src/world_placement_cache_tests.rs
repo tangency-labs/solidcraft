@@ -17,7 +17,7 @@ fn geometry_independent_moves_do_not_evaluate_the_timeline() {
     let before = session.evaluations;
     run(&mut session, "occurrence.move", json!({"occurrence":occurrence,"translate":[10,0,0],"capture":true}));
     assert_eq!(session.evaluations - before, 0, "a placement-independent model must not enter timeline evaluation");
-    let world = session.world_state();
+    let world = session.world_state().unwrap();
     let block = world.bodies.iter().find(|b| b.source_name.as_deref() == Some("Block")).unwrap();
     assert!(block.mesh().bounds().min.dist(Vec3::new(10., 0., 0.)) < 1e-9);
     assert!(Arc::ptr_eq(&definitions, &session.model.state()));
@@ -34,7 +34,7 @@ fn geometry_independent_moves_do_not_evaluate_the_timeline() {
     assert_eq!(scratch.evaluations, 0);
     assert!(Arc::ptr_eq(&definitions, &scratch.model.state()));
     assert_fresh_world(&scratch);
-    assert!(session.world_state().bodies[0].mesh().bounds().min.dist(Vec3::new(10., 0., 0.)) < 1e-9);
+    assert!(session.world_state().unwrap().bodies[0].mesh().bounds().min.dist(Vec3::new(10., 0., 0.)) < 1e-9);
 }
 
 fn assert_fresh_world(session: &Session) {
@@ -42,8 +42,8 @@ fn assert_fresh_world(session: &Session) {
     fresh.no_cache = true;
     fresh.evaluate(&session.doc);
     assert!(fresh.results.iter().all(|r| r.error.is_none()));
-    let expected = crate::doc::world_state(&session.doc, &fresh.state());
-    let actual = session.world_state();
+    let expected = crate::doc::world_state(&session.doc, &fresh.state()).unwrap();
+    let actual = session.world_state().unwrap();
     assert_eq!(actual.bodies.len(), expected.bodies.len());
     for (a, b) in actual.bodies.iter().zip(&expected.bodies) {
         assert_eq!(a.name, b.name);
@@ -450,19 +450,19 @@ fn body_frames_are_kept_with_the_world_state() {
     let first = run(&mut session, "component.create", json!({"name":"Part"}))["occurrence"].as_u64().unwrap();
     run(&mut session, "solid.box", json!({"length":2,"width":3,"height":4,"body_name":"Block","operation":"new"}));
     let second = run(&mut session, "occurrence.copy", json!({"occurrence":first}))["occurrence"].as_u64().unwrap();
-    let _ = session.world_state();
+    let _ = session.world_state().unwrap();
     let frames = session.body_frames();
     assert!(Arc::ptr_eq(&frames, &session.body_frames()), "kept while the world state is current");
     let copy = session.occurrence_placement(&[second]).unwrap().bodies[0].world.clone();
     assert!(frames.iter().any(|(world, own, _)| *world == copy && own == "Block"), "a copy maps back to its definition");
     run(&mut session, "occurrence.move", json!({"occurrence":second,"translate":[10,0,0],"capture":false}));
-    let _ = session.world_state();
+    let _ = session.world_state().unwrap();
     let moved = session.body_frames();
     assert!(!Arc::ptr_eq(&frames, &moved), "a moved placement works them out again");
     let at = |frames: &crate::BodyFrames| frames.iter().find(|(world, ..)| *world == copy).map(|(_, _, m)| m[3][0]);
     assert_eq!(at(&moved), Some(10.0), "with the placement's new frame");
     assert_eq!(at(&frames), Some(0.0));
     run(&mut session, "solid.box", json!({"length":1,"width":1,"height":1,"body_name":"Other","operation":"new"}));
-    let _ = session.world_state();
+    let _ = session.world_state().unwrap();
     assert!(session.body_frames().iter().any(|(world, ..)| world.starts_with("Other")), "a new body is in them");
 }

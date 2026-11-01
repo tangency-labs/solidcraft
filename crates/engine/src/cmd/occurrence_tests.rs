@@ -1566,7 +1566,7 @@ fn occurrence_align_moves_only_selected_instance_including_90_degree_face_mate()
     );
     assert_eq!(s.doc.features.len(), features_before, "aligning an occurrence must not add a body feature to the shared component");
 
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     let b1 = st.body("Beam").unwrap().mesh().bounds();
     assert!((b1.min.x - 0.0).abs() < 1e-5 && (b1.max.x - 10.0).abs() < 1e-5, "{b1:?}");
     assert!((b1.min.y - 0.0).abs() < 1e-5 && (b1.max.y - 10.0).abs() < 1e-5, "{b1:?}");
@@ -1594,7 +1594,7 @@ fn occurrence_align_supports_snaps_planes_flip_nested_paths_and_pending_capture(
     run(&mut s, "component.activate", json!({"component": "root"}));
 
     // Align the child under a 90-deg rotated parent onto XY plane along plane normal only (capture: false).
-    let before = s.world_state().body("Plate").unwrap().mesh().bounds();
+    let before = s.world_state().unwrap().body("Plate").unwrap().mesh().bounds();
     run(
         &mut s,
         "occurrence.align",
@@ -1605,13 +1605,13 @@ fn occurrence_align_supports_snaps_planes_flip_nested_paths_and_pending_capture(
             "capture": false
         }),
     );
-    let moved = s.world_state().body("Plate").unwrap().mesh().bounds();
+    let moved = s.world_state().unwrap().body("Plate").unwrap().mesh().bounds();
     assert!((moved.min.z - 0.0).abs() < 1e-5 && (moved.max.z - 4.0).abs() < 1e-5, "{moved:?}");
     assert!((moved.center().x - before.center().x).abs() < 1e-5 && (moved.center().y - before.center().y).abs() < 1e-5, "{moved:?}");
 
     // Revert drops the pending alignment; re-align with capture: true and vertex snap to origin.
     run(&mut s, "component.revert_position", json!({}));
-    assert!((s.world_state().body("Plate").unwrap().mesh().bounds().min.z - 10.0).abs() < 1e-5);
+    assert!((s.world_state().unwrap().body("Plate").unwrap().mesh().bounds().min.z - 10.0).abs() < 1e-5);
 
     run(
         &mut s,
@@ -1623,7 +1623,7 @@ fn occurrence_align_supports_snaps_planes_flip_nested_paths_and_pending_capture(
             "to": "origin"
         }),
     );
-    let at_origin = s.world_state().body("Plate").unwrap().mesh().bounds();
+    let at_origin = s.world_state().unwrap().body("Plate").unwrap().mesh().bounds();
     assert!(at_origin.min.dist(solidcraft_geom::Vec3::ZERO) < 1e-5, "{at_origin:?}");
 
     // Hostile / invalid parameters never panic.
@@ -1681,8 +1681,8 @@ fn a_body_copied_in_another_design_pastes_as_an_imported_body() {
     let (_, holder) = created(&mut source, "Holder");
     run(&mut source, "occurrence.move", json!({"occurrence": holder, "translate": [0,50,0]}));
     run(&mut source, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Cube"}));
-    let was = source.world_state().body("Cube").unwrap().mesh().bounds();
-    let copy = crate::ForeignCopy::of(&source, vec!["Cube".into()], Vec::new());
+    let was = source.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
+    let copy = crate::ForeignCopy::of(&source, vec!["Cube".into()], Vec::new()).unwrap();
 
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "body_name": "Cube"}));
@@ -1694,7 +1694,7 @@ fn a_body_copied_in_another_design_pastes_as_an_imported_body() {
     assert_eq!(out["bodies"], json!(["Cube (2)"]));
     assert_eq!(out["feature"], "Import1");
     assert_eq!(s.undo.len(), undo + 1);
-    let is = s.world_state().body("Cube (2)").unwrap().mesh().bounds();
+    let is = s.world_state().unwrap().body("Cube (2)").unwrap().mesh().bounds();
     assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
     let state = s.model.state();
     assert_eq!(s.doc.model_body_component(state.body("Cube (2)").unwrap()), a);
@@ -1716,13 +1716,13 @@ fn a_body_seen_in_another_placement_pastes_into_another_design_under_its_own_nam
     run(&mut source, "occurrence.move", json!({"occurrence": second, "translate": [0,40,0]}));
     let seen = source.placed_document().world_body_name(&source.model.state(), "Cube", holder, &[second]);
     assert_ne!(seen, "Cube");
-    let was = source.world_state().body(&seen).unwrap().mesh().bounds();
-    let copy = crate::ForeignCopy::of(&source, vec![seen], Vec::new());
+    let was = source.world_state().unwrap().body(&seen).unwrap().mesh().bounds();
+    let copy = crate::ForeignCopy::of(&source, vec![seen], Vec::new()).unwrap();
     assert_eq!(copy.names, vec!["Cube".to_string()]);
 
     let mut s = Session { foreign_copy: Some(std::sync::Arc::new(copy)), ..Default::default() };
     let out = run(&mut s, "component.paste_from_design", json!({}));
     assert_eq!(out["bodies"], json!(["Cube"]));
-    let is = s.world_state().body("Cube").unwrap().mesh().bounds();
+    let is = s.world_state().unwrap().body("Cube").unwrap().mesh().bounds();
     assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{was:?} vs {is:?}");
 }

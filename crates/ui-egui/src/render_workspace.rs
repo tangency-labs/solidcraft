@@ -2054,8 +2054,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.session.visibility.hidden_bodies.hash(&mut visibility);
         app.session.visibility.hidden_occurrences.hash(&mut visibility);
         let budget = preferred_geometry_budget(app.render_workspace.geometry_budget, app.preferences.render_previous_geometry_budget);
-        let signature =
-            (app.session.revision, Arc::as_ptr(&crate::open_meshing::session_world(&app.session)) as usize, visibility.finish() ^ assign::preview_key(app), budget);
+        let signature = (
+            app.session.revision,
+            Arc::as_ptr(&crate::open_meshing::session_world(&app.session)) as usize,
+            visibility.finish() ^ assign::preview_key(app),
+            budget,
+        );
         let preview = assign::preview(app);
         let previous_key = app.render_workspace.key;
         app.render_workspace.prepare_preview(signature, || {

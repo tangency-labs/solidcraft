@@ -2582,7 +2582,15 @@ mod tests {
         let pc = h.app.run("sketch.dimension", json!({"entities":[c]})).unwrap()["param"].as_str().unwrap().to_owned();
         let pl = h.app.run("sketch.dimension", json!({"entities":[l],"value":20})).unwrap()["param"].as_str().unwrap().to_owned();
         let dim = |h: &crate::scenario::Harness, p: &str| {
-            h.app.session.world_state().sketch(sid).unwrap().sketch.constraints.iter().find(|c| c.param.as_deref() == Some(p)).unwrap().clone()
+            crate::open_meshing::session_world(&h.app.session)
+                .sketch(sid)
+                .unwrap()
+                .sketch
+                .constraints
+                .iter()
+                .find(|c| c.param.as_deref() == Some(p))
+                .unwrap()
+                .clone()
         };
         let did = dim(&h, &pc).id;
 
@@ -2771,12 +2779,12 @@ mod tests {
             .to_owned();
         let sid = h.app.session.active_sketch.unwrap();
         let spot = |h: &crate::scenario::Harness, id: &str, piece: usize| {
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let sk = &state.sketch(sid).unwrap().sketch;
             sk.exact_segs(sk.curve_index(id).unwrap()).unwrap()[piece].point_at(0.5)
         };
         let count = |h: &crate::scenario::Harness, id: &str| {
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let sk = &state.sketch(sid).unwrap().sketch;
             sk.curves[sk.curve_index(id).unwrap()].kind.point_ids().len()
         };
@@ -2792,7 +2800,7 @@ mod tests {
         let item = menu.iter().find(|item| item.id == "sketch.spline.reverse").expect("a control point spline offers Reverse Spline Direction");
         assert_eq!((item.label.as_str(), item.params.clone()), ("Reverse Spline Direction", Some(json!({"curve": control}))));
         let points = |h: &crate::scenario::Harness, id: &str| {
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let sk = &state.sketch(sid).unwrap().sketch;
             sk.curves[sk.curve_index(id).unwrap()].kind.point_ids()
         };
@@ -2815,7 +2823,7 @@ mod tests {
         assert!(clicked.dist(at) < 0.5, "the item carries the clicked spot: {clicked:?} for {at:?}");
         h.step(&json!({"click":{"handle":"menu:sketch.spline.insert_point"}})).unwrap();
         assert_eq!(count(&h, &fit), 5);
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let sk = &state.sketch(sid).unwrap().sketch;
         let added = sk.point(sk.curves[sk.curve_index(&fit).unwrap()].kind.point_ids()[2]).unwrap();
         assert!(added.dist(at) < 0.5, "the new fit point is where the menu was opened: {added:?}");

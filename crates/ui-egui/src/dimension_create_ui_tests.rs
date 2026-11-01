@@ -588,7 +588,7 @@ fn a_driven_dimension_nothing_fixes_any_more_takes_a_value() {
     h.settle();
     let sketch = h.app.session.active_sketch.unwrap();
     let dim = |h: &Harness| {
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let sk = &state.sketch(sketch).unwrap().sketch;
         sk.constraints
             .iter()
@@ -641,7 +641,7 @@ fn a_driven_dimension_nothing_fixes_any_more_takes_a_value() {
     assert!(!driving.driven && driving.param.as_deref() == Some(name.as_str()), "{driving:?}");
     let value = driving.kind.value().unwrap();
     assert!((value - 30.0).abs() < 1e-6 && (measured - 30.0).abs() > 1.0, "{measured} → {value}");
-    assert!(h.app.session.world_state().sketch(sketch).unwrap().report.ok());
+    assert!(crate::open_meshing::session_world(&h.app.session).sketch(sketch).unwrap().report.ok());
 
     // One undo step puts the driven dimension back.
     assert_eq!(h.app.session.undo.len(), undo + 1);

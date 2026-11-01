@@ -172,7 +172,7 @@ fn a_body_mirror_reopens_with_its_bodies_and_operation() {
         let mut app = app_with(json!([
             {"command":"solid.box","params":{"corner":[40,0,0],"length":2,"width":2,"height":2,"name":"Base"}}
         ]));
-        let body = app.session.world_state().bodies[0].name.clone();
+        let body = crate::open_meshing::session_world(&app.session).bodies[0].name.clone();
         app.session.execute("solid.mirror", &json!({"bodies":[body],"plane":"YZ","combine":combine})).unwrap();
         let feature = app.session.doc.features.last().unwrap().clone();
         app.session = Session::new(solidcraft_engine::doc::Document::from_json(&app.session.doc.to_json()).unwrap());
@@ -193,7 +193,7 @@ fn a_body_mirror_reopens_with_its_bodies_and_operation() {
     let mut app = app_with(json!([
         {"command":"solid.box","params":{"corner":[40,0,0],"length":2,"width":2,"height":2,"name":"Base"}}
     ]));
-    let body = app.session.world_state().bodies[0].name.clone();
+    let body = crate::open_meshing::session_world(&app.session).bodies[0].name.clone();
     app.session.execute("solid.pattern.rectangular", &json!({"bodies":[body],"dir1":[1,0,0],"count1":3,"spacing1":5})).unwrap();
     let feature = app.session.doc.features.last().unwrap().clone();
     app.session.selection = vec![Sel::Feature { id: feature.id }];
@@ -1098,7 +1098,7 @@ fn path_pattern_editor_restores_sources_path_expressions_and_options() {
             let original = h.app.session.doc.find_feature("Copies").unwrap().clone();
             let seed = h.app.session.doc.find_feature("Seed").unwrap().id;
             let path = h.app.session.doc.find_feature("Path").unwrap().id;
-            let bounds: Vec<_> = h.app.session.world_state().bodies.iter().map(|b| b.mesh().bounds()).collect();
+            let bounds: Vec<_> = crate::open_meshing::session_world(&h.app.session).bodies.iter().map(|b| b.mesh().bounds()).collect();
             h.step(&json!({"call":"ui.editFeature","params":{"feature":"Copies"}})).unwrap();
             h.frames(8);
             assert!(!h.app.ui.palette_open, "Edit Feature must open the existing pattern dialog");
@@ -1117,7 +1117,7 @@ fn path_pattern_editor_restores_sources_path_expressions_and_options() {
             assert_eq!(edited.id, original.id);
             assert_eq!(edited.kind, original.kind);
             assert_eq!(edited.param_names, original.param_names);
-            assert_eq!(h.app.session.world_state().bodies.iter().map(|b| b.mesh().bounds()).collect::<Vec<_>>(), bounds);
+            assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.iter().map(|b| b.mesh().bounds()).collect::<Vec<_>>(), bounds);
         }
     }
 }
@@ -1148,15 +1148,19 @@ fn path_pattern_editor_applies_in_place_cancels_and_undoes() {
             if cancel {
                 assert_eq!(edited.kind, original.kind);
                 assert_eq!(h.app.session.undo.len(), undo);
-                assert_eq!(h.app.session.world_state().bodies.len(), 3);
+                assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 3);
             } else {
-                assert_eq!(h.app.session.world_state().bodies.len(), 5);
-                let max_x = h.app.session.world_state().bodies.iter().map(|b| b.mesh().bounds().max.x).fold(f64::NEG_INFINITY, f64::max);
+                assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 5);
+                let max_x = crate::open_meshing::session_world(&h.app.session)
+                    .bodies
+                    .iter()
+                    .map(|b| b.mesh().bounds().max.x)
+                    .fold(f64::NEG_INFINITY, f64::max);
                 let expected = if distance_key == "distance" { 16.0 } else { 52.0 };
                 assert!((max_x - expected).abs() < 1e-7, "five 4 mm bodies, {distance_key} 12 mm: {max_x}");
                 h.app.run("edit.undo", json!({})).unwrap();
                 assert_eq!(h.app.session.doc.find_feature("Copies").unwrap().kind, original.kind);
-                assert_eq!(h.app.session.world_state().bodies.len(), 3);
+                assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 3);
             }
         }
     }

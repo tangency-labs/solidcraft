@@ -1372,7 +1372,7 @@ mod tests {
         run(&mut s, "browser.visibility", json!({"items": ["KB (K:2)"], "visible": false}));
         let r = run(&mut s, "body.rename", json!({"body": "KB (K:2)", "name": "Lid"}));
         assert_eq!((r["body"].as_str(), r["name"].as_str()), (Some("KB"), Some("Lid")), "{r}");
-        let world = |s: &Session| s.world_state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+        let world = |s: &Session| s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
         let renamed = world(&s);
         assert!(renamed.iter().any(|n| n == "Lid") && renamed.iter().any(|n| n == "Lid (K:2)"), "{renamed:?}");
         assert!(!renamed.iter().any(|n| n.starts_with("KB")), "{renamed:?}");

@@ -140,14 +140,14 @@ fn the_grid_cross_fades_between_levels_as_the_view_zooms() {
 #[test]
 fn the_headless_grid_draws_both_levels_at_a_switch() {
     let s = Session::default();
-    let mut cam = home_camera(&s);
+    let mut cam = home_camera(&s).unwrap();
     cam.pitch = std::f64::consts::FRAC_PI_2;
     cam.target = Vec3::ZERO;
     let strength = |hh: f64, x: f64| {
         let mut cam = cam;
         cam.distance *= hh / cam.half_height();
         assert!((cam.half_height() - hh).abs() < 1e-6);
-        let scene = scene(&s, &cam);
+        let scene = scene(&s, &cam).unwrap();
         assert!(scene.grid.iter().all(|l| [Palette::DEFAULT.grid, Palette::DEFAULT.grid_major].contains(&l.color)));
         // The strongest piece of the line in each grid colour, added: a line two levels share
         // with different kinds is drawn in both.

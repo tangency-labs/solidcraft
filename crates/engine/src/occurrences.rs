@@ -399,17 +399,10 @@ impl Session {
     /// it is shown (uncaptured moves and the exploded view included).
     /// The placement index answers from lookups; the plain walk stays as the fallback and the error reporter.
     pub fn occurrence_placement(&self, path: &[u64]) -> Result<OccurrencePlacement> {
-        self.occurrence_placement_with(path, &self.pending_moves)
-    }
-
-    /// [`Session::occurrence_placement`] with the occurrences moved by `moves` instead of
-    /// `pending_moves` (the design's own, [`Session::uncaptured_moves`], for what reports the
-    /// design's placements).
-    pub fn occurrence_placement_with(&self, path: &[u64], moves: &std::collections::BTreeMap<u64, Mat>) -> Result<OccurrencePlacement> {
-        if path.is_empty() || path.len() > 64 {
-            return Err(invalid("occurrence path must contain 1..64 ids"));
-        }
-        if let Some(placement) = self.occurrence_placement_indexed(path) {
+        if !path.is_empty()
+            && path.len() <= 64
+            && let Some(placement) = self.occurrence_placement_indexed(path)
+        {
             return Ok(placement);
         }
         self.occurrence_placement_walk(path)
@@ -469,6 +462,13 @@ impl Session {
     /// The plain walk over `doc.occurrences`, kept as the fallback for paths the index can't
     /// answer and as the reference the indexed answers are checked against (#7502).
     pub(crate) fn occurrence_placement_walk(&self, path: &[u64]) -> Result<OccurrencePlacement> {
+        self.occurrence_placement_with(path, &self.pending_moves)
+    }
+
+    /// [`Session::occurrence_placement`] with the occurrences moved by `moves` instead of
+    /// `pending_moves` (the design's own, [`Session::uncaptured_moves`], for what reports the
+    /// design's placements). The placement index holds `pending_moves`, so this walks the path.
+    pub fn occurrence_placement_with(&self, path: &[u64], moves: &std::collections::BTreeMap<u64, Mat>) -> Result<OccurrencePlacement> {
         if path.is_empty() || path.len() > 64 {
             return Err(invalid("occurrence path must contain 1..64 ids"));
         }
@@ -972,11 +972,12 @@ impl Session {
         // A selected body that is gone cannot be deleted, measured or shown: drop it, so a
         // later body taking its name is never deleted in its place (#9737).
         if self.selection.iter().any(|s| s.body_name().is_some()) {
-            let world = self.world_state();
-            self.selection.retain(|s| match s.body_name() {
-                Some(name) => world.body(name).is_some(),
-                None => true,
-            });
+            if let Ok(world) = self.world_state() {
+                self.selection.retain(|s| match s.body_name() {
+                    Some(name) => world.body(name).is_some(),
+                    None => true,
+                });
+            }
         }
         let hidden = std::mem::take(&mut self.visibility.hidden_occurrences);
         self.visibility.hidden_occurrences = hidden.into_iter().filter(|p| self.occurrence_placement(p).is_ok()).collect();

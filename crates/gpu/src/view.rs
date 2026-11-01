@@ -738,7 +738,7 @@ pub struct BlockBuilder {
     hidden: Vec<u8>,
     bodies: Vec<BodySpan>,
     /// The body being written: its first vertex and the box so far.
-    open: Option<(u32, [[f32; 3]; 2])>,
+    spanning: Option<(u32, [[f32; 3]; 2])>,
 }
 
 impl BlockBuilder {
@@ -746,12 +746,12 @@ impl BlockBuilder {
     /// it can be left out of a view it is not in).
     pub fn begin_body(&mut self) {
         let at = u32::try_from(self.vertices.len() / TRI_SIZE).unwrap_or(u32::MAX);
-        self.open = Some((at, [[f32::INFINITY; 3], [f32::NEG_INFINITY; 3]]));
+        self.spanning = Some((at, [[f32::INFINITY; 3], [f32::NEG_INFINITY; 3]]));
     }
 
     /// End the body [`BlockBuilder::begin_body`] began.
     pub fn end_body(&mut self) {
-        let Some((start, bounds)) = self.open.take() else { return };
+        let Some((start, bounds)) = self.spanning.take() else { return };
         let end = u32::try_from(self.vertices.len() / TRI_SIZE).unwrap_or(u32::MAX);
         if end > start && bounds.iter().flatten().all(|x| x.is_finite()) {
             self.bodies.push(BodySpan { vertices: start..end, bounds });
@@ -775,7 +775,7 @@ impl BlockBuilder {
             }
         }
         self.vertices.extend_from_slice(&record);
-        if let Some((_, [lo, hi])) = &mut self.open {
+        if let Some((_, [lo, hi])) = &mut self.spanning {
             for v in p {
                 for k in 0..3 {
                     lo[k] = lo[k].min(v[k]);
@@ -1489,20 +1489,20 @@ impl BlockGpu {
 
     /// Draw `class`'s triangles with the pipeline already set (`tally`: what is counted).
     fn draw(&self, pass: &mut wgpu::RenderPass<'_>, class: TriClass, tally: &Tally) {
-        self.draw_runs(pass, self.class(class), tally);
+        self.draw_runs(pass, self.class(class), self.culled.as_ref().and_then(|c| c.get(class as usize)), tally);
     }
 
     /// Draw the closed bodies' opaque triangles ([`BlockBytes::closed`]), as [`BlockGpu::draw`].
     fn draw_closed(&self, pass: &mut wgpu::RenderPass<'_>, tally: &Tally) {
-        self.draw_runs(pass, self.closed.as_ref(), tally);
+        self.draw_runs(pass, self.closed.as_ref(), None, tally);
     }
 
-    fn draw_runs(&self, pass: &mut wgpu::RenderPass<'_>, runs: Option<&ClassGpu>, tally: &Tally) {
+    fn draw_runs(&self, pass: &mut wgpu::RenderPass<'_>, runs: Option<&ClassGpu>, culled: Option<&Vec<std::ops::Range<u32>>>, tally: &Tally) {
         match runs {
             Some(ClassGpu::Runs(runs)) => {
                 let Some(vertices) = &self.vertices else { return };
                 pass.set_vertex_buffer(0, vertices.slice(..));
-                let runs = self.culled.as_ref().map_or(&runs[..], |c| &c[class as usize][..]);
+                let runs = culled.map_or(&runs[..], |c| &c[..]);
                 for r in runs.iter() {
                     pass.draw(r.clone(), 0..1);
                     tally.triangles(r.len() as u32, 1);
@@ -2816,10 +2816,13 @@ impl Renderer {
         // one drawn paint the cut, other bodies behind it included (their colours and outlines
         // showed through it, #6328).
         let cap = |source: TriSource| {
-            cut_states.as_ref().map(|(_, _, _, cap)| solid_writes("sc_tris_cap", "fs_solid_cut", Some(wgpu::Face::Front), Some(cap.clone()), source, false))
+            cut_states
+                .as_ref()
+                .map(|(_, _, _, cap)| solid_writes("sc_tris_cap", "fs_solid_cut", Some(wgpu::Face::Front), Some(cap.clone()), source, false))
         };
         type Marks = (wgpu::RenderPipeline, wgpu::RenderPipeline, wgpu::RenderPipeline);
-        let cut = |marks: Option<Marks>, cap: Option<wgpu::RenderPipeline>| marks.zip(cap).map(|((count, fill, rest), cap)| Cut { count, fill, cap, rest });
+        let cut =
+            |marks: Option<Marks>, cap: Option<wgpu::RenderPipeline>| marks.zip(cap).map(|((count, fill, rest), cap)| Cut { count, fill, cap, rest });
         let access_bind = access_texture(device, None, &access_bgl, 1, &[]);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("sc_image"),

@@ -247,14 +247,14 @@ pub struct ForeignCopy {
 
 impl ForeignCopy {
     /// What `session` copies when `bodies` and `placements` are copied in it now.
-    pub fn of(session: &Session, bodies: Vec<String>, placements: Vec<Vec<u64>>) -> ForeignCopy {
+    pub fn of(session: &Session, bodies: Vec<String>, placements: Vec<Vec<u64>>) -> Result<ForeignCopy> {
         let frames = session.placed_document().body_frames_with_source(&session.model.state());
         let names = bodies.iter().map(|b| frames.iter().find(|f| f.0 == *b).map_or_else(|| b.clone(), |f| f.1.clone())).collect();
         let placed = placements.iter().filter_map(|p| session.occurrence_placement(p).ok()).map(|p| (p.component, p.occurrence, p.world)).collect();
-        ForeignCopy {
+        Ok(ForeignCopy {
             design: session.doc.name.clone(),
             features: Vec::new(),
-            world: session.world_state(),
+            world: session.world_state()?,
             bodies,
             names,
             placements,
@@ -262,7 +262,7 @@ impl ForeignCopy {
             doc: session.doc.clone(),
             model: session.model.clone(),
             pending_moves: session.pending_moves.clone(),
-        }
+        })
     }
 
     /// Timeline Copy's snapshot. No placed body geometry is needed to paste sketches.

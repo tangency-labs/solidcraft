@@ -148,7 +148,7 @@ pub(crate) fn edited(app: &mut SolveApp, params: &Value, reply: &Value) {
 }
 
 fn product_centre(app: &SolveApp) -> [f64; 3] {
-    let bounds = solidcraft_engine::view::bounds(&app.session);
+    let bounds = solidcraft_engine::view::bounds(&app.session).unwrap_or(solidcraft_engine::geom::Aabb3::EMPTY);
     let point = if bounds.is_empty() { app.cam.target } else { bounds.center() };
     [point.x, point.y, point.z]
 }
@@ -773,13 +773,13 @@ pub(super) fn editor(app: &mut SolveApp, ui: &mut egui::Ui, id: &str) {
                         let label =
                             app.tr(if aim == product_centre(app) { "render.light_product_centre" } else { "render.lighting_point" }).to_string();
                         ui_kit::dropdown_menu(ui, "render:light:aim", &label, |ui| {
-                            let bounds = solidcraft_engine::view::bounds(&app.session);
+                            let bounds = solidcraft_engine::view::bounds(&app.session).unwrap_or(solidcraft_engine::geom::Aabb3::EMPTY);
                             let mut targets = vec![
                                 (app.tr("render.light_product_centre").to_string(), product_centre(app)),
                                 (app.tr("render.light_world_origin").to_string(), [0.0; 3]),
                             ];
                             if !bounds.is_empty() {
-                                for body in &app.session.world_state().bodies {
+                                for body in &crate::open_meshing::session_world(&app.session).bodies {
                                     let bounds = body.mesh_bounds();
                                     let c = bounds.center();
                                     targets.push((body.name.clone(), [c.x, c.y, c.z]));
@@ -925,7 +925,7 @@ fn length([x, y, z]: [f64; 3]) -> f64 {
     x.hypot(y).hypot(z)
 }
 fn subject_size(app: &SolveApp) -> f64 {
-    bounded(solidcraft_engine::view::bounds(&app.session).diagonal(), 1.0, 1e6)
+    bounded(solidcraft_engine::view::bounds(&app.session).unwrap_or(solidcraft_engine::geom::Aabb3::EMPTY).diagonal(), 1.0, 1e6)
 }
 fn note(app: &SolveApp, ui: &mut egui::Ui, key: &'static str) {
     ui_kit::text(ui, app.tr(key), ui_kit::Text::Note(key));

@@ -814,7 +814,7 @@ fn build_scene(
         let fade = GridFade::new(cam.half_height(), slant, ext, far_reach);
         // The grid's centre on each axis, from the plane's origin (the world's, or the sketch
         // plane's): a level fading in near a switch of the spacing lies on its own places (#9570).
-        let origin = open_sketch_plane(s).map_or(Vec3::ZERO, |pl| pl.origin);
+        let origin = open_sketch_plane(s)?.map_or(Vec3::ZERO, |pl| pl.origin);
         let (at_u, at_v) = ((c - origin).dot(u), (c - origin).dot(v));
         // Two lines through the point `c + u * t`: one along v, one along u.
         for (along, across, at) in [(v, u, at_u), (u, v, at_v)] {

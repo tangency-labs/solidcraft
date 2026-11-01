@@ -3098,7 +3098,7 @@ fn drawn_copy_selection(s: &Session, p: &Value, ids: Vec<String>) -> Result<(Vec
         }
         let plane = match wire.space {
             WireSpace::Component => s.model.state().sketch(id).map(|sk| sk.plane),
-            WireSpace::World => s.world_state().sketch(id).map(|sk| sk.plane),
+            WireSpace::World => s.world_state()?.sketch(id).map(|sk| sk.plane),
         }
         .ok_or_else(|| bad(cmd, "sketch plane is unavailable"))?;
         drawn.push((wire.clone(), plane));

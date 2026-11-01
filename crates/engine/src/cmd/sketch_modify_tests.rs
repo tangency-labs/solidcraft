@@ -2717,7 +2717,7 @@ fn a_tangent_cap_follows_its_offset_when_the_source_length_changes() {
     // endpoint first makes every length change look contradictory, before the offset can move.
     let mut s = capped_line_offset(false);
     let check = |s: &Session, height: f64| {
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let solved = world.sketch(1).unwrap();
         assert!(solved.report.keeps_orientation(), "{:?}", solved.report);
         assert!(solved.report.fully_constrained());
@@ -2822,7 +2822,7 @@ fn a_cap_on_an_offset_arc_keeps_its_radius_through_large_length_edits() {
             let params =
                 if batch { json!({"changes":{"height":height.to_string()}}) } else { json!({"name":"height","expression":height.to_string()}) };
             run(&mut s, "parameters.change", params);
-            let world = s.world_state();
+            let world = s.world_state().unwrap();
             let solved = world.sketch(1).unwrap();
             assert!(solved.report.keeps_orientation() && solved.report.fully_constrained(), "{:?}", solved.report);
             for (p, before) in solved.sketch.points.iter().zip(&initial.points) {

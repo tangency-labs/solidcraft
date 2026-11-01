@@ -312,6 +312,7 @@ fn block_and_part() -> (Session, u64) {
 /// The lowest corner of every body in the world, rounded.
 fn world_corners(s: &Session) -> Vec<Vec<f64>> {
     s.world_state()
+        .unwrap()
         .bodies
         .iter()
         .map(|b| {

@@ -49,7 +49,7 @@ fn undoing_the_edited_feature_closes_its_editor_and_preserves_redo() {
     h.app.run("edit.redo", json!({})).unwrap();
     assert!(h.app.session.doc.feature(feature).is_some());
     assert!(h.app.dialog.is_none(), "redo does not resurrect the old editor");
-    assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds().max.z, 10.0);
+    assert_eq!(crate::open_meshing::session_world(&h.app.session).body("Main").unwrap().mesh().bounds().max.z, 10.0);
     open(&mut h);
     h.step(&json!({"widget":"OK"})).unwrap();
     assert!(h.app.dialog.is_none(), "the restored feature can be edited normally");
@@ -85,7 +85,7 @@ fn deleting_the_edited_feature_closes_its_editor_and_undo_restores_the_design() 
     assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
     h.app.run("edit.undo", json!({})).unwrap();
     assert!(std::sync::Arc::ptr_eq(&original, &h.app.session.doc), "Undo restores the document before the temporary editor rollback");
-    assert_eq!(h.app.session.world_state().body("Main").unwrap().mesh().bounds().max.z, 10.0);
+    assert_eq!(crate::open_meshing::session_world(&h.app.session).body("Main").unwrap().mesh().bounds().max.z, 10.0);
 }
 
 #[test]
@@ -601,7 +601,7 @@ fn editing_face_extrusion_temporarily_shows_its_hidden_source_body() {
         assert!(h.app.body_visible("Source"));
         assert!(!h.app.session.body_visible("Source"), "the editor must not change persistent visibility");
         assert!(h.app.body_visible("Other"));
-        assert!(h.app.session.world_state().body("Extension").is_none(), "the feature's result is rolled off");
+        assert!(crate::open_meshing::session_world(&h.app.session).body("Extension").is_none(), "the feature's result is rolled off");
         assert_eq!(h.app.session.undo.len(), undo);
         h.app.session.visibility.hidden_bodies.push("Other".into());
         h.step(&json!({"widget":finish})).unwrap();
@@ -610,7 +610,7 @@ fn editing_face_extrusion_temporarily_shows_its_hidden_source_body() {
         assert!(!h.app.body_visible("Other"), "unrelated visibility edits are preserved");
         assert_eq!(h.app.session.visibility.hidden_sketches, visibility.hidden_sketches);
         assert_eq!(h.app.session.visibility.shown_sketches, visibility.shown_sketches);
-        assert!(h.app.session.world_state().body("Extension").is_some());
+        assert!(crate::open_meshing::session_world(&h.app.session).body("Extension").is_some());
     }
 }
 

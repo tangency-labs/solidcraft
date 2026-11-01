@@ -471,13 +471,20 @@ mod tests {
                 control: true,
                 degree: 3,
                 periodic: false,
+                nurbs: None,
             },
             LinkGeom::Line(Vec2::new(12., 5. - 1e-5), Vec2::new(0., 0.1)),
         ];
         super::super::meet_at_shared_ends(&mut geom, 1e-4);
         assert_eq!(
             geom[1],
-            LinkGeom::Spline { pts: vec![Vec2::new(10., 0.), Vec2::new(11., 1.), Vec2::new(12., 5.)], control: true, degree: 3, periodic: false }
+            LinkGeom::Spline {
+                pts: vec![Vec2::new(10., 0.), Vec2::new(11., 1.), Vec2::new(12., 5.)],
+                control: true,
+                degree: 3,
+                periodic: false,
+                nurbs: None
+            }
         );
         assert_eq!(geom[2], LinkGeom::Line(Vec2::new(12., 5.), Vec2::new(0., 0.1)));
     }

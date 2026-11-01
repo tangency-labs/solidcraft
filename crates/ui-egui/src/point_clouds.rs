@@ -253,13 +253,13 @@ mod tests {
         let wider = gpu_clouds(&h.app, &h.ctx);
         assert_eq!((wider[0].version, wider[0].style.range), (ramp[0].version, [0.0, 2.0]), "a new range uploads nothing");
         // Hidden, alone or with its folder: nothing drawn; the view frames it while shown.
-        assert!(!solidcraft_engine::view::bounds(&h.app.session).is_empty());
+        assert!(!solidcraft_engine::view::bounds(&h.app.session).unwrap().is_empty());
         let first_bounds = crate::viewport::model_bounds(&h.app);
         assert!(!first_bounds.is_empty());
         assert_eq!(crate::viewport::model_bounds(&h.app), first_bounds, "cached sketch bounds keep the point cloud extent");
         h.app.run("pointcloud.edit", serde_json::json!({"cloud": id, "visible": false})).unwrap();
         assert!(gpu_clouds(&h.app, &h.ctx).is_empty());
-        assert!(solidcraft_engine::view::bounds(&h.app.session).is_empty());
+        assert!(solidcraft_engine::view::bounds(&h.app.session).unwrap().is_empty());
         assert!(crate::viewport::model_bounds(&h.app).is_empty());
         let _ = std::fs::remove_dir_all(dir);
     }

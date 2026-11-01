@@ -694,7 +694,7 @@ mod tests {
             let history = h.app.session.undo.len();
             let r = h.app.run("sketch.project", json!({"refs":[{"sketch":1,"curve":"l1"},{"sketch":1,"curve":"c1"}]})).unwrap();
             assert_eq!(r["links"].as_array().map(Vec::len), Some(2), "mode {m}: {r}");
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
             let kind = |line: bool| {
                 sketch
@@ -708,7 +708,10 @@ mod tests {
             assert_eq!(kind(false), circle, "mode {m}: the circle");
             assert_eq!(h.app.session.undo.len(), history + 1, "mode {m}: one undo step");
             h.app.run("edit.undo", json!({})).unwrap();
-            assert!(h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty(), "mode {m}");
+            assert!(
+                crate::open_meshing::session_world(&h.app.session).sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.is_empty(),
+                "mode {m}"
+            );
             set_mode(&mut h.app, 0);
         }
     }

@@ -1491,7 +1491,7 @@ fn select_same_look_uses_resolved_looks_without_document_history_edits_and_refus
     run(&mut s, "select.same_look", json!({"body":"A"}));
     assert_eq!(s.selection.len(), 3);
     let point = solidcraft_geom::Vec3::new(40.0, 5.0, 5.0);
-    let face = solidcraft_doc::appearance::face_index_at(s.world_state().body("C").unwrap(), point).unwrap();
+    let face = solidcraft_doc::appearance::face_index_at(s.world_state().unwrap().body("C").unwrap(), point).unwrap();
     run(&mut s, "select.set", json!({"items":[Sel::Face {body:"C".into(),index:face,point}]}));
     run(&mut s, "select.same_look", json!({}));
     assert_eq!(s.selection.len(), 3);

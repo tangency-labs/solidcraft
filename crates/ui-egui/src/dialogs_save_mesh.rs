@@ -316,7 +316,7 @@ fn paint_icon(ui: &egui::Ui, rect: egui::Rect, tex: Option<egui::TextureId>, nam
 
 /// Every body of the design, in model order; with `visible`, only the bodies the viewport shows.
 pub(crate) fn body_picks(app: &SolveApp, visible: bool) -> Vec<Sel> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let shown = |name: &str| !visible || app.session.body_visible(name);
     st.bodies.iter().filter(|b| shown(&b.name)).map(|b| Sel::Body { name: b.name.clone() }).collect()
 }

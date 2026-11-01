@@ -42,7 +42,7 @@ fn component(app: &SolveApp, sel: &Sel) -> Option<u64> {
     match sel {
         Sel::Occurrence { path } => app.session.placed_document().path_placement(path).map(|(id, _)| id).filter(|id| *id != 0),
         Sel::Body { name } | Sel::Face { body: name, .. } | Sel::Edge { body: name, .. } => {
-            let state = app.session.world_state();
+            let state = crate::open_meshing::session_world(&app.session);
             state.body(name).map(|body| app.session.doc.model_body_component(body)).filter(|id| *id != 0)
         }
         _ => None,
@@ -253,9 +253,7 @@ fn drop_preview(app: &SolveApp, look: Value, hit: &Hit, sel: &Sel, mods: Modifie
     }
     let whole_component = mods.ctrl || mods.command || app.ui.pick_components;
     if whole_component && let Some(id) = component(app, sel) {
-        let bodies = app
-            .session
-            .world_state()
+        let bodies = crate::open_meshing::session_world(&app.session)
             .bodies
             .iter()
             .filter(|b| {

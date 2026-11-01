@@ -282,7 +282,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 /// OK runs `sketch.equation_curve.edit` on it.
 pub fn edit_equation(app: &mut SolveApp, id: &str) -> bool {
     let Some(sid) = app.session.active_sketch else { return false };
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let Some(eq) = state.sketch(sid).and_then(|s| s.sketch.equation_of(id)).cloned() else { return false };
     let kind = Mod::Equation {
         form: usize::from(eq.x.is_none()),
@@ -304,7 +304,7 @@ pub fn edit_equation(app: &mut SolveApp, id: &str) -> bool {
 pub(crate) fn selected_equation(app: &SolveApp) -> Option<String> {
     let [Sel::SketchCurve { id, .. }] = app.session.selection.as_slice() else { return None };
     let sid = app.session.active_sketch?;
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     state.sketch(sid)?.sketch.equation_of(id).map(|e| e.curve.clone())
 }
 
@@ -315,7 +315,7 @@ pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) ->
     match hit {
         Hit::SketchCurve { sketch, .. } | Hit::SketchPoint { sketch, .. } | Hit::Profile { sketch, .. } if *sketch != active => None,
         Hit::SketchCurve { id, .. } if matches!(d.kind, Kind::SketchModify(Mod::Corner { .. })) => {
-            let state = session.world_state();
+            let state = crate::open_meshing::session_world(&session);
             let sk = &state.sketch(active)?.sketch;
             if sk.is_spatial_corner_curve(id) {
                 return None;
@@ -725,7 +725,9 @@ fn entity_ids(session: &solidcraft_engine::Session, inputs: &[SelInput], i: usiz
         match x {
             Sel::SketchCurve { id, .. } => out.push(id.clone()),
             Sel::Profile { sketch, index } => {
-                if let Some(ids) = session.world_state().sketch(*sketch).and_then(|ss| ss.profiles.get(*index)).map(|p| p.curve_ids()) {
+                if let Some(ids) =
+                    crate::open_meshing::session_world(&session).sketch(*sketch).and_then(|ss| ss.profiles.get(*index)).map(|p| p.curve_ids())
+                {
                     out.extend(ids);
                 }
             }
@@ -937,7 +939,7 @@ pub fn commands(app: &SolveApp, k: &Mod, inputs: &[SelInput], extra: &Map<String
                         json!(axis)
                     } else {
                         let (origin, dir) = crate::dialogs::axis_of(app, sel).ok_or("Select an origin axis")?;
-                        let st = app.session.world_state();
+                        let st = crate::open_meshing::session_world(&app.session);
                         let plane =
                             st.sketch(app.session.active_sketch.ok_or("No sketch is being edited")?).ok_or("The sketch no longer exists")?.plane;
                         if plane.normal().dot(dir).abs() > 1e-9 || plane.normal().dot(origin - plane.origin).abs() > 1e-6 {

@@ -207,7 +207,7 @@ fn a_material_colour_edit_its_undo_and_redo_reach_the_viewport() {
     app.ui.ground_shadow = false;
     app.set_origin_shown(false);
     app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
-    let name = app.session.world_state().bodies[0].name.clone();
+    let name = crate::open_meshing::session_world(&app.session).bodies[0].name.clone();
     app.run("material.create", json!({"name": "Wood dark", "density_g_cm3": 0.7, "color": "#c8a573"})).unwrap();
     app.run("material.assign", json!({"bodies": [name], "material": "Wood dark"})).unwrap();
     let colour = |app: &SolveApp| {
@@ -500,7 +500,7 @@ fn conflicting_curves_points_glyphs_and_dimensions_take_the_conflict_colour_unti
         h.app.edit_sketch(reach);
         h.settle();
         assert_eq!(h.app.session.active_sketch, Some(reach));
-        let st = h.app.session.world_state();
+        let st = crate::open_meshing::session_world(&h.app.session);
         let ss = st.sketch(reach).unwrap();
         assert_eq!(!ss.report.ok(), conflicting, "w = {w}: {:?}", ss.report);
         let conflict = super::Conflict::of(&h.app, &ss.sketch, &ss.report);

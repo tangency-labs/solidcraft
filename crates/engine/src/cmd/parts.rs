@@ -799,7 +799,7 @@ mod tests {
         // The profile: full width at the rim and up the flank (0.15 k = 0.50 high), drawing in
         // over the crown (r = 4.62 halfway up the head), and a flat top of 0.7 s = 2.8, which
         // leaves a ring of material around the socket's corners at r = 2.31.
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let widest = |above: f64| {
             st.bodies.iter().flat_map(|b| b.mesh().positions.clone()).filter(|p| p.z > above).map(|p| p.x.hypot(p.y)).fold(0.0, f64::max)
         };
@@ -893,7 +893,7 @@ mod tests {
         assert_eq!(r["joint"], r["joints"][0]);
         // Each placement sits in its own hole: the head flush on the top face, the shank down
         // the hole's axis.
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let mut seated: Vec<(f64, f64)> = Vec::new();
         for b in st.bodies.iter().filter(|b| s.doc.model_body_component(b) == comp) {
             let (lo, hi) = (b.mesh().bounds().min, b.mesh().bounds().max);

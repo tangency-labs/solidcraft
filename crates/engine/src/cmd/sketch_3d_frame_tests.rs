@@ -458,13 +458,13 @@ fn wire_frame_copies_keep_component_and_legacy_coordinates() {
     assert_eq!(sk.wires[3].space, WireSpace::World);
     near(sk.wires[2].arc.unwrap().center, Vec3::new(1.6, 0.0, 5.0));
     near(sk.wires[3].arc.unwrap().center, Vec3::new(20.0, 31.6, 45.0));
-    for wire in s.world_state().sketch(sketch).unwrap().sketch.wires.iter().filter(|w| copied.contains(&w.id)) {
+    for wire in s.world_state().unwrap().sketch(sketch).unwrap().sketch.wires.iter().filter(|w| copied.contains(&w.id)) {
         near(wire.arc.unwrap().center, Vec3::new(20.0, 31.6, 45.0));
         near(wire.fit[0], Vec3::new(10.0, 31.6, 45.0));
     }
     let component = s.active_component;
     run(&mut s, "component.activate", json!({"component":component,"occurrence":first,"path":[first]}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let wires = &world.sketch(sketch).unwrap().sketch.wires;
     near(wires.iter().find(|w| w.id == copied[0]).unwrap().arc.unwrap().center, Vec3::new(1.6, 0.0, 5.0));
     near(wires.iter().find(|w| w.id == copied[1]).unwrap().arc.unwrap().center, Vec3::new(20.0, 31.6, 45.0));
