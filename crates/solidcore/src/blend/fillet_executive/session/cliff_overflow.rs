@@ -10,6 +10,11 @@
 //! | `FilletSession::holds_its_law` (private)   | `sm_HoldsItsLaw`                          |
 //!
 //! Deviations:
+//! - **Section ends (not the fork's).** With `fixes.fillet_round_ends_at_tangent_continuation`
+//!   (WR-674, #2176) an open end noted as a section is cut by the plane through its vertex
+//!   normal to the filleted edge, and a round whose two ends are both such ends is closed by
+//!   `close_section_ended_round` instead of `close_removal_region`; any other combination
+//!   is refused as no room.
 //! - **The removal region leaves the session first.** Once each round's law is checked
 //!   (which reads the fillet surfaces where the intermediate body owns them), the
 //!   intermediate body is taken out of the session, as the fork sets `m_pFilletBrep` to
@@ -30,7 +35,8 @@ use std::collections::BTreeMap;
 
 use super::{invalid, FilletBody, FilletObject, FilletSession, SolverObject};
 use crate::blend::fillet_cliff_overflow::{
-    close_removal_region, cut_fillet_at_open_end, Blended, Refusal,
+    close_removal_region, close_section_ended_round, cut_fillet_at_open_end, Blended, Refusal,
+    SectionEnd,
 };
 use crate::blend::fillet_executive::p3::NoRoomReason;
 use crate::blend::fillet_geom::p1::{FilletErrorType, FilletGeomId, FilletSurfaceStorage};
@@ -41,8 +47,10 @@ use crate::geom::a_object::BooleanOperation;
 use crate::geom::attribute::ids;
 use crate::kernel::Kernel;
 use crate::math::{Vec3, EFF_ZERO, EFF_ZERO_SQRT, PI};
+use crate::surface::plane::Plane;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
+use crate::surface::surface::Surface;
 use crate::topology::brep::p3::{orient_trimmed_surfaces, with_kernel_callbacks};
 use crate::topology::topology_traverser::Marks;
 use crate::topology::{edge, edgeuse::p1 as eu1, face, vertex, Brep, FaceId};
@@ -281,6 +289,27 @@ impl FilletSession<'_> {
             .take()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
 
+        // WR-674: a round left open where its edge runs on tangentially is built alone, both
+        // its ends such ends, and not with a cliff overflow
+        let sectioned = open_ends.iter().any(|end| end.section);
+        if sectioned
+            && (self.executive.cliff_overflow
+                || solvers.len() != 1
+                || open_ends.len() != 2
+                || !open_ends.iter().all(|end| end.section)
+                || open_ends.first().map(|end| end.vertex)
+                    == open_ends.get(1).map(|end| end.vertex))
+        {
+            self.objects.intermediate = Some(region);
+            self.note_refusal(Refusal {
+                code: FilletErrorType::NoRoom,
+                reason: Some(NoRoomReason::TangentContinuationEndUnsupported),
+                comment: "Fillet Error: a round ending where its edge runs on tangentially is built only alone, with both its ends such ends",
+            });
+            return Err(SolidError::sm_err(OP));
+        }
+        let mut section_ends = Vec::new();
+
         let mut note = None;
         for end in &open_ends {
             let FilletObject::Solver(id) = end.solver else {
@@ -296,9 +325,6 @@ impl FilletSession<'_> {
             let base = self.objects.solver(id)?.base();
             let solver_tol = base.approx_tol_3d;
             let target = &*self.objects.target;
-            let end_surface = face::p2::surface(target, end_face)?
-                .ok_or_else(|| SolidError::null_pointer(OP))?
-                .clone_for_evaluation()?;
             // the fillet's point nearest the middle of the filleted edge
             let eu = base
                 .edgeuse(0)?
@@ -308,6 +334,37 @@ impl FilletSession<'_> {
                 .ok_or_else(|| SolidError::null_pointer(OP))?
                 .evaluate_point(k, edge::interval(target, fil_edge)?.evaluate(0.5))?;
             let vertex_point = vertex::point(target, v)?;
+            let end_surface = if end.section {
+                // WR-674: the section through the vertex, normal to the filleted edge
+                let interval = edge::interval(target, fil_edge)?;
+                let t = if edge::start_vertex(target, fil_edge)? == Some(v) {
+                    interval.min()
+                } else {
+                    interval.max()
+                };
+                let derivs = edge::curve(target, fil_edge)?
+                    .ok_or_else(|| SolidError::null_pointer(OP))?
+                    .evaluate(k, t, 1, true, true)?;
+                let tangent = derivs
+                    .get(1)
+                    .copied()
+                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                let length = tangent.length();
+                if length <= EFF_ZERO {
+                    return Err(SolidError::sm_err(OP));
+                }
+                let normal = tangent * (1.0 / length);
+                section_ends.push(SectionEnd {
+                    vertex: v,
+                    at: vertex_point,
+                    normal,
+                });
+                Surface::from(Plane::from_normal(vertex_point, normal))
+            } else {
+                face::p2::surface(target, end_face)?
+                    .ok_or_else(|| SolidError::null_pointer(OP))?
+                    .clone_for_evaluation()?
+            };
             let entry = faces_of
                 .get_mut(&end.solver)
                 .ok_or_else(|| SolidError::null_pointer(OP))?;
@@ -337,14 +394,26 @@ impl FilletSession<'_> {
                 }
             }
         }
-        let closed = close_removal_region(
-            k,
-            &mut region,
-            self.objects.target,
-            &blended,
-            tol,
-            &mut note,
-        );
+        let closed = match (sectioned, section_ends.as_slice(), blended_edges.first()) {
+            (true, &[first, second], Some(&fil_edge)) => close_section_ended_round(
+                k,
+                &mut region,
+                self.objects.target,
+                fil_edge,
+                [first, second],
+                tol,
+                &mut note,
+            ),
+            (true, _, _) => Err(SolidError::null_pointer(OP)),
+            (false, _, _) => close_removal_region(
+                k,
+                &mut region,
+                self.objects.target,
+                &blended,
+                tol,
+                &mut note,
+            ),
+        };
         self.noted(note.take(), closed)?;
 
         // stitch the closing faces to the sheet, and orient the closed shell as a solid

@@ -1,0 +1,92 @@
+{
+ "cases": [
+  {
+   "name": "issue_2176_tabbed_plate_corner_arc_r0_5",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp SmApiFilletEdges: r0.5 round of one top edge of an R25 disc with a tab (sides x = +-4, R2 corners, top y = 280/9 + 2) extruded 2, the edge picked alone (tangency-labs/solidcore#2176)",
+   "inputs": {
+    "real_solid": {
+     "checkpoint": "full",
+     "source": {
+      "kind": "file",
+      "path": {
+       "$repo_file": "fixtures/blend.fillet_executive_p3/issue_2176_tabbed_plate.smb"
+      }
+     },
+     "radius": 0.5,
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1.0,
+     "edges": [
+      7
+     ]
+    }
+   }
+  },
+  {
+   "name": "issue_2176_tabbed_plate_tab_side_r0_5",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp SmApiFilletEdges: r0.5 round of one top edge of an R25 disc with a tab (sides x = +-4, R2 corners, top y = 280/9 + 2) extruded 2, the edge picked alone (tangency-labs/solidcore#2176)",
+   "inputs": {
+    "real_solid": {
+     "checkpoint": "full",
+     "source": {
+      "kind": "file",
+      "path": {
+       "$repo_file": "fixtures/blend.fillet_executive_p3/issue_2176_tabbed_plate.smb"
+      }
+     },
+     "radius": 0.5,
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1.0,
+     "edges": [
+      15
+     ]
+    }
+   }
+  },
+  {
+   "name": "issue_2176_tabbed_plate_tab_top_r0_5",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp SmApiFilletEdges: r0.5 round of one top edge of an R25 disc with a tab (sides x = +-4, R2 corners, top y = 280/9 + 2) extruded 2, the edge picked alone (tangency-labs/solidcore#2176)",
+   "inputs": {
+    "real_solid": {
+     "checkpoint": "full",
+     "source": {
+      "kind": "file",
+      "path": {
+       "$repo_file": "fixtures/blend.fillet_executive_p3/issue_2176_tabbed_plate.smb"
+      }
+     },
+     "radius": 0.5,
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1.0,
+     "edges": [
+      8
+     ]
+    }
+   }
+  },
+  {
+   "name": "issue_2176_tabbed_plate_disc_wall_r0_5",
+   "upstream_ref": "source/SM_API/src/SmApiBrep.cpp SmApiFilletEdges: r0.5 round of one top edge of an R25 disc with a tab (sides x = +-4, R2 corners, top y = 280/9 + 2) extruded 2, the edge picked alone (tangency-labs/solidcore#2176)",
+   "inputs": {
+    "real_solid": {
+     "checkpoint": "full",
+     "source": {
+      "kind": "file",
+      "path": {
+       "$repo_file": "fixtures/blend.fillet_executive_p3/issue_2176_tabbed_plate.smb"
+      }
+     },
+     "radius": 0.5,
+     "xsect": 1,
+     "continuity": 1,
+     "thumbweight": 1.0,
+     "edges": [
+      3
+     ]
+    }
+   }
+  }
+ ]
+}

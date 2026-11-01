@@ -1514,9 +1514,9 @@ impl FilletCorner {
         target: &mut Brep,
         pseudo: &mut FilletBrep,
     ) -> Result<bool> {
-        let mut no_open_ends = |_, _, _| Ok(());
+        let mut no_open_ends = |_, _, _, _| Ok(());
         Ok(
-            self.drop_end_rib(k, target, pseudo, false, &mut no_open_ends)?
+            self.drop_end_rib(k, target, pseudo, false, false, &mut no_open_ends)?
                 == EndRibDrop::GlobalMerge,
         )
     }
@@ -1555,13 +1555,15 @@ impl FilletCorner {
         target: &mut Brep,
         pseudo: &mut FilletBrep,
         cliff_overflow: bool,
-        note_open_end: &mut dyn FnMut(EdgeuseId, VertexId, FaceId) -> Result<()>,
+        tangent_ends: bool,
+        note_open_end: &mut dyn FnMut(EdgeuseId, VertexId, FaceId, bool) -> Result<()>,
     ) -> Result<EndRibDrop> {
         const OP: &str = "blend::fillet_corner::p1::drop_end_rib";
         let [end_rib] = self.edges[..] else {
             return Ok(EndRibDrop::Kept);
         };
-        if !(k.fixes.fillet_nx1_end_rib_global_merge || cliff_overflow)
+        let tangent_ends = tangent_ends && !cliff_overflow;
+        if !(k.fixes.fillet_nx1_end_rib_global_merge || cliff_overflow || tangent_ends)
             || !matches!(self.kind, FilletCornerKind::NByOne | FilletCornerKind::Open)
             || pseudo.fillet_edge(end_rib)?.edge_type != FilletEdgeType::FilletXSideFace
         {
@@ -1713,6 +1715,25 @@ impl FilletCorner {
         if runs_on {
             return Ok(EndRibDrop::Kept);
         }
+        // Not upstream (WR-674, `fixes.fillet_round_ends_at_tangent_continuation`,
+        // tangency-labs/solidcore#2176): the side edge the rail missed continues the filleted
+        // edge tangentially across the vertex and reaches past the fillet's width there (the
+        // straight side of a plate's outline running on from a rounded corner arc): the rail
+        // runs alongside it and never meets it, and no face of the body ends the round. The
+        // round ends at its section through the vertex: the end is left open, noted for the
+        // subtraction, which cuts the round there by the plane normal to the filleted edge.
+        if tangent_ends {
+            let vertex = self.vertex.ok_or_else(|| SolidError::null_pointer(OP))?;
+            if self.runs_on_past_fillet(k, target, pseudo, fil_eu, side_edge, vertex, miss_fv)? {
+                note_open_end(fil_eu, vertex, other_face, true)?;
+                pseudo.delete_wire_fillet_edge(k, end_rib)?;
+                self.edges.clear();
+                return Ok(EndRibDrop::OpenEnd);
+            }
+            if !k.fixes.fillet_nx1_end_rib_global_merge {
+                return Ok(EndRibDrop::Kept);
+            }
+        }
         if cliff_overflow {
             // The end face: the side edge's face that is neither of the fillet's side faces.
             let [first, second] = side_faces;
@@ -1725,7 +1746,7 @@ impl FilletCorner {
                 return Err(SolidError::sm_err(OP));
             }
             let vertex = self.vertex.ok_or_else(|| SolidError::null_pointer(OP))?;
-            note_open_end(fil_eu, vertex, end_face)?;
+            note_open_end(fil_eu, vertex, end_face, false)?;
             pseudo.delete_wire_fillet_edge(k, end_rib)?;
             self.edges.clear();
             return Ok(EndRibDrop::OpenEnd);
@@ -1736,6 +1757,72 @@ impl FilletCorner {
         pseudo.delete_wire_fillet_edge(k, end_rib)?;
         self.edges.clear();
         Ok(EndRibDrop::GlobalMerge)
+    }
+
+    /// Whether the side edge `side_edge` the rail of `miss_fv` missed at the corner's
+    /// vertex `vertex` continues the filleted edge (of `fil_eu`) tangentially there, within
+    /// the corner's tangency tolerance, and reaches past the fillet's width: its other vertex
+    /// lies farther from `vertex` than the other rail's end, and it is straight (WR-674,
+    /// `fixes.fillet_round_ends_at_tangent_continuation`). A side edge that ends within the
+    /// fillet's width or bends away (WR-303's short arc, past which the round runs onto
+    /// another face) is left to the global merge.
+    ///
+    /// # Errors
+    /// `SM_ERR_NULL_POINTER` for a missing edge, vertex or end; those of the tangent test.
+    #[allow(clippy::too_many_arguments)]
+    fn runs_on_past_fillet(
+        &self,
+        k: &Kernel,
+        target: &Brep,
+        pseudo: &FilletBrep,
+        fil_eu: EdgeuseId,
+        side_edge: EdgeId,
+        vertex: VertexId,
+        miss_fv: VertexId,
+    ) -> Result<bool> {
+        const OP: &str = "blend::fillet_corner::p1::runs_on_past_fillet";
+        let fil_edge = eu1::edge(target, fil_eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let tol_deg = rad_to_deg(self.tangency_tol_radians);
+        let (g1, _) = test_g1_continuity(
+            k,
+            target,
+            Some(vertex),
+            Some(fil_edge),
+            Some(side_edge),
+            tol_deg,
+        )?;
+        if !g1 {
+            return Ok(false);
+        }
+        let other_fv = self
+            .vertices
+            .iter()
+            .copied()
+            .find(|&v| v != miss_fv)
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        let at = vertex::point(target, vertex)?;
+        let width = pseudo.vertex_point(other_fv)?.distance(at);
+        let far = edge::other_vertex(target, side_edge, Some(vertex))?
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        let far = vertex::point(target, far)?;
+        let length = far.distance(at);
+        if length <= width {
+            return Ok(false);
+        }
+        // straight: the side edge runs on along the filleted edge's tangent line (a curved
+        // continuation bends away from the round, which runs on past it onto the faces
+        // beyond: WR-303's)
+        let curve = edge::curve(target, side_edge)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let interval = edge::interval(target, side_edge)?;
+        let chord = (far - at) * (1.0 / length);
+        for i in 1..8 {
+            let p = curve.evaluate_point(k, interval.evaluate(f64::from(i) / 8.0))?;
+            let d = p - at;
+            if (d - chord * d.dot(chord)).length() > self.approx_tol_3d {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// `CalcCornerEdgeGeom`: `SmFilletEdge::CalcCornerEdgeGeom` on every corner fillet edge

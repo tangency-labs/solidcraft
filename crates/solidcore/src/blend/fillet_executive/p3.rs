@@ -132,6 +132,10 @@ pub enum NoRoomReason {
     /// Subtracting a cliff overflow's removal region from a manifold solid left no manifold
     /// solid (an empty or open body; not the fork's, WR-631 addendum).
     CliffSubtractionLeavesNoSolid,
+    /// A round that ends where its edge runs on tangentially is built only alone, with both
+    /// its ends such ends, and with its faces' sections at the ends straight (not the fork's,
+    /// WR-674, `fixes.fillet_round_ends_at_tangent_continuation`).
+    TangentContinuationEndUnsupported,
 }
 
 /// The initialized error-info members p3 reads or writes. Corner kinds use the
@@ -632,6 +636,10 @@ pub struct OpenEnd<O> {
     pub vertex: O,
     /// `m_pEndFace`: the face whose surface's continuation cuts the fillet off there.
     pub end_face: O,
+    /// Not the fork's (WR-674, `fixes.fillet_round_ends_at_tangent_continuation`): the
+    /// fillet is cut off by its section through the vertex, the plane normal to the
+    /// filleted edge there, not by `end_face` (then one of the filleted edge's faces).
+    pub section: bool,
 }
 
 /// Error-only corner metadata, requested only after a corner operation fails.

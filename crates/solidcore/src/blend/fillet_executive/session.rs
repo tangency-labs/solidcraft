@@ -2384,7 +2384,7 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
         // cliff overflow (WR-631) the end is left open, noted for the subtraction.
         let cliff_overflow = executive.cliff_overflow;
         let mut open_ends = Vec::new();
-        let mut note_open_end = |eu, vertex, end_face| -> Result<()> {
+        let mut note_open_end = |eu, vertex, end_face, section| -> Result<()> {
             // GetFilletSolverOfEdgeuse(pFilEdgeuse), then NoteOpenEnd
             let solver = executive
                 .fillet_solver_of_edgeuse(FilletObject::Topology(
@@ -2396,10 +2396,20 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
                 solver,
                 vertex: FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(vertex)),
                 end_face: FilletObject::Topology(FilletBody::Target, EntityRef::Face(end_face)),
+                section,
             });
             Ok(())
         };
-        let dropped = corner.drop_end_rib(k, target, pseudo, cliff_overflow, &mut note_open_end)?;
+        // WR-674: a round's end where its edge runs on tangentially is left open too.
+        let tangent_ends = k.fixes.fillet_round_ends_at_tangent_continuation;
+        let dropped = corner.drop_end_rib(
+            k,
+            target,
+            pseudo,
+            cliff_overflow,
+            tangent_ends,
+            &mut note_open_end,
+        )?;
         executive.open_ends.append(&mut open_ends);
         if dropped == EndRibDrop::GlobalMerge {
             executive.options.global_merge = true;

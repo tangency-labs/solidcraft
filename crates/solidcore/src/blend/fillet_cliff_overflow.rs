@@ -48,6 +48,7 @@
 //! | [`close_round_loop`]         | `sm_CloseRoundLoop` (`bba9914`)        |
 //! | [`continued_surface`], [`ContinuedSurface`] | `sm_ContinuedSurface` (`db4a655`) |
 //! | [`close_band`]               | `sm_CloseBand` (`db4a655`)             |
+//! | [`close_section_ended_round`] | none (WR-674, not the fork's)         |
 //!
 //! Deviations:
 //! - **Errors.** `GetFilletErrorInfo()->NoteError(code, comment)` followed by `SM_ERR`
@@ -1290,7 +1291,21 @@ pub fn closing_face(
             ),
         );
     };
+    face_of_loop(k, region, surface, lp)
+}
 
+/// The tail of [`closing_face`]: the face over the loop `lp` on `surface`, anticlockwise
+/// by the loop's signed area in the surface's parameters, made in `region`'s infinite
+/// region.
+///
+/// # Errors
+/// `SM_ERR` for a failed drop; those of the samples and the face construction.
+fn face_of_loop(
+    k: &mut Kernel,
+    region: &mut Brep,
+    surface: Surface,
+    mut lp: Vec<LoopCurve>,
+) -> Result<FaceId> {
     // anticlockwise on the surface: the loop's points in its parameters, by their signed
     // area
     let domain = surface.natural_uv_domain_with_nurb(k)?;
@@ -1814,4 +1829,216 @@ pub fn close_band(
         create_face_in_region_from_surface(k, b, region_id, Some(surface), &band, &mut fenv)
     })?;
     Ok(made.face)
+}
+
+// ---- WR-674: a round ended at its sections ------------------------------------------------
+
+/// One end of a round cut off by its section ([`close_section_ended_round`]): the filleted
+/// edge's vertex there and the section's plane through it, normal to the edge.
+#[derive(Debug, Clone, Copy)]
+pub struct SectionEnd {
+    /// The filleted edge's vertex (of the target).
+    pub vertex: VertexId,
+    /// The vertex's point, on the plane.
+    pub at: Point3,
+    /// The plane's unit normal: the filleted edge's tangent at the vertex.
+    pub normal: Vec3,
+}
+
+/// Whether `p` lies on the plane through `at` with unit normal `normal`, within `tol`.
+fn on_section_plane(p: Point3, at: Point3, normal: Vec3, tol: f64) -> bool {
+    (p - at).dot(normal).abs() <= tol
+}
+
+/// Not the fork's (WR-674, `fixes.fillet_round_ends_at_tangent_continuation`,
+/// tangency-labs/solidcore#2176): close the sheet `region` of one round, cut off at both
+/// ends by its sections (`ends`, the two vertices of the filleted edge `fil_edge`), into the
+/// region the round removes. The sheet's boundary is a rail on each face of the filleted
+/// edge and a section at each end. Each face gets a closing face on its surface (continued:
+/// [`covering_surface`]) along its rail, from the rail's ends along the section's line to
+/// the end's vertex, and along the filleted edge; each section gets a flat face, from the
+/// section's ends to the vertex. Refused (`NoRoom`) for a boundary of any other kind, and
+/// for a section that is not straight on a face (a line from the rail's end to the vertex
+/// off the face's surface by more than ten times `tol`); `NotExact` where a face's surface
+/// cannot be continued over its closing face.
+///
+/// # Errors
+/// The refusals as `SM_ERR`; those of the samples, distances and face constructions.
+#[allow(clippy::too_many_lines)]
+pub fn close_section_ended_round(
+    k: &mut Kernel,
+    region: &mut Brep,
+    target: &Brep,
+    fil_edge: EdgeId,
+    ends: [SectionEnd; 2],
+    tol: f64,
+    note: &mut Option<Refusal>,
+) -> Result<()> {
+    const UNSUPPORTED: Refusal = Refusal::no_room(
+        NoRoomReason::TangentContinuationEndUnsupported,
+        "Fillet Error: a round ending where its edge runs on tangentially has a boundary other than its rails and end sections",
+    );
+    const BENT_SECTION: Refusal = Refusal::no_room(
+        NoRoomReason::TangentContinuationEndUnsupported,
+        "Fillet Error: a round ending where its edge runs on tangentially has a face whose section at the end is not straight",
+    );
+    let on_tol = 10.0 * tol;
+    let faces = edge::faces(target, fil_edge, None)?;
+    let [first_face, second_face] = faces.as_slice() else {
+        return refuse(note, UNSUPPORTED);
+    };
+    let host_faces = [*first_face, *second_face];
+
+    // the sheet's lamina edges: a section at each end, a rail on each face
+    let mut sections: [Option<EdgeId>; 2] = [None, None];
+    let mut rails: [Option<EdgeId>; 2] = [None, None];
+    for e in crate::topology::brep::p1::edges(region, None)? {
+        if !edge::is_lamina(region, e)? {
+            continue;
+        }
+        let curve = edge_curve(k, region, e)?;
+        let mut points = Vec::new();
+        samples(k, &curve, 4, &mut points)?;
+        let mut slot = None;
+        for (i, end) in ends.iter().enumerate() {
+            if points
+                .iter()
+                .all(|&p| on_section_plane(p, end.at, end.normal, on_tol))
+            {
+                slot = Some((&mut sections, i));
+                break;
+            }
+        }
+        if slot.is_none() {
+            for (i, &f) in host_faces.iter().enumerate() {
+                let mut on = true;
+                for &p in &points {
+                    if distance_to_surface(k, target, f, p)? > on_tol {
+                        on = false;
+                        break;
+                    }
+                }
+                if on {
+                    slot = Some((&mut rails, i));
+                    break;
+                }
+            }
+        }
+        let Some((list, i)) = slot else {
+            return refuse(note, UNSUPPORTED);
+        };
+        let Some(entry) = list.get_mut(i) else {
+            return Err(SolidError::null_pointer(OP));
+        };
+        if entry.is_some() {
+            return refuse(note, UNSUPPORTED);
+        }
+        *entry = Some(e);
+    }
+    let ([Some(s0), Some(s1)], [Some(r0), Some(r1)]) = (sections, rails) else {
+        return refuse(note, UNSUPPORTED);
+    };
+
+    // a rail's end at each section: its vertex on that section's plane
+    let rail_ends = |e: EdgeId| -> Result<Option<[Point3; 2]>> {
+        let (a, b) = edge::start_end_vertices(region, e)?;
+        let a = vertex::point(region, a.ok_or_else(|| SolidError::null_pointer(OP))?)?;
+        let b = vertex::point(region, b.ok_or_else(|| SolidError::null_pointer(OP))?)?;
+        let [e0, e1] = ends;
+        if on_section_plane(a, e0.at, e0.normal, on_tol)
+            && on_section_plane(b, e1.at, e1.normal, on_tol)
+        {
+            Ok(Some([a, b]))
+        } else if on_section_plane(b, e0.at, e0.normal, on_tol)
+            && on_section_plane(a, e1.at, e1.normal, on_tol)
+        {
+            Ok(Some([b, a]))
+        } else {
+            Ok(None)
+        }
+    };
+    let (Some(rail_points0), Some(rail_points1)) = (rail_ends(r0)?, rail_ends(r1)?) else {
+        return refuse(note, UNSUPPORTED);
+    };
+    let [v0, v1] = [ends[0].at, ends[1].at];
+    let fil_curve = edge_curve(k, target, fil_edge)?;
+    let line = |from: Point3, to: Point3| Curve::from(Line::from_points(from, to, 3));
+
+    // a closing face on each face of the filleted edge
+    for (f, rail, [p0, p1]) in [
+        (host_faces[0], r0, rail_points0),
+        (host_faces[1], r1, rail_points1),
+    ] {
+        let mut lp: Vec<LoopCurve> = Vec::new();
+        add_curve(k, &mut lp, edge_curve(k, region, rail)?, p0, p1)?;
+        for (from, to) in [(p1, v1), (v1, v0), (v0, p0)] {
+            if from == v1 && to == v0 {
+                add_curve(k, &mut lp, fil_curve.clone(), v1, v0)?;
+                continue;
+            }
+            if same(from, to, on_tol) {
+                continue;
+            }
+            // the section's line on the face
+            let mid = from + (to - from) * 0.5;
+            if distance_to_surface(k, target, f, mid)? > on_tol {
+                return refuse(note, BENT_SECTION);
+            }
+            add_curve(k, &mut lp, line(from, to), from, to)?;
+        }
+        let mut points = Vec::new();
+        for c in &lp {
+            samples(k, &c.curve, 8, &mut points)?;
+        }
+        let Some(surface) = covering_surface(k, target, f, &points, on_tol)? else {
+            return refuse(
+                note,
+                Refusal::not_exact(
+                    "Fillet Error: a round ending where its edge runs on tangentially needs a face's surface continued past its domain, which is not a plane",
+                ),
+            );
+        };
+        face_of_loop(k, region, surface, lp)?;
+    }
+
+    // a flat face at each section
+    for (end, section) in ends.iter().zip([s0, s1]) {
+        let (a, b) = edge::start_end_vertices(region, section)?;
+        let a = vertex::point(region, a.ok_or_else(|| SolidError::null_pointer(OP))?)?;
+        let b = vertex::point(region, b.ok_or_else(|| SolidError::null_pointer(OP))?)?;
+        let mut lp: Vec<LoopCurve> = Vec::new();
+        add_curve(k, &mut lp, edge_curve(k, region, section)?, a, b)?;
+        for (from, to) in [(b, end.at), (end.at, a)] {
+            if !same(from, to, on_tol) {
+                add_curve(k, &mut lp, line(from, to), from, to)?;
+            }
+        }
+        let [_, x, y] = end.normal.make_unit_ortho_vectors(None)?;
+        let mut bbox: Option<Extent2d> = None;
+        for c in &lp {
+            let mut points = Vec::new();
+            samples(k, &c.curve, 8, &mut points)?;
+            for p in points {
+                let d = p - end.at;
+                let uv = Point2::new(d.dot(x), d.dot(y));
+                match bbox.as_mut() {
+                    None => bbox = Some(Extent2d::from_points(uv, uv)),
+                    Some(bx) => bx.add_point(uv),
+                }
+            }
+        }
+        let Some(bbox) = bbox else {
+            return Err(SolidError::sm_err(OP));
+        };
+        let margin = 0.01 * bbox.size().length() + on_tol;
+        let domain = Extent2d::from_bounds(
+            bbox.min().x - margin,
+            bbox.min().y - margin,
+            bbox.max().x + margin,
+            bbox.max().y + margin,
+        );
+        let plane = Surface::from(Plane::new(end.at, x, y, Vec2::new(1.0, 1.0), &domain));
+        face_of_loop(k, region, plane, lp)?;
+    }
+    Ok(())
 }

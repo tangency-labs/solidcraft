@@ -650,7 +650,11 @@ impl FilletSession<'_> {
             // The fork's (WR-631, WR-638): a cliff overflow closes the fillet faces into the
             // region the blends remove and subtracts it from the target, instead of merging
             // the fillet faces in; the error a failed subtraction noted stands.
-            if session.executive.cliff_overflow {
+            // WR-674: a round left open at its tangent-continuation ends is built the same
+            // way, by subtraction
+            if session.executive.cliff_overflow
+                || session.executive.open_ends.iter().any(|end| end.section)
+            {
                 let result = session.subtract_removal_region(k);
                 session.objects.target.set_editing_enabled(editing);
                 if let Some(output) = error_out {
