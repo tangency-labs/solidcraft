@@ -192,9 +192,9 @@ impl Open {
 
 /// The plate shelled through the API (`SmApiShellBrepFull`, as `smlib_shell` and the
 /// difftest runner call it) under `fixes`.
-fn probe(fixes: UpstreamFixes, create_offset_solid: bool, open: Open) -> solidcore::Result<Brep> {
+fn probe(fixes: &UpstreamFixes, create_offset_solid: bool, open: Open) -> solidcore::Result<Brep> {
     let mut k = Kernel {
-        fixes,
+        fixes: *fixes,
         ..Default::default()
     };
     let mut b = drilled(&mut k);
@@ -213,7 +213,7 @@ fn issue_1795_extended_edges_mated() {
     let mut fixes = UpstreamFixes::default();
     fixes.offset_extended_edges_mated = true;
     for open in [Open::Z27, Open::Y20] {
-        match probe(fixes, true, open) {
+        match probe(&fixes, true, open) {
             Err(e) => eprintln!(
                 "PROBE 1795 open={open:?} offset_extended_edges_mated, cos=true: Err({e:?})"
             ),

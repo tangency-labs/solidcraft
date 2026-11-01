@@ -165,9 +165,9 @@ fn solidcraft_fixes() -> UpstreamFixes {
 
 /// The shell of the operand (`SmApiShellBrepFull(b, -0.5, TRUE, TRUE, TRUE, [start
 /// cap])`), with its run time.
-fn shell(fixes: UpstreamFixes) -> (Kernel, solidcore::Result<Brep>) {
+fn shell(fixes: &UpstreamFixes) -> (Kernel, solidcore::Result<Brep>) {
     let mut k = Kernel::default();
-    k.fixes.clone_from(&fixes);
+    k.fixes.clone_from(fixes);
     let mut part = operand(&mut k);
     assert_eq!(part.face_list().len(), 14);
     let start = planar_faces_at(&k, &part, 2, 0.0);
@@ -195,7 +195,7 @@ fn shell(fixes: UpstreamFixes) -> (Kernel, solidcore::Result<Brep>) {
 }
 
 /// Checks the shell and returns its number of line edges.
-fn check(fixes: UpstreamFixes, want: f64) -> usize {
+fn check(fixes: &UpstreamFixes, want: f64) -> usize {
     let (k, result) = shell(fixes);
     let mut b = result.unwrap();
     b.refresh_cached_topology();
@@ -229,7 +229,7 @@ fn check(fixes: UpstreamFixes, want: f64) -> usize {
 
 #[test]
 fn issue_1476_swept_bar_shells() {
-    assert_eq!(check(UpstreamFixes::default(), 1299.4876808844865), 16);
+    assert_eq!(check(&UpstreamFixes::default(), 1299.4876808844865), 16);
 }
 
 /// About 6 s at opt-level 3 but over 4 min in a debug build (the two 38 000-sample
@@ -239,7 +239,7 @@ fn issue_1476_swept_bar_shells() {
 #[test]
 #[ignore = "slow in debug builds (two 38 000-sample curve offsets)"]
 fn issue_1476_swept_bar_shells_with_solidcraft_fixes() {
-    assert_eq!(check(solidcraft_fixes(), 1299.482314966473), 16);
+    assert_eq!(check(&solidcraft_fixes(), 1299.482314966473), 16);
 }
 
 /// `shell_edges_on_analytics_exact` (WR-545) alone: `make_edges_on_analytics_exact`
@@ -252,7 +252,7 @@ fn issue_1476_swept_bar_shells_with_solidcraft_fixes() {
 fn issue_1476_swept_bar_shells_with_edges_on_analytics_exact() {
     let mut fixes = UpstreamFixes::default();
     fixes.shell_edges_on_analytics_exact = true;
-    assert_eq!(check(fixes, 1299.4876808844865), 20);
+    assert_eq!(check(&fixes, 1299.4876808844865), 20);
 }
 
 /// SolidCraft's configuration with `shell_edges_on_analytics_exact` on as well (the
@@ -264,5 +264,5 @@ fn issue_1476_swept_bar_shells_with_edges_on_analytics_exact() {
 fn issue_1476_swept_bar_shells_with_solidcraft_fixes_and_edges_on_analytics_exact() {
     let mut fixes = solidcraft_fixes();
     fixes.shell_edges_on_analytics_exact = true;
-    assert_eq!(check(fixes, 1299.482314966473), 18);
+    assert_eq!(check(&fixes, 1299.482314966473), 18);
 }

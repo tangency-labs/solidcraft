@@ -44,9 +44,9 @@ fn ribbed(k: &mut Kernel, inset: f64) -> Brep {
 }
 
 /// The part shelled 0.5 inward open at the rib's outer side, under `fixes`.
-fn shell(fixes: UpstreamFixes, inset: f64) -> solidcore::Result<(bool, f64)> {
+fn shell(fixes: &UpstreamFixes, inset: f64) -> solidcore::Result<(bool, f64)> {
     let mut k = Kernel::default();
-    k.fixes.clone_from(&fixes);
+    k.fixes.clone_from(fixes);
     let mut part = ribbed(&mut k, inset);
     part.refresh_cached_topology();
     let open = planar_faces_at(&k, &part, 0, inset);
@@ -84,7 +84,7 @@ fn crossing(walls_touch: bool) -> UpstreamFixes {
 /// Upstream (crossing loops not resolved): the merge returns no manifold solid.
 #[test]
 fn default_fixes_return_no_solid() {
-    let (manifold, _) = shell(UpstreamFixes::default(), 0.15).unwrap();
+    let (manifold, _) = shell(&UpstreamFixes::default(), 0.15).unwrap();
     assert!(!manifold);
 }
 
@@ -93,7 +93,7 @@ fn default_fixes_return_no_solid() {
 #[test]
 fn floor_under_the_opening_is_kept() {
     for walls_touch in [false, true] {
-        let (manifold, v) = shell(crossing(walls_touch), 0.15).unwrap();
+        let (manifold, v) = shell(&crossing(walls_touch), 0.15).unwrap();
         assert!(manifold, "{walls_touch}");
         assert!((v - 587.5).abs() <= 1e-9 * 587.5, "{walls_touch}: {v}");
     }
@@ -103,7 +103,7 @@ fn floor_under_the_opening_is_kept() {
 /// has the same closed form.
 #[test]
 fn rib_past_the_moved_wall_is_unchanged() {
-    let (manifold, v) = shell(crossing(false), 0.6).unwrap();
+    let (manifold, v) = shell(&crossing(false), 0.6).unwrap();
     assert!(manifold);
     assert!((v - 587.5).abs() <= 1e-9 * 587.5, "{v}");
 }

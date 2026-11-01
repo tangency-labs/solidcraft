@@ -82,9 +82,9 @@ fn arc(k: &Kernel, c: Point3, x0: Vec3, y0: Vec3, r: f64, degrees: f64) -> Curve
 
 /// The join's level-2 check failures, its volume, the ribbed slab's and the pad's volumes,
 /// and its worst edge-end gap, with `fixes`.
-fn grazing_join(fixes: UpstreamFixes) -> (usize, f64, f64, f64, f64) {
+fn grazing_join(fixes: &UpstreamFixes) -> (usize, f64, f64, f64, f64) {
     let mut k = Kernel {
-        fixes,
+        fixes: *fixes,
         ..Default::default()
     };
     let p = Point3::new;
@@ -143,7 +143,7 @@ fn fixes(best: bool) -> UpstreamFixes {
 
 #[test]
 fn fork_c9db18e_grazing_join_is_sound_with_the_best_crossing() {
-    let (failures, v, ribbed, pad, gap) = grazing_join(fixes(true));
+    let (failures, v, ribbed, pad, gap) = grazing_join(&fixes(true));
     assert_eq!(failures, 0, "the check");
     assert!(
         v > ribbed && v < ribbed + pad,
@@ -156,7 +156,7 @@ fn fork_c9db18e_grazing_join_is_sound_with_the_best_crossing() {
 /// Placed by the first crossing, an edge ends 9.3e-5 from its vertex: test 61 fails.
 #[test]
 fn fork_c9db18e_grazing_join_fails_the_check_by_the_first_crossing() {
-    let (failures, _, _, _, gap) = grazing_join(fixes(false));
+    let (failures, _, _, _, gap) = grazing_join(&fixes(false));
     assert!(failures > 0);
     assert!(gap > 5e-5, "{gap}");
 }
@@ -174,14 +174,14 @@ fn trims_and_best(extends: bool) -> UpstreamFixes {
 
 #[test]
 fn fork_a8caccd_grazing_join_edges_reach_their_vertices_with_the_extension() {
-    let (failures, _, _, _, gap) = grazing_join(trims_and_best(true));
+    let (failures, _, _, _, gap) = grazing_join(&trims_and_best(true));
     assert_eq!(failures, 0, "the check");
     assert!(gap < 1e-5, "an edge ends {gap} from its vertex");
 }
 
 #[test]
 fn fork_a8caccd_grazing_join_fails_the_check_without_the_extension() {
-    let (failures, _, _, _, gap) = grazing_join(trims_and_best(false));
+    let (failures, _, _, _, gap) = grazing_join(&trims_and_best(false));
     assert!(failures > 0);
     assert!(gap > 5e-5, "{gap}");
 }

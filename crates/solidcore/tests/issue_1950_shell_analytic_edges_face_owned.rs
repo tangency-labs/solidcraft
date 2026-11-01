@@ -159,9 +159,9 @@ fn solidcraft_fixes() -> UpstreamFixes {
 
 /// The plate shelled 2 inward, open at x = 42.5, under `fixes`: a manifold solid and its
 /// volume.
-fn shelled_volume(fixes: UpstreamFixes) -> f64 {
+fn shelled_volume(fixes: &UpstreamFixes) -> f64 {
     let mut k = Kernel {
-        fixes,
+        fixes: *fixes,
         ..Kernel::default()
     };
     let b = drilled(&mut k);
@@ -191,18 +191,18 @@ fn check(v: f64, want: f64, without_flag: f64) {
 #[test]
 fn shelled_plate_with_solidcraft_fixes() {
     let mut fixes = solidcraft_fixes();
-    let without_flag = shelled_volume(fixes);
+    let without_flag = shelled_volume(&fixes);
     assert!((without_flag - 10400.212787697543).abs() <= 1e-9 * without_flag);
     fixes.shell_edges_on_analytics_exact = true;
-    check(shelled_volume(fixes), 10400.212342134768, without_flag);
+    check(shelled_volume(&fixes), 10400.212342134768, without_flag);
 }
 
 /// With only the flag on.
 #[test]
 fn shelled_plate_with_the_flag_alone() {
     let mut fixes = UpstreamFixes::default();
-    let without_flag = shelled_volume(fixes);
+    let without_flag = shelled_volume(&fixes);
     assert!((without_flag - 10400.212793536877).abs() <= 1e-9 * without_flag);
     fixes.shell_edges_on_analytics_exact = true;
-    check(shelled_volume(fixes), 10400.21294715712, without_flag);
+    check(shelled_volume(&fixes), 10400.21294715712, without_flag);
 }

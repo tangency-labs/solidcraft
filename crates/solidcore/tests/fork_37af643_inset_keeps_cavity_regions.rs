@@ -48,9 +48,9 @@ fn frame(k: &mut Kernel, ring_top: f64) -> Brep {
 
 /// The frame shelled 0.5 inward open at the ring cut's outer wall (x = 18), under
 /// `fixes`: whether the result is a manifold solid, and its volume.
-fn shell(fixes: UpstreamFixes, ring_top: f64) -> (bool, f64) {
+fn shell(fixes: &UpstreamFixes, ring_top: f64) -> (bool, f64) {
     let mut k = Kernel::default();
-    k.fixes.clone_from(&fixes);
+    k.fixes.clone_from(fixes);
     let mut part = frame(&mut k, ring_top);
     part.refresh_cached_topology();
     let open = planar_faces_at(&k, &part, 0, 18.0);
@@ -89,14 +89,14 @@ fn keep_cavity() -> UpstreamFixes {
 /// the result is no manifold solid.
 #[test]
 fn flag_off_keeps_the_sliver_region() {
-    let (manifold, _) = shell(UpstreamFixes::default(), 2.5);
+    let (manifold, _) = shell(&UpstreamFixes::default(), 2.5);
     assert!(!manifold);
 }
 
 /// The flag: only the cavity is made manifold; the shell is the closed form.
 #[test]
 fn flag_on_keeps_only_the_cavity() {
-    let (manifold, v) = shell(keep_cavity(), 2.5);
+    let (manifold, v) = shell(&keep_cavity(), 2.5);
     assert!(manifold);
     assert!((v - 638.75).abs() <= 1e-9 * 638.75, "{v}");
 }
@@ -109,7 +109,7 @@ fn flag_on_with_offset_fixes() {
     fixes.offset_resolve_crossing_loops = true;
     fixes.offset_stitch_at_body_tolerance = true;
     fixes.offset_extended_edges_mated = true;
-    let (manifold, v) = shell(fixes, 2.5);
+    let (manifold, v) = shell(&fixes, 2.5);
     assert!(manifold);
     assert!((v - 638.75).abs() <= 1e-9 * 638.75, "{v}");
 }
@@ -118,8 +118,8 @@ fn flag_on_with_offset_fixes() {
 /// shells the same with the flag off and on.
 #[test]
 fn thicker_floor_is_unchanged() {
-    let off = shell(UpstreamFixes::default(), 2.0);
-    let on = shell(keep_cavity(), 2.0);
+    let off = shell(&UpstreamFixes::default(), 2.0);
+    let on = shell(&keep_cavity(), 2.0);
     assert!(off.0 && on.0);
     assert_eq!(off.1.to_bits(), on.1.to_bits());
 }

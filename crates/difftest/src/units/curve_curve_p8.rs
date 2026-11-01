@@ -752,14 +752,17 @@ fn shim_id(x: Option<Obj>) -> f64 {
 }
 
 fn rust(op: &OpIn) -> Result<Output, HarnessError> {
-    rust_with_fixes(op, solidcore::kernel::UpstreamFixes::default())
+    rust_with_fixes(op, &solidcore::kernel::UpstreamFixes::default())
 }
 
 fn rust_with_fixes(
     op: &OpIn,
-    fixes: solidcore::kernel::UpstreamFixes,
+    fixes: &solidcore::kernel::UpstreamFixes,
 ) -> Result<Output, HarnessError> {
-    let k = Kernel { fixes, ..Kernel::default() };
+    let k = Kernel {
+        fixes: *fixes,
+        ..Kernel::default()
+    };
     let mut o: Vec<f64> = Vec::new();
     match op {
         OpIn::Gci {
@@ -1006,7 +1009,7 @@ mod tests {
         assert_eq!(original.values["out"][0], 2.0);
         let mut fixes = solidcore::kernel::UpstreamFixes::default();
         fixes.refine_cc_range_ends = true;
-        let out = rust_with_fixes(&op, fixes).unwrap();
+        let out = rust_with_fixes(&op, &fixes).unwrap();
         assert_eq!(out.ints["status"], vec![0]);
         let values = &out.values["out"];
         assert_eq!(values[0], 3.0);
