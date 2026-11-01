@@ -1043,6 +1043,7 @@ fn main() -> eframe::Result {
             wayland_display,
             std::env::var("XDG_CURRENT_DESKTOP").ok().as_deref(),
             wayland_override,
+            nvidia_driver_loaded(),
         );
         // Without a Wayland socket winit opens on X11 anyway.
         let _ = WINDOW_SYSTEM.set(if x11 || !wayland_display { "x11" } else { "wayland" });
@@ -1381,18 +1382,31 @@ fn window_system_override(preference: Option<&str>) -> Option<&'static str> {
 
 /// Whether to run through XWayland rather than native Wayland. winit has no file drag-and-drop
 /// on Wayland (only on X11), so dropping files from the file manager showed a "no" cursor: use
-/// XWayland when it's there. Except on niri, whose XWayland (xwayland-satellite) breaks window
-/// management (maximize/restore), so it stays on native Wayland and gives up file drops.
+/// XWayland when it's there. Two exceptions stay on native Wayland and give up file drops:
+/// niri, whose XWayland (xwayland-satellite) breaks window management (maximize/restore); and
+/// the proprietary NVIDIA driver (`nvidia_driver`), whose XWayland rendering is catastrophically
+/// slow — the whole UI drops to ~10 fps with tearing where native Wayland runs at full speed (#1973).
 /// `SOLIDCRAFT_WAYLAND=1` keeps native Wayland, `SOLIDCRAFT_WAYLAND=0` forces XWayland.
 #[cfg(all(unix, not(target_os = "macos")))]
-fn prefer_x11(display: bool, wayland_display: bool, desktop: Option<&str>, wayland_override: Option<&str>) -> bool {
+fn prefer_x11(display: bool, wayland_display: bool, desktop: Option<&str>, wayland_override: Option<&str>, nvidia_driver: bool) -> bool {
     match wayland_override.map(str::trim) {
         Some("0") => return display,
         Some(_) => return false,
         None => {}
     }
     let niri = desktop.is_some_and(|d| d.split(':').any(|name| name.trim().eq_ignore_ascii_case("niri")));
-    display && !(niri && wayland_display)
+    // Under a Wayland session, niri and NVIDIA each have a broken or unusable XWayland path.
+    let native_wayland = wayland_display && (niri || nvidia_driver);
+    display && !native_wayland
+}
+
+/// Whether the proprietary NVIDIA driver is loaded. It exposes this file the moment it binds a
+/// GPU, so it is the cheap, dependency-free check (no window, no device enumeration) for the
+/// XWayland-is-slow rule in [`prefer_x11`] (#1973). The open-source nouveau driver does not
+/// create it and does not show the same XWayland slowdown.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn nvidia_driver_loaded() -> bool {
+    std::path::Path::new("/proc/driver/nvidia/version").exists()
 }
 
 #[cfg(all(test, unix, not(target_os = "macos")))]
@@ -1401,20 +1415,39 @@ mod backend_tests {
 
     #[test]
     fn xwayland_by_default_native_wayland_on_niri_and_the_override_wins() {
-        // XWayland whenever there's an X display, for file drag-and-drop.
-        assert!(prefer_x11(true, true, Some("GNOME"), None));
-        assert!(prefer_x11(true, false, None, None));
-        assert!(!prefer_x11(false, true, Some("KDE"), None));
+        // XWayland whenever there's an X display, for file drag-and-drop (no NVIDIA driver).
+        assert!(prefer_x11(true, true, Some("GNOME"), None, false));
+        assert!(prefer_x11(true, false, None, None, false));
+        assert!(!prefer_x11(false, true, Some("KDE"), None, false));
         // niri (alone or in a desktop list) under Wayland stays native.
-        assert!(!prefer_x11(true, true, Some("niri"), None));
-        assert!(!prefer_x11(true, true, Some("niri:GNOME"), None));
+        assert!(!prefer_x11(true, true, Some("niri"), None, false));
+        assert!(!prefer_x11(true, true, Some("niri:GNOME"), None, false));
         // niri without a Wayland socket (nested X session) still uses X11.
-        assert!(prefer_x11(true, false, Some("niri"), None));
+        assert!(prefer_x11(true, false, Some("niri"), None, false));
         // SOLIDCRAFT_WAYLAND: anything but 0 keeps Wayland, 0 forces XWayland (when present).
-        assert!(!prefer_x11(true, true, Some("GNOME"), Some("1")));
-        assert!(!prefer_x11(true, true, Some("GNOME"), Some("")));
-        assert!(prefer_x11(true, true, Some("niri"), Some("0")));
-        assert!(!prefer_x11(false, true, Some("niri"), Some("0")));
+        assert!(!prefer_x11(true, true, Some("GNOME"), Some("1"), false));
+        assert!(!prefer_x11(true, true, Some("GNOME"), Some(""), false));
+        assert!(prefer_x11(true, true, Some("niri"), Some("0"), false));
+        assert!(!prefer_x11(false, true, Some("niri"), Some("0"), false));
+    }
+
+    /// Proprietary NVIDIA + XWayland renders the whole UI at ~10 fps with tearing; under a
+    /// Wayland session `auto` must stay native there (#1973).
+    #[test]
+    fn native_wayland_on_nvidia_under_a_wayland_session() {
+        // NVIDIA, Wayland session, X display present: native Wayland, not XWayland.
+        assert!(!prefer_x11(true, true, Some("GNOME"), None, true));
+        assert!(!prefer_x11(true, true, Some("KDE"), None, true));
+        // Without a Wayland socket (pure X session) NVIDIA changes nothing: X11 as before.
+        assert!(prefer_x11(true, false, Some("GNOME"), None, true));
+        // Without an X display there is no XWayland to prefer either way.
+        assert!(!prefer_x11(false, true, Some("GNOME"), None, true));
+        // No NVIDIA driver: the old XWayland-by-default behavior is unchanged.
+        assert!(prefer_x11(true, true, Some("GNOME"), None, false));
+        // Explicit choices still win over the NVIDIA rule.
+        assert!(prefer_x11(true, true, Some("GNOME"), Some("0"), true));
+        assert!(!prefer_x11(true, true, Some("GNOME"), Some("1"), true));
+        assert!(!prefer_x11(true, true, Some("GNOME"), Some("1"), false));
     }
 
     /// Preferences › Graphics › Window system stands for the same values (#3083).
@@ -1426,8 +1459,10 @@ mod backend_tests {
             (Some("1"), Some("0"), None, None, None)
         );
         // Wayland chosen on GNOME keeps native Wayland; X11 chosen on niri goes through XWayland.
-        assert!(!prefer_x11(true, true, Some("GNOME"), over(Some("wayland"))));
-        assert!(prefer_x11(true, true, Some("niri"), over(Some("x11"))));
+        assert!(!prefer_x11(true, true, Some("GNOME"), over(Some("wayland")), false));
+        assert!(prefer_x11(true, true, Some("niri"), over(Some("x11")), false));
+        // X11 chosen explicitly on NVIDIA under Wayland still goes through XWayland.
+        assert!(prefer_x11(true, true, Some("GNOME"), over(Some("x11")), true));
     }
 
     #[test]
