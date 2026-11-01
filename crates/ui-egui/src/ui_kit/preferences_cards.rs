@@ -214,7 +214,7 @@ pub(crate) fn preset_card(
     icon(p, Rect::from_center_size(box_rect.center(), box_rect.size() * 0.55), dim(box_ink));
     let text_left = box_rect.right() + t.space_12;
     let text_width = (rect.right() - t.space_14 - t.space_24 - text_left).max(0.0);
-    let name_font = crate::fonts::semibold(t.font_heading.min(15.0));
+    let name_font = crate::fonts::semibold(t.font_heading.min(t.font_subtitle));
     let name_ink = if selected { t.selected_ink } else { t.form_ink };
     let name_rect = Rect::from_min_size(pos2(text_left, rect.center().y - t.space_16), vec2(text_width, t.space_16));
     super::text::paint_text(ui, name_rect, name, name_font, dim(name_ink), false);

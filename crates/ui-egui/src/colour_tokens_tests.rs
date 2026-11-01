@@ -31,6 +31,8 @@ fn moved_colours_keep_the_values_they_were_drawn_with() {
         assert_eq!(t.logo, [Color32::from_rgb(96, 158, 236), Color32::from_rgb(58, 136, 238), Color32::from_rgb(55, 108, 197)]);
         assert_eq!(t.icons.marker_halo, Color32::from_black_alpha(150));
         assert_eq!(t.icons.agent, Color32::from_rgb(168, 85, 247));
+        assert_eq!(t.figure_white, Color32::WHITE);
+        assert_eq!(t.figure_black, Color32::BLACK);
     }
     let (l, d) = (Tokens::light(), Tokens::dark());
     assert_eq!((l.bend_up, l.bend_down), (Color32::from_rgb(30, 140, 50), Color32::from_rgb(200, 90, 20)));

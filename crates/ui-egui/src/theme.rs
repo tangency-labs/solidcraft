@@ -1199,6 +1199,10 @@ pub struct Tokens {
     pub figure_face_right: Color32,
     /// Paper, panels and pads drawn inside Preferences figures.
     pub figure_card: Color32,
+    /// Fixed white label and highlight ink inside Preferences illustrations.
+    pub figure_white: Color32,
+    /// Fixed black hatch and shadow ink inside Preferences illustrations.
+    pub figure_black: Color32,
     /// What a Preferences figure or selected card acts on.
     pub figure_accent: Color32,
     /// Reference point in a Preferences figure: pivot, origin, pointer.

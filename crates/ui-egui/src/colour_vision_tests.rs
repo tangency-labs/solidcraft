@@ -396,6 +396,35 @@ fn groups(t: &Tokens) -> Vec<Group> {
         out.push(group(name, &[(key, fill)], &[("panel", t.panel)]));
     }
     out.push(group("dark pill text", &[("tab_on_fill_dark", t.tab_on_fill_dark)], &[("mesh_fill", t.mesh_fill)]));
+    // Miniature figures identify axes by labels and direction, reference points by
+    // position. Each ink must remain visible on its surfaces;
+    // the hues are not the only way to distinguish these marks from one another.
+    for (key, ink) in [
+        ("figure_line", t.figure_line),
+        ("figure_accent", t.figure_accent),
+        ("figure_reference", t.figure_reference),
+        ("figure_axis_x", t.figure_axis_x),
+        ("figure_axis_y", t.figure_axis_y),
+        ("figure_axis_z", t.figure_axis_z),
+        ("figure_ok", t.figure_ok),
+        ("figure_warn", t.figure_warn),
+    ] {
+        out.push(group(key, &[(key, ink)], &[("figure_ground", t.figure_ground), ("figure_card", t.figure_card)]));
+    }
+    // The static sketch-state illustration uses success and warm alert inks on
+    // the top face. Keep success apart from each alert; the two warm warning
+    // shades are not a colour-only legend for live solver states.
+    out.push(group(
+        "preferences sketch states",
+        &[("figure_ok", t.figure_ok), ("figure_warn", t.figure_warn)],
+        &[("figure_face_top", t.figure_face_top)],
+    ));
+    out.push(group("preferences sketch note", &[("figure_ok", t.figure_ok), ("pref_note", t.pref_note)], &[("figure_face_top", t.figure_face_top)]));
+    // Badge words identify the status; check the ink against its own fill, as for
+    // tab text above, rather than treating an ink and its tint as competing states.
+    out.push(group("preferences note", &[("pref_note", t.pref_note)], &[("pref_note_fill", t.pref_note_fill)]));
+    out.push(group("preferences success", &[("pref_ok", t.pref_ok)], &[("pref_ok_fill", t.pref_ok_fill)]));
+    out.push(group("preferences accent ink", &[("pref_on_accent", t.pref_on_accent)], &[("form_primary", t.form_primary)]));
     // The removed part of a cut preview is translucent over the body.
     if let Some(sel) = out.iter_mut().find(|g| g.name == "selection") {
         sel.members.push(("preview_cut", over(t.preview_cut, t.body)));
@@ -409,6 +438,12 @@ const SHADED: [&str; 2] = ["analysis.draft", "analysis.access"];
 /// Tokens no colour vision mode needs to keep apart, and why. A new token fails
 /// `every_token_is_measured_or_carries_no_meaning` until it is in a group above or here.
 const NO_MEANING: &[(&str, &str)] = &[
+    ("figure_face_left", "neutral cube shading; face geometry identifies the orientation"),
+    ("figure_face_right", "neutral cube shading; face geometry identifies the orientation"),
+    ("figure_white", "neutral axis label and highlight ink; letters identify the axes"),
+    ("figure_black", "neutral hatching and shadows; pattern and geometry carry the meaning"),
+    ("pref_well", "neutral well behind a labelled control or illustration"),
+    ("pref_disabled", "dimmed control ink; label and disabled interaction identify availability"),
     ("nav_hover", "neutral hover surface; placement and pointer feedback identify the control"),
     ("nav_press", "neutral pressed/open surface; interaction and menu presence identify the state"),
     ("nav_dim", "neutral secondary ink; the Later label identifies the unavailable option"),

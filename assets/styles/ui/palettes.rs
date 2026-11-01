@@ -232,6 +232,8 @@ impl Tokens {
             figure_face_left: Color32::from_rgb(228, 233, 240),
             figure_face_right: Color32::from_rgb(201, 210, 222),
             figure_card: Color32::from_rgb(255, 255, 255),
+            figure_white: Color32::WHITE,
+            figure_black: Color32::BLACK,
             figure_accent: Color32::from_rgb(35, 110, 173),
             figure_reference: Color32::from_rgb(138, 83, 0),
             figure_axis_x: Color32::from_rgb(214, 69, 69),
