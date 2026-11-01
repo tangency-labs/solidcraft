@@ -1749,6 +1749,32 @@ mod tests {
         assert!(handle_at("timeline:S0").is_some() && handle_at("timeline:S49").is_some(), "clicking again shows each feature");
     }
 
+    /// #10393 with the bar's groups on: a component marked out of the History bar leaves neither
+    /// its features nor a chip for them, and its features don't count towards folding. Showing
+    /// hidden components brings its long run back, folded like any other.
+    #[test]
+    fn a_component_hidden_from_the_bar_leaves_no_chip_and_comes_back_folded() {
+        use crate::scenario::handle_at;
+        let mut h = Harness::new();
+        assert_eq!(h.call("ui.prefs", json!({"history_bar_groups": true}))["ok"], true);
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Root sketch"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("component.create", json!({"name": "Copy"})).unwrap();
+        for i in 0..crate::timeline_fold::FOLD_FROM {
+            h.app.run("sketch.create", json!({"plane": "XY", "name": format!("C{i}")})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("component.hide_history", json!({"component": "Copy"})).unwrap();
+        h.frames(4);
+        assert!(handle_at("timeline:Root sketch").is_some(), "the rest of the design shows");
+        assert!(handle_at("timeline:C0").is_none() && handle_at("timeline-group:Copy").is_none(), "no feature or chip of the hidden component");
+        h.app.tree.history_show_hidden = true;
+        h.frames(4);
+        assert!(handle_at("timeline-group:Copy").is_some(), "shown again, its long run folds into a chip");
+        assert!(handle_at("timeline:C0").is_none(), "folded, not each feature");
+    }
+
     /// A run that holds subassemblies folding in turn shows only its component's features when
     /// clicked, after a path back to the whole design. A subassembly there opens in place, and the
     /// marker dragged between its features rolls the whole history there. "All components" goes
