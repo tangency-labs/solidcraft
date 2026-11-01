@@ -75,7 +75,7 @@ fn a_fixed_corner_holds_and_joined_lines_stay_joined() {
     let joints = sk.join_drawn_wires(&[a.clone(), b.clone()]).unwrap();
     assert_eq!(joints.len(), 1);
     let start = sk.wire_point(&format!("{a}.start")).unwrap();
-    sk.add_wire_constraint(WireConstraintKind::Fix { p: start, at: v(0.0, 0.0, 0.0) }).unwrap();
+    sk.add_wire_constraint(WireConstraintKind::Fix { p: start, at: v(0.0, 0.0, 0.0), exprs: None }).unwrap();
     sk.add_wire_constraint(WireConstraintKind::AlongAxis { line: a.clone(), axis: Axis::X }).unwrap();
     sk.add_wire_constraint(WireConstraintKind::AlongAxis { line: b.clone(), axis: Axis::Z }).unwrap();
     let rep = sk.solve_wires(None);
@@ -98,7 +98,7 @@ fn a_point_on_a_line_slides_onto_it() {
     for end in ["start", "end"] {
         let p = sk.wire_point(&format!("{l}.{end}")).unwrap();
         let at = sk.wire_point_at(&p).unwrap();
-        sk.add_wire_constraint(WireConstraintKind::Fix { p, at }).unwrap();
+        sk.add_wire_constraint(WireConstraintKind::Fix { p, at, exprs: None }).unwrap();
     }
     sk.add_wire_constraint(WireConstraintKind::PointOnLine { p: sk.wire_point(&q).unwrap(), line: l.clone() }).unwrap();
     let rep = sk.solve_wires(None);
@@ -115,7 +115,7 @@ fn conflicting_constraints_fail_name_the_conflict_and_move_nothing() {
     let l = line(&mut sk, v(0.0, 0.0, 0.0), v(10.0, 0.0, 0.0));
     for (end, to) in [("start", v(0.0, 0.0, 0.0)), ("end", v(0.0, 10.0, 0.0))] {
         let p = sk.wire_point(&format!("{l}.{end}")).unwrap();
-        sk.add_wire_constraint(WireConstraintKind::Fix { p, at: to }).unwrap();
+        sk.add_wire_constraint(WireConstraintKind::Fix { p, at: to, exprs: None }).unwrap();
     }
     let k = sk.add_wire_constraint(WireConstraintKind::AlongAxis { line: l.clone(), axis: Axis::X }).unwrap();
     let before = sk.wires.clone();
@@ -134,7 +134,7 @@ fn a_held_point_stays_where_it_was_put_and_the_rest_follows() {
     let b = line(&mut sk, v(10.0, 0.0, 0.0), v(10.0, 0.0, 10.0));
     sk.join_drawn_wires(&[a.clone(), b.clone()]).unwrap();
     let start = sk.wire_point(&format!("{a}.start")).unwrap();
-    sk.add_wire_constraint(WireConstraintKind::Fix { p: start, at: v(0.0, 0.0, 0.0) }).unwrap();
+    sk.add_wire_constraint(WireConstraintKind::Fix { p: start, at: v(0.0, 0.0, 0.0), exprs: None }).unwrap();
     sk.add_wire_constraint(WireConstraintKind::AlongAxis { line: b.clone(), axis: Axis::Z }).unwrap();
     // Drag the joint to (20, 5, 0): the rise goes with it.
     let joint = sk.wire_point(&format!("{b}.start")).unwrap();
@@ -156,7 +156,7 @@ fn an_arc_squeezed_into_a_line_fails_instead_of_breaking_the_curve() {
     for end in ["start", "end"] {
         let p = sk.wire_point(&format!("{l}.{end}")).unwrap();
         let at = sk.wire_point_at(&p).unwrap();
-        sk.add_wire_constraint(WireConstraintKind::Fix { p, at }).unwrap();
+        sk.add_wire_constraint(WireConstraintKind::Fix { p, at, exprs: None }).unwrap();
     }
     sk.add_wire_constraint(WireConstraintKind::PointOnLine { p: sk.wire_point(&format!("{a}.through")).unwrap(), line: l.clone() }).unwrap();
     sk.add_wire_constraint(WireConstraintKind::Coincident {
@@ -202,18 +202,117 @@ fn constraints_are_checked_deduplicated_and_pruned_with_their_curves() {
 fn hostile_saved_constraints_are_refused() {
     let mut sk = Sketch::new();
     let l = line(&mut sk, v(0.0, 0.0, 0.0), v(10.0, 0.0, 0.0));
-    sk.wire_constraints
-        .push(WireConstraint { id: "k9".into(), kind: WireConstraintKind::Fix { p: WirePoint { wire: l.clone(), index: 7 }, at: v(0.0, 0.0, 0.0) } });
+    sk.wire_constraints.push(WireConstraint {
+        id: "k9".into(),
+        kind: WireConstraintKind::Fix { p: WirePoint { wire: l.clone(), index: 7 }, at: v(0.0, 0.0, 0.0), exprs: None },
+        param: None,
+        driven: false,
+    });
     assert!(sk.validate_wire_constraints().is_err());
     sk.wire_constraints.clear();
     sk.wire_constraints.push(WireConstraint {
         id: "k9".into(),
-        kind: WireConstraintKind::Fix { p: WirePoint { wire: l.clone(), index: 0 }, at: v(f64::NAN, 0.0, 0.0) },
+        kind: WireConstraintKind::Fix { p: WirePoint { wire: l.clone(), index: 0 }, at: v(f64::NAN, 0.0, 0.0), exprs: None },
+        param: None,
+        driven: false,
     });
     assert!(sk.validate_wire_constraints().is_err());
     sk.wire_constraints.clear();
     for _ in 0..2 {
-        sk.wire_constraints.push(WireConstraint { id: "k9".into(), kind: WireConstraintKind::AlongAxis { line: l.clone(), axis: Axis::X } });
+        sk.wire_constraints.push(WireConstraint {
+            id: "k9".into(),
+            kind: WireConstraintKind::AlongAxis { line: l.clone(), axis: Axis::X },
+            param: None,
+            driven: false,
+        });
     }
     assert!(sk.validate_wire_constraints().is_err(), "duplicate ids");
+}
+
+fn fix_all(sk: &mut Sketch, r: &str) {
+    let p = sk.wire_point(r).unwrap();
+    let at = sk.wire_point_at(&p).unwrap();
+    sk.add_wire_constraint(WireConstraintKind::Fix { p, at, exprs: None }).unwrap();
+}
+
+#[test]
+fn a_length_dimension_stretches_a_line_along_itself() {
+    // A 3-4-5 line from a fixed start, dimensioned to 10: least motion keeps its direction.
+    let mut sk = Sketch::new();
+    let l = line(&mut sk, v(0.0, 0.0, 0.0), v(3.0, 4.0, 0.0));
+    fix_all(&mut sk, &format!("{l}.start"));
+    let (a, b) = (sk.wire_point(&format!("{l}.start")).unwrap(), sk.wire_point(&format!("{l}.end")).unwrap());
+    sk.add_wire_dimension(WireConstraintKind::Distance { a, b, value: 10.0 }, Some("d1".into()), false).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    assert!(close(at(&sk, &format!("{l}.end")), v(6.0, 8.0, 0.0)), "{:?}", at(&sk, &format!("{l}.end")));
+    // 6 coordinates, less the fix (3) and the length (1).
+    assert_eq!(rep.dof, 2);
+}
+
+#[test]
+fn an_axis_distance_keeps_its_side() {
+    // b lies 7 before a along X: the dimension keeps it before a, at 20.
+    let mut sk = Sketch::new();
+    let qa = sk.add_drawn_wire_in(&[v(10.0, 0.0, 0.0)], WireSpace::Component).unwrap();
+    let qb = sk.add_drawn_wire_in(&[v(3.0, 5.0, 1.0)], WireSpace::Component).unwrap();
+    fix_all(&mut sk, &qa);
+    let (a, b) = (sk.wire_point(&qa).unwrap(), sk.wire_point(&qb).unwrap());
+    sk.add_wire_dimension(WireConstraintKind::AxisDistance { a, b, axis: Axis::X, reversed: true, value: 20.0 }, None, false).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    // Only x moves: y and z are free and least motion leaves them.
+    assert!(close(at(&sk, &qb), v(-10.0, 5.0, 1.0)), "{:?}", at(&sk, &qb));
+}
+
+#[test]
+fn an_angle_dimension_turns_the_free_line() {
+    // Two lines from a fixed corner, the first fixed along X; the second at 90° after the solve.
+    let mut sk = Sketch::new();
+    let a = line(&mut sk, v(0.0, 0.0, 0.0), v(10.0, 0.0, 0.0));
+    let b = line(&mut sk, v(0.0, 0.0, 0.0), v(5.0, 0.0, 5.0));
+    fix_all(&mut sk, &format!("{a}.start"));
+    fix_all(&mut sk, &format!("{a}.end"));
+    fix_all(&mut sk, &format!("{b}.start"));
+    sk.add_wire_dimension(WireConstraintKind::Angle { a: a.clone(), b: b.clone(), value: std::f64::consts::FRAC_PI_2 }, None, false).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    let end = at(&sk, &format!("{b}.end"));
+    assert!(end.x.abs() < 1e-7 && end.z > 0.0, "the second line stands square to the first: {end:?}");
+    let k = sk.wire_constraints.last().unwrap().kind.clone();
+    assert!((sk.measure_wire_dimension(&k).unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+}
+
+#[test]
+fn a_radius_dimension_resizes_an_arc_through_fixed_ends() {
+    // A half circle of radius 5 between fixed ends 10 apart: radius 8 puts the middle point on
+    // the circle of radius 8 through the ends.
+    let mut sk = Sketch::new();
+    let arc = sk.add_drawn_arc_in(&[v(-5.0, 0.0, 0.0), v(0.0, 5.0, 0.0), v(5.0, 0.0, 0.0)], WireSpace::Component).unwrap();
+    fix_all(&mut sk, &format!("{arc}.start"));
+    fix_all(&mut sk, &format!("{arc}.end"));
+    sk.add_wire_dimension(WireConstraintKind::Radius { arc: arc.clone(), value: 8.0 }, None, false).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok, "{rep:?}");
+    let w = &sk.wires[sk.wire_index(&arc).unwrap()];
+    assert!((w.arc.unwrap().radius - 8.0).abs() < 1e-7, "{:?}", w.arc);
+}
+
+#[test]
+fn a_driven_dimension_measures_without_constraining_and_a_second_one_is_refused() {
+    let mut sk = Sketch::new();
+    let l = line(&mut sk, v(0.0, 0.0, 0.0), v(3.0, 4.0, 12.0));
+    let (a, b) = (sk.wire_point(&format!("{l}.start")).unwrap(), sk.wire_point(&format!("{l}.end")).unwrap());
+    let d = sk.add_wire_dimension(WireConstraintKind::Distance { a: a.clone(), b: b.clone(), value: 1.0 }, Some("ignored".into()), true).unwrap();
+    let rep = sk.solve_wires(None);
+    assert!(rep.ok && rep.dof == 6, "a driven dimension takes no freedom: {rep:?}");
+    let c = sk.wire_constraints.iter().find(|c| c.id == d).unwrap();
+    assert!(c.driven && c.param.is_none());
+    assert!((c.kind.value().unwrap() - 13.0).abs() < 1e-9, "it measures the 3-4-12 line: 13");
+    let e = sk.add_wire_dimension(WireConstraintKind::Distance { a: b, b: a, value: 13.0 }, None, false).unwrap_err().to_string();
+    assert!(e.contains(&d), "{e}");
+    // Out-of-range values are refused.
+    let arc = sk.add_drawn_arc_in(&[v(-5.0, 0.0, 0.0), v(0.0, 5.0, 0.0), v(5.0, 0.0, 0.0)], WireSpace::Component).unwrap();
+    assert!(sk.add_wire_dimension(WireConstraintKind::Radius { arc, value: -1.0 }, None, false).is_err());
+    assert_eq!(sk.dimension_params().len(), 0);
 }

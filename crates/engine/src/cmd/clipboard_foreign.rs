@@ -73,7 +73,7 @@ fn parameters(target: &mut Document, source: &Document, features: &[Feature], ma
     let mut texts = BTreeSet::new();
     for feature in features {
         if let FeatureKind::Sketch { sketch, .. } = &feature.kind {
-            pending.extend(sketch.constraints.iter().filter_map(|c| c.param.clone()));
+            pending.extend(sketch.dimension_params().into_iter().cloned());
             let text_and_points = sketch
                 .links
                 .iter()

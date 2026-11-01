@@ -564,6 +564,7 @@ impl Sketch {
             .flatten()
             .chain(self.points.iter().filter_map(|p| p.exprs.as_deref()).flat_map(crate::PointExprs::list))
             .chain(self.equations.iter().flat_map(crate::EquationCurve::list))
+            .chain(self.wire_point_exprs())
             .collect()
     }
 
@@ -601,6 +602,15 @@ impl Sketch {
             })
             .flatten()
             .chain(self.points.iter_mut().filter_map(|p| p.exprs.as_deref_mut()).flat_map(crate::PointExprs::list_mut))
+            .chain(
+                self.wire_constraints
+                    .iter_mut()
+                    .filter_map(|c| match &mut c.kind {
+                        crate::WireConstraintKind::Fix { exprs: Some(e), .. } => Some(e.list_mut()),
+                        _ => None,
+                    })
+                    .flatten(),
+            )
             .collect()
     }
 

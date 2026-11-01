@@ -61,6 +61,41 @@ impl Axis {
     }
 }
 
+/// The expressions placing a 3D point, over the design's parameters, in the coordinates of its
+/// curve's space; a coordinate without one keeps the number in its Fix.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PointExprs3 {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z: Option<String>,
+}
+
+impl PointExprs3 {
+    /// The expressions set, each with what it sets.
+    pub fn list(&self) -> Vec<(&'static str, &String)> {
+        [("3D Point X", &self.x), ("3D Point Y", &self.y), ("3D Point Z", &self.z)]
+            .into_iter()
+            .filter_map(|(what, e)| e.as_ref().map(|e| (what, e)))
+            .collect()
+    }
+
+    /// Mutable view of [`PointExprs3::list`], for renaming the parameters they refer to.
+    pub fn list_mut(&mut self) -> Vec<&mut String> {
+        [&mut self.x, &mut self.y, &mut self.z].into_iter().filter_map(Option::as_mut).collect()
+    }
+
+    /// Each axis's expression, in x, y, z order.
+    pub fn by_axis(&self) -> [Option<&String>; 3] {
+        [self.x.as_ref(), self.y.as_ref(), self.z.as_ref()]
+    }
+}
+
+/// Most a 3D length dimension may ask for (mm).
+pub const MAX_WIRE_LENGTH: f64 = 1e6;
+
 /// What a 3D constraint asks for.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -69,10 +104,33 @@ pub enum WireConstraintKind {
     Coincident { a: WirePoint, b: WirePoint },
     /// A fit point on the infinite line through a drawn 3D line.
     PointOnLine { p: WirePoint, line: String },
-    /// A fit point held where it was fixed.
-    Fix { p: WirePoint, at: Vec3 },
+    /// A fit point held where it was fixed. With `exprs`, those coordinates follow the design's
+    /// parameters (applied before each solve).
+    Fix {
+        p: WirePoint,
+        at: Vec3,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        exprs: Option<Box<PointExprs3>>,
+    },
     /// A drawn 3D line parallel to an axis.
     AlongAxis { line: String, axis: Axis },
+    /// The distance between two fit points (a line's length is the distance between its ends).
+    Distance { a: WirePoint, b: WirePoint, value: f64 },
+    /// The distance from `a` to `b` along an axis, the way it was measured: `reversed` when `b`
+    /// lay before `a` along the axis, so the dimension keeps that side.
+    AxisDistance {
+        a: WirePoint,
+        b: WirePoint,
+        axis: Axis,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reversed: bool,
+        value: f64,
+    },
+    /// The angle (radians, 0 to π) between the directions of two drawn 3D lines, each from its
+    /// start to its end.
+    Angle { a: String, b: String, value: f64 },
+    /// The radius of a drawn 3D arc.
+    Radius { arc: String, value: f64 },
 }
 
 impl WireConstraintKind {
@@ -88,6 +146,9 @@ impl WireConstraintKind {
             }
             WireConstraintKind::Fix { p, .. } => vec![p.clone()],
             WireConstraintKind::AlongAxis { line, .. } => ends(line).to_vec(),
+            WireConstraintKind::Distance { a, b, .. } | WireConstraintKind::AxisDistance { a, b, .. } => vec![a.clone(), b.clone()],
+            WireConstraintKind::Angle { a, b, .. } => ends(a).into_iter().chain(ends(b)).collect(),
+            WireConstraintKind::Radius { arc, .. } => (0..3).map(|index| WirePoint { wire: arc.clone(), index }).collect(),
         }
     }
 
@@ -98,6 +159,64 @@ impl WireConstraintKind {
             WireConstraintKind::PointOnLine { p, line } => vec![&p.wire, line],
             WireConstraintKind::Fix { p, .. } => vec![&p.wire],
             WireConstraintKind::AlongAxis { line, .. } => vec![line],
+            WireConstraintKind::Distance { a, b, .. } | WireConstraintKind::AxisDistance { a, b, .. } => vec![&a.wire, &b.wire],
+            WireConstraintKind::Angle { a, b, .. } => vec![a, b],
+            WireConstraintKind::Radius { arc, .. } => vec![arc],
+        }
+    }
+
+    /// Whether it is a dimension (it has a value).
+    pub fn is_dimension(&self) -> bool {
+        self.value().is_some()
+    }
+
+    /// A dimension's value (mm, or radians for an angle).
+    pub fn value(&self) -> Option<f64> {
+        match self {
+            WireConstraintKind::Distance { value, .. }
+            | WireConstraintKind::AxisDistance { value, .. }
+            | WireConstraintKind::Angle { value, .. }
+            | WireConstraintKind::Radius { value, .. } => Some(*value),
+            _ => None,
+        }
+    }
+
+    /// Set a dimension's value; other constraints are unchanged.
+    pub fn set_value(&mut self, v: f64) {
+        match self {
+            WireConstraintKind::Distance { value, .. }
+            | WireConstraintKind::AxisDistance { value, .. }
+            | WireConstraintKind::Angle { value, .. }
+            | WireConstraintKind::Radius { value, .. } => *value = v,
+            _ => {}
+        }
+    }
+
+    /// Whether its value is an angle.
+    pub fn is_angle(&self) -> bool {
+        matches!(self, WireConstraintKind::Angle { .. })
+    }
+
+    /// What a dimension measures with its points at `at` (in [`Self::points`] order).
+    fn measure_at(&self, at: &[Vec3]) -> Option<f64> {
+        let p = |i: usize| at.get(i).copied().unwrap_or(Vec3::ZERO);
+        match self {
+            WireConstraintKind::Distance { .. } => Some(p(0).dist(p(1))),
+            WireConstraintKind::AxisDistance { axis, reversed, .. } => {
+                let d = (p(1) - p(0)).dot(axis.unit());
+                Some(if *reversed { -d } else { d })
+            }
+            WireConstraintKind::Angle { .. } => {
+                let (u, v) = (p(1) - p(0), p(3) - p(2));
+                Some(u.cross(v).len().atan2(u.dot(v)))
+            }
+            WireConstraintKind::Radius { .. } => {
+                // The circle through the arc's three points: |ab| |bc| |ca| / (2 |ab × ac|).
+                let (a, b, c) = (p(0), p(1), p(2));
+                let twice_area = (b - a).cross(c - a).len();
+                Some(if twice_area > 1e-18 { a.dist(b) * b.dist(c) * c.dist(a) / (2.0 * twice_area) } else { MAX_WIRE_LENGTH * 10.0 })
+            }
+            _ => None,
         }
     }
 
@@ -128,6 +247,10 @@ impl WireConstraintKind {
                     Axis::Z => vec![d.x, d.y],
                 }
             }
+            WireConstraintKind::Distance { value, .. }
+            | WireConstraintKind::AxisDistance { value, .. }
+            | WireConstraintKind::Angle { value, .. }
+            | WireConstraintKind::Radius { value, .. } => vec![self.measure_at(at).unwrap_or(0.0) - *value],
         }
     }
 
@@ -142,6 +265,20 @@ impl WireConstraintKind {
             _ => false,
         }
     }
+
+    /// A dimension of the same kind on the same geometry (a second one could only conflict or
+    /// repeat it).
+    fn same_dimension(&self, o: &WireConstraintKind) -> bool {
+        use WireConstraintKind::*;
+        let pair = |a: &WirePoint, b: &WirePoint, c: &WirePoint, d: &WirePoint| (a == c && b == d) || (a == d && b == c);
+        match (self, o) {
+            (Distance { a, b, .. }, Distance { a: c, b: d, .. }) => pair(a, b, c, d),
+            (AxisDistance { a, b, axis, .. }, AxisDistance { a: c, b: d, axis: e, .. }) => axis == e && pair(a, b, c, d),
+            (Angle { a, b, .. }, Angle { a: c, b: d, .. }) => (a == c && b == d) || (a == d && b == c),
+            (Radius { arc, .. }, Radius { arc: other, .. }) => arc == other,
+            _ => false,
+        }
+    }
 }
 
 /// A 3D constraint as a sketch stores it.
@@ -150,6 +287,12 @@ pub struct WireConstraint {
     pub id: String,
     #[serde(flatten)]
     pub kind: WireConstraintKind,
+    /// For a dimension: the model parameter that drives its value (e.g. `d1`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub param: Option<String>,
+    /// A driven (reference) dimension: it measures, it does not constrain.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub driven: bool,
 }
 
 /// How a 3D solve went.
@@ -222,7 +365,36 @@ impl Sketch {
             WireConstraintKind::Coincident { a, b } if a == b => return bad("a point cannot be coincident with itself".into()),
             WireConstraintKind::PointOnLine { p, line } if p.wire == *line => return bad("a line's own end is already on it".into()),
             WireConstraintKind::Fix { at, .. } if !in_range3(*at) => return bad("3D point out of range".into()),
+            WireConstraintKind::Distance { a, b, .. } | WireConstraintKind::AxisDistance { a, b, .. } if a == b => {
+                return bad("a distance needs two different points".into());
+            }
+            WireConstraintKind::Angle { a, b, .. } if a == b || !self.is_drawn_line(a) || !self.is_drawn_line(b) => {
+                return bad("an angle needs two different drawn 3D lines".into());
+            }
+            WireConstraintKind::Radius { arc, .. } if !self.drawn_wire(arc).is_some_and(|w| w.arc.is_some()) => {
+                return bad(format!("`{arc}` is not a drawn 3D arc"));
+            }
             _ => {}
+        }
+        if let Some(v) = k.value() {
+            let ok = match k {
+                WireConstraintKind::Angle { .. } => (0.0..=std::f64::consts::PI).contains(&v),
+                WireConstraintKind::Radius { .. } => v > 1e-9 && v <= MAX_WIRE_LENGTH,
+                WireConstraintKind::AxisDistance { .. } => v.abs() <= MAX_WIRE_LENGTH,
+                _ => (0.0..=MAX_WIRE_LENGTH).contains(&v),
+            };
+            if !ok {
+                return bad(match k {
+                    WireConstraintKind::Angle { .. } => "a 3D angle must be between 0 and 180 degrees".to_string(),
+                    WireConstraintKind::Radius { .. } => format!("a 3D radius must be above 0 and at most {MAX_WIRE_LENGTH} mm"),
+                    _ => format!("a 3D distance must be at most {MAX_WIRE_LENGTH} mm (and not negative)"),
+                });
+            }
+        }
+        if let WireConstraintKind::Fix { exprs: Some(e), .. } = k
+            && e.list().iter().any(|(_, x)| x.is_empty() || x.len() > 4096)
+        {
+            return bad("a 3D point's expression must be 1 to 4096 characters".into());
         }
         let spaces: Vec<_> = k.wires().iter().filter_map(|id| self.drawn_wire(id).map(|w| w.space)).collect();
         if spaces.windows(2).any(|w| w[0] != w[1]) {
@@ -248,16 +420,77 @@ impl Sketch {
 
     /// Add a 3D constraint; one that says what another already says returns that one's id.
     pub fn add_wire_constraint(&mut self, kind: WireConstraintKind) -> Result<String> {
+        self.add_wire_dimension(kind, None, false)
+    }
+
+    /// Add a 3D constraint or dimension; a dimension takes its model parameter (`param`) or is
+    /// driven (it measures). A dimension on geometry another dimension of that kind already
+    /// measures is refused, naming it.
+    pub fn add_wire_dimension(&mut self, kind: WireConstraintKind, param: Option<String>, driven: bool) -> Result<String> {
         self.validate_wire_constraint(&kind)?;
         if let Some(same) = self.wire_constraints.iter().find(|c| c.kind.same_as(&kind)) {
             return Ok(same.id.clone());
+        }
+        if let Some(same) = self.wire_constraints.iter().find(|c| c.kind.same_dimension(&kind)) {
+            return Err(SketchError::Invalid(format!("that is already dimensioned by {}", same.id)));
         }
         if self.constraints.len().saturating_add(self.wire_constraints.len()) >= MAX_CONSTRAINTS {
             return Err(SketchError::TooLarge);
         }
         let id = self.fresh("k")?;
-        self.wire_constraints.push(WireConstraint { id: id.clone(), kind });
+        let driven = driven && kind.is_dimension();
+        let param = if driven || !kind.is_dimension() { None } else { param };
+        self.wire_constraints.push(WireConstraint { id: id.clone(), kind, param, driven });
         Ok(id)
+    }
+
+    /// What a 3D dimension measures now.
+    pub fn measure_wire_dimension(&self, k: &WireConstraintKind) -> Option<f64> {
+        let at: Option<Vec<Vec3>> = k.points().iter().map(|p| self.wire_point_at(p)).collect();
+        k.measure_at(&at?)
+    }
+
+    /// The model parameters that drive the sketch's dimensions, planar and 3D.
+    pub fn dimension_params(&self) -> Vec<&String> {
+        self.constraints.iter().filter_map(|c| c.param.as_ref()).chain(self.wire_constraints.iter().filter_map(|c| c.param.as_ref())).collect()
+    }
+
+    /// Mutable view of [`Sketch::dimension_params`] (for renaming or re-pointing them).
+    pub fn dimension_params_mut(&mut self) -> Vec<&mut Option<String>> {
+        self.constraints.iter_mut().map(|c| &mut c.param).chain(self.wire_constraints.iter_mut().map(|c| &mut c.param)).collect()
+    }
+
+    /// The (dimension id, parameter) of every dimension driven by a parameter, planar and 3D.
+    pub fn dimension_param_ids(&self) -> Vec<(&str, &str)> {
+        self.constraints
+            .iter()
+            .filter_map(|c| c.param.as_deref().map(|p| (c.id.as_str(), p)))
+            .chain(self.wire_constraints.iter().filter_map(|c| c.param.as_deref().map(|p| (c.id.as_str(), p))))
+            .collect()
+    }
+
+    /// The expressions placing 3D points, each with what it sets.
+    pub fn wire_point_exprs(&self) -> Vec<(&'static str, &String)> {
+        self.wire_constraints
+            .iter()
+            .filter_map(|c| match &c.kind {
+                WireConstraintKind::Fix { exprs: Some(e), .. } => Some(e.list()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
+    /// Mutable view of [`Sketch::wire_point_exprs`].
+    pub fn wire_point_exprs_mut(&mut self) -> Vec<&mut String> {
+        self.wire_constraints
+            .iter_mut()
+            .filter_map(|c| match &mut c.kind {
+                WireConstraintKind::Fix { exprs: Some(e), .. } => Some(e.list_mut()),
+                _ => None,
+            })
+            .flatten()
+            .collect()
     }
 
     /// Join drawn 3D curves end to end: each curve's end coincident with the next one's start,
@@ -299,13 +532,20 @@ impl Sketch {
             }
         }
         let total = slots.len().saturating_mul(3);
-        if self.wire_constraints.is_empty() {
+        if self.wire_constraints.iter().all(|c| c.driven) {
             rep.dof = total;
+            let measured: Vec<Option<f64>> = self.wire_constraints.iter().map(|c| self.measure_wire_dimension(&c.kind)).collect();
+            for (c, m) in self.wire_constraints.iter_mut().zip(measured) {
+                if let Some(v) = m.filter(|v| v.is_finite()) {
+                    c.kind.set_value(v);
+                }
+            }
             return rep;
         }
         let cons: Vec<(String, WireConstraintKind, Vec<usize>)> = self
             .wire_constraints
             .iter()
+            .filter(|c| !c.driven)
             .filter_map(|c| {
                 let pts: Option<Vec<usize>> = c.kind.points().iter().map(|p| slot_of.get(p).copied()).collect();
                 pts.map(|pts| (c.id.clone(), c.kind.clone(), pts))
@@ -418,6 +658,14 @@ impl Sketch {
                 w.fit = fit;
                 w.arc = arc;
                 w.pts = pts;
+            }
+        }
+        // Driven dimensions measure the solved geometry.
+        let measured: Vec<Option<f64>> =
+            self.wire_constraints.iter().map(|c| if c.driven { self.measure_wire_dimension(&c.kind) } else { None }).collect();
+        for (c, m) in self.wire_constraints.iter_mut().zip(measured) {
+            if let Some(v) = m.filter(|v| v.is_finite()) {
+                c.kind.set_value(v);
             }
         }
         rep
