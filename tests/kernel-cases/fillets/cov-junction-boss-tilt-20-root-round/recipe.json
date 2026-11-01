@@ -1,0 +1,52 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 60,
+    "width": 60,
+    "height": 10,
+    "corner": [
+     -30,
+     -30,
+     -10
+    ],
+    "body_name": "P"
+   }
+  },
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 6,
+    "height": 25,
+    "base": [
+     -0.6840402866513374,
+     0,
+     -1.8793852415718169
+    ],
+    "axis": [
+     0.3420201433256687,
+     0,
+     0.9396926207859084
+    ],
+    "operation": "join",
+    "targets": [
+     "P"
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      0,
+      6,
+      0
+     ]
+    ],
+    "radius": 1.5
+   }
+  }
+ ]
+}
