@@ -45,6 +45,7 @@ pub mod title_block;
 pub mod tspline;
 mod unit_vec3;
 mod vec;
+pub mod weld;
 
 pub use aabb2::Aabb2;
 pub use arcfit::MAX_FIT_PIECES;
