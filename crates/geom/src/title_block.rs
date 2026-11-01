@@ -89,6 +89,9 @@ pub struct TextCell {
     pub align: HAlign,
     #[serde(default)]
     pub fit: Fit,
+    /// The drawing's image file shown in place of the text: a logo (ISO 7200: a name or a logo).
+    #[serde(default, with = "crate::ids::option", skip_serializing_if = "Option::is_none")]
+    pub image: Option<u64>,
 }
 
 /// A block placed on one sheet: what a writer draws, before the values are set.
@@ -170,7 +173,7 @@ pub fn default_block() -> TitleBlock {
     use HAlign::{Centre, Left};
     use Source::{Component, Drawing, Revision};
     let field = |source, key: &str| Part::Field { source, key: key.into(), format: Format::default() };
-    let text = |cap_mm, align, fit, parts| CellKind::Text(TextCell { content: Content(parts), cap_mm, align, fit });
+    let text = |cap_mm, align, fit, parts| CellKind::Text(TextCell { content: Content(parts), cap_mm, align, fit, image: None });
     let most = |n| Fit { max_chars: Some(n), ..Fit::default() };
     let (whole, wrap) = (Fit::default(), Fit { wrap: true, ..Fit::default() });
     let title = Fit { max_chars: Some(25), wide_max_chars: Some(30), wrap: false };
@@ -196,6 +199,14 @@ pub fn default_block() -> TitleBlock {
 }
 
 impl TitleBlock {
+    /// The image files its cells show in place of their text.
+    pub fn logos(&self) -> impl Iterator<Item = u64> + '_ {
+        self.cells.iter().filter_map(|cell| match &cell.kind {
+            CellKind::Text(text) => text.image,
+            CellKind::ProjectionSymbol => None,
+        })
+    }
+
     /// `cell`'s rectangle `rect` inside its lines: each side moved in by half the line drawn on it,
     /// the outline's on the block's edges and a cell line's inside the block.
     fn inside_lines(&self, cell: &Cell, rect: Aabb2) -> Aabb2 {

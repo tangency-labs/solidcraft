@@ -180,7 +180,8 @@ fn template_apply(s: &mut Session, p: &Value) -> Result<Value> {
         Some(Value::Bool(dry_run)) => *dry_run,
         Some(_) => return Err(bad(cmd, "`dry_run` is true or false")),
     };
-    let (applied, changed) = template::apply(s.drawing(cmd)?, &chosen).map_err(fail)?;
+    let record = s.drawing(cmd)?.clone();
+    let (applied, changed) = template::apply(&record, &chosen, &mut s.ids).map_err(fail)?;
     // The views on a sheet whose room changed: listed when they fall outside or over the block, never moved.
     let views: Vec<u64> = changed.iter().filter(|c| c.paper || c.border || c.title_block).flat_map(|c| applied.on_sheet(c.sheet).views).collect();
     let outside = super::drawing_view::outside_results(crate::drawing_view::outside(s, &applied, &views, cmd)?);

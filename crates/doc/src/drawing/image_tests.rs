@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 use solidcraft_geom::drawing_sheet::{self, Orientation, PaperSize};
+use solidcraft_geom::title_block::CellKind;
 
 use super::*;
 use crate::ids::IdSource;
@@ -230,4 +231,147 @@ fn a_drawings_images_keep_their_counts() {
     let twin = twins.sheet_images[0].clone();
     twins.sheet_images.push(twin);
     assert!(twins.validate().is_err());
+}
+
+/// A drawing of two sheets with the built-in block, on A3.
+fn with_blocks() -> (Drawing, IdSource) {
+    let mut id_source = IdSource::seeded(3875);
+    let a3 = drawing_sheet::Sheet::standard(PaperSize::A3, Orientation::Landscape);
+    let mut d =
+        Drawing::new("Logos", "en", "Sheet 1", a3, Some(drawing_sheet::DrawingBorderProfile::iso()), &BTreeSet::new(), &mut id_source).unwrap();
+    Arc::make_mut(&mut d.sheets[0]).title_block = Some(solidcraft_geom::title_block::default_block());
+    let second = d.allocate_id(&mut id_source).unwrap();
+    d.sheets.push(Arc::new(drawing_sheet_copy(&d, second)));
+    d.validate().unwrap();
+    (d, id_source)
+}
+
+fn logo_of(d: &Drawing, sheet: usize) -> Option<u64> {
+    d.sheets[sheet].title_block.as_ref().unwrap().logos().next()
+}
+
+/// A logo on every sheet is one file, the same bytes again reuse it, it comes back the same after a
+/// save, and it goes with its last use; a placement of the same file keeps it.
+#[test]
+fn a_logo_is_a_use_of_its_file() {
+    let (mut d, mut id_source) = with_blocks();
+    let bytes = png(32, 32);
+    let new_file = |d: &Drawing, id_source: &mut IdSource| ImageFile::from_file(d.allocate_id(id_source).unwrap(), &bytes).unwrap();
+    let file = new_file(&d, &mut id_source);
+    let (sheets, shown) = d.set_logo(None, "legal_owner", Some(file)).unwrap();
+    let id = logo_of(&d, 0).unwrap();
+    assert_eq!((sheets.len(), shown), (2, Some(id)));
+    assert_eq!((logo_of(&d, 1), d.images.iter().count(), d.images_in_use()), (Some(id), 1, BTreeSet::from([id])));
+    d.validate().unwrap();
+    let again = new_file(&d, &mut id_source);
+    d.set_logo(None, "title", Some(again)).unwrap();
+    assert_eq!(d.images.iter().count(), 1, "the same bytes are one file");
+
+    let back = Drawing::from_json(&d.to_json().unwrap()).unwrap();
+    assert_eq!((logo_of(&back, 0), base64_decode(&back.images.by_id(id).unwrap().data).unwrap()), (Some(id), bytes.clone()));
+
+    d.set_logo(None, "title", None).unwrap();
+    let first = d.sheets[0].id;
+    d.set_logo(Some(&[first]), "legal_owner", None).unwrap();
+    assert_eq!((logo_of(&d, 0), logo_of(&d, 1), d.images.iter().count()), (None, Some(id), 1), "the other sheet still shows it");
+    d.set_logo(None, "legal_owner", None).unwrap();
+    assert!(d.images.is_empty(), "it goes with its last use");
+    d.validate().unwrap();
+}
+
+#[test]
+fn a_logo_goes_only_in_a_text_cell_of_a_block() {
+    let (mut d, mut id_source) = with_blocks();
+    let file = ImageFile::from_file(d.allocate_id(&mut id_source).unwrap(), &png(8, 8)).unwrap();
+    let was = d.clone();
+    let fails = |d: &mut Drawing, sheets: Option<&[u64]>, cell: &str| d.set_logo(sheets, cell, Some(file.clone())).unwrap_err().to_string();
+    assert!(fails(&mut d, None, "projection").contains("isn't a text cell"));
+    d = was.clone();
+    assert!(fails(&mut d, None, "nothing").contains("no sheet's title block"));
+    d = was.clone();
+    let first = d.sheets[0].id;
+    assert!(fails(&mut d, Some(&[first]), "nothing").contains("no title block cell"));
+    d = was.clone();
+    assert!(fails(&mut d, Some(&[1]), "title").contains("no sheet"));
+}
+
+/// A link to a file the drawing doesn't have is refused on read, and so is a file only an emptied
+/// cell used to show.
+#[test]
+fn a_damaged_logo_link_is_refused_on_read() {
+    let (mut d, mut id_source) = with_blocks();
+    let id = d.allocate_id(&mut id_source).unwrap();
+    d.set_logo(None, "title", Some(ImageFile::from_file(id, &png(8, 8)).unwrap())).unwrap();
+    let cell = "/sheets/0/title_block/cells/0/kind/text/image";
+    let mut lost: Value = file(&d);
+    *lost.pointer_mut(cell).unwrap() = json!(crate::ids::encode(id + 1));
+    assert!(Drawing::from_value(lost).unwrap_err().to_string().contains("which the drawing doesn't have"));
+    let mut unused: Value = file(&d);
+    for sheet in 0..2 {
+        unused.pointer_mut(&format!("/sheets/{sheet}/title_block/cells/0/kind/text")).unwrap().as_object_mut().unwrap().remove("image");
+    }
+    assert!(Drawing::from_value(unused).unwrap_err().to_string().contains("nothing uses it"));
+}
+
+/// A template over a block with a logo takes the logo with the old block.
+#[test]
+fn a_logo_goes_with_the_block_a_template_replaces() {
+    let (mut d, mut id_source) = with_blocks();
+    let id = d.allocate_id(&mut id_source).unwrap();
+    d.set_logo(None, "title", Some(ImageFile::from_file(id, &png(8, 8)).unwrap())).unwrap();
+    let chosen = crate::drawing::template::built_in("iso-a3-part").unwrap().unwrap();
+    let (applied, _) = crate::drawing::template::apply(&d, &chosen, &mut id_source).unwrap();
+    assert!(applied.images.is_empty() && logo_of(&applied, 0).is_none());
+}
+
+/// A template saved from a drawing keeps its logo's file and leaves placed images out. A drawing made
+/// from it shows the logo; applied to a drawing whose own file has that id, it brings its file in under
+/// another id, and applied again changes nothing.
+#[test]
+fn a_template_carries_its_logos_file() {
+    use crate::drawing::template;
+
+    let (mut d, mut id_source) = with_blocks();
+    let logo = png(16, 16);
+    let id = d.allocate_id(&mut id_source).unwrap();
+    d.set_logo(None, "legal_owner", Some(ImageFile::from_file(id, &logo).unwrap())).unwrap();
+    let placed = d.allocate_id(&mut id_source).unwrap();
+    d.sheet_images.add([Arc::new(SheetImage { id: placed, sheet: d.sheets[0].id, rect_mm: RECT, image: id })]);
+    let saved = template::from_drawing(&d).unwrap();
+    assert!(saved.sheet_images.is_empty());
+    assert_eq!(saved.images.iter().count(), 1);
+    let read = template::read(&saved.to_json().unwrap()).unwrap();
+    let made = template::instantiate(&read, "From a template", &BTreeSet::new(), &mut id_source).unwrap();
+    assert_eq!(base64_decode(&made.images.by_id(logo_of(&made, 0).unwrap()).unwrap().data).unwrap(), logo);
+
+    // The drawing has another file under the template's file's id.
+    let (mut other, _, _) = pictured(&png(99, 99));
+    let (taken, placement) = (other.images.iter().next().unwrap().id, other.sheet_images.iter().next().unwrap().id);
+    let mut seeded = IdSource::seeded(1);
+    Arc::make_mut(&mut other.sheets[0]).title_block = Some(solidcraft_geom::title_block::default_block());
+    let mut clash = read.clone();
+    let file = ImageFile { id: taken, ..(**clash.images.iter().next().unwrap()).clone() };
+    clash.images = Default::default();
+    clash.images.add([Arc::new(file)]);
+    for sheet in &mut clash.sheets {
+        Arc::make_mut(sheet).title_block.as_mut().unwrap().cells.iter_mut().for_each(|cell| {
+            if let CellKind::Text(text) = &mut cell.kind {
+                text.image = text.image.map(|_| taken);
+            }
+        });
+    }
+    template::check(&clash).unwrap();
+    let (applied, changed) = template::apply(&other, &clash, &mut seeded).unwrap();
+    assert_eq!(changed.len(), 1);
+    let shown = logo_of(&applied, 0).unwrap();
+    assert_ne!(shown, taken);
+    assert_eq!(base64_decode(&applied.images.by_id(shown).unwrap().data).unwrap(), logo);
+    assert_eq!(base64_decode(&applied.images.by_id(taken).unwrap().data).unwrap(), png(99, 99), "the placed image keeps its own");
+    assert!(applied.sheet_images.by_id(placement).is_some());
+    let (again, changed) = template::apply(&applied, &clash, &mut seeded).unwrap();
+    assert_eq!((changed.len(), again.images.iter().count()), (0, 2), "the same bytes are the same file");
+
+    let mut placed_in_it = read;
+    placed_in_it.sheet_images.add([Arc::new(SheetImage { id: placed, sheet: placed_in_it.sheets[0].id, rect_mm: RECT, image: id })]);
+    assert!(template::check(&placed_in_it).unwrap_err().to_string().contains("images placed"));
 }

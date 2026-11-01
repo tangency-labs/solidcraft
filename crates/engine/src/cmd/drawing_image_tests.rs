@@ -56,7 +56,7 @@ fn an_image_is_read_saved_without_its_path_and_one_undo_step() {
     let record = s.drawing("test").unwrap().clone();
     let id = ids::decode(reply["image"].as_str().unwrap()).unwrap();
     assert_eq!(base64_decode(&record.images.by_id(record.sheet_images.by_id(id).unwrap().image).unwrap().data).unwrap(), bytes);
-    assert!(!record.to_json().unwrap().contains("logo"));
+    assert!(!record.to_json().unwrap().contains("logo.png"));
 
     s.execute("edit.undo", &json!({})).unwrap();
     assert!(s.drawing("test").unwrap().images.is_empty());
@@ -202,4 +202,97 @@ fn an_image_a_drawing_has_no_room_for_is_refused() {
         std::fs::remove_dir_all(d).unwrap();
     }
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A logo by command: on every sheet with one call, one file, one undo step; null brings the text
+/// back and takes the file. The original file isn't needed again.
+#[test]
+fn a_logo_by_command() {
+    let bytes = png(320, 80);
+    let (dir, file) = on_disk("cell-logo", &bytes);
+    let (mut s, first) = drawing();
+    s.execute("drawing.sheet.add", &json!({})).unwrap();
+    let reply = s.execute(LOGO, &json!({"cell": "legal_owner", "file": file})).unwrap();
+    let schema = output_schema_for::<LogoResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    assert_eq!(reply["sheets"].as_array().unwrap().len(), 2, "{reply}");
+    std::fs::remove_dir_all(&dir).unwrap();
+    let record = s.drawing("test").unwrap().clone();
+    let id = ids::decode(reply["image"].as_str().unwrap()).unwrap();
+    assert_eq!((record.images.iter().count(), base64_decode(&record.images.by_id(id).unwrap().data).unwrap()), (1, bytes));
+    assert!(!record.to_json().unwrap().contains("cell-logo"));
+
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(s.drawing("test").unwrap().images.is_empty());
+    s.execute("edit.redo", &json!({})).unwrap();
+    let one = s.execute(LOGO, &json!({"cell": "legal_owner", "file": null, "sheets": [first]})).unwrap();
+    assert_eq!((one["sheets"].as_array().unwrap().len(), &one["image"]), (1, &Value::Null), "{one}");
+    assert_eq!(s.drawing("test").unwrap().images.iter().count(), 1, "the other sheet still shows it");
+    s.execute(LOGO, &json!({"cell": "legal_owner", "file": null})).unwrap();
+    assert!(s.drawing("test").unwrap().images.is_empty());
+}
+
+/// What is refused changes nothing: a header over the pixel cap without decoding it, a corrupt file, a
+/// cell that isn't a text cell or isn't there, and a call that doesn't say which file.
+#[test]
+fn a_logo_refused_changes_nothing() {
+    let (big_dir, big) = on_disk("logo-big", &png(9000, 9000));
+    let (bad_dir, corrupt) = on_disk("logo-corrupt", b"not an image");
+    let (ok_dir, ok) = on_disk("logo-ok", &png(8, 8));
+    let (mut s, _) = drawing();
+    let was = s.drawing("test").unwrap().clone();
+    for (p, says) in [
+        (json!({"cell": "title", "file": big}), "pixels"),
+        (json!({"cell": "title", "file": corrupt}), "isn't a PNG or JPEG"),
+        (json!({"cell": "projection", "file": ok}), "isn't a text cell"),
+        (json!({"cell": "nothing", "file": ok}), "no sheet's title block"),
+        (json!({"cell": "title"}), "file"),
+        (json!({"cell": "title", "file": ok, "sheets": ["no such sheet"]}), "sheet"),
+        (json!({"cell": "title", "file": ""}), "`file` is the path"),
+    ] {
+        let e = s.execute(LOGO, &p).unwrap_err().to_string();
+        assert!(e.contains(says), "{p}: {e}");
+        assert_eq!(s.drawing("test").unwrap(), &was, "{p}");
+    }
+    for dir in [big_dir, bad_dir, ok_dir] {
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+/// A block taken away, or replaced, takes its logo's file.
+#[test]
+fn a_logo_goes_with_its_block() {
+    let (dir, file) = on_disk("logo-block", &png(8, 8));
+    let (mut s, sheet) = drawing();
+    s.execute(LOGO, &json!({"cell": "title", "file": file})).unwrap();
+    s.execute("drawing.sheet.set", &json!({"sheet": sheet, "title_block": null})).unwrap();
+    assert!(s.drawing("test").unwrap().images.is_empty());
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A template file carries the logo: a new drawing from it shows the file, with the original gone, and
+/// the file comes with `drawing.template.apply` too.
+#[test]
+fn a_logo_travels_in_a_template_file() {
+    let bytes = png(16, 16);
+    let (dir, file) = on_disk("logo-template", &bytes);
+    let template = dir.join("mine.json").to_string_lossy().into_owned();
+    let (mut s, _) = drawing();
+    s.execute(LOGO, &json!({"cell": "legal_owner", "file": file})).unwrap();
+    s.execute("drawing.template.save", &json!({"path": template})).unwrap();
+    std::fs::remove_file(&file).unwrap();
+
+    let shows = |s: &Session| {
+        let d = s.drawing("test").unwrap();
+        let logo = d.sheets[0].title_block.as_ref().unwrap().logos().next().unwrap();
+        base64_decode(&d.images.by_id(logo).unwrap().data).unwrap()
+    };
+    s.execute("drawing.close", &json!({})).unwrap();
+    s.execute("drawing.create", &json!({"template": template})).unwrap();
+    assert_eq!(shows(&s), bytes);
+    s.execute("drawing.close", &json!({})).unwrap();
+    s.execute("drawing.create", &json!({})).unwrap();
+    s.execute("drawing.template.apply", &json!({"template": template})).unwrap();
+    assert_eq!(shows(&s), bytes);
+    std::fs::remove_dir_all(dir).unwrap();
 }

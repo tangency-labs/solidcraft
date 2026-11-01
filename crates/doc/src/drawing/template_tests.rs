@@ -89,8 +89,8 @@ fn a_template_applied_gives_each_sheet_its_format() {
     for (cell, text) in [("material", "See note 3"), ("finish", "Black oxide")] {
         Arc::make_mut(&mut d.sheets[0]).title_block_overrides.insert(cell.into(), text.into());
     }
-    assert_eq!(apply(&d, &made("iso-a3-part")).unwrap(), (d.clone(), Vec::new()), "the same template changes nothing");
-    let (applied, changed) = apply(&d, &made("iso-a2-assembly")).unwrap();
+    assert_eq!(apply(&d, &made("iso-a3-part"), &mut IdSource::seeded(1)).unwrap(), (d.clone(), Vec::new()), "the same template changes nothing");
+    let (applied, changed) = apply(&d, &made("iso-a2-assembly"), &mut IdSource::seeded(1)).unwrap();
     let ids: Vec<u64> = d.sheets.iter().map(|s| s.id).collect();
     let restyled = |sheet| Restyled { sheet, paper: true, border: false, title_block: true, lost: Vec::new() };
     assert_eq!(changed, ids.iter().map(|id| restyled(*id)).collect::<Vec<_>>());
@@ -104,11 +104,11 @@ fn a_template_applied_gives_each_sheet_its_format() {
     let mut renamed = made("iso-a3-part");
     let block = Arc::make_mut(&mut renamed.sheets[0]).title_block.as_mut().unwrap();
     block.cells.iter_mut().find(|cell| cell.name == "finish").unwrap().name = "surface".into();
-    let (applied, changed) = apply(&d, &renamed).unwrap();
+    let (applied, changed) = apply(&d, &renamed, &mut IdSource::seeded(1)).unwrap();
     assert_eq!(changed[0], Restyled { sheet: ids[0], paper: false, border: false, title_block: true, lost: vec!["finish".into()] });
     let kept: Vec<&str> = applied.sheets[0].title_block_overrides.keys().map(String::as_str).collect();
     assert_eq!(kept, ["material"]);
-    assert!(apply(&d, &plate()).unwrap_err().to_string().starts_with("a template draws no design"));
+    assert!(apply(&d, &plate(), &mut IdSource::seeded(1)).unwrap_err().to_string().starts_with("a template draws no design"));
 }
 
 /// A drawing saved as a template keeps its sheets and leaves its model behind, and reads back as

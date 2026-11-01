@@ -15,7 +15,7 @@ fn field(source: Source, key: &str) -> Part {
 }
 
 fn text(cap_mm: f64, align: HAlign, fit: Fit, parts: Vec<Part>) -> CellKind {
-    CellKind::Text(TextCell { content: Content(parts), cap_mm, align, fit })
+    CellKind::Text(TextCell { content: Content(parts), cap_mm, align, fit, image: None })
 }
 
 fn sheet_layout(profile: &DrawingBorderProfile, size: PaperSize, orientation: Orientation) -> SheetLayout {
