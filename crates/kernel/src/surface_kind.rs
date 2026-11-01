@@ -139,6 +139,126 @@ fn circle_through(s: &[Vec3], tol: f64) -> Option<EdgeCircle> {
     Some(EdgeCircle { center, axis, radius, start, end, angle })
 }
 
+/// A body's B-rep corners, and the corners each edge runs between.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Corners {
+    /// The corners' points, in the body's vertex order.
+    pub points: Vec<Vec3>,
+    /// Per edge (in the order of [`Body::edges`]): the corners at its start and end (the same
+    /// one for a closed edge), as indices into `points`.
+    pub ends: Vec<[usize; 2]>,
+}
+
+/// The corners of `b` and the edges' ends (empty for a mesh body).
+pub fn corners(b: &Body) -> Corners {
+    if b.mesh.is_some() {
+        return Corners::default();
+    }
+    let mut index = std::collections::HashMap::new();
+    let mut points = Vec::new();
+    for v in b.solid.vertex_iter() {
+        index.entry(v.id()).or_insert_with(|| {
+            points.push(from_p3(v.point()));
+            points.len() - 1
+        });
+    }
+    let ends = Body::unique_edges(&b.solid)
+        .iter()
+        .map(|e| [index.get(&e.front().id()).copied().unwrap_or(0), index.get(&e.back().id()).copied().unwrap_or(0)])
+        .collect();
+    Corners { points, ends }
+}
+
+/// A straight edge: its ends.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EdgeLine {
+    pub start: Vec3,
+    pub end: Vec3,
+}
+
+/// Edge `edge` (in the order of [`Body::edges`]) if its exact curve is a straight line, sampled
+/// along it. `None` for other curves, mesh bodies and an index out of range.
+pub fn edge_line(b: &Body, edge: usize) -> Option<EdgeLine> {
+    use mt::{BoundedCurve, ParametricCurve};
+    if b.mesh.is_some() {
+        return None;
+    }
+    let e = Body::unique_edges(&b.solid).into_iter().nth(edge)?;
+    let tol = (b.size() * 1e-7).max(1e-9) * 100.0;
+    crate::guard("edge line", || {
+        let c = e.oriented_curve();
+        let (t0, t1) = c.range_tuple();
+        let at = |f: f64| from_p3(c.subs(t0 + (t1 - t0) * f));
+        let (start, end) = (at(0.0), at(1.0));
+        let Some(dir) = (end - start).normalized() else { return Ok(None) };
+        let straight = (1..24).map(|i| at(f64::from(i) / 24.0)).all(|p| {
+            let w = p - start;
+            (w - dir * w.dot(dir)).len() <= tol
+        });
+        Ok(straight.then_some(EdgeLine { start, end }))
+    })
+    .ok()
+    .flatten()
+}
+
+/// A face's free-form surface as a NURBS patch: `points[i][j]` with `weights[i][j]` over the
+/// knots `knots_u` (index i) and `knots_v` (index j). The patch is the face's surface oriented as
+/// the face: ∂S/∂u × ∂S/∂v points out of the material. The face is the part of it its edges
+/// bound.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FaceNurbs {
+    pub degree_u: usize,
+    pub degree_v: usize,
+    pub knots_u: Vec<f64>,
+    pub knots_v: Vec<f64>,
+    pub points: Vec<Vec<Vec3>>,
+    pub weights: Vec<Vec<f64>>,
+}
+
+/// The NURBS patch of face `face` (in face order) when its surface is a B-spline or NURBS
+/// surface. `None` for planes and surfaces of revolution (their analytic kinds are in
+/// [`face_surface`]), for mesh bodies, and for an index out of range.
+pub fn face_nurbs(b: &Body, face: usize) -> Option<FaceNurbs> {
+    if b.mesh.is_some() {
+        return None;
+    }
+    let f = b.solid.face_iter().nth(face)?;
+    let (knots, points, weights) = match f.oriented_surface() {
+        mt::Surface::BSplineSurface(s) => {
+            let points: Vec<Vec<Vec3>> = s.control_points().iter().map(|row| row.iter().map(|p| from_p3(*p)).collect()).collect();
+            let weights = points.iter().map(|row| vec![1.0; row.len()]).collect();
+            (s.knot_vecs().clone(), points, weights)
+        }
+        mt::Surface::NurbsSurface(s) => {
+            let mut points = Vec::new();
+            let mut weights = Vec::new();
+            for row in s.control_points() {
+                let mut pr = Vec::with_capacity(row.len());
+                let mut wr = Vec::with_capacity(row.len());
+                for h in row {
+                    if !(h.w.is_finite() && h.w > 0.0) {
+                        return None;
+                    }
+                    pr.push(Vec3::new(h.x / h.w, h.y / h.w, h.z / h.w));
+                    wr.push(h.w);
+                }
+                points.push(pr);
+                weights.push(wr);
+            }
+            (s.knot_vecs().clone(), points, weights)
+        }
+        _ => return None,
+    };
+    let (ku, kv): (Vec<f64>, Vec<f64>) = (knots.0.to_vec(), knots.1.to_vec());
+    let nu = points.len();
+    let nv = points.first().map_or(0, Vec::len);
+    if nu == 0 || nv == 0 || ku.len() <= nu || kv.len() <= nv || points.iter().any(|r| r.len() != nv) {
+        return None;
+    }
+    let finite = points.iter().flatten().all(|p| p.is_finite()) && ku.iter().chain(&kv).all(|k| k.is_finite());
+    finite.then(|| FaceNurbs { degree_u: ku.len() - nu - 1, degree_v: kv.len() - nv - 1, knots_u: ku, knots_v: kv, points, weights })
+}
+
 impl FaceSurface {
     /// The point of the whole surface (not only of its face) nearest `p`. `None` where every
     /// point of a ring is as near (on a cylinder's or cone's axis, at a sphere's or torus's

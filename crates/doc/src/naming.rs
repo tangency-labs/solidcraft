@@ -930,6 +930,34 @@ fn edge_names_from(b: &ModelBody, faces: &[String]) -> Vec<String> {
     names
 }
 
+/// Names of a body's corners (in the order of [`solidcraft_kernel::corners`]): the names of the
+/// faces its edges that end there bound, `<face A>|<face B>|<face C>` sorted, numbered `~k` when
+/// several corners share them.
+pub fn vertex_names(b: &ModelBody) -> Vec<String> {
+    let corners = solidcraft_kernel::corners(&b.body);
+    let faces = face_names(b);
+    let m = b.mesh();
+    let mut around: Vec<Vec<&str>> = vec![Vec::new(); corners.points.len()];
+    for (ends, fs) in corners.ends.iter().zip(&m.edge_faces) {
+        for v in ends {
+            if let Some(names) = around.get_mut(*v) {
+                names.extend(fs.iter().filter_map(|f| faces.get(*f as usize).map(String::as_str)));
+            }
+        }
+    }
+    let mut names: Vec<String> = around
+        .into_iter()
+        .map(|mut n| {
+            n.sort_unstable();
+            n.dedup();
+            n.join("|")
+        })
+        .collect();
+    let pts: Vec<Vec<Vec3>> = corners.points.iter().map(|p| vec![*p]).collect();
+    number_pieces(&mut names, &pts, '~');
+    names
+}
+
 /// The edge of a body with this name: exact, else the pieces of the same edge nearest `near`
 /// (`Err` explains when there is none).
 pub fn find_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<(Vec3, bool), String> {

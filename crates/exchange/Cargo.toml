@@ -1,0 +1,22 @@
+[package]
+name = "solidcraft-exchange"
+description = "SolidCraft exchange: a stable, data-only snapshot of a design (parameters, materials, welded per-body meshes with named, typed faces) for analysis tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+solidcraft-geom = { workspace = true }
+solidcraft-kernel = { workspace = true }
+solidcraft-doc = { workspace = true }
+solidcraft-io = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# The contract test reads the tagged 3MF's face tags straight from its model part.
+zip = { workspace = true }
