@@ -2335,7 +2335,7 @@ mod tests {
         assert_eq!(builtin().last().map(|theme| theme.id.as_str()), Some("onyx"), "existing picker order is retained");
         let (values, notices) = effective_values(file, &BTreeMap::new());
         assert!(notices.is_empty());
-        assert_eq!(values["opacity"], OptionValue::Num(87.0));
+        assert_eq!(values["opacity"], OptionValue::Num(80.0));
         assert_eq!(values["blur"], OptionValue::Num(60.0));
         assert_eq!(values["tab_colours"], OptionValue::Bool(false));
         assert_eq!(values["tab_fade_ms"], OptionValue::Num(240.0));
@@ -2349,7 +2349,7 @@ mod tests {
         );
         let opacity = file.options.iter().find(|o| o.id == "opacity").unwrap();
         let OptionKind::Range { min, max, .. } = &opacity.kind else { panic!("opacity must be a range") };
-        assert_eq!((*min, *max), (85.0, 100.0));
+        assert_eq!((*min, *max), (60.0, 100.0));
         let faded = resolve(file);
         let full = resolve_with(file, &BTreeMap::from([("opacity".into(), OptionValue::Num(100.0))]));
         assert!(faded.panel.a() < full.panel.a(), "the default exposes a little of the scene");
@@ -2383,7 +2383,7 @@ mod tests {
         for contrast in ["soft", "defined"] {
             for finish in ["flat", "etched", "bevel"] {
                 for accent in ["slate", "silver", "sage"] {
-                    for opacity in [85.0, 90.0, 100.0] {
+                    for opacity in [60.0, 80.0, 100.0] {
                         for tabs in [false, true] {
                             let values = BTreeMap::from([
                                 ("contrast".into(), OptionValue::Choice(contrast.into())),

@@ -214,8 +214,8 @@
     {
       "id": "opacity",
       "type": "range",
-      "default": 87,
-      "min": 85,
+      "default": 80,
+      "min": 60,
       "max": 100
     },
     {
