@@ -129,7 +129,7 @@ impl ShortcutBox {
 }
 
 /// How well `q` matches `s` (0 = not at all): a prefix beats a word start beats a substring
-/// beats the letters in order with gaps.
+/// beats a one- or two-letter typo beats the letters in order with gaps.
 pub fn score(q: &str, s: &str) -> u32 {
     if q.is_empty() {
         return 1;
@@ -144,28 +144,87 @@ pub fn score(q: &str, s: &str) -> u32 {
     if s.contains(q) {
         return 600;
     }
-    // Letters in order: fewer gaps score higher.
+    let typo = typo_score(q, &s);
+    if typo > 0 {
+        return typo;
+    }
+    // Letters in order: count every gap after the first hit; reject scattered hits (#9080).
+    let q_len = q.chars().count() as u32;
     let mut gaps = 0u32;
     let mut it = s.chars();
-    let mut last_hit = true;
+    let mut started = false;
     for qc in q.chars() {
         let mut found = false;
         for c in it.by_ref() {
             if c == qc {
                 found = true;
+                started = true;
                 break;
             }
-            if last_hit {
+            if started {
                 gaps += 1;
             }
-            last_hit = false;
         }
         if !found {
             return 0;
         }
-        last_hit = true;
+    }
+    if gaps > q_len.saturating_mul(2) {
+        return 0;
     }
     300u32.saturating_sub(gaps * 20).max(10)
+}
+
+/// Dotted command ids: prefix, segment start, or substring only — never letter-in-order.
+/// Long dotted strings otherwise match almost any short query (#9080).
+fn id_score(q: &str, id: &str) -> u32 {
+    if q.is_empty() {
+        return 1;
+    }
+    let s = id.to_lowercase();
+    if s.starts_with(q) {
+        return 1000 - s.len().min(500) as u32;
+    }
+    if s.split(|c: char| !c.is_alphanumeric()).any(|w| w.starts_with(q)) {
+        return 800;
+    }
+    if s.contains(q) {
+        return 600;
+    }
+    0
+}
+
+/// One- or two-edit typos of a similar-length label ("mesure" → Measure).
+fn typo_score(q: &str, s: &str) -> u32 {
+    let q_len = q.chars().count();
+    let s_len = s.chars().count();
+    if q_len < 4 || s_len < 4 || q_len.abs_diff(s_len) > 2 {
+        return 0;
+    }
+    let dist = edit_distance(q, s);
+    match dist {
+        1 => 750,
+        2 if q_len >= 5 => 650,
+        _ => 0,
+    }
+}
+
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<_> = a.chars().take(128).collect();
+    let b: Vec<_> = b.chars().take(128).collect();
+    let mut prev: Vec<_> = (0..=a.len()).collect();
+    for (j, ch) in b.iter().enumerate() {
+        let mut next = vec![j + 1];
+        for (i, qc) in a.iter().enumerate() {
+            next.push(
+                (prev.get(i).copied().unwrap_or(128) + usize::from(ch != qc))
+                    .min(prev.get(i + 1).copied().unwrap_or(128) + 1)
+                    .min(next.last().copied().unwrap_or(128) + 1),
+            );
+        }
+        prev = next;
+    }
+    prev.last().copied().unwrap_or(128)
 }
 
 /// Words people look for a command by that its name doesn't hold (file formats, what it is for).
@@ -201,7 +260,7 @@ pub type Row = (&'static str, &'static str, &'static str, Option<(&'static str, 
 /// id, so a name typed in either language, or an id, finds the command in every language.
 pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
     let q = q.trim().to_lowercase();
-    let mut v: Vec<(u32, Row)> = command_specs()
+    let mut v: Vec<(u32, u32, u32, Row)> = command_specs()
         .into_iter()
         .filter(|c| !crate::workspace::AGENT_ONLY.contains(&c.id))
         .filter_map(|c| {
@@ -210,21 +269,52 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
             let (label, tab, panel) =
                 (crate::i18n::tr_label(info.label), crate::i18n::tr_label(crate::workspace::tab_label(home_tab)), crate::i18n::tr_label(home_panel));
             let place = (!home_tab.is_empty()).then_some((tab, panel));
-            let s = score(&q, label)
+            let name = score(&q, label)
                 .max(score(&q, c.label))
                 .max(score(&q, info.label))
-                .max(score(&q, c.id) * 9 / 10)
-                .max(keyword_score(&q, keywords(c.id)))
-                .max(score(&q, tab).max(score(&q, home_tab)) / 3)
-                .max(score(&q, panel).max(score(&q, home_panel)) / 3);
+                .max(id_score(&q, c.id) * 9 / 10)
+                .max(keyword_score(&q, keywords(c.id)));
+            let by_place = (score(&q, tab).max(score(&q, home_tab)) / 3).max(score(&q, panel).max(score(&q, home_panel)) / 3);
+            let matched = name.max(by_place);
             let recent = app.sbox.recent.iter().position(|r| r == c.id).map_or(0, |i| 2000u32.saturating_sub(i.min(2000) as u32));
             // Commands that can run now come before those that can't.
             let usable = if info.enabled { 150 } else { 0 };
-            (s > 0).then_some((s + usable + if q.is_empty() { recent } else { recent / 20 }, (c.id, label, info.icon, place)))
+            let rank = matched + usable + if q.is_empty() { recent } else { recent / 20 };
+            (matched > 0).then_some((name, by_place, rank, (c.id, label, info.icon, place)))
         })
         .collect();
-    v.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.1.cmp(b.1.1)));
-    v.into_iter().map(|(_, row)| row).collect()
+    v.sort_by(|a, b| b.2.cmp(&a.2).then(a.3.1.cmp(b.3.1)));
+    // Drop weak letter-in-order name hits when a real name match exists; keep tab/panel hits (#9080).
+    if !q.is_empty() {
+        let best_name = v.iter().map(|(n, _, _, _)| *n).max().unwrap_or(0);
+        if best_name >= 600 {
+            v.retain(|(n, place, _, _)| *n >= 600 || *place > 0);
+        } else if best_name >= 300 {
+            v.retain(|(n, place, _, _)| *n + 100 >= best_name || *place > 0);
+        }
+    }
+    v.into_iter().map(|(_, _, _, row)| row).collect()
+}
+
+/// Readable place for a search row: toolbar tab › panel, or Preferences / Render / Feature history
+/// / File when the command is not on the ribbon (#9080).
+fn place_text(id: &str, place: Option<(&str, &str)>) -> String {
+    if let Some((tab, panel)) = place {
+        return format!("{tab} › {panel}");
+    }
+    if id.starts_with("settings.") {
+        return crate::i18n::tr("ui.preferences").to_string();
+    }
+    if id.starts_with("render.") {
+        return crate::workspace::tab_name("RENDER");
+    }
+    if id.starts_with("timeline.") {
+        return crate::i18n::tr("ui.feature_history").to_string();
+    }
+    if id.starts_with("file.") {
+        return crate::i18n::tr("ui.file").to_string();
+    }
+    id.split('.').next().map(crate::workspace::word_cased).unwrap_or_else(|| id.to_string())
 }
 
 #[derive(Clone, Debug)]
@@ -311,27 +401,22 @@ fn typed(line: &str) -> Option<(&str, Result<Value, String>)> {
     Some((id, result))
 }
 
-/// Bounded Levenshtein distance also handles transposed/missing letters in a no-match query.
+/// Bounded Levenshtein distance for a no-match query. Only suggest when the label is actually
+/// close — a long nonsense query must not pick an arbitrary short name (#9080).
 fn closest(query: &str) -> Option<&'static str> {
-    let q: Vec<_> = query.trim().to_lowercase().chars().take(128).collect();
+    let q = query.trim().to_lowercase();
+    let q_len = q.chars().count();
+    if q_len < 2 {
+        return None;
+    }
+    let max_dist = if q_len <= 4 { 1 } else { 2 };
     command_specs()
         .into_iter()
         .map(|c| {
             let label = crate::i18n::tr_label(c.label);
-            let mut prev: Vec<_> = (0..=q.len()).collect();
-            for (j, ch) in label.to_lowercase().chars().take(128).enumerate() {
-                let mut next = vec![j + 1];
-                for (i, qc) in q.iter().enumerate() {
-                    next.push(
-                        (prev.get(i).copied().unwrap_or(128) + usize::from(ch != *qc))
-                            .min(prev.get(i + 1).copied().unwrap_or(128) + 1)
-                            .min(next.last().copied().unwrap_or(128) + 1),
-                    );
-                }
-                prev = next;
-            }
-            (prev.last().copied().unwrap_or(128), label)
+            (edit_distance(&q, &label.to_lowercase()), label)
         })
+        .filter(|(dist, label)| *dist <= max_dist && q_len.abs_diff(label.chars().count()) <= max_dist.saturating_add(1))
         .min()
         .map(|(_, label)| label)
 }
@@ -564,7 +649,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                         item.highlighted = index == app.sbox.index;
                                         let shortcut = crate::keymap::display_for(app, id).unwrap_or_default();
                                         item.shortcut = &shortcut;
-                                        let path = place.map_or_else(|| id.to_string(), |(tab, panel)| format!("{tab} › {panel}"));
+                                        let path = place_text(id, *place);
                                         let response = item.search_row(ui, &query, &path, None);
                                         crate::scenario::publish_target(&format!("search:command:{id}"), response.rect);
                                         if item.highlighted && (up || down) {
@@ -715,6 +800,31 @@ mod tests {
         assert!(score("pres", "Press Pull") > score("ppl", "Press Pull"));
         assert!(score("ppl", "Press Pull") > 0);
         assert_eq!(score("xyz", "Extrude"), 0);
+        assert!(score("mesure", "Measure") >= 650, "a one-letter typo still finds the name");
+        assert_eq!(id_score("fillet", "settings.profile.delete"), 0, "dotted ids are not letter-matched");
+    }
+
+    /// Weak letter-in-order hits must not sit next to a real name match, and "Did you mean"
+    /// only fires when the label is close (#9080).
+    #[test]
+    fn search_drops_weak_matches_and_nonsense_suggestions() {
+        let app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let fillet: Vec<_> = search(&app, "fillet").iter().map(|r| r.0).collect();
+        assert!(fillet.contains(&"solid.fillet"), "{fillet:?}");
+        assert!(!fillet.contains(&"settings.profile.delete"), "{fillet:?}");
+
+        let measure: Vec<_> = search(&app, "mesure").iter().map(|r| r.0).collect();
+        assert_eq!(measure.first().copied(), Some("inspect.measure"), "{measure:?}");
+        assert!(!measure.iter().any(|id| *id == "render.library.surface.unbind" || *id == "timeline.suppress"), "{measure:?}");
+
+        assert_eq!(closest("fliet"), Some("Fillet"));
+        assert_eq!(closest("xyzzy nothing"), None);
+
+        assert!(search(&app, "delete settings").iter().any(|r| r.0 == "settings.profile.delete"), "the command remains findable by its name");
+        assert_eq!(place_text("settings.profile.delete", None), "Preferences");
+        assert_eq!(place_text("timeline.suppress", None), crate::i18n::tr("ui.feature_history"));
+        assert_eq!(place_text("render.library.surface.unbind", None), crate::workspace::tab_name("RENDER"));
+        assert_eq!(place_text("solid.fillet", Some(("MODEL", "MODIFY"))), "MODEL › MODIFY");
     }
 
     fn frame(app: &mut SolveApp, ctx: &egui::Context) {
