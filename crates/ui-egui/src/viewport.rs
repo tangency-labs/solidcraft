@@ -202,6 +202,9 @@ pub struct ViewportState {
     pub(crate) trackpad_coast: crate::navigation::TrackpadCoast,
     /// A primary press on the axis gizmo: the pointer position used by its last orbit step.
     pub axis_drag: Option<Pos2>,
+    /// The centre the gizmo drag last warped the cursor to, until the pointer next lands near
+    /// it (steps measured before that echo would jump the view by the whole warp distance).
+    pub(crate) axis_warp: Option<Pos2>,
     /// Unsnapped camera while Shift-orbit previews a standard or diagonal view.
     pub orbit_free: Option<Camera>,
     pub build_ms: f64,
@@ -6623,19 +6626,45 @@ fn axis_view_orbit(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) -> bool {
                 navigation_cube::drag_origin(&app.cam, axis_center(app, rect), *p, axis_rect(app, rect).width() / navigation_cube::DESIGN_SIZE)
             }
         });
+        app.viewport.axis_warp = None;
         if app.viewport.axis_drag.is_some() {
             app.viewport.orbit_free = None;
         }
     }
     if !down && app.viewport.axis_drag.take().is_some() {
+        app.viewport.axis_warp = None;
         app.viewport.orbit_free = None;
     }
     let Some(last) = app.viewport.axis_drag.filter(|_| decided) else { return false };
     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
     if let Some(p) = pos {
         app.cancel_view_animation();
-        orbit_drag(app, rect, f64::from(p.x - last.x), f64::from(p.y - last.y), None, shift, false);
+        // While a warp is pending the pointer may still sit at the edge it hit (the OS has not
+        // echoed the warp, or cannot), have landed at the centre (the echo), or have moved past
+        // it (the echo plus a fast flick): measure each step from whichever reference the
+        // pointer is nearer to, so the view never jumps by the warp distance and a platform
+        // that ignores warps keeps orbiting from the real pointer instead of freezing.
+        let from = match app.viewport.axis_warp {
+            Some(w) if p.distance(w) <= p.distance(last) => {
+                app.viewport.axis_warp = None;
+                w
+            }
+            _ => last,
+        };
+        orbit_drag(app, rect, f64::from(p.x - from.x), f64::from(p.y - from.y), None, shift, false);
         app.viewport.axis_drag = Some(p);
+        // The OS stops feeding movement once the cursor is pinned at the screen edge, so an
+        // orbit toward that edge would stall: warp the cursor back to the window centre and
+        // measure the next steps from there, keeping the orbit tracking while the button is held (#9943).
+        let screen = ui.ctx().viewport_rect();
+        let edge = 6.0;
+        if app.viewport.axis_warp.is_none()
+            && (p.x <= screen.min.x + edge || p.x >= screen.max.x - edge || p.y <= screen.min.y + edge || p.y >= screen.max.y - edge)
+        {
+            let home = screen.center();
+            app.viewport.axis_warp = Some(home);
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::CursorPosition(home));
+        }
         ui.ctx().request_repaint();
     }
     true
