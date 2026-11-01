@@ -705,10 +705,12 @@ preference_settings! {
     hole_moves: bool = false, PAGE_DESIGN => check("Move holes by clicking or dragging");
     /// The browser's Origin folder starts hidden in designs that don't keep its eye themselves.
     hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
-    /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit): a marker that
-    /// drags it across the model and a ring that turns it. Off by default: the feature is then placed
-    /// by its click only, as before, and its Position input takes faces only.
-    placement_handles: bool = false, PAGE_DESIGN => check("Placement handles", "Handles on the preview of a Rest, Boss or Snap Fit: drag the marker to move it across the model, turn it by its ring");
+    /// Handles on the preview of a feature placed on a face (Rest, Boss, Snap Fit, and the Box,
+    /// Cylinder, Cone, Sphere, Torus and Coil): a marker that drags it across the model and, where
+    /// it can turn in the face, a ring that turns it. Off by default: a Rest, Boss or Snap Fit is
+    /// then placed by its click only, as before, and its Position input takes faces only; a
+    /// primitive by its fields, its inputs or the selection it opened with.
+    placement_handles: bool = false, PAGE_DESIGN => check("Placement handles", "Handles on the preview of a Rest, Boss, Snap Fit, Box, Cylinder, Cone, Sphere, Torus or Coil: drag the marker to move it across the model, turn it by its ring if it has one");
     /// The files a design names (linked designs, font files) may be on any network location, for
     /// organisations that keep their designs on file servers. Off (the default): only on the
     /// servers in `network_hosts`, or one the user allows when asked (`network_prompt`).

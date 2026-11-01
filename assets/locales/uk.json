@@ -3042,7 +3042,7 @@
   "ui.pipe": "Труба",
   "ui.placement": "Розміщення",
   "ui.placement_handles": "Placement handles",
-  "ui.placement_handles_tip": "Handles on the preview of a Rest, Boss or Snap Fit: drag the marker to move it across the model, turn it by its ring",
+  "ui.placement_handles_tip": "Handles on the preview of a Rest, Boss, Snap Fit, Box, Cylinder, Cone, Sphere, Torus or Coil: drag the marker to move it across the model, turn it by its ring if it has one",
   "ui.plane": "Площина",
   "ui.plane_at_angle": "Площина під кутом",
   "ui.plugins": "Плагіни",

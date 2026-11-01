@@ -3123,7 +3123,7 @@
   "ui.pipe": "管道",
   "ui.placement": "放置",
   "ui.placement_handles": "放置手柄",
-  "ui.placement_handles_tip": "垫块、凸台或卡扣预览上的手柄：拖动标记在模型上移动，用转环旋转",
+  "ui.placement_handles_tip": "垫块、凸台、卡扣、长方体、圆柱体、圆锥体、球体、圆环体或螺旋预览上的手柄：拖动标记在模型上移动，有转环时用转环旋转",
   "ui.plane": "平面",
   "ui.plane_at_angle": "角度平面",
   "ui.plugins": "插件",

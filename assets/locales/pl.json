@@ -2015,7 +2015,7 @@
   "ui.pipe": "Rura",
   "ui.placement": "Umiejscowienie",
   "ui.placement_handles": "Uchwyty umieszczania",
-  "ui.placement_handles_tip": "Uchwyty na podglądzie podparcia, występu lub zatrzasku: przeciągnij znacznik, aby przesunąć element po modelu, obróć go pierścieniem",
+  "ui.placement_handles_tip": "Uchwyty na podglądzie podparcia, występu, zatrzasku, prostopadłościanu, walca, stożka, sfery, torusa lub spirali: przeciągnij znacznik, aby przesunąć element po modelu, obróć go pierścieniem, jeśli go ma",
   "ui.plane": "Płaszczyzna",
   "ui.plane_at_angle": "Płaszczyzna pod kątem",
   "ui.plugins": "Wtyczki",

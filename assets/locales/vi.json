@@ -3123,7 +3123,7 @@
   "ui.pipe": "Ống",
   "ui.placement": "Vị trí đặt",
   "ui.placement_handles": "Tay nắm định vị",
-  "ui.placement_handles_tip": "Tay nắm trên hình xem trước của Gờ đỡ, Vấu lồi hoặc Khớp cài: kéo điểm đánh dấu để di chuyển trên mô hình, xoay bằng vòng xoay",
+  "ui.placement_handles_tip": "Tay nắm trên hình xem trước của Gờ đỡ, Vấu lồi, Khớp cài, Khối hộp, Hình trụ, Hình nón, Hình cầu, Hình xuyến hoặc Lò xo xoắn: kéo điểm đánh dấu để di chuyển trên mô hình, xoay bằng vòng xoay nếu có",
   "ui.plane": "Mặt phẳng",
   "ui.plane_at_angle": "Mặt phẳng theo góc",
   "ui.plugins": "Plugin",

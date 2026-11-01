@@ -3044,7 +3044,7 @@
   "ui.pipe": "Boru",
   "ui.placement": "Yerleşim",
   "ui.placement_handles": "Yerleşim tutamaçları",
-  "ui.placement_handles_tip": "Bir Dayama, Kabarıklık veya Kilit Geçme önizlemesindeki tutamaçlar: işaretçiyi model üzerinde hareket ettirmek için sürükleyin, halkasıyla döndürün",
+  "ui.placement_handles_tip": "Bir Dayama, Kabarıklık, Kilit Geçme, Kutu, Silindir, Koni, Küre, Torus veya Helezon önizlemesindeki tutamaçlar: işaretçiyi model üzerinde hareket ettirmek için sürükleyin, halkası varsa halkasıyla döndürün",
   "ui.plane": "Düzlem",
   "ui.plane_at_angle": "Açılı düzlem",
   "ui.plugins": "Eklentiler",
