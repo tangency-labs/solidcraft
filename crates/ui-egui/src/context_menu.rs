@@ -1089,6 +1089,18 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     v.push(act("ui.showAll", "Show All Bodies", "eye"));
     v.push(act("ui.isolate", "Isolate", "body").with(json!({ "bodies": names })).on(!bodies.is_empty() && id != 0));
     v.push(act("ui.newGroup", "New Group", "folder").with(json!({ "component": id })));
+    if id != 0 {
+        // Keep the component in the design but leave its features out of the History bar (#10393).
+        let hidden = doc.component_history_hidden(id);
+        v.push(
+            cmd(
+                app,
+                if hidden { "component.show_history" } else { "component.hide_history" },
+                if hidden { "Show its History" } else { "Hide its History" },
+            )
+            .with(json!({ "component": id })),
+        );
+    }
     v.push(Item::sep());
     v.push(cmd(app, "browser.expand_all", "Expand All").with(json!({ "component": id })));
     v.push(cmd(app, "browser.collapse_all", "Collapse All").with(json!({ "component": id })));
@@ -1686,6 +1698,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 app.set_status(e, true);
             }
         }
+        "ui.historyShowHidden" => app.tree.history_show_hidden = p["show"].as_bool().unwrap_or(false),
         "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" => {
             if let Some(workspace) = p.get("workspace").and_then(Value::as_str)
                 && let Err(e) = crate::render_workspace::enter(app, workspace == "render")

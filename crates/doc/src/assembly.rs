@@ -419,6 +419,19 @@ impl Document {
         false
     }
 
+    /// Is `c` (or one of its ancestors) marked out of the History bar (#10393)? The root (0)
+    /// never is: its own features always show.
+    pub fn component_history_hidden(&self, mut c: u64) -> bool {
+        for _ in 0..1000 {
+            match self.components.iter().find(|x| x.id == c) {
+                Some(x) if x.history_hidden => return true,
+                Some(x) if x.parent != 0 => c = x.parent,
+                _ => return false,
+            }
+        }
+        false
+    }
+
     /// Would putting a placement of `component` into `parent` put it inside itself: is `parent`
     /// the component, or inside it, created in it or placed in it at any depth? Placements can sit
     /// apart from where their component was created ([`Self::component_within`] follows only

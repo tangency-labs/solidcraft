@@ -48,6 +48,10 @@ mod sketches_to_parts;
 mod transfer;
 
 #[cfg(test)]
+#[path = "component_history_tests.rs"]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod history_tests;
+#[cfg(test)]
 #[path = "occurrence_tests.rs"]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod occurrence_tests;
@@ -56,6 +60,12 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("component.cycle_color", "Cycle Component Color", cycle_color)
         .icon("colored_components").doc_only()
         .params("component: id or name; saves the next identification colour and enables Component Colors; shared by every instance, separate from appearances"),
+    CommandSpec::new("component.hide_history", "Hide Component History", hide_history)
+        .icon("eye").doc_only()
+        .params("component: id or name; keeps the component's features in the design but leaves them out of the History bar (#10393)"),
+    CommandSpec::new("component.show_history", "Show Component History", show_history)
+        .icon("eye").doc_only()
+        .params("component: id or name; puts a component's features back in the History bar after Hide Component History (#10393)"),
     CommandSpec::new("component.create", "New Component", new_component)
         .at("SOLID", "ASSEMBLE")
         .icon("component")
@@ -806,4 +816,22 @@ fn cycle_color(s: &mut Session, p: &Value) -> Result<Value> {
     c.identification_color = Some(next);
     s.colored_components = Some(());
     Ok(json!({"component": id, "color": next}))
+}
+
+/// Mark a component's features out of the History bar, or back in (#10393). The features still
+/// rebuild; only the History bar leaves them out.
+fn set_history_hidden(s: &mut Session, p: &Value, hidden: bool) -> Result<Value> {
+    let cmd = if hidden { "component.hide_history" } else { "component.show_history" };
+    let id = component(s, p, "component", cmd)?;
+    let c = s.doc_mut().components.iter_mut().find(|c| c.id == id).ok_or_else(|| bad(cmd, "choose a component below the design root"))?;
+    c.history_hidden = hidden;
+    Ok(json!({"component": id, "history_hidden": hidden}))
+}
+
+fn hide_history(s: &mut Session, p: &Value) -> Result<Value> {
+    set_history_hidden(s, p, true)
+}
+
+fn show_history(s: &mut Session, p: &Value) -> Result<Value> {
+    set_history_hidden(s, p, false)
 }

@@ -4516,10 +4516,10 @@ fn renaming_a_body_later_features_change_evaluates_nothing() {
     assert_eq!(s.evaluations, 0, "nor do its undo and redo");
 }
 
-/// A body whose name later bodies' names are worked out from (`X` patterned into `X (2)`) is still
-/// renamed by evaluating the design, so the copies follow it as they would on opening it.
+/// A body whose name later bodies' names are worked out from (`X` patterned into `X (2)`) keeps
+/// the same copies and face names as opening the renamed design.
 #[test]
-fn renaming_a_body_whose_copies_take_its_name_evaluates_the_design() {
+fn renaming_a_body_keeps_its_copies_consistent_with_rebuilding() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "X"}));
     run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["X"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20}));
@@ -4529,6 +4529,9 @@ fn renaming_a_body_whose_copies_take_its_name_evaluates_the_design() {
     let mut fresh = Session::new((*s.doc).clone());
     fresh.refresh();
     assert_eq!(names(&fresh), names(&s));
+    for (a, b) in fresh.model.state().bodies.iter().zip(&s.model.state().bodies) {
+        assert_eq!(solidcraft_doc::naming::face_names(a), solidcraft_doc::naming::face_names(b));
+    }
 }
 
 /// #3044: on a design with thousands of bodies the cheap commands stay cheap: showing, hiding,
