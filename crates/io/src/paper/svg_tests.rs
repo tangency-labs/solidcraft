@@ -1,7 +1,7 @@
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
-use solidcraft_geom::paper::{Group, ObjectKind, Scene};
-use solidcraft_geom::{Loop2, Region2};
+use solidcraft_geom::paper::{Dashes, Group, Item, ObjectKind, Scene};
+use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
 
 use super::*;
 use crate::{Geom2, read_svg};
@@ -15,7 +15,7 @@ fn line(a: Vec2, b: Vec2) -> Seg2 {
 }
 
 fn stroke(path: Vec<Seg2>, closed: bool, width_mm: f64) -> Item {
-    Item::Stroke { path, closed, width_mm }
+    Item::Stroke { path, closed, width_mm, pattern: None }
 }
 
 /// Anticlockwise from `min`.
@@ -101,14 +101,12 @@ fn cubics_and_parabolas_are_written_and_other_conics_refused() {
 }
 
 /// Numbers are whole nanometres: no exponent, no "-0", trailing zeros trimmed; a width under half
-/// a nanometre is written as one and reported.
+/// a nanometre is written as one and reported (the grid's own rounding is `geom`'s test).
 #[test]
 fn numbers_are_whole_nanometres() {
     for (n, text) in [(0, "0"), (1, "0.000001"), (-1, "-0.000001"), (1_500_000, "1.5"), (-420_000_000, "-420"), (123_456_789, "123.456789")] {
         assert_eq!(number(n), text);
     }
-    assert_eq!((nano(-0.0).unwrap(), nano(4e-7).unwrap(), nano(6e-7).unwrap()), (0, 0, 1));
-    assert!(nano(f64::NAN).is_err() && nano(1e10).is_err());
     let thin = sheet(vec![stroke(vec![line(p(0.0, 0.0), p(1.0, 0.0))], false, 1e-9)]);
     let (text, report) = svg(&thin);
     assert!(text.contains("stroke-width=\"0.000001\""), "{text}");
@@ -162,4 +160,17 @@ fn the_svg_reader_reads_it_back() {
     assert_eq!(arcs.len(), 1, "{read:?}");
     let (c, a, b) = arcs[0];
     assert!(c.dist(p(50.0, 50.0)) < 3e-6 && a.dist(p(60.0, 50.0)) < 3e-6 && b.dist(p(50.0, 60.0)) < 3e-6, "{:?}", arcs[0]);
+}
+
+/// A dashed stroke carries its pattern in millimetres, its offset only when its phase isn't 0.
+#[test]
+fn a_dashed_stroke_has_its_dasharray_and_offset() {
+    let path = |phase_mm| {
+        let pattern = Some(Dashes { lengths_mm: vec![4.2, 1.05], phase_mm });
+        let scene = sheet(vec![Item::Stroke { path: vec![line(p(5.0, 10.0), p(105.0, 10.0))], closed: false, width_mm: 1.0, pattern }]);
+        let (text, _) = svg(&scene);
+        text.lines().find(|l| l.starts_with("<path")).unwrap().to_string()
+    };
+    assert_eq!(path(0.0), "<path stroke-width=\"1\" stroke-dasharray=\"4.2 1.05\" d=\"M5 287L105 287\"/>");
+    assert_eq!(path(0.5), "<path stroke-width=\"1\" stroke-dasharray=\"4.2 1.05\" stroke-dashoffset=\"0.5\" d=\"M5 287L105 287\"/>");
 }
