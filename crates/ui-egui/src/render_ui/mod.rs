@@ -201,6 +201,7 @@ pub(crate) fn overlays(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !focused(app) {
         shots_pill(app, ui, free);
     }
+    crate::operations::show(app, ui, crate::shell::bottom_overlay_rect(app, viewport));
     crate::viewport::transient_messages(app, ui, viewport, None);
 }
 

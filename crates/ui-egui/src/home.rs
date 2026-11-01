@@ -624,7 +624,7 @@ enum FileAction {
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     poll(app, ui.ctx());
     let file_menu_open = ui.ctx().data(|data| data.get_temp::<bool>(egui::Id::new("sc_file_menu"))).unwrap_or(false);
-    let interactive = !app.file_picker_busy() && !app.file_load.busy() && !file_menu_open;
+    let interactive = !app.file_picker_busy() && !app.file_load_holds() && !file_menu_open;
     // Help windows draw before Home; remember their prior visibility so one Escape closes only the window.
     let had_help_window = ui.ctx().memory(|memory| {
         ["sc_about", "sc_crash_reports"]

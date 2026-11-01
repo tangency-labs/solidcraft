@@ -641,7 +641,7 @@ fn a_refresh_waits_for_a_command_still_queued_in_the_assembly() {
     save_box(&f.post_file, [10.0, 10.0, 10.0], true);
     refresh(&mut f.app);
     crate::documents::switch(&mut f.app, 0);
-    f.app.deferred_queue.push(("view.fit".into(), json!({})));
+    f.app.deferred_queue.push(("view.fit".into(), json!({}), 0));
     for _ in 0..200 {
         tick(&mut f.app);
         std::thread::sleep(std::time::Duration::from_millis(1));
@@ -761,7 +761,7 @@ fn a_queued_edit_is_checked_when_asked_for_and_waits_for_what_runs() {
     assert!(e.contains("already"), "one at a time: {e}");
     // The turn ends while a command still waits in the design: the edit waits too
     f.app.agent_chat.set_state(crate::agent_chat::State::Ready);
-    f.app.deferred_queue.push(("view.fit".into(), json!({})));
+    f.app.deferred_queue.push(("view.fit".into(), json!({}), 0));
     tick(&mut f.app);
     assert!(f.app.edit_in_place.enter_after_turn.is_some() && f.app.docs.count() == 1);
     f.app.deferred_queue.clear();
@@ -795,7 +795,7 @@ fn stopping_the_agent_forgets_what_it_queued() {
 #[test]
 fn a_command_queued_in_the_assembly_holds_up_entering() {
     let mut f = assembly("queued-enter");
-    f.app.deferred_queue.push(("view.fit".into(), json!({})));
+    f.app.deferred_queue.push(("view.fit".into(), json!({}), 0));
     let e = f.app.run("component.edit_in_place", json!({"component": f.plate})).unwrap_err();
     assert!(e.contains("Wait"), "{e}");
     settle(&mut f.app);
