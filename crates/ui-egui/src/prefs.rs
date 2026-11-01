@@ -1336,6 +1336,10 @@ preference_settings! {
     /// Fusion and Inventor (`invert_navigator_arrows`, #10254). Off by default: an arrow rotates
     /// the cube toward the side it sits on, so the arrow on the left swings the camera left.
     invert_navigator_arrows: bool = false, PAGE_NAVIGATION;
+    /// The view cube's two curved arrows roll the view the other way: the clockwise arrow rolls
+    /// counterclockwise and the counterclockwise arrow rolls clockwise (`invert_curved_roll_arrows`,
+    /// #10483). Off by default: each arrow rolls the view the way it curls.
+    invert_curved_roll_arrows: bool = false, PAGE_NAVIGATION;
     /// How much of the view the model fills when Home, Fit, an opened design or a navigator
     /// view change frames it (0.1 to 1; #10091): 1, the default, fills the room between the
     /// panels, the compass and the navigation bar, as before.
@@ -4204,6 +4208,22 @@ mod tests {
         assert!(restored.preferences.invert_navigator_arrows);
         super::reset_preferences(&mut app.preferences, super::PAGE_NAVIGATION);
         assert!(!app.preferences.invert_navigator_arrows);
+    }
+
+    /// #10483: the curved-roll invert toggle is off by default, persists, and the Navigation
+    /// page's Defaults resets it.
+    #[test]
+    fn invert_curved_roll_arrows_defaults_off_persists_and_resets() {
+        assert!(!Prefs::default().invert_curved_roll_arrows);
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        assert!(!app.preferences.invert_curved_roll_arrows);
+        app.preferences.invert_curved_roll_arrows = true;
+        assert_eq!(serde_json::to_value(&app.preferences).unwrap()["invert_curved_roll_arrows"], true);
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&app.prefs());
+        assert!(restored.preferences.invert_curved_roll_arrows);
+        super::reset_preferences(&mut app.preferences, super::PAGE_NAVIGATION);
+        assert!(!app.preferences.invert_curved_roll_arrows);
     }
 
     #[test]

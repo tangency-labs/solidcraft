@@ -162,6 +162,18 @@ fn inverted_arrow(action: &str) -> Option<&'static str> {
     }
 }
 
+/// Preferences › Navigation: "Invert the curved roll arrows" (#10483). With it on, the two
+/// curved arrows at the cube's corner roll the view the other way within the screen plane: the
+/// clockwise arrow rolls counterclockwise and the counterclockwise arrow rolls clockwise. The
+/// arrow keeps its curl; the tooltip names the roll actually performed.
+fn inverted_roll(action: &str) -> Option<&'static str> {
+    match action {
+        "clockwise" => Some("counterclockwise"),
+        "counterclockwise" => Some("clockwise"),
+        _ => None,
+    }
+}
+
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     let outer = axis_rect(app, rect);
     if !outer.is_positive() {
@@ -242,6 +254,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         ("counterclockwise", vec2(42.0, -72.0), vec2(40.0, 20.0), false, "Rotate view counterclockwise 90°"),
         ("clockwise", vec2(72.0, -42.0), vec2(20.0, 40.0), true, "Rotate view clockwise 90°"),
     ] {
+        let (action, tooltip) = match app.preferences.invert_curved_roll_arrows.then(|| inverted_roll(action)).flatten() {
+            Some(swapped) => (swapped, if swapped == "clockwise" { "Rotate view clockwise 90°" } else { "Rotate view counterclockwise 90°" }),
+            None => (action, tooltip),
+        };
         let hovered = control(app, ui, Rect::from_center_size(c + offset * scale, size * scale), action, tooltip);
         if active {
             curved_arrow(&painter, c + vec2(42.0, -42.0) * scale, clockwise, hovered, t, scale);
@@ -642,6 +658,40 @@ mod tests {
         let p = crate::scenario::handle_at("navigation_cube:control:clockwise").unwrap();
         h.call("ui.click", json!({"x":p.x,"y":p.y}));
         assert!((h.app.cam.roll - camera.roll - std::f64::consts::FRAC_PI_2).abs() < 1e-6, "clockwise still rolls clockwise");
+    }
+
+    /// #10483: with Preferences › Navigation "Invert the curved roll arrows" on, the two curved
+    /// arrows trade rolls: the clockwise arrow rolls counterclockwise, and the counterclockwise
+    /// arrow rolls clockwise.
+    #[test]
+    fn inverted_curved_arrows_roll_the_other_way() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube", "look_at_anim":false}));
+        assert!(!h.app.preferences.invert_curved_roll_arrows, "off by default");
+        let roll_at = |h: &mut crate::scenario::Harness, p: egui::Pos2| -> f64 {
+            h.call("ui.view", json!({"view":"front"}));
+            h.frames(2);
+            let camera = h.app.cam;
+            h.call("ui.click", json!({"x":p.x,"y":p.y}));
+            h.frames(2);
+            h.app.cam.roll - camera.roll
+        };
+        let quarter = std::f64::consts::FRAC_PI_2;
+        let turn = std::f64::consts::TAU;
+        // The engine keeps roll in [0, τ), so compare quarter-turns modulo a full turn.
+        let is_a_quarter_turn = |delta: f64, way: f64| (delta - way).rem_euclid(turn) < 1e-6 || (way - delta).rem_euclid(turn) < 1e-6;
+        let top = crate::scenario::handle_at("navigation_cube:control:counterclockwise").unwrap();
+        let right = crate::scenario::handle_at("navigation_cube:control:clockwise").unwrap();
+        // Off (the default): each arrow rolls the view the way it curls.
+        assert!(is_a_quarter_turn(roll_at(&mut h, right), quarter), "off: the clockwise arrow rolls clockwise");
+        assert!(is_a_quarter_turn(roll_at(&mut h, top), -quarter), "off: the counterclockwise arrow rolls counterclockwise");
+        h.call("ui.prefs", json!({"invert_curved_roll_arrows":true}));
+        h.frames(2);
+        // On: the same two arrows trade rolls.
+        assert!(is_a_quarter_turn(roll_at(&mut h, right), -quarter), "on: the clockwise arrow rolls counterclockwise");
+        assert!(is_a_quarter_turn(roll_at(&mut h, top), quarter), "on: the counterclockwise arrow rolls clockwise");
+        // The handles name the roll actually performed, and trade places with it.
+        assert_eq!(crate::scenario::handle_at("navigation_cube:control:clockwise").unwrap(), top);
     }
 
     #[test]

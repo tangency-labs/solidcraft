@@ -1,0 +1,26 @@
+{
+  "en": {
+    "prefs.invert_curved_roll_arrows": "Invert the curved roll arrows",
+    "prefs.invert_curved_roll_arrows_note": "The two curved arrows at the cube's corner roll the view within the screen plane. On: the clockwise arrow rolls counterclockwise and the counterclockwise arrow rolls clockwise. Off: each arrow rolls the view the way it curls."
+  },
+  "ja": {
+    "prefs.invert_curved_roll_arrows": "カーブしたロール矢印を反転",
+    "prefs.invert_curved_roll_arrows_note": "キューブの隅にある2つのカーブした矢印は、画面内でビューをロールします。オン: 時計回りの矢印が反時計回りに、反時計回りの矢印が時計回りにロールします。オフ: 各矢印は、そのカーブの向きにビューをロールします。"
+  },
+  "zh": {
+    "prefs.invert_curved_roll_arrows": "反转弯曲的翻滚箭头",
+    "prefs.invert_curved_roll_arrows_note": "立方体角落的两个弯曲箭头在屏幕平面内翻滚视图。开启：顺时针箭头逆时针翻滚，逆时针箭头顺时针翻滚。关闭：每个箭头按其弯曲方向翻滚视图。"
+  },
+  "ar": {
+    "prefs.invert_curved_roll_arrows": "عكس سهمي التدوير المنحنيين",
+    "prefs.invert_curved_roll_arrows_note": "سهما التدوير المنحنيان عند زاوية المكعب يدوران العرض داخل مستوى الشاشة. عند التشغيل: سهم التدوير مع عقارب الساعة يدور عكسها، وسهم العكس يدور معها. عند الإيقاف: يدور كل سهم بالعرض حسب انحنائه."
+  },
+  "he": {
+    "prefs.invert_curved_roll_arrows": "היפוך חצי הגלילה המעוגלים",
+    "prefs.invert_curved_roll_arrows_note": "שני החצים המעוגלים בפינת הקובייה מסובבים את התצוגה במישור המסך. פועל: החץ עם כיוון השעון מסובב נגד כיוון השעון, והחץ נגד כיוון השעון מסובב עם כיוון השעון. כבוי: כל חץ מסובב את התצוגה לפי העקום שלו."
+  },
+  "vi": {
+    "prefs.invert_curved_roll_arrows": "Đảo ngược mũi tên cuộn cong",
+    "prefs.invert_curved_roll_arrows_note": "Hai mũi tên cong ở góc khối cuộn khung nhìn trong mặt phẳng màn hình. Khi bật: mũi tên theo chiều kim đồng hồ cuộn ngược chiều kim đồng hồ và ngược lại. Khi tắt: mỗi mũi tên cuộn khung nhìn theo chiều cong của nó."
+  }
+}
