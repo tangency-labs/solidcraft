@@ -168,6 +168,9 @@ winit = { path = "vendor/winit" }
 # macOS: dropping the accessibility adapter leaves AppKit's key-value observers intact (#7535).
 accesskit_macos = { path = "vendor/accesskit_macos" }
 
+# Save the settings file (app.ron) whole, by renaming a finished temporary file over it (#4164).
+eframe = { path = "vendor/eframe" }
+
 # Mutation testing (cargo-mutants, docs/mutation-testing.md): the ci profile with incremental
 # builds, since every mutant rebuilds the crates above the one it changes.
 [profile.mutants]
