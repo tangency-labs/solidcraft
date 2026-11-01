@@ -108,6 +108,27 @@ pub struct EditJointResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Show only the joints that attach one placement, with every body outside it faded. This is a
+/// view: it is not saved and is not an undo step.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct FocusJointsParams {
+    /// The placement, as occurrence ids from the top of the design. Default: leave the view.
+    #[serde(default)]
+    pub path: Option<Vec<u64>>,
+}
+
+/// What `joint.focus` returns: the joints shown and the bodies left solid (both empty when the
+/// view is left).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FocusJointsResult {
+    pub joints: Vec<u64>,
+    pub bodies: Vec<String>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 #[cfg(test)]
 #[path = "joints_tests.rs"]
 mod tests;

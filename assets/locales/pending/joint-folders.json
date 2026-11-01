@@ -1,0 +1,82 @@
+{
+  "en": {
+    "cmd.joint_focus": "Show Joints",
+    "prefs.detailed_joint_folders": "Detailed Joints folders",
+    "prefs.detailed_joint_folders_help": "List the joints crossing a subassembly's border in its Joints folder, with a count and the other part on a second line",
+    "prefs.highlight_joint_parts": "Highlight a picked joint's parts",
+    "prefs.highlight_joint_parts_help": "Picking a joint fades everything but the parts it joins, until you move on",
+    "ui.joint_focus_banner": "Joints of {name}. Press Esc to leave.",
+    "ui.showJoints": "Show Joints",
+    "ui.stopShowingJoints": "Stop Showing Joints"
+  },
+  "ar": {
+    "cmd.joint_focus": "إظهار المفاصل",
+    "prefs.detailed_joint_folders": "مجلدات مفاصل مفصّلة",
+    "prefs.detailed_joint_folders_help": "إدراج المفاصل التي تعبر حدود التجميع الفرعي في مجلد المفاصل الخاص به، مع عددها والجزء الآخر في سطر ثانٍ",
+    "prefs.highlight_joint_parts": "تمييز أجزاء المفصل المحدد",
+    "prefs.highlight_joint_parts_help": "عند تحديد مفصل يتلاشى كل شيء ما عدا الأجزاء التي يربطها، إلى أن تنتقل إلى عمل آخر",
+    "ui.joint_focus_banner": "مفاصل {name}. اضغط Esc للخروج.",
+    "ui.showJoints": "إظهار المفاصل",
+    "ui.stopShowingJoints": "إيقاف إظهار المفاصل"
+  },
+  "de": {
+    "cmd.joint_focus": "Gelenke anzeigen",
+    "prefs.detailed_joint_folders": "Ausführliche Gelenkordner",
+    "prefs.detailed_joint_folders_help": "Im Gelenkordner einer Unterbaugruppe auch die Gelenke über ihre Grenze hinweg auflisten, mit Anzahl und dem anderen Teil in einer zweiten Zeile",
+    "prefs.highlight_joint_parts": "Teile des gewählten Gelenks hervorheben",
+    "prefs.highlight_joint_parts_help": "Beim Auswählen eines Gelenks verblasst alles außer den verbundenen Teilen, bis weitergearbeitet wird",
+    "ui.joint_focus_banner": "Gelenke von {name}. Mit Esc beenden.",
+    "ui.showJoints": "Gelenke anzeigen",
+    "ui.stopShowingJoints": "Gelenke nicht mehr anzeigen"
+  },
+  "he": {
+    "cmd.joint_focus": "הצגת מפרקים",
+    "prefs.detailed_joint_folders": "תיקיות מפרקים מפורטות",
+    "prefs.detailed_joint_folders_help": "הצגת המפרקים שחוצים את גבול תת-המכלול בתיקיית המפרקים שלו, עם מספרם והחלק השני בשורה נוספת",
+    "prefs.highlight_joint_parts": "הדגשת החלקים של המפרק שנבחר",
+    "prefs.highlight_joint_parts_help": "בחירת מפרק מעמעמת את כל מה שאינו החלקים שהוא מחבר, עד שממשיכים לפעולה אחרת",
+    "ui.joint_focus_banner": "המפרקים של {name}. יש ללחוץ על Esc ליציאה.",
+    "ui.showJoints": "הצגת מפרקים",
+    "ui.stopShowingJoints": "הפסקת הצגת המפרקים"
+  },
+  "ja": {
+    "cmd.joint_focus": "ジョイントを表示",
+    "prefs.detailed_joint_folders": "ジョイントフォルダーの詳細表示",
+    "prefs.detailed_joint_folders_help": "サブアセンブリの境界をまたぐジョイントもジョイントフォルダーに一覧表示し、件数と、2 行目に相手の部品を表示します",
+    "prefs.highlight_joint_parts": "選択したジョイントの部品を強調表示",
+    "prefs.highlight_joint_parts_help": "ジョイントを選択すると、結合された部品以外を薄く表示します。別の操作を始めると元に戻ります",
+    "ui.joint_focus_banner": "{name} のジョイント。Esc で終了します。",
+    "ui.showJoints": "ジョイントを表示",
+    "ui.stopShowingJoints": "ジョイントの表示を終了"
+  },
+  "ko": {
+    "cmd.joint_focus": "조인트 표시",
+    "prefs.detailed_joint_folders": "자세한 조인트 폴더",
+    "prefs.detailed_joint_folders_help": "하위 어셈블리의 경계를 넘는 조인트도 조인트 폴더에 표시하고, 개수와 상대 부품을 두 번째 줄에 보여 줍니다",
+    "prefs.highlight_joint_parts": "선택한 조인트의 부품 강조",
+    "prefs.highlight_joint_parts_help": "조인트를 선택하면 연결된 부품 외의 모든 것을 흐리게 표시합니다. 다른 작업을 시작하면 원래대로 돌아갑니다",
+    "ui.joint_focus_banner": "{name}의 조인트입니다. Esc를 눌러 종료합니다.",
+    "ui.showJoints": "조인트 표시",
+    "ui.stopShowingJoints": "조인트 표시 중지"
+  },
+  "vi": {
+    "cmd.joint_focus": "Hiển thị các khớp nối",
+    "prefs.detailed_joint_folders": "Thư mục khớp nối chi tiết",
+    "prefs.detailed_joint_folders_help": "Liệt kê cả các khớp nối vượt qua ranh giới của cụm con trong thư mục khớp nối, kèm số lượng và chi tiết còn lại ở dòng thứ hai",
+    "prefs.highlight_joint_parts": "Làm nổi bật các chi tiết của khớp nối đã chọn",
+    "prefs.highlight_joint_parts_help": "Khi chọn một khớp nối, mọi thứ trừ các chi tiết nó nối với nhau sẽ mờ đi cho đến khi bạn chuyển sang thao tác khác",
+    "ui.joint_focus_banner": "Các khớp nối của {name}. Nhấn Esc để thoát.",
+    "ui.showJoints": "Hiển thị các khớp nối",
+    "ui.stopShowingJoints": "Dừng hiển thị các khớp nối"
+  },
+  "zh": {
+    "cmd.joint_focus": "显示关节",
+    "prefs.detailed_joint_folders": "详细的关节文件夹",
+    "prefs.detailed_joint_folders_help": "在子装配的关节文件夹中列出跨越其边界的关节，并显示数量，在第二行显示另一个零件",
+    "prefs.highlight_joint_parts": "突出显示所选关节的零件",
+    "prefs.highlight_joint_parts_help": "选择关节时，除其连接的零件外其余内容都会淡化，直到开始其他操作",
+    "ui.joint_focus_banner": "{name} 的关节。按 Esc 退出。",
+    "ui.showJoints": "显示关节",
+    "ui.stopShowingJoints": "停止显示关节"
+  }
+}
