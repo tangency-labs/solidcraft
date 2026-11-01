@@ -1069,12 +1069,59 @@ pub fn sketch_shown(s: &Session, id: u64) -> bool {
 /// built from the sketch, and hiding the sketch would take its other points from the next
 /// Single hole's snap.
 pub fn sketch_consumed(s: &Session, id: u64) -> bool {
+    if let Ok(mut cache) = s.consumed_sketches_cache.lock() {
+        if cache.as_ref().is_none_or(|c| !std::ptr::eq(c.doc.as_ptr(), Arc::as_ptr(&s.doc))) {
+            *cache = Some(ConsumedSketches { doc: Arc::downgrade(&s.doc), ids: consumed_sketches(&s.doc).collect() });
+        }
+        return cache.as_ref().is_some_and(|c| c.ids.contains(&id));
+    }
+    // The lock is poisoned: answer from the features themselves.
+    consumed_sketches(&s.doc).any(|sketch| sketch == id)
+}
+
+/// The sketches [`sketch_consumed`] answers for, read from one design. The design is held
+/// weakly: its allocation is not handed to another design while the set lives, and an edit in
+/// place (`Arc::make_mut`) moves it to an allocation of its own, so a set is never asked about
+/// a design it was not read from.
+pub(crate) struct ConsumedSketches {
+    doc: std::sync::Weak<solidcraft_doc::Document>,
+    ids: std::collections::HashSet<u64>,
+}
+
+/// The sketches the features of a design use (see [`sketch_consumed`]), once per use.
+fn consumed_sketches(doc: &solidcraft_doc::Document) -> impl Iterator<Item = u64> + '_ {
     use solidcraft_doc::{FeatureKind, SketchPoints};
-    s.doc.features.iter().any(|f| {
-        matches!(f.kind, FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. }
-            | FeatureKind::SheetBase { sketch, .. } | FeatureKind::SheetContour { sketch, .. }
-            | FeatureKind::Hole { points: Some(SketchPoints { sketch, single: false, .. }), .. } if sketch == id)
+    sketch_work::add(doc.features.len() as u64);
+    doc.features.iter().filter_map(|f| match &f.kind {
+        FeatureKind::Extrude { sketch, .. }
+        | FeatureKind::Revolve { sketch, .. }
+        | FeatureKind::SheetBase { sketch, .. }
+        | FeatureKind::SheetContour { sketch, .. }
+        | FeatureKind::Hole { points: Some(SketchPoints { sketch, single: false, .. }), .. } => Some(sketch.0),
+        _ => None,
     })
+}
+
+/// How many features [`sketch_consumed`] walked, for the tests that hold it to one walk per
+/// design rather than one per question.
+pub(crate) mod sketch_work {
+    #[cfg(test)]
+    thread_local! {
+        static WALKED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    }
+
+    /// The features the answers of this thread walked since the last call.
+    #[cfg(test)]
+    pub(crate) fn take() -> u64 {
+        WALKED.with(|walked| walked.replace(0))
+    }
+
+    pub(crate) fn add(walked: u64) {
+        #[cfg(test)]
+        WALKED.with(|count| count.set(count.get() + walked));
+        #[cfg(not(test))]
+        let _ = walked;
+    }
 }
 
 /// Camera framing the model (iso view).
@@ -1323,6 +1370,40 @@ mod tests {
         assert_eq!(solid(&hatched), 0, "the hatched cut is tinted");
         let shades = |img: &[u8]| img.chunks(4).map(|p| [p[0], p[1], p[2]]).collect::<std::collections::BTreeSet<_>>().len();
         assert!(shades(&hatched) > shades(&plain), "the hatch adds its stripes' shades");
+    }
+
+    /// The viewport asks whether each sketch is used several times a frame: the features are
+    /// walked once per design, not once per sketch asked about, and the answers follow every
+    /// change of the design, a direct edit of it included.
+    #[test]
+    fn consumed_sketches_are_worked_out_once_per_design() {
+        let mut s = Session::default();
+        let mut sketches = Vec::new();
+        for i in 0..4 {
+            let at = 20 * i;
+            sketches.push(s.execute("sketch.create", &json!({"plane": "XY"})).unwrap()["sketch"].as_u64().unwrap());
+            s.execute("sketch.rectangle.two_point", &json!({"p0": [at, 0], "p1": [at + 10, 10]})).unwrap();
+            s.execute("sketch.finish", &json!({})).unwrap();
+        }
+        s.execute("solid.extrude", &json!({"sketch": sketches[0], "distance": 5})).unwrap();
+        s.execute("solid.extrude", &json!({"sketch": sketches[2], "distance": 5, "operation": "new"})).unwrap();
+        let shown = |s: &Session| sketches.iter().map(|id| sketch_shown(s, *id)).collect::<Vec<_>>();
+        sketch_work::take();
+        for _ in 0..10 {
+            assert_eq!(shown(&s), [false, true, false, true]);
+        }
+        assert_eq!(sketch_work::take(), s.doc.features.len() as u64, "one walk of the features for 40 questions");
+        s.execute("solid.extrude", &json!({"sketch": sketches[1], "distance": 5, "operation": "new"})).unwrap();
+        assert_eq!(shown(&s), [false, false, false, true], "an Extrude added uses its sketch");
+        let at = s.doc.features.iter().position(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Extrude { .. })).unwrap();
+        Arc::make_mut(&mut s.doc).features.remove(at);
+        assert_eq!(shown(&s), [true, false, false, true], "a design edited in place is read again");
+        // `doc_mut` edits in place (the crash journal follows the document's address, #7502):
+        // the set held on the design does not move it.
+        let address = Arc::as_ptr(&s.doc);
+        s.doc_mut().features.retain(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::Extrude { .. }));
+        assert_eq!(Arc::as_ptr(&s.doc), address, "doc_mut still edits in place");
+        assert_eq!(shown(&s), [true; 4], "an edit through doc_mut is read again");
     }
 }
 

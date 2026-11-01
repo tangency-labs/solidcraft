@@ -521,7 +521,13 @@ fn text_hit(ui: &Ui, text: &str) -> bool {
 }
 
 fn text_matches(query: &str, text: &str) -> bool {
-    setting_score(query, text) > 0 || english_hit(query, text) || keywords(text).iter().any(|word| setting_score(query, word) > 0)
+    // A right-to-left label reaches here in display order (see `Catalog::shown`), while the query
+    // is typed in reading order: compare the query in display order too, so a multi-word Hebrew
+    // or Arabic label is found as it is typed (#10471; #7532 fixed only the test's half).
+    setting_score(query, text) > 0
+        || setting_score(&crate::bidi::visual(query), text) > 0
+        || english_hit(query, text)
+        || keywords(text).iter().any(|word| setting_score(query, word) > 0)
 }
 
 /// Prefix, the start of a word, or a run of at least three characters. Scattered letters are not
@@ -747,6 +753,22 @@ mod tests {
         assert!(matches_text("dark", &["Theme"]));
         assert!(matches_text("antialiasing", &["Anti-aliasing"]));
         assert!(!matches_text("dark", &["Units of new designs"]));
+    }
+
+    /// A multi-word right-to-left label reaches the search in display order while the query is
+    /// typed in reading order: typing the label's words as written must find the row (#10471).
+    #[test]
+    fn search_finds_right_to_left_labels_typed_in_reading_order() {
+        let _language = crate::i18n::scope("he");
+        let label = crate::i18n::tr("prefs.bodies_folders");
+        assert!(matches_text("תיקיות גופים", &[label]), "the label as it is typed");
+        assert!(matches_text("גופים תיקיות", &[label]), "the words swapped still match");
+        assert!(matches_text("תיקיות", &[label]), "one word still matches");
+        let _language = crate::i18n::scope("ar");
+        let label = crate::i18n::tr("prefs.bodies_folders");
+        assert!(matches_text("مجلدات الأجسام", &[label]), "the label as it is typed");
+        assert!(matches_text("الأجسام مجلدات", &[label]), "the words swapped still match");
+        assert!(matches_text("مجلدات", &[label]), "one word still matches");
     }
 
     /// The search field and its empty result name the window they search (#8318): "Search

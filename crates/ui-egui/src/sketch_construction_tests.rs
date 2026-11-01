@@ -104,3 +104,168 @@ fn construction_family_menu_and_preference() {
         }
     }
 }
+
+fn digit(h: &mut Harness, d: char) {
+    let key = egui::Key::from_name(&d.to_string()).unwrap();
+    h.frame_with(vec![
+        egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE },
+        egui::Event::Text(d.to_string()),
+    ]);
+}
+
+fn length_box_focused(h: &Harness) -> bool {
+    h.ctx.memory(|m| m.focused()) == Some(crate::sketch_dims::box_id(0))
+}
+
+/// The one-click tools show their Length box at once, but it takes the keyboard only for a digit:
+/// a letter still reaches the shortcuts (#10258).
+#[test]
+fn a_waiting_length_box_leaves_letters_to_the_shortcuts_and_takes_a_digit() {
+    for id in ["sketch.construction_line.horizontal", "sketch.construction_line.parallel"] {
+        let mut h = sketch();
+        steps(&mut h, id, &[]);
+        h.step(&json!({"move":{"sketch":[5,10]}})).unwrap();
+        h.settle();
+        let tool = h.app.tool.as_ref().unwrap();
+        assert_eq!(tool.dims.iter().map(|b| (b.label, b.value.as_str(), b.locked)).collect::<Vec<_>>(), [("Length", "\u{221e}", false)], "{id}");
+        assert!(!length_box_focused(&h), "{id}: no keyboard before a digit");
+        h.step(&json!({"key":"L"})).unwrap();
+        h.settle();
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.line"), "{id}: L still starts a line");
+
+        let mut h = sketch();
+        steps(&mut h, id, &[]);
+        h.step(&json!({"move":{"sketch":[5,10]}})).unwrap();
+        h.settle();
+        digit(&mut h, '2');
+        digit(&mut h, '5');
+        h.frames(2);
+        assert!(length_box_focused(&h), "{id}: a digit gives the box the keyboard");
+        let b = &h.app.tool.as_ref().unwrap().dims[0];
+        assert_eq!((b.value.as_str(), b.locked), ("25", true), "{id}");
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some(id), "{id}: digits are not shortcuts");
+    }
+}
+
+/// With a length the tool takes two clicks: the start, then the side the segment runs to. The
+/// segment keeps its start's snap and gets the length as a dimension.
+#[test]
+fn a_typed_length_makes_two_clicks_draw_a_dimensioned_segment() {
+    let cases: &[(&str, &[[f64; 2]], [f64; 2], [f64; 2])] = &[
+        ("sketch.construction_line.horizontal", &[], [20., 0.], [6., 5.]),
+        ("sketch.construction_line.vertical", &[], [20., 0.], [23., -9.]),
+        ("sketch.construction_line.parallel", &[[10., 0.]], [0., 20.], [-10., 24.]),
+        ("sketch.construction_line.perpendicular", &[[10., 0.]], [0., 20.], [-4., 30.]),
+    ];
+    for (id, picks, start, side) in cases {
+        let mut h = sketch();
+        let sid = h.app.session.active_sketch.unwrap();
+        let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+        steps(&mut h, id, picks);
+        h.step(&json!({"move":{"sketch":start}})).unwrap();
+        h.settle();
+        digit(&mut h, '8');
+        // Apart from the reference pick, so the two clicks are not one double click.
+        h.frames(30);
+        h.step(&json!({"click":{"sketch":start}})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.doc.sketch(sid).unwrap().curves.len(), before, "{id}: the first click only sets the start");
+        assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "8", "{id}: the length stays typed");
+        // A hand moves there first: the box steps out of the way, behind the start.
+        h.step(&json!({"move":{"sketch":side}})).unwrap();
+        h.settle();
+        h.step(&json!({"click":{"sketch":side}})).unwrap();
+        h.settle();
+        let sk = h.app.session.doc.sketch(sid).unwrap();
+        assert_eq!(sk.curves.len(), before + 1, "{id}: {:?}", h.app.status);
+        let curve = sk.curves.last().unwrap();
+        assert!(!curve.infinite && curve.construction, "{id}: {curve:?}");
+        let CurveKind::Line { a, b } = curve.kind else { panic!("{id}: a line") };
+        let (a, b) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+        assert!(a.dist(solidcraft_engine::geom::Vec2::new(start[0], start[1])) < 1e-6, "{id}: starts at the snapped point {a:?}");
+        assert!((a.dist(b) - 8.0).abs() < 1e-6, "{id}: {a:?} {b:?}");
+        let s = solidcraft_engine::geom::Vec2::new(side[0], side[1]);
+        assert!((b - a).dot(s - a) > 0.0, "{id}: runs towards the side clicked");
+        assert!(sk.constraints.iter().any(|c| matches!(c.kind, solidcraft_engine::sketch::ConstraintKind::Length { .. })), "{id}");
+        let tool = h.app.tool.as_ref().unwrap();
+        assert!(tool.pts.is_empty() && tool.dims.iter().all(|b| !b.locked), "{id}: ready for the next line");
+    }
+}
+
+/// The angle tool has a Length box beside Angle; Tab reaches it and Enter places the segment.
+#[test]
+fn the_angle_tool_takes_a_length_beside_its_angle() {
+    let mut h = sketch();
+    steps(&mut h, "sketch.construction_line.angle", &[[5., 10.]]);
+    h.step(&json!({"move":{"sketch":[15,20]}})).unwrap();
+    h.settle();
+    assert_eq!(h.app.tool.as_ref().unwrap().dims.iter().map(|b| b.label).collect::<Vec<_>>(), ["Angle", "Length"]);
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"30 deg"})).unwrap();
+    h.step(&json!({"key":"Tab"})).unwrap();
+    h.step(&json!({"text":"12"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    let curve = sk.curves.last().unwrap();
+    assert!(!curve.infinite && curve.construction, "{curve:?}");
+    let CurveKind::Line { a, b } = curve.kind else { panic!("line") };
+    let d = sk.point(b).unwrap() - sk.point(a).unwrap();
+    assert!((d.len() - 12.0).abs() < 1e-6 && (d.angle().to_degrees() - 30.0).abs() < 1e-6, "{d:?}");
+}
+
+fn click_switch(h: &mut Harness, which: &str) {
+    let at = crate::scenario::handle_at(&format!("construction_switch:{which}")).expect("the Construction/Normal switch");
+    h.call("ui.click", json!({"x": at.x, "y": at.y}));
+    h.settle();
+}
+
+/// The Construction/Normal switch is greyed out while the line is infinite; with a length, Normal
+/// makes the segment a normal sketch line. The Sketch Palette's line type is left alone (#10258).
+#[test]
+fn the_normal_switch_needs_a_length_and_draws_a_normal_line() {
+    let mut h = sketch();
+    crate::sketch_palette::set_mode(&mut h.app, 1);
+    let sid = h.app.session.active_sketch.unwrap();
+    let before = h.app.session.doc.sketch(sid).unwrap().curves.len();
+    steps(&mut h, "sketch.construction_line.horizontal", &[]);
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    click_switch(&mut h, "normal");
+    assert!(!h.app.tool.as_ref().unwrap().normal, "an infinite line stays construction");
+
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    digit(&mut h, '8');
+    h.frames(2);
+    click_switch(&mut h, "normal");
+    assert!(h.app.tool.as_ref().unwrap().normal, "with a length the switch works");
+    assert!(h.app.tool.as_ref().unwrap().pts.is_empty(), "a click on the switch places no point");
+    assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "8");
+
+    h.step(&json!({"move":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    h.frames(30);
+    h.step(&json!({"click":{"sketch":[20,0]}})).unwrap();
+    h.settle();
+    h.step(&json!({"move":{"sketch":[6,5]}})).unwrap();
+    h.settle();
+    h.step(&json!({"click":{"sketch":[6,5]}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    assert_eq!(sk.curves.len(), before + 1, "{:?}", h.app.status);
+    let curve = sk.curves.last().unwrap();
+    assert!(!curve.construction && !curve.infinite && !curve.centerline, "{curve:?}");
+    let CurveKind::Line { a, b } = curve.kind else { panic!("a line") };
+    assert!((sk.point(a).unwrap().dist(sk.point(b).unwrap()) - 8.0).abs() < 1e-6);
+    assert_eq!(crate::sketch_palette::mode(&h.app), 1, "the palette's line type is untouched");
+
+    // Without a length the next line is infinite construction again, whatever the switch says.
+    h.frames(30);
+    h.step(&json!({"click":{"sketch":[5,10]}})).unwrap();
+    h.settle();
+    let sk = h.app.session.doc.sketch(sid).unwrap();
+    let curve = sk.curves.last().unwrap();
+    assert!(curve.construction && curve.infinite, "{curve:?}");
+}

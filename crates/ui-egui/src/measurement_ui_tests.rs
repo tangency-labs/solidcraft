@@ -139,6 +139,22 @@ fn measure_dialog_shows_the_obtuse_corner_of_selected_lines() {
     }
 }
 
+/// A datum plane and the origin's axis measure against points: the shapes run on, so the
+/// distances are exact rather than sampled.
+#[test]
+fn a_datum_plane_and_a_point_measure_their_distance() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.set_origin_shown(false);
+    h.app.ui.show_browser = false;
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Box"})).unwrap();
+    h.app.session.selection = vec![Sel::Plane { name: "XY".into() }, Sel::Vertex { body: "Box".into(), point: [5.0, 5.0, 10.0].into() }];
+    h.app.start("inspect.measure");
+    h.settle();
+    let d = result(&h)["distance_mm"].as_f64().unwrap();
+    assert!((d - 10.0).abs() < 1e-9, "{d}");
+}
+
 #[test]
 fn measurement_axis_distances_follow_the_upstream_centre_min_and_max_choices() {
     let mut h = Harness::new();

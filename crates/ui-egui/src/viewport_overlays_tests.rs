@@ -1665,6 +1665,37 @@ fn a_huge_extrude_distance_draws_its_handles_at_once() {
     assert!(started.elapsed().as_secs_f64() < 10.0, "{:?}", started.elapsed());
 }
 
+/// The taper handle's limits come from the profiles' inradii, a grid search over every side:
+/// an open extrude works them out once for its profiles, not every frame, and again when the
+/// profiles change.
+#[test]
+fn an_open_extrude_keeps_its_taper_limits_while_the_profiles_stay() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[-20,-20],"p1":[20,20]})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":6})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("select.clear", json!({})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"home"}})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"solid.extrude"})).unwrap();
+    h.step(&json!({"click":{"world":[15,15,0]}})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::handle_at("taper").is_some(), "the taper handle is drawn");
+    let once = crate::canvas::taper_radii_worked_out();
+    h.frames(20);
+    assert_eq!(crate::canvas::taper_radii_worked_out(), once, "the same profile: not worked out again");
+    h.step(&json!({"text":"25"})).unwrap();
+    h.frames(4);
+    assert_eq!(crate::canvas::taper_radii_worked_out(), once, "only the height changed");
+    // The disc in the hole joins the extrude: other profiles, other limits.
+    h.step(&json!({"click":{"world":[-3,-3,0]}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.dialog.as_ref().map(|d| d.inputs[0].items.len()), Some(2), "{:?}", h.app.dialog.as_ref().map(|d| &d.inputs[0].items));
+    assert!(crate::canvas::taper_radii_worked_out() > once, "new profiles are worked out");
+}
+
 fn point_overlays(app: &SolveApp) -> Vec<Shape> {
     let ctx = egui::Context::default();
     let proj = display_proj(app);

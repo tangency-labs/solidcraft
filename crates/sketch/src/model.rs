@@ -831,9 +831,13 @@ impl Sketch {
     }
 
     pub fn point_index(&self, id: &str) -> Option<usize> {
+        #[cfg(test)]
+        crate::tests::count_id_search();
         self.points.iter().position(|p| p.id == id)
     }
     pub fn curve_index(&self, id: &str) -> Option<usize> {
+        #[cfg(test)]
+        crate::tests::count_id_search();
         self.curves.iter().position(|c| c.id == id)
     }
     pub fn point(&self, i: usize) -> Option<Vec2> {

@@ -32,6 +32,9 @@ pub struct ConstructionLineParams {
     /// A segment of this length from `at` instead of an infinite line, held by a length
     /// dimension. For the horizontal, vertical, angle, parallel and perpendicular methods.
     pub length: Option<LengthExpr>,
+    /// `false` makes a line with a `length` a normal sketch line, ready for a profile, instead
+    /// of construction geometry (default `true`). An infinite line is always construction.
+    pub construction: Option<bool>,
     /// The sketch (default: the one being edited).
     pub sketch: Option<SketchRef>,
 }

@@ -69,8 +69,9 @@ request to save a mesh or send it to a slicer asks first and names the slicer.
 
 A body can have a **print face**: the flat face it should lie on in the slicer. Select the face
 and press **Ctrl+B** (or **Print Face** in the face's right-click menu); press it again to clear
-it. The Send to Slicer window shows the print face of the one body being sent in its **Print
-face** row, where you can pick another face in the viewport or clear it. Each send then turns a
+it. The Send to Slicer window shows the print face of each body being sent in its **Print
+face** row. A face you pick there in the viewport becomes the print face of its body, in place
+of the one it had; take a face out of the row to clear its body's. Each send then turns a
 copy of the body so the print face points down at Z = 0, with its centre of mass over the
 origin; the design itself does not move. The face is tinted and outlined in the viewport, and a
 copy made with Move/Copy or Mirror keeps it. A print face that is gone or no longer flat is

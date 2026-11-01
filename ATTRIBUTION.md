@@ -646,6 +646,7 @@ Original SolidCraft drawings, Open for owner review; no runtime assignments.
 | docs/book/src/generated/equation-wave.png | SolidCraft contributors | rendered by `cargo xtask book` (`solidcraft-cli snapshot docs/book/scripts/equation-wave.json`; gitignored) | MIT OR Apache-2.0 |
 | assets/icons/ui/design/svg/model/print_face.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | MIT OR Apache-2.0 |
 | assets/locales/fi.json | SolidCraft contributors | Original Finnish translation of SolidCraft's English catalog, AI-assisted (Claude Code) clean-room from the English and not yet reviewed line by line by a native speaker; no commercial CAD text used | MIT OR Apache-2.0 |
+| assets/icons/ui/design/svg/model/plane_axis_point.svg | SolidCraft contributors | original icon master (64 grid) | MIT OR Apache-2.0 |
 
 ## Code adapted from sibling projects
 

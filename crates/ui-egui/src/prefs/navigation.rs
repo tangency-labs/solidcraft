@@ -200,6 +200,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             let (label, note) = (app.tr("prefs.invert_navigator_arrows").to_owned(), app.tr("prefs.invert_navigator_arrows_note").to_owned());
             let invert = ui_kit::checkbox(ui, &label, &mut app.preferences.invert_navigator_arrows).on_hover_text(note);
             crate::scenario::publish_target("prefs:invert_navigator_arrows", invert.rect);
+            let (label, note) = (app.tr("prefs.invert_curved_roll_arrows").to_owned(), app.tr("prefs.invert_curved_roll_arrows_note").to_owned());
+            let invert = ui_kit::checkbox(ui, &label, &mut app.preferences.invert_curved_roll_arrows).on_hover_text(note);
+            crate::scenario::publish_target("prefs:invert_curved_roll_arrows", invert.rect);
             ui_kit::row(ui, app.tr_label("Middle double-click"), |ui| {
                 let current = MiddleDoubleClick::of(app);
                 ui_kit::settings_control_width(ui, t.form_label_width * 2.0 + t.space_24 * 2.0 + t.space_12, |ui| {

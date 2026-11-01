@@ -17,6 +17,9 @@ use crate::theme::Tokens;
 use crate::tools::Tool;
 use crate::viewport::Proj;
 
+/// What an untyped construction line Length box shows: the line stays infinite.
+const INFINITE: &str = "\u{221e}";
+
 /// One value box.
 #[derive(Clone, Debug)]
 pub struct DimBox {
@@ -39,7 +42,15 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
     use ValueKind::*;
     let b = DimBox::new;
     match (cmd, n) {
-        ("sketch.construction_line.angle", 1) => vec![b("Angle", Angle)],
+        // Length boxes start empty: an empty box keeps the infinite line (#10258).
+        ("sketch.construction_line.angle", 1) => vec![b("Angle", Angle), b("Length", Length)],
+        (
+            "sketch.construction_line.horizontal"
+            | "sketch.construction_line.vertical"
+            | "sketch.construction_line.parallel"
+            | "sketch.construction_line.perpendicular",
+            0 | 1,
+        ) => vec![b("Length", Length)],
         ("sketch.line" | "sketch.line.midpoint", n) if n >= 1 => vec![b("Length", Length), b("Angle", Angle)],
         ("sketch.rectangle.two_point" | "sketch.rectangle.center", 1) => vec![b("Width", Length), b("Height", Length)],
         ("sketch.rectangle.rounded", 1) => vec![b("Width", Length), b("Height", Length), b("Radius", Length)],
@@ -76,7 +87,7 @@ fn eval(doc: &Document, text: &str, kind: ValueKind) -> solidcraft_engine::doc::
 /// parameter (sent with the shape); sides and rho are counts and shape factors.
 fn is_dimension(t: &Tool, label: &str) -> bool {
     if solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some() {
-        return t.cmd == "sketch.construction_line.angle" && label == "Angle";
+        return (t.cmd == "sketch.construction_line.angle" && label == "Angle") || label == "Length";
     }
     !matches!(label, "Sides" | "Rho") && !(t.cmd == "sketch.rectangle.rounded" && label == "Radius")
 }
@@ -161,8 +172,9 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
 /// sketch geometry stays there, and one on a curve slides along it to where the axis crosses.
 pub fn placed(app: &SolveApp, t: &Tool, p: &(Vec2, Option<String>)) -> (Vec2, Option<String>) {
     let line = t.cmd == "sketch.line";
-    // A typed length or angle wins over every snap.
-    if t.dims.iter().any(|b| b.locked) {
+    // A typed length or angle wins over every snap. A construction line's length leaves its
+    // start where it snapped: the length runs from there.
+    if t.dims.iter().any(|b| b.locked && !construction_length(t, b)) {
         return (effective(app, t, p.0), None);
     }
     // A line snapped through a circle's centre stays on that radial line. The axis snap would
@@ -181,6 +193,16 @@ pub fn placed(app: &SolveApp, t: &Tool, p: &(Vec2, Option<String>)) -> (Vec2, Op
         return q;
     }
     p.clone()
+}
+
+/// The Length box of a construction line tool, which is empty for an infinite line.
+fn construction_length(t: &Tool, b: &DimBox) -> bool {
+    b.label == "Length" && solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some()
+}
+
+/// The id of the `i`th value box of the tool being drawn.
+pub(crate) fn box_id(i: usize) -> egui::Id {
+    egui::Id::new(("sc_dim", i))
 }
 
 /// Where the preview and the value boxes put the tool's next point for the hover `p`: for a
@@ -253,11 +275,25 @@ fn line_boxes(a: Vec2, e: Vec2, px: f64, off: f64) -> Vec<(f64, Vec2)> {
 /// `px` is the size of a screen pixel in sketch units: boxes sit a little off the segment they
 /// measure so they don't cover it.
 fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
+    let off = 20.0 * px;
+    // A one-click construction line's Length box waits beside the pointer before any click.
+    if t.pts.is_empty() && t.dims.first().is_some_and(|b| construction_length(t, b)) {
+        return vec![(0.0, e + Vec2::new(2.5 * off, -1.5 * off))];
+    }
     let Some(a) = t.pts.last().map(|p| p.0) else { return Vec::new() };
     let first = t.pts.first().map(|p| p.0).unwrap_or(a);
-    let off = 20.0 * px;
     match (t.cmd, t.pts.len()) {
-        ("sketch.construction_line.angle", 1) => vec![((e - a).angle(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
+        // As for a line: the angle near the start, the length at the middle (#10258).
+        ("sketch.construction_line.angle", 1) => line_boxes(a, e, px, off).into_iter().rev().collect(),
+        // Behind the start, away from the pointer: the next click, on the pointer's side, picks
+        // the side the line runs to.
+        (
+            "sketch.construction_line.horizontal"
+            | "sketch.construction_line.vertical"
+            | "sketch.construction_line.parallel"
+            | "sketch.construction_line.perpendicular",
+            1,
+        ) => vec![(0.0, a - dir_or_x(e - a) * (2.5 * off))],
         ("sketch.line", _) | ("sketch.slot.center_to_center" | "sketch.slot.overall", 1) => line_boxes(a, e, px, off),
         // The midpoint line runs from the end's mirror image through the midpoint to the end,
         // so its length is the whole line: twice the distance from the midpoint to the cursor.
@@ -372,9 +408,19 @@ pub fn sync(t: &mut Tool) {
         } else if t.pts.len() <= t.dims_stage || t.cmd == "sketch.line" {
             t.dim_history.clear();
         }
-        t.dims = boxes_for(t.cmd, t.pts.len());
+        let before = std::mem::replace(&mut t.dims, boxes_for(t.cmd, t.pts.len()));
+        let construction = solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some();
+        if construction && t.pts.len() == t.dims_stage.saturating_add(1) {
+            // A length typed before the start click is still the line's length after it.
+            for b in &mut t.dims {
+                if let Some(kept) = before.iter().find(|old| old.label == b.label && old.locked) {
+                    *b = kept.clone();
+                }
+            }
+        }
         t.dims_stage = t.pts.len();
-        t.dims_focus = !t.dims.is_empty();
+        // Before the first click, the box waits for a digit: letters stay tool shortcuts.
+        t.dims_focus = !t.dims.is_empty() && !(construction && t.pts.is_empty());
     }
 }
 
@@ -420,6 +466,9 @@ pub fn dimensions(t: &Tool) -> Value {
 /// Invalid values stay in the current field, so users can correct them before another stage.
 pub fn validate(app: &SolveApp, t: &Tool) -> Result<(), String> {
     for dimension in t.dim_history.iter().chain(&t.dims).filter(|dimension| dimension.locked) {
+        if construction_length(t, dimension) && dimension.value.trim().is_empty() {
+            continue;
+        }
         if dimension.value.len() > 4096 {
             return Err(format!("{} expression is too long", dimension.label));
         }
@@ -508,6 +557,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     let Some(mut t) = app.tool.take() else { return };
     sync(&mut t);
     let place = if t.dims.is_empty() { None } else { boxes(app, ui, proj, &mut t) };
+    crate::sketch_construction::line_type_switch(ui, &mut t);
     app.tool = Some(t);
     if let Some(p) = place {
         crate::tools::place(app, (p, None));
@@ -553,9 +603,11 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let mut any_focused = false;
     let view = app.viewport.layout.as_ref().map(|l| l.drawable).filter(|r| r.is_finite() && r.is_positive());
     let field_frame = Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(tk.space_3 as i8, 1));
+    let construction = solidcraft_engine::cmd::construction_line_mode(t.cmd).is_some();
     for (b, (v, _)) in t.dims.iter_mut().zip(&lv) {
         if !b.locked {
-            b.value = fmt(app, b.label, b.kind, *v);
+            // A construction line's untyped length is infinite, whatever the pointer does.
+            b.value = if construction && b.label == "Length" { INFINITE.to_owned() } else { fmt(app, b.label, b.kind, *v) };
         }
     }
     // Polygon values used to sit inside the radius, so both boxes covered a small polygon
@@ -630,7 +682,8 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
         ui.ctx().memory_mut(|memory| memory.request_focus(id));
     }
     let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
-    let nothing = ui.ctx().memory(|m| m.focused().is_none());
+    // A box waiting before the first click only places on Enter once it has the keyboard.
+    let nothing = ui.ctx().memory(|m| m.focused().is_none()) && !(construction && t.pts.is_empty());
     (enter && (any_focused || nothing)).then_some(e)
 }
 

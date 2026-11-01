@@ -515,10 +515,15 @@ pub struct Session {
     /// (see [`Session::solve_joints`]).
     joints_settled: Option<(Arc<Document>, std::sync::Weak<solidcraft_doc::ModelState>)>,
     occurrence_visibility_cache: std::sync::Mutex<Option<occurrences::VisibilityCache>>,
-    /// The hidden joints and folders of the view, as sets: the browser asks about every joint
-    /// of the design on every frame (#3892), and an answer that walked the hidden lists made a
-    /// frame cost grow with the size of the design.
+    /// The hidden joints, folders and bodies of the view, as sets: the browser asks about every
+    /// joint of the design on every frame (#3892), the viewport about every body, and an answer
+    /// that walked the hidden lists made a frame cost grow with the size of the design.
     visibility_index_cache: std::sync::Mutex<Option<occurrences::VisibilityIndex>>,
+    /// The sketches a feature uses, with the design they were read from
+    /// ([`view::sketch_consumed`]): the viewport asks about every sketch several times a frame,
+    /// and walking the features for each made that cost grow with sketches times features.
+    /// Keyed on the design itself, so an edit of any kind builds the set again.
+    consumed_sketches_cache: std::sync::Mutex<Option<view::ConsumedSketches>>,
     /// The bodies each feature made, by name, with the state they were read from
     /// ([`Session::pin_body_names`]).
     made_bodies: MadeBodies,
@@ -798,6 +803,7 @@ impl Session {
             joints_settled: None,
             occurrence_visibility_cache: Default::default(),
             visibility_index_cache: Default::default(),
+            consumed_sketches_cache: Default::default(),
             made_bodies: MadeBodies::new(),
             removed_later_cache: Default::default(),
             occurrence_bodies_cache: Default::default(),
@@ -1028,17 +1034,45 @@ impl Session {
         }
     }
 
+    /// Let the used sketches' set go before an edit in place: it holds the document weakly, and
+    /// `Arc::make_mut` would move a weakly held document to a new address.
+    fn forget_consumed_sketches(&self) {
+        if let Ok(mut cache) = self.consumed_sketches_cache.lock() {
+            *cache = None;
+        }
+    }
+
     /// Mutable document (copy-on-write).
     pub fn doc_mut(&mut self) -> &mut Document {
-        // The placement index keeps the document alive with its answers; let it go before an
-        // in-place edit, so the edit stays in place (a shared handle would clone the document
-        // to a new address behind the crash journal's back, #7502) and no stale lookup outlives it.
+        self.forget_document_caches();
+        #[cfg(test)]
+        if Arc::strong_count(&self.doc) > 1 {
+            tests::doc_copies::record();
+        }
+        Arc::make_mut(&mut self.doc)
+    }
+
+    /// Make `doc` the design, as `*doc_mut() = doc` does, without first copying a shared
+    /// document only to overwrite the copy: a command's undo step still holds the design it
+    /// started from, so `doc_mut` would copy all of it (every feature and sketch) on each
+    /// sketch drag frame. The design lands at a new address either way, and the command's end
+    /// tells the crash journal that address (#7502).
+    pub(crate) fn set_doc(&mut self, doc: Document) {
+        self.forget_document_caches();
+        self.doc = Arc::new(doc);
+    }
+
+    /// Before the document changes: the placement index keeps the document alive with its
+    /// answers; let it go, so an in-place edit stays in place (a shared handle would clone the
+    /// document to a new address behind the crash journal's back, #7502) and no stale lookup
+    /// outlives it.
+    fn forget_document_caches(&mut self) {
         if let Ok(mut index) = self.placement_index_cache.lock() {
             *index = None;
         }
+        self.forget_consumed_sketches();
         self.forget_dirty_answer();
         self.model.forget_fingerprints();
-        Arc::make_mut(&mut self.doc)
     }
 
     /// Prepared placements only: optional save caches must not compute a cold world.
@@ -1528,6 +1562,7 @@ impl Session {
             if let Ok(mut index) = self.placement_index_cache.lock() {
                 *index = None;
             }
+            self.forget_consumed_sketches();
             self.forget_dirty_answer();
             self.model.adopt_solved_sketches(Arc::make_mut(&mut self.doc));
         }
@@ -1830,6 +1865,7 @@ impl Session {
             made_bodies: MadeBodies::new(),
             occurrence_visibility_cache: Default::default(),
             visibility_index_cache: Default::default(),
+            consumed_sketches_cache: Default::default(),
             removed_later_cache: Default::default(),
             occurrence_bodies_cache: Default::default(),
             placement_index_cache: Default::default(),
