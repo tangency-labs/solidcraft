@@ -1173,14 +1173,33 @@ fn preferences_preserves_every_page_and_footer_in_both_themes() {
             let row = scenario::rect_of(&format!("prefs:page:{page}")).unwrap();
             assert!(nav.contains_rect(row), "{dark}: {page} stays visible");
             let window = scenario::rect_of("prefs:window").unwrap();
+            let header = scenario::rect_of("dialog:header").unwrap();
+            let search = scenario::rect_of("prefs:search:frame").unwrap();
+            assert!((header.height() - 40.0).abs() < 0.5);
+            assert!(header.contains_rect(search), "{dark}: {page}: search stays inside the titlebar");
+            assert!((search.width() - 230.0).abs() < 0.5 && (search.height() - 26.0).abs() < 0.5);
+            assert!(search.left() > header.center().x);
             for action in ["prefs:ok", "prefs:apply", "prefs:cancel"] {
                 assert!(window.contains_rect(scenario::rect_of(action).unwrap()), "{dark}: {page}: {action}");
             }
             assert!(scenario::rect_of("prefs:page_body").is_some());
-            assert!(h.widget(h.app.tr("ui.restore_defaults")).is_some());
+            assert!(h.widget(h.app.tr("prefs.restore_page_defaults")).is_some());
             let footer = scenario::rect_of("dialog:pages_footer").expect("pinned profile footer");
             assert!(nav.contains_rect(footer));
-            assert!(footer.contains_rect(scenario::rect_of("prefs:profile").expect("real switcher")));
+            let profile_card = scenario::rect_of("prefs:profile:sidebar_card").expect("bordered profile card");
+            assert!(footer.contains_rect(profile_card));
+            assert!((profile_card.height() - 48.0).abs() < 0.5);
+            assert_eq!(profile_card, scenario::rect_of("prefs:profile").expect("the whole card is the real switcher"));
+            let icon = scenario::rect_of("prefs:profile:icon").unwrap();
+            let label = scenario::rect_of("prefs:profile:label").unwrap();
+            let name = scenario::rect_of("prefs:profile:name").unwrap();
+            let chevron = scenario::rect_of("prefs:profile:chevron").unwrap();
+            for part in [icon, label, name, chevron] {
+                assert!(profile_card.contains_rect(part));
+            }
+            assert!(icon.right() < label.left() && label.bottom() <= name.top() && name.right() < chevron.left());
+            assert!((label.left() - name.left()).abs() < 0.5);
+            assert!((icon.center().y - profile_card.center().y).abs() < 0.5);
             let tagged = [
                 crate::prefs::PAGE_GENERAL,
                 crate::prefs::PAGE_APPEARANCE,
@@ -1191,6 +1210,12 @@ fn preferences_preserves_every_page_and_footer_in_both_themes() {
             ]
             .contains(&index);
             assert_eq!(scenario::rect_of("prefs:in_profile").is_some(), tagged, "{page}");
+            if index == crate::prefs::PAGE_GENERAL {
+                let tag = scenario::rect_of("prefs:in_profile").unwrap();
+                let body = scenario::rect_of("prefs:page_body").unwrap();
+                assert!((tag.height() - 22.0).abs() < 0.5);
+                assert!((tag.right() - body.right()).abs() < 0.5, "{dark}: the profile tag aligns to the page's right edge");
+            }
         }
     }
     crate::theme::set_dark(previous);

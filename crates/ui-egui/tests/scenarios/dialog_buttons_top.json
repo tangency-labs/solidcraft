@@ -4,7 +4,7 @@
   {"call": "engine.execute", "params": {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [40, 30]}}},
   {"call": "engine.execute", "params": {"command": "sketch.finish", "params": {}}},
   {"call": "ui.prefs", "params": {"open": "Layout"}},
-  {"widget": "Top", "near": "Dialog buttons"},
+  {"click": {"handle": "prefs:dialog_buttons:top"}},
   {"widget": "OK"},
   {"expect": {"prefs": {"dialog": null, "dialog_buttons": "top"}}},
   {"note": "Extrude picks the sketch's one profile; its buttons are in the title row."},
