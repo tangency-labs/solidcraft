@@ -14,7 +14,7 @@ impl Brep {
         if faces.is_empty() || faces.len() > ffi::split::MAX_FACES || tools.is_empty() || tools.len() > ffi::split::MAX_TOOLS {
             return Err(Error::Argument);
         }
-        if route::Op::Split.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             let specs: Vec<&crate::ssi::Spec> = tools.iter().map(|t| t.spec()).collect();
             return core::split::split_faces(self.core()?, faces, &specs).map(|r| r.map(|(b, made)| (Brep::made_core(b), made)));
         }
@@ -34,7 +34,7 @@ impl Brep {
     /// leaves both parts the whole body, with no face from the tool (tag `self` to tell); `None`
     /// when a side is left empty.
     pub fn split_body(&self, tool: &Surface) -> Result<Option<(Brep, Brep)>> {
-        if route::Op::Split.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::split::split_body(self.core()?, tool.spec()).map(|r| r.map(|(b, f)| (Brep::made_core(b), Brep::made_core(f))));
         }
         init()?;
@@ -51,7 +51,7 @@ impl Brep {
     /// normal and the part in front. A `sheet` that is no sheet, or a `face` it does not have, is
     /// [`Error::Argument`].
     pub fn split_body_by_sheet(&self, sheet: &Brep, face: usize) -> Result<Option<(Brep, Brep)>> {
-        if route::Op::Split.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::split::split_body_by_sheet(self.core()?, sheet.core()?, face)
                 .map(|r| r.map(|(b, f)| (Brep::made_core(b), Brep::made_core(f))));
         }

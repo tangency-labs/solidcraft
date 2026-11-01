@@ -188,7 +188,7 @@ fn solidcore_case(name: &'static str) -> Option<Measured> {
     })
 }
 
-/// The case on the C++ kernel, called directly (whatever the routing): what it measured.
+/// The case on the C++ kernel, called directly (whatever the choice): what it measured.
 #[cfg(feature = "native")]
 fn cpp_case(name: &str) -> Option<Measured> {
     use crate::{Brep, ffi};
@@ -390,7 +390,7 @@ fn a_failed_closest_point_counts_as_off_the_piece() {
     .unwrap();
 }
 
-/// Face and edge tags (`Brep::tagged`) through operations routed to solidcore, as on C++: each
+/// Face and edge tags (`Brep::tagged`) through operations on solidcore, as on C++: each
 /// operand is tagged on the C++ kernel, its solidcore body converted from that and tagged the same
 /// way there, and the two results' histories ([`Raw`], each in its own kernel's face and edge
 /// order) must be the same.

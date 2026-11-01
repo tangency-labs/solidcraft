@@ -174,7 +174,7 @@ fn corner_miss(m: Miss) -> Error {
 }
 
 /// A corner set back: its vertex and the setback along each of its edges (the capi's
-/// `SetBack`; the routed entry points take no ease, which is 0).
+/// `SetBack`; the entry points take no ease, which is 0).
 struct SetBack {
     vertex: VertexId,
     distance: f64,

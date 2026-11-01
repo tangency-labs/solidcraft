@@ -33,7 +33,7 @@ impl Brep {
             Holes::All => None,
             Holes::At(at) => Some(at),
         };
-        if route::Op::Split.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::trim::untrim_face(self.core()?, point, tolerance, holes, outer, in_place).map(Brep::made_core);
         }
         init()?;
@@ -48,7 +48,7 @@ impl Brep {
     /// `how` says: SMLib's extended surface over the grown box, the face and its sides carrying
     /// the tags of those they continue. A sheet of another shape is [`crate::Error::Unsupported`].
     pub fn extend_sheet(&self, point: [f64; 3], tolerance: f64, distance: f64, how: Continuation) -> Result<Brep> {
-        if route::Op::Split.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::trim::extend_sheet(self.core()?, point, tolerance, distance, how).map(Brep::made_core);
         }
         init()?;
@@ -66,7 +66,7 @@ impl Brep {
     /// A point inside each face, in SMLib's face order: on the face's surface, inside its trims
     /// (`SmFace::CalculateAnInternalPoint`).
     pub fn face_points(&self) -> Result<Vec<[f64; 3]>> {
-        if route::Op::Split.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::trim::face_points(self.core()?);
         }
         init()?;

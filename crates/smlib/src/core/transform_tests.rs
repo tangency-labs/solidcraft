@@ -176,7 +176,7 @@ fn solidcore_case(name: &str) -> Got {
     judge(name, "solidcore", got)
 }
 
-/// The case on the C++ kernel, called directly (whatever the routing).
+/// The case on the C++ kernel, called directly (whatever the choice).
 #[cfg(feature = "native")]
 fn cpp_case(name: &str) -> Got {
     use crate::{Brep, error, ffi};
@@ -292,7 +292,7 @@ fn the_body_stays_as_it_was() {
     }
 }
 
-/// Face and edge tags (`Brep::tagged`) through a copy and a transform routed to solidcore, as on
+/// Face and edge tags (`Brep::tagged`) through a copy and a transform on solidcore, as on
 /// C++: the box is tagged on the C++ kernel, its solidcore body converted from that and tagged the
 /// same way, and the two results' histories must be the same.
 #[cfg(feature = "native")]

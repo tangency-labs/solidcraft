@@ -143,7 +143,7 @@ fn surface(spec: &Spec) -> crate::ssi::Surface {
     .unwrap()
 }
 
-/// The case on the C++ kernel, called directly (whatever the routing), on the cube converted
+/// The case on the C++ kernel, called directly (whatever the choice), on the cube converted
 /// from solidcore's.
 #[cfg(feature = "native")]
 fn cpp_case(name: &str) -> Got {
@@ -349,7 +349,7 @@ fn the_body_stays_as_it_was() {
     assert!(rel(volume(&b, 1e-8).unwrap(), 1000.0) < 1e-12);
 }
 
-/// Face and edge tags (`Brep::tagged`) through a face split routed to solidcore, as on C++.
+/// Face and edge tags (`Brep::tagged`) through a face split on solidcore, as on C++.
 #[cfg(feature = "native")]
 mod history {
     use crate::{Brep, ffi};

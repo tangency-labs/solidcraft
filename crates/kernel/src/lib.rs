@@ -214,7 +214,7 @@ pub use prism_curve::{PlanarPiece, PlanarSpline};
 pub use prism_measure::{PrismSection, certified_prism_equivalent, certified_prism_section};
 pub use repair::{Hole, RebuiltFace, RefusedFace, RepairOptions, RepairReport, SewnGap, repair};
 pub use sew::{EdgeSpec, FaceSpec, SurfSpec, sew, sew_touching};
-/// Which kernel answers each operation, SMLib or solidcore (crates/smlib/src/route.rs).
+/// Which kernel the process runs on, solidcore or SMLib (crates/smlib/src/route.rs).
 pub use solidcraft_smlib::route as kernel_route;
 pub use splitface::{SplitTool, split_body, split_faces, split_faces_with_map};
 pub use step::step_export;

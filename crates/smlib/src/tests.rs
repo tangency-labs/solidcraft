@@ -18,7 +18,7 @@ fn box_end_to_end() {
 fn bad_arguments_are_errors() {
     assert_eq!(Brep::make_box([0.0; 3], [1.0, -1.0, 1.0]).unwrap_err(), Error::Argument);
     assert_eq!(Brep::make_box([f64::NAN, 0.0, 0.0], [1.0; 3]).unwrap_err(), Error::Argument);
-    // each kernel refuses a bad box the same way, whichever one `Op::Primitive` routes to
+    // each kernel refuses a bad box the same way, whichever one is in force
     init().unwrap();
     for size in [[1.0, -1.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, f64::NAN]] {
         assert_eq!(core::make_box([0.0; 3], size).err(), Some(Error::Argument), "solidcore: {size:?}");
@@ -139,7 +139,7 @@ fn calls_from_many_threads_are_serialised() {
 #[test]
 fn without_native_every_call_says_so() {
     assert_eq!(init(), Err(Error::NotBuilt));
-    // the C API's own box, whatever `Op::Primitive` routes to
+    // the C API's own box, whichever kernel is in force
     assert_eq!(ffi::make_box(&[0.0; 3], &[1.0; 3]).map_err(error).err(), Some(Error::NotBuilt));
     // solidcore builds a box without SMLib; asking the C++ kernel about it says there is none
     let b = core::make_box([0.0; 3], [1.0; 3]).map(Brep::made_core).unwrap();
@@ -266,7 +266,7 @@ fn without_the_cpp_kernel_every_entry_point_answers() {
     use crate::sweeps::{Affine, Curve, DraftCorner, Ends, SweepFrame};
     use crate::trim::{Continuation, Holes};
     use crate::{Blend, BooleanOp, ChamferSecond, CheckLevel};
-    if route::Op::ALL.iter().any(|op| op.backend() != route::Backend::Solidcore) {
+    if route::backend() != route::Backend::Solidcore {
         return;
     }
     fn says<T>(name: &str, r: Result<T>) -> Option<T> {
@@ -411,7 +411,7 @@ fn every_call_is_a_profiler_span_timed_by_the_c_api() {
     let _cpp = route::on_cpp();
     solidcraft_profile::set_enabled(true);
     let mark = solidcraft_profile::mark();
-    // the C API's own box, whatever `Op::Primitive` routes to
+    // the C API's own box, whichever kernel is in force
     crate::init().unwrap();
     let b = ffi::make_box(&[0.0; 3], &[1.0; 3]).map(Brep::made).unwrap();
     let _ = b.volume(1e-7).unwrap();

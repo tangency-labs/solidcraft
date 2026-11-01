@@ -102,7 +102,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         // Under SOLIDCRAFT_KERNEL the control shows the environment's choice, disabled.
         let environment = app.prefs_window.kernel_environment.clone();
         ui.add_enabled_ui(environment.is_none(), |ui| {
-            let options = [app.tr("prefs.geometry_kernel_routed"), "SMLib", "solidcore"];
+            let options = ["solidcore", "SMLib"];
             let shown = environment.as_deref().unwrap_or(&app.preferences.geometry_kernel);
             let mut selected = KERNELS.iter().position(|k| *k == shown).unwrap_or(0);
             ui_kit::segmented(ui, &mut selected, &options, ui_kit::Segments { intrinsic: true, ..Default::default() });
@@ -116,6 +116,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         ui_kit::text(ui, app.tr("prefs.geometry_kernel_note"), ui_kit::Text::Hint("geometry_kernel"));
         if environment.is_some() {
             ui_kit::text(ui, app.tr("prefs.geometry_kernel_environment"), ui_kit::Text::Hint("geometry_kernel_environment"));
+        }
+        if app.prefs_window.kernel_unavailable {
+            ui_kit::text(ui, app.tr("prefs.geometry_kernel_unavailable"), ui_kit::Text::Hint("geometry_kernel_unavailable"));
         }
     });
     // Where the files a design names may be: never a network location the user hasn't allowed.

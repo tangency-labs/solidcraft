@@ -6,7 +6,7 @@ use crate::{Brep, Result, core, error, ffi, route};
 
 /// Whether the Measure family runs on solidcore ([`route`]).
 fn on_core() -> bool {
-    route::Op::Measure.backend() == route::Backend::Solidcore
+    route::backend() == route::Backend::Solidcore
 }
 
 /// The accuracy [`Brep::mass_properties`] and [`Brep::area`] use unless told otherwise: the

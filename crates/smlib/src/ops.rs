@@ -102,7 +102,7 @@ impl Brep {
     /// as one body, counted by [`Brep::solid_count`]. Tagged operands ([`Brep::tagged`]) give a
     /// result whose [`Brep::history`] says where each face and edge came from.
     pub fn boolean(&self, other: &Brep, op: BooleanOp) -> Result<Option<Brep>> {
-        if route::Op::Boolean.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::boolean::boolean(self.core()?, other.core()?, op).map(|r| r.map(Brep::made_core));
         }
         init()?;
@@ -123,7 +123,7 @@ impl Brep {
     /// tagged each with its own number ([`Brep::tagged`]) give a result whose [`Brep::history`]
     /// names them. At least one body and at most [`MAX_UNION_BREPS`].
     pub fn union_all(breps: &[&Brep]) -> Result<Brep> {
-        if route::Op::Boolean.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             if breps.is_empty() || breps.len() > MAX_UNION_BREPS {
                 return Err(Error::Argument);
             }
@@ -142,7 +142,7 @@ impl Brep {
     /// as regions of that plane by `op`: `None` when the result is empty. The result's edges are
     /// the inputs' own curves, split where they cross.
     pub fn boolean2d(&self, other: &Brep, op: BooleanOp) -> Result<Option<Brep>> {
-        if route::Op::Boolean.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::boolean::boolean2d(self.core()?, other.core()?, op).map(|r| r.map(Brep::made_core));
         }
         init()?;
@@ -162,7 +162,7 @@ impl Brep {
     /// one body: `None` when the tool meets no face. Tagged operands give the pieces' history
     /// (each piece is a split of the face it was cut from).
     pub fn imprint(&self, tool: &Brep) -> Result<Option<Brep>> {
-        if route::Op::Boolean.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::boolean::imprint(self.core()?, tool.core()?).map(|r| r.map(Brep::made_core));
         }
         init()?;
@@ -175,7 +175,7 @@ impl Brep {
 
     /// The number of separate solid regions (voids not counted).
     pub fn solid_count(&self) -> Result<usize> {
-        if route::Op::Measure.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return crate::core::solid_count(self.core()?);
         }
         ffi::ops::solid_count(self.cpp()?).map(|n| usize::try_from(n).unwrap_or(0)).map_err(error)
@@ -184,7 +184,7 @@ impl Brep {
     /// The edges nearest to `edges` (each within `tolerance`), exactly those, rounded
     /// at `radius`.
     pub fn fillet(&self, edges: &[[f64; 3]], tolerance: f64, radius: f64) -> Result<Brep> {
-        if route::Op::Blend.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return self.core_blend(Blend::Round, edges, &[radius], tolerance, &[], &[], core::blend::Corners::Filled);
         }
         self.pick_op(ffi::ops::Pick::Fillet, edges, tolerance, radius, false)
@@ -194,7 +194,7 @@ impl Brep {
     /// an equal-distance chamfer `distance` back along each face (measured at each edge's
     /// midpoint), with bevelled corners.
     pub fn chamfer(&self, edges: &[[f64; 3]], tolerance: f64, distance: f64) -> Result<Brep> {
-        if route::Op::Blend.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return self.core_blend(Blend::Chamfer, edges, &[distance], tolerance, &[], &[], core::blend::Corners::Filled);
         }
         self.pick_op(ffi::ops::Pick::Chamfer, edges, tolerance, distance, false)
@@ -206,7 +206,7 @@ impl Brep {
         if edges.len() > MAX_POINTS || edges.is_empty() || sizes.len() != edges.len() {
             return Err(Error::Argument);
         }
-        if route::Op::Blend.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return self.core_blend(kind, edges, sizes, tolerance, &[], &[], core::blend::Corners::Filled);
         }
         init()?;
@@ -226,7 +226,7 @@ impl Brep {
         if edges.len() > MAX_POINTS || edges.is_empty() || sizes.len() != edges.len() {
             return Err(Error::Argument);
         }
-        if route::Op::Blend.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::blend::blend_dropping(self.core()?, kind, edges, sizes, tolerance).map(|(b, d)| (Brep::made_core(b), d));
         }
         init()?;
@@ -262,7 +262,7 @@ impl Brep {
         {
             return Err(Error::Argument);
         }
-        if route::Op::Blend.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return self.core_blend(kind, edges, sizes, tolerance, corners, setbacks, core::blend::Corners::Filled);
         }
         init()?;
@@ -298,7 +298,7 @@ impl Brep {
         {
             return Err(Error::Argument);
         }
-        if route::Op::Blend.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::blend::blend_holes(self.core()?, kind, edges, sizes, tolerance, corners, setbacks, core::blend::Corners::Open)
                 .map(|(b, holes)| (Brep::made_core(b), holes));
         }
@@ -320,7 +320,7 @@ impl Brep {
     /// `radii` over the position along the edge, 0 at its end nearest `start` and 1 at the other
     /// (the edge curve's parameter scaled to 0..1).
     pub fn fillet_variable(&self, edge: [f64; 3], tolerance: f64, start: [f64; 3], degree: usize, knots: &[f64], radii: &[f64]) -> Result<Brep> {
-        if route::Op::Blend.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::blend::fillet_variable(self.core()?, edge, tolerance, start, degree, knots, radii).map(Brep::made_core);
         }
         init()?;
@@ -340,7 +340,7 @@ impl Brep {
         if edges.is_empty() || edges.len() > MAX_POINTS {
             return Err(Error::Argument);
         }
-        if route::Op::Blend.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::blend::chamfer_sides(self.core()?, edges, tolerance, distance, second, first).map(Brep::made_core);
         }
         init()?;
@@ -357,7 +357,7 @@ impl Brep {
     /// whose walls would just meet (a hole exactly twice the wall from a side) is
     /// [`Error::WallsTouch`].
     pub fn shell(&self, open_faces: &[[f64; 3]], tolerance: f64, thickness: f64) -> Result<Brep> {
-        if route::Op::Offset.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::offset::shell(self.core()?, open_faces, tolerance, thickness).map(Brep::made_core);
         }
         self.pick_op(ffi::ops::Pick::Shell, open_faces, tolerance, thickness, true)
@@ -368,7 +368,7 @@ impl Brep {
     /// faces around them extended or trimmed to meet them. Faces moved in past all of the body
     /// behind them are [`Error::NoRoom`].
     pub fn offset_faces(&self, faces: &[[f64; 3]], tolerance: f64, distance: f64) -> Result<Brep> {
-        if route::Op::Offset.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::offset::offset_faces(self.core()?, faces, tolerance, distance).map(Brep::made_core);
         }
         self.pick_op(ffi::ops::Pick::OffsetFaces, faces, tolerance, distance, false)
@@ -378,7 +378,7 @@ impl Brep {
     /// against them), or by half each way when `symmetric`, with ruled walls along its open
     /// edges. A closed solid is [`Error::Argument`].
     pub fn thicken(&self, thickness: f64, symmetric: bool) -> Result<Brep> {
-        if route::Op::Offset.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::offset::thicken(self.core()?, thickness, symmetric).map(Brep::made_core);
         }
         init()?;
@@ -394,7 +394,7 @@ impl Brep {
         if keep.len() > MAX_POINTS {
             return Err(Error::Argument);
         }
-        if route::Op::Split.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::merge::merge_faces(self.core()?, keep, tolerance).map(Brep::made_core);
         }
         init()?;
@@ -418,7 +418,7 @@ impl Brep {
         if faces.is_empty() || faces.len() > MAX_POINTS {
             return Err(Error::Argument);
         }
-        if route::Op::Split.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::offset::draft(self.core()?, faces, tolerance, neutral_origin, neutral_normal, pull, angle).map(Brep::made_core);
         }
         init()?;

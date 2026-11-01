@@ -585,15 +585,15 @@ static KERNEL_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 /// `None` when `SOLIDCRAFT_KERNEL` chose the other kernel: it wins over `set_choice`, and scoring
 /// the wrong kernel against this one's list says nothing.
 fn global_intersect_scores(backend: solidcraft_smlib::route::Backend) -> Option<Vec<Score>> {
-    use solidcraft_smlib::route::{Choice, Op, set_choice};
+    use solidcraft_smlib::route::{Backend, choice, set_choice};
     use solidcraft_smlib::ssi::{Method, intersect};
     let t0 = std::time::Instant::now();
     let cases = all_cases();
     let outcomes: Vec<Outcome> = {
         let _kernel = KERNEL_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        set_choice(Choice::Only(backend));
-        if Op::Ssi.backend() != backend {
-            set_choice(Choice::Routed);
+        set_choice(backend);
+        if choice() != backend {
+            set_choice(Backend::Solidcore);
             eprintln!("skipped: SOLIDCRAFT_KERNEL chose the other kernel");
             return None;
         }
@@ -608,7 +608,7 @@ fn global_intersect_scores(backend: solidcraft_smlib::route::Backend) -> Option<
                 runner_output(r, &a, &b, t.elapsed().as_secs_f64() * 1e3)
             })
             .collect();
-        set_choice(Choice::Routed);
+        set_choice(Backend::Solidcore);
         outcomes
     };
     let ran = t0.elapsed();

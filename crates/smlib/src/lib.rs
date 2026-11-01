@@ -217,7 +217,7 @@ pub fn set_dump_dir(dir: Option<&Path>) -> Result<()> {
     let c = dir.map(c_path).transpose()?;
     core::dump::set_dir(dir.map(Path::to_path_buf));
     // A build or a run on solidcore alone never starts the C++ kernel to tell it.
-    if !route::any_on_cpp() {
+    if route::backend() != route::Backend::Smlib {
         return Ok(());
     }
     match init() {
@@ -232,7 +232,7 @@ pub fn current_call() -> Option<String> {
     if let Some(call) = core::dump::current() {
         return Some(call);
     }
-    if !route::any_on_cpp() {
+    if route::backend() != route::Backend::Smlib {
         return None;
     }
     let mut buf = [0u8; 512];
@@ -242,8 +242,11 @@ pub fn current_call() -> Option<String> {
 }
 
 /// A B-rep in either kernel ([`route`]). Immutable: operations return new bodies. A body made
-/// by one kernel is converted for the other the first time an operation routed there needs it,
-/// through the flat arrays both understand, and keeps both.
+/// by one kernel is converted for the other the first time an operation there needs it, through the
+/// flat arrays both understand, and keeps both. A process has one kernel at a time, and this stays
+/// because that kernel can change under a live body: changing the preference or `diagnostics.kernel`
+/// leaves bodies already computed as they are, so the next operation on one needs it on the new
+/// kernel. The parity tests take solidcore's bodies to the C++ kernel the same way.
 pub struct Brep {
     cpp: OnceLock<Result<ffi::Handle>>,
     core: OnceLock<Result<core::Body>>,
@@ -306,7 +309,7 @@ impl Brep {
 
     /// An axis-aligned box from its lower corner, with positive edge lengths (mm).
     pub fn make_box(origin: [f64; 3], size: [f64; 3]) -> Result<Brep> {
-        if route::Op::Primitive.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::make_box(origin, size).map(Brep::made_core);
         }
         init()?;
@@ -315,7 +318,7 @@ impl Brep {
 
     /// Reads a native SMLib `.smb` file.
     pub fn read(path: &Path, ascii: bool) -> Result<Brep> {
-        if route::Op::File.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             c_path(path)?;
             return core::file::read(path, ascii).map(Brep::made_core);
         }
@@ -325,7 +328,7 @@ impl Brep {
 
     /// Writes this body to a native SMLib `.smb` file.
     pub fn write(&self, path: &Path, ascii: bool) -> Result<()> {
-        if route::Op::File.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             c_path(path)?;
             return core::file::write(self.core()?, path, ascii);
         }
@@ -334,7 +337,7 @@ impl Brep {
 
     /// A deep copy.
     pub fn try_clone(&self) -> Result<Brep> {
-        if route::Op::Transform.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::transform::copy(self.core()?).map(Brep::made_core);
         }
         ffi::copy(self.cpp()?).map(Brep::made).map_err(error)
@@ -345,7 +348,7 @@ impl Brep {
     /// mirror it, a non-uniform scale or a shear turns its geometry into NURBS, tolerances scale
     /// with it.
     pub fn transformed(&self, matrix: &[[f64; 4]; 4]) -> Result<Brep> {
-        if route::Op::Transform.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::transform::transform(self.core()?, matrix).map(Brep::made_core);
         }
         ffi::transform(self.cpp()?, matrix).map(Brep::made).map_err(error)
@@ -353,7 +356,7 @@ impl Brep {
 
     /// The enclosed volume (mm³) at `relative_accuracy` (SMLib clamps it to [1e-8, 1e-1]).
     pub fn volume(&self, relative_accuracy: f64) -> Result<f64> {
-        if route::Op::Measure.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::volume(self.core()?, relative_accuracy);
         }
         ffi::volume(self.cpp()?, relative_accuracy).map_err(error)
@@ -361,7 +364,7 @@ impl Brep {
 
     /// Face, edge and vertex counts.
     pub fn counts(&self) -> Result<[usize; 3]> {
-        if route::Op::Measure.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::counts(self.core()?);
         }
         let c = ffi::counts(self.cpp()?).map_err(error)?;

@@ -201,7 +201,7 @@ fn solidcore_case(name: &str) -> Got {
     judge(name, "solidcore", got)
 }
 
-/// The case on the C++ kernel, called directly (whatever the routing), on the input converted
+/// The case on the C++ kernel, called directly (whatever the choice), on the input converted
 /// from solidcore's.
 #[cfg(feature = "native")]
 fn cpp_case(name: &str) -> Got {
@@ -429,7 +429,7 @@ fn the_body_stays_as_it_was() {
     assert_eq!(counts(&block).unwrap(), was);
 }
 
-/// Face and edge tags (`Brep::tagged`) through a stitch and a merge routed to solidcore, as on
+/// Face and edge tags (`Brep::tagged`) through a stitch and a merge on solidcore, as on
 /// C++: the input is tagged on solidcore, converted to C++ and tagged the same way there.
 #[cfg(feature = "native")]
 mod history {

@@ -152,9 +152,9 @@ impl Spec {
     }
 }
 
-/// Whether intersections run on the C++ kernel ([`route::Op::Ssi`]).
+/// Whether intersections run on the C++ kernel ([`route::backend`]).
 fn ssi_on_cpp() -> bool {
-    route::Op::Ssi.backend() == route::Backend::Smlib
+    route::backend() == route::Backend::Smlib
 }
 
 impl Surface {
@@ -172,12 +172,12 @@ impl Surface {
         &self.spec
     }
 
-    /// A surface from its checked description. With a family that takes surfaces on the C++
+    /// A surface from its checked description. On the C++
     /// kernel, its side is made now, so that what it refuses is refused here.
     fn made(spec: Spec) -> Result<Surface> {
         spec.check()?;
         let s = Surface { handle: OnceLock::new(), core: OnceLock::new(), spec };
-        if ssi_on_cpp() || route::Op::Split.backend() == route::Backend::Smlib {
+        if ssi_on_cpp() {
             s.handle()?;
         }
         Ok(s)

@@ -96,7 +96,7 @@ fn round_trips(name: &str) {
 fn matches_cpp(name: &str) {
     use crate::flat::{TOLERANCE, VERTEX_TOLERANCE, WIRE_EDGE_NURBS_FORM};
     use crate::{Brep, ffi};
-    // built by the C API whatever `Op::Primitive` routes to
+    // built by the C API whichever kernel is in force
     crate::init().unwrap();
     let cpp = match name {
         "box" => ffi::make_box(&[1.0, -2.0, 3.0], &[10.0, 20.0, 30.0]),
@@ -509,7 +509,7 @@ mod cpp_round_trip {
         Brep::made(ffi::ops::boolean(a.cpp().unwrap(), b.cpp().unwrap(), ffi::ops::BOOLEAN_SUBTRACT).unwrap())
     }
 
-    /// `f` with the sweeps on the C++ kernel, whatever the route.
+    /// `f` with the sweeps on the C++ kernel, whatever the choice.
     fn on_cpp(f: impl FnOnce() -> crate::Result<Brep>) -> Brep {
         crate::init().unwrap();
         crate::sweeps::ON_CPP.with(|c| c.set(true));

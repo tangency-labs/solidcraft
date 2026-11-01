@@ -109,8 +109,8 @@ fn check_refuses_only_an_unknown_naming() {
     name(NamingScheme::Caller).unwrap();
 }
 
-/// The C++ kernel's body of the same primitive, built by its C API whatever `Op::Primitive`
-/// routes to: a body imported from solidcore's arrays is not the C++ kernel's own (its
+/// The C++ kernel's body of the same primitive, built by its C API whichever kernel is in
+/// force: a body imported from solidcore's arrays is not the C++ kernel's own (its
 /// `edge_face_distance` measures to each face's surface over its domain, which the import sets).
 #[cfg(feature = "native")]
 fn cpp(name: &str) -> crate::Brep {

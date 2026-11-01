@@ -282,7 +282,7 @@ fn solidcore_case(name: &'static str) -> Got {
     })
 }
 
-/// The case on the C++ kernel, called directly (whatever the routing).
+/// The case on the C++ kernel, called directly (whatever the choice).
 #[cfg(feature = "native")]
 fn cpp_case(name: &str) -> Got {
     use crate::ops::{pick_error, setback_error};
@@ -726,7 +726,7 @@ fn the_first_distance_goes_on_the_face_along_first() {
     }
 }
 
-/// Face and edge tags (`Brep::tagged`) through blends routed to solidcore, as on C++: the box is
+/// Face and edge tags (`Brep::tagged`) through blends on solidcore, as on C++: the box is
 /// tagged on the C++ kernel, its solidcore body converted from that and tagged the same way, and
 /// the two results' histories must be the same.
 #[cfg(feature = "native")]

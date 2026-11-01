@@ -64,8 +64,8 @@ fn diagnostics_profile_reports_commands_features_and_the_kernel() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Tests that set the process-wide kernel choice run one at a time, and put `routed` back however
-/// they end (a failed assertion included).
+/// Tests that set the process-wide kernel choice run one at a time, and put `solidcore` back
+/// however they end (a failed assertion included).
 struct KernelChoice(#[allow(dead_code)] std::sync::MutexGuard<'static, ()>);
 
 static KERNEL_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -78,57 +78,44 @@ impl KernelChoice {
 
 impl Drop for KernelChoice {
     fn drop(&mut self) {
-        solidcraft_kernel::kernel_route::set_choice(solidcraft_kernel::kernel_route::Choice::Routed);
+        solidcraft_kernel::kernel_route::set_choice(solidcraft_kernel::kernel_route::Backend::Solidcore);
     }
 }
 
-/// diagnostics.kernel lists every operation family with the table's kernel and the one it runs
-/// on now, and its `choice` moves them (unless SOLIDCRAFT_KERNEL overrides it).
+/// diagnostics.kernel says the kernel in force and whether the environment chose it, and its
+/// `choice` sets it (unless SOLIDCRAFT_KERNEL overrides it).
 ///
 /// The choice is process-wide and the other tests in this binary build bodies meanwhile, so only
-/// choices that route every family as the table does are set through the command; what the
-/// others would route to is read from `Op::backend_under`, which the command's own answer follows.
+/// `solidcore` is set through the command; what `smlib` asks for is read from `kernel_asked`.
 #[test]
 fn diagnostics_kernel_reports_and_sets_the_choice() {
     use solidcraft_kernel::kernel_route as route;
     let _choice = KernelChoice::take();
     let mut s = Session::default();
     let r = s.execute("diagnostics.kernel", &json!({})).unwrap();
-    let routes = r["routes"].as_array().unwrap();
-    assert_eq!(routes.len(), route::Op::ALL.len(), "{r}");
-    for (row, op) in routes.iter().zip(route::Op::ALL) {
-        assert_eq!(row["op"], json!(format!("{op:?}").to_lowercase()), "{r}");
-        assert_eq!(row["route"], json!(op.route().id()), "{r}");
-        assert!(matches!(row["backend"].as_str(), Some("smlib" | "solidcore")), "{r}");
-    }
     let environment = route::overridden();
-    assert_eq!(r["environment"], json!(environment), "{r}");
-    // SOLIDCRAFT_KERNEL_ROUTES, as the families it moves.
-    let moved: serde_json::Map<String, serde_json::Value> = route::overrides().iter().map(|(op, b)| (op.id().to_string(), json!(b.id()))).collect();
-    assert_eq!(r["overrides"], serde_json::Value::Object(moved), "{r}");
-    for choice in ["solidcore", "smlib", "routed"] {
-        let c = route::Choice::from_id(choice).unwrap();
-        for op in route::Op::ALL {
-            let want = match choice {
-                "routed" => op.route().id(),
-                other => other,
-            };
-            assert_eq!(op.backend_with(c, &route::Overrides::NONE).id(), want, "{choice}: {op:?}");
-        }
-        if !route::Op::ALL.iter().all(|op| op.backend_under(c) == op.route()) {
-            continue; // it would move other tests' bodies to another kernel
-        }
-        let r = s.execute("diagnostics.kernel", &json!({ "choice": choice })).unwrap();
-        if environment {
-            continue; // SOLIDCRAFT_KERNEL wins: the choice and the backends stay its own
-        }
-        assert_eq!(r["choice"], json!(choice), "{r}");
-        for (row, op) in r["routes"].as_array().unwrap().iter().zip(route::Op::ALL) {
-            assert_eq!(row["backend"], json!(op.backend_under(c).id()), "{choice}: {r}");
-        }
+    assert_eq!(r, json!({ "choice": route::choice().id(), "environment": environment }));
+    let r = s.execute("diagnostics.kernel", &json!({ "choice": "solidcore" })).unwrap();
+    assert!(environment || r["choice"] == json!("solidcore"), "{r}");
+    assert_eq!(crate::cmd::diagnostics::kernel_asked(&json!("solidcore"), false).unwrap(), route::Backend::Solidcore);
+    assert_eq!(crate::cmd::diagnostics::kernel_asked(&json!("solidcore"), true).unwrap(), route::Backend::Solidcore);
+    assert_eq!(crate::cmd::diagnostics::kernel_asked(&json!("smlib"), true).unwrap(), route::Backend::Smlib);
+}
+
+/// `smlib` on a build without the C++ kernel is refused as not available, whichever kernel is in
+/// force, and leaves the choice alone: never an answer from the other kernel. Built with it, the
+/// command would move the other tests' bodies, so `kernel_asked` alone is asked.
+#[test]
+fn diagnostics_kernel_refuses_smlib_on_a_build_without_it() {
+    let _choice = KernelChoice::take();
+    let refused = crate::cmd::diagnostics::kernel_asked(&json!("smlib"), false).unwrap_err();
+    assert!(matches!(&refused, crate::EngineError::Disabled(cmd, _) if cmd == "diagnostics.kernel"), "{refused}");
+    if !solidcraft_kernel::smlib_built() {
+        let mut s = Session::default();
+        let before = s.execute("diagnostics.kernel", &json!({})).unwrap();
+        assert!(matches!(s.execute("diagnostics.kernel", &json!({"choice": "smlib"})), Err(crate::EngineError::Disabled(..))));
+        assert_eq!(s.execute("diagnostics.kernel", &json!({})).unwrap(), before);
     }
-    let r = s.execute("diagnostics.kernel", &json!({ "choice": "routed" })).unwrap();
-    assert!(environment || r["choice"] == json!("routed"), "{r}");
 }
 
 /// An unknown or mistyped choice is an error that changes nothing; no hostile value panics.
@@ -143,6 +130,7 @@ fn diagnostics_kernel_refuses_unknown_choices() {
         json!("SMLIB"),
         json!(""),
         json!(huge),
+        json!("routed"),
         json!("routed\0"),
         json!(5),
         json!(true),
@@ -150,8 +138,8 @@ fn diagnostics_kernel_refuses_unknown_choices() {
         json!({"choice": "smlib"}),
     ] {
         match s.execute("diagnostics.kernel", &json!({ "choice": bad })) {
-            Err(crate::EngineError::Internal(..)) | Ok(_) => panic!("`{}` was not refused", bad.as_str().map_or(0, str::len)),
-            Err(_) => {}
+            Err(crate::EngineError::BadParams { .. }) => {}
+            other => panic!("`{}` was not refused: {:?}", bad.as_str().map_or(0, str::len), other.map_err(|e| e.to_string())),
         }
     }
     for v in crate::tests::hostile_values() {

@@ -53,7 +53,7 @@ impl Brep {
     /// Runs SMLib's validity check at `level`. A body that fails it is still `Ok`, with the
     /// failures in the report; `Err` means the check could not run.
     pub fn check(&self, level: CheckLevel) -> Result<CheckReport> {
-        if route::Op::Check.backend() == route::Backend::Solidcore {
+        if route::backend() == route::Backend::Solidcore {
             return core::check(self.core()?, level);
         }
         let mut buf = vec![0u8; 1 << 16];

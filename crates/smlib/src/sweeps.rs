@@ -157,17 +157,17 @@ impl List {
 
 #[cfg(test)]
 thread_local! {
-    /// Tests: this thread's sweeps run on the C++ kernel whatever the routing.
+    /// Tests: this thread's sweeps run on the C++ kernel whatever the choice.
     pub(crate) static ON_CPP: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Whether the sweeps run on solidcore ([`route::Op::Sweep`]).
+/// Whether the sweeps run on solidcore ([`route::backend`]).
 fn on_core() -> bool {
     #[cfg(test)]
     if ON_CPP.with(std::cell::Cell::get) {
         return false;
     }
-    route::Op::Sweep.backend() == route::Backend::Solidcore
+    route::backend() == route::Backend::Solidcore
 }
 
 impl Brep {
