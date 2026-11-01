@@ -2553,6 +2553,7 @@
   "prefs.plugins_show_folder": "Show plugins folder",
   "prefs.prefer_free_sketch_points": "Prefer movable sketch points when points overlap",
   "prefs.preview_choices": "Preview of your choices",
+  "prefs.preview_reselect_modifier": "Hide preview for reselect",
   "prefs.preview_tint_new_faces": "Tint new surface in a preview",
   "prefs.preview_tint_new_faces_help": "A preview of a feature that changes a body can draw the surface it adds in the preview colour. When off, the body is drawn as itself.",
   "prefs.print_face_highlight": "Print face highlight",

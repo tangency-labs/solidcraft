@@ -2553,6 +2553,7 @@
   "prefs.plugins_show_folder": "显示插件文件夹",
   "prefs.prefer_free_sketch_points": "草图点重合时优先选择可移动的点",
   "prefs.preview_choices": "所选设置预览",
+  "prefs.preview_reselect_modifier": "隐藏预览以重新选择",
   "prefs.preview_tint_new_faces": "在预览中为新表面着色",
   "prefs.preview_tint_new_faces_help": "更改实体的特征，其预览可以用预览颜色绘制新增的表面。关闭时，实体按自身颜色绘制。",
   "prefs.print_face_highlight": "打印底面高亮",
