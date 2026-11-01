@@ -1638,13 +1638,40 @@ pub(crate) fn joint_glyph_plan(app: &SolveApp, proj: &Proj) -> Vec<JointGlyph> {
     plan.into_iter().map(|(g, _)| g).collect()
 }
 
+/// How near (screen points) the pointer must come to a glyph's centre for its tooltip.
+const GLYPH_TIP_REACH: f32 = 8.0;
+
+/// The joint whose glyph the pointer at `pos` is on: the nearest centre within reach, and of
+/// glyphs on the same spot the one drawn on top (#6404).
+pub(crate) fn joint_glyph_at(plan: &[JointGlyph], pos: Pos2) -> Option<u64> {
+    plan.iter().map(|g| (g.id, g.centre.distance(pos))).filter(|(_, d)| *d <= GLYPH_TIP_REACH).min_by(|a, b| a.1.total_cmp(&b.1)).map(|(id, _)| id)
+}
+
+/// A glyph's tooltip: the joint's name and type, e.g. "Glue · Rigid", so the square, ring and
+/// axis explain themselves (#6404).
+pub(crate) fn joint_glyph_tip(app: &SolveApp, id: u64) -> Option<String> {
+    let j = app.session.doc.assembly.joints.iter().find(|j| j.id == id)?;
+    Some(format!("{} · {:?}", j.name, j.kind))
+}
+
 /// Joint glyphs in the viewport: a ring where a moving joint sits, its motion axis and its
 /// limits (ticks on the ring for a turn, along the axis for a slide); a small square for a rigid
-/// joint. Glyphs are only drawn; they are never picked in the viewport.
+/// joint. Glyphs are never picked in the viewport; hovering one names the joint and its type.
 pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let plan = joint_glyph_plan(app, proj);
     if plan.is_empty() {
         return;
+    }
+    let ctx = painter.ctx();
+    let pointer = ctx
+        .input(|i| if i.pointer.any_down() { None } else { i.pointer.hover_pos() })
+        .filter(|p| painter.clip_rect().contains(*p) && !crate::shell::covered(app, *p));
+    if let Some(p) = pointer
+        && let Some(id) = joint_glyph_at(&plan, p)
+        && let Some(tip) = joint_glyph_tip(app, id)
+    {
+        egui::containers::Tooltip::always_open(ctx.clone(), painter.layer_id(), egui::Id::new(("joint_glyph_tip", id)), egui::PopupAnchor::Pointer)
+            .show(|ui| ui.label(tip));
     }
     let t = Tokens::get();
     let frames = joint_frames_world(&app.session);
@@ -1653,6 +1680,7 @@ pub fn joint_glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     for g in plan.iter().rev() {
         let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == g.id) else { continue };
         let Some((_, m)) = frames.iter().find(|(f, _)| *f == g.id) else { continue };
+        crate::scenario::publish_handle(&format!("joint-glyph:{}", j.name), g.centre);
         let col = if g.picked {
             t.sel_edge
         } else if j.suppressed {
