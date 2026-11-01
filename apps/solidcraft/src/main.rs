@@ -23,6 +23,8 @@ mod app_icon;
 mod come_forward;
 mod control_server;
 #[cfg(target_os = "linux")]
+mod desktop_chooser;
+#[cfg(target_os = "linux")]
 mod desktop_theme;
 mod device_lost;
 #[cfg(target_os = "windows")]
@@ -240,6 +242,12 @@ impl eframe::App for App {
             menu.tick(&mut self.solve, ctx);
         }
         self.solve.logic(ctx);
+        // The file chooser that opened is not the desktop's own: the user has to be told (#10159).
+        #[cfg(target_os = "linux")]
+        if let Some(reason) = desktop_chooser::take_reason() {
+            let text = self.solve.tr(reason).to_string();
+            self.solve.set_status(text, false);
+        }
         self.dialog_folder.design(self.solve.session.path.as_deref());
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
         if !self.solve.file_picker_busy() {
@@ -469,12 +477,19 @@ fn fullscreen_content_insets(raw: &mut egui::RawInput, title_height: f32, zoom: 
 
 fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services {
     let parent = rfd::AsyncFileDialog::new().set_parent(cc);
+    // The file chooser that opens may not be the desktop's own: the user is told when it does
+    // not (#10159).
+    #[cfg(target_os = "linux")]
+    let chooser_ctx = cc.egui_ctx.clone();
     let open_parent = parent.clone();
     let program_parent = parent.clone();
     let file_parent = parent.clone();
     let (open_folder, file_folder, save_folder) = (folder.clone(), folder.clone(), folder.clone());
     Services {
         pick_open: Some(Box::new(move |first: &[&str]| {
+            // The chooser that opens may not be the desktop's own (#10159).
+            #[cfg(target_os = "linux")]
+            desktop_chooser::note_opening(&chooser_ctx);
             // The file type the command reads comes first, so the picker opens on it (#1801).
             let mut dialog = open_folder.start(open_parent.clone());
             if !first.is_empty() {
@@ -1077,6 +1092,10 @@ fn main() -> eframe::Result {
             solidcraft_ui_egui::fonts::load_system_fonts_in_background(&cc.egui_ctx);
             mark("fonts");
             let dialog_folder = DialogFolder::default();
+            // The file chooser that opens may not be the desktop's own: the session bus is asked
+            // now, so the answer is there when a file is opened (#10159).
+            #[cfg(target_os = "linux")]
+            desktop_chooser::start(&cc.egui_ctx);
             let mut app = SolveApp::new(Session::default(), services(cc, &dialog_folder));
             app.apply_off_thread = Some(solidcraft_ui_egui::dialogs::APPLY_AT_ONCE);
             app.custom_titlebar = custom_titlebar;
@@ -1409,13 +1428,33 @@ fn prefer_x11(display: bool, wayland_display: bool, desktop: Option<&str>, wayla
 ///
 /// `None` means the desktop's own chooser is the one that opens and there is nothing to say;
 /// `Some` carries the reason to report.
+/// Why the file chooser that opens is not the desktop's own: the desktop's own chooser is the
+/// portal one, and `rfd` falls back to zenity without it (#10159). Each reason is the message
+/// that says so.
 #[cfg(all(unix, not(target_os = "macos")))]
-#[cfg_attr(not(test), allow(dead_code))]
+const CHOOSER_NO_SESSION_BUS: &str = "file.open.portal_fallback.no_session_bus";
+#[cfg(all(unix, not(target_os = "macos")))]
+const CHOOSER_NO_PORTAL_SERVICE: &str = "file.open.portal_fallback.no_portal_service";
+#[cfg(all(unix, not(target_os = "macos")))]
+const CHOOSER_XWAYLAND: &str = "file.open.portal_fallback.xwayland";
+
+#[cfg(all(unix, not(target_os = "macos")))]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn desktop_chooser_fallback(dbus_session: bool, portal_service: bool, wayland_display: bool, x11_display: bool) -> Option<&'static str> {
-    // The decision does not exist yet: the application never says that the chooser is not the
-    // desktop's own. The test below states what it has to say, and this body is where the answer
-    // goes.
-    let _ = (dbus_session, portal_service, wayland_display, x11_display);
+    // Without a session bus there is no bus to reach the portal on, so the chooser is not the
+    // desktop's own whatever else is there.
+    if !dbus_session {
+        return Some(CHOOSER_NO_SESSION_BUS);
+    }
+    // The bus is there but the portal does not answer on it: `rfd` falls back to zenity.
+    if !portal_service {
+        return Some(CHOOSER_NO_PORTAL_SERVICE);
+    }
+    // Under XWayland the window is an X11 one while the session is a Wayland one, and the portal
+    // refuses to parent its chooser to an X11 window: `rfd` falls back to zenity.
+    if wayland_display && x11_display {
+        return Some(CHOOSER_XWAYLAND);
+    }
     None
 }
 
