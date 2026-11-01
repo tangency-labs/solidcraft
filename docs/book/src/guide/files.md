@@ -206,6 +206,9 @@ Before you raise them:
 The control channel sets the same preference with `ui.prefs {"max_step_file_mb": 2048,
 "max_design_file_mb": 1024}`.
 
+STEP text parsing accepts up to **1 GB**. For exports above the 512 MB read default,
+raise the file limits before importing and reopening the saved design.
+
 ## Design properties
 
 **File → Design Properties…** (also under **Document Settings** in the Browser, and on the
