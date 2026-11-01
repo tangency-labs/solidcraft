@@ -28,8 +28,9 @@ sketch (plane + constraints + dimensions)
   right when the part grows; a hole placed by eye doesn't. Use constraints and dimensions for what
   matters, and name the important values as parameters (type `width = 40` in any value box: see
   [Parameters and expressions](parameters.md)).
-- **Fully constrain sketches.** Under-constrained sketch geometry is drawn blue, fully constrained
-  geometry turns dark, and the status shows the degrees of freedom left (see
+- **Fully constrain sketches.** Under-constrained sketch geometry is drawn blue and the Sketch
+  Palette shows how many degrees of freedom are left; once none are, the geometry changes colour
+  (white in the default dark theme) and the status reads **Fully constrained** (see
   [Sketching and constraints](sketching.md)). A fully constrained sketch changes only the way you
   tell it to.
 - **Keep sketches simple, let features do the work.** A rectangle and an extrude, then a fillet, is
@@ -43,8 +44,8 @@ sketch (plane + constraints + dimensions)
 
 ## The timeline is the design
 
-The [timeline](ui-tour.md) along the bottom of the window lists every feature in the order it is
-computed. Each feature can be edited (double-click), suppressed, renamed, reordered when nothing it
+The [timeline](ui-tour.md), the **History** strip along the bottom of the window, lists every
+feature in the order it is computed. Each feature can be edited (double-click), suppressed, renamed, reordered when nothing it
 depends on moves after it, and deleted; deleting asks first when other features depend on it.
 
 Drag the **rollback marker** back to see the design as it was at an earlier step. Features after
@@ -82,8 +83,8 @@ design quick and makes the assembly when its structure is clear.
 
 | You want to | Start with | Read |
 |---|---|---|
-| Model a part from scratch | Create Sketch on an origin plane, constrain and dimension it, Extrude or Revolve | [Sketching](sketching.md), [Solid features](features.md) |
-| Make a design you can resize | User parameters in Change Parameters, used in sketch dimensions and feature inputs | [Parameters and expressions](parameters.md) |
+| Model a part from scratch | **New Sketch** (Create Sketch) on an origin plane, constrain and dimension it, Extrude or Revolve | [Sketching](sketching.md), [Solid features](features.md) |
+| Make a design you can resize | User parameters, added with **Parameters** (Change Parameters), used in sketch dimensions and feature inputs | [Parameters and expressions](parameters.md) |
 | Build an assembly | Bodies turned into components, or New Component, then joints | [Components and joints](assemblies.md) |
 | Design a bent sheet part | A base flange from a sketch, then flanges, hems and folds under a sheet metal rule | [Sheet metal](sheet-metal.md) |
 | Design a plastic enclosure | A shelled body, then bosses, lip and groove, snap fits, ribs | [Plastic parts](plastic.md) |
