@@ -119,6 +119,20 @@ fn closes_design(key: &str, command: bool, shift: bool, alt: bool, design_shown:
     design_shown && command && !shift && !alt && key.eq_ignore_ascii_case("w")
 }
 
+/// Whether the autosave found at start (written at `autosave`) was given up: the page that wrote
+/// it was closed with the browser's "Leave" and marked it `left` (#9621). It is then not offered
+/// again. A reload still offers it, and so does an autosave another tab wrote since.
+#[cfg(any(target_arch = "wasm32", test))]
+fn autosave_given_up(autosave: Option<f64>, left: Option<f64>, reload: bool) -> bool {
+    !reload && autosave.is_some() && autosave == left
+}
+
+/// The stamp a closed page left in local storage, if it is one.
+#[cfg(any(target_arch = "wasm32", test))]
+fn parse_left_stamp(text: &str) -> Option<f64> {
+    text.trim().parse::<f64>().ok().filter(|s| s.is_finite())
+}
+
 /// The settings a tab last wrote to the browser's storage, or loaded from another tab (#8644).
 /// Every open tab of the app shares that storage, and eframe saves each tab's whole copy every
 /// 30 s and when the page loses focus, so a tab still holding old settings put them back over a
@@ -238,6 +252,21 @@ mod web {
         let _ = window.add_event_listener_with_callback("beforeunload", on_unload.as_ref().unchecked_ref());
         // The listener lives as long as the page.
         on_unload.forget();
+    }
+
+    /// The page going away for good, after the browser's "leave site?" got Leave (a cancelled
+    /// prompt keeps the page, and a page kept in the back/forward cache may come back): its
+    /// unsaved work was given up, so its autosave is not offered on the next visit (#9621).
+    fn give_up_autosave_on_leave(window: &web_sys::Window, files: Rc<Files>) {
+        let on_hide = wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(move |e: web_sys::Event| {
+            let kept = js_sys::Reflect::get(&e, &"persisted".into()).ok().and_then(|p| p.as_bool()).unwrap_or(false);
+            if !kept {
+                files::leaving(&files);
+            }
+        });
+        let _ = window.add_event_listener_with_callback("pagehide", on_hide.as_ref().unchecked_ref());
+        // The listener lives as long as the page.
+        on_hide.forget();
     }
 
     /// eframe cancels the browser's action for every Tab it gets, so the browser couldn't switch
@@ -915,6 +944,9 @@ mod web {
                         let files = Rc::new(Files::default());
                         if launch.persists() {
                             files::start(&files);
+                            if let Some(window) = web_sys::window() {
+                                give_up_autosave_on_leave(&window, files.clone());
+                            }
                         }
                         let (panel, opener, saver, shown) = (files.clone(), files.clone(), files.clone(), files.clone());
                         let (restorable, restorer) = (files.clone(), files.clone());
@@ -1151,6 +1183,28 @@ mod tests {
         assert!(!closes_design("w", true, false, true, true));
         assert!(!closes_design("w", false, false, false, true));
         assert!(!closes_design("s", true, false, false, true));
+    }
+
+    /// A tab closed with Ctrl+W, "Leave" answered to the browser's prompt, doesn't have its
+    /// autosave offered as "Recover unsaved work?" on the next visit (#9621).
+    #[test]
+    fn leaving_without_saving_gives_up_the_autosave() {
+        let stamp = parse_left_stamp(&1_798_000_000_123.0_f64.to_string());
+        assert_eq!(stamp, Some(1_798_000_000_123.0));
+        // The page that wrote the autosave left: it is dropped.
+        assert!(autosave_given_up(Some(1_798_000_000_123.0), stamp, false));
+        // A reload still offers it.
+        assert!(!autosave_given_up(Some(1_798_000_000_123.0), stamp, true));
+        // Another tab autosaved since (or the page that left wrote none): it is offered.
+        assert!(!autosave_given_up(Some(1_798_000_000_999.0), stamp, false));
+        assert!(!autosave_given_up(Some(1_798_000_000_123.0), None, false));
+        // A crash, or no autosave at all: nothing is given up.
+        assert!(!autosave_given_up(None, None, false));
+        assert!(!autosave_given_up(None, stamp, false));
+        // Hostile or broken storage values name no autosave.
+        for text in ["", "NaN", "inf", "-inf", "abc", "1e999"] {
+            assert_eq!(parse_left_stamp(text), None, "{text}");
+        }
     }
 
     /// A tab writes its settings when they change, and not again while they stay the same; the
