@@ -69,12 +69,24 @@ pub(crate) fn stored(doc: &Document, text: &str) -> String {
     }
 }
 
-/// A computed model-space value written back to an editable field. Use all significant digits:
-/// display precision must never round a value that will be sent back to the model.
+/// A computed model-space value written back to an editable field. Kept to a micrometre so a
+/// snapped drag does not write float residue like `1.2000000000000002 mm` (#9035, #9036).
 pub(crate) fn model(doc: &Document, mm: f64) -> String {
-    let unit = unit(doc);
-    let scale = unit_info(unit).map(|(_, scale)| scale).unwrap_or(1.0);
-    format!("{} {unit}", mm / scale)
+    doc.design_length(mm).1
+}
+
+/// A dragged length for an editable field: rounded to Preferences › Length decimals, but never
+/// coarser than the snap step so the written value still matches what the arrow snapped to (#9035).
+pub(crate) fn model_drag(doc: &Document, mm: f64, step_mm: f64, decimals: u8) -> String {
+    let u = unit(doc);
+    let scale = unit_info(u).map(|(_, scale)| scale).unwrap_or(1.0);
+    if !mm.is_finite() || !scale.is_finite() || scale <= 0.0 {
+        return format!("{mm} {u}");
+    }
+    let step_u = if step_mm.is_finite() && step_mm > 0.0 { step_mm / scale } else { 0.0 };
+    let step_places = if step_u > 0.0 { (-step_u.log10()).ceil().max(0.0) as u8 } else { 0 };
+    let places = decimals.max(step_places).min(8);
+    solidcraft_engine::doc::display_units::format_length(mm, u, places)
 }
 
 /// The editable length expressions in a dialog. Counts, angles, ratios, selectors and standard
