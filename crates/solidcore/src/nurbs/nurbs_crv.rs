@@ -62,9 +62,11 @@
 //!   [`allocate_nurb_curve`]) are allocated fallibly: `InvalidInput` when they do not
 //!   fit in memory or take more than [`crate::limits::MAX_ALLOC_BYTES`] (upstream: the
 //!   caller's arrays, or `smos_Calloc` returning `NULL`).
-//! - `sm_CrvDerivs` accepts `der == GW_MAX_DERIV`, then writes past its row arrays;
-//!   [`crv_derivs`] rejects `der >= MAX_DERIV` with [`NlibCode::MaxDerivative`]
-//!   (upstream's own `der > GW_MAX_DERIV` check returns the plain flag).
+//! - `sm_CrvDerivs` accepts `der == GW_MAX_DERIV` but its row arrays hold only
+//!   `GW_MAX_DERIV` rows (UB-33: the last row is written past them). The port holds
+//!   `MAX_DERIV + 1` rows (as the fork, smlib#79 2391302) and so evaluates `der ==
+//!   MAX_DERIV`; [`crv_derivs`] rejects `der > MAX_DERIV` with
+//!   [`NlibCode::MaxDerivative`] (upstream's own check returns the plain flag).
 //! - Every array access is bounds checked. Where upstream would index outside its
 //!   arrays (degrees of `GW_MAX_DEGREE` or more, malformed curves, indices the
 //!   routines do not check) the port returns [`SolidError::InvalidInput`]; for every
@@ -900,8 +902,8 @@ fn rational_basis_derivs_into<const N: usize>(
     let pu = cur.degree();
     let p = sx(pu, OP)?;
     let knt = cur.knot_vector()?;
-    // `der + 1` rows: on the stack for the usual `der < MAX_DERIV`.
-    let mut nd_stack = [[0.0_f64; N]; MAX_DERIV];
+    // `der + 1` rows: on the stack for the usual `der <= MAX_DERIV`.
+    let mut nd_stack = [[0.0_f64; N]; MAX_DERIV + 1];
     let mut nd_heap: Vec<[f64; N]>;
     let nd: &mut [[f64; N]] = if let Some(rows) = nd_stack.get_mut(..=der) {
         rows
@@ -980,11 +982,11 @@ pub fn crv_rational_basis_derivs(
 /// (`sm_CrvDerivs`): the (rational) basis derivatives times the Euclidean control
 /// points.
 ///
-/// Errors with [`NlibCode::MaxDerivative`] when `der >= MAX_DERIV`, with the errors of
+/// Errors with [`NlibCode::MaxDerivative`] when `der > MAX_DERIV`, with the errors of
 /// [`basis_derivs`] and with [`NlibCode::Index`] when the span's control points are
 /// missing.
 pub fn crv_derivs(cur: &Curve, u: f64, side: Side, der: usize) -> Result<Vec<Vec3>> {
-    if der >= MAX_DERIV {
+    if der > MAX_DERIV {
         return Err(nlib(OP_CDERIVS, NlibCode::MaxDerivative));
     }
     let mut cd = vec![Vec3::ZERO; der + 1];
@@ -999,7 +1001,7 @@ pub fn crv_derivs(cur: &Curve, u: f64, side: Side, der: usize) -> Result<Vec<Vec
 pub fn crv_derivs_into(cur: &Curve, u: f64, side: Side, out: &mut [Vec3]) -> Result<()> {
     const OP: &str = OP_CDERIVS;
     let der = match out.len().checked_sub(1) {
-        Some(der) if der < MAX_DERIV => der,
+        Some(der) if der <= MAX_DERIV => der,
         _ => return Err(nlib(OP, NlibCode::MaxDerivative)),
     };
     if cur.degree() < SMALL_DEGREE {
@@ -1010,7 +1012,7 @@ pub fn crv_derivs_into(cur: &Curve, u: f64, side: Side, out: &mut [Vec3]) -> Res
 }
 
 /// [`crv_derivs_into`] with scratch width `N` (see [`basis_derivs_into`]);
-/// `der < MAX_DERIV`, `out.len() == der + 1`.
+/// `der <= MAX_DERIV`, `out.len() == der + 1`.
 fn crv_derivs_n<const N: usize>(
     cur: &Curve,
     u: f64,
@@ -1020,7 +1022,7 @@ fn crv_derivs_n<const N: usize>(
 ) -> Result<()> {
     const OP: &str = OP_CDERIVS;
     let pu = cur.degree();
-    let mut bd = [[0.0_f64; N]; MAX_DERIV];
+    let mut bd = [[0.0_f64; N]; MAX_DERIV + 1];
     let rows_bd = bd.get_mut(..=der).ok_or_else(|| oob(OP))?;
 
     // Compute basis function derivatives.
@@ -2128,6 +2130,31 @@ mod tests {
         assert_eq!(k[6], 1.0);
     }
 
+    /// Regression (UB-33, smlib#79 2391302, solidcore#2273): `der == MAX_DERIV` is
+    /// accepted by upstream and fits `MAX_DERIV + 1` rows. The Bezier curve with
+    /// control points `(0,0,0,0,0,1)` is `x(t) = t^5`, so `C^(k)(0.5) = 5!/(5-k)! t^(5-k)`.
+    #[test]
+    fn derivs_up_to_max_deriv_fit_their_rows() {
+        // Homogeneous points `(w X, w)`: a constant weight 2 is rational, the same curve.
+        let mk = |w: f64| {
+            let pw: Vec<CPoint> = (0..6)
+                .map(|i| CPoint::new(if i == 5 { w.max(1.0) } else { 0.0 }, 0.0, 0.0, w))
+                .collect();
+            let knots = vec![0.0; 6].into_iter().chain(vec![1.0; 6]).collect();
+            Curve::new(pw, 5, knots).unwrap()
+        };
+        let want = [0.03125, 0.3125, 2.5, 15.0, 60.0, 120.0];
+        for w in [NOW, 2.0] {
+            let c = mk(w);
+            let d = crv_derivs(&c, 0.5, Side::Left, MAX_DERIV).unwrap();
+            assert_eq!(d.len(), MAX_DERIV + 1);
+            for (k, w) in want.iter().enumerate() {
+                assert!((d[k].x - w).abs() <= 1e-12 * w, "k = {k}: {}", d[k].x);
+            }
+            assert!(crv_derivs(&c, 0.5, Side::Left, MAX_DERIV + 1).is_err());
+        }
+    }
+
     #[test]
     fn eval_at_nan_below_p_plus_one_control_points_is_sm_err() {
         // An edge whose limits were never set: degree 3, 2 control points, every
@@ -2165,7 +2192,7 @@ mod tests {
             let d = crv_derivs(&c, u, Side::Left, 2).unwrap();
             assert!((p - d[0]).length() < 1e-12, "u = {u}");
         }
-        assert!(crv_derivs(&c, 0.5, Side::Left, 5).is_err());
+        assert!(crv_derivs(&c, 0.5, Side::Left, MAX_DERIV + 1).is_err());
     }
 
     #[test]

@@ -953,7 +953,7 @@ impl BSplineCurve {
     /// # Errors
     ///
     /// `SM_ERR` without a NURB or when the NLib evaluation fails (including
-    /// `num_derivs >= GW_MAX_DERIV`).
+    /// `num_derivs > GW_MAX_DERIV`).
     pub fn evaluate(
         &self,
         t: f64,
@@ -965,7 +965,7 @@ impl BSplineCurve {
         if num_derivs == 0 {
             return Ok(vec![self.evaluate_point(t)?]);
         }
-        if num_derivs >= MAX_DERIV {
+        if num_derivs > MAX_DERIV {
             // (NLib's order error, after the NURB check, without allocating an output
             // of that size)
             let cur = self.nurb_ref()?;
@@ -978,7 +978,7 @@ impl BSplineCurve {
     }
 
     /// [`BSplineCurve::evaluate`] into the caller's slice: `out[k]` is derivative `k`,
-    /// `num_derivs = out.len() - 1` (below `GW_MAX_DERIV`), without a heap allocation
+    /// `num_derivs = out.len() - 1` (up to `GW_MAX_DERIV`), without a heap allocation
     /// (except for the rare zero-tangent re-evaluation).
     ///
     /// # Errors

@@ -2508,8 +2508,11 @@ mod tests {
         assert_eq!(ders.len(), 9);
         assert_eq!(ders[1], Vec3::new(0.0, 0.0, 2.0));
         assert!(s.evaluate_step(&k, Point2::new(0.5, 1.0), 6, 6).is_err());
-        // order 5 of a B-spline generator: upstream overruns NL_MAXDER (UB-80)
-        assert!(s.evaluate_step(&k, Point2::new(0.5, 1.0), 5, 5).is_err());
+        // order 5 of a B-spline generator: upstream overruns sm_CrvDerivs' rows (UB-80,
+        // UB-33); the port evaluates it
+        let d5 = s.evaluate_step(&k, Point2::new(0.5, 1.0), 5, 5).unwrap();
+        assert_eq!(d5.len(), 36);
+        assert_eq!(d5[1], Vec3::new(0.0, 0.0, 2.0));
     }
 
     /// WR-61: the unit X line swept along Z, with the analytic domain `domain`.
