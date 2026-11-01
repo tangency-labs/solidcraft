@@ -55,9 +55,11 @@ Cura then load it as one object with a part per body, and each part can take its
 design's own bodies, and a component with a single body, stay objects of their own.
 
 **File → Send to Slicer** (also on the Insert tab's Files panel, and in the right-click menu of a
-body) is the short way: it saves the selected bodies as a 3MF in millimetres, without face tags,
+body) is the short way: it saves the selected bodies as a mesh in millimetres, without face tags,
 and sends it to a slicer. It always asks which one and pre-selects the slicer you used last time,
-so the usual case is one click or Enter. The list shows the slicers found on the computer with their
+so the usual case is one click or Enter. Its **Format** row picks 3MF (the default), binary STL or
+ASCII STL, and its **Quality** row how closely the mesh follows curved faces (Standard, the
+default, Fine or Finest, as in Save as Mesh); both are remembered for the next send. The list shows the slicers found on the computer with their
 icons; **Custom…** adds any other program to the top of the list (kept between runs; hover an entry
 you added and press Delete to remove it). On Linux only, a program whose desktop entry says it opens
 3MF or STL files is listed even if SolidCraft doesn't know it by name. Windows and macOS list the
@@ -86,6 +88,32 @@ browser. The link expires after 30 minutes, and you need to be signed in to Prin
 asks once before the first upload and remembers that you agreed. Nothing is uploaded unless you pick
 this row. SolidCraft isn't affiliated with Printables. Scripts use `file.open_in_easyprint`, which refuses unless it gets `consent: true`,
 and an AI agent's request to use it asks first.
+
+### Network folders
+
+A slicer on another computer, such as OrcaSlicer in a container on a home server, can read the
+files you send from a shared folder. Mount the share on this computer first (SMB or NFS, as your
+system does it), then choose **Network folder…** at the bottom of the Send to Slicer list. Give it a
+name, pick the folder with **Browse…**, and press **Test** to write a small file there and delete it
+again. **Add** keeps it in your preferences, never in the design, and it is listed at the top of
+the slicer list with a network icon, ready for the next send.
+
+Sending to a network folder starts no program. The file is written as for any slicer and copied
+into the folder under the design's name, and the body's after it when one body is sent
+(`Bracket - Arm.3mf`). A file that is already there is never replaced: the copy is numbered
+instead (`Bracket - Arm (2).3mf`). It is copied under a hidden name first and then given its
+name, so a slicer that watches the folder never reads half a file. The status line says where the
+file went, or why it couldn't go: the folder is not there (is the share mounted?), there is no
+permission to write, the disk is full, the file is larger than 1 GB, or the share did not answer
+within 30 seconds. A missing folder is never created, so nothing lands on this computer by mistake
+when a share is not mounted, and the file stays in your slicer folder either way.
+
+Hover a network folder in the list and press Delete to remove it, or change and remove them in
+**Preferences → General → Slicer**; the files already sent stay. The browser build has no network
+folders. Scripts and the control channel use `file.slicers.add_remote` (`name`, `folder`),
+`file.slicers.remove_remote` and `file.slicers.test` (`name` or `folder`); `file.slicers` lists the
+network folders first, with `remote: true`, and `file.send_to_slicer` or `file.save_mesh` take a
+network folder's name or id (`remote:<name>`) as their `slicer`. None of them opens a window.
 
 Files sent to a slicer go to a folder only you can
 read: `~/.cache/solidcraft/slicer` on Linux, `~/Library/Caches/SolidCraft/slicer` on macOS and
