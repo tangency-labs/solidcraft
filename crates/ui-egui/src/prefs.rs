@@ -1008,6 +1008,10 @@ preference_settings! {
     free_orbit_upright: bool = false, PAGE_NAVIGATION => check_tr("nav.free_orbit_upright.label");
     /// Off: a right drag that the mouse mapping would orbit leaves the camera alone (#6492).
     right_drag_orbits: bool = true, PAGE_NAVIGATION => check_tr("nav.right_drag_orbits.label");
+    /// A middle or right drag keeps the mode it started with until its button is released, as a
+    /// left drag with the mapping's keys does: letting go of Shift partway through a Shift+middle
+    /// orbit doesn't turn it into a pan (#9557). Off: the keys held decide on every frame, as before.
+    nav_drag_keeps_mode: bool = true, PAGE_NAVIGATION => check_tr("nav.drag_keeps_mode.label");
     /// View orientation widget: original signed axes (default) or compact cube.
     navigator_style: NavigatorStyle = NavigatorStyle::default(), PAGE_NAVIGATION;
     /// Show the radial ring and enable hold/flick gestures for viewport context menus.
