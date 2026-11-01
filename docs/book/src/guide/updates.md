@@ -130,7 +130,7 @@ and SolidCraft picks the one matching how it was installed:
 | `.tar.gz` | anywhere else on Linux | `solidcraft-<version>-linux-<arch>.tar.gz` | Unpack over the old copy |
 | Windows installer | under Program Files, or in the folder the installer recorded | `solidcraft-windows-<arch>.msi` | Run the installer |
 | Windows portable | `solidcraft-cli.exe` beside it | `solidcraft-windows-<arch>-portable.zip` | Unzip over the old copy |
-| Windows `.exe` | anywhere else on Windows | `SolidCraft-<version>-windows-x64.exe` | Replace the old `.exe` |
+| Windows `.exe` | anywhere else on Windows | `solidcraft-<version>-windows-x64.exe` | Replace the old `.exe` |
 | macOS | inside `SolidCraft.app` | `solidcraft-macos-universal.dmg` | Drag the new app to Applications |
 
 The window shows the command for Snap, `.deb` and `.rpm` installations, with a Copy button. The
