@@ -643,7 +643,7 @@ impl<'a> Panel<'a> {
     }
 
     /// The painted anchor also drives dragging, including the shell's edge clearance.
-    fn bounded_anchor(&self, ctx: &egui::Context) -> egui::Pos2 {
+    pub(crate) fn bounded_anchor(&self, ctx: &egui::Context) -> egui::Pos2 {
         let viewport = self.viewport;
         let gap = super::Container::new(ctx, super::Surface::Feature).gap();
         let width = self.width.min(viewport.width().max(0.0));
