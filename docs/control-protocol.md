@@ -521,7 +521,7 @@ One setting per line, sorted by name. A change that adds a setting adds its own 
 - `view_confirm_corner` (default false: while a dialog or a sketch is open, a check and a cross at the view's top right, handles `view:confirm:ok` and `view:confirm:cancel`, do what the dialog's OK and Cancel do, or Finish Sketch and Cancel Sketch; the axis view or cube moves down below them, #6709)
 - `viewport_theme` (`theme` (default: the theme's own), `light`, `dark`: the 3D view in the Light or Dark theme's colours whatever the window uses, #4146)
 - `wheel_zoom_speed` (0.25 to 4, default 1: how far each wheel step zooms; the 3D mouse keeps its own speed)
-- `window_system` (Linux: `auto` (default: XWayland whenever there is an X display, native Wayland on niri), `wayland`, `x11`; saved in `graphics.json`, applies at the next start; `SOLIDCRAFT_WAYLAND` overrides it)
+- `window_system` (Linux: `auto` (default: XWayland whenever there is an X display, native Wayland on niri and Hyprland), `wayland`, `x11`; saved in `graphics.json`, applies at the next start; `SOLIDCRAFT_WAYLAND` overrides it)
 - `zoom_reverse`
 - `zoom_stop_at_model` (default false: the 3D mouse and navigation bridge stop zoom at the surface in the middle of the view; drag-zoom holds its press point; independent of `zoom_to_cursor`)
 - `zoom_to_cursor`
