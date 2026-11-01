@@ -1,9 +1,9 @@
 [
-  {"note": "Help ▸ About ▸ Licences shows SolidCraft's licences and every third-party crate's, built into the program."},
+  {"note": "Help ▸ About ▸ Licenses shows SolidCraft's licenses and every third-party crate's, built into the program."},
   {"call": "ui.help", "params": {"item": "about"}},
-  {"widget": "Licences"},
-  {"expect": {"shown": "Third-party licences"}},
-  {"widget": "Third-party licences"},
-  {"expect": {"shown": "Copy all licences"}},
+  {"widget": "Licenses"},
+  {"expect": {"shown": "Third-party licenses"}},
+  {"widget": "Third-party licenses"},
+  {"expect": {"shown": "Copy all licenses"}},
   {"expect": {"shown": "Third-party software in SolidCraft"}}
 ]

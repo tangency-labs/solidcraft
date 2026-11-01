@@ -4,6 +4,10 @@
 //! appears in the application bar beside Report a bug; it opens a small window with the version,
 //! the release notes and Download, Skip this version and Remind me later.
 //!
+//! A launcher (ArtCraft Launcher) can manage this copy: `SOLIDCRAFT_MANAGED_BY=<its name>`, or its
+//! `installed.json` records this installation. The checks run as before, but the window only says
+//! to update SolidCraft in that launcher: no Update now, no AppImage replacement, no Download.
+//!
 //! The request is the only thing sent: no identifiers, no usage data. A short timeout keeps it
 //! from hanging, a failed check (offline, rate limited) stays silent and is retried later, and
 //! development builds never check. Turning off Preferences ▸ General ▸ Check for updates
@@ -25,14 +29,14 @@ use crate::theme::Tokens;
 use crate::ui_kit;
 
 /// The repository releases come from.
-pub const REPO: &str = "bherbruck/solidcraft";
+pub const REPO: &str = "tangency-labs/solidcraft";
 /// The one request an update check makes.
-pub const LATEST_API: &str = "https://api.github.com/repos/bherbruck/solidcraft/releases/latest";
+pub const LATEST_API: &str = "https://api.github.com/repos/tangency-labs/solidcraft/releases/latest";
 /// Where Download goes when no package fits this installation.
-pub const RELEASES_PAGE: &str = "https://github.com/bherbruck/solidcraft/releases/latest";
-/// Release pages and assets must be on GitHub, under this repository. The repository is moving
-/// to the `tangency-labs` organisation, so releases may name either owner (the API request stays
-/// on the old name, which GitHub redirects after a transfer).
+pub const RELEASES_PAGE: &str = "https://github.com/tangency-labs/solidcraft/releases/latest";
+/// Release pages and assets must be on GitHub, under this repository. The repository moved to the
+/// `tangency-labs` organisation, so releases may still name either owner (older releases and the
+/// links GitHub redirects keep the old one).
 const RELEASE_PREFIXES: [&str; 2] = ["https://github.com/bherbruck/solidcraft/releases/", "https://github.com/tangency-labs/solidcraft/releases/"];
 
 /// A release page or asset URL: github.com, one of the two owners, exactly `solidcraft`, then
@@ -51,12 +55,13 @@ pub const MANUAL_COOLDOWN_S: f64 = 30.0;
 pub const RETRY_AFTER_FAILURE_S: f64 = 3600.0;
 /// Caps on what a release response may hold (it comes from the network).
 const MAX_NOTES: usize = 64 * 1024;
+const MAX_RELEASE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_ASSETS: usize = 400;
 /// The room the Update pill's long label leaves for the document tabs.
 const TAB_ROOM: f32 = 300.0;
 
 /// The Linux app ID (Flatpak, desktop files).
-pub const APP_ID: &str = "ai.storyteller.solidcraft";
+pub const APP_ID: &str = "io.tangencylabs.solidcraft";
 
 /// Why a check failed. Automatic checks never show it; Check now does.
 #[derive(Clone, Debug, PartialEq)]
@@ -278,6 +283,113 @@ fn msi_install_dir() -> Option<PathBuf> {
     None
 }
 
+// ---- managed by a launcher --------------------------------------------------------------------
+
+/// Set by a launcher that installed and updates this copy; the value is its display name
+/// ("ArtCraft Launcher"). The window then points to it instead of replacing files itself.
+pub const MANAGED_ENV: &str = "SOLIDCRAFT_MANAGED_BY";
+
+/// The ArtCraft Launcher's name, shown when its install record (not the variable) says it manages this copy.
+const LAUNCHER_NAME: &str = "ArtCraft Launcher";
+
+/// The key the launcher files SolidCraft under in its `installed.json`.
+const LAUNCHER_APP_ID: &str = "solidcraft";
+
+/// The longest manager name shown (the variable is untrusted text).
+const MAX_MANAGER_NAME: usize = 64;
+
+/// A launcher's record file is a few KB; this is room for a hundred apps.
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_RECORD_FILE: u64 = 1 << 20;
+
+/// `a` is `b` or inside it. Slashes, a trailing separator and Windows' `\\?\` prefix don't count;
+/// case counts only where the file system ignores it.
+fn same_or_inside(a: &Path, b: &Path, ignore_case: bool) -> bool {
+    let norm = |p: &Path| {
+        let mut t = p.to_string_lossy().replace('\\', "/");
+        if ignore_case {
+            t = t.to_lowercase();
+        }
+        t.strip_prefix("//?/").map_or(t.clone(), str::to_string).trim_end_matches('/').to_string()
+    };
+    let (a, b) = (norm(a), norm(b));
+    // The bare root (`/`, `C:\`) would hold every install.
+    !b.is_empty() && !b.ends_with(':') && (a == b || a.strip_prefix(&b).is_some_and(|rest| rest.starts_with('/')))
+}
+
+/// Whether the launcher's `installed.json` (`bytes`) records this installation: its `solidcraft`
+/// entry's `path` (the exe, the AppImage, the `.app`, or the folder of an unpacked tarball) is one
+/// of `places` or contains one.
+pub fn record_matches(bytes: &[u8], places: &[PathBuf], ignore_case: bool) -> bool {
+    let Ok(json) = serde_json::from_slice::<Value>(bytes) else { return false };
+    let Some(path) = json.get("apps").and_then(|a| a.get(LAUNCHER_APP_ID)).and_then(|r| r.get("path")).and_then(Value::as_str) else {
+        return false;
+    };
+    // A relative path would claim whatever it is read against. (Not `Path::is_absolute`: a record
+    // written on Windows has to read as absolute everywhere the tests run.)
+    let absolute = path.starts_with(['/', '\\'])
+        || path.as_bytes().get(1..3).is_some_and(|d| d.first() == Some(&b':') && d.get(1).is_some_and(|c| matches!(c, b'/' | b'\\')));
+    absolute && places.iter().any(|p| same_or_inside(p, Path::new(path), ignore_case))
+}
+
+/// Where the launcher keeps `installed.json` for this user, as the launcher itself works it out
+/// (`<local data>/artcraft-launcher`, or `ArtCraft Launcher` on Windows and macOS).
+fn launcher_record_path(os: &str, env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let var = |k: &str| env(k).filter(|v| !v.trim().is_empty()).map(PathBuf::from);
+    let (base, dir) = match os {
+        "windows" => (var("LOCALAPPDATA")?, "ArtCraft Launcher"),
+        "macos" => (var("HOME")?.join("Library/Application Support"), "ArtCraft Launcher"),
+        _ => (var("XDG_DATA_HOME").or_else(|| var("HOME").map(|h| h.join(".local/share")))?, "artcraft-launcher"),
+    };
+    Some(base.join(dir).join("installed.json"))
+}
+
+/// What manages this copy, if anything: the variable's value, else "ArtCraft Launcher" when its
+/// install record names this installation. Read-only: nothing is written or created.
+/// `read` returns a file's bytes.
+pub fn managed_by(
+    os: &str,
+    env: &dyn Fn(&str) -> Option<String>,
+    exe: Option<&Path>,
+    kind: &InstallKind,
+    read: &dyn Fn(&Path) -> Option<Vec<u8>>,
+) -> Option<String> {
+    if let Some(name) = env(MANAGED_ENV) {
+        let name: String = name.chars().filter(|c| !c.is_control()).take(MAX_MANAGER_NAME).collect();
+        if !name.trim().is_empty() {
+            return Some(name.trim().to_string());
+        }
+    }
+    let mut places: Vec<PathBuf> = exe.map(Path::to_path_buf).into_iter().collect();
+    if let InstallKind::AppImage(p) | InstallKind::MacApp(p) = kind {
+        places.push(p.clone());
+    }
+    // The launcher runs an unpacked tarball with its own HOME, so the usual place is out of reach:
+    // `<launcher data>/apps/solidcraft/…` has the record two levels up.
+    let beside_apps = exe.into_iter().flat_map(Path::ancestors).find(|a| a.file_name().is_some_and(|n| n == "apps")).and_then(Path::parent);
+    let records = beside_apps.map(|d| d.join("installed.json")).into_iter().chain(launcher_record_path(os, env));
+    let ignore_case = matches!(os, "windows" | "macos");
+    records.filter_map(|path| read(&path)).any(|bytes| record_matches(&bytes, &places, ignore_case)).then(|| LAUNCHER_NAME.to_string())
+}
+
+/// This machine's manager, looked up once.
+#[cfg(not(target_arch = "wasm32"))]
+fn this_managed_by(kind: &InstallKind) -> Option<String> {
+    use std::io::Read;
+    let env = |k: &str| std::env::var(k).ok();
+    let read = |p: &Path| {
+        let mut bytes = Vec::new();
+        std::fs::File::open(p).ok()?.take(MAX_RECORD_FILE).read_to_end(&mut bytes).ok()?;
+        Some(bytes)
+    };
+    managed_by(std::env::consts::OS, &env, std::env::current_exe().ok().as_deref(), kind, &read)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn this_managed_by(_kind: &InstallKind) -> Option<String> {
+    None
+}
+
 impl InstallKind {
     /// The package manager updates it: Download isn't the way (the window shows the command).
     pub fn system_managed(&self) -> bool {
@@ -382,6 +494,9 @@ impl Release {
     /// A `releases/latest` answer. Drafts and prereleases are refused (GitHub never returns them
     /// there, but the answer comes from the network).
     pub fn parse(json: &[u8]) -> Result<Release, FetchError> {
+        if json.len() > MAX_RELEASE_BYTES {
+            return Err(FetchError::Failed("release response is too large".into()));
+        }
         let v: Value = serde_json::from_slice(json).map_err(|e| FetchError::Failed(format!("unexpected answer from GitHub: {e}")))?;
         let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
         if v.get("draft").and_then(Value::as_bool).unwrap_or(false) || v.get("prerelease").and_then(Value::as_bool).unwrap_or(false) {
@@ -525,6 +640,9 @@ pub enum Status {
 pub struct Updater {
     /// The installation, looked up at the first frame.
     pub kind: Option<InstallKind>,
+    /// What manages this copy (`SOLIDCRAFT_MANAGED_BY`, or a launcher's record), looked up with
+    /// the installation: Some(None) is "nothing does".
+    pub managed: Option<Option<String>>,
     pub status: Status,
     /// The newest release found (whether or not it is offered).
     pub release: Option<Release>,
@@ -553,6 +671,15 @@ impl Updater {
     /// The installation (looked up on first use).
     pub fn kind(&mut self) -> &InstallKind {
         self.kind.get_or_insert_with(this_install)
+    }
+
+    /// The launcher that updates this copy, if one does (looked up on first use).
+    pub fn managed_by(&mut self) -> Option<&str> {
+        if self.managed.is_none() {
+            let kind = self.kind().clone();
+            self.managed = Some(this_managed_by(&kind));
+        }
+        self.managed.as_ref()?.as_deref()
     }
 }
 
@@ -590,16 +717,32 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     poll(app);
     let now = unix_now();
     let launch = !app.updater.launch_checked;
-    if app.updater.rx.is_none() && app.preferences.check_updates && app.preferences.update.due(now, launch) && available(app) {
+    if app.updater.job.is_none()
+        && app.updater.rx.is_none()
+        && app.preferences.check_updates
+        && app.preferences.update.due(now, launch)
+        && available(app)
+    {
         app.updater.launch_checked = true;
         start(app, ctx, false);
     }
 }
 
-/// Check now (Preferences): ignores the daily interval, not GitHub's rate limit.
+/// Check now (Help or Preferences): show progress and the result, ignoring the daily interval,
+/// but not GitHub's rate limit. A check already in flight serves the manual request too.
 pub fn check_now(app: &mut SolveApp, ctx: &egui::Context) {
+    app.updater.open = true;
+    // Keep a download or a completed installation on screen without starting another check.
+    if app.updater.job.is_some() || app.updater.installed.as_ref().is_some_and(Result::is_ok) || !available(app) {
+        return;
+    }
+    if let Some((_, manual)) = &mut app.updater.rx {
+        *manual = true;
+        app.updater.last_manual = unix_now();
+        return;
+    }
     let now = unix_now();
-    if app.updater.rx.is_some() || now - app.updater.last_manual < MANUAL_COOLDOWN_S || !available(app) {
+    if now - app.updater.last_manual < MANUAL_COOLDOWN_S {
         return;
     }
     if now < app.preferences.update.rate_limited_until {
@@ -611,20 +754,29 @@ pub fn check_now(app: &mut SolveApp, ctx: &egui::Context) {
     start(app, ctx, true);
 }
 
+/// Fetch the same bounded feed for automatic checks and an explicit installation.
+fn fetch_latest(feed: Option<&Path>, http: Option<&HttpGet>) -> Result<Release, FetchError> {
+    use std::io::Read;
+    let body = match (feed, http) {
+        (Some(path), _) => {
+            let file = std::fs::File::open(path).map_err(|e| FetchError::Failed(e.to_string()))?;
+            let mut body = Vec::new();
+            file.take(MAX_RELEASE_BYTES as u64 + 1).read_to_end(&mut body).map_err(|e| FetchError::Failed(e.to_string()))?;
+            body
+        }
+        (None, Some(get)) => get(LATEST_API)?,
+        (None, None) => return Err(FetchError::Failed("no network client".into())),
+    };
+    Release::parse(&body)
+}
+
 fn start(app: &mut SolveApp, ctx: &egui::Context, manual: bool) {
     let (tx, rx) = std::sync::mpsc::channel();
     app.updater.status = Status::Checking;
     app.updater.rx = Some((rx, manual));
     let feed = app.updater.feed.clone();
     let http = app.services.http_get.clone();
-    let fetch = move || -> Result<Release, FetchError> {
-        let body = match (&feed, &http) {
-            (Some(path), _) => std::fs::read(path).map_err(|e| FetchError::Failed(format!("{}: {e}", path.display())))?,
-            (None, Some(get)) => get(LATEST_API)?,
-            (None, None) => return Err(FetchError::Failed("no network client".into())),
-        };
-        Release::parse(&body)
-    };
+    let fetch = move || fetch_latest(feed.as_deref(), http.as_ref());
     #[cfg(not(target_arch = "wasm32"))]
     {
         let ctx = ctx.clone();
@@ -632,9 +784,9 @@ fn start(app: &mut SolveApp, ctx: &egui::Context, manual: bool) {
             let _ = tx.send(fetch());
             ctx.request_repaint();
         });
-        if spawned.is_err() {
+        if let Err(error) = spawned {
             app.updater.rx = None;
-            app.updater.status = Status::Idle;
+            app.updater.status = if manual { Status::Failed(error.to_string()) } else { Status::Idle };
         }
     }
     #[cfg(target_arch = "wasm32")]
@@ -660,12 +812,14 @@ fn poll(app: &mut SolveApp) {
             let newer = is_newer(&release.tag, current_version());
             app.updater.status = if newer { Status::Idle } else { Status::UpToDate };
             if newer && manual {
-                // Asked for: show it even if it was skipped or put off.
+                // Asked for: offer it even if it was skipped or put off. check_now already
+                // opened the window; don't reopen it if the user closed it while checking.
                 app.preferences.update.skipped.clear();
                 app.preferences.update.remind_after = 0.0;
-                app.updater.open = true;
             }
-            app.updater.release = Some(release);
+            if app.updater.job.is_none() && app.updater.release.as_ref().is_none_or(|known| !is_newer(&known.tag, &release.tag)) {
+                app.updater.release = Some(release);
+            }
         }
         Err(e) => {
             log::info!("update check: {e}");
@@ -678,6 +832,10 @@ fn poll(app: &mut SolveApp) {
 
 /// How this installation updates in place, when the host can download (None: Download only).
 pub fn install_method(app: &mut SolveApp) -> Option<install::Method> {
+    // A launcher updates its copies itself: no Update now, no replacing the AppImage under it.
+    if app.updater.managed_by().is_some() {
+        return None;
+    }
     if app.services.http_get.is_none() || app.services.http_download.is_none() {
         return None;
     }
@@ -692,7 +850,7 @@ pub fn install_method(app: &mut SolveApp) -> Option<install::Method> {
     }
 }
 
-/// Download, verify and apply the release found (Update now).
+/// Re-check the feed, then download, verify and apply the newest release (Update now).
 pub fn start_install(app: &mut SolveApp, ctx: &egui::Context) {
     let (Some(release), Some(method), Some(get), Some(download)) =
         (app.updater.release.clone(), install_method(app), app.services.http_get.clone(), app.services.http_download.clone())
@@ -703,6 +861,7 @@ pub fn start_install(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let kind = app.updater.kind().clone();
+    let feed = app.updater.feed.clone();
     let progress = Arc::new(install::Progress::default());
     let (tx, rx) = std::sync::mpsc::channel();
     app.updater.installed = None;
@@ -711,7 +870,7 @@ pub fn start_install(app: &mut SolveApp, ctx: &egui::Context) {
     {
         let ctx = ctx.clone();
         let staging = std::env::temp_dir().join("solidcraft-update");
-        let net = install::Net { get, download };
+        let net = install::Net { get, download, feed };
         let spawned = std::thread::Builder::new().name("update-install".into()).spawn(move || {
             let result = install::run(&release, &kind, &method, std::env::consts::ARCH, &net, &staging, &progress);
             let _ = tx.send(result);
@@ -724,19 +883,29 @@ pub fn start_install(app: &mut SolveApp, ctx: &egui::Context) {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = (ctx, tx, release, method, get, download, kind);
+        let _ = (ctx, tx, release, method, get, download, kind, feed);
         app.updater.job = None;
     }
 }
 
 fn poll_install(app: &mut SolveApp) {
-    let Some((rx, _)) = &app.updater.job else { return };
-    let result = match rx.try_recv() {
+    let Some((rx, progress)) = &app.updater.job else { return };
+    let received = rx.try_recv();
+    if let Some((release, _)) = progress.selection() {
+        app.updater.release = Some(release);
+    }
+    let result = match received {
         Ok(r) => r,
         Err(TryRecvError::Empty) => return,
         Err(TryRecvError::Disconnected) => Err("the update stopped".into()),
     };
     app.updater.job = None;
+    // Cancel already cleared the job in the UI; ignore a late "cancelled" result so Offer returns
+    // without an error banner (#8908).
+    if matches!(&result, Err(e) if e == "cancelled" || e.contains("cancelled")) {
+        app.updater.installed = None;
+        return;
+    }
     match &result {
         Ok(install::Outcome::Installer(program, args)) => {
             // The installer replaces this program: start it once SolidCraft has closed. On
@@ -796,12 +965,17 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if !app.updater.open {
         return;
     }
-    let Some(release) = app.updater.release.clone() else {
-        app.updater.open = false;
+    if app.updater.job.is_none()
+        && !app.updater.installed.as_ref().is_some_and(Result::is_ok)
+        && (matches!(app.updater.status, Status::Checking | Status::Failed(_)) || offered_or_newer(app).is_none())
+    {
+        show_check_status(app, ctx);
         return;
-    };
+    }
+    let Some(release) = app.updater.release.clone() else { return };
     let kind = app.updater.kind().clone();
     let install = install_method(app);
+    let managed = app.updater.managed_by().map(str::to_string);
     let arch = std::env::consts::ARCH;
     let t = Tokens::get();
     let one_click = install.is_some() && !matches!(app.updater.installed, Some(Err(_)));
@@ -824,6 +998,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         State::Downloading => ("", crate::i18n::tr("ui.cancel"), None),
         State::Restart => (crate::i18n::tr("update.restart"), crate::i18n::tr("update.restart_later"), None),
         State::Started => ("", crate::i18n::tr("ui.close"), None),
+        // Managed: nothing here installs or downloads; the launcher does.
+        State::Offer if managed.is_some() => ("", crate::i18n::tr("update.later"), Some(crate::i18n::tr("update.skip"))),
         State::Offer => (primary, crate::i18n::tr("update.later"), Some(crate::i18n::tr("update.skip"))),
     };
     let id = egui::Id::new("sc_update");
@@ -843,7 +1019,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 });
             });
             let asset = release.asset_for(&kind, arch).map(|a| a.name.clone());
-            if let Some(cmd) = kind.update_command(asset.as_deref()) {
+            if let Some(manager) = &managed {
+                ui_kit::text(ui, &crate::i18n::format("update.managed", &[("manager", manager)]), ui_kit::Text::Report("managed", false));
+            } else if let Some(cmd) = kind.update_command(asset.as_deref()) {
                 let how = match kind {
                     InstallKind::Deb | InstallKind::Rpm | InstallKind::Snap { store: false } => "update.package_hint",
                     _ => "update.system_hint",
@@ -859,6 +1037,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
             match (&state, &app.updater.installed, &app.updater.job) {
                 (State::Downloading, _, Some((_, progress))) => {
+                    ui_kit::text(ui, &progress.message(), ui_kit::Text::Report("selection", false));
                     let done = progress.done.load(std::sync::atomic::Ordering::Relaxed);
                     let total = progress.total.load(std::sync::atomic::Ordering::Relaxed).max(1);
                     let mb = |b: u64| format!("{:.1}", b as f64 / 1_048_576.0);
@@ -926,12 +1105,43 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Some("restart") => restart(app),
         Some("close") => app.updater.open = false,
         Some("cancel_download") => {
-            if let Some((_, progress)) = &app.updater.job {
+            // Drop the job from the UI at once so Cancel leaves "Downloading" immediately; the
+            // worker still sees the flag and stops at the next feed/checksum/chunk check (#8908).
+            if let Some((_, progress)) = app.updater.job.take() {
                 progress.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
             }
+            app.updater.installed = None;
         }
         _ if closed => app.updater.open = false,
         _ => {}
+    }
+}
+
+/// Manual checks also have a visible result when no update can be offered.
+fn show_check_status(app: &mut SolveApp, ctx: &egui::Context) {
+    let (message, warning) = if !available(app) {
+        (crate::i18n::tr("update.check_unavailable").to_string(), false)
+    } else {
+        match &app.updater.status {
+            Status::Checking => (crate::i18n::tr("update.checking").to_string(), false),
+            Status::UpToDate => (crate::i18n::tr("update.up_to_date").to_string(), false),
+            Status::Failed(error) => (crate::i18n::format("update.failed", &[("error", error)]), true),
+            Status::Idle => (crate::i18n::tr("update.check_unavailable").to_string(), false),
+        }
+    };
+    let id = egui::Id::new("sc_update");
+    let (closed, action) = ui_kit::Window::new(id, "update", crate::i18n::tr("update.check_for_updates"))
+        .cards(1.7)
+        .actions("", crate::i18n::tr("ui.close"), None)
+        .show(ctx, true, |ui| {
+            ui_kit::text(ui, &message, ui_kit::Text::Report("check_status", warning));
+            ui_kit::text(ui, &crate::i18n::format("update.you_have", &[("version", current_version())]), ui_kit::Text::Note("have"));
+        });
+    if let Some(area) = ctx.memory(|m| m.area_rect(id)) {
+        crate::scenario::publish_rect("update:window", area);
+    }
+    if closed || action == ui_kit::Action::Cancel {
+        app.updater.open = false;
     }
 }
 
@@ -978,6 +1188,8 @@ pub fn prefs_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let note = if kind == InstallKind::Web {
         crate::i18n::tr("update.prefs_web").to_string()
+    } else if can && let Some(manager) = app.updater.managed_by().map(str::to_string) {
+        crate::i18n::format("update.prefs_managed", &[("version", current_version()), ("manager", &manager)])
     } else if can {
         crate::i18n::format("update.prefs_note", &[("version", current_version()), ("kind", kind.label())])
     } else if let InstallKind::Flatpak(id) = &kind {

@@ -75,12 +75,15 @@ fn designs() -> Vec<(String, Session)> {
             .unwrap()
             .flatten()
             .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|x| x == "solidcraft" || x == "json") && !p.to_string_lossy().ends_with(".expected.json"))
+            .filter(|p| {
+                (solidcraft_engine::io::is_design_container_path(p) || p.extension().is_some_and(|x| x == "json"))
+                    && !p.to_string_lossy().ends_with(".expected.json")
+            })
             .collect();
         files.sort();
         for p in files {
             let name = p.file_stem().unwrap_or_default().to_string_lossy().to_string();
-            let s = if p.extension().is_some_and(|x| x == "solidcraft") {
+            let s = if solidcraft_engine::io::is_design_container_path(&p) {
                 open(&p)
             } else {
                 let mut s = Session::default();
@@ -150,7 +153,7 @@ fn pi_case_faces_per_step_at_both_heights() {
     const FACES: [(usize, usize); 13] =
         [(2, 6), (3, 10), (4, 19), (5, 19), (6, 25), (7, 43), (8, 43), (9, 55), (10, 55), (11, 59), (12, 59), (13, 63), (14, 79)];
     let dir = scratch_dir("pi");
-    let design: Value = serde_json::from_slice(&std::fs::read(root().join("tests/action_matrix/designs/pi-case.solidcraft")).unwrap()).unwrap();
+    let design: Value = serde_json::from_slice(&std::fs::read(root().join("tests/action_matrix/designs/pi-case.sc")).unwrap()).unwrap();
     let at = |height: &str, file: &str| {
         let mut d = design.clone();
         for p in d["params"].as_array_mut().unwrap() {

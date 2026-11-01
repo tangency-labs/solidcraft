@@ -69,6 +69,29 @@ fn flange_follows_the_picks() {
     }
 }
 
+/// A click on the plate's bottom edge picks the edge, not the base flange's sketch line lying on
+/// it: the flange is an edge flange with a bend, not a flat contour wall (#6804).
+#[test]
+fn a_click_on_the_bottom_edge_makes_an_edge_flange() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.step(&json!({"call": "ui.view", "params": {"view": "front"}})).unwrap();
+    h.settle();
+    h.app.start("sheet.flange");
+    h.frames(3);
+    // The bottom edge lies on the sketch plane, under the sketch's line from (0, 0) to (100, 0).
+    let at = h.at(&json!({"world": [50, 0, 0]})).unwrap();
+    h.step(&json!({"click": at})).unwrap();
+    let items = h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
+    assert!(matches!(items.as_slice(), [Sel::Edge { point, .. }] if point.z.abs() < 1e-9 && point.y.abs() < 1e-9), "{items:?}");
+    let c = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(c[0].1["type"], "edge", "{:?}", c[0].1);
+}
+
 /// Hem takes edges and an optional gap; rules make and pick a rule with its expressions.
 #[test]
 fn hem_and_rules() {
@@ -168,6 +191,35 @@ fn shallow_pocket_overlay_labels_depth_without_drawing_a_through_void() {
         assert!(paths.iter().all(|p| p.fill == Color32::TRANSPARENT), "pockets must not be rendered as filled voids");
         let lines = output.shapes.iter().filter(|s| matches!(s.shape, egui::Shape::LineSegment { .. })).count();
         assert!(lines > 6, "pocket contours and legend use dashed lines, not through-cut strokes");
+    }
+}
+
+/// The Flat Pattern panel shows each side of the flat size, and the thickness, whole: on one row
+/// ("1250.00 mm × 1000.00 mm × 2.50 mm") the panel cut it off after the first side.
+#[test]
+fn flat_pattern_shows_each_side_of_the_flat_size_whole() {
+    for layout in ["docked", "floating"] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+        h.call("ui.set", json!({"layout": layout}));
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [1250, 1000]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+        h.app.start("sheet.flat_pattern");
+        h.frames(4);
+        let output = h.ctx.run_ui(egui::RawInput { screen_rect: Some(h.ctx.content_rect()), focused: true, ..Default::default() }, |ui| {
+            h.app.logic(ui.ctx());
+            h.app.ui(ui);
+        });
+        let texts: Vec<_> = crate::test_support::text_shapes(&output).collect();
+        for (label, value) in [("Flat size X", "1250.00 mm"), ("Flat size Y", "1000.00 mm"), ("Thickness", "2.50 mm")] {
+            assert!(texts.iter().any(|t| t.galley.text() == label), "{layout}: no {label} row");
+            let shown = texts.iter().find(|t| t.galley.job.text == value).unwrap_or_else(|| panic!("{layout}: {label} {value} not painted"));
+            assert!(!shown.galley.elided, "{layout}: {label} is cut off");
+        }
+        assert!(!texts.iter().any(|t| t.galley.text().contains('×')), "{layout}: the sides are no longer run together");
     }
 }
 
@@ -1341,5 +1393,25 @@ fn perforate_edit_restores_dimensions_pattern_and_target() {
     let params = &commands[0].1["params"];
     for (key, value) in [("body", body.as_str()), ("diameter", "4 mm"), ("pitch", "9 mm"), ("margin", "5 mm"), ("pattern", "square")] {
         assert_eq!(params[key], value, "{key} is restored");
+    }
+}
+
+#[test]
+fn flat_pattern_navigation_slots_hide_orbit_controls_and_keep_fit_home() {
+    let ctx = crate::fonts::test_context();
+    let mut app = flat_app("fusion", crate::shell::LayoutMode::Floating);
+    app.preferences.navigation_bar = serde_json::from_value(json!({
+        "slots":["orbit","spin","look_at","projection","visual_style","pan","zoom","fit","home","display"]
+    }))
+    .unwrap();
+    let mut time = 0.0;
+    crate::scenario::clear_handles();
+    frame(&mut app, &ctx, &mut time, egui::Modifiers::NONE, vec![]);
+    assert_eq!(crate::navigation_bar::canvas_caps(&app), crate::navigation::NavCaps { orbit: false, pick: false });
+    for slot in ["orbit", "spin", "look_at", "projection", "visual_style"] {
+        assert!(crate::scenario::handle_at(&format!("nav:slot:{slot}")).is_none(), "{slot}");
+    }
+    for slot in ["pan", "zoom", "fit", "home", "display"] {
+        assert!(crate::scenario::handle_at(&format!("nav:slot:{slot}")).is_some(), "{slot}");
     }
 }

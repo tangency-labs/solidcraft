@@ -3,6 +3,11 @@
 //! send the bodies to: it always asks, and pre-selects the slicer used last time. The list also has
 //! a plain text row for EasyPrint (`file.open_in_easyprint`), which works in a browser too.
 //!
+//! Send to Slicer also has a Print face input (#8429): it shows the print face of each body being
+//! sent, takes a flat face picked in the viewport as its body's print face (in place of the one it
+//! had), and clears a body's when its face is taken out. Each change runs `body.print_face` at
+//! once, so it undoes like any other.
+//!
 //! Every place that saves a mesh opens this dialog: File › Export STL / Export 3MF, the Mesh tab, and the
 //! Save As Mesh item of the body menus. The slicer list (Send to Slicer only) holds the programs the user added (kept
 //! between runs, newest first), then the slicers found on this machine, then "Custom…", which asks
@@ -19,8 +24,9 @@ use solidcraft_engine::slicers::{self, Slicer};
 
 use crate::SolveApp;
 use crate::dialogs::{Kind, form_row};
-use crate::selection::{BODIES, SelInput};
+use crate::selection::{BODIES, PLANAR_FACES, SelInput};
 use crate::theme::Tokens;
+use solidcraft_engine::Sel;
 
 /// The formats, as shown and as `file.save_mesh` names them.
 /// (label, `format` parameter, file extension).
@@ -46,6 +52,9 @@ pub struct SaveMesh {
     slicer: String,
     /// The slicer list has not been read for this opening yet.
     stale: bool,
+    /// Send to Slicer: the bodies and the print faces the Print face input last showed, to tell
+    /// a pick or a clear in it from a change of the bodies.
+    shown: Option<(Vec<String>, Vec<Sel>)>,
 }
 
 impl SaveMesh {
@@ -127,8 +136,12 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         _ => String::new(),
     };
     let quality = QUALITIES.iter().position(|q| q.1 == p.save_mesh_quality).unwrap_or(0);
-    let kind = Kind::SaveMesh(SaveMesh { format, quality, open, slicer, stale: true });
-    Some((kind, vec![SelInput::new("Bodies", BODIES, true)]))
+    let kind = Kind::SaveMesh(SaveMesh { format, quality, open, slicer, stale: true, shown: None });
+    let mut inputs = vec![SelInput::new("Bodies", BODIES, true)];
+    if open {
+        inputs.push(SelInput::new("Print face", PLANAR_FACES, true));
+    }
+    Some((kind, inputs))
 }
 
 /// Send to Slicer needs a way to start a program (a browser has none) or a way to reach EasyPrint.
@@ -302,8 +315,68 @@ fn paint_icon(ui: &egui::Ui, rect: egui::Rect, tex: Option<egui::TextureId>, nam
     }
 }
 
+/// Every body of the design, in model order; with `visible`, only the bodies the viewport shows.
+pub(crate) fn body_picks(app: &SolveApp, visible: bool) -> Vec<Sel> {
+    let st = app.session.world_state();
+    let shown = |name: &str| !visible || app.session.body_visible(name);
+    st.bodies.iter().filter(|b| shown(&b.name)).map(|b| Sel::Body { name: b.name.clone() }).collect()
+}
+
+/// Keep the Print face input and the design in step: it holds the print face of each body being
+/// sent. A face picked into it becomes the print face of its body, in place of the one it had; a
+/// face taken out of it clears its body's. When the bodies change, it shows their print faces.
+fn sync_print_face(app: &mut SolveApp, k: &mut SaveMesh, inputs: &mut [SelInput]) {
+    let bodies = crate::selection::items(inputs, 0).body_names();
+    let Some(input) = inputs.get_mut(1) else { return };
+    match k.shown.take() {
+        Some((shown_bodies, shown)) if shown_bodies == bodies && shown != input.items => {
+            let picked = input.items.clone();
+            // New faces first: a body picked anew keeps its new face, and is not then cleared
+            // because its old one has left the input.
+            let mut done: Vec<String> = Vec::new();
+            for face in picked.iter().filter(|f| !shown.contains(f)) {
+                let Sel::Face { body, .. } = face else { continue };
+                if !bodies.contains(body) {
+                    app.set_status(crate::i18n::tr("ui.print_face_body_not_sent"), true);
+                } else if !done.contains(body) {
+                    crate::print_face_ui::set(app, body, Some(face));
+                    done.push(body.clone());
+                }
+            }
+            for face in shown.iter().filter(|f| !picked.contains(f)) {
+                let Sel::Face { body, .. } = face else { continue };
+                if !done.contains(body) {
+                    crate::print_face_ui::set(app, body, None);
+                    done.push(body.clone());
+                }
+            }
+        }
+        Some(shown) if shown.0 == bodies => {
+            k.shown = Some(shown);
+            return;
+        }
+        _ => {}
+    }
+    let current: Vec<Sel> = bodies.iter().filter_map(|b| crate::print_face_ui::current(app, b)).collect();
+    input.items = current.clone();
+    k.shown = Some((bodies, current));
+}
+
 /// The rows after the Bodies input; true when Enter was pressed in a field.
-pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) -> bool {
+pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mut [SelInput]) -> bool {
+    if k.open {
+        sync_print_face(app, k, inputs);
+    }
+    // One row each: the two side by side do not fit the dialog's width.
+    for (label, visible) in [("Add all bodies", false), ("Add visible bodies", true)] {
+        form_row(ui, "", |ui| {
+            if crate::ui_kit::button(ui, crate::i18n::tr_label(label), crate::ui_kit::Button::Small).clicked()
+                && let Some(input) = inputs.first_mut()
+            {
+                input.items = body_picks(app, visible);
+            }
+        });
+    }
     if !k.open {
         choice_row(ui, "Format", "sm_format", &mut k.format, &FORMATS.map(|f| f.0));
         choice_row(ui, "Quality", "sm_quality", &mut k.quality, &QUALITIES.map(|q| q.0));
@@ -861,7 +934,7 @@ mod tests {
 
     #[test]
     fn send_to_slicer_asks_for_bodies_and_a_slicer_but_not_a_format() {
-        let k = SaveMesh { format: 0, quality: 0, open: true, slicer: "prusa".into(), stale: false };
+        let k = SaveMesh { format: 0, quality: 0, open: true, slicer: "prusa".into(), stale: false, shown: None };
         let mut input = SelInput::new("Bodies", BODIES, true);
         assert!(commands(&k, std::slice::from_ref(&input)).is_err());
         input.items = vec![Sel::Body { name: "Part".into() }];
@@ -880,10 +953,60 @@ mod tests {
     fn a_remembered_quality_goes_to_save_but_not_to_send() {
         let mut input = SelInput::new("Bodies", BODIES, true);
         input.items = vec![Sel::Body { name: "Part".into() }];
-        let k = SaveMesh { format: 0, quality: 2, open: true, slicer: "prusa".into(), stale: false };
+        let k = SaveMesh { format: 0, quality: 2, open: true, slicer: "prusa".into(), stale: false, shown: None };
         let (_, sent) = commands(&k, std::slice::from_ref(&input)).unwrap().remove(0);
         assert_eq!(sent.get("quality"), None, "sending has no quality row: the default applies");
         let (_, saved) = commands(&SaveMesh { open: false, ..k }, &[input]).unwrap().remove(0);
         assert_eq!(saved["quality"], "finest");
+    }
+
+    #[test]
+    fn the_print_face_input_takes_one_face_for_each_body_sent() {
+        let mut h = crate::scenario::Harness::new();
+        for (name, x) in [("One", 0), ("Two", 20)] {
+            h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new_body","body_name":name})).unwrap();
+        }
+        h.app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        h.app.start("file.send_to_slicer");
+        let all = body_picks(&h.app, false);
+        h.app.dialog.as_mut().unwrap().inputs[0].items = all;
+        h.settle();
+        // A click on the face of `body` at `point` in the Print face input; that face's index.
+        let pick = |h: &mut crate::scenario::Harness, body: &str, point: [f64; 3]| {
+            let p = solidcraft_engine::geom::Vec3::new(point[0], point[1], point[2]);
+            let index = solidcraft_engine::doc::appearance::face_index_at(h.app.session.world_state().body(body).unwrap(), p).unwrap();
+            let d = h.app.dialog.as_mut().unwrap();
+            d.active = 1;
+            d.pick(&h.app.session, Sel::Face { body: body.into(), index, point: p });
+            h.settle();
+            index
+        };
+        let shown = |h: &crate::scenario::Harness| h.app.dialog.as_ref().unwrap().inputs[1].items.len();
+        let one_bottom = pick(&mut h, "One", [5.0, 5.0, 0.0]);
+        let two_bottom = pick(&mut h, "Two", [25.0, 5.0, 0.0]);
+        assert!(crate::print_face_ui::is_print_face(&h.app, "One", one_bottom));
+        assert!(crate::print_face_ui::is_print_face(&h.app, "Two", two_bottom), "a second body takes its own face");
+        assert_eq!(shown(&h), 2);
+        // Another face of One takes the place of its first; Two keeps its own.
+        let one_top = pick(&mut h, "One", [5.0, 5.0, 10.0]);
+        assert!(crate::print_face_ui::is_print_face(&h.app, "One", one_top));
+        assert!(crate::print_face_ui::is_print_face(&h.app, "Two", two_bottom));
+        assert_eq!(shown(&h), 2);
+        // A click on a body's print face takes it out, and clears only that body's.
+        pick(&mut h, "One", [5.0, 5.0, 10.0]);
+        assert!(crate::print_face_ui::current(&h.app, "One").is_none());
+        assert!(crate::print_face_ui::is_print_face(&h.app, "Two", two_bottom));
+        assert_eq!(shown(&h), 1);
+        // Each change is a command of its own.
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert!(crate::print_face_ui::is_print_face(&h.app, "One", one_top));
+        // With Two alone sent, the input shows its face; a face of One, not sent, is refused.
+        h.app.dialog.as_mut().unwrap().inputs[0].items = vec![Sel::Body { name: "Two".into() }];
+        h.settle();
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[1].items.len(), 1);
+        pick(&mut h, "One", [5.0, 5.0, 0.0]);
+        assert!(crate::print_face_ui::is_print_face(&h.app, "One", one_top), "One is not being sent: its print face stays");
+        assert!(matches!(&h.app.status, Some((_, _, true))));
+        assert_eq!(shown(&h), 1);
     }
 }

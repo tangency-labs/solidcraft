@@ -172,6 +172,39 @@ fn two_point_circle_takes_a_typed_diameter() {
     assert!((c - dir * 15.0).len() < 1e-6, "{c:?}");
 }
 
+/// #10279: the Ellipse tool shows a Major radius box after the centre and a Minor radius box after
+/// the end of the major axis. The typed values size the ellipse and become its two dimensions,
+/// the major radius one kept from the first stage.
+#[test]
+fn an_ellipse_takes_a_typed_major_and_minor_radius() {
+    use solidcraft_engine::doc::expr::Kind;
+    use solidcraft_engine::sketch::CurveKind;
+    let labels = |h: &Harness| h.app.tool.as_ref().unwrap().dims.iter().map(|b| b.label).collect::<Vec<_>>();
+    let mut h = drawing("sketch.ellipse");
+    assert_eq!(labels(&h), ["Major radius"]);
+    type_value(&mut h, "25");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.step(&json!({"move": {"world": [0, 30, 0]}})).unwrap();
+    assert_eq!(labels(&h), ["Minor radius"]);
+    assert_focus(&h, 0);
+    type_value(&mut h, "8");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    let state = h.app.session.world_state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status);
+    let CurveKind::Ellipse { c, m, r } = sk.curves[0].kind.clone() else { panic!("{:?}", sk.curves[0].kind) };
+    let (c, m) = (sk.point(c).unwrap(), sk.point(m).unwrap());
+    // From the centre (the origin) toward the cursor at (20, 10).
+    let dir = solidcraft_engine::geom::Vec2::new(20.0, 10.0).normalized().unwrap();
+    assert!(c.len() < 1e-6 && (m - dir * 25.0).len() < 1e-6, "{c:?} {m:?}");
+    assert!((r - 8.0).abs() < 1e-6, "{r}");
+    let doc = &h.app.session.doc;
+    let mut sizes: Vec<f64> = doc.params.iter().filter(|p| p.model).filter_map(|p| doc.eval(&p.name, Kind::Length).ok()).collect();
+    sizes.sort_by(f64::total_cmp);
+    assert_eq!(sizes.len(), 2, "{sizes:?}");
+    assert!((sizes[0] - 8.0).abs() < 1e-6 && (sizes[1] - 25.0).abs() < 1e-6, "{sizes:?}");
+}
+
 #[test]
 fn inch_live_lengths_use_design_units_and_typed_four_digits_commit_in_inches() {
     let mut h = Harness::new();
@@ -296,6 +329,119 @@ fn rounded_rectangle_clicks_use_a_default_radius() {
     let r: f64 = 0.2 * 20.0;
     let want = w * hh - (4.0 - std::f64::consts::PI) * r * r;
     assert!((sketch.profiles[0].area - want).abs() < 0.05 * want, "area {} want about {want}", sketch.profiles[0].area);
+}
+
+/// "Dimension new shapes" (Preferences › Sketch) is off by default: shapes drawn by clicks get no
+/// dimensions. On, every size of the shape is dimensioned at its size as drawn, in the same undo
+/// step as the shape.
+#[test]
+fn dimension_new_shapes_dimensions_every_size_only_when_on() {
+    use solidcraft_engine::doc::expr::Kind;
+    let dimensions = |h: &Harness| -> Vec<f64> {
+        let doc = &h.app.session.doc;
+        let mut values: Vec<f64> = doc.params.iter().filter(|p| p.model).filter_map(|p| doc.eval(&p.name, Kind::Length).ok()).collect();
+        values.sort_by(f64::total_cmp);
+        values
+    };
+    let rectangle = |h: &mut Harness| {
+        h.step(&json!({"start": "sketch.rectangle.two_point"})).unwrap();
+        h.step(&json!({"click": {"sketch": [0, 0]}})).unwrap();
+        h.step(&json!({"click": {"sketch": [40, 20]}})).unwrap();
+    };
+
+    let mut h = Harness::new();
+    assert!(!h.app.preferences.sketch_auto_dimensions, "Dimension new shapes is on by default");
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    rectangle(&mut h);
+    assert!(dimensions(&h).is_empty(), "off, yet the rectangle has dimensions {:?}", dimensions(&h));
+
+    let mut h = Harness::new();
+    h.app.preferences.sketch_auto_dimensions = true;
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    rectangle(&mut h);
+    let sizes = dimensions(&h);
+    assert_eq!(sizes.len(), 2, "width and height: {sizes:?} {:?}", h.app.status);
+    assert!((sizes[0] - 20.0).abs() < 0.5 && (sizes[1] - 40.0).abs() < 0.5, "{sizes:?}");
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.step(&json!({"start": "sketch.circle.center"})).unwrap();
+    h.step(&json!({"click": {"sketch": [70, 10]}})).unwrap();
+    h.step(&json!({"click": {"sketch": [80, 10]}})).unwrap();
+    assert_eq!(dimensions(&h).len(), 3, "the circle's diameter joins: {:?} {:?}", dimensions(&h), h.app.status);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(dimensions(&h).len(), 2, "one undo removes the circle with its dimension");
+}
+
+/// "Also place them from the origin" finishes the job: a rectangle drawn away from the origin
+/// gets its width, height and place, and the sketch is fully constrained. On its own (without
+/// "Dimension new shapes") it does nothing.
+#[test]
+fn place_from_the_origin_fully_constrains_new_shapes() {
+    let draw = |dimension: bool, locate: bool| -> (usize, u64) {
+        let mut h = Harness::new();
+        assert!(!h.app.preferences.sketch_auto_locate, "Also place them from the origin is on by default");
+        h.app.preferences.sketch_auto_dimensions = dimension;
+        h.app.preferences.sketch_auto_locate = locate;
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.step(&json!({"start": "sketch.rectangle.two_point"})).unwrap();
+        h.step(&json!({"click": {"sketch": [10, 10]}})).unwrap();
+        h.step(&json!({"click": {"sketch": [50, 30]}})).unwrap();
+        let dimensions = h.app.session.doc.params.iter().filter(|p| p.model).count();
+        let dof = h.app.run("sketch.solve", json!({})).unwrap()["dof"].as_u64().unwrap();
+        (dimensions, dof)
+    };
+    assert_eq!(draw(true, true), (4, 0), "width, height and two distances from the origin");
+    assert_eq!(draw(true, false), (2, 2), "sizes only: the rectangle can still move");
+    assert_eq!(draw(false, true), (0, 4), "placing needs Dimension new shapes");
+}
+
+/// A line ended on a spline, between its fit points (#9321): the cursor snaps On the spline as it
+/// does on a line or a circle, and the click ties the end to the spline.
+#[test]
+fn a_line_end_on_a_spline_snaps_on_it_and_stays_on_it() {
+    use solidcraft_engine::sketch::{ConstraintKind, CurveKind};
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.spline.fit_point", json!({"points": [[-30, 0], [-10, 18], [10, 6], [30, 20]]})).unwrap();
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    let (spline, on) = {
+        let st = h.app.session.world_state();
+        let sk = &st.sketch(sid).unwrap().sketch;
+        let ci = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Spline { .. })).unwrap();
+        let poly = sk.polyline(ci);
+        // Partway along the spline, away from its fit points.
+        let w = poly.len() * 3 / 8;
+        (ci, (poly[w] + poly[w + 1]) * 0.5)
+    };
+    h.step(&json!({"start": "sketch.line"})).unwrap();
+    h.step(&json!({"click": {"world": [0, -25, 0]}})).unwrap();
+    h.step(&json!({"move": {"world": [on.x, on.y, 0]}})).unwrap();
+    let hover = h.app.tool.as_ref().unwrap().hover.clone().unwrap();
+    assert!(hover.1.as_deref().is_some_and(|s| s.starts_with("on:")), "{hover:?}");
+    h.step(&json!({"click": {"world": [on.x, on.y, 0]}})).unwrap();
+    let st = h.app.session.world_state();
+    let sk = &st.sketch(sid).unwrap().sketch;
+    let b = sk
+        .curves
+        .iter()
+        .find_map(|c| if let CurveKind::Line { b, .. } = c.kind { Some(b) } else { None })
+        .unwrap_or_else(|| panic!("no line, {:?}", h.app.status));
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::PointOnCurve { p, c } if p == b && c == spline)),
+        "the end is not tied to the spline: {:?}",
+        sk.constraints
+    );
+    let end = sk.point(b).unwrap();
+    let to_segment = |a: solidcraft_engine::geom::Vec2, b: solidcraft_engine::geom::Vec2| {
+        let ab = b - a;
+        let t = ((end - a).dot(ab) / ab.len2().max(1e-300)).clamp(0.0, 1.0);
+        (a + ab * t).dist(end)
+    };
+    // The constraint puts the end on the spline itself; the polyline it is drawn with lies within
+    // a few µm of it between its samples.
+    let off = sk.polyline(spline).windows(2).map(|w| to_segment(w[0], w[1])).fold(f64::MAX, f64::min);
+    assert!(off < 0.02, "the end is {off} mm off the spline at {end:?}");
+    assert!(end.dist(on) < 0.5, "the end moved from the cursor {on:?} to {end:?}");
 }
 
 /// A line from a circle's centre to the circle, ending a little off the quadrant: the preview
@@ -453,4 +599,202 @@ fn value_boxes_stay_in_view_and_off_the_cursor() {
     // No room on either side: inside the view all the same.
     let tiny = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(80.0, 30.0));
     assert!(tiny.contains_rect(egui::Rect::from_min_size(in_view(egui::pos2(-200.0, -200.0), Some(tiny), Some(egui::pos2(40.0, 15.0))), BOX)));
+}
+
+#[test]
+fn polygon_inputs_clear_each_other_and_the_preview() {
+    for command in ["sketch.polygon.inscribed", "sketch.polygon.circumscribed"] {
+        for (view, corner) in [("top", false), ("iso", false), ("top", true)] {
+            let mut h = Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.call("ui.view", json!({"view":view}));
+            h.step(&json!({"start":command})).unwrap();
+            if corner {
+                let view = h.app.viewport.layout.as_ref().unwrap().drawable.shrink(20.0);
+                let center = view.left_top();
+                let end = center + egui::vec2(16.0, 0.0);
+                h.step(&json!({"click":[center.x,center.y]})).unwrap();
+                h.step(&json!({"move":[end.x,end.y],"alt":true})).unwrap();
+            } else {
+                h.step(&json!({"click":{"sketch":[0,0]}})).unwrap();
+                h.step(&json!({"move":{"sketch":[2,0]},"alt":true})).unwrap();
+            }
+            h.frames(3);
+            let boxes: Vec<_> = (0..2usize)
+                .map(|i| {
+                    h.ctx
+                        .memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", i))))
+                        .unwrap_or_else(|| panic!("{command}, {view}, {corner:?}: input {i} missing"))
+                })
+                .collect();
+            assert!(!boxes[0].intersects(boxes[1]), "{command}: inputs overlap: {boxes:?}");
+            let tool = h.app.tool.as_ref().unwrap();
+            let end = crate::sketch_dims::shown(&h.app, tool, tool.hover.as_ref().unwrap());
+            let outline = crate::tools::polygon_outline(tool, end, 6.0).unwrap();
+            let state = h.app.session.world_state();
+            let plane = state.sketch(h.app.session.active_sketch.unwrap()).unwrap().plane;
+            let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+            let points: Vec<_> = outline.iter().map(|p| proj.to_screen(plane.to_world(*p)).unwrap()).collect();
+            let bounds = egui::Rect::from_points(&points);
+            for rect in boxes {
+                assert!(!rect.intersects(bounds), "{command}: input {rect:?} covers polygon {bounds:?}");
+                assert!(h.app.viewport.layout.as_ref().unwrap().drawable.contains_rect(rect));
+            }
+            assert_focus(&h, 0);
+            type_value(&mut h, "2");
+            tab(&mut h, false);
+            assert_focus(&h, 1);
+            type_value(&mut h, "6");
+            h.step(&json!({"key":"Enter"})).unwrap();
+            let state = h.app.session.world_state();
+            let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+            assert_eq!(sketch.sketch.curves.iter().filter(|c| !c.construction).count(), 6);
+            assert_eq!(sketch.profiles.len(), 1);
+            let expected = if command == "sketch.polygon.inscribed" { 6.0 * 3f64.sqrt() } else { 8.0 * 3f64.sqrt() };
+            assert!((sketch.profiles[0].area - expected).abs() < 1e-6, "{command}: {}", sketch.profiles[0].area);
+        }
+    }
+}
+
+/// `name = expression` in a value box, as in the Dimension tool's: the shape takes the
+/// expression's size while it is typed and when placed, and the new parameter `name` drives its
+/// dimension (#7567).
+#[test]
+fn a_box_typed_name_equals_value_defines_the_parameter_driving_the_dimension() {
+    let mut h = drawing("sketch.circle.center");
+    type_value(&mut h, "width=20");
+    let tool = h.app.tool.as_ref().unwrap();
+    assert_eq!(crate::sketch_dims::locked_value(&h.app, tool, "Diameter"), Some(20.0), "the preview follows the typed size");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    let state = h.app.session.world_state();
+    let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status);
+    assert!(sk.radius(0).is_some_and(|r| (r - 10.0).abs() < 1e-6), "{:?}", sk.radius(0));
+    let width = h.app.session.doc.param("width").expect("the parameter is defined");
+    assert_eq!((width.expr.as_str(), width.unit.as_str(), width.model), ("20", "mm", false));
+    let dimension = sk.constraints.iter().find_map(|c| c.param.as_deref()).expect("a driving dimension");
+    assert_eq!(h.app.session.doc.param(dimension).unwrap().expr, "width");
+    assert_eq!(h.app.status.as_ref().map(|(text, _, error)| (text.as_str(), *error)), Some(("Parameter `width` defined", false)));
+
+    // In an inch design the right-hand side is in inches, while typing too.
+    let mut h = Harness::new();
+    h.app.run("document.units", json!({"units":"in"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.step(&json!({"start":"sketch.rectangle.two_point"})).unwrap();
+    h.step(&json!({"click":{"world":[0,0,0]}})).unwrap();
+    h.step(&json!({"move":{"world":[25.4,12.7,0]}})).unwrap();
+    type_value(&mut h, "#w = 2");
+    tab(&mut h, false);
+    type_value(&mut h, "h = 1");
+    let tool = h.app.tool.as_ref().unwrap();
+    assert!((crate::sketch_dims::locked_value(&h.app, tool, "Width").unwrap() - 50.8).abs() < 1e-6);
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert_eq!(h.app.session.doc.param("w").map(|p| p.unit.as_str()), Some("in"), "{:?}", h.app.status);
+    assert!(h.app.session.doc.param("h").is_some());
+    assert_eq!(h.app.status.as_ref().map(|(text, _, _)| text.as_str()), Some("Parameters `h`, `w` defined"));
+}
+
+/// #8899: after a centre-point circle is placed, another circle started on the same centre must
+/// keep its Diameter field after the button is released. A press places the centre for
+/// drag-to-draw (#1630); releasing on that same centre (a click, or a drag that ends there)
+/// must not clear the Diameter box (#2448 / #8899).
+#[test]
+fn a_second_circle_on_the_same_centre_keeps_its_diameter_box_after_release() {
+    for (label, drive) in [("short-drag", "short"), ("zero-move", "zero"), ("click", "click")] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.app.cam.distance = 120.0;
+        h.settle();
+        h.app.run("sketch.circle.center", json!({"center": [0, 0], "radius": 10})).unwrap();
+        h.settle();
+        h.step(&json!({"start": "sketch.circle.center"})).unwrap();
+
+        let p = h.call("ui.at", json!({"sketch": [0.0, 0.0]}))["result"].clone();
+        let (x, y) = (p[0].as_f64().unwrap(), p[1].as_f64().unwrap());
+        match drive {
+            "short" => {
+                h.call("ui.drag", json!({"x0": x - 12.0, "y0": y, "x1": x, "y1": y, "steps": 4}));
+            }
+            "zero" => {
+                h.call("ui.drag", json!({"x0": x, "y0": y, "x1": x, "y1": y, "steps": 1, "hold": 5}));
+            }
+            _ => {
+                h.call("ui.click", json!({"x": x, "y": y}));
+            }
+        }
+        h.settle();
+
+        let tool = h.app.tool.as_ref().unwrap_or_else(|| panic!("{label}: tool ended; status={:?}", h.app.status));
+        assert_eq!(tool.pts.len(), 1, "{label}: pts={:?} status={:?}", tool.pts, h.app.status);
+        assert_eq!(
+            tool.dims.iter().map(|d| d.label).collect::<Vec<_>>(),
+            ["Diameter"],
+            "{label}: dims={:?} hover={:?} status={:?}",
+            tool.dims,
+            tool.hover,
+            h.app.status
+        );
+        assert!(
+            h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", 0usize)))).is_some(),
+            "{label}: Diameter field missing; focused={:?} hover={:?}",
+            h.ctx.memory(|m| m.focused()),
+            tool.hover
+        );
+        let state = h.app.session.world_state();
+        let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        assert_eq!(sk.curves.len(), 1, "{label}: unexpected curves {}", sk.curves.len());
+    }
+}
+
+/// #8899: same as above, but the first circle was drawn with a typed Diameter (so egui's text
+/// edit for `sc_dim` still has state when the second centre is placed).
+#[test]
+fn a_typed_first_circle_then_same_centre_keeps_the_diameter_box() {
+    let mut h = drawing("sketch.circle.center");
+    type_value(&mut h, "20");
+    h.step(&json!({"key": "Enter"})).unwrap();
+    assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.circle.center"));
+    assert!(h.app.tool.as_ref().unwrap().pts.is_empty());
+
+    let p = h.call("ui.at", json!({"sketch": [0.0, 0.0]}))["result"].clone();
+    let (x, y) = (p[0].as_f64().unwrap(), p[1].as_f64().unwrap());
+    h.call("ui.drag", json!({"x0": x, "y0": y, "x1": x, "y1": y, "steps": 1, "hold": 8}));
+    h.settle();
+    // Do not move away: the Diameter field must remain with the keyboard at the shared centre.
+    let tool = h.app.tool.as_ref().expect("tool");
+    assert_eq!(tool.pts.len(), 1, "pts={:?} status={:?}", tool.pts, h.app.status);
+    assert_eq!(tool.dims.iter().map(|d| d.label).collect::<Vec<_>>(), ["Diameter"]);
+    assert!(
+        h.ctx.memory(|m| m.area_rect(egui::Id::new(("sc_dim_area", 0usize)))).is_some(),
+        "Diameter field gone; focused={:?} hover={:?} dims={:?}",
+        h.ctx.memory(|m| m.focused()),
+        tool.hover,
+        tool.dims
+    );
+    assert_focus(&h, 0);
+}
+
+/// A box that is not a dimension (a polygon's sides, a rounded rectangle's corner radius) has
+/// nothing for a parameter to drive: `name = ...` there is refused, not quietly dropped.
+#[test]
+fn a_definition_in_a_box_that_is_not_a_dimension_is_refused() {
+    for (command, tabs, text, says) in [
+        ("sketch.polygon.inscribed", 1, "n = 6", "Sides: only a box that becomes a dimension can define `n`"),
+        ("sketch.rectangle.rounded", 2, "r = 2", "Radius: only a box that becomes a dimension can define `r`"),
+        ("sketch.circle.center", 0, "w =", "Diameter: `w =` needs a value after the `=`"),
+    ] {
+        let mut h = drawing(command);
+        for _ in 0..tabs {
+            tab(&mut h, false);
+        }
+        type_value(&mut h, text);
+        h.step(&json!({"key": "Enter"})).unwrap();
+        let state = h.app.session.world_state();
+        let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        assert!(sk.curves.is_empty(), "{command} {text}: placed {:?}", h.app.status);
+        assert!(h.app.session.doc.params.iter().all(|p| p.model), "{command} {text}: no user parameter");
+        let status = h.app.status.as_ref().expect("the refusal is reported");
+        assert!(status.2 && status.0.starts_with(says), "{command} {text}: {status:?}");
+        assert_eq!(h.app.tool.as_ref().unwrap().pts.len(), 1, "{command} {text}: the first point stays down");
+    }
 }

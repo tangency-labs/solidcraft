@@ -11,6 +11,7 @@ use solidcraft_render::{
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct Start {
+    studio_weights: Option<[f64; 3]>,
     progressive: bool,
     denoise: bool,
     samples: Option<u32>,
@@ -46,6 +47,7 @@ impl Default for EnvironmentRequest {
 #[derive(Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct ProgressiveStart {
+    studio_weights: Option<[f64; 3]>,
     aging: solidcraft_doc::render_aging::SavedAgingStack,
     #[serde(default)]
     nested_media: bool,
@@ -159,7 +161,7 @@ fn normalize_saved_job(s: &Session, params: &Value, command: &str) -> Result<Opt
     } else {
         return Ok(None);
     };
-    if let Some(key) = object.keys().find(|key| !matches!(key.as_str(), "setup" | "settings" | "replace")) {
+    if let Some(key) = object.keys().find(|key| !matches!(key.as_str(), "setup" | "settings" | "replace" | "studio_weights")) {
         return Err(bad(
             command,
             format!(
@@ -198,6 +200,9 @@ fn normalize_saved_job(s: &Session, params: &Value, command: &str) -> Result<Opt
         }
     };
     lowered["settings"] = serde_json::to_value(settings).map_err(|e| bad(command, e.to_string()))?;
+    if let Some(weights) = object.get("studio_weights") {
+        lowered["studio_weights"] = weights.clone();
+    }
     if let Some(replace) = object.get("replace") {
         lowered["replace"] = replace.clone();
     }
@@ -237,6 +242,10 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
         ));
     }
     let mut input: Start = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    validate_studio_weights(input.studio_weights, command)?;
+    if input.integrator == Integrator::Raytrace && input.studio_weights.is_some() {
+        return Err(bad(command, "studio_weights apply to raster or the implicit GPU studio; use explicit CPU light intensities"));
+    }
     if input.progressive {
         return prepare_progressive(s, params, command, false, None, None, None);
     }
@@ -399,6 +408,7 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
         return Err(bad(command, "resolved executor is not installed as an image job host"));
     }
     let request = ImageRequest {
+        studio_weights: validate_studio_weights(input.studio_weights, command)?,
         environment: None,
         textures: None,
         integrator: input.integrator,
@@ -455,6 +465,10 @@ fn prepare_progressive(
         return Err(bad(command, "progressive rendering does not accept CPU raytrace, environment or LED options"));
     }
     let mut input: ProgressiveStart = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    validate_studio_weights(input.studio_weights, command)?;
+    if input.studio_weights.is_some() && (input.lighting.is_some() || input.environment.is_some() || saved_hdr.is_some()) {
+        return Err(bad(command, "studio_weights require the implicit GPU studio without environment lighting"));
+    }
     if input.integrator != Integrator::Raster || !input.progressive {
         return Err(bad(command, "progressive rendering requires the registered GPU request method"));
     }
@@ -601,6 +615,7 @@ fn prepare_progressive(
         return Err(bad(command, "image host is unavailable"));
     }
     let request = ImageRequest {
+        studio_weights: validate_studio_weights(input.studio_weights, command)?,
         integrator: Default::default(),
         raytrace: None,
         environment,
@@ -706,6 +721,22 @@ pub(super) fn pin(s: &mut Session, params: &Value) -> Result<Value> {
     Ok(json!({"frame":s.render_jobs.pin(input.job).map_err(job_error)?}))
 }
 
+pub(super) fn copy(s: &mut Session, params: &Value) -> Result<Value> {
+    let input: Job = serde_json::from_value(params.clone()).map_err(|e| bad("render.result.copy", e.to_string()))?;
+    let frame = s
+        .render_jobs
+        .handle(input.job)
+        .map_err(job_error)?
+        .frame()
+        .map_err(job_error)?
+        .ok_or_else(|| bad("render.result.copy", "render has no completed image"))?;
+    let size = (u64::from(frame.info.width), u64::from(frame.info.height));
+    if solidcraft_render::RenderLimits::default().fit(size.0, size.1, None) != Some(size) {
+        return Err(bad("render.result.copy", "clipboard image exceeds 4096 per side or 4194304 pixels; export the PNG instead"));
+    }
+    Ok(json!({"frame":frame.info}))
+}
+
 pub(super) fn cancel(s: &mut Session, params: &Value) -> Result<Value> {
     let input: Job = serde_json::from_value(params.clone()).map_err(|e| bad("render.cancel", e.to_string()))?;
     let status = s.render_jobs.status(input.job).map_err(job_error)?;
@@ -768,4 +799,11 @@ pub(super) fn export(s: &mut Session, params: &Value) -> Result<Value> {
     Ok(
         json!({"job":input.job,"path":input.path,"bytes":bytes.len(),"format":input.format.extension(),"encoding":if input.format==ExportFormat::Exr {"scene_linear_srgb_d65"} else {"srgb"},"alpha":if input.format==ExportFormat::Exr {"coverage_premultiplied"} else {"straight"},"frame":frame.info,"linear_master":frame.linear_master_info(),"presentation":frame.presentation()}),
     )
+}
+
+fn validate_studio_weights(weights: Option<[f64; 3]>, command: &str) -> Result<Option<[f64; 3]>> {
+    if weights.is_some_and(|weights| weights.iter().any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))) {
+        return Err(bad(command, "studio visibility weights must be finite in 0..1"));
+    }
+    Ok(weights)
 }

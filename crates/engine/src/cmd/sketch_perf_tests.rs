@@ -83,3 +83,78 @@ fn sketch_perf() {
         );
     }
 }
+
+/// Fill sketch `id` with `n` constrained rectangles, each with a circle inside.
+fn fill(doc: &mut solidcraft_doc::Document, id: u64, n: usize, x0: f64) {
+    use solidcraft_geom::Vec2;
+    use solidcraft_sketch::ConstraintKind::*;
+    let Ok(sk) = doc.sketch_mut(id) else { return };
+    for k in 0..n {
+        let (x, y) = (x0 + k as f64 * 30.0, 0.0);
+        let p: Vec<usize> = [(0.0, 0.0), (20.0, 0.3), (20.2, 15.0), (-0.1, 15.1)]
+            .iter()
+            .map(|(dx, dy)| sk.add_point(Vec2::new(x + dx, y + dy), None).unwrap())
+            .collect();
+        let l: Vec<usize> = (0..4).map(|i| sk.add_line_pts(p[i], p[(i + 1) % 4], None).unwrap()).collect();
+        sk.add_constraint(Horizontal { l: l[0] }, None).unwrap();
+        sk.add_constraint(Horizontal { l: l[2] }, None).unwrap();
+        sk.add_constraint(Vertical { l: l[1] }, None).unwrap();
+        sk.add_constraint(Vertical { l: l[3] }, None).unwrap();
+        sk.add_constraint(Length { l: l[0], value: 20.0 }, None).unwrap();
+        sk.add_constraint(Length { l: l[1], value: 15.0 }, None).unwrap();
+        sk.add_circle(Vec2::new(x + 10.0, y + 7.5), 3.0, None, None).unwrap();
+    }
+}
+
+/// A large design (`sketches` sketches of `rects` rectangles, `params` parameters), the first
+/// sketch (`first` rectangles) open for editing; per live drag frame: execute time and the
+/// time of one copy of the document.
+#[test]
+#[ignore]
+fn sketch_drag_frame_perf() {
+    let cases: [(usize, usize, usize, usize); 3] = [(50, 10, 200, 2), (200, 20, 500, 2), (200, 20, 500, 50)];
+    for (sketches, rects, params, first) in cases {
+        let mut s = Session::default();
+        for i in 0..params {
+            s.execute("parameters.add", &json!({"name": format!("p{i}"), "expression": format!("{i} mm")})).unwrap();
+        }
+        for k in 0..sketches {
+            s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+            let id = s.active_sketch.unwrap();
+            let mut doc = (*s.doc).clone();
+            fill(&mut doc, id, if k == 0 { first } else { rects }, 0.0);
+            *s.doc_mut() = doc;
+            s.execute("sketch.finish", &json!({})).unwrap();
+        }
+        s.execute("sketch.edit", &json!({"sketch": "Sketch1"})).unwrap();
+        let curves: usize = s.doc.features.iter().filter_map(|f| s.doc.sketch(f.id).ok()).map(|k| k.curves.len()).sum();
+        let json_len = serde_json::to_string(&*s.doc).map(|j| j.len()).unwrap_or(0);
+        let frames = 60;
+        let mut frame_ms = Vec::new();
+        for f in 0..frames {
+            let to = [1.0 + f as f64 * 0.05, 1.0 + f as f64 * 0.03];
+            let t = Instant::now();
+            s.execute("sketch.drag", &json!({"entity": "p1", "from": [0, 0], "to": to, "live": true})).unwrap();
+            frame_ms.push(ms(t));
+        }
+        s.execute("sketch.drag_end", &json!({})).ok();
+        let digest = {
+            use std::hash::{Hash, Hasher};
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            serde_json::to_string(&*s.doc).unwrap_or_default().hash(&mut h);
+            format!("{:016x}", h.finish())
+        };
+        frame_ms.sort_by(f64::total_cmp);
+        let t = Instant::now();
+        for _ in 0..frames {
+            std::hint::black_box((*s.doc).clone());
+        }
+        let copy = ms(t) / frames as f64;
+        let frame = frame_ms[frames / 2];
+        eprintln!(
+            "DRAGPERF sketches={sketches} rects={rects} first={first} params={params} features={} curves={curves} json={json_len}B: frame median {frame:.3} ms, one copy {copy:.3} ms ({:.1} %), design {digest}",
+            s.doc.features.len(),
+            100.0 * copy / frame
+        );
+    }
+}

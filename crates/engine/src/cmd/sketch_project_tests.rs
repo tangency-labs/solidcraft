@@ -216,6 +216,67 @@ fn project_edges_bodies_sketches_and_origin() {
     assert!(s.execute("sketch.project", &json!({"refs": [{"plane": "XY"}]})).is_err(), "parallel plane projects to nothing");
 }
 
+/// A construction axis projects as an origin axis does, as its line in the sketch plane, and stays
+/// linked to it: the projection follows when the axis moves and when it is renamed. The report's
+/// steps (#9324): the axis made after the sketch, then moved before it.
+#[test]
+fn a_construction_axis_projects_and_stays_linked() {
+    let mut s = Session::default();
+    let sketch = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.finish", json!({}));
+    let axis = |x: f64| json!({"a": {"point": [x, 0, 0]}, "b": {"point": [x, 30, 0]}, "name": "Axis1"});
+    run(&mut s, "construct.axis.two_points", axis(10.0));
+    run(&mut s, "timeline.reorder", json!({"feature": "Axis1", "position": 0}));
+    run(&mut s, "sketch.edit", json!({"sketch": sketch}));
+    let r = run(&mut s, "sketch.project", json!({"refs": [{"axis": "Axis1"}]}));
+    let line = r["links"][0]["curves"][0].clone();
+    // Where the projected line runs: its two ends' x, and its length along y.
+    let at = |s: &mut Session| {
+        run(s, "sketch.edit", json!({"sketch": sketch}));
+        let si = inspect(s);
+        let c = si["curves"].as_array().unwrap().iter().find(|c| c["id"] == line).cloned().unwrap();
+        run(s, "sketch.finish", json!({}));
+        let n = |v: &Value| v.as_f64().unwrap();
+        (n(&c["start_at"][0]), n(&c["end_at"][0]), (n(&c["end_at"][1]) - n(&c["start_at"][1])).abs())
+    };
+    run(&mut s, "sketch.finish", json!({}));
+    let (x0, x1, length) = at(&mut s);
+    assert!((x0 - 10.0).abs() < 1e-9 && (x1 - 10.0).abs() < 1e-9 && length > 30.0, "{x0} {x1} {length}");
+    run(&mut s, "timeline.redefine", json!({"feature": "Axis1", "command": "construct.axis.two_points", "params": axis(25.0)}));
+    let (x0, x1, _) = at(&mut s);
+    assert!((x0 - 25.0).abs() < 1e-9 && (x1 - 25.0).abs() < 1e-9, "the projection follows the axis: {x0} {x1}");
+    run(&mut s, "timeline.rename", json!({"feature": "Axis1", "name": "Hinge axis"}));
+    let state = s.model.state();
+    let link = &state.sketch(sketch).unwrap().sketch.links[0];
+    assert_eq!(link.source, solidcraft_sketch::LinkSource::Axis { name: "Hinge axis".into() });
+    assert!(!link.lost, "renamed, the axis is still found");
+    // A design with the axis after the sketch opens with the link lost, saying why.
+    run(&mut s, "timeline.reorder", json!({"feature": "Hinge axis", "position": 1}));
+    let opened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(opened.model.state().sketch(sketch).unwrap().sketch.links[0].lost);
+    let warnings = opened.model.result(sketch).and_then(|r| r.warning.clone()).unwrap_or_default();
+    assert!(warnings.contains("it must come earlier in the timeline"), "{warnings}");
+    run(&mut s, "timeline.reorder", json!({"feature": "Hinge axis", "position": 0}));
+    // An axis that is no origin axis and no construction axis is refused, by its name.
+    run(&mut s, "sketch.edit", json!({"sketch": sketch}));
+    let error = s.execute("sketch.project", &json!({"refs": [{"axis": "Axis9"}]})).unwrap_err().to_string();
+    assert!(error.contains("unknown axis `Axis9`"), "{error}");
+}
+
+#[test]
+fn project_whole_body_can_create_unlinked_geometry() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    let sketch = run(&mut s, "sketch.create", json!({"plane":"XY"}))["sketch"].as_u64().unwrap();
+    let body = s.model.state().bodies[0].name.clone();
+    let r = run(&mut s, "sketch.project", json!({"refs":[{"body":body}],"projection_link":false}));
+    assert_eq!(r["links"][0]["link"], Value::Null);
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.links.is_empty());
+    assert_eq!(sk.curves.len(), 4);
+    assert!(s.execute("sketch.project", &json!({"refs":[{"body":body}],"projection_link":"false"})).is_err());
+}
+
 #[test]
 fn intersect_cuts_a_body_with_the_sketch_plane() {
     let mut s = Session::default();
@@ -243,6 +304,21 @@ fn break_link_makes_normal_geometry() {
     // Now free: 4 lines with 4 shared corners, 8 degrees of freedom.
     assert_eq!(si["dof"], 8, "{si}");
     assert!(s.execute("sketch.break_link", &json!({"link": "j99"})).is_err());
+}
+
+/// Trim refuses projected edges until Break Link; the message names that command (#8979).
+#[test]
+fn trim_refuses_projected_edges_until_break_link() {
+    let mut s = Session::default();
+    box_part(&mut s);
+    let r = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}}));
+    let link = r["projected"].as_str().unwrap().to_string();
+    let curve = linked_curves(&inspect(&mut s))[0]["id"].as_str().unwrap().to_string();
+    let err = s.execute("sketch.trim", &json!({"curve": curve, "at": [20, 15]})).unwrap_err().to_string();
+    assert!(err.contains("Break Link"), "{err}");
+    assert!(err.contains("projected"), "{err}");
+    run(&mut s, "sketch.break_link", json!({"link": link}));
+    run(&mut s, "sketch.trim", json!({"curve": curve, "at": [20, 15]}));
 }
 
 /// The sketch's curves as evaluated (after its links were refreshed): (id, construction).
@@ -872,4 +948,353 @@ fn intersect_on_a_top_face_gives_its_outline() {
     ends.iter_mut().for_each(|e| *e = e.map(|v| v.round()));
     ends.sort_by(|a, b| a.partial_cmp(b).unwrap());
     assert_eq!(ends, vec![[0.0, 0.0, 40.0, 0.0], [0.0, 30.0, 0.0, 0.0], [40.0, 0.0, 40.0, 30.0], [40.0, 30.0, 0.0, 30.0]]);
+}
+
+#[test]
+fn intersect_whole_body_can_create_unlinked_section_geometry() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Post"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 10}));
+
+    let result = run(&mut s, "sketch.intersect", json!({"refs": [{"body": "Post"}], "projection_link": false}));
+    assert_eq!(result["links"][0]["link"], Value::Null, "{result}");
+    assert_eq!(result["links"][0]["curves"].as_array().unwrap().len(), 4, "{result}");
+
+    let sketch = s.doc.sketch(s.active_sketch.unwrap()).unwrap();
+    assert!(sketch.links.is_empty(), "projection links were disabled");
+    assert_eq!(sketch.curves.len(), 4, "the whole body's section remains as normal sketch geometry");
+    assert!(s.execute("sketch.intersect", &json!({"refs": [{"body": "Post"}], "projection_link": "false"})).is_err());
+}
+
+#[test]
+fn whole_body_project_preserves_the_arc_of_a_chamfered_round_edge() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Plate"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[40, 0, 10]], "radius": 5}));
+    let sketch = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}, "project_edges": false}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"body": "Plate"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    run(&mut s, "timeline.roll_to", json!({"position": 2}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[40, 15, 20]], "distance": 1}));
+    run(&mut s, "timeline.roll_to", json!({}));
+
+    let result = s.model.result(sketch).unwrap();
+    let state = s.model.state();
+    let solved = state.sketch(sketch).unwrap();
+    let sketch = &solved.sketch;
+    assert!(result.error.is_none(), "{:?}", result.error);
+    assert!(result.warning.is_none(), "a rebuilt projection nothing depends on needs no warning: {:?}", result.warning);
+    assert!((solved.plane.origin.z - 20.).abs() < 1e-6);
+    assert!(
+        sketch.curves.iter().any(|curve| matches!(curve.kind, solidcraft_sketch::CurveKind::Arc { .. })),
+        "the rounded chamfer silhouette should contain an arc, not only line segments: {:?}",
+        sketch.curves
+    );
+}
+
+#[test]
+fn whole_body_project_stays_on_the_body_outline_after_a_late_chamfer() {
+    use solidcraft_sketch::CurveKind;
+    let planes: [([i32; 3], &str); 3] = [([20, 15, 20], "top"), ([20, 0, 10], "front"), ([40, 15, 10], "side")];
+    let chamfers: [[i32; 3]; 4] = [[40, 15, 20], [20, 0, 20], [40, 0, 10], [38, 2, 20]];
+    for (face, plane) in planes {
+        for chamfer in chamfers {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Plate"}));
+            run(&mut s, "solid.fillet", json!({"edges": [[40, 0, 10]], "radius": 5}));
+            let sketch = run(&mut s, "sketch.create", json!({"plane": {"face": face}, "project_edges": false}))["sketch"].as_u64().unwrap();
+            run(&mut s, "sketch.project", json!({"refs": [{"body": "Plate"}]}));
+            run(&mut s, "sketch.finish", json!({}));
+            run(&mut s, "timeline.roll_to", json!({"position": 2}));
+            if s.execute("solid.chamfer", &json!({"edges": [chamfer], "distance": 1})).is_err() {
+                continue;
+            }
+            run(&mut s, "timeline.roll_to", json!({}));
+            let state = s.model.state();
+            let solved = state.sketch(sketch).unwrap();
+            let sk = &solved.sketch;
+            let pts: Vec<_> = sk.points.iter().map(|p| p.pos).collect();
+            let (x0, x1) = pts.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p.x), a.1.max(p.x)));
+            let (y0, y1) = pts.iter().fold((f64::MAX, f64::MIN), |a, p| (a.0.min(p.y), a.1.max(p.y)));
+            let mut worst = 0.0_f64;
+            for curve in &sk.curves {
+                if let CurveKind::Arc { c, a, b } = curve.kind {
+                    let (c, a, b) = (pts[c], pts[a], pts[b]);
+                    let r = c.dist(a);
+                    let (t0, mut sweep) = ((a - c).angle(), (b - c).angle() - (a - c).angle());
+                    while sweep < 0.0 {
+                        sweep += std::f64::consts::TAU;
+                    }
+                    for i in 0..=16 {
+                        let t = t0 + sweep * f64::from(i) / 16.0;
+                        let q = solidcraft_geom::Vec2::new(c.x + r * t.cos(), c.y + r * t.sin());
+                        worst = worst.max((x0 - q.x).max(q.x - x1).max(y0 - q.y).max(q.y - y1));
+                    }
+                    assert!(sweep < std::f64::consts::PI + 0.01, "{plane} {chamfer:?}: arc sweeps {sweep} rad, not a rounded corner");
+                }
+            }
+            assert!(worst < 0.01, "{plane} {chamfer:?}: an arc leaves the body outline by {worst}");
+        }
+    }
+}
+
+#[test]
+fn whole_body_project_of_a_filleted_plate_keeps_exact_lines_and_arcs() {
+    use solidcraft_sketch::CurveKind;
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": 8, "body_name": "Plate"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[0, 0, 4], [80, 0, 4], [80, 50, 4], [0, 50, 4]], "radius": 6}));
+    let sketch = run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": 36, "project_edges": false}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"body": "Plate"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "timeline.roll_to", json!({"position": 2}));
+    let top = [[40., 0.], [1.7574, 1.7574], [78.2426, 1.7574], [80., 25.], [78.2426, 48.2426], [40., 50.], [1.7574, 48.2426], [0., 25.]];
+    let edges: Vec<_> = top.iter().map(|p| json!([p[0], p[1], 8])).collect();
+    run(&mut s, "solid.fillet", json!({"edges": edges, "radius": 2}));
+    run(&mut s, "timeline.roll_to", json!({}));
+
+    let state = s.model.state();
+    let sk = &state.sketch(sketch).unwrap().sketch;
+    let pos = |i: usize| sk.points[i].pos;
+    let mut arcs = Vec::new();
+    for curve in &sk.curves {
+        match curve.kind {
+            CurveKind::Line { a, b } => {
+                let d = pos(b) - pos(a);
+                assert!(d.x.abs() < 1e-3 || d.y.abs() < 1e-3, "slanted line {:?} -> {:?}", pos(a), pos(b));
+            }
+            CurveKind::Arc { c, a, .. } => arcs.push(pos(c).dist(pos(a))),
+            _ => {}
+        }
+    }
+    assert_eq!(arcs.len(), 2, "{arcs:?}");
+    assert!(arcs.iter().all(|r| (r - 2.).abs() < 5e-3), "{arcs:?}");
+    // Every arc end is exactly the end of a straight edge, and meets it tangentially.
+    for curve in &sk.curves {
+        let CurveKind::Arc { c, a, b } = curve.kind else { continue };
+        for end in [a, b] {
+            let touching = sk
+                .curves
+                .iter()
+                .filter(|o| matches!(o.kind, CurveKind::Line { a: p, b: q } if pos(p).dist(pos(end)) < 1e-6 || pos(q).dist(pos(end)) < 1e-6))
+                .count();
+            assert!(touching >= 1, "arc end {:?} meets no line end", pos(end));
+            let radial = pos(end) - pos(c);
+            assert!((radial.len() - 2.).abs() < 5e-3);
+        }
+    }
+}
+
+/// A U-slot cut into a plate's edge with its top rim rounded: the round meets the top face on a
+/// circle of radius 6.5 + 1 about the slot's axis, but the kernel makes that edge a spline that
+/// only follows the circle (within 2e-6 mm), and it projected as twenty spline pieces. The
+/// edge is a circle (the selection readout says so): it projects as an arc of that circle.
+#[test]
+fn a_rounded_slot_rim_projects_as_an_arc_of_its_circle() {
+    use solidcraft_sketch::CurveKind;
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"radius": 6.5, "height": 20, "base": [20, 2, -5], "operation": "cut", "targets": ["Plate"]}));
+    run(&mut s, "solid.fillet", json!({"edges": [[20, 8.5, 10]], "radius": 1}));
+    let edge = run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 30, "project_edges": false}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"body": "Plate", "edge": [20, 9.5, 10]}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let face = run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 30, "project_edges": false}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"body": "Plate", "face": [5, 25, 10]}]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    let state = s.model.state();
+    let center = solidcraft_geom::Vec2::new(20., 2.);
+    for id in [edge, face] {
+        let sk = &state.sketch(id).unwrap().sketch;
+        let pos = |i: usize| sk.points[i].pos;
+        let mut arcs = 0;
+        for curve in &sk.curves {
+            match curve.kind {
+                CurveKind::Line { .. } => {}
+                CurveKind::Arc { c, a, b } => {
+                    arcs += 1;
+                    assert!(pos(c).dist(center) < 1e-5, "arc centre {:?}", pos(c));
+                    for end in [a, b] {
+                        assert!((pos(end).dist(pos(c)) - 7.5).abs() < 1e-5, "arc end {:?} off the circle", pos(end));
+                    }
+                }
+                ref other => panic!("sketch {id}: the rim projects as {other:?}, not as lines and arcs"),
+            }
+        }
+        assert!(arcs >= 1, "sketch {id}: no arc in {:?}", sk.curves);
+    }
+    // The face's outline still closes: the plate's top less the slot's disc of radius 7.5 (its
+    // part above the front face, whose chord lies 2 below the centre).
+    let (r, d) = (7.5f64, 2f64);
+    let below = r * r * (d / r).acos() - d * (r * r - d * d).sqrt();
+    let area = 40. * 30. - (std::f64::consts::PI * r * r - below);
+    let profiles = &state.sketch(face).unwrap().profiles;
+    assert!(profiles.iter().any(|p| (p.area - area).abs() < 1e-3), "{:?} vs {area}", profiles.iter().map(|p| p.area).collect::<Vec<_>>());
+}
+
+/// A hook: a J of lines and two arcs about (-15, 0), of radii 7.5 and 15, extruded 20 with its
+/// top edges chamfered. Seen along the extrusion its outline is the J again. The walls are seen
+/// edge-on, but the triangles of a round wall join its two rims at slightly different angles
+/// and each leans a hair towards the sketch or away: the outline ran zig-zag along the walls
+/// and came in as 74 short lines. Faces that lie edge-on are edge-on in every triangle.
+#[test]
+fn whole_body_project_of_a_chamfered_hook_keeps_its_arcs() {
+    use solidcraft_sketch::CurveKind;
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 60], [0, 0]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-15, 0], "start": [-30, 0], "end": [0, 0]}));
+    run(&mut s, "sketch.line", json!({"points": [[-30, 0], [-30, 10], [-22.5, 10], [-22.5, 0]]}));
+    run(&mut s, "sketch.arc.center_point", json!({"center": [-15, 0], "start": [-22.5, 0], "end": [-7.5, 0]}));
+    run(&mut s, "sketch.line", json!({"points": [[-7.5, 0], [-7.5, 60], [0, 60]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 20, "body_name": "Hook"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[-15, -15, 20], [-15, -7.5, 20], [0, 30, 20], [-7.5, 30, 20]], "distance": 0.25}));
+    let sketch = run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 40, "project_edges": false}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.project", json!({"refs": [{"body": "Hook"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+
+    let state = s.model.state();
+    let solved = state.sketch(sketch).unwrap();
+    let sk = &solved.sketch;
+    let pos = |i: usize| sk.points[i].pos;
+    let mut radii = Vec::new();
+    for curve in &sk.curves {
+        match curve.kind {
+            CurveKind::Line { .. } => {}
+            CurveKind::Arc { c, a, b } => {
+                assert!(pos(c).dist(solidcraft_geom::Vec2::new(-15., 0.)) < 1e-3, "arc centre {:?}", pos(c));
+                assert!((pos(a).dist(pos(c)) - pos(b).dist(pos(c))).abs() < 1e-6);
+                radii.push(pos(a).dist(pos(c)));
+            }
+            ref other => panic!("the outline projects as {other:?}, not as lines and arcs"),
+        }
+    }
+    radii.sort_by(f64::total_cmp);
+    assert_eq!(radii.len(), 2, "{} curves, arcs of radii {radii:?}", sk.curves.len());
+    assert!((radii[0] - 7.5).abs() < 1e-3 && (radii[1] - 15.).abs() < 1e-3, "{radii:?}");
+    assert_eq!(sk.curves.len(), 8, "{:?}", sk.curves);
+    // One closed profile: the J's area, a rectangle 7.5 x 60 and a half ring 7.5 to 15 with its
+    // 7.5 x 10 tip.
+    let area = 7.5 * 60. + std::f64::consts::PI * (15. * 15. - 7.5 * 7.5) / 2. + 7.5 * 10.;
+    assert!(
+        solved.profiles.iter().any(|p| (p.area - area).abs() < 0.05),
+        "{:?} vs {area}",
+        solved.profiles.iter().map(|p| p.area).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn whole_body_intersect_of_a_filleted_plate_keeps_exact_lines_and_arcs() {
+    use solidcraft_sketch::CurveKind;
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 80, "width": 50, "height": 8, "body_name": "Plate"}));
+    let sketch = run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": 36, "project_edges": false}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.intersect", json!({"refs": [{"body": "Plate"}]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "timeline.roll_to", json!({"position": 1}));
+    let top = [[40., 0.], [80., 25.], [40., 50.], [0., 25.]];
+    let edges: Vec<_> = top.iter().map(|p| json!([p[0], p[1], 8])).collect();
+    run(&mut s, "solid.fillet", json!({"edges": edges, "radius": 2}));
+    run(&mut s, "timeline.roll_to", json!({}));
+
+    let result = s.model.result(sketch).unwrap().warning.clone();
+    assert!(result.is_none(), "{result:?}");
+    let state = s.model.state();
+    let sk = &state.sketch(sketch).unwrap().sketch;
+    let pos = |i: usize| sk.points[i].pos;
+    let mut arcs = Vec::new();
+    for curve in &sk.curves {
+        match curve.kind {
+            CurveKind::Line { a, b } => {
+                let d = pos(b) - pos(a);
+                assert!(d.x.abs() < 1e-3 || d.y.abs() < 1e-3, "slanted line {:?} -> {:?}", pos(a), pos(b));
+            }
+            CurveKind::Arc { c, a, .. } => arcs.push(pos(c).dist(pos(a))),
+            _ => {}
+        }
+    }
+    assert_eq!(sk.curves.len(), 6, "{} curves", sk.curves.len());
+    assert_eq!(arcs.len(), 2, "{arcs:?}");
+    assert!(arcs.iter().all(|r| (r - 2.).abs() < 5e-3), "{arcs:?}");
+}
+#[test]
+fn a_rebuilt_projection_keeps_user_constraints_without_a_warning() {
+    for dimensioned in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20, "body_name": "Plate"}));
+        run(&mut s, "solid.fillet", json!({"edges": [[40, 0, 10]], "radius": 5}));
+        let sketch = run(&mut s, "sketch.create", json!({"plane": {"face": [20, 15, 20]}, "project_edges": false}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.project", json!({"refs": [{"body": "Plate"}]}));
+        if dimensioned {
+            // A line of the user's, pinned to the projected corner.
+            let line = ids(&run(&mut s, "sketch.line", json!({"points": [[5, 5], [10, 5]]}))["curves"]);
+            run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{}.start", line[0]), "b": "p4"}));
+        }
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "timeline.roll_to", json!({"position": 2}));
+        run(&mut s, "solid.chamfer", json!({"edges": [[40, 15, 20]], "distance": 1}));
+        run(&mut s, "timeline.roll_to", json!({}));
+        let warning = s.model.result(sketch).unwrap().warning.clone();
+        let st = s.model.state();
+        let k = &st.sketch(sketch).unwrap().sketch;
+        // The user's constraint survives the rebuild, so there is nothing to warn about.
+        assert_eq!(k.constraints.len(), usize::from(dimensioned));
+        assert!(warning.is_none(), "{warning:?}");
+    }
+}
+
+/// #9001: an angle (an L profile, wall thickness `d1`, legs `d2`) with a sketch on its face and
+/// a hole dimensioned to the inner wall's projected edge. Making the wall thicker moves the
+/// inner corner by more than a tenth of the face; the projection follows it (it was kept as it
+/// was, "boundary identity is ambiguous"), and the hole with it, as it already did for `d2`.
+#[test]
+fn a_thicker_angle_moves_the_projected_face_of_the_sketch_on_it() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.change", json!({"name": "d1", "expression": "20 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "d2", "expression": "80 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    let l = ids(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [80, 0], [80, 20], [20, 20], [20, 80], [0, 80]], "closed": true}))["curves"]);
+    for (i, line) in l.iter().enumerate() {
+        let mode = if i % 2 == 0 { "horizontal" } else { "vertical" };
+        run(&mut s, "sketch.constraint.horizontal_vertical", json!({"line": line, "mode": mode}));
+    }
+    run(&mut s, "sketch.constraint.coincident", json!({"a": format!("{}.start", l[0]), "b": "origin"}));
+    for (k, value) in [(0, "d2"), (1, "d1"), (4, "d1"), (5, "d2")] {
+        run(&mut s, "sketch.dimension", json!({"entities": [l[k]], "value": value}));
+    }
+    assert_eq!(inspect(&mut s)["dof"], 0);
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 30}));
+    let sketch = run(&mut s, "sketch.create", json!({"plane": {"face": [10, 10, 30]}}))["sketch"].as_u64().unwrap();
+    let si = inspect(&mut s);
+    // The inner wall's edge, from (20, 20) to (20, 80) on the face.
+    let wall = linked_curves(&si)
+        .into_iter()
+        .find(|c| {
+            ["start_at", "end_at"].iter().all(|e| (c[e][0].as_f64().unwrap().abs() - 20.).abs() < 1e-6 && c[e][1].as_f64().unwrap().abs() > 19.)
+        })
+        .unwrap_or_else(|| panic!("{si}"));
+    let hole = ids(&run(&mut s, "sketch.circle.center", json!({"center": [10, 50], "radius": 3}))["curves"])[0].clone();
+    run(&mut s, "sketch.dimension", json!({"entities": [format!("{hole}.center"), wall["id"]], "value": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "parameters.change", json!({"name": "d1", "expression": "30 mm"}));
+    let check = |s: &Session| {
+        let warning = s.model.result(sketch).and_then(|r| r.warning.clone());
+        assert!(warning.is_none(), "{warning:?}");
+        let st = s.model.state();
+        let ss = st.sketch(sketch).unwrap();
+        assert!(ss.sketch.links.iter().all(|l| !l.lost));
+        let world = |p: solidcraft_geom::Vec2| ss.plane.to_world(p);
+        let at = |x: f64, y: f64| ss.sketch.points.iter().any(|p| world(p.pos).dist(solidcraft_geom::Vec3::new(x, y, 30.)) < 1e-6);
+        // The inner corner is at (30, 30) now, and the hole 10 from the wall that moved.
+        assert!(at(30., 30.) && !at(20., 20.));
+        let center = ss.sketch.points.iter().find(|p| p.id == format!("{hole}.center")).unwrap();
+        assert!((world(center.pos).x - 20.).abs() < 1e-6, "{:?}", world(center.pos));
+        assert_eq!(ss.sketch.constraints.len(), 1);
+    };
+    check(&s);
+    check(&Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap()));
 }

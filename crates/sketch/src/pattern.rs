@@ -306,9 +306,9 @@ impl Sketch {
         if self.patterns.is_empty() {
             return;
         }
-        let curves: std::collections::BTreeSet<_> = self.curves.iter().map(|c| c.id.as_str()).collect();
-        let points: std::collections::BTreeSet<_> = self.points.iter().map(|p| p.id.as_str()).collect();
-        let constraint_ids: std::collections::BTreeSet<_> = self.constraints.iter().map(|c| c.id.as_str()).collect();
+        let curves: std::collections::HashSet<_> = self.curves.iter().map(|c| c.id.as_str()).collect();
+        let points: std::collections::HashSet<_> = self.points.iter().map(|p| p.id.as_str()).collect();
+        let constraint_ids: std::collections::HashSet<_> = self.constraints.iter().map(|c| c.id.as_str()).collect();
         let retired: Vec<_> = self
             .patterns
             .iter()
@@ -334,15 +334,31 @@ impl Sketch {
     /// Conic rho is an authored shape parameter rather than a solver unknown. Like its
     /// defining points, the copies follow the seed's shape when that parameter is edited.
     pub(crate) fn refresh_pattern_shapes(&mut self) {
-        if !self.curves.iter().any(|c| matches!(c.kind, CurveKind::Conic { .. } | CurveKind::Arc { .. })) {
+        if self.patterns.is_empty() || !self.curves.iter().any(|c| matches!(c.kind, CurveKind::Conic { .. } | CurveKind::Arc { .. })) {
             return;
         }
-        for pattern in &self.patterns {
-            let sources: Vec<_> = pattern.entities.iter().filter_map(|id| self.curve_index(id)).collect();
-            for instance in &pattern.instances {
-                for (seed, copy) in sources.iter().zip(&instance.curves) {
+        // This runs before every solve, drag frames included. Ids resolve through maps built
+        // once here: a linear search per copy cost patterns × copies × seeds × curves string
+        // comparisons, which dominated dragging anything in a sketch with a large pattern.
+        // Only curve shapes change below, so the indices stay valid throughout.
+        let (sources, copies): (Vec<Vec<usize>>, Vec<Vec<Vec<Option<usize>>>>) = {
+            let curves = first_index(self.curves.iter().map(|c| c.id.as_str()));
+            self.patterns
+                .iter()
+                .map(|pattern| {
+                    (
+                        pattern.entities.iter().filter_map(|id| curves.get(id.as_str()).copied()).collect(),
+                        pattern.instances.iter().map(|i| i.curves.iter().map(|id| curves.get(id.as_str()).copied()).collect()).collect(),
+                    )
+                })
+                .unzip()
+        };
+        let points = first_index(self.points.iter().map(|p| p.id.as_str()));
+        for ((pattern, sources), copies) in self.patterns.iter().zip(&sources).zip(&copies) {
+            for (instance, copies) in pattern.instances.iter().zip(copies) {
+                for (seed, copy) in sources.iter().zip(copies) {
                     if let Some(CurveKind::Conic { rho, .. }) = self.curves.get(*seed).map(|c| &c.kind)
-                        && let Some(copy) = self.curve_index(copy)
+                        && let Some(copy) = *copy
                     {
                         let rho = *rho;
                         if let Some(CurveKind::Conic { rho: slot, .. }) = self.curves.get_mut(copy).map(|c| &mut c.kind) {
@@ -355,9 +371,9 @@ impl Sketch {
                             self.points
                                 .get(p)
                                 .and_then(|p| instance.points.iter().find(|(id, _)| *id == p.id))
-                                .and_then(|(_, id)| self.point_index(id))
+                                .and_then(|(_, id)| points.get(id.as_str()).copied())
                         };
-                        if let (Some(c), Some(a), Some(b), Some(copy)) = (mapped(c), mapped(a), mapped(b), self.curve_index(copy))
+                        if let (Some(c), Some(a), Some(b), Some(copy)) = (mapped(c), mapped(a), mapped(b), *copy)
                             && let Some(curve) = self.curves.get_mut(copy)
                         {
                             curve.kind = CurveKind::Arc { c, a, b };
@@ -531,7 +547,7 @@ fn copy_through(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Vec2) ->
         let prefix = match &kind {
             CurveKind::Ellipse { .. } => "e",
             CurveKind::Spline { .. } => "s",
-            CurveKind::Conic { .. } => "k",
+            CurveKind::Conic { .. } => "n",
             CurveKind::Line { .. } => "l",
             CurveKind::Circle { .. } => "c",
             CurveKind::Arc { .. } => "a",
@@ -560,4 +576,13 @@ fn rotate(c: Vec2, ang: f64) -> impl Fn(Vec2) -> Vec2 {
         let (s, co) = ang.sin_cos();
         c + Vec2::new(d.x * co - d.y * s, d.x * s + d.y * co)
     }
+}
+
+/// Each id's first index, as `position` finds it.
+fn first_index<'a>(ids: impl Iterator<Item = &'a str>) -> std::collections::HashMap<&'a str, usize> {
+    let mut map = std::collections::HashMap::new();
+    for (i, id) in ids.enumerate() {
+        map.entry(id).or_insert(i);
+    }
+    map
 }

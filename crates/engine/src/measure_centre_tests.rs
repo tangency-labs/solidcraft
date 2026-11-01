@@ -159,6 +159,8 @@ fn two_holes_measure_centre_to_centre_with_min_and_max() {
     // One rim: Ø, R and circumference first-class.
     let r = measure(&mut s, vec![ea]);
     assert!(close(&r["diameter"], 6.0, 1e-9) && close(&r["radius"], 3.0, 1e-9) && close(&r["circumference"], TAU * 3.0, 1e-9), "{r}");
+    // Its length is its circumference, not the length of the polyline drawn for it (#9086).
+    assert!(close(&r["items"][0]["length_mm"], TAU * 3.0, 1e-9), "{r}");
     assert_eq!(r["items"][0]["round"], "circle", "{r}");
 }
 
@@ -259,9 +261,11 @@ fn sketch_circle_arc_and_slot() {
         run(&mut s, "sketch.arc.center_point", json!({"center": [30, 0], "start": [34, 0], "sweep": 90}))["curves"][0].as_str().unwrap().to_string();
     let r = measure(&mut s, vec![json!({"type": "sketch_curve", "id": c})]);
     assert!(close(&r["diameter"], 10.0, 1e-9) && close(&r["radius"], 5.0, 1e-9) && close(&r["circumference"], 10.0 * PI, 1e-9), "{r}");
+    assert!(close(&r["items"][0]["length_mm"], 10.0 * PI, 1e-9), "{r}");
     let r = measure(&mut s, vec![json!({"type": "sketch_curve", "id": a})]);
     assert!(close(&r["radius"], 4.0, 1e-9) && close(&r["diameter"], 8.0, 1e-9), "{r}");
     assert!(close(&r["angle_deg"], 90.0, 1e-9) && close(&r["arc_length"], 2.0 * PI, 1e-9), "{r}");
+    assert!(close(&r["items"][0]["length_mm"], 2.0 * PI, 1e-9), "{r}");
     assert_eq!(r["items"][0]["round"], "arc");
     // Circle to arc: centre to centre.
     let r = measure(&mut s, vec![json!({"type": "sketch_curve", "id": c}), json!({"type": "sketch_curve", "id": a})]);
@@ -315,7 +319,21 @@ fn a_fillet_edge_is_an_arc() {
     let r = measure(&mut s, vec![e]);
     assert!(close(&r["radius"], 5.0, 1e-9) && close(&r["diameter"], 10.0, 1e-9), "{r}");
     assert!(close(&r["angle_deg"], 90.0, 1e-6) && close(&r["arc_length"], 2.5 * PI, 1e-6), "{r}");
+    assert!(close(&r["items"][0]["length_mm"], 2.5 * PI, 1e-6), "{r}");
     assert!(close(&r["center"][0], 35.0, 1e-9) && close(&r["center"][1], 25.0, 1e-9), "{r}");
+}
+
+/// A cylinder's top circle is as long as its circumference, in the same reply: the length
+/// comes from the exact circle, not from the polyline drawn for it, which runs inside it
+/// (#9086, the report's own cylinder).
+#[test]
+fn a_cylinders_top_circle_is_as_long_as_its_circumference() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "base": [40, 10, 0], "operation": "new"}));
+    let e = edge(&s, |p| (p.z - 20.0).abs() < 1e-9 && ((p - Vec3::new(40.0, 10.0, 20.0)).len() - 5.0).abs() < 1e-6);
+    let r = measure(&mut s, vec![e]);
+    assert!(close(&r["circumference"], TAU * 5.0, 1e-9), "{r}");
+    assert!(close(&r["items"][0]["length_mm"], TAU * 5.0, 1e-9), "{r}");
 }
 
 /// A plate with holes through STEP: the holes come back as cylinders, and measure the same.

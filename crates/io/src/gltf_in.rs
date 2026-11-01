@@ -839,17 +839,16 @@ impl<'d> Reader<'d, '_, '_> {
     }
 }
 
-/// Linear to sRGB (0–1).
-fn srgb(c: f32) -> f32 {
-    let c = if c.is_finite() { c.clamp(0.0, 1.0) } else { 0.8 };
-    if c <= 0.003_130_8 { 12.92 * c } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
+/// A linear base colour channel as an 8-bit sRGB code; one that isn't a number reads as 0.8.
+fn srgb(c: f32) -> u8 {
+    solidcraft_geom::srgb::encode8(if c.is_finite() { f64::from(c) } else { 0.8 })
 }
 
 /// A material's look: base colour, alpha when blended, metallic/roughness when opaque.
 fn look_of(m: &gltf::Material<'_>) -> Look {
     let pbr = m.pbr_metallic_roughness();
     let [r, g, b, a] = pbr.base_color_factor();
-    let color = [r, g, b].map(|c| (srgb(c) * 255.0).round() as u8);
+    let color = [r, g, b].map(srgb);
     let opacity = match m.alpha_mode() {
         gltf::material::AlphaMode::Blend if a.is_finite() => f64::from(a).clamp(0.0, 1.0),
         _ => 1.0,

@@ -114,21 +114,6 @@ fn chorded_region(region: &Region2) -> Result<Region2> {
     })
 }
 
-/// A line or free-form segment with its points mapped by `f`: exact under any affine map (a
-/// conic keeps its weight). An arc is given by angles, not points, and stays as it is.
-pub(crate) fn map_controls(seg: &Seg2, f: impl Fn(Vec2) -> Vec2) -> Seg2 {
-    match *seg {
-        Seg2::Line { a, b } => Seg2::Line { a: f(a), b: f(b) },
-        Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic { p0: f(p0), p1: f(p1), p2: f(p2), p3: f(p3) },
-        Seg2::Conic { a, apex, b, w } => Seg2::Conic { a: f(a), apex: f(apex), b: f(b), w },
-        Seg2::Bezier { n, mut p } => {
-            p.iter_mut().take(usize::from(n) + 1).for_each(|q| *q = f(*q));
-            Seg2::Bezier { n, p }
-        }
-        arc @ Seg2::Arc { .. } => arc,
-    }
-}
-
 fn planar_region(region: &Region2) -> Result<Region2> {
     if region.holes.len() > MAX_FLAT_PIECES {
         return Err(flat_budget_error());
@@ -4318,7 +4303,7 @@ impl SheetBody {
                     }
                 }
                 // Free-form segments map exactly, through their control points.
-                other => map_controls(&other, map),
+                other => other.map_controls(map),
             }
         };
         let map_loop = |lp: &Loop2| Loop2 { segs: lp.segs.iter().map(seg).collect() };
@@ -4731,7 +4716,7 @@ fn flip_x_loop(l: &Loop2) -> Loop2 {
             Seg2::Arc { center, radius, start, sweep } => {
                 Seg2::Arc { center: flip_x(center), radius, start: std::f64::consts::PI - start, sweep: -sweep }
             }
-            other => map_controls(&other, flip_x),
+            other => other.map_controls(flip_x),
         })
         .collect();
     Loop2 { segs }.reversed()
@@ -5380,7 +5365,7 @@ mod tests {
         // right: the same ellipse on the sheet, every curve through its mirrored controls.
         let below = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y * -1.0 };
         let mirror = |p: Vec2| Vec2::new(p.x, -p.y);
-        let seen = Region2 { outer: Loop2 { segs: hole.outer.segs.iter().map(|x| map_controls(x, mirror)).collect() }, holes: vec![] };
+        let seen = Region2 { outer: Loop2 { segs: hole.outer.segs.iter().map(|x| x.map_controls(mirror)).collect() }, holes: vec![] };
         let mapped = s.region_to_flat(None, &below, &seen).unwrap();
         assert!(mapped.outer.is_ccw() && mapped.outer.segs.len() == 4 && mapped.outer.segs.iter().all(|x| hole.outer.segs.contains(x)), "{mapped:?}");
         // A cubic and a quartic closed by a line, clockwise in that plane: counter-clockwise on

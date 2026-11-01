@@ -77,14 +77,9 @@ fn curvature_comb(s: &mut Session, p: &Value) -> Result<Value> {
     let density = num(p, "density").map(|d| d.clamp(2.0, 2000.0) as usize).unwrap_or(40);
     let st = s.model.state();
     let mut combs: Vec<(String, Vec<(Vec3, f64, Vec3)>)> = Vec::new();
-    let curves = string_list(p, "curves");
+    let curves = string_list(cmd, p, "curves")?;
     if !curves.is_empty() {
-        let id = match p.get("sketch") {
-            Some(Value::Number(n)) => n.as_u64(),
-            Some(Value::String(x)) => s.doc.find_feature(x).map(|f| f.id),
-            _ => s.active_sketch,
-        }
-        .ok_or_else(|| bad(cmd, "no such sketch (and none is active)"))?;
+        let id = super::sketch_store::target(s, p, cmd)?;
         let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
         for c in curves.iter().take(1000) {
             let ci = ss.sketch.curve_index(c).ok_or_else(|| bad(cmd, format!("unknown curve `{c}`")))?;
@@ -228,14 +223,9 @@ fn minimum_radius(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.minimum_radius";
     let st = s.model.state();
     let mut items: Vec<(String, Option<(f64, Vec3)>)> = Vec::new();
-    let curves = string_list(p, "curves");
+    let curves = string_list(cmd, p, "curves")?;
     if !curves.is_empty() {
-        let id = match p.get("sketch") {
-            Some(Value::Number(n)) => n.as_u64(),
-            Some(Value::String(x)) => s.doc.find_feature(x).map(|f| f.id),
-            _ => s.active_sketch,
-        }
-        .ok_or_else(|| bad(cmd, "no such sketch (and none is active)"))?;
+        let id = super::sketch_store::target(s, p, cmd)?;
         let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
         for c in curves.iter().take(1000) {
             let ci = ss.sketch.curve_index(c).ok_or_else(|| bad(cmd, format!("unknown curve `{c}`")))?;
@@ -318,8 +308,9 @@ fn isocurves(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn center_of_mass(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.center_of_mass";
-    let names = string_list(p, "bodies");
-    let st = s.model.state();
+    let names = string_list(cmd, p, "bodies")?;
+    // The world state, as Measure reads: placed occurrences where they are, each placement once.
+    let st = s.world_state();
     let mut out = Vec::new();
     let (mut vol, mut moment) = (0.0, Vec3::ZERO);
     for b in st.bodies.iter().filter(|b| names.is_empty() || names.contains(&b.name)) {
@@ -411,5 +402,45 @@ mod tests {
         };
         assert!(curves.iter().filter(|c| flat(c)).count() >= 4, "rings at constant height");
         assert!(s.execute("inspect.isocurve", &json!({"faces": []})).is_err());
+    }
+
+    /// #5246: the centre of mass of an assembly is the world's, like Measure's and Properties':
+    /// a moved occurrence where it is, a copy counted and found by its world name.
+    #[test]
+    fn center_of_mass_measures_occurrences_where_they_are_placed() {
+        let mut s = Session::default();
+        for (c, p) in [
+            ("solid.box", json!({"length": 100, "width": 100, "height": 10, "body_name": "Plate"})),
+            ("component.create", json!({"name": "Fixture"})),
+            ("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [200, 0, 0], "body_name": "Block"})),
+            ("component.activate", json!({"component": "root"})),
+            // The first part is grounded when it is made; this one is moved.
+            ("occurrence.ground", json!({"occurrence": "Fixture:1", "grounded": false})),
+            ("occurrence.move", json!({"occurrence": "Fixture:1", "translate": [0, 0, 100], "space": "world"})),
+        ] {
+            s.execute(c, &p).unwrap_or_else(|e| panic!("{c}: {e}"));
+        }
+        let at = |r: &Value, k: usize| r["center"][k].as_f64().unwrap();
+        let r = s.execute("inspect.center_of_mass", &json!({"bodies": ["Block"]})).unwrap();
+        assert!((at(&r, 0) - 205.0).abs() < 1e-6 && (at(&r, 2) - 105.0).abs() < 1e-6, "{r}");
+        s.execute("occurrence.copy", &json!({"component": "Fixture", "translate": [0, 300, 0]})).unwrap();
+        let r = s.execute("inspect.center_of_mass", &json!({})).unwrap();
+        assert_eq!(r["bodies"].as_array().unwrap().len(), 3, "{r}");
+        assert!((r["volume"].as_f64().unwrap() - 102_000.0).abs() < 1e-6, "{r}");
+        // The same as Properties' mass centre: every body has the same density here.
+        let props = s.execute("component.properties", &json!({"component": "root"})).unwrap();
+        for k in 0..3 {
+            let want = props["total"]["center_of_mass"][k].as_f64().unwrap();
+            assert!((at(&r, k) - want).abs() < 1e-9, "{k}: {r} vs {props}");
+        }
+        let copy = r["bodies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|b| b["body"] != "Plate" && b["body"] != "Block")
+            .expect("the copy, by its world name")["body"]
+            .clone();
+        let r = s.execute("inspect.center_of_mass", &json!({"bodies": [copy]})).unwrap();
+        assert!((at(&r, 1) - 305.0).abs() < 1e-6, "{r}");
     }
 }

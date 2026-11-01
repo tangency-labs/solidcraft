@@ -39,7 +39,7 @@ impl Mat {
 /// Solve `A x = b` (A square). Returns `None` when singular.
 pub fn solve(mut a: Mat, mut b: Vec<f64>) -> Option<Vec<f64>> {
     let n = a.rows;
-    if a.cols != n || b.len() != n {
+    if a.cols != n || b.len() != n || n.checked_mul(n) != Some(a.data.len()) {
         return None;
     }
     for k in 0..n {
@@ -57,18 +57,23 @@ pub fn solve(mut a: Mat, mut b: Vec<f64>) -> Option<Vec<f64>> {
         }
         a.swap_rows(k, piv);
         b.swap(k, piv);
-        let d = a.get(k, k);
-        for r in k + 1..n {
-            let f = a.get(r, k) / d;
+        // Row by row on slices, so the update vectorises: the same operations in the same
+        // order as element by element (the solution is bit for bit the same).
+        let (above, below) = a.data.split_at_mut_checked((k + 1) * n)?;
+        let pivot = above.get(k * n + k..)?;
+        let d = *pivot.first()?;
+        let (b_above, b_below) = b.split_at_mut_checked(k + 1)?;
+        let bk = *b_above.last()?;
+        for (row, br) in below.chunks_exact_mut(n).zip(b_below.iter_mut()) {
+            let row = row.get_mut(k..)?;
+            let f = *row.first()? / d;
             if f == 0.0 {
                 continue;
             }
-            for c in k..n {
-                let v = a.get(k, c);
-                a.add(r, c, -f * v);
+            for (x, v) in row.iter_mut().zip(pivot) {
+                *x += -f * v;
             }
-            let bk = *b.get(k)?;
-            *b.get_mut(r)? -= f * bk;
+            *br -= f * bk;
         }
     }
     let mut x = vec![0.0; n];
@@ -166,6 +171,80 @@ mod tests {
         assert!((x[0] - 0.8).abs() < 1e-12 && (x[1] - 1.4).abs() < 1e-12);
         let s = Mat::zeros(2, 2);
         assert!(solve(s, vec![1.0, 1.0]).is_none());
+    }
+
+    /// The elimination element by element, as `solve` did before it worked on row slices.
+    fn solve_by_elements(mut a: Mat, mut b: Vec<f64>) -> Option<Vec<f64>> {
+        let n = a.rows;
+        for k in 0..n {
+            let mut piv = k;
+            let mut best = a.get(k, k).abs();
+            for r in k + 1..n {
+                if a.get(r, k).abs() > best {
+                    best = a.get(r, k).abs();
+                    piv = r;
+                }
+            }
+            if !(best > 1e-300) || !best.is_finite() {
+                return None;
+            }
+            a.swap_rows(k, piv);
+            b.swap(k, piv);
+            let d = a.get(k, k);
+            for r in k + 1..n {
+                let f = a.get(r, k) / d;
+                if f == 0.0 {
+                    continue;
+                }
+                for c in k..n {
+                    let v = a.get(k, c);
+                    a.add(r, c, -f * v);
+                }
+                let bk = b[k];
+                b[r] -= f * bk;
+            }
+        }
+        let mut x = vec![0.0; n];
+        for k in (0..n).rev() {
+            let mut s = b[k];
+            for (c, xc) in x.iter().enumerate().skip(k + 1) {
+                s -= a.get(k, c) * xc;
+            }
+            x[k] = s / a.get(k, k);
+        }
+        x.iter().all(|v| v.is_finite()).then_some(x)
+    }
+
+    #[test]
+    fn row_slices_solve_bit_for_bit_as_elements_did() {
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64 - 0.5
+        };
+        for n in [1, 2, 3, 7, 16, 41, 120] {
+            for sparse in [false, true] {
+                let mut a = Mat::zeros(n, n);
+                for r in 0..n {
+                    for c in 0..n {
+                        let v = next();
+                        // Sparse rows (as a sketch's Jacobian has) skip most updates: f == 0.
+                        if !sparse || r == c || v.abs() < 0.1 {
+                            a.set(r, c, if r == c { v + 4.0 } else { v });
+                        }
+                    }
+                }
+                let b: Vec<f64> = (0..n).map(|_| next()).collect();
+                let new = solve(a.clone(), b.clone()).unwrap();
+                let old = solve_by_elements(a, b).unwrap();
+                assert!(new.iter().zip(&old).all(|(x, y)| x.to_bits() == y.to_bits()), "n {n}, sparse {sparse}");
+            }
+        }
+        // Wrong shapes are refused, not read past.
+        assert!(solve(Mat { rows: 2, cols: 2, data: vec![1.0; 3] }, vec![1.0, 1.0]).is_none());
+        assert!(solve(Mat::zeros(2, 3), vec![1.0, 1.0]).is_none());
     }
 
     #[test]

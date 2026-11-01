@@ -8,6 +8,177 @@ fn run(session: &mut Session, command: &str, params: Value) -> Value {
 }
 
 #[test]
+fn geometry_independent_moves_do_not_evaluate_the_timeline() {
+    let mut session = Session::default();
+    let created = run(&mut session, "component.create", json!({"name":"Part","grounded":false}));
+    let occurrence = created["occurrence"].as_u64().unwrap();
+    run(&mut session, "solid.box", json!({"length":2,"width":3,"height":4,"body_name":"Block"}));
+    let definitions = session.model.state();
+    let before = session.evaluations;
+    run(&mut session, "occurrence.move", json!({"occurrence":occurrence,"translate":[10,0,0],"capture":true}));
+    assert_eq!(session.evaluations - before, 0, "a placement-independent model must not enter timeline evaluation");
+    let world = session.world_state();
+    let block = world.bodies.iter().find(|b| b.source_name.as_deref() == Some("Block")).unwrap();
+    assert!(block.mesh().bounds().min.dist(Vec3::new(10., 0., 0.)) < 1e-9);
+    assert!(Arc::ptr_eq(&definitions, &session.model.state()));
+    assert_fresh_world(&session);
+    for command in ["edit.undo", "edit.redo"] {
+        let before = session.evaluations;
+        run(&mut session, command, json!({}));
+        assert_eq!(session.evaluations, before, "{command} must share the placement reuse decision");
+        assert!(Arc::ptr_eq(&definitions, &session.model.state()));
+        assert_fresh_world(&session);
+    }
+    let mut scratch = session.scratch();
+    run(&mut scratch, "occurrence.move", json!({"occurrence":occurrence,"translate":[5,0,0],"capture":true}));
+    assert_eq!(scratch.evaluations, 0);
+    assert!(Arc::ptr_eq(&definitions, &scratch.model.state()));
+    assert_fresh_world(&scratch);
+    assert!(session.world_state().bodies[0].mesh().bounds().min.dist(Vec3::new(10., 0., 0.)) < 1e-9);
+}
+
+fn assert_fresh_world(session: &Session) {
+    let mut fresh = crate::doc::Model::new();
+    fresh.no_cache = true;
+    fresh.evaluate(&session.doc);
+    assert!(fresh.results.iter().all(|r| r.error.is_none()));
+    let expected = crate::doc::world_state(&session.doc, &fresh.state());
+    let actual = session.world_state();
+    assert_eq!(actual.bodies.len(), expected.bodies.len());
+    for (a, b) in actual.bodies.iter().zip(&expected.bodies) {
+        assert_eq!(a.name, b.name);
+        assert_eq!(a.component, b.component);
+        let (a, b) = (a.mesh(), b.mesh());
+        assert_eq!(a.triangles, b.triangles);
+        assert_eq!(a.tri_face, b.tri_face);
+        assert_eq!(a.edge_faces, b.edge_faces);
+        assert_eq!(a.positions.len(), b.positions.len());
+        assert_eq!(a.normals.len(), b.normals.len());
+        for (a, b) in a.positions.iter().zip(&b.positions) {
+            assert!(a.dist(*b) < 1e-8);
+        }
+        for (a, b) in a.normals.iter().zip(&b.normals) {
+            assert!(a.dist(*b) < 1e-8);
+        }
+    }
+}
+
+#[test]
+fn geometry_independent_joint_drive_and_reach_keep_the_evaluated_model() {
+    let mut session = Session::default();
+    let created = run(&mut session, "component.create", json!({"name":"Rotor","grounded":false}));
+    let occurrence = created["occurrence"].as_u64().unwrap();
+    run(&mut session, "solid.box", json!({"length":2,"width":3,"height":4,"body_name":"Block"}));
+    run(&mut session, "joint.as_built", json!({"type":"revolute","name":"Turn","a":0,"b":"Rotor","at":{"occurrence":0,"point":[0,0,0],"z":[0,0,1]}}));
+    let definitions = session.model.state();
+    for angle in [30_f64, -45., 90.] {
+        let before = session.evaluations;
+        let answer = run(&mut session, "joint.drive", json!({"joint":"Turn","value":angle,"quiet":true}));
+        assert_eq!(answer["errors"], json!([]));
+        assert_eq!(answer["conflicts"], json!([]));
+        assert_eq!(session.evaluations, before);
+        assert!(Arc::ptr_eq(&definitions, &session.model.state()));
+        let m = crate::doc::joints::occurrence_world(&session.doc, occurrence);
+        let expected = Vec3::new(2. * angle.to_radians().cos(), 2. * angle.to_radians().sin(), 0.);
+        assert!(crate::doc::apply_point(&m, Vec3::new(2., 0., 0.)).dist(expected) < 1e-8);
+        assert_fresh_world(&session);
+    }
+    let at = crate::doc::apply_point(&crate::doc::joints::occurrence_world(&session.doc, occurrence), Vec3::new(2., 0., 0.));
+    let before = session.evaluations;
+    let answer =
+        run(&mut session, "joint.reach", json!({"occurrence":occurrence,"at":[at.x,at.y,at.z],"point":[2.,0.,0.],"quiet":true,"continuous":true}));
+    assert_eq!(answer["reached"], true, "{answer}");
+    assert_eq!(session.evaluations, before);
+    assert!(Arc::ptr_eq(&definitions, &session.model.state()));
+    assert_fresh_world(&session);
+    for command in ["edit.undo", "edit.redo"] {
+        let before = session.evaluations;
+        run(&mut session, command, json!({}));
+        assert_eq!(session.evaluations, before);
+        assert_fresh_world(&session);
+    }
+}
+
+#[test]
+fn geometry_independent_fixed_sketch_extrusions_reuse_only_their_geometry() {
+    let mut session = Session::default();
+    let created = run(&mut session, "component.create", json!({"name":"Part","grounded":false}));
+    let occurrence = created["occurrence"].as_u64().unwrap();
+    run(&mut session, "sketch.create", json!({"plane":"XY"}));
+    run(&mut session, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[2,3]}));
+    run(&mut session, "sketch.finish", json!({}));
+    run(&mut session, "solid.extrude", json!({"distance":4,"operation":"new"}));
+    let definitions = session.model.state();
+    let before = session.evaluations;
+    run(&mut session, "occurrence.move", json!({"occurrence":occurrence,"translate":[10,0,0],"capture":true}));
+    assert_eq!(session.evaluations, before);
+    assert!(Arc::ptr_eq(&definitions, &session.model.state()));
+    assert_fresh_world(&session);
+    // An edit made directly before the move is not the model's evaluated input, even though
+    // the command itself changes only placement. The proof must name the evaluated document.
+    let sketch = session.doc.features.iter().find(|f| matches!(f.kind, crate::doc::FeatureKind::Sketch { .. })).unwrap().id;
+    session.doc_mut().sketch_mut(sketch).unwrap().points[1].pos.x += 1.;
+    let before = session.evaluations;
+    run(&mut session, "occurrence.move", json!({"occurrence":occurrence,"translate":[1,0,0],"capture":true}));
+    assert!(session.evaluations > before);
+    assert_fresh_world(&session);
+}
+
+#[test]
+fn placement_dependent_cross_component_cuts_still_evaluate_and_undo() {
+    use crate::doc::{Document, FeatureKind, Model, Operation, point_expr};
+    let mut document = Document::new("cross-component placement dependency");
+    let plate = document.add_component(Some("Plate"), 0).unwrap();
+    let tools = document.add_component(Some("Tools"), 0).unwrap();
+    for occurrence in &mut document.occurrences {
+        occurrence.grounded = occurrence.component == tools;
+    }
+    let feature = document
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "10".into(),
+                height: "4".into(),
+                operation: Operation::NewBody,
+            },
+            None,
+        )
+        .unwrap();
+    document.feature_mut(feature).unwrap().component = plate;
+    let mut model = Model::new();
+    model.evaluate(&document);
+    let plate_body = model.state().bodies[0].name.clone();
+    let feature = document
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(4., 4., -1.)),
+                length: "2".into(),
+                width: "2".into(),
+                height: "6".into(),
+                operation: Operation::Cut,
+            },
+            None,
+        )
+        .unwrap();
+    let feature = document.feature_mut(feature).unwrap();
+    feature.component = tools;
+    feature.participants = vec![plate_body.clone()];
+    let mut session = Session::new(document);
+    run(&mut session, "joint.as_built", json!({"type":"slider","name":"Slide","a":0,"b":"Plate","at":{"occurrence":0,"point":[0,0,0],"z":[1,0,0]}}));
+    assert!((session.model.state().body(&plate_body).unwrap().measure().unwrap().volume - 384.).abs() < 1e-7);
+    for (command, params, volume) in
+        [("joint.drive", json!({"joint":"Slide","value":5,"quiet":true}), 392.), ("edit.undo", json!({}), 384.), ("edit.redo", json!({}), 392.)]
+    {
+        let before = session.evaluations;
+        run(&mut session, command, params);
+        assert!(session.evaluations > before, "{command} must update the cut");
+        assert!((session.model.state().body(&plate_body).unwrap().measure().unwrap().volume - volume).abs() < 1e-7);
+        assert_fresh_world(&session);
+    }
+}
+
+#[test]
 fn world_placement_cache_preserves_pending_picks_materials_scratch_and_named_joint_frames() {
     let mut session = Session::default();
     let created = run(&mut session, "component.create", json!({"name":"Part"}));

@@ -199,14 +199,14 @@ const API_TEST: &str = r#"(async () => {
     const [x, y] = await app.request('ui.at', {handle: 'dialog:Export DXF…'});
     await app.request('ui.click', {x, y});
     // Browser files exist only in the VFS: native filesystem metadata cannot find them.
-    await app.execute('file.save', {path: '/upload/linked-part.solidcraft'});
+    await app.execute('file.save', {path: '/upload/linked-part.sc'});
     await app.execute('file.new');
-    const linked = await app.execute('component.insert_design', {path: '/upload/linked-part.solidcraft'});
-    await app.execute('file.save', {path: '/opfs/linked-assembly.solidcraft'});
+    const linked = await app.execute('component.insert_design', {path: '/upload/linked-part.sc'});
+    await app.execute('file.save', {path: '/opfs/linked-assembly.sc'});
     const links = await app.execute('component.links');
     check(links.links[0].found === true, 'linked part is found in browser storage');
-    check(links.links[0].path === '../upload/linked-part.solidcraft', 'assembly stores a relative link');
-    check(links.links[0].file === '/upload/linked-part.solidcraft', 'relative link resolves to a browser storage key');
+    check(links.links[0].path === '../upload/linked-part.sc', 'assembly stores a relative link');
+    check(links.links[0].file === '/upload/linked-part.sc', 'relative link resolves to a browser storage key');
     await app.request('ui.menu', {x: 200, y: 300, target: {type: 'occurrence', path: [linked.occurrence]}});
     let menu;
     for (let frame = 0; frame < 120; frame++) {
@@ -443,7 +443,7 @@ pub fn run(root: &Path, site: Option<&str>, required: bool) -> Result<(), String
     // Chrome sends a server at most six requests at once: a build with more files has the rest
     // wait for the first ones. v6 is deployed once all of v5's are asked for (any asked later
     // would get v6's file, which rightly ends v5's download, but that isn't this step).
-    server.wait_asked_slowly(asked + only_in(&v5, &v6)?)?;
+    server.wait_asked_slowly(asked + file_count(&v5)?)?;
     server.set(Mode::Serve(v6));
     // v5's files are still held while v6 launches; they come once v6 has started.
     let t = launch(&mut cdp, "v6")?;
@@ -520,16 +520,16 @@ const STATE_JS: &str = "(async () => {
     registered: (await navigator.serviceWorker.getRegistrations()).filter((r) => r.scope === scope).length };
 })()";
 
-/// The worker's cache for a build of the copy at `path` (sw.js's CACHE_PREFIX + version).
-/// How many files `build` keeps that `other` doesn't have.
-fn only_in(build: &Path, other: &Path) -> Result<usize, String> {
+/// Every file this build downloads, including names shared with the next build.
+fn file_count(build: &Path) -> Result<usize, String> {
     let path = build.join("build.json");
     let json: Value =
         std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).ok_or_else(|| format!("{}: not readable", path.display()))?;
     let files = json["files"].as_array().into_iter().flatten().filter_map(|f| f["file"].as_str());
-    Ok(files.filter(|f| !other.join(f).exists()).count())
+    Ok(files.count())
 }
 
+/// The worker's cache for a build of the copy at `path` (sw.js's CACHE_PREFIX + version).
 fn cache_name(path: &str, version: &str) -> String {
     format!("solidcraft-app {path} {version}")
 }
@@ -810,9 +810,13 @@ fn answer(mut stream: TcpStream, shared: &Mutex<Mode>, seen: &Counters, elsewher
         Mode::Flaky(dir) => (dir, true, false),
         Mode::SlowCheck(dir) => (dir, false, true),
         Mode::SlowFiles(dir, next) => {
-            if !small && file.is_some_and(|f| !next.join(f).exists()) {
+            if !small && file.is_some() {
+                // Count shared names too: switching builds before their requests arrive would
+                // serve the next build's bytes and correctly cancel this download's hash check.
                 seen.slow.fetch_add(1, Ordering::SeqCst);
-                seen.gate.pass();
+                if file.is_some_and(|f| !next.join(f).exists()) {
+                    seen.gate.pass();
+                }
             }
             (dir, false, false)
         }

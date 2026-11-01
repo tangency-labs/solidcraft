@@ -73,6 +73,85 @@ fn enabled_buttons_show_the_pointing_hand_and_disabled_ones_do_not() {
     }
 }
 
+/// With nothing to apply (#8561), Apply is disabled for the pointer, the keyboard and
+/// accessibility, and drawn with the theme's dim ink; with a change it works as before. OK and
+/// Cancel are not affected. The same holds for a confirmation's third action on the left.
+#[test]
+fn apply_with_nothing_to_apply_is_disabled_for_pointer_keyboard_and_accessibility() {
+    use crate::theme::Tokens;
+    for confirm in [false, true] {
+        for nothing_to_apply in [true, false] {
+            let live = !nothing_to_apply;
+            let ctx = crate::fonts::test_context();
+            ctx.enable_accesskit();
+            let action = std::cell::Cell::new(Action::None);
+            let run = |events: Vec<egui::Event>| {
+                scenario::clear_handles();
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0))),
+                    events,
+                    focused: true,
+                    ..Default::default()
+                };
+                crate::test_support::frame(&ctx, input, |ui| {
+                    ui.set_width(280.0);
+                    scope(ui, |ui| {
+                        let options = Footer { apply: Some("Apply"), confirm, nothing_to_apply, ..Default::default() };
+                        action.set(footer(ui, "OK", "Cancel", true, options));
+                    });
+                })
+            };
+            let case = format!("confirm {confirm}, nothing to apply {nothing_to_apply}");
+            let output = run(vec![]);
+            assert_eq!(scenario::count_of("dialog:apply:enabled"), Some(f64::from(live)), "{case}");
+            assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(1.0), "{case}: OK keeps its own state");
+            let node = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .and_then(|update| update.nodes.iter().find(|(_, node)| node.label() == Some("Apply")))
+                .map(|(_, node)| node.clone())
+                .unwrap_or_else(|| panic!("{case}: Apply is an accessible button"));
+            assert_eq!(node.role(), egui::accesskit::Role::Button, "{case}");
+            assert_eq!(node.is_disabled(), nothing_to_apply, "{case}: accessibility reports the state");
+            if !confirm {
+                let ink = crate::test_support::text_shapes(&output)
+                    .find(|text| text.galley.job.text == "Apply")
+                    .and_then(|text| text.galley.job.sections.first().map(|section| section.format.color))
+                    .unwrap_or_else(|| panic!("{case}: Apply's label is painted"));
+                let t = Tokens::get();
+                assert_eq!(ink, if live { t.form_ink } else { t.form_dim }, "{case}: a disabled Apply looks disabled");
+            }
+
+            // The pointer: no hand and no click without something to apply.
+            let apply = scenario::handle_at("dialog:apply").unwrap_or_else(|| panic!("{case}: Apply has a handle"));
+            run(vec![egui::Event::PointerMoved(apply)]);
+            let cursor = run(vec![egui::Event::PointerMoved(apply)]).platform_output.cursor_icon;
+            assert_eq!(cursor, if live { egui::CursorIcon::PointingHand } else { egui::CursorIcon::Default }, "{case}");
+            run(pointer(apply, true));
+            run(pointer(apply, false));
+            assert_eq!(action.get(), if live { Action::Apply } else { Action::None }, "{case}: click");
+
+            // The keyboard: Tab never lands on a disabled Apply, so Space/Enter can't press it.
+            ctx.memory_mut(|m| {
+                if let Some(id) = m.focused() {
+                    m.surrender_focus(id);
+                }
+            });
+            let mut focused = Vec::new();
+            for _ in 0..4 {
+                for event in run(key(egui::Key::Tab)).platform_output.events {
+                    if let egui::output::OutputEvent::FocusGained(info) = event {
+                        focused.push(info.label.unwrap_or_default());
+                    }
+                }
+            }
+            assert!(focused.iter().any(|label| label == "Cancel"), "{case}: Tab reaches the footer: {focused:?}");
+            assert_eq!(focused.iter().any(|label| label == "Apply"), live, "{case}: Tab and Apply: {focused:?}");
+        }
+    }
+}
+
 #[test]
 fn positioned_shared_buttons_center_text_and_respect_disabled_clicks_in_both_themes() {
     use crate::theme::Tokens;
@@ -135,4 +214,106 @@ fn positioned_shared_buttons_center_text_and_respect_disabled_clicks_in_both_the
         }
     }
     crate::theme::set_dark(previous);
+}
+
+#[test]
+fn one_bit_primary_actions_keep_inverted_labels_and_legacy_fills() {
+    use crate::theme::{Tokens, scoped_tokens};
+    use egui::{Color32, Shape};
+
+    for base in [crate::theme_files::Base::Dark, crate::theme_files::Base::Light] {
+        let old = crate::theme_files::parse(&format!(
+            r##"{{"format":"solidcraft-theme/1","name":"Old","base":"{}","colors":{{"form_primary":"#123456"}}}}"##,
+            if base.is_dark() { "dark" } else { "light" }
+        ))
+        .unwrap();
+        let t = crate::theme_files::resolve(&old);
+        assert_eq!(t.form_primary_fill, t.form_primary);
+    }
+    for theme in crate::theme_files::builtin().iter().filter(|theme| !crate::theme_files::is_two_colour(&theme.id)) {
+        let t = crate::theme_files::resolve(theme);
+        assert_eq!(t.form_primary_fill, t.form_primary, "{} retains its primary fill", theme.id);
+    }
+    // 1-bit's primary actions are black with white labels; 1-bit Dark's the reverse.
+    for (id, fill, ink) in [("1-bit", Color32::BLACK, Color32::WHITE), ("1-bit-dark", Color32::WHITE, Color32::BLACK)] {
+        let t = crate::theme_files::resolve(crate::theme_files::find(id, &[]).unwrap());
+        let _restore = scoped_tokens(t);
+        assert_eq!(Tokens::get().form_primary_fill, fill, "{id}");
+        let ctx = crate::fonts::test_context();
+        let mut rects = Vec::new();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            ui.set_width(400.0);
+            scope(ui, |ui| {
+                rects.push(primary_button(ui, "Primary").rect);
+                rects.push(wide_primary_button(ui, "Wide").rect);
+                footer(ui, "OK", "Cancel", true, Footer::default());
+                rects.push(scenario::rect_of("dialog:ok").unwrap());
+            });
+        });
+        output.textures_delta.clear();
+        for rect in rects {
+            assert!(
+                output.shapes.iter().any(|shape| matches!(&shape.shape, Shape::Rect(r) if rect.contains_rect(r.rect) && r.fill == fill)),
+                "{id}: {rect:?} has its fill"
+            );
+            assert!(
+                output.shapes.iter().any(|shape| matches!(&shape.shape, Shape::Text(text) if rect.contains(text.pos) && text.galley.job.sections.iter().all(|section| section.format.color == ink))),
+                "{id}: {rect:?} has its label ink"
+            );
+        }
+    }
+}
+
+#[test]
+fn persistent_native_selected_recipe_is_opt_in_and_preserves_small_selected_controls() {
+    fn flatten(shape: &egui::Shape, out: &mut Vec<egui::Shape>) {
+        match shape {
+            egui::Shape::Vec(shapes) => {
+                for s in shapes {
+                    flatten(s, out);
+                }
+            }
+            s => out.push(s.clone()),
+        }
+    }
+    let mut themes: Vec<_> = [false, true]
+        .into_iter()
+        .flat_map(|dark| crate::theme::ColorVision::ALL.into_iter().map(move |vision| crate::theme::Tokens::themed(dark, vision)))
+        .collect();
+    themes.extend(crate::theme_files::builtin().iter().map(crate::theme_files::resolve).filter(|t| t.borders.bevel.is_some()));
+    assert!(themes.iter().any(|t| t.borders.bevel.is_some()), "include a real bevel theme");
+    for t in themes {
+        let _theme = crate::theme::scoped_tokens(t);
+        let ctx = crate::fonts::test_context();
+        let mut selected = egui::Shape::Noop;
+        let mut native = egui::Rect::NOTHING;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let response = button(ui, "Existing selected", Button::SmallSelected);
+            native = response.rect;
+            selected = persistent_button_shape(ui, &response, response.rect);
+        });
+        output.textures_delta.clear();
+        let mut shapes = Vec::new();
+        flatten(&selected, &mut shapes);
+        assert!(shapes.iter().any(|s| matches!(s, egui::Shape::Rect(r) if r.rect == native && r.fill == t.selected_bg)));
+        assert!(shapes.iter().any(|s| matches!(s, egui::Shape::LineSegment { stroke, .. } if stroke.width == 2.0 && stroke.color == t.accent)));
+        // Existing SmallSelected keeps its old fill (including the bevel policy), regular
+        // label family and no persistent underline. Merely asking for the opt-in shape
+        // cannot alter that widget or its native geometry.
+        let mut old = Vec::new();
+        for shape in output.shapes {
+            flatten(&shape.shape, &mut old);
+        }
+        let fill = if t.borders.bevel.is_some() { t.control_fill } else { t.selected_bg };
+        assert!(old.iter().any(|s| matches!(s, egui::Shape::Rect(r) if r.rect == native && r.fill == fill)));
+        assert!(!old.iter().any(|s| matches!(s, egui::Shape::LineSegment { stroke, .. } if stroke.width == 2.0 && stroke.color == t.accent)));
+        let text = old
+            .iter()
+            .find_map(|s| match s {
+                egui::Shape::Text(s) if s.galley.text() == "Existing selected" => Some(s),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(text.galley.job.sections[0].format.font_id.family, egui::FontFamily::Proportional);
+    }
 }

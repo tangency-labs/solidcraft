@@ -17,6 +17,22 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
 Bends follow the rule's K-factor, so flat lengths match what a press brake will make. Tests
 check flat lengths against hand-computed bend allowances.
 
+A rule is saved in its design, and a new design starts with only the default steel rule. To use
+the same rules in every design, keep them as **personal rules**, saved in your profile: open
+**Personal rules** at the top of Sheet Metal Rules.
+
+- **Save new** keeps the rule the manager shows under a name: its thickness, K factor, bend
+  radius, reliefs, gaps, corner relief shape and angle display. A bare number is saved with the
+  design's unit, so the rule makes the same sheet in a millimetre or an inch design. `Thickness`
+  and other expressions are kept as typed, and are worked out in the design the rule is used in.
+- Picking a personal rule fills the manager with it: the design's own rule of that name, or else
+  a new rule. **OK** adds it to the design (or updates that rule); picking alone changes nothing.
+- The save icon beside the box saves the manager's values over the picked personal rule.
+  **Rename** and **Delete** change the personal rule only, never the rules already in designs.
+
+A design keeps its own copy of each rule it uses, so it builds the same on a computer without
+your personal rules. The profile keeps up to 64 of them.
+
 A copy of a sheet metal body is sheet metal too. **Mirror** (`solid.mirror` with `bodies`)
 makes the opposite hand: its own flat pattern, DXF and bend table, the mirror image of the
 original's flat, with the same thickness side, bends and flat lengths, and holes where the
