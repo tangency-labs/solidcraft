@@ -2482,6 +2482,28 @@ fn move_origin_and_matrix_use_world_coordinates_for_placed_bodies() {
 }
 
 #[test]
+fn a_turn_with_no_pivot_goes_about_the_world_origin_in_a_placed_component() {
+    use solidcraft_geom::Vec3;
+    for explicit_axis in [false, true] {
+        let mut s = Session::default();
+        let component = run(&mut s, "component.create", json!({"name": "Offset", "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube"}));
+        run(&mut s, "occurrence.move", json!({"occurrence": component["occurrence"], "translate": [100, 0, 0]}));
+        run(&mut s, "component.activate", json!({"component": 0}));
+        let mut turn = json!({"bodies": ["Cube"], "angle": "90 deg"});
+        if explicit_axis {
+            turn["axis"] = json!([0, 0, 1]);
+        }
+        run(&mut s, "solid.move", turn);
+        let bounds = world_bounds(&s, "Cube");
+        assert!(
+            bounds.min.dist(Vec3::new(-10.0, 100.0, 0.0)) < 1e-6 && bounds.max.dist(Vec3::new(0.0, 110.0, 10.0)) < 1e-6,
+            "explicit axis {explicit_axis}: {bounds:?}"
+        );
+    }
+}
+
+#[test]
 fn move_origin_and_matrix_apply_to_each_repeated_placement() {
     use solidcraft_geom::Vec3;
     for transform in [json!({"origin": ["50 mm", 0, 0], "angle": "90 deg"}), json!({"matrix": [0,-1,0,50, 1,0,0,-50, 0,0,1,0]})] {
