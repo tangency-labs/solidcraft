@@ -94,7 +94,7 @@ shortcut such as L can start a Midpoint Line; pick the variant you want from the
 change it ([Keyboard shortcuts](shortcuts.md)).
 
 Once a shape's first point is down, value boxes (a line's length and angle, a rectangle's width
-and height, a circle's diameter…) follow the cursor. Typing goes into the first box, Tab moves to
+and height, a circle's diameter, an ellipse's major and minor radius…) follow the cursor. Typing goes into the first box, Tab moves to
 the next and Enter places the shape; each typed value becomes a dimension. A value is an
 expression (`25`, `1 in`, `d1 * 2`), or `width = 20` (also `#width = 20`), which also adds the
 user parameter `width` and dimensions with it, as when [placing a dimension](parameters.md). A
@@ -341,9 +341,9 @@ and the tool stays on for the next dimension. The dimension's text always takes 
 lines take it only away from sketch points and curves, which still start a new dimension.
 
 To have shapes dimensioned as you draw them, turn on **Dimension new shapes** in Preferences ›
-Sketch (it is off by default). Each line, rectangle, circle, arc, slot or polygon you draw then
-gets all its dimensions at the sizes you drew: a line its length and angle, a rectangle its width
-and height, a circle its diameter, and so on. Values you type in the drawing boxes win, and a size
+Sketch (it is off by default). Each line, rectangle, circle, arc, slot, polygon or ellipse you draw
+then gets all its dimensions at the sizes you drew: a line its length and angle, a rectangle its
+width and height, a circle its diameter, an ellipse its major and minor radius, and so on. Values you type in the drawing boxes win, and a size
 the sketch already sets (the angle of a line that snapped horizontal) is left out. The shape and
 its dimensions are one undo step. In scripts, `sketch.draw.dimensioned` takes `"as_drawn": true`.
 

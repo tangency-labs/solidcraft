@@ -561,3 +561,30 @@ fn dragging_an_occurrence_row_onto_the_top_of_a_sibling_reorders_them() {
     assert!(row(c).y < row(a).y && row(a).y < row(b).y, "the rows follow the saved order");
     assert!(h.app.session.doc.occurrences.iter().all(|o| o.parent == 0), "none moved into another");
 }
+
+/// #10218: the design's Sketches folder offers Move Sketches to the Part They're On for its
+/// sketches; the one drawn on the part's face goes to the part, the one on XY stays, and the
+/// status bar says so.
+#[test]
+fn sketches_folder_moves_its_sketches_to_the_part_they_are_on() {
+    let (mut h, component, occurrence) = crate::test_support::component_box();
+    h.app.session.auto_project = false;
+    let world = h.app.session.world_state();
+    let body = world.bodies.iter().find(|b| h.app.session.doc.model_body_component(b) == component).unwrap().name.clone();
+    let face = world.body(&body).unwrap().body.faces(0.01).unwrap().into_iter().max_by(|a, b| a.centroid.z.total_cmp(&b.centroid.z)).unwrap();
+    let pick = json!({"face":[face.centroid.x,face.centroid.y,face.centroid.z],"body":body,"index":face.index,"path":[occurrence]});
+    let on_face = h.app.run("sketch.create", json!({"name":"OnFace","plane":pick})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.finish_sketch();
+    let on_xy = h.app.run("sketch.create", json!({"name":"OnXY","plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.finish_sketch();
+    let target = Target::Folder { component: 0, folder: "sketches".into(), scope: "c0".into() };
+    let items = context_menu::items(&h.app, &target);
+    let item = items.iter().find(|i| i.id == "component.move_sketches.to_parts").expect("on the Sketches folder's menu");
+    assert_eq!(item.params.as_ref().unwrap()["sketches"], json!([on_face.to_string(), on_xy.to_string()]));
+    context_menu::run_item(&mut h.app, item, egui::Pos2::ZERO);
+    assert_eq!(h.app.session.doc.feature(on_face).unwrap().component, component);
+    assert_eq!(h.app.session.doc.feature(on_xy).unwrap().component, 0);
+    let (status, _, error) = h.app.status.clone().unwrap();
+    assert!(!error && status.contains("Moved 1") && status.contains("1 stayed") && status.contains("not on a part's face"), "{status}");
+    assert!(context_menu::items(&h.app, &Target::Sketch { id: on_xy }).iter().any(|i| i.id == "component.move_sketches.to_parts"));
+}

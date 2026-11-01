@@ -3721,6 +3721,29 @@ fn highlight_block_tris(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -
     map.get(&b.name).cloned()
 }
 
+/// The world's bodies by name, the map made at the first lookup: [`ModelState::body`] looks along
+/// every body, so a highlight with thousands of bodies selected looked up each of them that way.
+/// A name held by more than one body finds the first, as `ModelState::body` does.
+///
+/// [`ModelState::body`]: solidcraft_engine::doc::ModelState::body
+struct BodiesByName<'a> {
+    state: &'a solidcraft_engine::doc::ModelState,
+    map: Option<std::collections::HashMap<&'a str, &'a solidcraft_engine::doc::ModelBody>>,
+}
+
+impl<'a> BodiesByName<'a> {
+    fn new(state: &'a solidcraft_engine::doc::ModelState) -> Self {
+        Self { state, map: None }
+    }
+
+    fn get(&mut self, name: &str) -> Option<&'a solidcraft_engine::doc::ModelBody> {
+        let state = self.state;
+        // Last inserted wins: the bodies go in from the last, so the first of a name is kept.
+        let map = self.map.get_or_insert_with(|| state.bodies.iter().rev().map(|b| (b.name.as_str(), b)).collect());
+        map.get(name).copied()
+    }
+}
+
 /// How a whole body is lit: hovered or selected, and in which colour (where the model's own
 /// colour is not kept: placements, and faded or see-through bodies).
 #[derive(Clone, Copy)]
@@ -3977,18 +4000,21 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             }
         }
     }
-    // Selected things.
+    // Selected things. Their bodies are found by name in a map made once, at the first lookup:
+    // looking each one up along the world's bodies made Select All on an assembly of thousands
+    // of bodies quadratic (millions of name comparisons on every hover change).
+    let mut by_name = BodiesByName::new(&st);
     for x in &sel {
         match x {
             Sel::Face { body, index, .. } => {
                 // A live preview stands in for the body: its old faces would fight with it.
-                if let Some(b) = st.body(body).filter(|_| app.body_visible(body) && !replaced(body)) {
+                if let Some(b) = by_name.get(body).filter(|_| app.body_visible(body) && !replaced(body)) {
                     face_tris(&mut feedback, &shown(b), *index, c4(t.sel_face), false);
                     hidden_face_outline(&mut feedback, &drawn(b), *index, t.sel_edge);
                 }
             }
             Sel::Body { name } => {
-                if let Some(b) = st.body(name)
+                if let Some(b) = by_name.get(name)
                     && app.body_visible(name)
                 {
                     let lit = WholeBody { selected: true, colour: c4(t.body_selected) };
@@ -4000,7 +4026,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 }
             }
             Sel::Edge { body, index, point } => {
-                if let Some(b) = st.body(body)
+                if let Some(b) = by_name.get(body)
                     && app.body_visible(body)
                     && !moving(body)
                 {
@@ -9699,6 +9725,44 @@ mod tests {
             app.session.selection = selected;
             assert_eq!(build_highlight(&app).merged().tris.len(), expected, "whole-body feedback must neither omit nor duplicate selected faces");
         }
+    }
+
+    /// Every body selected (Select All on an assembly) looks each body up by name in a map, not
+    /// along the world's bodies: the map finds the same body a scan finds for every name (the
+    /// first one, were a name held twice) and none for a name no body has, and the highlight
+    /// lights every selected body once, with a selected face and edge as before.
+    #[test]
+    fn selected_bodies_found_by_name_are_the_bodies_a_scan_finds() {
+        let mut app = cylinder_app();
+        app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false });
+        app.run("solid.box", json!({"length": 4, "width": 4, "height": 4, "center": [40, 0, 2], "operation": "new", "name": "Seed"})).unwrap();
+        app.run("solid.pattern.rectangular", json!({"features": ["Seed"], "dir1": [1, 0, 0], "count1": 6, "spacing1": 6, "name": "Row"})).unwrap();
+        let st = app.session.world_state();
+        assert_eq!(st.bodies.len(), 7);
+        let mut by_name = BodiesByName::new(&st);
+        for b in &st.bodies {
+            let found = by_name.get(&b.name).expect("every body is found by its name");
+            assert!(std::ptr::eq(found, st.body(&b.name).unwrap()), "{}: the body a scan finds", b.name);
+        }
+        assert!(by_name.get("No such body").is_none());
+        let mut twice = (*st).clone();
+        let mut copy = twice.bodies[1].clone();
+        copy.name = twice.bodies[0].name.clone();
+        twice.bodies.push(copy);
+        let mut by_name = BodiesByName::new(&twice);
+        assert!(std::ptr::eq(by_name.get(&twice.bodies[0].name).unwrap(), &twice.bodies[0]), "a name held twice finds the first body");
+        let names: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
+        let first = st.bodies[0].clone();
+        drop(st);
+        let mut selection: Vec<Sel> = names.iter().map(|name| Sel::Body { name: name.clone() }).collect();
+        selection.push(Sel::Face { body: first.name.clone(), index: 0, point: Vec3::ZERO });
+        selection.push(Sel::Edge { body: first.name.clone(), index: 0, point: Vec3::ZERO });
+        app.session.selection = selection;
+        let lit = build_highlight(&app);
+        assert_eq!(lit.selected_planned.len() + lit.selected_blocks.len(), names.len(), "every selected body is lit once");
+        let merged = lit.merged();
+        assert!(!merged.tris.is_empty(), "the selected face is lit");
+        assert!(!merged.lines.is_empty() || !merged.overlay.is_empty() || !merged.hidden.is_empty(), "the selected edge is lit");
     }
 
     /// A whole highlighted body is lit from the model's own triangles, not by copying every one

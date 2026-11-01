@@ -355,6 +355,7 @@ fn sample(creator: &str) -> Option<Value> {
         "sketch.circle.two_point" => json!({"p0":[0,0],"p1":[10,0]}),
         "sketch.circle.three_point" => json!({"p0":[0,0],"p1":[10,0],"p2":[5,5]}),
         "sketch.arc.center_point" => json!({"center":[0,0],"start":[10,0],"end":[0,10]}),
+        "sketch.ellipse" => json!({"center":[0,0],"major":[10,6],"minor_radius":4}),
         "sketch.slot.center_to_center" | "sketch.slot.overall" => json!({"p0":[2,3],"p1":[22,3],"width":4}),
         "sketch.slot.center_point" => json!({"center":[12,3],"end":[22,3],"width":4}),
         "sketch.slot.arc_center" => json!({"center":[0,0],"start":[20,0],"end":[0,20],"width":6}),
@@ -448,6 +449,19 @@ fn as_drawn_keeps_typed_values_alternatives_and_leaves_out_determined_sizes() {
     let mut s = session();
     let out = draw(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[30,20]}), json!({"width":40}));
     assert_eq!(out["dimensions"].as_object().unwrap().keys().collect::<Vec<_>>(), ["width"]);
+}
+
+/// An ellipse takes its major and minor radius (#10279): typed values drive it.
+#[test]
+fn an_ellipse_takes_a_typed_major_and_minor_radius() {
+    let mut s = session();
+    let out =
+        draw(&mut s, "sketch.ellipse", json!({"center":[0,0],"major":[10,0],"minor_radius":4}), json!({"major_radius":"12 mm","minor_radius":5}));
+    let mut placed: Vec<&String> = out["dimensions"].as_object().unwrap().keys().collect();
+    placed.sort();
+    assert_eq!(placed, ["major_radius", "minor_radius"]);
+    close(measure(&s, |k| matches!(k, ConstraintKind::Distance { .. })), 12.0);
+    close(measure(&s, |k| matches!(k, ConstraintKind::Radius { .. })), 5.0);
 }
 
 /// Every `[x, y]` point of a sample moved by `(dx, dy)`; sizes and counts stay.

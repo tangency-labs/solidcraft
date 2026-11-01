@@ -819,7 +819,23 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let dims = app.session.visibility.shown_dimensions.contains(&id);
     let editing = app.session.active_sketch == Some(id);
     let has_profiles = crate::open_meshing::session_world(&app.session).sketch(id).is_some_and(|s| !s.profiles.is_empty());
-    vec![
+    // This sketch, or every selected sketch when it is one of them, to the part it is on (#10218).
+    let selected: Vec<String> = app
+        .session
+        .selection
+        .iter()
+        .filter_map(|sel| match sel {
+            solidcraft_engine::Sel::Feature { id }
+                if app.session.doc.feature(*id).is_some_and(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Sketch { .. })) =>
+            {
+                Some(id.to_string())
+            }
+            _ => None,
+        })
+        .collect();
+    let sketches = if selected.contains(&id.to_string()) { selected } else { vec![id.to_string()] };
+    let parts = !app.session.doc.components.is_empty();
+    let mut items = vec![
         act("ui.extrudeSketch", "Extrude", "extrude").key("E").with(json!({ "sketch": id })).on(has_profiles && !editing),
         Item::sep(),
         act("ui.editSketch", "Edit Sketch", "sketch").with(json!({ "sketch": id })).on(!editing),
@@ -831,6 +847,7 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste(app)),
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": [{"type": "feature", "id": id}] })),
         act("ui.rename", "Rename", "rename").with(json!({ "feature": id })),
+        crate::browser::sketches_to_parts_item(sketches).on(parts && !editing),
         Item::sep(),
         act("ui.lookAt", "Look At", "lookat").with(json!({ "sketch": id })),
         act("ui.sketchProfile", if profiles { "Hide Profile" } else { "Show Profile" }, "sketch").with(json!({ "sketch": id })),
@@ -838,7 +855,9 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act(if visible { "ui.hideSketch" } else { "ui.showSketch" }, "Show/Hide", "eye").key("V").with(json!({ "sketch": id })),
         Item::sep(),
         act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({ "feature": id })),
-    ]
+    ];
+    items.retain(|item| parts || item.id != "component.move_sketches.to_parts");
+    items
 }
 
 /// Construction geometry's row: edit, delete, rename, show or hide; sketch on planes.
@@ -1796,11 +1815,36 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         // They recompute the history from the changed feature on: off the frame, as the timeline does.
         "timeline.suppress" | "timeline.roll_to" if item.params.is_some() => drop(app.run_heavy(&item.id, p)),
+        "component.move_sketches.to_parts" => sketches_to_parts(app, p),
         id if item.params.is_some() => {
             let _ = app.run(id, p);
         }
         id => app.start(id),
     }
+}
+
+/// Move Sketches to the Part They're On, and say in the status bar how many moved and why the
+/// others stayed (#10218).
+fn sketches_to_parts(app: &mut SolveApp, p: Value) {
+    let out = match app.run("component.move_sketches.to_parts", p) {
+        Ok(out) => out,
+        Err(error) => return app.set_status(crate::friendly_error("component.move_sketches.to_parts", &error), true),
+    };
+    let count = |key: &str| out.get(key).and_then(Value::as_u64).unwrap_or(0).to_string();
+    let mut why: Vec<String> = Vec::new();
+    for kept in out.get("kept").and_then(Value::as_array).into_iter().flatten() {
+        let code = kept.get("code").and_then(Value::as_str).unwrap_or_default();
+        let reason = crate::i18n::tr(&format!("browser.sketches_to_parts_{code}")).to_string();
+        if !why.contains(&reason) {
+            why.push(reason);
+        }
+    }
+    let message = if why.is_empty() {
+        crate::i18n::format("browser.sketches_to_parts_moved", &[("moved", &count("moved"))])
+    } else {
+        crate::i18n::format("browser.sketches_to_parts_result", &[("moved", &count("moved")), ("stayed", &count("stayed")), ("why", &why.join("; "))])
+    };
+    app.set_status(message, false);
 }
 
 /// Delete what is selected: sketch entities, features, and bodies (a Remove feature).

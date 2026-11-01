@@ -47,6 +47,8 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
         // The two points are a diameter's ends (#3278).
         ("sketch.circle.two_point", 1) => vec![b("Diameter", Length)],
         ("sketch.circle.two_tangent", 2) => vec![b("Radius", Length)],
+        ("sketch.ellipse", 1) => vec![b("Major radius", Length)],
+        ("sketch.ellipse", 2) => vec![b("Minor radius", Length)],
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 1) => vec![b("Radius", Length)],
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 2) => vec![b("Sweep", Angle)],
         ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => vec![b("Radius", Length), b("Sides", Unitless)],
@@ -119,6 +121,13 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
         ("sketch.circle.two_point", 1) => a + dir_or_x(h - a) * lk("Diameter").unwrap_or((h - a).len()),
         ("sketch.slot.center_point", 1) => a + dir_or_x(h - a) * lk("Length").map_or((h - a).len(), |l| l * 0.5),
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 1) => a + dir_or_x(h - a) * lk("Radius").unwrap_or((h - a).len()),
+        ("sketch.ellipse", 1) => a + dir_or_x(h - a) * lk("Major radius").unwrap_or((h - a).len()),
+        // A typed minor radius puts the third point on the minor axis, on the cursor's side.
+        ("sketch.ellipse", 2) => lk("Minor radius").map_or(h, |r| {
+            let c = t.pts.first().map(|p| p.0).unwrap_or(a);
+            let n = dir_or_x(a - c).perp();
+            c + n * (r * sign(n.dot(h - c)))
+        }),
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 2) => {
             let c = t.pts.first().map(|p| p.0).unwrap_or(a);
             let r = (a - c).len();
@@ -278,6 +287,17 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
         }
         ("sketch.circle.center", 1) => vec![(2.0 * (e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
         ("sketch.circle.two_point", 1) => vec![((e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
+        ("sketch.ellipse", 1) => vec![((e - a).len(), (a + e) * 0.5 + dir_or_x(e - a).perp() * off)],
+        ("sketch.ellipse", 2) => {
+            // The minor radius of the ellipse through the cursor, as the preview draws it; the box
+            // sits beyond the cursor, away from the major axis (#2201).
+            let u = dir_or_x(a - first);
+            let d = e - first;
+            let y = u.cross(d).abs();
+            let k = 1.0 - (d.dot(u) / first.dist(a).max(1e-12)).powi(2);
+            let r = if k > 1e-12 { y / k.sqrt() } else { y };
+            vec![(r, e + u.perp() * (sign(u.perp().dot(d)) * 2.5 * off))]
+        }
         ("sketch.circle.two_tangent", 2) => {
             vec![(crate::sketch_tools::two_tangent_default_radius(app, t), (first + a) * 0.5 + dir_or_x(a - first).perp() * off)]
         }
@@ -341,6 +361,7 @@ pub fn sync(t: &mut Tool) {
             && matches!(
                 t.cmd,
                 "sketch.arc.center_point"
+                    | "sketch.ellipse"
                     | "sketch.slot.center_to_center"
                     | "sketch.slot.overall"
                     | "sketch.slot.center_point"
@@ -391,7 +412,7 @@ pub fn dimensions(t: &Tool) -> Value {
         .iter()
         .chain(&t.dims)
         .filter(|dimension| dimension.locked && is_dimension(t, dimension.label))
-        .map(|dimension| (dimension.label.to_ascii_lowercase(), json!(dimension.value)))
+        .map(|dimension| (dimension.label.to_ascii_lowercase().replace(' ', "_"), json!(dimension.value)))
         .collect::<serde_json::Map<_, _>>();
     Value::Object(values)
 }
