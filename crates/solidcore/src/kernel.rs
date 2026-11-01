@@ -269,6 +269,27 @@ pub struct UpstreamFixes {
     pub temporary_radius_setup_errors: bool,
     /// `SmFilletGeom::Trim` returns the first curve/surface trim or interval-intersection error instead of dropping it and continuing with an unset interval (WR-604, #483). Earlier successful edits remain; off by default for pinned C++ parity.
     pub fillet_trim_status: bool,
+    /// `SmBendVolume::EvaluateBoundingBoxSimple` builds the mid-angle `PseudoBox`
+    /// (`proj_pseudo_box`) from the true radial/angular cosine and sine extrema over
+    /// `[u_min, u_max] × [-half_angle, half_angle]` (propagating `±SM_INFINITE_PARAMETER`
+    /// along unbounded `u` rays) instead of `sin(theta_end) * u_min` / `sin(theta_end) * u_max`
+    /// compared against `SM_PI`, and uses `max(sin(theta_min), sin(theta_max)) * u_min`
+    /// instead of cosines for the axis-aligned box's `dYMax` when `u` reaches
+    /// `SM_INFINITE_PARAMETER` and both end angles are `<= 0` (`WR-59`; see
+    /// `plan/upstream-issues/WR-59--addendum-2026-11-01-bend-volume-pseudo-box-bounds.md`).
+    /// Off by default for pinned C++ parity.
+    pub bend_volume_bbox_contains_wide_angle_and_inf_u: bool,
+    /// `SmBendVolume::TrimParamBoundingBoxSimple` trims `v` periodically to the primary
+    /// period `[-pi * |d|, pi * |d|]` — shifting intervals of length `< 2 * pi * |d|`
+    /// into the primary period when they do not straddle the seam `±pi * |d|` (within
+    /// `SM_EFF_ZERO`) and expanding seam-crossing or full-period/unbounded intervals to
+    /// `[-pi * |d|, pi * |d|]` — instead of rejecting shifted-period boxes and clamping
+    /// `v_min` and `v_max` independently with `SM_CLAMP_TO_PERIOD`, which inverts
+    /// seam-crossing intervals and leaves `trim_box` holding stale caller data while
+    /// returning `SM_SUCCESS` (`WR-60`; see
+    /// `plan/upstream-issues/WR-60--addendum-2026-11-01-bend-volume-trim-across-period.md`).
+    /// Off by default for pinned C++ parity.
+    pub bend_volume_trim_param_box_across_period: bool,
     /// `SmCurve::ComputeCrvsNormal` uses the sampled polygon's area vector, so a
     /// concave planar loop's normal follows its orientation and its taper drafts
     /// in the requested direction (WR-587, #1776). An open chain closes by its chord.
