@@ -6023,6 +6023,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         .and_then(|ss| ss.sketch.points.iter().find(|p| p.id == id).map(|p| ss.plane.to_world(p.pos)))
                         .unwrap_or(position.0);
                     if let Some(inp) = d.inputs.first_mut() {
+                        // Editing a Single hole places it at exactly one point: a pick replaces.
+                        inp.multi = false;
                         inp.items = vec![face_sel(s, at).unwrap_or(Sel::Face { body: String::new(), index: 0, point: at })];
                     }
                     d.extra.insert("direction".into(), pt3(direction.0));
@@ -6039,6 +6041,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 }
                 None => {
                     if let Some(inp) = d.inputs.first_mut() {
+                        // Editing a Single hole places it at exactly one point: a pick replaces.
+                        inp.multi = false;
                         inp.items = vec![face_sel(s, position.0).unwrap_or(Sel::Face { body: String::new(), index: 0, point: position.0 })];
                     }
                     d.extra.insert("direction".into(), pt3(direction.0));
