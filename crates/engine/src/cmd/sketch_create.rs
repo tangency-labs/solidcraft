@@ -16,7 +16,7 @@ use super::sketch::{add_c, circumcircle, edit, ids_of, mark_construction, req_pa
 use super::sketch_store;
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, num, req_vec2, str_, string_list};
-use crate::schema::sketch_create::{SplineReverseParams, SplineReverseResult};
+use crate::schema::sketch_create::{SplineRemovePointParams, SplineRemovePointResult, SplineReverseParams, SplineReverseResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
@@ -29,6 +29,7 @@ mod text_move_tests;
 mod text_expr_tests;
 
 const SPLINE_REVERSE_CONTRACT: TypedContract<SplineReverseParams> = TypedContract::new();
+const SPLINE_REMOVE_POINT_CONTRACT: TypedContract<SplineRemovePointParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.line.midpoint", "Midpoint Line", midpoint_line)
@@ -88,6 +89,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("spline")
         .enabled(in_sketch)
         .params("curve: fit point spline id, at: [x,y]: a fit point is inserted where the curve passes nearest to it, between its neighbours (the curve still runs through it and all its old points; constraints on them stay); end?: start|end: `at` becomes the spline's new first or last point instead, and the curve runs on to it (refused when that end is joined to other geometry). Control point splines take no new points yet. Returns point: the new point's id"),
+    CommandSpec::new("sketch.spline.remove_point", "Remove Spline Point", crate::checked!("sketch.spline.remove_point", spline_remove_point))
+        .icon("spline")
+        .enabled(in_sketch)
+        .contract(&SPLINE_REMOVE_POINT_CONTRACT)
+        .output(output_schema_for::<SplineRemovePointResult>)
+        .params("curve: spline id, point: one of its points (a point id, or the curve's start or end such as s1.end): the spline runs through (or over) its other points only, and the point goes with the constraints on it unless another curve uses it. Fit point, control point and closed splines. Refused for a closed spline's closing point, for an end joined to other geometry or held by a constraint, when fewer than 2 points would be left (3 on a closed spline), and for a projected, offset or patterned spline. Returns curve, point: the point's id, deleted: whether the point went too"),
     CommandSpec::new("sketch.spline.reverse", "Reverse Spline Direction", crate::checked!("sketch.spline.reverse", spline_reverse))
         .icon("spline")
         .enabled(in_sketch)
@@ -709,6 +716,22 @@ fn spline_insert_point(s: &mut Session, p: &Value) -> Result<Value> {
         sk.points.get(new).map(|q| q.id.clone()).ok_or_else(|| bad(cmd, "the new point is missing"))
     })?;
     Ok(json!({"point": point, "curve": p.get("curve"), "sketch": info}))
+}
+
+/// One point taken out of a spline (#10783).
+fn spline_remove_point(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.spline.remove_point";
+    let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?.to_string();
+    let point = str_(p, "point").ok_or_else(|| bad(cmd, "`point` must be one of the spline's points"))?.to_string();
+    let ((point, deleted), info) = edit(s, p, cmd, false, |sk, _| {
+        let c = sk.curve_index(&id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+        let at = sk.resolve_point(&point).ok_or_else(|| bad(cmd, format!("unknown sketch point `{point}`")))?;
+        let name = sk.points.get(at).map_or(point.clone(), |q| q.id.clone());
+        let deleted = sk.remove_spline_point(c, at).map_err(|e| bad(cmd, e.to_string()))?;
+        Ok((name, deleted))
+    })?;
+    let reply = SplineRemovePointResult { curve: id, point, deleted, sketch: info, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn spline_reverse(s: &mut Session, p: &Value) -> Result<Value> {

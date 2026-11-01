@@ -80,6 +80,50 @@ pub struct SplineReverseParams {
     pub sketch: Option<SketchRef>,
 }
 
+/// Take one point out of a spline: it runs through (or over) its other points only, and the point
+/// goes with the constraints on it unless another curve uses it. Takes fit point, control point
+/// and closed splines; refused for a closed spline's closing point, for an end joined to other
+/// geometry or held by a constraint, when fewer than 2 points would be left (3 on a closed
+/// spline), and for a projected, offset or patterned spline.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct SplineRemovePointParams {
+    /// The spline's curve id.
+    #[serde(deserialize_with = "spline_id")]
+    pub curve: String,
+    /// One of the spline's points: a point id, or the curve's `start` or `end` (`s1.end`).
+    #[serde(deserialize_with = "point_ref")]
+    pub point: String,
+    /// The sketch (default: the one being edited).
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "SketchRef")]
+    pub sketch: Option<SketchRef>,
+}
+
+/// What `sketch.spline.remove_point` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SplineRemovePointResult {
+    /// The spline's curve id (unchanged).
+    pub curve: String,
+    /// The id the point had.
+    pub point: String,
+    /// Whether the point went too; `false` when another curve still uses it.
+    pub deleted: bool,
+    /// The sketch's solve: `{solved, dof}`.
+    pub sketch: Value,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// A point reference, with the handler's message for anything else.
+fn point_ref<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    match Value::deserialize(d)? {
+        Value::String(s) => Ok(s),
+        _ => Err(serde::de::Error::custom("must be one of the spline's points")),
+    }
+}
+
 /// A curve id, with the handler's message for anything else.
 fn spline_id<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
     match Value::deserialize(d)? {

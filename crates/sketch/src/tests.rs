@@ -1199,6 +1199,88 @@ fn a_spline_extends_to_a_new_end_unless_the_end_is_joined() {
     assert!(sk.extend_spline(s, v(-10.0, 5.0), true).is_err(), "already a point there");
 }
 
+/// Where spline `s`'s points are, in order.
+fn spline_places(sk: &Sketch, s: usize) -> Vec<Vec2> {
+    let CurveKind::Spline { pts, .. } = &sk.curves[s].kind else { panic!("{s} is no spline") };
+    pts.iter().map(|i| sk.point(*i).unwrap()).collect()
+}
+
+/// #10783: a spline gives up one of its points. The curve runs through the others, in order, and
+/// the point goes with the constraints on it; a point a line also ends at stays, for the line.
+#[test]
+fn a_point_removed_from_a_spline_goes_and_the_curve_keeps_the_others() {
+    let mut sk = Sketch::new();
+    let (pts, s) = wave_spline(&mut sk, false);
+    let mut others = spline_places(&sk, s);
+    let gone = others.remove(2);
+    // A free point held on the one that goes: the constraint goes, the free point stays.
+    let free = sk.add_point(gone, None).unwrap();
+    sk.add_constraint(ConstraintKind::Coincident { p: pts[2], q: free }, None).unwrap();
+    let count = sk.points.len();
+    assert_eq!(sk.remove_spline_point(s, pts[2]), Ok(true));
+    assert_eq!(spline_places(&sk, s), others);
+    for q in &others {
+        assert!(off_curve(&sk, s, *q) < 1e-9, "the curve still runs through {q:?}");
+    }
+    assert!(matches!(sk.curves[s].kind, CurveKind::Spline { control: false, periodic: false, .. }));
+    assert_eq!(sk.points.len(), count - 1, "the point went");
+    assert!(sk.constraints.is_empty(), "the constraint on it went: {:?}", sk.constraints);
+    // A free end goes too: the spline starts at the next point.
+    let start = sk.curves[s].kind.ends().unwrap().0;
+    assert_eq!(sk.remove_spline_point(s, start), Ok(true));
+    others.remove(0);
+    assert_eq!(spline_places(&sk, s), others);
+    // An inner point a line also ends at stays, for the line.
+    let CurveKind::Spline { pts: now, .. } = sk.curves[s].kind.clone() else { panic!() };
+    let line = sk.add_line(others[1], v(40.0, 30.0), Some(now[1]), None, None).unwrap();
+    assert_eq!(sk.remove_spline_point(s, now[1]), Ok(false));
+    assert!(sk.curves[line].kind.uses(now[1]) && !sk.curves[s].kind.uses(now[1]));
+    others.remove(1);
+    assert_eq!(spline_places(&sk, s), others);
+    // Two points are as few as a spline keeps.
+    assert_eq!(others.len(), 2);
+    let before = sk.clone();
+    assert!(sk.remove_spline_point(s, sk.curves[s].kind.ends().unwrap().1).is_err());
+    assert_eq!(sk, before, "a refused removal changes nothing");
+}
+
+/// #10783: what a spline keeps: an end joined to a line or held by a constraint, a closed
+/// spline's closing point and its last three points. A control point spline gives up a point as a
+/// fit point spline does.
+#[test]
+fn a_spline_keeps_its_joined_ends_and_closing_point() {
+    let mut sk = Sketch::new();
+    let (pts, s) = wave_spline(&mut sk, false);
+    let line = sk.add_line(sk.point(pts[4]).unwrap(), v(60.0, 0.0), Some(pts[4]), None, None).unwrap();
+    let tied = sk.add_point(sk.point(pts[0]).unwrap(), None).unwrap();
+    sk.add_constraint(ConstraintKind::Coincident { p: pts[0], q: tied }, None).unwrap();
+    let before = sk.clone();
+    assert!(sk.remove_spline_point(s, pts[4]).is_err(), "a line ends there");
+    assert!(sk.remove_spline_point(s, pts[0]).is_err(), "a constraint holds the start");
+    assert!(sk.remove_spline_point(s, tied).is_err(), "not one of the spline's points");
+    assert!(sk.remove_spline_point(line, pts[4]).is_err(), "a line has no spline points");
+    assert_eq!(sk, before, "a refused removal changes nothing");
+
+    let mut sk = Sketch::new();
+    let (pts, s) = wave_spline(&mut sk, true);
+    assert!(sk.remove_spline_point(s, pts[0]).is_err(), "the closing point");
+    assert_eq!(sk.remove_spline_point(s, pts[2]), Ok(true));
+    assert_eq!(sk.remove_spline_point(s, pts[1]), Ok(true));
+    let CurveKind::Spline { pts: now, periodic, .. } = sk.curves[s].kind.clone() else { panic!() };
+    assert!(periodic);
+    assert_eq!(now.len(), 4, "three points and the closing one: {now:?}");
+    assert!(sk.remove_spline_point(s, now[1]).is_err(), "a closed spline keeps three points");
+    sk.validate_periodic_splines().unwrap();
+
+    let mut sk = Sketch::new();
+    let places = [v(0.0, 0.0), v(10.0, 10.0), v(20.0, -10.0), v(30.0, 0.0)];
+    let cv: Vec<usize> = places.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
+    let c = sk.add_curve(CurveKind::Spline { pts: cv.clone(), control: true, degree: 3, periodic: false }, None).unwrap();
+    assert_eq!(sk.remove_spline_point(c, cv[1]), Ok(true));
+    assert!(matches!(sk.curves[c].kind, CurveKind::Spline { control: true, .. }));
+    assert_eq!(spline_places(&sk, c), vec![places[0], places[2], places[3]]);
+}
+
 /// #755: a line drawn through a junction of a loop, but 2e-5 off it, still splits the loop. The
 /// junction lies on the loop's two curves only, so it cuts neither of them where the line
 /// crosses, and that crossing, next to the junction, was taken for one already cut there: the

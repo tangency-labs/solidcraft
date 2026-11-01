@@ -1492,6 +1492,64 @@ fn a_point_added_to_a_spline_keeps_its_constraints_and_undoes() {
     assert_eq!(sketch(&s), unchanged, "refusals change nothing");
 }
 
+/// Remove Spline Point (#10783): one fit point goes, with the dimension on it. The spline runs
+/// through its other points, which stay where they were, and the line joined to its end stays.
+/// Undo puts the point back. The end the line joins, a line and an unknown point are refused; a
+/// control point spline gives up a point too.
+#[test]
+fn a_point_removed_from_a_spline_goes_with_its_dimension_and_undoes() {
+    let mut s = new_sketch();
+    let sid =
+        ids(&run(&mut s, "sketch.spline.fit_point", json!({"points": [[0, 0], [10, 8], [20, 0], [30, 6]], "connect": false}))["curves"])[0].clone();
+    run(&mut s, "sketch.line", json!({"points": [format!("{sid}.end"), [40, 6]], "connect": false}));
+    let sk = sketch(&s);
+    let si = sk.curve_index(&sid).unwrap();
+    let names: Vec<String> = sk.curves[si].kind.point_ids().iter().map(|i| sk.points[*i].id.clone()).collect();
+    run(&mut s, "sketch.dimension", json!({"entities": [names[1], names[2]], "value": 12.8}));
+    let before = sketch(&s);
+    let at = |sk: &solidcraft_sketch::Sketch, id: &str| sk.point(sk.point_index(id).unwrap()).unwrap();
+
+    let r = run(&mut s, "sketch.spline.remove_point", json!({"curve": sid, "point": names[1]}));
+    assert_eq!((r["curve"].as_str(), r["point"].as_str(), r["deleted"].as_bool()), (Some(sid.as_str()), Some(names[1].as_str()), Some(true)), "{r}");
+    let after = sketch(&s);
+    assert!(after.point_index(&names[1]).is_none(), "the point went");
+    let left: Vec<String> = after.curves[si].kind.point_ids().iter().map(|i| after.points[*i].id.clone()).collect();
+    assert_eq!(left, [names[0].clone(), names[2].clone(), names[3].clone()]);
+    let segs = after.exact_segs(si).unwrap();
+    for id in &left {
+        let q = at(&after, id);
+        assert!(q.dist(at(&before, id)) < 1e-9, "{id} stays where it was");
+        let off = segs.iter().map(|seg| seg.point_at(seg.closest_param(q)).dist(q)).fold(f64::INFINITY, f64::min);
+        assert!(off < 1e-9, "the curve runs through {id}");
+    }
+    assert!(after.constraints.iter().all(|c| c.kind.value().is_none()), "the dimension on the point went");
+    let joined = after.curves.iter().any(|c| matches!(c.kind, CurveKind::Line { a, .. } if after.points[a].id == names[3]));
+    assert!(joined, "the line still starts at the spline's end");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(sketch(&s), before, "undo puts the point back");
+
+    let line = before.curves.iter().find(|c| matches!(c.kind, CurveKind::Line { .. })).unwrap().id.clone();
+    for (p, why) in [
+        (json!({"curve": sid, "point": format!("{sid}.end")}), "joined"),
+        (json!({"curve": line, "point": names[0]}), "spline"),
+        (json!({"curve": sid, "point": "nope"}), "unknown sketch point"),
+        (json!({"curve": sid}), "`point`"),
+    ] {
+        let e = s.execute("sketch.spline.remove_point", &p).unwrap_err().to_string();
+        assert!(e.contains(why), "{p}: {e}");
+    }
+    assert_eq!(sketch(&s), before, "refusals change nothing");
+
+    let cv =
+        ids(&run(&mut s, "sketch.spline.control_point", json!({"points": [[0, 20], [10, 30], [20, 20]], "connect": false}))["curves"])[0].clone();
+    let r = run(&mut s, "sketch.spline.remove_point", json!({"curve": cv, "point": format!("{cv}.start")}));
+    assert_eq!(r["deleted"], json!(true), "{r}");
+    let sk = sketch(&s);
+    let ci = sk.curve_index(&cv).unwrap();
+    let left: Vec<Vec2> = sk.curves[ci].kind.point_ids().iter().map(|i| sk.point(*i).unwrap()).collect();
+    assert_eq!(left, [Vec2::new(10.0, 30.0), Vec2::new(20.0, 20.0)]);
+}
+
 /// Reverse Spline Direction (#8224): a fit, a control point and a closed spline each run the
 /// other way along the same path, their ends swapped. Their points, the constraints on them and
 /// a line joined to an end stay, and undo restores the spline. A line and the source and output

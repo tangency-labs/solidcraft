@@ -1688,7 +1688,7 @@ impl Sketch {
     /// Points held together only through points about to go stay together: two rectangles'
     /// corners made coincident with one arc end are tied to each other when a trim takes that
     /// end away, instead of coming apart where they still meet.
-    fn keep_ties_through(&mut self, gone: &[usize]) {
+    pub(crate) fn keep_ties_through(&mut self, gone: &[usize]) {
         if gone.is_empty() {
             return;
         }
@@ -1725,7 +1725,7 @@ impl Sketch {
         }
     }
 
-    fn point_used_by_curve(&self, p: usize) -> bool {
+    pub(crate) fn point_used_by_curve(&self, p: usize) -> bool {
         self.curves.iter().any(|c| c.kind.uses(p))
     }
 
