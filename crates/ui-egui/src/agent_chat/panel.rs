@@ -1579,10 +1579,8 @@ fn copy_message_button(ui: &mut egui::Ui, n: usize, text: &str) {
 #[cfg(not(target_arch = "wasm32"))]
 fn copy_message_menu(ui: &egui::Ui, response: &egui::Response, n: usize, text: &str) {
     crate::scenario::publish_rect(&format!("agent_chat:msg:{n}"), response.rect);
-    let opened = ui.input(|i| {
-        i.pointer.button_released(egui::PointerButton::Secondary)
-            && i.pointer.interact_pos().is_some_and(|p| response.rect.contains(p))
-    });
+    let opened = ui
+        .input(|i| i.pointer.button_released(egui::PointerButton::Secondary) && i.pointer.interact_pos().is_some_and(|p| response.rect.contains(p)));
     let mut copy = false;
     egui::Popup::menu(response)
         .at_pointer_fixed()
@@ -1619,7 +1617,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
             Item::User { text, image, pictures, context, files } => {
                 // A picture-only prompt has no text to copy: no action rather than an empty copy (#10675).
                 let copyable = !text.is_empty();
-                let before = ui.min_rect();
+                let before = ui.cursor();
                 ui_kit::assistant_bubble(ui, |ui| {
                     if !text.is_empty() {
                         ui.add(egui::Label::new(RichText::new(text).color(t.text)).selectable(true).wrap());
@@ -1639,7 +1637,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 });
                 if copyable {
-                    let drawn = ui.min_rect().subtract(before);
+                    let drawn = egui::Rect::from_x_y_ranges(before.x_range(), before.min.y..=ui.cursor().min.y);
                     let resp = ui.interact(drawn, Id::new(("agent_chat_msg", n)), Sense::hover());
                     copy_message_menu(ui, &resp, n, text);
                 }
@@ -1648,11 +1646,11 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if *thought {
                     ui.add(egui::Label::new(RichText::new(text).italics().color(t.text_dim)).selectable(true).wrap());
                 } else {
-                    let before = ui.min_rect();
+                    let before = ui.cursor();
                     ui_kit::assistant_prose(ui, |ui| super::markdown_view::show(ui, n, text));
                     if !text.is_empty() {
                         copy_message_button(ui, n, text);
-                        let drawn = ui.min_rect().subtract(before);
+                        let drawn = egui::Rect::from_x_y_ranges(before.x_range(), before.min.y..=ui.cursor().min.y);
                         let resp = ui.interact(drawn, Id::new(("agent_chat_msg", n)), Sense::hover());
                         copy_message_menu(ui, &resp, n, text);
                     }

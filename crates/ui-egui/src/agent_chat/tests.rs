@@ -3713,10 +3713,7 @@ fn chat_with_copiable_messages() -> crate::scenario::Harness {
         files: Vec::new(),
         context: Context::default(),
     });
-    h.app.agent_chat.items.push(Item::Agent {
-        thought: false,
-        text: "# Result\n\nA plate with holes.\n\n```rust\nlet x = 1;\n```".into(),
-    });
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "# Result\n\nA plate with holes.\n\n```rust\nlet x = 1;\n```".into() });
     h.frames(3);
     h
 }
@@ -3733,7 +3730,6 @@ fn click_at(h: &mut crate::scenario::Harness, at: egui::Pos2, button: egui::Poin
     h.frame_with(vec![egui::Event::PointerMoved(at)]);
     h.frame_with(vec![egui::Event::PointerButton { pos: at, button, pressed: true, modifiers: egui::Modifiers::NONE }]);
     h.frame_with(vec![egui::Event::PointerButton { pos: at, button, pressed: false, modifiers: egui::Modifiers::NONE }]);
-    h.frames(2);
 }
 
 /// The visible button on a sent prompt copies the whole prompt, as entered.
@@ -3761,6 +3757,7 @@ fn right_clicking_a_message_offers_copy_message() {
     let mut h = chat_with_copiable_messages();
     let msg = crate::scenario::rect_of("agent_chat:msg:1").expect("the reply's message area");
     click_at(&mut h, msg.center(), egui::PointerButton::Secondary);
+    h.frames(1); // let the popup settle at its final place before clicking its row
     let item = crate::scenario::handle_at("agent_chat:copy_menu:1").expect("the right-click menu's Copy message row");
     click_at(&mut h, item, egui::PointerButton::Primary);
     assert_eq!(copied_text(&h).as_deref(), Some("# Result\n\nA plate with holes.\n\n```rust\nlet x = 1;\n```"));
@@ -3786,7 +3783,13 @@ fn a_picture_only_prompt_and_a_thought_have_no_copy_message_action() {
     let mut h = crate::scenario::Harness::new();
     h.call("ui.agent_chat", json!({"open": true}));
     h.frames(3);
-    h.app.agent_chat.items.push(Item::User { text: String::new(), image: true, pictures: Vec::new(), files: Vec::new(), context: Context::default() });
+    h.app.agent_chat.items.push(Item::User {
+        text: String::new(),
+        image: true,
+        pictures: Vec::new(),
+        files: Vec::new(),
+        context: Context::default(),
+    });
     h.app.agent_chat.items.push(Item::Agent { thought: true, text: "pondering".into() });
     h.frames(3);
     assert!(crate::scenario::handle_at("agent_chat:copy:0").is_none(), "a picture-only prompt hides the text-copy action");

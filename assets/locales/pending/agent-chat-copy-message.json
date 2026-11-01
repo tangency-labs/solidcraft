@@ -1,4 +1,9 @@
 {
   "en": { "ui.agent_chat_copy_message": "Copy message" },
-  "de": { "ui.agent_chat_copy_message": "Nachricht kopieren" }
+  "de": { "ui.agent_chat_copy_message": "Nachricht kopieren" },
+  "ar": { "ui.agent_chat_copy_message": "نسخ الرسالة" },
+  "he": { "ui.agent_chat_copy_message": "העתק הודעה" },
+  "ja": { "ui.agent_chat_copy_message": "メッセージをコピー" },
+  "vi": { "ui.agent_chat_copy_message": "Sao chép tin nhắn" },
+  "zh": { "ui.agent_chat_copy_message": "复制消息" }
 }
