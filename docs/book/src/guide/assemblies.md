@@ -16,6 +16,29 @@ plane, on a body of the design itself, on a face without an exact attachment, or
 part. The status bar says how many moved and why the others stayed; the command's reply lists
 each sketch. With no `sketches` it looks at every sketch in the design.
 
+## Step by step
+
+A two-leaf hinge: each leaf is a plate with a barrel along one edge, modelled as a body.
+
+**1. Make components.** Right-click the **Bodies** folder in the browser and choose **Create
+Components from Bodies**. Each body becomes a component of its own. The first is grounded (the pin
+beside it): it stays where it is while the others move.
+
+<video src="../media/assemblies/components.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Right-clicking the Bodies folder and choosing Create Components from Bodies: Leaf A and Leaf B become components, Leaf A grounded"></video>
+
+**2. Join them.** On the **ASSEMBLE** tab, click **Joint**. Click the end of Leaf B's barrel, then
+the same end of Leaf A's: Leaf B moves so the two circles meet. Choose **Revolute** for a hinge. If
+the part lands the wrong way round, tick **Flip**. Click **OK**.
+
+<video src="../media/assemblies/joint.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Creating a revolute joint between the barrel ends of Leaf B and Leaf A, flipping Leaf B so it lies beside Leaf A, then OK"></video>
+
+**3. Move it.** Drag Leaf B: it turns about the hinge and nothing else. Leaf A is grounded, so it
+doesn't move.
+
+<video src="../media/assemblies/drag.mp4" autoplay loop muted playsinline controls width="100%" aria-label="Dragging Leaf B, which swings about the hinge, then trying to drag grounded Leaf A, which stays where it is"></video>
+
+## Components, placement and joints
+
 A component is placed by its **occurrences**. Paste creates another instance of the same
 component, and **Paste New** creates an independent copy. Move an occurrence with the move
 triad, then **Capture Position** to keep it or **Revert** to put it back. SolidCraft asks before
