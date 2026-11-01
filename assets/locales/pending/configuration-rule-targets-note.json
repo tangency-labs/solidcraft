@@ -3,8 +3,28 @@
     "config.rule_parameter_columns": "Only parameters with a column in the table are listed. Add one with Add Column (+) to use it here.",
     "config.rule_suppression_columns": "Only features with a Suppress column in the table are listed. Add one with Add Column (+) to drive it here."
   },
+  "ar": {
+    "config.rule_parameter_columns": "لا تظهر هنا إلا المعاملات التي لها عمود في الجدول. أضف عمودًا عبر «إضافة عمود» (+) لاستخدام المعامل هنا.",
+    "config.rule_suppression_columns": "لا تظهر هنا إلا الميزات التي لها عمود «تعطيل» في الجدول. أضف عمودًا عبر «إضافة عمود» (+) للتحكم بالميزة هنا."
+  },
   "de": {
     "config.rule_parameter_columns": "Hier stehen nur Parameter mit einer Spalte in der Tabelle. Fügen Sie eine mit „Spalte hinzufügen“ (+) hinzu, um den Parameter hier zu verwenden.",
     "config.rule_suppression_columns": "Hier stehen nur Funktionen mit einer Spalte „Unterdrücken“ in der Tabelle. Fügen Sie eine mit „Spalte hinzufügen“ (+) hinzu, um die Funktion hier zu steuern."
+  },
+  "he": {
+    "config.rule_parameter_columns": "מוצגים כאן רק פרמטרים שיש להם עמודה בטבלה. הוסיפו עמודה דרך \"הוספת עמודה\" (+) כדי להשתמש בפרמטר כאן.",
+    "config.rule_suppression_columns": "מוצגים כאן רק פיצ'רים שיש להם עמודת \"השבתה\" בטבלה. הוסיפו עמודה דרך \"הוספת עמודה\" (+) כדי לשלוט בפיצ'ר כאן."
+  },
+  "ja": {
+    "config.rule_parameter_columns": "表に列があるパラメータのみが表示されます。ここで使うには「列を追加」(+) で列を追加してください。",
+    "config.rule_suppression_columns": "表に「抑制」列があるフィーチャーのみが表示されます。ここで制御するには「列を追加」(+) で列を追加してください。"
+  },
+  "vi": {
+    "config.rule_parameter_columns": "Chỉ những tham số có cột trong bảng mới được liệt kê. Thêm cột bằng “Thêm cột” (+) để dùng tham số đó ở đây.",
+    "config.rule_suppression_columns": "Chỉ những tính năng có cột “Bỏ kích hoạt (Suppress)” trong bảng mới được liệt kê. Thêm cột bằng “Thêm cột” (+) để điều khiển tính năng đó ở đây."
+  },
+  "zh": {
+    "config.rule_parameter_columns": "此处仅列出在表中有列的参数。使用“添加列”(+) 添加一列，即可在此使用该参数。",
+    "config.rule_suppression_columns": "此处仅列出在表中有“抑制”列的特征。使用“添加列”(+) 添加一列，即可在此控制该特征。"
   }
 }
