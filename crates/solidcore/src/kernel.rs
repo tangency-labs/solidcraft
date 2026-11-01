@@ -331,6 +331,16 @@ pub struct UpstreamFixes {
     pub keep_operand_uv_trims: bool,
     /// `smgu_EvaluateCurveContinuity`'s G2 test compares the two sides' Frenet curvatures and normals (WR-380, #933/#838).
     pub geometric_g2_continuity: bool,
+    /// `smgu_CircleFindSilhouettePoints` in perspective rotates the unit direction from the
+    /// circle centre toward the projected eye point (`proj_eye - center`) as a pure vector
+    /// about the circle normal by `±acos(radius / dist)` and offsets the scaled radius
+    /// vectors by `circle_center`, returning `None` when the circle normal is degenerate.
+    /// Pinned v1.0.1 negates `to_eye` (`center - proj_eye`), rotates a frame at
+    /// `circle_center` about the global origin, transforms `to_eye` as a point and scales
+    /// by `radius` without adding `circle_center` (WR-11, #2138;
+    /// `plan/upstream-issues/WR-11--addendum-2026-10-31-perspective-silhouette-center.md`).
+    /// Off by default for pinned C++ parity.
+    pub circle_silhouette_perspective_center: bool,
     /// `RemoveCoincidentNoEdgeProtoVertex` reports a miss as `false` (WR-73, #848).
     pub proto_vertex_miss_is_false: bool,
     /// `CheckLoop` measures a gap against at least its vertex's zone tolerance (WR-381, #476).

@@ -22,7 +22,7 @@
 //! | [`segment_point_angle_deg_to_perp`]   | `smgu_SegmentPointAngleDegToPerp`                |
 //! | [`circle_center_from_3_points`]       | `smgu_CircleCenterFrom3Points`                   |
 //! | [`circle_from_3_points`], [`Circle3Points`] | `smgu_CircleFrom3Points`                   |
-//! | [`circle_find_silhouette_points`]     | `smgu_CircleFindSilhouettePoints`                |
+//! | [`circle_find_silhouette_points`], [`circle_find_silhouette_points_opt_in`], [`circle_find_silhouette_points_with_kernel`] | `smgu_CircleFindSilhouettePoints` |
 //! | [`cones_are_disjoint_perpen`]         | `smgu_ConesAreDisjointPerpen`                    |
 //! | [`line_coplanar_circle_intersect`]    | `smgu_LineCoPlanarCircleIntersect`               |
 //! | [`circle_coplanar_circle_intersect`], [`CircleCircle`] | `smgu_CircleCoPlanarCircleIntersect` |
@@ -79,6 +79,13 @@
 //!   derivatives upstream writes.
 //! - `smgu_AddSorted` takes `Vec`s for `SmTArray`s; `sm_AddPoint`'s `ULONG&` count and
 //!   `SmPoint3d[2]` array are a `Vec` of at most two points.
+//! - [`circle_find_silhouette_points_opt_in`] (and
+//!   [`circle_find_silhouette_points_with_kernel`], reading
+//!   [`crate::kernel::UpstreamFixes::circle_silhouette_perspective_center`]) adds an
+//!   opt-in perspective fix (`WR-11`) that rotates `proj_eye_point - circle_center` as a
+//!   vector about `circle_normal` and adds `circle_center`, returning `None` when
+//!   `circle_normal` is degenerate; [`circle_find_silhouette_points`] keeps pinned C++
+//!   parity.
 //! - `SM_ASSERT*` and `SM_DEBUG_CODE` blocks are not compiled upstream (release build)
 //!   and are not ported.
 
@@ -90,6 +97,7 @@ use crate::geom::polynomial::{solve_quadratic, Roots};
 use crate::geom::tol::{are_same_to_tol, is_zero};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{acos as sm_acos, sqrt as sm_sqrt, Point3, Vec3};
+use crate::kernel::Kernel;
 use crate::math::{rad_to_deg, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 
 /// `ANALYTIC_TOL_SCALE` (`SmConfig.h`).
@@ -654,8 +662,11 @@ pub fn circle_from_3_points(
 /// along a view direction, or `None` when there are none
 /// (`smgu_CircleFindSilhouettePoints`).
 ///
-/// In the perspective case upstream returns the rotated unit directions scaled by the
-/// radius (not offset by the center); the port does the same.
+/// In the perspective case pinned upstream negates `to_eye`, rotates a placement at
+/// `circle_center` about the global origin and scales by `circle_radius` without adding
+/// `circle_center`; this default entry point preserves that behaviour (see
+/// [`circle_find_silhouette_points_opt_in`] and
+/// [`circle_find_silhouette_points_with_kernel`] for `WR-11`).
 pub fn circle_find_silhouette_points(
     circle_center: Point3,
     circle_normal: Vec3,
@@ -663,7 +674,85 @@ pub fn circle_find_silhouette_points(
     perspective: bool,
     eye_point_or_vector: Vec3,
 ) -> Result<Option<(Point3, Point3)>> {
+    circle_find_silhouette_points_opt_in(
+        circle_center,
+        circle_normal,
+        circle_radius,
+        perspective,
+        eye_point_or_vector,
+        false,
+    )
+}
+
+/// [`circle_find_silhouette_points`] forwarding
+/// [`Kernel::fixes`]'s `circle_silhouette_perspective_center` (`WR-11`).
+pub fn circle_find_silhouette_points_with_kernel(
+    k: &Kernel,
+    circle_center: Point3,
+    circle_normal: Vec3,
+    circle_radius: f64,
+    perspective: bool,
+    eye_point_or_vector: Vec3,
+) -> Result<Option<(Point3, Point3)>> {
+    circle_find_silhouette_points_opt_in(
+        circle_center,
+        circle_normal,
+        circle_radius,
+        perspective,
+        eye_point_or_vector,
+        k.fixes.circle_silhouette_perspective_center,
+    )
+}
+
+/// [`circle_find_silhouette_points`] with an explicit opt-in (`fix_perspective`) for
+/// `WR-11`.
+///
+/// When `perspective && fix_perspective`, projects `eye_point_or_vector` onto the
+/// circle's plane, rotates the unit direction `proj_eye_point - circle_center` as a pure
+/// vector by `±acos(circle_radius / length)` about `circle_normal` and returns
+/// `circle_center + dir * circle_radius` (or `None` when `circle_normal` is degenerate,
+/// `circle_radius` is negative or non-finite, or the projected eye lies inside
+/// `circle_radius + SM_EFF_ZERO`). When `!fix_perspective`, matches pinned C++ parity.
+pub fn circle_find_silhouette_points_opt_in(
+    circle_center: Point3,
+    circle_normal: Vec3,
+    circle_radius: f64,
+    perspective: bool,
+    eye_point_or_vector: Vec3,
+    fix_perspective: bool,
+) -> Result<Option<(Point3, Point3)>> {
     if perspective {
+        if fix_perspective {
+            let norm_sq = circle_normal.length_squared();
+            if !norm_sq.is_finite() || norm_sq < EFF_ZERO_SQ {
+                return Ok(None);
+            }
+            if !circle_radius.is_finite() || circle_radius < 0.0 {
+                return Ok(None);
+            }
+            let proj_eye_point =
+                point_project_to_plane(eye_point_or_vector, circle_center, circle_normal);
+            let toward_eye = proj_eye_point - circle_center;
+            let length = toward_eye.length();
+            if !length.is_finite() || length < circle_radius + EFF_ZERO {
+                return Ok(None);
+            }
+            let toward_eye = toward_eye.unitize_or_z();
+
+            let angle_rad = sm_acos(circle_radius / length);
+            let mut a2p = Axis2Placement::IDENTITY;
+            a2p.rotate_about_axis(angle_rad, circle_normal);
+            let to_p1 = a2p.transform_vector(toward_eye);
+            a2p = Axis2Placement::IDENTITY;
+            a2p.rotate_about_axis(-angle_rad, circle_normal);
+            let to_p2 = a2p.transform_vector(toward_eye);
+
+            return Ok(Some((
+                circle_center + to_p1 * circle_radius,
+                circle_center + to_p2 * circle_radius,
+            )));
+        }
+
         let proj_eye_point =
             point_project_to_plane(eye_point_or_vector, circle_center, circle_normal);
         let to_eye = circle_center - proj_eye_point;
@@ -2154,5 +2243,120 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn wr11_perspective_origin_circle_to_eye_sign() {
+        let c = Vec3::ZERO;
+        let n = Vec3::Z;
+        let r = 1.0;
+        let eye = v(2.0, 0.0, 3.0);
+        let half_rt3 = 3.0f64.sqrt() * 0.5;
+
+        let def = circle_find_silhouette_points(c, n, r, true, eye);
+        let opt_off = circle_find_silhouette_points_opt_in(c, n, r, true, eye, false);
+        let (d1, d2) = def.unwrap().unwrap();
+        assert_eq!(opt_off.unwrap(), Some((d1, d2)));
+        assert!((d1 - v(-0.5, -half_rt3, 0.0)).length() < 1e-14);
+        assert!((d2 - v(-0.5, half_rt3, 0.0)).length() < 1e-14);
+        for d in [d1, d2] {
+            assert!(d.x < 0.0);
+            assert!(((d - eye).dot(d - c) - 2.0).abs() < 1e-13);
+        }
+
+        let fixed = circle_find_silhouette_points_opt_in(c, n, r, true, eye, true);
+        let (p1, p2) = fixed.unwrap().unwrap();
+        assert!((p1 - v(0.5, half_rt3, 0.0)).length() < 1e-14);
+        assert!((p2 - v(0.5, -half_rt3, 0.0)).length() < 1e-14);
+        for p in [p1, p2] {
+            assert!(p.x > 0.0);
+            assert!(((p - c).length() - r).abs() < 1e-14);
+            assert!((p - c).dot(n).abs() < 1e-14);
+            assert!((p - eye).dot(p - c).abs() < 1e-14);
+        }
+    }
+
+    #[test]
+    fn wr11_perspective_translated_tilted_circle_and_non_unit_normal() {
+        let c = v(10.0, -4.0, 3.0);
+        let n_unit = v(1.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0);
+        let n_scaled = v(2.0, 4.0, 4.0);
+        let u1 = v(2.0 / 3.0, -2.0 / 3.0, 1.0 / 3.0);
+        let v1 = v(2.0 / 3.0, 1.0 / 3.0, -2.0 / 3.0);
+        let r = 3.0;
+        let eye = c + 5.0 * u1 + 7.0 * n_unit;
+
+        let def = circle_find_silhouette_points(c, n_unit, r, true, eye);
+        let (d1, d2) = def.unwrap().unwrap();
+        assert!(((d1 - c).length() - r).abs() > 10.0);
+        assert!(((d2 - c).length() - r).abs() > 10.0);
+
+        let fixed = circle_find_silhouette_points_opt_in(c, n_unit, r, true, eye, true);
+        let (p1, p2) = fixed.unwrap().unwrap();
+        let exp1 = c + r * (0.6 * u1 + 0.8 * v1);
+        let exp2 = c + r * (0.6 * u1 - 0.8 * v1);
+        assert!((p1 - exp1).length() < 1e-13);
+        assert!((p2 - exp2).length() < 1e-13);
+        for p in [p1, p2] {
+            assert!(((p - c).length() - r).abs() < 1e-13);
+            assert!((p - c).dot(n_unit).abs() < 1e-13);
+            assert!((p - eye).dot(p - c).abs() < 1e-13);
+        }
+
+        let scaled = circle_find_silhouette_points_opt_in(c, n_scaled, r, true, eye, true);
+        let (s1, s2) = scaled.unwrap().unwrap();
+        assert!((s1 - p1).length() < 1e-13);
+        assert!((s2 - p2).length() < 1e-13);
+    }
+
+    #[test]
+    fn wr11_inside_radius_parallel_degenerate_and_kernel_wiring() {
+        let c = v(10.0, -4.0, 3.0);
+        let n = v(1.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0);
+        let u1 = v(2.0 / 3.0, -2.0 / 3.0, 1.0 / 3.0);
+        let r = 3.0;
+
+        for dist in [0.0, 1.5, r] {
+            let inside_eye = c + dist * u1 + 4.0 * n;
+            let off = circle_find_silhouette_points_opt_in(c, n, r, true, inside_eye, false);
+            let on = circle_find_silhouette_points_opt_in(c, n, r, true, inside_eye, true);
+            assert_eq!(off.unwrap(), None);
+            assert_eq!(on.unwrap(), None);
+        }
+
+        let far_eye = c + 5.0 * u1 + 4.0 * n;
+        let zero_n = circle_find_silhouette_points_opt_in(c, Vec3::ZERO, r, true, far_eye, true);
+        assert_eq!(zero_n.unwrap(), None);
+        let neg_r = circle_find_silhouette_points_opt_in(c, n, -1.0, true, far_eye, true);
+        assert_eq!(neg_r.unwrap(), None);
+
+        let view_dir = v(1.0, -0.5, 0.25);
+        let par_off = circle_find_silhouette_points_opt_in(c, n, r, false, view_dir, false);
+        let par_on = circle_find_silhouette_points_opt_in(c, n, r, false, view_dir, true);
+        let (q1, q2) = par_off.unwrap().unwrap();
+        assert_eq!(par_on.unwrap(), Some((q1, q2)));
+        for q in [q1, q2] {
+            assert!(((q - c).length() - r).abs() < 1e-13);
+            assert!((q - c).dot(n).abs() < 1e-13);
+            assert!((q - c).dot(view_dir).abs() < 1e-13);
+        }
+        let par_axis = circle_find_silhouette_points_opt_in(c, n, r, false, n, true);
+        assert_eq!(par_axis.unwrap(), None);
+
+        let k0 = Kernel::default();
+        assert!(!k0.fixes.circle_silhouette_perspective_center);
+        let mut k1 = Kernel::default();
+        let flag = k1.fixes.flag_mut("circle_silhouette_perspective_center");
+        *flag.unwrap() = true;
+        assert!(k1.fixes.circle_silhouette_perspective_center);
+
+        let def_res = circle_find_silhouette_points(c, n, r, true, far_eye);
+        let k0_res = circle_find_silhouette_points_with_kernel(&k0, c, n, r, true, far_eye);
+        assert_eq!(k0_res, def_res);
+
+        let opt_res = circle_find_silhouette_points_opt_in(c, n, r, true, far_eye, true);
+        let k1_res = circle_find_silhouette_points_with_kernel(&k1, c, n, r, true, far_eye);
+        assert_eq!(k1_res, opt_res);
+        assert!(k1_res.unwrap().is_some());
     }
 }
