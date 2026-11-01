@@ -121,10 +121,10 @@
 //! - A composite face cannot be a member of a composite face, nor the source of
 //!   [`PolyBrep::add_cpoly_face`] ([`SolidError::InvalidInput`]). Upstream only ever
 //!   adds shell faces (`SmLineSegClass.cpp`), but `AddPolyFace` would accept a composite
-//!   (even itself), and the virtual `GetPolyEdges` / `GetNormal` /
+//!   (even itself), and the virtual `GetPolyLoops` / `GetPolyEdges` / `GetNormal` /
 //!   `CalculateBoundingBox` / `GetOKBackPtrs` of the composite would then recurse
-//!   without bound; refusing nested composites keeps that recursion one level deep
-//!   (WR-82 in `plan/upstream-issues.md`).
+//!   without bound; refusing nested composites keeps composite queries one level deep
+//!   (WR-82).
 //! - `SmCPolyFace::GetNormal` of a composite without members returns `(1,1,1)` after an
 //!   `SM_ASSERT`; kept.
 //! - `SmPolyBrep::GetPolyEdges` with a common edge use walks each face's loop list as
@@ -1228,7 +1228,7 @@ impl PolyBrep {
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] for an unknown face or a composite `face` (nested
-    /// composites would make the composite queries recurse without bound).
+    /// composites would make the composite queries recurse without bound; WR-82).
     pub fn add_cpoly_face(&mut self, face: PolyFaceId) -> Result<PolyFaceId> {
         const OP: &str = "query::poly::PolyBrep::add_cpoly_face";
         let f = slot(&self.face_slots, face.0, OP)?;
@@ -1254,7 +1254,7 @@ impl PolyBrep {
     ///
     /// [`SolidError::InvalidInput`] for unknown ids, a `cpoly` that is not composite or
     /// a composite `face` (nested composites would make the composite queries recurse
-    /// without bound).
+    /// without bound; WR-82).
     pub fn cpoly_add_poly_face(
         &mut self,
         cpoly: PolyFaceId,
@@ -4034,5 +4034,242 @@ mod tests {
         // Trigger 2: deleting a face after removing it from composite does not remove remaining members
         b_fixed.delete_face(f3).unwrap();
         assert_eq!(b_fixed.cpoly_faces_of_composite(c_fixed).unwrap(), vec![f4]);
+    }
+
+    fn add_wr82_triangle_face(
+        k: &Kernel,
+        pb: &mut PolyBrep,
+        shell: PolyShellId,
+        pts: &[Point3; 3],
+        tol: f64,
+    ) -> (PolyFaceId, PolyLoopId, [PolyEdgeId; 3]) {
+        let f = pb
+            .add_face(k, shell, tol, Some(Vec3::new(0.0, 0.0, 1.0)))
+            .unwrap();
+        let vs = [
+            pb.add_vertex(k, pts[0], tol).unwrap(),
+            pb.add_vertex(k, pts[1], tol).unwrap(),
+            pb.add_vertex(k, pts[2], tol).unwrap(),
+        ];
+        let lp = pb.start_poly_edge_loop(f).unwrap();
+        let es = [
+            pb.add_poly_edge(k, lp, tol, pts[0], pts[1], vs[0]).unwrap(),
+            pb.add_poly_edge(k, lp, tol, pts[1], pts[2], vs[1]).unwrap(),
+            pb.add_poly_edge(k, lp, tol, pts[2], pts[0], vs[2]).unwrap(),
+        ];
+        pb.finish_poly_edge_loop(lp).unwrap();
+        let (normal, degenerate) = pb.face_normal(k, f, true, true).unwrap();
+        assert!(!degenerate);
+        for v in vs {
+            pb.vertex_add_face_normal(v, normal).unwrap();
+        }
+        (f, lp, es)
+    }
+
+    #[test]
+    fn wr82_rejects_self_and_nested_composite_faces_preserving_state() {
+        let k = Kernel::default();
+        let tol = 1.0e-5;
+        let mut pb = PolyBrep::new(&k, tol);
+        let region = pb.add_region().unwrap();
+        let shell = pb.add_shell(region).unwrap();
+        let (f1, l1, es1) = add_wr82_triangle_face(
+            &k,
+            &mut pb,
+            shell,
+            &[
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+            tol,
+        );
+        let (f2, l2, es2) = add_wr82_triangle_face(
+            &k,
+            &mut pb,
+            shell,
+            &[
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+            tol,
+        );
+
+        let c1 = pb.add_cpoly_face(f1).unwrap();
+        let c2 = pb.add_cpoly_face(f2).unwrap();
+        assert_eq!(pb.cpoly_faces(), vec![c1, c2]);
+        assert_eq!(pb.face_cpoly_face(f1).unwrap(), Some(c1));
+        assert_eq!(pb.face_cpoly_face(f2).unwrap(), Some(c2));
+        assert_eq!(pb.face_cpoly_face(c1).unwrap(), Some(c1));
+        assert_eq!(pb.face_cpoly_face(c2).unwrap(), Some(c2));
+        assert_eq!(pb.cpoly_faces_of_composite(c1).unwrap(), vec![f1]);
+        assert_eq!(pb.cpoly_faces_of_composite(c2).unwrap(), vec![f2]);
+
+        let snapshot = pb.clone();
+        let slot_count = pb.face_slot_count();
+
+        // SmCPolyFace(c1): composite source face is rejected without allocating a
+        // dangling composite or overwriting c1's self back-pointer.
+        assert!(matches!(
+            pb.add_cpoly_face(c1),
+            Err(SolidError::InvalidInput {
+                operation: "query::poly::PolyBrep::add_cpoly_face",
+                reason: "a composite poly face cannot be a member of a composite poly face",
+            })
+        ));
+        assert_eq!(pb.cpoly_faces(), vec![c1, c2]);
+        assert_eq!(pb.face_slot_count(), slot_count);
+        assert_eq!(pb.face_cpoly_face(c1).unwrap(), Some(c1));
+        assert_eq!(pb, snapshot);
+
+        // c1->AddPolyFace(c1): exact WR-82 self-cycle trigger (both duplicate modes).
+        for allow_duplicates in [false, true] {
+            assert!(matches!(
+                pb.cpoly_add_poly_face(c1, c1, allow_duplicates),
+                Err(SolidError::InvalidInput {
+                    operation: "query::poly::PolyBrep::cpoly_add_poly_face",
+                    reason: "a composite poly face cannot be a member of a composite poly face",
+                })
+            ));
+        }
+        assert_eq!(pb.cpoly_faces_of_composite(c1).unwrap(), vec![f1]);
+        assert_eq!(pb.face_cpoly_face(c1).unwrap(), Some(c1));
+        assert_eq!(pb, snapshot);
+
+        // c1->AddPolyFace(c2) and c2->AddPolyFace(c1): nested / mutual 2-cycle rejected,
+        // leaving c2's back-pointer and member list [f2] untouched.
+        assert!(matches!(
+            pb.cpoly_add_poly_face(c1, c2, false),
+            Err(SolidError::InvalidInput {
+                operation: "query::poly::PolyBrep::cpoly_add_poly_face",
+                reason: "a composite poly face cannot be a member of a composite poly face",
+            })
+        ));
+        assert_eq!(pb.face_cpoly_face(c2).unwrap(), Some(c2));
+        assert_eq!(pb.cpoly_faces_of_composite(c2).unwrap(), vec![f2]);
+        assert_eq!(pb.cpoly_faces_of_composite(c1).unwrap(), vec![f1]);
+
+        assert!(matches!(
+            pb.cpoly_add_poly_face(c2, c1, true),
+            Err(SolidError::InvalidInput {
+                operation: "query::poly::PolyBrep::cpoly_add_poly_face",
+                reason: "a composite poly face cannot be a member of a composite poly face",
+            })
+        ));
+        assert_eq!(pb.face_cpoly_face(c1).unwrap(), Some(c1));
+        assert_eq!(pb.face_cpoly_face(c2).unwrap(), Some(c2));
+        assert_eq!(pb.cpoly_faces_of_composite(c1).unwrap(), vec![f1]);
+        assert_eq!(pb.cpoly_faces_of_composite(c2).unwrap(), vec![f2]);
+        assert_eq!(pb, snapshot);
+
+        // Non-composite target and unknown face ids are also rejected without mutation.
+        assert!(matches!(
+            pb.cpoly_add_poly_face(f1, f2, false),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        let unknown = PolyFaceId::from_index(999);
+        assert!(matches!(
+            pb.add_cpoly_face(unknown),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            pb.cpoly_add_poly_face(c1, unknown, false),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert_eq!(pb, snapshot);
+
+        // Composite queries on c1 and c2 still terminate cleanly after rejected cycles.
+        assert_eq!(pb.face_poly_loops(c1).unwrap(), vec![l1]);
+        assert_eq!(pb.face_poly_loops(c2).unwrap(), vec![l2]);
+        assert_eq!(pb.face_poly_edges(c1).unwrap(), es1.to_vec());
+        assert_eq!(pb.face_poly_edges(c2).unwrap(), es2.to_vec());
+        assert_eq!(
+            pb.face_normal(&k, c1, false, false).unwrap(),
+            (Vec3::new(0.0, 0.0, 1.0), false)
+        );
+        assert_eq!(
+            pb.face_normal(&k, c2, false, false).unwrap(),
+            (Vec3::new(0.0, 0.0, 1.0), false)
+        );
+        assert!(pb.face_bounding_box(c1).is_ok());
+        assert!(pb.face_bounding_box(c2).is_ok());
+        assert!(!pb.face_ok_back_ptrs(c1).unwrap());
+        assert!(!pb.face_ok_back_ptrs(c2).unwrap());
+    }
+
+    #[test]
+    fn wr82_valid_multi_face_composite_queries_succeed() {
+        let k = Kernel::default();
+        let tol = 1.0e-5;
+        let mut pb = PolyBrep::new(&k, tol);
+        let region = pb.add_region().unwrap();
+        let shell = pb.add_shell(region).unwrap();
+        let (f1, l1, es1) = add_wr82_triangle_face(
+            &k,
+            &mut pb,
+            shell,
+            &[
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+            tol,
+        );
+        let (f2, _, _) = add_wr82_triangle_face(
+            &k,
+            &mut pb,
+            shell,
+            &[
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(1.0, 1.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ],
+            tol,
+        );
+        let (f3, l3, es3) = add_wr82_triangle_face(
+            &k,
+            &mut pb,
+            shell,
+            &[
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(3.0, 0.0, 0.0),
+                Vec3::new(1.0, 2.0, 0.0),
+            ],
+            tol,
+        );
+
+        pb.set_ok_back_ptrs(true);
+        let c1 = pb.add_cpoly_face(f1).unwrap();
+        pb.cpoly_add_poly_face(c1, f3, false).unwrap();
+        // Re-adding f3 with allow_duplicates = false keeps the member list unique.
+        pb.cpoly_add_poly_face(c1, f3, false).unwrap();
+
+        assert_eq!(pb.cpoly_faces_of_composite(c1).unwrap(), vec![f1, f3]);
+        assert_eq!(pb.face_cpoly_face(f1).unwrap(), Some(c1));
+        assert_eq!(pb.face_cpoly_face(f3).unwrap(), Some(c1));
+        assert_eq!(pb.face_cpoly_face(f2).unwrap(), None);
+        assert_eq!(pb.face_cpoly_face(c1).unwrap(), Some(c1));
+
+        let expected_edges: Vec<PolyEdgeId> = es1.into_iter().chain(es3).collect();
+        assert_eq!(pb.face_poly_edges(c1).unwrap(), expected_edges);
+        assert_eq!(pb.face_poly_loops(c1).unwrap(), vec![l1, l3]);
+        assert_eq!(
+            pb.face_normal(&k, c1, true, true).unwrap(),
+            (Vec3::new(0.0, 0.0, 1.0), false)
+        );
+
+        let bb_f1 = pb.face_bounding_box(f1).unwrap();
+        let bb_f3 = pb.face_bounding_box(f3).unwrap();
+        let bb_c1 = pb.face_bounding_box(c1).unwrap();
+        assert_eq!(bb_c1, bb_f1.union(&bb_f3));
+        assert_eq!(bb_c1.min(), Vec3::new(-tol, -tol, -tol));
+        assert_eq!(bb_c1.max(), Vec3::new(3.0 + tol, 2.0 + tol, tol));
+
+        assert!(pb.face_ok_back_ptrs(c1).unwrap());
+
+        let (sphere_center, sphere_radius) = pb.face_compute_sphere_bound(c1, true).unwrap();
+        assert_eq!(sphere_center, Vec3::new(1.0, 0.5, 0.0));
+        assert!((sphere_radius - (crate::geom::vector3d::sqrt(4.25) + tol)).abs() <= 1.0e-15);
     }
 }
