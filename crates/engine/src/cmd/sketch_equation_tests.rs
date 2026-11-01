@@ -283,7 +283,7 @@ fn a_variable_in_its_ranges_unit_follows_the_parameter_and_the_design_unit() {
     run(&mut s, "parameters.add", json!({"name": "b", "expression": "10 mm"}));
     run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Off"}));
     let why = s.execute("sketch.equation_curve", &json!({"x": "t", "y": "b ^ 2 / (4 * t)", "start": "b", "end": "3 * b"})).unwrap_err().to_string();
-    assert!(why.contains("length^2"), "{why}");
+    assert!(why.contains("an area"), "{why}");
     run(&mut s, "sketch.finish", json!({}));
 
     let id = range_unit_curve(&mut s);

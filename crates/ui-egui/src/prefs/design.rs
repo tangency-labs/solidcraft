@@ -1,5 +1,6 @@
 //! New-design defaults, with inline precision specimens.
 use super::*;
+use solidcraft_engine::doc::expr;
 
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
@@ -34,6 +35,22 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             ui_kit::row(ui, app.tr("prefs.parameter_list_rows"), |ui| {
                 let tip = app.tr("prefs.parameter_list_rows_tip").to_string();
                 ui_kit::settings_number(ui, &mut app.preferences.parameter_list_rows, PARAMETER_LIST_ROWS, 1.0).on_hover_text(tip);
+            });
+            ui_kit::row(ui, app.tr("ui.mass_unit"), |ui| {
+                let units: Vec<&str> = expr::UNITS.iter().filter(|(_, kind, _)| *kind == expr::Kind::Mass).map(|(name, ..)| *name).collect();
+                // Another saved unit shows as kilograms, as `show_mass` reads it.
+                let mut selected = units.iter().position(|u| *u == app.preferences.mass_unit).unwrap_or(1);
+                ui_kit::segmented(ui, &mut selected, &units, ui_kit::Segments { intrinsic: true, ..Default::default() });
+                if let Some(unit) = units.get(selected)
+                    && app.preferences.mass_unit != *unit
+                {
+                    app.preferences.mass_unit = (*unit).into();
+                }
+            });
+            ui_kit::row(ui, app.tr("ui.mass_decimals"), |ui| {
+                ui_kit::settings_number(ui, &mut app.preferences.mass_decimals, 0..=6, 1.0);
+                ui.add_space(t.space_6);
+                ui_kit::settings_precision_sample(ui, &show_mass(app, 9420.0));
             });
         });
         let tip = app.tr("ui.step_values_tip").to_string();

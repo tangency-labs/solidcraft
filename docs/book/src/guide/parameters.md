@@ -69,10 +69,31 @@ is half an inch; after a `/` only written without spaces: `1 in / 1/2 in` is 2, 
 `2.5 mm`, and `-(width-0,5)/2` is `-(width-0.5)/2` (directly in a function's parentheses the
 comma separates its arguments, so write `max(2.5, 3)` there). A mixed number is one value, as imperial sizes are written: `2 1/8"` and
 `3 7/16 in` are 2.125 in and 3.4375 in (a whole number, a space, then a proper fraction of whole
-numbers). A length where an angle is expected (or the other way round) is an
-error, not a silent conversion. Cycles are reported with their path (`a → b → a`), renaming a
-parameter updates every expression, dimension and feature input that uses it, and a parameter
-in use can't be deleted (the error lists its users).
+numbers). A length where an angle is expected, or a mass where a length is (any value of
+another kind), is an error, not a silent conversion. Cycles are reported with their path
+(`a → b → a`), renaming a parameter updates every expression, dimension and feature input that
+uses it, and a parameter in use can't be deleted (the error lists its users).
+
+Masses, volumes and areas have units too: `50 g`, `0.5 kg`, `1 lb`, `500 ml`, `2 cm³`, `1 m³`,
+`3 mm²`, `1.5 m²` (`cm^3` works as well as `cm³`). A parameter can be a mass, a volume or an
+area, and a density times a volume is a mass: `7.85 g/cm³ * (10 mm)^3` is 7.85 g. A new mass
+parameter shows in kg, a volume in mm³ and an area in mm². A bare number in a parameter is in its
+unit (`2` in a g parameter is 2 g), and otherwise in the unit its kind shows in: `kit + 1` beside a
+mass is 1 kg more, and `3` where a mass is expected is 3 kg. `l`, `L`, `t` and `oz` are not units
+(they are common names, or could be a mass or a volume), and neither is `m3` (an M3 screw).
+
+The units are:
+- lengths: `mm`, `cm`, `m`, `km`, `um` (or `µm`), `nm`, `in` (or `inch`, `"`), `ft` (or `'`),
+  `yd` and `mil`;
+- angles: `deg` (or `°`) and `rad`;
+- masses: `g`, `kg` and `lb`;
+- volumes: `ml`, `mm³`, `cm³` and `m³`;
+- areas: `mm²`, `cm²` and `m²`.
+
+No parameter can be named after a unit. When a design saved before these units opens, a
+parameter or feature input called `g`, `kg`, `lb`, `ml`, `mm³`, `cm³`, `m³`, `mm²`, `cm²` or `m²`
+is renamed (`g` becomes `g_param`), everything that uses it follows, and its comment says why.
+Its value doesn't change.
 
 The design's units (Document Settings in the browser: mm, cm, m, in or ft) set how a bare number
 or unitless arithmetic expression typed into a length field is read. In an inch design `0.25`

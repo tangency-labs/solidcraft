@@ -97,6 +97,22 @@ pub fn format_number(x: f64, decimals: u8, f: &NumberFormat) -> Result<Shown> {
     format_display(x, 1.0, decimals, f)
 }
 
+/// A mass in grams in `unit` (a mass unit of the expressions: `g`, `kg` or `lb`), without the unit's name. The
+/// decimals are a minimum: a mass under one unit gets the places that show two significant digits, up to 8, so
+/// 1.29 g in kilograms at 2 decimals reads "0.0013". It rounds as [`format_value`] does (a decimal half to even) and,
+/// like it, refuses a unit that isn't a mass unit and more than 8 decimals.
+pub fn mass_number(grams: f64, unit: &str, decimals: u8) -> Result<String> {
+    let value = expr::unit_info(unit).map_or(grams, |(_, scale)| grams / scale);
+    let readable = if value != 0.0 && value.abs() < 1.0 { 1.0 - value.abs().log10().floor() } else { 0.0 };
+    let places = decimals.max((readable as u8).min(8));
+    Ok(format_value(grams, expr::Kind::Mass, unit, places, &NumberFormat::default())?.text)
+}
+
+/// A mass in grams with its unit's name ([`mass_number`]): 9420 g in kilograms reads "9.42 kg".
+pub fn format_mass(grams: f64, unit: &str, decimals: u8) -> Result<String> {
+    Ok(format!("{} {}", mass_number(grams, unit, decimals)?, unit.trim()))
+}
+
 fn format_display(x: f64, scale: f64, decimals: u8, f: &NumberFormat) -> Result<Shown> {
     // The unit table supplies a positive finite scale. Its decimal step must be at most
     // 1e-9 internal units; the precision floor can make the effective tie window narrower.
@@ -265,7 +281,7 @@ mod tests {
 #[cfg(test)]
 mod number_tests {
     use super::*;
-    use expr::Kind::{Angle, Length, Unitless};
+    use expr::Kind::{Angle, Length, Mass, Unitless};
 
     fn pair(x: f64, dp: u8, even: &str, away: &str) {
         for (ties, expected) in [(Ties::HalfEven, even), (Ties::HalfAwayFromZero, away)] {
@@ -352,6 +368,41 @@ mod number_tests {
         for (kind, unit) in [(Length, "deg"), (Angle, "mm"), (Length, ""), (Length, "parsec"), (Unitless, "mm"), (Length, "IN")] {
             assert!(matches!(format_value(1.0, kind, unit, 2, &f), Err(DocError::Invalid(_))), "{kind:?} {unit:?}");
         }
+    }
+
+    #[test]
+    fn mass_decimals_are_a_minimum_and_round_like_every_number() {
+        for (grams, unit, dp, expected) in [
+            (9420.0, "kg", 2, "9.42 kg"),
+            (9420.0, "g", 2, "9420.00 g"),
+            (453.592_37, "lb", 2, "1.00 lb"),
+            (9420.0, " kg ", 2, "9.42 kg"),
+            // Under one unit: the places for two significant digits, the decimals still a minimum.
+            (1.29, "kg", 2, "0.0013 kg"),
+            (1.29, "kg", 5, "0.00129 kg"),
+            (500.0, "kg", 0, "0.50 kg"),
+            (0.1, "g", 1, "0.10 g"),
+            (99.95, "kg", 2, "0.100 kg"),
+            (1e-9, "kg", 2, "0.00000000 kg"),
+            // One unit and over: the decimals as asked, a decimal half to even.
+            (1000.0, "kg", 0, "1 kg"),
+            (1500.0, "kg", 0, "2 kg"),
+            (2500.0, "kg", 0, "2 kg"),
+            (392.5, "kg", 3, "0.392 kg"),
+            (0.0, "kg", 2, "0.00 kg"),
+            (-0.0, "kg", 2, "0.00 kg"),
+            (-1.29, "kg", 2, "−0.0013 kg"),
+        ] {
+            assert_eq!(format_mass(grams, unit, dp).unwrap(), expected, "{grams} g in {unit:?}, {dp} places");
+            assert_eq!(mass_number(grams, unit, dp).unwrap(), expected.rsplit_once(' ').unwrap().0);
+        }
+        for (grams, unit, dp) in [(1.0, "mm", 2), (1.0, "", 2), (1.0, "KG", 2), (1.0, "oz", 2), (1.0, "kg", 9), (1.0, "kg", u8::MAX)] {
+            assert!(matches!(format_mass(grams, unit, dp), Err(DocError::Invalid(_))), "{unit:?}, {dp} places");
+        }
+        for grams in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 1e16] {
+            assert!(matches!(format_mass(grams, "kg", 2), Err(DocError::Invalid(_))), "{grams}");
+        }
+        assert_eq!(expr::unit_info("kg"), Some((Mass, 1000.0)), "the unit table the mass format reads");
     }
 
     #[test]

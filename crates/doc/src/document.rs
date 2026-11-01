@@ -36,7 +36,7 @@ impl ThreadHandedness {
 pub struct Param {
     pub name: String,
     pub expr: String,
-    /// `mm`, `deg` or empty (unit-less).
+    /// A unit (`mm`, `deg`, `kg`, `mm³`…) or empty (unit-less).
     pub unit: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub comment: String,
@@ -3845,8 +3845,8 @@ impl Document {
             if p.expr.len() > 4096 || p.comment.len() > 4096 {
                 return Err(DocError::Expr(format!("parameter `{}`: expression or comment too long", p.name)));
             }
-            if !p.unit.is_empty() && expr::unit_info(&p.unit).is_none() {
-                return Err(DocError::Invalid(format!("parameter `{}`: unknown unit `{}`", p.name, p.unit)));
+            if let Some(why) = expr::unit_problem(&p.unit) {
+                return Err(DocError::Invalid(format!("parameter `{}`: {why}", p.name)));
             }
         }
         let id = f.id;
@@ -3996,8 +3996,7 @@ impl Document {
 
     /// Why a name cannot be a parameter name (None = fine).
     pub fn param_name_problem(name: &str) -> Option<String> {
-        let mut cs = name.chars();
-        if !matches!(cs.next(), Some(c) if c.is_alphabetic() || c == '_') || !cs.all(|c| c.is_alphanumeric() || c == '_') {
+        if !expr::is_name_shaped(name) {
             return Some(format!("`{name}` is not a valid parameter name (letters, digits and _, starting with a letter)"));
         }
         if name.len() > 64 {
@@ -4028,10 +4027,8 @@ impl Document {
         if expr_s.trim().is_empty() {
             return Err(DocError::Expr("empty expression".into()));
         }
-        if let Some(u) = unit
-            && expr::unit_info(u).is_none()
-        {
-            return Err(DocError::Expr(format!("unknown unit `{u}` (mm, cm, m, in, ft, deg, rad or none)")));
+        if let Some(why) = unit.and_then(expr::unit_problem) {
+            return Err(DocError::Expr(why));
         }
         if comment.is_some_and(|c| c.len() > 4096) {
             return Err(DocError::Invalid("comment too long".into()));
