@@ -197,7 +197,7 @@ fn a_right_to_left_line_is_a_run_per_direction_with_marks_in_their_letters_clust
 #[test]
 fn a_character_no_font_has_is_refused_by_name() {
     let e = err("Size \u{d55c}", None, &TextStyle::default());
-    assert!(e.contains("no glyph for '\u{d55c}'"), "{e}");
+    assert!(e.contains("no glyph for '\u{d55c}'") && !e.contains("the web"), "{e}");
     let e = err("a\tb", None, &TextStyle::default());
     assert!(e.contains("'\\t'"), "{e}");
 }
@@ -463,6 +463,41 @@ fn the_status_names_what_fell_back_and_looks_for_nothing() {
         paper_fallback_notes(&dirs, "", "ja", ["A\u{4e2d}\u{30c6}", "B"]),
         ["Han set in BIZ UDPGothic for Japanese", "Kana set in BIZ UDPGothic"]
     );
+}
+
+/// No font folders, as in the browser: Japanese waits for the font the web app fetches, then is
+/// set by it, and what it lacks is refused by name. The one test, as the font's state is the process's.
+#[test]
+fn on_the_web_japanese_waits_for_the_fetched_font() {
+    use crate::fonts::fallback::{provide_web_font, web_font_failed, web_font_wanted};
+    let plain = TextStyle::default();
+    let set = |text: &str| paper_text_in(&[], text, None, "", AT, 5.0, 0.0, &plain);
+    // Nothing that font could set doesn't ask for it.
+    let e = set("\u{628}").unwrap_err().to_string();
+    assert!(e.contains("no glyph for") && e.contains("the web covers Japanese for now"), "{e}");
+    assert!(!web_font_wanted());
+    assert!(set("A").unwrap().is_some());
+    assert!(!web_font_wanted(), "text with its own font asks for nothing");
+    // Waiting, whichever way it's asked.
+    assert!(matches!(set("A\u{30c6}"), Err(SketchError::FontPending)));
+    assert!(web_font_wanted());
+    assert!(matches!(paper_text_now(&[], "\u{4e2d}", None, "", AT, 5.0, 0.0, &plain), Err(SketchError::FontPending)));
+    assert!(paper_fallback_notes(&[], "", "", ["\u{30c6}"]).is_empty(), "nothing to say yet");
+    // The fetch failed: refused by name, and it stays wanted no more.
+    web_font_failed();
+    assert!(!web_font_wanted());
+    let e = set("\u{30c6}").unwrap_err().to_string();
+    assert!(e.contains("the web covers Japanese for now"), "{e}");
+    // It came (a later try): set, in that font, under the name a face of it has.
+    provide_web_font(gothic());
+    assert!(!web_font_wanted());
+    let (runs, fonts) = mixed(set("A\u{30c6}").unwrap().unwrap());
+    assert_eq!((runs.len(), fonts.len()), (2, 2));
+    assert!(fonts.iter().any(|f| f.postscript_name.starts_with("BIZ")));
+    assert_eq!(paper_fallback_notes(&[], "", "", ["\u{30c6}"]), ["Kana set in BIZ UDPGothic"]);
+    // What it lacks: Hangul and Arabic, refused by name, with no font asked for.
+    let e = set("\u{d55c}").unwrap_err().to_string();
+    assert!(e.contains("no glyph for") && e.contains("the web covers Japanese for now"), "{e}");
 }
 
 /// The same text and fonts give the same runs and fonts, however the answers came.

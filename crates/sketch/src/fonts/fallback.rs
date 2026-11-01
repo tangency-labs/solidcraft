@@ -6,10 +6,14 @@
 //! then, in sorted order, the first face in the folders with outlines and the character, read from
 //! each file's character map alone and bounded by `MAX_FONT_FILES`. Its answers, "none has it"
 //! too, are kept for the process. [`answers`] runs it where it's called, or on a thread of its own.
+//!
+//! The browser has no font folders. There, the web covers Japanese for now: the first kana or Han
+//! that lacks a font asks for the font the web app fetches ([`web_font_wanted`]), the text is
+//! pending until it comes ([`provide_web_font`]), and it sets whatever it has a glyph for.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use super::{FaceTable, MAX_FONT_BYTES, face_names, face_tables, font_files, normalize};
 
@@ -327,14 +331,87 @@ fn state() -> std::sync::MutexGuard<'static, Search> {
     STATE.get_or_init(Default::default).lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// Where the font the web app fetches stands.
+#[derive(Default)]
+enum WebFont {
+    #[default]
+    NotAsked,
+    Wanted,
+    Here(Arc<Vec<u8>>),
+    Failed,
+}
+
+/// The path that stands for the fetched font among faces, which are named by their files.
+const WEB_FONT: &str = "web:BIZUDPGothic-Regular.ttf";
+
+fn web_font() -> std::sync::MutexGuard<'static, WebFont> {
+    static FONT: OnceLock<Mutex<WebFont>> = OnceLock::new();
+    FONT.get_or_init(Default::default).lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Whether a text is waiting for the font the web app fetches.
+pub fn web_font_wanted() -> bool {
+    matches!(*web_font(), WebFont::Wanted)
+}
+
+/// The font the web app fetched: text waiting for it is set on its next try.
+pub fn provide_web_font(bytes: Vec<u8>) {
+    *web_font() = WebFont::Here(Arc::new(bytes));
+}
+
+/// The fetch failed: what waited for it is refused by name.
+pub fn web_font_failed() {
+    *web_font() = WebFont::Failed;
+}
+
+/// The fetched font's bytes, when `path` stands for it.
+pub(crate) fn web_font_at(path: &Path) -> Option<Arc<Vec<u8>>> {
+    match &*web_font() {
+        WebFont::Here(bytes) if path == Path::new(WEB_FONT) => Some(bytes.clone()),
+        _ => None,
+    }
+}
+
+/// The answers where there are no font folders: the fetched font when it has the character. None
+/// when kana or Han has to wait for it.
+fn web_answers(queries: &[Query]) -> Option<Vec<Answer>> {
+    let mut font = web_font();
+    match &*font {
+        WebFont::Here(bytes) => {
+            let face = ttf_parser::Face::parse(bytes, 0).ok();
+            let has = |query: &Query| face.as_ref().is_some_and(|face| face.glyph_index(query.ch).is_some_and(|glyph| glyph.0 != 0));
+            Some(queries.iter().map(|query| has(query).then(|| (PathBuf::from(WEB_FONT), 0))).collect())
+        }
+        WebFont::Failed => Some(vec![None; queries.len()]),
+        WebFont::NotAsked | WebFont::Wanted => {
+            if !queries.iter().any(|query| matches!(script(query.ch), Some(Script::Kana | Script::Han))) {
+                return Some(vec![None; queries.len()]);
+            }
+            *font = WebFont::Wanted;
+            None
+        }
+    }
+}
+
 /// The answer the search has given to `query`, without searching.
 pub(crate) fn answered(query: &Query) -> Answer {
+    if query.dirs.is_empty() {
+        // Asks for nothing: only a font already here answers. The lock ends with the check, as
+        // `web_answers` takes it again.
+        if !matches!(*web_font(), WebFont::Here(_)) {
+            return None;
+        }
+        return web_answers(std::slice::from_ref(query)).into_iter().flatten().next().flatten();
+    }
     state().answers.get(query).cloned().flatten()
 }
 
 /// The answers to `queries`, in order. With `wait` the search runs here; else the ones not known
 /// yet go to a thread, and this is None until they are in (a system with no threads waits).
 pub(crate) fn answers(queries: &[Query], wait: bool) -> Option<Vec<Answer>> {
+    if queries.iter().all(|query| query.dirs.is_empty()) {
+        return web_answers(queries);
+    }
     let unknown: Vec<Query> = {
         let mut search = state();
         let unknown: Vec<Query> = queries.iter().filter(|query| !search.answers.contains_key(*query)).cloned().collect();

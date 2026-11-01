@@ -263,7 +263,8 @@ fn face_tables(path: &Path, tag: &[u8; 4], largest: u32) -> Vec<FaceTable> {
 
 /// The face `index` of the font file at `path`, for a font found by searching.
 pub(crate) fn face_at(path: &Path, index: u32) -> Option<FontData> {
-    Some(FontData { bytes: FontBytes::File(path.to_path_buf(), read_font(path).ok()?), index, weight: None })
+    let bytes = fallback::web_font_at(path).map_or_else(|| read_font(path).ok(), Some)?;
+    Some(FontData { bytes: FontBytes::File(path.to_path_buf(), bytes), index, weight: None })
 }
 
 /// The family name of a face.
@@ -447,8 +448,12 @@ fn override_dirs(dirs: Option<std::ffi::OsString>, pack: Option<std::ffi::OsStri
     }
 }
 
-/// The folders searched for installed fonts, in order.
+/// The folders searched for installed fonts, in order: none in the browser, which has only the
+/// font the web app fetches ([`fallback::provide_web_font`]).
 pub fn font_dirs() -> Vec<PathBuf> {
+    if cfg!(target_arch = "wasm32") {
+        return Vec::new();
+    }
     let mut dirs = font_override_dirs();
     let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
     if cfg!(windows) {
