@@ -25,3 +25,9 @@ unit = "topology.brep_local_operation"
 check = "ratchet"
 case = "nurb_fillet_face5_same"
 reason = "ND-493 C++ clock-seeded rand() (srand(time(NULL)) in GetPointsInFace via IsInnerShell in the merge stitch): intermittent on main CI at c47d6d3b5 and 7ca6ce7a9; Rust deterministic; parked"
+
+[[waiver]]
+unit = "offset.offset_executive_p2"
+check = "ratchet"
+case = "issue2174_cap_two_rim_edges_api_shell_out"
+reason = "parked, not lost: #2225 parks the case with cpp_defect = \"UB-241\" because the C++ side crashes or finishes depending on the heap layout (#2224; passed in #2217's run, rejected in #2218's, same base). The base report may hold it as a pass; remove this waiver once #2225 has merged"

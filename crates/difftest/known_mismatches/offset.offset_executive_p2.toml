@@ -1,0 +1,11 @@
+# GlueCoincidentBrepVertices gluing a vertex it has already deleted (UB-241): the C++
+# side crashes or finishes depending on the heap layout of the forked child, so the case
+# passes in one run and is rejected in the next
+# (plan/upstream-issues/UB-241--addendum-2026-11-01-heap-layout-dependent-crash.md).
+# Parked, not passed: this case is not run in the gate.
+[[mismatch]]
+unit = "offset.offset_executive_p2"
+case = "issue2174_cap_two_rim_edges_api_shell_out"
+libc = "glibc"
+cpp_defect = "UB-241"
+why = "C++ heap-layout dependent (UB-241 use-after-free in GlueCoincidentBrepVertices): crashes in one run and finishes in another; the Rust output is the same in every run (tests/issue_2174_cap_outward_ub_241.rs)"
