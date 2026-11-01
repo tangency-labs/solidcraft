@@ -677,10 +677,16 @@ impl Context {
         Ok(lease)
     }
 
+    /// Whether a crate edit has lent this context's callbacks ([`Context::lend_notify`]):
+    /// a nested edit through it is refused.
+    pub(crate) const fn notify_lent(&self) -> bool {
+        self.identities.lent
+    }
+
     /// `InvalidInput` when a crate edit has lent this context's callbacks
     /// ([`Context::lend_notify`]).
     pub(crate) const fn check_not_lent(&self) -> Result<()> {
-        if self.identities.lent {
+        if self.notify_lent() {
             Err(NOTIFY_LENT)
         } else {
             Ok(())

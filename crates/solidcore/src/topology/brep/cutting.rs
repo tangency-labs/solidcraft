@@ -27,7 +27,9 @@
 //!   attributes and identities); `curve_ref` names each new edge curve. [`cut`] uses an
 //!   arena-only store ([`ArenaNotifyState`]), as `SmApiCut`'s caller holds none.
 //!   `StitchAndOrient` notifies through its own kernel-context edits
-//!   ([`p5::stitch_and_orient`]).
+//!   ([`p5::stitch_and_orient`]), or, when the caller's edit has lent the kernel
+//!   context's callbacks (where those edits would be refused as nested), through the
+//!   caller's environment (`p5::stitch_and_orient_notified`).
 //! - **Marks.** `SmNewMarkAndLock` advances and locks an unlocked context mark as
 //!   upstream ([`MarkLock`], released on every return); the edges and faces it marks are
 //!   sets owned by the call (a freshly advanced mark marks nothing).
@@ -621,11 +623,25 @@ fn do_cut_body(
         ignore_status(bp4::delete_vertex(k, b, &mut d, v))?;
     }
 
-    ignore_status(p5::stitch_and_orient(
-        k,
-        b,
-        &StitchAndOrientOptions::default(),
-    ))?;
+    // Inside an edit that has lent the kernel context's callbacks (a caller under
+    // `with_kernel_callbacks`), `StitchAndOrient`'s own edits would be refused as nested,
+    // and the refusal ignored with the status: it stitches and orients through this
+    // cut's environment there, naming new curves by `curve_ref`.
+    if k.context.notify_lent() {
+        ignore_status(p5::stitch_and_orient_notified(
+            k,
+            b,
+            &StitchAndOrientOptions::default(),
+            env,
+            p9::CurveIdentity::Legacy(curve_ref),
+        ))?;
+    } else {
+        ignore_status(p5::stitch_and_orient(
+            k,
+            b,
+            &StitchAndOrientOptions::default(),
+        ))?;
+    }
     Ok(())
 }
 
