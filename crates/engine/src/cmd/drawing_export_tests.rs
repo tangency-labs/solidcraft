@@ -75,9 +75,9 @@ fn a_failed_view_is_named_and_nothing_is_written() {
     let (mut s, sheet, [front, top]) = front_and_top();
     let folder = Folder::new("drawing-export-failed");
     let path = folder.path("sheet.svg");
-    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": "shaded"}}));
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": "shaded_visible"}}));
     let why = refused(&mut s, json!({"sheet": ids::encode(sheet), "path": path}));
-    assert!(why.contains(&format!("views on the sheet failed: {} (not supported yet: shaded views", ids::encode(top))), "{why}");
+    assert!(why.contains(&format!("views on the sheet failed: {} (not supported yet: shaded views with lines", ids::encode(top))), "{why}");
     assert!(!why.contains(&ids::encode(front)) && !std::path::Path::new(&path).exists(), "{why}");
     run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": "visible"}}));
     for level in 0..=MAX_PLACEMENT_DEPTH as u64 + 1 {
@@ -117,4 +117,42 @@ fn what_it_cant_write_is_refused() {
     assert_eq!(std::fs::read_dir(&folder.0).unwrap().count(), 0);
     run(&mut s, "drawing.close", json!({}));
     assert!(refused(&mut s, json!({"sheet": id})).contains("open a drawing first"));
+}
+
+/// A sheet with shaded views exports their pictures as `<image>`s, the same bytes twice. A picture
+/// past the grid's limit is refused and nothing is written.
+#[test]
+fn a_shaded_view_exports_its_picture() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    let plain = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}))["svg"].as_str().unwrap().to_owned();
+    assert!(!plain.contains("<image"), "lines only: {}", plain.len());
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"display_style": "shaded"}}));
+    let reply = run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}));
+    let svg = reply["svg"].as_str().unwrap();
+    assert_eq!(svg.matches("<image").count(), 2, "the front view's, and the top view's, which follows it: {reply}");
+    assert_eq!(run(&mut s, CMD, json!({"sheet": ids::encode(sheet)}))["svg"], reply["svg"], "the same bytes twice");
+    let folder = Folder::new("drawing-export-picture");
+    let path = folder.path("sheet.svg");
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"scale": "100:1"}}));
+    let why = refused(&mut s, json!({"sheet": ids::encode(sheet), "path": path}));
+    assert!(why.contains("over the limit"), "{why}");
+    assert!(!std::path::Path::new(&path).exists(), "{why}");
+}
+
+/// A picture has no key of its own to go stale: each export draws it again, so a change of the part's
+/// colour alone changes the file, and going back gives the first one again.
+#[test]
+fn a_shaded_views_picture_follows_the_parts_colour() {
+    let (mut s, sheet, [front, _]) = front_and_top();
+    run(&mut s, "drawing.view.edit", json!({"view": ids::encode(front), "set": {"display_style": "shaded"}}));
+    let drawing = json!({"drawing": ids::encode(s.drawing("test").unwrap().id)});
+    let coloured = |s: &mut Session, color: &str| {
+        run(s, "drawing.close", json!({}));
+        run(s, "appearance.assign", json!({"bodies": ["Block"], "color": color}));
+        run(s, "drawing.open", drawing.clone());
+        run(s, CMD, json!({"sheet": ids::encode(sheet)}))["svg"].as_str().unwrap().to_owned()
+    };
+    let red = coloured(&mut s, "#ff0000");
+    assert_ne!(red, coloured(&mut s, "#0000ff"), "the colour shows in the picture");
+    assert_eq!(red, coloured(&mut s, "#ff0000"));
 }

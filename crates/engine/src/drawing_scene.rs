@@ -3,7 +3,8 @@
 //! same thing. In paint order: the sheet's drawing border ([`SheetLayout::paper`]), then each view
 //! on the sheet by id, its visible lines as [`paper_group`] makes them. Images placed on the sheet
 //! sit between the two ([`groups`]), so a view's lines draw over a photo. Text, the title block,
-//! tables, hidden lines and shaded views each join as one more kind of group.
+//! tables and hidden lines each join as one more kind of group. A shaded view's group holds its
+//! pictures under its lines; nothing here draws their pixels ([`crate::drawing_picture`]).
 //!
 //! [`build`] draws a sheet at once, each view the one way: its lines worked out centred on the view,
 //! then moved to its centre, so the same lines on the same centre are the same bytes however they
@@ -32,7 +33,8 @@ use solidcraft_geom::paper::text::TextRun;
 use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, Picture, Scene};
 use solidcraft_geom::{Aabb2, Loop2, Region2, Seg2, Vec2};
 
-use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, ShownSet, Stats, Unmeasured, paper_group};
+use crate::drawing_picture::{picture_items, view_parts};
+use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, ShownSet, Stats, Styles, Unmeasured, paper_group};
 use crate::params::bad;
 use crate::{EngineError, Result, Session};
 
@@ -131,6 +133,7 @@ struct Drawn {
 /// the paper scene's [`MAX_RECORDS`] are refused here, so no view holds more than a scene takes.
 fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64, view: &ResolvedView) -> Drawn {
     let none = |status| Drawn { group: None, status, stats: None };
+    let styles = Styles::from(view);
     // A style that draws hidden lines is refused here too, so the lines below are visible ones.
     if let Some(why) = crate::drawing_view::not_drawable(view.display_style.value, view.reference_style.value, true) {
         return none(Status::Failed(why.into()));
@@ -148,11 +151,16 @@ fn draw(s: &Session, shown: &std::result::Result<ShownSet, Unmeasured>, id: u64,
     let chord_mm = CHORD_MM.max(MIN_MODEL_CHORD_MM * view.scale.value.factor() * (1.0 + 1e-9));
     let reference_hides_model = view.reference_hides_model.value;
     let request = LineRequest { shows: around, hidden: false, reference_hidden: false, reference_hides_model, tangent_edges, chord_mm };
-    let lines = crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, Vec2::ZERO, CMD)
-        .and_then(|frame| crate::drawing_view::lines(s, set, &frame, &request, CMD));
+    let lines = crate::drawing_view::frame(view.basis, view.scale.value, &extents.model, Vec2::ZERO, CMD).and_then(|frame| {
+        let rect = frame.boundary(&around).map_err(|e| bad(CMD, e.to_string()))?;
+        let mut lines = crate::drawing_view::lines(s, set, &frame, &request, CMD)?;
+        styles.leave_shaded_to_pictures(&mut lines);
+        Ok((lines, rect))
+    });
     match lines {
-        Ok(lines) => {
-            let group = paper_group(&lines, id);
+        Ok((lines, rect)) => {
+            let mut group = paper_group(&lines, id);
+            group.items.splice(0..0, picture_items(id, &view_parts(set, styles), rect));
             if group.records() > MAX_RECORDS {
                 return none(Status::Failed(format!("its lines are more than a paper scene's {MAX_RECORDS} records: choose a smaller scale")));
             }
@@ -234,7 +242,7 @@ fn sheet_of(d: &Drawing, sheet: u64) -> Result<&Sheet> {
 }
 
 /// The views on sheet `sheet` of `d`, in id order, each as it draws and with its centre.
-fn views_on(d: &Drawing, sheet: u64) -> Result<Vec<(u64, ResolvedView, Vec2)>> {
+pub(crate) fn views_on(d: &Drawing, sheet: u64) -> Result<Vec<(u64, ResolvedView, Vec2)>> {
     let fail = |e: DocError| bad(CMD, e.to_string());
     let mut on: Vec<u64> = d.views.iter().filter(|v| v.sheet == sheet).map(|v| v.id).collect();
     on.sort_unstable();

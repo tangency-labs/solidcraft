@@ -200,7 +200,7 @@ fn a_view_that_cant_be_drawn_leaves_out_only_itself() {
     let (mut s, sheet, [front, top]) = front_and_top();
     let status = |s: &Session, id: u64| built(s, sheet).views.into_iter().find(|v| v.view == id).map(|v| v.status);
     for (style, why) in [
-        ("shaded", "not supported yet: shaded views need the drawing renderer (#5624)"),
+        ("shaded_visible", "not supported yet: shaded views with lines need the view's exact lines (W06)"),
         ("visible_hidden", "not supported yet: hidden lines in the paper scene need dashed lines (#4890 A5)"),
     ] {
         run(&mut s, "drawing.view.edit", json!({"view": ids::encode(top), "set": {"display_style": style}}));

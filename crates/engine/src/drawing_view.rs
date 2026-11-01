@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
+use solidcraft_doc::drawing::view::ResolvedView;
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
 use solidcraft_geom::drawing_view::{Scale, ViewFrame};
@@ -82,6 +83,28 @@ pub struct Shown {
     pub body: String,
     /// It is placed through a reference occurrence ([`solidcraft_doc::Document::reference_occurrences`]).
     pub reference: bool,
+}
+
+/// How a view draws its two kinds of part.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Styles {
+    pub display: VisualStyle,
+    pub reference: VisualStyle,
+    pub reference_hides_model: bool,
+}
+
+impl From<&ResolvedView> for Styles {
+    fn from(view: &ResolvedView) -> Styles {
+        Styles { display: view.display_style.value, reference: view.reference_style.value, reference_hides_model: view.reference_hides_model.value }
+    }
+}
+
+impl Styles {
+    /// Leaves out a shaded part's own lines: its picture draws it, and it still hides what lies
+    /// behind it.
+    pub fn leave_shaded_to_pictures(&self, lines: &mut Lines) {
+        lines.lines.retain(|l| !(if l.reference { self.reference } else { self.display }).is_shaded());
+    }
 }
 
 /// What a view shows, worked out once per request: the world state and each body it shows, in the
@@ -159,15 +182,12 @@ pub struct OnSheet {
 }
 
 /// Why a view drawing in `display` and `reference` styles can't be drawn yet, if it can't: shaded
-/// views with lines need the view's exact lines, and a paper scene (`scene`) has neither pictures
-/// for shaded ones nor dashed lines for hidden ones, of the model or of reference parts. The snapshot
-/// and the sheet scene refuse alike.
+/// views with lines need the view's exact lines, and a paper scene (`scene`) has no dashed lines for
+/// hidden ones, of the model or of reference parts. The snapshot and the sheet scene refuse alike.
 pub fn not_drawable(display: VisualStyle, reference: VisualStyle, scene: bool) -> Option<&'static str> {
     let lined = |style: VisualStyle| style.is_shaded() && style != VisualStyle::Shaded;
     if lined(display) || lined(reference) {
         Some("not supported yet: shaded views with lines need the view's exact lines (W06)")
-    } else if scene && (display.is_shaded() || reference.is_shaded()) {
-        Some("not supported yet: shaded views need the drawing renderer (#5624)")
     } else if scene && (display == VisualStyle::VisibleHidden || reference == VisualStyle::VisibleHidden) {
         Some("not supported yet: hidden lines in the paper scene need dashed lines (#4890 A5)")
     } else {
