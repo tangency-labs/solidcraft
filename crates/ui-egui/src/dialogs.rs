@@ -2650,6 +2650,7 @@ pub(crate) fn selection_label(s: &Session, names: crate::prefs::OriginPlaneNames
         // A point of the model: a vertex, or the centre a round edge stands for.
         Sel::Vertex { body, .. } if !body.is_empty() => format!("{body} · point"),
         Sel::Feature { id } => s.doc.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| format!("Feature {id}")),
+        Sel::Occurrence { path } if path.is_empty() => s.doc.name.clone(),
         Sel::Occurrence { path } => s.occurrence_placement(path).map(|p| p.name).unwrap_or_else(|_| "Component".into()),
         Sel::Vertex { body, point } if body.is_empty() => {
             let state = s.world_state();

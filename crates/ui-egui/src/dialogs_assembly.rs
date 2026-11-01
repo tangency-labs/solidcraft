@@ -333,13 +333,24 @@ fn side_inputs() -> Vec<SelInput> {
 
 /// The pick a joint side shows in the side inputs: the face or edge of its own occurrence that
 /// the side's snap names (the piece nearest its pick, when the name has several), else the face
-/// or edge nearest the pick. A point or frame side names no face: None.
+/// or edge nearest the pick. A point or frame side names no face, so it shows its component.
 fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
     let s = &app.session;
     let (pick, face, edge) = match &o.snap {
         Snap::FaceCenter { pick, face, .. } | Snap::CircleCenter { pick, face, .. } => (*pick, face.as_deref(), None),
         Snap::Edge { pick, edge, .. } => (*pick, None, edge.as_deref()),
-        Snap::Point { .. } | Snap::Frame { .. } => return None,
+        Snap::Point { .. } | Snap::Frame { .. } => {
+            let path = if o.occurrence == 0 {
+                Vec::new()
+            } else {
+                let occurrence = s.doc.occurrences.iter().find(|p| p.id == o.occurrence)?;
+                let mut path = s.doc.first_path(occurrence.parent);
+                path.push(occurrence.id);
+                s.doc.path_placement(&path)?;
+                path
+            };
+            return Some(Sel::Occurrence { path });
+        }
     };
     // The pick is in the component's coordinates; the placed bodies are in the world.
     let at =

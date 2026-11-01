@@ -325,6 +325,72 @@ fn edit_joint_shows_both_sides_and_a_repick_sends_only_that_side() {
     assert_ne!(after.b, before.b);
 }
 
+/// Point and frame origins have no face pick, but Edit Joint must still identify their
+/// components (#7749). Showing those components must not replace either stored origin.
+#[test]
+fn edit_joint_shows_components_for_point_and_frame_origins() {
+    for command in ["joint.create", "joint.as_built", "joint.rigid_group"] {
+        let mut app = two_boxes();
+        let (a, b) = (occ(&app, "A"), occ(&app, "B"));
+        let params = match command {
+            "joint.create" => json!({"type": "rigid", "flip": true,
+                "a": {"occurrence": a, "point": [10, 10, 10], "z": [0, 0, 1]},
+                "b": {"occurrence": b, "point": [40, 10, 10], "z": [0, 0, 1]}}),
+            "joint.as_built" => json!({"type": "rigid", "a": a, "b": b}),
+            _ => json!({"occurrences": [a, b]}),
+        };
+        app.run(command, params).unwrap();
+        let before = app.session.doc.assembly.joints[0].clone();
+        let mut d = edit_joint(&app, before.id).unwrap();
+        for (input, (id, name)) in d.inputs.iter().zip([(a, "A:1"), (b, "B:1")]) {
+            let item = input.items.first().expect("the stored component is shown");
+            assert_eq!(item, &Sel::Occurrence { path: vec![id] }, "{command}");
+            assert_eq!(crate::dialogs::selection_label(&app.session, app.preferences.origin_plane_names, &d, input, item), name);
+        }
+        let commands = apply_commands(&app, &d).unwrap();
+        assert!(commands[0].1.get("a").is_none() && commands[0].1.get("b").is_none(), "{commands:?}");
+        for (id, params) in commands {
+            app.run(&id, params).unwrap();
+        }
+        let after = &app.session.doc.assembly.joints[0];
+        assert_eq!((&after.a, &after.b), (&before.a, &before.b), "{command}");
+
+        // Replacing just B with a face still edits only B, preserving A's point/frame.
+        let body = app.session.world_state().bodies.iter().find(|body| occurrence_of_body(&app.session, &body.name) == Some(b)).unwrap().name.clone();
+        let picked = Sel::Face { body, index: 0, point: Vec3::new(40.0, 10.0, 10.0) };
+        d.active = 1;
+        d.pick(&app.session, picked);
+        let commands = apply_commands(&app, &d).unwrap();
+        assert!(commands[0].1.get("a").is_none(), "{commands:?}");
+        assert_eq!(commands[0].1["b"]["occurrence"], b);
+    }
+}
+
+#[test]
+fn edit_joint_component_labels_keep_the_nested_instance_and_root() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    let parent = app.run("component.create", json!({"name": "Assembly", "activate": false})).unwrap()["occurrence"].as_u64().unwrap();
+    let first =
+        app.run("component.create", json!({"name": "Part", "parent": "Assembly", "activate": false})).unwrap()["occurrence"].as_u64().unwrap();
+    let second = app.run("occurrence.copy", json!({"occurrence": first})).unwrap()["occurrence"].as_u64().unwrap();
+    let origin = |id| json!({"occurrence": id, "frame": {"origin": [0, 0, 0], "z": [0, 0, 1], "x": [1, 0, 0]}});
+    app.run("joint.create", json!({"type": "rigid", "flip": true, "a": origin(0), "b": origin(second)})).unwrap();
+    let before = app.session.doc.assembly.joints[0].clone();
+    let mut d = edit_joint(&app, before.id).unwrap();
+    for (input, (path, label)) in d.inputs.iter().zip([(vec![], app.session.doc.name.as_str()), (vec![parent, second], "Part:2")]) {
+        let item = input.items.first().expect("the stored component is shown");
+        assert_eq!(item, &Sel::Occurrence { path });
+        assert_eq!(crate::dialogs::selection_label(&app.session, app.preferences.origin_plane_names, &d, input, item), label);
+    }
+    for (id, params) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, params).unwrap();
+    }
+    let after = &app.session.doc.assembly.joints[0];
+    assert_eq!((&after.a, &after.b), (&before.a, &before.b));
+    d.inputs[1].items.clear();
+    assert!(apply_commands(&app, &d).is_err(), "clearing a side still requires a replacement origin");
+}
+
 /// A side on a hole's wall shows the wall, a cylinder, not the plate's face beside the hole: the
 /// face its snap names is the one the pre-fill takes, however near the other face's plane lies.
 #[test]
