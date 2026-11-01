@@ -80,7 +80,13 @@ fn construction_offset_is_a_driving_constraint_on_the_chosen_side() {
     assert_eq!(s.doc.param(distance.param.as_deref().unwrap()).unwrap().expr, "gap");
     assert!(sketch(&s).constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Parallel { .. })));
     run(&mut s, "parameters.change", json!({"name":"gap","expression":"9 mm"}));
-    assert!((line_anchor(&s, id).y - 9.0).abs() < 1e-6, "the distance follows the parameter");
+    let sk = sketch(&s);
+    let CurveKind::Line { a, b } = curve(&sk, id).kind else { panic!("line") };
+    let (pa, pb) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+    assert!((pa.y - 9.0).abs() < 1e-6 && (pb.y - 9.0).abs() < 1e-6, "the distance follows the parameter: {pa:?} -> {pb:?}");
+    let CurveKind::Line { a, b } = curve(&sk, "a").kind else { panic!("reference") };
+    let (ra, rb) = (sk.point(a).unwrap(), sk.point(b).unwrap());
+    assert!(ra.dist(Vec2::new(0.0, 0.0)) < 1e-6 && rb.dist(Vec2::new(20.0, 0.0)) < 1e-6, "the reference stays: {ra:?} -> {rb:?}");
 
     let below = run(&mut s, "sketch.construction_line.parallel", json!({"curve":"a","at":[4, -2],"offset":3}));
     assert!((line_anchor(&s, below["curves"][0].as_str().unwrap()).y + 3.0).abs() < 1e-6);

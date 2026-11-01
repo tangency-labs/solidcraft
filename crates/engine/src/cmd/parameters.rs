@@ -185,26 +185,32 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(out)
 }
 
-/// The point a length dimension keeps when its value changes: the first it measures from (a
-/// line's start). None for other dimensions.
-fn dimension_start(sk: &Sketch, kind: &ConstraintKind) -> Option<usize> {
+/// Points a driving dimension keeps when its value changes. A length keeps the first point it
+/// measures from (a line's start, #6070). A point-to-line distance is measured from the line, so
+/// the line stays and the point takes the new distance: a construction offset must not swing the
+/// reference it was picked from.
+fn dimension_held_points(sk: &Sketch, kind: &ConstraintKind) -> Vec<usize> {
     match kind {
-        ConstraintKind::Distance { p, .. } | ConstraintKind::DistanceX { p, .. } | ConstraintKind::DistanceY { p, .. } => Some(*p),
-        ConstraintKind::Length { l, .. } => match sk.curves.get(*l)?.kind {
-            CurveKind::Line { a, .. } => Some(a),
-            _ => None,
+        ConstraintKind::Distance { p, .. } | ConstraintKind::DistanceX { p, .. } | ConstraintKind::DistanceY { p, .. } => vec![*p],
+        ConstraintKind::Length { l, .. } => match sk.curves.get(*l).map(|c| &c.kind) {
+            Some(CurveKind::Line { a, .. }) => vec![*a],
+            _ => Vec::new(),
         },
-        _ => None,
+        ConstraintKind::PointLineDistance { l, .. } => match sk.curves.get(*l).map(|c| &c.kind) {
+            Some(CurveKind::Line { a, b }) => vec![*a, *b],
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
     }
 }
 
 /// A length dimension driven by `name` keeps its first point where it is when the value
-/// changes, so a rectangle's side grows from its first corner, not from both ends (#6070). The
-/// sketch is solved here with that point held, before the design evaluates from its stored
-/// positions. Where holding it can't solve (a symmetry moves both ends), evaluation solves as
-/// before.
+/// changes, so a rectangle's side grows from its first corner, not from both ends (#6070). A
+/// point-to-line distance keeps the line and moves the point. The sketch is solved here with
+/// those points held, before the design evaluates from its stored positions. Where holding them
+/// can't solve (a symmetry moves both ends), evaluation solves as before.
 fn keep_dimension_start(s: &mut Session, name: &str) {
-    let targets: Vec<(u64, usize)> = s
+    let targets: Vec<(u64, Vec<usize>)> = s
         .doc
         .features
         .iter()
@@ -212,9 +218,14 @@ fn keep_dimension_start(s: &mut Session, name: &str) {
             FeatureKind::Sketch { sketch, .. } => sketch
                 .constraints
                 .iter()
-                .find(|c| !c.driven && c.param.as_deref() == Some(name))
-                .and_then(|c| dimension_start(sketch, &c.kind))
-                .map(|p| (f.id, p)),
+                .find(|c| {
+                    !c.driven
+                        && c.param.as_deref().is_some_and(|param| {
+                            param == name || s.doc.param(param).is_some_and(|p| expr::references(&p.expr).iter().any(|r| r == name))
+                        })
+                })
+                .map(|c| (f.id, dimension_held_points(sketch, &c.kind)))
+                .filter(|(_, points)| !points.is_empty()),
             _ => None,
         })
         .collect();
@@ -222,14 +233,14 @@ fn keep_dimension_start(s: &mut Session, name: &str) {
         return;
     }
     let vals = s.doc.evaluation_values();
-    for (id, start) in targets {
+    for (id, points) in targets {
         let Ok(stored) = sketch_store::read(&s.doc, id) else { continue };
         let mut trial = stored.clone();
         if s.doc.apply_dimension_values(&vals, &mut trial).is_err() {
             continue;
         }
         let reference: Vec<_> = stored.points.iter().map(|p| p.pos).collect();
-        let hold = Hold { points: vec![start], radii: Vec::new() };
+        let hold = Hold { points, radii: Vec::new() };
         if !solve_with(&mut trial, &hold, Some(&reference), Analysis::StatusOnly, None).keeps_orientation() {
             continue;
         }
