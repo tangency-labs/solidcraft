@@ -1131,7 +1131,8 @@ fn timeline_inspect_shows_what_timeline_edit_changes() {
     run(&mut s, "solid.extrude", json!({"distance": 10, "name": "Slab"}));
     run(&mut s, "solid.fillet", json!({"edges": [[20, 0, 10]], "radius": 2, "name": "Round"}));
     let i = run(&mut s, "timeline.inspect", json!({"feature": "Slab"}));
-    assert_eq!(i["type"], "ExtrudeFeature", "{i}");
+    assert_eq!(i["type"], "extrude", "{i}");
+    assert_eq!(i["type_name"], "ExtrudeFeature", "{i}");
     assert_eq!(i["definition"]["extent"]["distance"], "10", "{i}");
     assert_eq!(i["definition"]["operation"], "new_body", "{i}");
     assert!(i["definition"].get("type").is_none() && i["definition"].get("param_names").is_none(), "{i}");

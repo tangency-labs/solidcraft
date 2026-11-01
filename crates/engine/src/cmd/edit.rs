@@ -1123,7 +1123,7 @@ fn inspect_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let rolled_back = s.doc.features.iter().position(|x| x.id == id).is_some_and(|i| i >= marker);
     let r = s.model.result(id);
     Ok(json!({
-        "id": f.id, "name": f.name, "type": f.kind.type_name(), "suppressed": f.suppressed, "rolled_back": rolled_back,
+        "id": f.id, "name": f.name, "type": f.kind.kind_key(), "type_name": f.kind.type_name(), "suppressed": f.suppressed, "rolled_back": rolled_back,
         "definition": def, "omitted": omitted, "inputs": inputs,
         "error": r.and_then(|r| r.error.clone()), "warning": r.and_then(|r| r.warning.clone()),
         "boolean_diagnostics": r.map(|r| &r.boolean_diagnostics),

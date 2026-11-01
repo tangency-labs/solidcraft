@@ -870,3 +870,19 @@ fn browser_data_survives_a_save_and_old_designs_read_unchanged() {
         assert_eq!(resaved["browser_groups"], groups, "{order}");
     }
 }
+
+/// #10748: verify that type names map to their canonical design-file kind keys.
+#[test]
+fn feature_kind_key_and_type_name_mappings() {
+    assert_eq!(FeatureKind::type_name_to_kind_key("HoleFeature"), Some("hole"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("BoxFeature"), Some("box"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("EdgeFlangeFeature"), Some("sheet_flange"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("RectangularPatternFeature"), Some("pattern"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("PathPatternFeature"), Some("pattern"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("CircularPatternFeature"), Some("pattern"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("ExtrudeFeature"), Some("extrude"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("SplitBodyFeature"), Some("split"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("BaseFeature"), Some("import"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("MeshFeature"), Some("mesh_import"));
+    assert_eq!(FeatureKind::type_name_to_kind_key("NonExistent"), None);
+}
