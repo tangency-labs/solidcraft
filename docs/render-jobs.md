@@ -25,6 +25,22 @@ and meshes synchronously; it is not a promise of bounded CAD evaluation latency.
 Preflight validates capabilities and estimates admission, but does not reserve a queue
 slot or the host memory pool. Start checks those resources again.
 
+Captured meshes are the model's reference meshes, with a chord of about a thousandth of each
+body's size. In a large picture that shows as straight segments along a round silhouette, so
+once the camera and the size are known, check and start mesh curved faces again for that
+picture (#9814), the way the viewport refines a close view: each body with a curved face that
+comes into the picture is refined until its chord is under half an output pixel where it
+comes nearest the camera, in at most four steps that each halve the chord. The bodies that need
+it most go first, and the scene stays within 1,000,000 triangles, or the executor's own cap
+where that is lower (262,144 for the CPU raster image and the Compact CPU profile). Both replies
+report it as `meshes`: `target_px`, `triangle_budget`, `reference_triangles`, `triangles`, and
+for each body that needed it `body`, `steps` and the `error_px` rendered, with `coarser`
+(`triangle_budget`, `most_steps` or `no_plan`) when it stays above the target. Bodies with only
+flat faces and imported mesh bodies keep their meshes. Faces keep their indices, so face
+appearances, saved surfaces and glass bindings still apply. A stage is checked against the
+captured meshes; the path tracer certifies glass closure on the refined ones. The design, the
+viewport, the preview and picking keep the reference meshes.
+
 Start returns a typed `job: {session, serial, generation}`. Keep all three fields when
 calling `render.status`, `render.cancel` or `render.export`. IDs are never accepted by
 another document session, scratch copy, or a newly opened/recovered document. Status

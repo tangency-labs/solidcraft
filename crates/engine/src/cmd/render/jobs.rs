@@ -364,6 +364,9 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
     } else {
         settings.validate().map_err(|e| bad(command, e.to_string()))?;
     }
+    // Curved faces meshed for this picture (#9814), within the executor's triangle cap.
+    let max_triangles = budget.limits().max_triangles.min(crate::product_scene::IMAGE_TRIANGLE_BUDGET);
+    let meshes = crate::product_scene::refine_for_image(s, &mut scene, &settings.camera, settings.width, settings.height, max_triangles);
     // The raster image executor has no exposure or environment controls. A setup saved with them
     // (the render workspace and the other executors use them) still renders here, and the reply
     // names what this render leaves out (#5089). The raytrace path takes them only through a
@@ -439,7 +442,7 @@ fn prepare(s: &Session, params: &Value, command: &str) -> Result<Prepared> {
         Integrator::Raytrace if refraction => "physical_transmission",
         Integrator::Raytrace => "opaque_only",
     };
-    let reply = json!({"ignored_controls":ignored,"stage_panels":settings.stage.len(),"stage_transport":"CPU direct/specular only; no diffuse interreflection", "cpu_budget":budget,"cpu_limits":budget.limits(),"environment":environment_info,"retained_request_bytes":retained_request_bytes,"resolved":resolved,"admission":admission,"request":request,"scene_generation":s.revision,"host":host.kind(),"transparency":transparency,"refraction":refraction,"dielectric_boundaries":if refraction {vec!["thin_sheet","closed_box"]} else {Vec::<&str>::new()}});
+    let reply = json!({"ignored_controls":ignored,"meshes":meshes,"stage_panels":settings.stage.len(),"stage_transport":"CPU direct/specular only; no diffuse interreflection", "cpu_budget":budget,"cpu_limits":budget.limits(),"environment":environment_info,"retained_request_bytes":retained_request_bytes,"resolved":resolved,"admission":admission,"request":request,"scene_generation":s.revision,"host":host.kind(),"transparency":transparency,"refraction":refraction,"dielectric_boundaries":if refraction {vec!["thin_sheet","closed_box"]} else {Vec::<&str>::new()}});
     Ok(Prepared { replace: input.replace, scene, request, reply, environment, executor: resolved.executor, options: Default::default() })
 }
 
@@ -526,6 +529,10 @@ fn prepare_progressive(
         return Err(bad(command, "sampling and exposure controls require progressive rendering"));
     }
     super::staging::apply(&mut scene, &settings, command)?;
+    // Curved faces meshed for this picture (#9814), within the path tracer's triangle cap. Glass
+    // closure is certified on these meshes when the job is prepared.
+    let max_triangles = solidcraft_render::job::MAX_GPU_PATH_TRIANGLES.min(crate::product_scene::IMAGE_TRIANGLE_BUDGET);
+    let meshes = crate::product_scene::refine_for_image(s, &mut scene, &settings.camera, settings.width, settings.height, max_triangles);
     let mut options = solidcraft_render::job::JobOptions::default();
     if let Some(samples) = input.samples {
         options.samples = samples;
@@ -633,7 +640,7 @@ fn prepare_progressive(
         .filter(|bytes| *bytes <= host.job_limit_bytes())
         .ok_or_else(|| bad(command, "GPU work and retained metadata exceed the per-job limit"))?;
     let refraction = input.progressive && scene.has_transmission();
-    let reply = json!({"stage_panels":settings.stage.len(),"resolved":resolved,"admission":admission,"request":request,"textures":request.textures.as_ref().map(|resources|resources.summary()),"scene_generation":s.revision,"host":host.kind(),"transparency":if refraction {"physical_transmission"} else if input.progressive {"opaque_only"} else {"sorted_alpha_approximation"},"options":options,"environment":request.environment.as_ref().map(|source|source.info()),"refraction":refraction,"dielectric_boundaries": if resolved.executor.as_str() == "gpu-path" {vec!["thin_sheet","closed_box","closed_mesh"]} else {Vec::<&str>::new()}});
+    let reply = json!({"meshes":meshes,"stage_panels":settings.stage.len(),"resolved":resolved,"admission":admission,"request":request,"textures":request.textures.as_ref().map(|resources|resources.summary()),"scene_generation":s.revision,"host":host.kind(),"transparency":if refraction {"physical_transmission"} else if input.progressive {"opaque_only"} else {"sorted_alpha_approximation"},"options":options,"environment":request.environment.as_ref().map(|source|source.info()),"refraction":refraction,"dielectric_boundaries": if resolved.executor.as_str() == "gpu-path" {vec!["thin_sheet","closed_box","closed_mesh"]} else {Vec::<&str>::new()}});
     let mut reply = reply;
     if options.denoise {
         reply["denoising"] = json!({
@@ -679,8 +686,12 @@ pub(super) fn start(s: &mut Session, params: &Value) -> Result<Value> {
         )
         .map_err(job_error)?;
     let mut status = json!(status);
-    if let (Some(out), Some(ignored)) = (status.as_object_mut(), p.reply.get("ignored_controls")) {
-        out.insert("ignored_controls".into(), ignored.clone());
+    if let Some(out) = status.as_object_mut() {
+        for key in ["ignored_controls", "meshes"] {
+            if let Some(value) = p.reply.get(key) {
+                out.insert(key.into(), value.clone());
+            }
+        }
     }
     Ok(status)
 }

@@ -19,9 +19,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use solidcraft_engine::doc::ModelBody;
+pub(crate) use solidcraft_engine::doc::display_quality::Lens;
 use solidcraft_engine::doc::display_quality::{DisplayQuality, MAX_REFINE, refinement_for};
 use solidcraft_engine::geom::tess::TessPlan;
-use solidcraft_engine::geom::{Aabb3, Mesh, Vec3};
+use solidcraft_engine::geom::{Aabb3, Mesh};
 
 /// Most triangles all refined bodies may draw together (on top of the rest of the model).
 pub(crate) const TRIANGLE_BUDGET: usize = 6_000_000;
@@ -53,56 +54,6 @@ pub(crate) type Holder = Arc<dyn std::any::Any + Send + Sync>;
 pub(crate) fn body_id(b: &ModelBody) -> (usize, Holder) {
     let holder = b.display_identity();
     (Arc::as_ptr(&holder) as *const () as usize, holder)
-}
-
-/// How the camera maps millimetres to pixels.
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct Lens {
-    pub eye: Vec3,
-    /// Unit direction from the target toward the eye.
-    pub back: Vec3,
-    /// Orthographic: pixels per millimetre everywhere. Perspective: pixels per millimetre at a
-    /// depth of 1 mm (divided by the depth).
-    pub scale: f64,
-    pub perspective: bool,
-    /// Nearest depth considered (mm), so a body around the eye does not ask for infinity.
-    pub near: f64,
-}
-
-impl Lens {
-    /// The view of `cam` in a viewport `height_px` physical pixels high.
-    pub fn new(cam: &solidcraft_engine::render::Camera, height_px: f64) -> Lens {
-        let perspective = cam.fov > 0.0;
-        let scale = if perspective { height_px / (2.0 * (cam.fov * 0.5).tan()) } else { height_px / (2.0 * cam.half_height()) };
-        Lens { eye: cam.eye(), back: cam.back(), scale, perspective, near: (cam.distance * 1e-2).max(1e-3) }
-    }
-
-    /// Whether any of a box lies in front of the eye.
-    pub fn in_front(&self, b: &Aabb3) -> bool {
-        let toward = -self.back;
-        let far_corner = Vec3::new(
-            if toward.x > 0.0 { b.max.x } else { b.min.x },
-            if toward.y > 0.0 { b.max.y } else { b.min.y },
-            if toward.z > 0.0 { b.max.z } else { b.min.z },
-        );
-        !self.perspective || (far_corner - self.eye).dot(toward) > 0.0
-    }
-
-    /// Pixels per millimetre where a box comes nearest the eye.
-    pub fn px_per_mm(&self, b: &Aabb3) -> f64 {
-        if !self.perspective {
-            return self.scale;
-        }
-        // The box's nearest depth along the view: its support point toward the eye.
-        let toward = -self.back;
-        let near_corner = Vec3::new(
-            if toward.x > 0.0 { b.min.x } else { b.max.x },
-            if toward.y > 0.0 { b.min.y } else { b.max.y },
-            if toward.z > 0.0 { b.min.z } else { b.max.z },
-        );
-        let depth = (near_corner - self.eye).dot(toward);
-        self.scale / depth.max(self.near)
-    }
 }
 
 /// The screen-space error (physical pixels) of drawing a body of `size` at `q` and its box's
@@ -410,6 +361,7 @@ fn mesh_bytes(m: &Mesh) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solidcraft_engine::geom::Vec3;
     use solidcraft_engine::render::Camera;
 
     fn cylinder() -> ModelBody {

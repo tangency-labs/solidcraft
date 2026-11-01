@@ -1287,3 +1287,48 @@ fn output_viewer_copy_validates_completed_job_without_mutation_or_pixel_payloads
     assert!(Arc::ptr_eq(&document, &s.doc));
     assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), host.admitted_bytes()));
 }
+
+/// #9814: check and start mesh curved faces for the picture asked for. A 240 mm disc is meshed
+/// finer for a larger picture and rendered from that mesh; the small picture, the design and the
+/// model's own mesh are unchanged.
+#[test]
+fn a_larger_picture_meshes_curved_faces_finer_for_check_and_start() {
+    let (mut s, host) = session();
+    s.execute("solid.cylinder", &json!({"radius":120,"height":40,"body_name":"Base"})).unwrap();
+    s.execute("render.scene", &json!({})).unwrap();
+    let mesh = s.world_state().body("Base").unwrap().mesh();
+    let camera = solidcraft_render::Camera {
+        target: crate::geom::Vec3::new(0.0, 0.0, 20.0),
+        yaw: 25f64.to_radians(),
+        pitch: 28f64.to_radians(),
+        distance: 400.0,
+        fov: 0.5,
+        ..Default::default()
+    };
+    let request = |width: u32, height: u32| json!({"settings":{"width":width,"height":height,"camera":camera}});
+    let doc = s.doc.clone();
+    let before = (s.revision, s.evaluations, s.undo.len());
+    let small = s.execute("render.preflight", &request(64, 36)).unwrap();
+    assert_eq!(small["meshes"]["bodies"], json!([]));
+    assert_eq!(small["admission"]["triangles"], json!(mesh.triangles.len()));
+    let large = s.execute("render.preflight", &request(640, 360)).unwrap();
+    assert_eq!(large["meshes"]["bodies"][0]["body"], "Base");
+    assert!(large["meshes"]["bodies"][0]["steps"].as_u64().unwrap() >= 1, "{}", large["meshes"]);
+    assert!(large["meshes"]["bodies"][0]["error_px"].as_f64().unwrap() <= 0.5);
+    assert_eq!(large["meshes"]["reference_triangles"], json!(mesh.triangles.len()));
+    assert_eq!(large["admission"]["triangles"], large["meshes"]["triangles"]);
+    assert!(large["admission"]["triangles"].as_u64().unwrap() > mesh.triangles.len() as u64);
+    let started = s.execute("render.start", &request(640, 360)).unwrap();
+    assert_eq!(started["meshes"], large["meshes"]);
+    let id: JobId = serde_json::from_value(started["job"].clone()).unwrap();
+    // A larger picture than `finish` is sized for.
+    for _ in 0..1000 {
+        if !host.pump(1 << 20).unwrap() {
+            break;
+        }
+    }
+    assert_eq!(s.execute("render.status", &json!({"job":id})).unwrap()["progress"]["phase"], "completed");
+    assert!(Arc::ptr_eq(&doc, &s.doc));
+    assert_eq!(before, (s.revision, s.evaluations, s.undo.len()));
+    assert!(Arc::ptr_eq(&mesh, &s.world_state().body("Base").unwrap().mesh()));
+}
