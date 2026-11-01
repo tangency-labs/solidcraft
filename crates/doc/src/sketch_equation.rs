@@ -204,15 +204,37 @@ fn bezier_distance(b: &[Vec2; 4], q: Vec2) -> f64 {
 fn deviation(vals: &BTreeMap<String, Value>, eq: &EquationCurve, (a, b): (f64, f64), points: &[Vec2], closed: bool, d: Defaults) -> Result<f64> {
     let pieces = fit_beziers_mode(points, closed).map_err(|e| DocError::Invalid(e.to_string()))?;
     let step = (b - a) / points.len().saturating_sub(1).max(1) as f64;
+    // The formula is checked against the spline between the samples. Checking at only a few
+    // points per span lets a formula that is zero at every sample and check point (a fast sine
+    // sampled on its zeros) pass with a near-zero deviation. Each span is therefore checked with
+    // as many points as its span needs for the check spacing to stay a fraction of the tolerance,
+    // bounded by a floor and a cap so short spans stay cheap and long ranges stay fast. The
+    // samples bound each span, so a span's extent is the distance between its two sample points.
+    const CHECK_FLOOR: usize = 8;
+    const CHECK_CAP: usize = 256;
     let mut worst: f64 = 0.0;
     for (i, piece) in pieces.iter().enumerate() {
-        for k in [0.25, 0.5, 0.75] {
-            let q = point_at(vals, eq, a + step * (i as f64 + k), d)?;
+        // The two samples bounding this piece, wrapping for a closed curve.
+        let start = points[i];
+        let end = points[(i + 1) % points.len()];
+        let span_extent = start.dist(end);
+        // Spacing of `checks` over the span stays near `eq.tolerance / DIVISOR`; clamp to the
+        // floor and cap.
+        let checks = ((span_extent / (eq.tolerance / DIVISOR)).ceil().max(CHECK_FLOOR as f64) as usize).min(CHECK_CAP);
+        for j in 1..=checks {
+            let t = j as f64 / checks as f64;
+            let q = point_at(vals, eq, a + step * (i as f64 + t), d)?;
             worst = worst.max(bezier_distance(piece, q));
         }
     }
     Ok(worst)
 }
+
+/// How finely the formula is checked against the spline between two samples: the check spacing is
+/// kept near this fraction of the curve's tolerance, so an excursion larger than the tolerance
+/// cannot hide between two checks. A sine sampled on its zeros is caught because the checks are
+/// dense enough to land near its peaks.
+const DIVISOR: f64 = 8.0;
 
 /// Check an equation's text and tolerance before any evaluation.
 pub fn check(eq: &EquationCurve) -> Result<()> {
@@ -322,6 +344,21 @@ mod tests {
             vals.insert(crate::eval::DESIGN_LEN.to_string(), Value::num(len));
         }
         vals
+    }
+
+    /// The issue's curve (#10404): y = sin(64·π·x) over x from 0 to 1. It swings ±1 mm between its
+    /// samples, but is zero at every sample point and at the old quarter/half/three-quarter check
+    /// points, so the old deviation counted it as ~0 and accepted it flat. The deviation is now
+    /// checked finely between samples, so even at the initial 9 samples it reports the true ~1 mm
+    /// instead of ~0. (At 500 points the true deviation is ~0.023 mm, still above the 0.0001 mm
+    /// tolerance, so the fit loop rejects the curve rather than accepting it flat.)
+    #[test]
+    fn issue_10404_sin_64_pi_x_deviation_is_not_zero_at_initial_samples() {
+        let vals = BTreeMap::new();
+        let mut e = eq(None, "sin(64 * pi * x)", "0", "1");
+        e.tolerance = 1e-4;
+        let fit = sample(&vals, &e, FIRST_COUNT, None).unwrap();
+        assert!(fit.deviation > 0.5, "deviation should be ~1 mm, got {}", fit.deviation);
     }
 
     #[test]
