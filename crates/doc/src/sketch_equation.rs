@@ -45,7 +45,7 @@ const RANGE_UNIT_REFUSED: &str =
 /// sine), lengths in the design's unit.
 fn defaults(vals: &BTreeMap<String, Value>) -> Defaults {
     let len = vals.get(crate::eval::DESIGN_LEN).map(|v| v.v).filter(|v| v.is_finite() && *v > 0.0).unwrap_or(1.0);
-    Defaults { len, ang: 1.0 }
+    Defaults { len, ang: 1.0, ..Defaults::default() }
 }
 
 fn checked_text<'a>(what: &str, e: &'a str) -> Result<&'a str> {
@@ -83,7 +83,9 @@ fn range_end(vals: &BTreeMap<String, Value>, e: &str, d: Defaults) -> Result<(f6
     let (out, kind) = match v.kind() {
         Some(kind @ (Kind::Unitless | Kind::Angle)) => (v.v, kind),
         Some(Kind::Length) => (v.v / d.len, Kind::Length),
-        None => return Err(DocError::Expr(format!("expected a number, an angle or a length, got {}", v.describe()))),
+        Some(Kind::Mass | Kind::Volume | Kind::Area) | None => {
+            return Err(DocError::Expr(format!("expected a number, an angle or a length, got {}", v.describe())));
+        }
     };
     if out.is_finite() { Ok((out, kind)) } else { Err(DocError::Expr("not a finite number".into())) }
 }
@@ -379,6 +381,8 @@ mod tests {
             (Some("t"), "t", "0", "0", DEFAULT_TOLERANCE),
             (Some("t"), "t", "0", "1e300", DEFAULT_TOLERANCE),
             (Some("t"), "t", "0", "nan", DEFAULT_TOLERANCE),
+            (Some("t"), "t", "0", "(2 mm)^3", DEFAULT_TOLERANCE),
+            (Some("t"), "t", "2 mm * 2 mm", "9", DEFAULT_TOLERANCE),
             (Some("t * 1 deg"), "t", "0", "1", DEFAULT_TOLERANCE),
             (Some("1e300 * t"), "t", "0", "1", DEFAULT_TOLERANCE),
             (Some("5"), "5", "0", "1", DEFAULT_TOLERANCE),
@@ -459,7 +463,7 @@ mod tests {
         let plain = fit(&vals, &eq(Some("t"), "t * t / 20", "0 mm", "40 mm")).unwrap();
         let last = *plain.points.last().unwrap();
         assert!((last - Vec2::new(40.0, 80.0)).len() < 1e-9, "{last:?}");
-        assert!(fit(&vals, &eq(Some("t"), "a ^ 2 / (4 * t)", "a", "3 * a")).unwrap_err().to_string().contains("length^2"));
+        assert!(fit(&vals, &eq(Some("t"), "a ^ 2 / (4 * t)", "a", "3 * a")).unwrap_err().to_string().contains("an area"));
         // On, that plain-number formula is a length squared, and is refused rather than misread.
         assert!(fit(&vals, &with_range_unit(eq(Some("t"), "t * t / 20", "0 mm", "40 mm"))).is_err());
     }

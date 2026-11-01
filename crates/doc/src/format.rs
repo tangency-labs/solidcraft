@@ -448,12 +448,49 @@ impl Formats<'_> {
 }
 
 /// Take a short list of names out of a file's JSON: its `format_pending` (the pending changes it
-/// has).
+/// has), or the [`UNIT_WORD_PARAMS`] an upgrade listed. `noun` is what the file is, for the
+/// refusal of a damaged list ("damaged design: …").
 fn take_names(v: &mut Value, key: &str, noun: &str) -> Result<Option<Vec<String>>> {
     let Some(list) = v.as_object_mut().and_then(|o| o.remove(key)) else { return Ok(None) };
     let invalid = || DocError::Invalid(format!("damaged {noun}: `{key}` is not a short list of names"));
     let list = list.as_array().filter(|l| l.len() <= 1000).ok_or_else(invalid)?;
     list.iter().map(|n| n.as_str().filter(|n| n.len() <= 128).map(str::to_string).ok_or_else(invalid)).collect::<Result<_>>().map(Some)
+}
+
+/// Where format steps list the parameters, text parameters and feature inputs of an older design
+/// named after what a newer build made a unit (`g`, `kg`…). [`read`] takes the list out and
+/// renames them (`Document::rename_unit_word_params`), as the build that saved the design read
+/// them.
+const UNIT_WORD_PARAMS: &str = "unit_word_params";
+
+/// List under [`UNIT_WORD_PARAMS`] which of `words` name a parameter, a text parameter or a
+/// feature input of `v`, in the order of `words`, after the names an earlier step listed (a
+/// damaged list is refused, as `read` refuses it). The names are read once, each looked up in `words`, so a hostile file's
+/// size can't make it slow. A change that makes words units calls this from its step, with its
+/// own words as they were when it was made.
+fn list_unit_word_params(v: &mut Value, words: &[&str]) -> Result<()> {
+    let mut listed = take_names(v, UNIT_WORD_PARAMS, "design")?.unwrap_or_default();
+    let mut hit = vec![false; words.len()];
+    let params =
+        ["params", "text_params"].into_iter().filter_map(|key| v.get(key)).filter_map(Value::as_array).flatten().filter_map(|p| p.get("name"));
+    let inputs =
+        v.get("features").and_then(Value::as_array).into_iter().flatten().filter_map(|f| f.get("param_names")).filter_map(Value::as_array).flatten();
+    for name in params.chain(inputs).filter_map(Value::as_str) {
+        if let Some(h) = words.iter().position(|w| *w == name).and_then(|i| hit.get_mut(i)) {
+            *h = true;
+        }
+    }
+    for (word, _) in words.iter().zip(&hit).filter(|(_, h)| **h) {
+        if !listed.iter().any(|n| n.as_str() == *word) {
+            listed.push(word.to_string());
+        }
+    }
+    if !listed.is_empty()
+        && let Some(o) = v.as_object_mut()
+    {
+        o.insert(UNIT_WORD_PARAMS.into(), listed.into());
+    }
+    Ok(())
 }
 
 pub fn format_string(n: u32) -> String {
@@ -689,6 +726,7 @@ pub fn read(s: &str) -> Result<Document> {
     let legacy_wires = validate_wires(&v, version)?;
     validate_body_transfers(&v)?;
     DESIGN.upgrade(&mut v, version, applied.as_deref())?;
+    let unit_words = take_names(&mut v, UNIT_WORD_PARAMS, "design")?.unwrap_or_default();
     let mut d: Document = serde_json::from_value(v).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
     check_typed_numbers(&d)?;
     let mut legacy_by_feature = std::collections::BTreeMap::<usize, Vec<usize>>::new();
@@ -788,7 +826,7 @@ pub fn read(s: &str) -> Result<Document> {
     }
     // Fill in what older designs (and hand-edited files) may lack; a no-op otherwise.
     crate::format_offsets::validate_typed(&d)?;
-    normalise(&mut d)?;
+    normalise(&mut d, &unit_words)?;
     // `next_id` is trusted by nothing: a hand-edited or generated file may omit it or leave it stale,
     // and the next feature, component or occurrence would then reuse an id that is already taken.
     let largest =
@@ -1245,8 +1283,9 @@ fn rigid(m: &crate::Mat) -> bool {
         && t[..3].iter().all(|v| v.abs() <= MAX_REAL)
 }
 
-/// Feature input names and component occurrences, which format 1 files may predate.
-fn normalise(d: &mut Document) -> Result<()> {
+/// Feature input names and component occurrences, which format 1 files may predate, and new
+/// names for the parameters an upgrade found named after what are now units (`unit_words`).
+fn normalise(d: &mut Document, unit_words: &[String]) -> Result<()> {
     d.normalise_component_color_indices()?;
     d.name_all_feature_inputs();
     let missing: Vec<(u64, u64)> =
@@ -1254,7 +1293,7 @@ fn normalise(d: &mut Document) -> Result<()> {
     for (c, p) in missing {
         d.add_occurrence(c, p, crate::IDENTITY)?;
     }
-    Ok(())
+    d.rename_unit_word_params(unit_words)
 }
 
 #[cfg(test)]
@@ -1683,6 +1722,185 @@ mod tests {
         file["format_pending"] = Value::from(pending_names());
         let opened = read(&file.to_string()).unwrap();
         assert_eq!(opened.format_pending, pending_names());
+    }
+
+    /// The parameters an upgrade lists under `unit_word_params` (#4811) are renamed as the design
+    /// opens when their names are reserved words now, as the build that saved it read them; the
+    /// list is never saved, and a damaged one is refused.
+    #[test]
+    fn listed_parameters_named_after_reserved_words_are_renamed_as_the_design_opens() {
+        let mut file: Value = serde_json::from_str(&Document::new("A").to_json()).unwrap();
+        file["params"] = serde_json::json!([
+            {"name": "mm", "expr": "3", "unit": ""},
+            {"name": "twice", "expr": "2 mm", "unit": ""},
+            {"name": "width", "expr": "10", "unit": "mm"}
+        ]);
+        file[UNIT_WORD_PARAMS] = serde_json::json!(["mm", "width", "absent"]);
+        let opened = read(&file.to_string()).unwrap();
+        let params: Vec<(&str, &str)> = opened.params.iter().map(|p| (p.name.as_str(), p.expr.as_str())).collect();
+        assert_eq!(params, [("mm_param", "3"), ("twice", "2 mm_param"), ("width", "10")], "a free name is left alone");
+        assert_eq!(opened.param_values().0["twice"].v, 6.0);
+        assert_eq!(opened.param("mm_param").map(|p| p.comment.as_str()), Some("renamed from `mm`, which is now a unit"));
+        let saved: Value = serde_json::from_str(&opened.to_json()).unwrap();
+        assert_eq!(saved.get(UNIT_WORD_PARAMS), None);
+        assert_eq!(read(&opened.to_json()).unwrap(), opened);
+        for damaged in [serde_json::json!("mm"), serde_json::json!([1]), serde_json::json!(["x".repeat(200)]), serde_json::json!(vec!["mm"; 1001])] {
+            file[UNIT_WORD_PARAMS] = damaged;
+            let error = read(&file.to_string()).unwrap_err().to_string();
+            assert!(error.contains("`unit_word_params` is not a short list"), "{error}");
+        }
+    }
+
+    /// An older design whose parameters, feature inputs and dimensions are named after what are
+    /// now units (#4811) opens with them renamed, and everything that uses them reads them as the
+    /// build that saved it did: the same values, nothing failing, comments that say why, and the
+    /// same design when it is saved and opened again. A design saved with the change already is
+    /// read as it is: `50 g` there is 50 grams.
+    #[test]
+    fn older_parameters_named_after_new_units_are_renamed_as_they_open() {
+        use crate::config::{Column, ConfigRow, ConfigRule, RuleCondition, RuleEffect, RuleOperator};
+        // Built under stand-in names, which the older file then has as `g`, `lb`, `kg` and `ml`.
+        let mut doc = Document::new("old");
+        doc.set_param("qqg", "4", Some(""), Some("gap count")).unwrap();
+        doc.set_param("qqlb", "10 mm", Some("mm"), None).unwrap();
+        doc.set_param("twice", "2 qqg * qqlb", Some("mm"), None).unwrap();
+        let kind = crate::FeatureKind::Box {
+            corner: ["qqlb".into(), "0".into(), "0".into()],
+            length: "qqlb + 1".into(),
+            width: "qqg mm".into(),
+            height: "twice".into(),
+            operation: crate::Operation::NewBody,
+        };
+        let id = doc.add_feature(kind, None).unwrap();
+        let length = doc.feature(id).unwrap().param_names[0].clone();
+        doc.rename_param(&length, "qqkg").unwrap();
+        doc.set_param("wide", "qqkg * 2", Some("mm"), None).unwrap();
+        let mut sketch = solidcraft_sketch::Sketch::new();
+        let a = sketch.add_point(solidcraft_geom::Vec2::ZERO, None).unwrap();
+        let b = sketch.add_point(solidcraft_geom::Vec2::new(30.0, 0.0), None).unwrap();
+        let line = sketch.add_line_pts(a, b, None).unwrap();
+        let dimension = doc.new_model_param("qqlb * 3", "mm");
+        sketch.add_constraint(solidcraft_sketch::ConstraintKind::Length { l: line, value: 30.0 }, Some(dimension.clone())).unwrap();
+        doc.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
+        doc.rename_param(&dimension, "qqml").unwrap();
+        doc.set_favorite("qqg", true).unwrap();
+        doc.configs.columns = vec![Column::Param("qqlb".into())];
+        doc.configs.rows.push(ConfigRow { name: "Default".into(), cells: vec!["qqg * 3 mm".into()] });
+        doc.configs.rules.push(ConfigRule {
+            id: "r".into(),
+            name: "r".into(),
+            enabled: true,
+            length_unit: None,
+            condition: RuleCondition::Parameter { parameter: "qqg".into(), operator: RuleOperator::Gt, expression: "1".into() },
+            effect: RuleEffect::DriveParameter { parameter: "qqlb".into(), expression: "qqg * 2 mm".into() },
+        });
+        // Sheet metal and plastic rules and a canvas's plane hold expressions too (#4420).
+        let mut steel = crate::sheet::SheetRule::steel();
+        (steel.thickness, steel.gap) = ("qqlb / 5".into(), "qqg mm / 8".into());
+        doc.sheet.rules.push(steel);
+        let mut housing = crate::plastic::PlasticRule::library().remove(0);
+        (housing.clearance, housing.draft) = ("qqg mm / 40".into(), "qqg deg".into());
+        doc.plastic.rules.push(housing);
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
+        let canvas = doc.allocate_id().unwrap();
+        doc.canvases.push(crate::canvas::Canvas {
+            id: canvas,
+            name: "Canvas1".into(),
+            format: "png".into(),
+            data: crate::canvas::base64_encode(&png),
+            pixels: [4, 2],
+            plane: crate::PlaneRef::Offset { base: Box::new(crate::PlaneRef::Origin { name: "XY".into() }), distance: "qqlb * 2".into() },
+            center: solidcraft_geom::Vec2::ZERO,
+            width: 40.0,
+            angle: 0.0,
+            opacity: 0.5,
+            flip: false,
+            visible: true,
+            component: 0,
+        });
+        // (sheet thickness and gap, plastic clearance and draft, the canvas plane's height)
+        let rule_and_plane_values = |d: &Document| {
+            let vals = d.param_values().0;
+            let sheet = d.rule_values(&vals, &d.sheet.rules[0]).map(|v| (v.thickness, v.gap)).ok();
+            let plastic = d.plastic_values(&vals, &d.plastic.rules[0]).map(|v| (v.clearance, v.draft)).ok();
+            (sheet, plastic, d.canvas_plane(&vals, &d.canvases[0]).ok().map(|p| p.origin.z))
+        };
+        let rules_before = rule_and_plane_values(&doc);
+        let draft_is_4_deg = |d: f64| (d - 4f64.to_radians()).abs() < 1e-12;
+        let (sheet, plastic, height) = rules_before;
+        assert_eq!((sheet, height), (Some((2.0, 0.5)), Some(20.0)));
+        assert!(plastic.is_some_and(|(clearance, draft)| clearance == 0.1 && draft_is_4_deg(draft)), "{plastic:?}");
+        let before = doc.param_values().0;
+        let text = doc.to_json().replace("qqkg", "kg").replace("qqml", "ml").replace("qqlb", "lb").replace("qqg", "g");
+        let mut file: Value = serde_json::from_str(&text).unwrap();
+        file["format"] = Value::from("solidcraft/30");
+        file.as_object_mut().unwrap().remove("format_pending");
+
+        let opened = read(&file.to_string()).unwrap();
+        let names: Vec<&str> = opened.params.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["g_param", "lb_param", "twice", "wide", "ml_param"]);
+        let expr_of = |n: &str| opened.param(n).map(|p| p.expr.as_str());
+        assert_eq!(
+            (expr_of("twice"), expr_of("wide"), expr_of("ml_param")),
+            (Some("2 g_param * lb_param"), Some("kg_param * 2"), Some("lb_param * 3"))
+        );
+        let f = opened.feature(id).unwrap();
+        assert_eq!(f.param_names.first().map(String::as_str), Some("kg_param"));
+        let crate::FeatureKind::Box { corner, length, width, .. } = &f.kind else { panic!("a box") };
+        assert_eq!((corner[0].as_str(), length.as_str(), width.as_str()), ("lb_param", "lb_param + 1", "g_param mm"));
+        let dimensions: Vec<&str> = opened
+            .features
+            .iter()
+            .flat_map(|f| match &f.kind {
+                crate::FeatureKind::Sketch { sketch, .. } => sketch.constraints.iter().filter_map(|c| c.param.as_deref()).collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .collect();
+        assert_eq!(dimensions, ["ml_param"]);
+        assert_eq!(opened.configs.columns, [Column::Param("lb_param".into())]);
+        assert_eq!(opened.configs.rows[0].cells, ["g_param * 3 mm"]);
+        let rule_uses = opened.configs.rules[0].parameter_references();
+        assert!(rule_uses.iter().all(|n| n == "g_param" || n == "lb_param") && rule_uses.len() == 3, "{rule_uses:?}");
+        assert!(opened.favorites.contains("g_param"));
+        let steel = &opened.sheet.rules[0];
+        assert_eq!((steel.thickness.as_str(), steel.gap.as_str()), ("lb_param / 5", "g_param mm / 8"));
+        let housing = &opened.plastic.rules[0];
+        assert_eq!((housing.clearance.as_str(), housing.draft.as_str()), ("g_param mm / 40", "g_param deg"));
+        let crate::PlaneRef::Offset { distance, .. } = &opened.canvases[0].plane else { panic!("an offset plane") };
+        assert_eq!(distance.as_ref(), "lb_param * 2");
+        assert_eq!(rule_and_plane_values(&opened), rules_before);
+        // The same values under the new names, and nothing fails.
+        let (after, errors) = opened.param_values();
+        assert!(errors.is_empty(), "{errors:?}");
+        for (old, new) in [("qqg", "g_param"), ("qqlb", "lb_param"), ("twice", "twice"), ("qqkg", "kg_param"), ("wide", "wide"), ("qqml", "ml_param")]
+        {
+            assert_eq!(after.get(new), before.get(old), "{new}");
+        }
+        assert_eq!((after["twice"].v, after["wide"].v, after["ml_param"].v), (80.0, 22.0, 30.0));
+        // The comments say why, after what they said.
+        assert_eq!(opened.param("g_param").map(|p| p.comment.as_str()), Some("gap count (renamed from `g`, which is now a unit)"));
+        assert_eq!(opened.param("lb_param").map(|p| p.comment.as_str()), Some("renamed from `lb`, which is now a unit"));
+        assert_eq!(opened.param_comments.get("kg_param").map(String::as_str), Some("renamed from `kg`, which is now a unit"));
+        // The model builds as it did, and the configuration's rule still drives its parameter.
+        let mut model = crate::Model::new();
+        model.evaluate(&opened);
+        assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+        let volume = model.state().bodies.first().and_then(|b| solidcraft_kernel::measure(&b.body).ok()).map(|m| m.volume);
+        assert!(volume.is_some_and(|v| (v - 11.0 * 4.0 * 80.0).abs() < 1e-6), "{volume:?}");
+        let mut configured = opened.clone();
+        configured.apply_configuration("Default").unwrap();
+        assert_eq!(configured.param_values().0["lb_param"].v, 8.0, "g_param * 2 mm");
+        // Saved and opened again it is the same design: the step ran once, the list isn't saved.
+        assert_eq!(read(&opened.to_json()).unwrap(), opened);
+
+        // A design saved with this change reads its units as units.
+        let mut new = Document::new("new");
+        new.set_param("load", "50 g", None, None).unwrap();
+        assert_eq!(new.param("load").map(|p| p.unit.as_str()), Some("kg"));
+        let reopened = read(&new.to_json()).unwrap();
+        assert_eq!(reopened, new);
+        assert_eq!(reopened.param_values().0["load"], crate::expr::Value::mass(50.0));
     }
 
     /// 24 added the corner relief of an edge flange: a no-op step carries a 23 design up, a flange

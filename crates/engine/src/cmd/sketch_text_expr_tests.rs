@@ -326,6 +326,27 @@ fn word_expr(s: &Session, link: &str) -> Value {
     serde_json::to_value(stored(s, link).3).unwrap()["text"].clone()
 }
 
+/// #4811: an older design whose text parameter is named `g`, now a unit, opens with it renamed to
+/// `g_param` in the text's words too: the text shows the same words, the comment says why, and the
+/// design saves and reopens the same.
+#[test]
+fn an_older_text_parameter_named_after_a_unit_is_renamed_in_its_texts_words() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "qqg", "expression": "IT", "unit": "text", "comment": "tag"}));
+    let r = block_with_text(&mut s, json!({"text_expression": "qqg + '-L'"}));
+    let link = r["link"].as_str().unwrap().to_string();
+    // Saved by an older build, where `g` could name a parameter.
+    let mut file: Value = serde_json::from_str(&s.doc.to_json().replace("qqg", "g")).unwrap();
+    file["format"] = json!("solidcraft/30");
+    file.as_object_mut().unwrap().remove("format_pending");
+    let opened = Session::new(solidcraft_doc::format::read(&file.to_string()).unwrap());
+    no_trouble(&opened);
+    assert_eq!(word_expr(&opened, &link), json!("g_param + '-L'"));
+    assert_eq!(words(&opened, &link), "IT-L");
+    assert_eq!(opened.doc.text_param("g_param").map(|p| p.comment.as_str()), Some("tag (renamed from `g`, which is now a unit)"));
+    assert_eq!(solidcraft_doc::format::read(&opened.doc.to_json()).unwrap(), *opened.doc);
+}
+
 /// A text's words can be an expression of text parameters (`Label + '-L'`): a parameter edit,
 /// or a configuration row that sets the parameter, relabels the text, and a cut of the text
 /// follows in the same rebuild, as if its words had been typed.

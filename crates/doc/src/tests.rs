@@ -446,6 +446,55 @@ fn a_body_reads_the_material_its_mass_is_computed_with() {
     }
 }
 
+/// An older design's parameters and feature inputs named after what are now units (#4811) are
+/// renamed to the first free `<name>_param…`; what uses them follows as the older build read
+/// it, and the comment says why without losing what it said.
+#[test]
+fn parameters_named_after_units_are_renamed_as_an_older_build_read_them() {
+    let mut doc = Document::new("old");
+    let id = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "4".into(),
+                height: "2".into(),
+                operation: Operation::NewBody,
+            },
+            None,
+        )
+        .unwrap();
+    // Names no build lets you choose now, as an older design could have them.
+    doc.feature_mut(id).unwrap().param_names[0] = "deg".into();
+    doc.param_comments.insert("deg".into(), "tilt".into());
+    doc.params.push(Param { name: "mm".into(), expr: "3".into(), unit: String::new(), comment: "x".repeat(4096), model: false });
+    doc.set_param("mm_param", "1", Some(""), None).unwrap();
+    doc.params.push(Param { name: "turn".into(), expr: "deg / 2 + mm".into(), unit: "mm".into(), comment: String::new(), model: false });
+    doc.favorites.insert("mm".into());
+    let names = ["mm".to_string(), "deg".into(), "mm".into(), "width".into()];
+    doc.rename_unit_word_params(&names).unwrap();
+    assert_eq!(doc.feature(id).unwrap().param_names[0], "deg_param");
+    assert!(doc.param("mm").is_none() && doc.param("mm_param2").is_some(), "the next free name");
+    assert_eq!(doc.param("turn").map(|p| p.expr.as_str()), Some("deg_param / 2 + mm_param2"));
+    assert_eq!(doc.param_values().0["turn"].v, 8.0);
+    assert!(doc.favorites.contains("mm_param2"));
+    assert_eq!(doc.param_comments.get("deg_param").map(String::as_str), Some("tilt (renamed from `deg`, which is now a unit)"));
+    assert_eq!(doc.param("mm_param2").map(|p| p.comment.len()), Some(4096), "a comment at its longest keeps its text");
+    assert!(doc.param_values().1.is_empty(), "{:?}", doc.param_values().1);
+}
+
+/// Text parameters' names are taken too: a new `dN` name and a renamed parameter skip them.
+#[test]
+fn new_and_renamed_names_skip_text_parameters() {
+    let mut doc = Document::new("names");
+    doc.set_text_param("d1", "label", None).unwrap();
+    doc.set_text_param("mm_param", "label", None).unwrap();
+    assert_eq!(doc.next_d_name(), "d2");
+    doc.params.push(Param { name: "mm".into(), expr: "3".into(), unit: String::new(), comment: String::new(), model: false });
+    doc.rename_unit_word_params(&["mm".to_string()]).unwrap();
+    assert!(doc.param("mm").is_none() && doc.param("mm_param2").is_some());
+}
+
 #[test]
 fn primitives_and_combine() {
     let mut doc = Document::new("p");
@@ -513,6 +562,10 @@ fn hostile_expressions_never_panic() {
         "in",
         "nan",
         "9999999999999999999999",
+        "g",
+        "kg",
+        "m³",
+        "mm²",
     ];
     let mut state: u64 = 0x9e3779b97f4a7c15;
     let mut next = || {
