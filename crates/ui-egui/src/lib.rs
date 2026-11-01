@@ -192,6 +192,7 @@ pub(crate) mod navigation;
 pub mod navigation_bar;
 mod navigation_bar_view;
 pub use navigation::WebWheelGestures;
+mod network_folder_ui;
 pub mod network_prompt;
 pub mod op_auto;
 pub mod open_elsewhere;
@@ -454,6 +455,9 @@ pub struct Services {
     pub pick_file: Option<Box<dyn Fn(&str, &[&str]) -> FilePickerFuture>>,
     /// Open a dialog asking for a program (a slicer); `None` when the host has no such dialog.
     pub pick_program: Option<Box<dyn Fn() -> FilePickerFuture>>,
+    /// Open a dialog asking for a folder (a network folder for Send to Slicer); `None` when the
+    /// host has no such dialog (the browser), and then no network folder is offered.
+    pub pick_folder: Option<Box<dyn Fn() -> FilePickerFuture>>,
     pub show_in_folder: Option<Box<dyn Fn(&str)>>,
     /// Where the host reads the anti-aliasing preference at start (a small JSON file).
     pub graphics_path: Option<String>,
@@ -560,6 +564,8 @@ pub struct SolveApp {
     file_picker: Option<file_picker::Pending>,
     /// A slicer started alone and waited for before the file is sent (Send to Slicer).
     pub(crate) slicer_wait: Option<dialogs_save_mesh::SlicerWait>,
+    /// Send to Slicer's network folders: the window that adds one and a copy going on (#2304).
+    pub(crate) network_folder: network_folder_ui::State,
     /// Open with EasyPrint: the upload in flight and the question before the first one.
     pub(crate) easyprint: easyprint_ui::State,
     /// A Save or Save As being written on a worker (see [`save_job`]).
@@ -753,6 +759,9 @@ pub struct SolveApp {
     control_job: Option<control_job::ControlJob>,
     /// Agent exports computing on copies of the design.
     control_answering: Vec<control_job::ControlJob>,
+    /// Sends to a network folder waiting for a free worker, each on the copy of the design taken
+    /// when it was asked for: they never run on the window thread.
+    control_sends_waiting: std::collections::VecDeque<control_job::OnACopy>,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
@@ -841,6 +850,7 @@ impl SolveApp {
             services,
             file_picker: None,
             slicer_wait: None,
+            network_folder: Default::default(),
             easyprint: Default::default(),
             saving: None,
             viewport: viewport::ViewportState::default(),
@@ -939,6 +949,7 @@ impl SolveApp {
             control_held: Default::default(),
             control_job: None,
             control_answering: Vec::new(),
+            control_sends_waiting: Default::default(),
             agent: Default::default(),
             pending_shots: Vec::new(),
             shot_chat_turns: Default::default(),
@@ -1182,6 +1193,8 @@ impl SolveApp {
             self.ui.layout = p.layout;
             self.preferences = p;
         }
+        // Send to Slicer's network folders live in the preferences; the session's commands use them.
+        self.session.network_folders = solidcraft_engine::remote_slicers::sanitized(&self.preferences.network_folders);
         // Before a design given at start opens: its paths follow the network preferences.
         prefs::sync_surface_analysis(self);
         prefs::apply_network(&self.preferences);
@@ -1227,6 +1240,12 @@ impl SolveApp {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
         self.session.set_validation(self.preferences.validation);
+        // The network folders are the preferences'. A command matches its id in any case, and so
+        // do these checks.
+        let command_id = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
+        if network_folder_ui::read_by(command_id) {
+            self.session.network_folders = solidcraft_engine::remote_slicers::sanitized(&self.preferences.network_folders);
+        }
         if id == "timeline.play" {
             let reply = self.session.execute(id, &params).map_err(|e| e.to_string())?;
             let action = serde_json::from_value(reply["action"].clone()).map_err(|e| e.to_string())?;
@@ -1282,7 +1301,8 @@ impl SolveApp {
     /// Host effects shared by directly executed and already evaluated commands.
     pub(crate) fn command_completed(&mut self, id: &str, r: Result<Value, String>) -> Result<Value, String> {
         // The engine has no edit in place to start or finish; the window does, and says when it can't.
-        let r = match solidcraft_engine::find_command(id).map(|spec| spec.id) {
+        let spec_id = solidcraft_engine::find_command(id).map(|spec| spec.id);
+        let r = match spec_id {
             // `queued`: it waits for the end of the agent's turn.
             Some("component.edit_in_place") => r.and_then(|v| edit_in_place::command_ran(self, &v).map(|queued| with_queued(v, queued))),
             Some("component.finish_edit") => r.and_then(|v| edit_in_place::finish_command(self).map(|queued| with_queued(v, queued))),
@@ -1465,6 +1485,10 @@ impl SolveApp {
             }
             // Curves drawn in construction (or centerline) mode take that line type.
             sketch_palette::apply_mode(self, id, v);
+        }
+        // A network folder added or removed by a command is kept in the preferences.
+        if r.is_ok() && spec_id.is_some_and(network_folder_ui::changed_by) {
+            self.preferences.network_folders = self.session.network_folders.clone();
         }
         // Settings profiles live in the app: the engine only checked the parameters.
         let r = match r {
@@ -3223,6 +3247,7 @@ impl SolveApp {
                 // Preferences and Keyboard Shortcuts open from Home too (its links, the gear, Ctrl+,).
                 prefs::show(self, ui.ctx());
                 browser::editors(self, ui);
+                network_folder_ui::show(self, ui.ctx());
                 return;
             }
         }
@@ -3358,6 +3383,8 @@ impl SolveApp {
         joint_handles::show_warning(self, ui.ctx());
         shortcut_box::show(self, ui.ctx());
         prefs::show(self, ui.ctx());
+        // Over Send to Slicer and Preferences, which both open it.
+        network_folder_ui::show(self, ui.ctx());
         toolbar_custom::window(self, ui.ctx());
     }
 

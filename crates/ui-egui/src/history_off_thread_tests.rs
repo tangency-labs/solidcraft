@@ -860,6 +860,87 @@ fn a_measure_reads_a_copy_off_the_window_thread_preference_or_not() {
     assert_eq!(h.app.session.log.len(), log, "a reading leaves no echo: {:?}", h.app.session.log);
 }
 
+/// #2304: sending to a network folder over the control channel copies the file on a copy of the
+/// design, preference or not: a copy to a slow share took seconds on the window thread, which
+/// answered nothing meanwhile. The window answers `ui.*` while it sends, and the file arrives.
+#[test]
+fn a_send_to_a_network_folder_runs_off_the_window_thread_preference_or_not() {
+    let (mut h, tx) = agent_harness();
+    h.app.preferences.agent_off_thread = false;
+    let share = std::env::temp_dir().join(format!("solidcraft-control-share-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&share);
+    std::fs::create_dir_all(&share).unwrap();
+    let folder = solidcraft_engine::remote_slicers::RemoteTarget::folder_target("Share", &share.to_string_lossy());
+    h.app.preferences.network_folders = vec![folder];
+    let send =
+        ask(&tx, "engine.execute", json!({"command": "file.send_to_slicer", "params": {"slicer": "Share", "bodies": ["Body1"], "wait": "block"}}));
+    let view = ask(&tx, "ui.inspect", json!({}));
+    h.frames(1);
+    assert!(view.try_recv().is_ok_and(|v| v["ok"] == true), "ui.* answered meanwhile");
+    let r = reply_to(&mut h, &send);
+    assert_eq!(r["ok"], true, "{r}");
+    let sent = r["result"]["sent_to"].as_str().unwrap_or_default().to_string();
+    assert!(std::path::Path::new(&sent).starts_with(&share) && std::fs::metadata(&sent).is_ok_and(|m| m.len() > 0), "{r}");
+    assert!(h.app.control_answering.is_empty());
+    let _ = std::fs::remove_dir_all(&share);
+}
+
+/// #2304: with every worker busy, more sends to a network folder wait for one instead of running
+/// on the window thread, and each still arrives, in order.
+#[test]
+fn sends_to_a_network_folder_wait_for_a_worker_when_all_are_busy() {
+    let (mut h, tx) = agent_harness();
+    let share = std::env::temp_dir().join(format!("solidcraft-control-busy-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&share);
+    std::fs::create_dir_all(&share).unwrap();
+    let folder = solidcraft_engine::remote_slicers::RemoteTarget::folder_target("Share", &share.to_string_lossy());
+    h.app.preferences.network_folders = vec![folder];
+    let sends: Vec<_> = (0..7)
+        .map(|_| ask(&tx, "engine.execute", json!({"command": "file.send_to_slicer", "params": {"slicer": "Share", "bodies": ["Body1"]}})))
+        .collect();
+    let view = ask(&tx, "ui.inspect", json!({}));
+    h.frames(1);
+    assert!(view.try_recv().is_ok_and(|v| v["ok"] == true), "ui.* answered meanwhile");
+    assert!(h.app.control_answering.len() <= 4, "at most four workers: {}", h.app.control_answering.len());
+    assert!(!h.app.control_sends_waiting.is_empty(), "the rest wait for a worker");
+    for send in &sends {
+        let r = reply_to(&mut h, send);
+        assert_eq!(r["ok"], true, "{r}");
+    }
+    assert_eq!(std::fs::read_dir(&share).unwrap().count(), 7, "every send arrived, none replaced");
+    assert!(h.app.control_answering.is_empty() && h.app.control_sends_waiting.is_empty());
+    let _ = std::fs::remove_dir_all(&share);
+}
+
+/// #2304: a send to a network folder that waits for a worker sends the design as it was when it
+/// was asked for. It took the design only once a worker came free, so an edit made meanwhile
+/// (here, renaming the body it sends) changed what it sent, or made it fail.
+#[test]
+fn a_send_that_waits_for_a_worker_sends_the_design_as_it_was_asked_for() {
+    let (mut h, tx) = agent_harness();
+    // The rename runs at once, behind the sends, while some of them still wait.
+    h.app.preferences.agent_off_thread = false;
+    let share = std::env::temp_dir().join(format!("solidcraft-control-asked-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&share);
+    std::fs::create_dir_all(&share).unwrap();
+    let folder = solidcraft_engine::remote_slicers::RemoteTarget::folder_target("Share", &share.to_string_lossy());
+    h.app.preferences.network_folders = vec![folder];
+    let sends: Vec<_> = (0..7)
+        .map(|_| ask(&tx, "engine.execute", json!({"command": "file.send_to_slicer", "params": {"slicer": "Share", "bodies": ["Body1"]}})))
+        .collect();
+    let rename = ask(&tx, "engine.execute", json!({"command": "body.rename", "params": {"body": "Body1", "name": "Renamed"}}));
+    h.frames(1);
+    assert!(!h.app.control_sends_waiting.is_empty(), "some sends wait for a worker");
+    assert_eq!(reply_to(&mut h, &rename)["ok"], true);
+    for send in &sends {
+        let r = reply_to(&mut h, send);
+        assert_eq!(r["ok"], true, "{r}");
+        assert!(r["result"]["sent_to"].as_str().is_some_and(|sent| sent.contains("Body1")), "the body as it was named: {r}");
+    }
+    assert_eq!(std::fs::read_dir(&share).unwrap().count(), 7);
+    let _ = std::fs::remove_dir_all(&share);
+}
+
 /// #9624: an inspection read on a copy reports the design's undo and redo counts and its file,
 /// as one run here does; the copy has no history and no file, and it said undo 0, redo 0, path
 /// none, so an agent could not tell how far to roll back a failed batch.

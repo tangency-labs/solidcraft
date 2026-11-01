@@ -117,6 +117,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 ui_kit::help_icon(ui, &tip);
             });
+            // Send to Slicer's network folders (#2304); the browser has none.
+            if crate::network_folder_ui::available(app) {
+                crate::network_folder_ui::prefs_block(app, ui, labels);
+            }
             ui_kit::settings_form(ui, labels, |ui| {
                 ui_kit::settings_row_help(ui, app.tr("prefs.print_face_highlight"), app.tr("prefs.print_face_highlight_tip"), |ui| {
                     ui_kit::settings_control_width(ui, t.space_24 * 10.0, |ui| {

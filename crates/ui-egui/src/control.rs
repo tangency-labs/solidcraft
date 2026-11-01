@@ -806,15 +806,26 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                 }
                 return ok(json!(results));
             }
-            let mut replaced = false;
+            // Send to Slicer's network folders, as `SolveApp::run` keeps them: the preferences'
+            // for the steps, and back in the preferences once a step added or removed one, also
+            // when a later step failed.
+            let spec_id = |step: &Value| command(step).and_then(solidcraft_engine::find_command).map(|spec| spec.id);
+            if steps.is_some_and(|steps| steps.iter().filter_map(spec_id).any(crate::network_folder_ui::read_by)) {
+                app.session.network_folders = solidcraft_engine::remote_slicers::sanitized(&app.preferences.network_folders);
+            }
+            let (mut replaced, mut folders) = (false, false);
             let r = app
                 .session
                 .run_script_each(p, &mut |i, _| {
-                    let id = steps.and_then(|steps| steps.get(i)).and_then(command).and_then(solidcraft_engine::find_command).map(|spec| spec.id);
+                    let id = steps.and_then(|steps| steps.get(i)).and_then(spec_id);
                     replaced |= matches!(id, Some("file.new" | "doc.open" | "doc.recover"));
+                    folders |= id.is_some_and(crate::network_folder_ui::changed_by);
                 })
                 .map(|v| json!(v))
                 .map_err(|e| e.to_string());
+            if folders {
+                app.preferences.network_folders = app.session.network_folders.clone();
+            }
             // A successful replacement still happened if a later script step failed.
             if replaced {
                 crate::documents::reset_chat(app);
