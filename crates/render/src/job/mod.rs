@@ -19,6 +19,7 @@ pub(crate) mod encoding;
 pub mod finishing;
 mod host;
 pub(crate) mod image;
+pub mod interactive;
 pub mod led_strip;
 mod lens;
 #[cfg(test)]
