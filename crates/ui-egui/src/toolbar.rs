@@ -5421,16 +5421,7 @@ mod command_start_tab_tests {
     /// so command search and the VIEW tab's menus must not either.
     #[test]
     fn view_display_commands_keep_the_ribbon_on_the_tab_they_were_started_from() {
-        for id in [
-            "view.fit",
-            "view.home",
-            "view.spin",
-            "view.grid",
-            "view.ground_shadow",
-            "view.navigation_bar",
-            "view.visual_style",
-            "view.tool",
-        ] {
+        for id in ["view.fit", "view.home", "view.spin", "view.grid", "view.ground_shadow", "view.navigation_bar", "view.visual_style", "view.tool"] {
             let mut h = on_model_with_a_box();
             h.app.ui.tab = "INSPECT".into();
             h.app.start(id);
