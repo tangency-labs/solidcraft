@@ -496,6 +496,151 @@ fn a_saddle_flattens_and_reports_its_stretch() {
     assert!(flat.stretch > 1e-3 && flat.stretch < 0.5, "{}", flat.stretch);
 }
 
+/// A dome curves both ways, so it is not developable either: its developed flat does not
+/// converge under refinement, so the flat is solved for over finer spaces until a finer one no
+/// longer changes the stretch, which it reports.
+#[test]
+fn a_dome_flattens_and_reports_its_stretch() {
+    let mut points = Vec::new();
+    for j in 0..4 {
+        for i in 0..4 {
+            let (x, y) = (i as f64 - 1.5, j as f64 - 1.5);
+            points.push(Vec3::new(20.0 * i as f64, 20.0 * j as f64, 12.0 * (1.0 - (x * x + y * y) / 4.5)));
+        }
+    }
+    let bezier = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+    let sheet = free(spline([3, 3], [bezier.clone(), bezier], &points, &[1.0; 16]));
+    let dev = develop(&sheet, 0).unwrap_or_default();
+    let Some(Some(flat)) = dev.panels.first() else { panic!("laid out: {dev:?}") };
+    assert!(flat.stretch > 1e-3 && flat.stretch < 0.5, "{}", flat.stretch);
+}
+
+/// The length of the neutral curve of a sheet rolled along `curve` (its point, first and second
+/// derivatives at a parameter), from `t0` to `t1`, as a fine polyline: the curve moved by the
+/// neutral surface's depth along `normal` (the material side, from the curve's derivative), K x T
+/// or (1 - K) x T depending on which side the curve bends to.
+fn neutral_length(curve: impl Fn(f64) -> [Vec3; 3], normal: impl Fn(Vec3) -> Vec3, t0: f64, t1: f64) -> f64 {
+    let at = |t: f64| {
+        let [p, d, dd] = curve(t);
+        let n = normal(d) * (1.0 / normal(d).len());
+        let toward = dd.dot(n) > 0.0;
+        p + n * if toward { (1.0 - K) * T } else { K * T }
+    };
+    let steps = 200_000;
+    (0..steps).map(|k| at(t0 + (t1 - t0) * k as f64 / steps as f64).dist(at(t0 + (t1 - t0) * (k + 1) as f64 / steps as f64))).sum()
+}
+
+/// A strip 80 long bent along a cubic spline of three spans: its neutral surface is only once
+/// differentiable across the spans' knots (an offset is one order less smooth than its curve),
+/// yet it flattens with next to no stretch, to the length of its neutral curve.
+#[test]
+fn a_strip_bent_along_a_spline_of_several_spans_flattens_to_its_neutral_curves_length() {
+    let c = [
+        Vec3::new(0.0, 0.0, 0.0),
+        Vec3::new(30.0, 0.0, 5.0),
+        Vec3::new(60.0, 0.0, 30.0),
+        Vec3::new(75.0, 0.0, 70.0),
+        Vec3::new(70.0, 0.0, 110.0),
+        Vec3::new(50.0, 0.0, 140.0),
+    ];
+    let knots = vec![0.0, 0.0, 0.0, 0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0, 1.0, 1.0, 1.0];
+    let mut points = Vec::new();
+    for p in c {
+        for y in [0.0, 80.0] {
+            points.push(Vec3::new(p.x, y, p.z));
+        }
+    }
+    let sheet = free(spline([1, 3], [vec![0.0, 0.0, 1.0, 1.0], knots.clone()], &points, &[1.0; 12]));
+    let dev = develop(&sheet, 0).unwrap_or_default();
+    let Some(Some(flat)) = dev.panels.first() else { panic!("laid out: {dev:?}") };
+    assert!(flat.stretch < 1e-6, "{}", flat.stretch);
+    let Ok(space) = solidcraft_geom::spline_space::Space::new(3, knots) else { panic!() };
+    let curve = |t: f64| [0, 1, 2].map(|d| space.eval(&c, t, d).unwrap_or(Vec3::ZERO));
+    // Su x Sv with Su along +y.
+    let expected = neutral_length(curve, |d| Vec3::new(d.z, 0.0, -d.x), 0.0, 1.0);
+    let got = flat_length(&sheet, Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0));
+    assert!((got - expected).abs() < 1e-6, "{got} vs {expected}");
+}
+
+/// A sheet rolled along a cubic curve C but parameterised askew, S(u, v) = C(u + v / 2) moved 60 v
+/// along y, so that neither parameter runs along its straight lines and both are fitted as
+/// curved: it flattens with next to no stretch, its edge v = 0 to its neutral curve's length.
+#[test]
+fn an_askew_parameterised_roll_flattens_to_its_neutral_curves_length() {
+    use solidcraft_geom::spline_space::{Cond, Interpolant, Space};
+    let c = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(40.0, 0.0, 10.0), Vec3::new(80.0, 0.0, 50.0), Vec3::new(90.0, 0.0, 100.0)];
+    // C over [0, 1.5].
+    let curve = |t: f64| {
+        let (s, k) = (t / 1.5, 1.0 / 1.5);
+        let r = 1.0 - s;
+        let p = c[0] * (r * r * r) + c[1] * (3.0 * r * r * s) + c[2] * (3.0 * r * s * s) + c[3] * (s * s * s);
+        let d = ((c[1] - c[0]) * (3.0 * r * r) + (c[2] - c[1]) * (6.0 * r * s) + (c[3] - c[2]) * (3.0 * s * s)) * k;
+        let dd = ((c[2] - c[1] * 2.0 + c[0]) * (6.0 * r) + (c[3] - c[2] * 2.0 + c[1]) * (6.0 * s)) * (k * k);
+        [p, d, dd]
+    };
+    // S is a polynomial of degree three in u and v together, so a bicubic interpolating it on a
+    // 4 x 4 grid is S exactly.
+    let Ok(space) = Space::polynomial(3, 0.0, 1.0) else { panic!() };
+    let Ok(fit) = Interpolant::new(space, (0..4).map(|k| Cond { t: k as f64 / 3.0, der: 0 }).collect()) else { panic!() };
+    let rows: Vec<Vec<Vec3>> = (0..4)
+        .map(|j| {
+            let v = j as f64 / 3.0;
+            let row: Vec<Vec3> = (0..4).map(|i| curve(i as f64 / 3.0 + v / 2.0)[0] + Vec3::new(0.0, 60.0 * v, 0.0)).collect();
+            fit.fit(&row).unwrap_or_default()
+        })
+        .collect();
+    let mut points = vec![Vec3::ZERO; 16];
+    for i in 0..4 {
+        let col: Vec<Vec3> = rows.iter().map(|r| r.get(i).copied().unwrap_or(Vec3::ZERO)).collect();
+        for (j, p) in fit.fit(&col).unwrap_or_default().into_iter().enumerate() {
+            points[j * 4 + i] = p;
+        }
+    }
+    let bezier = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+    let sheet = free(spline([3, 3], [bezier.clone(), bezier], &points, &[1.0; 16]));
+    let dev = develop(&sheet, 0).unwrap_or_default();
+    let Some(Some(flat)) = dev.panels.first() else { panic!("laid out: {dev:?}") };
+    assert!(flat.stretch < 1e-6, "{}", flat.stretch);
+    // Su x Sv = C' x (C' / 2 + 60 y) = 60 C' x y: in (x, z), C' turned a quarter to the left.
+    let expected = neutral_length(curve, |d| Vec3::new(-d.z, 0.0, d.x), 0.0, 1.0);
+    let got = flat_length(&sheet, Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0));
+    assert!((got - expected).abs() < 1e-6, "{got} vs {expected}");
+}
+
+/// A sheet rolled along a wavy cubic spline of ten spans and run 60 along y, its straight lines
+/// parameterised by a cubic of five spans, so that both directions are fitted as curved and many
+/// spans meet both ways: it flattens with next to no stretch, its edge v = 0 to its neutral
+/// curve's length and its straight edge to 60.
+#[test]
+fn a_roll_over_many_spans_both_ways_flattens_to_its_neutral_curves_length() {
+    let c: Vec<Vec3> = (0..13).map(|i| Vec3::new(15.0 * i as f64, 0.0, 20.0 * (0.8 * i as f64).sin())).collect();
+    let y = [0.0, 3.0, 10.0, 22.0, 30.0, 41.0, 50.0, 60.0];
+    let uniform = |spans: usize| {
+        let mut k = vec![0.0; 4];
+        k.extend((1..spans).map(|i| i as f64 / spans as f64));
+        k.extend([1.0; 4]);
+        k
+    };
+    let mut points = Vec::new();
+    for &yj in &y {
+        for p in &c {
+            points.push(Vec3::new(p.x, yj, p.z));
+        }
+    }
+    let sheet = free(spline([3, 3], [uniform(10), uniform(5)], &points, &[1.0; 104]));
+    let dev = develop(&sheet, 0).unwrap_or_default();
+    let Some(Some(flat)) = dev.panels.first() else { panic!("laid out: {dev:?}") };
+    assert!(flat.stretch < 1e-6, "{}", flat.stretch);
+    let Ok(space) = solidcraft_geom::spline_space::Space::new(3, uniform(10)) else { panic!() };
+    let curve = |t: f64| [0, 1, 2].map(|d| space.eval(&c, t, d).unwrap_or(Vec3::ZERO));
+    // Su x Sv with Su along the curve and Sv along +y.
+    let expected = neutral_length(curve, |d| Vec3::new(-d.z, 0.0, d.x), 0.0, 1.0);
+    let got = flat_length(&sheet, Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0));
+    assert!((got - expected).abs() < 1e-6, "{got} vs {expected}");
+    let side = flat_length(&sheet, Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0));
+    assert!((side - 60.0).abs() < 1e-6, "{side}");
+}
+
 /// A straight line across a free-form panel's parameters flattens to exact Bezier pieces, one for
 /// each knot span it crosses, of the spaces' degrees added: every point of the pieces is the
 /// fitted map's point at the matching parameter.
@@ -516,7 +661,7 @@ fn a_straight_trim_flattens_to_exact_bezier_pieces() {
     let (a, b) = (Vec2::new(0.1, 0.2), Vec2::new(0.9, 0.7));
     let line = Region2 { outer: Loop2 { segs: vec![Seg2::Line { a, b }] }, holes: Vec::new() };
     let Ok((flat, _)) = map.region(&line) else { panic!() };
-    assert!(flat.outer.segs.iter().all(|s| matches!(s, Seg2::Bezier { n: 4, .. })), "{:?}", flat.outer.segs);
+    assert!(flat.outer.segs.iter().all(|s| matches!(s, Seg2::Bezier { n: 9, .. })), "{:?}", flat.outer.segs);
     // The pieces end to end follow the map along the line.
     let total: usize = flat.outer.segs.len();
     for (k, s) in flat.outer.segs.iter().enumerate() {
