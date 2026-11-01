@@ -199,6 +199,8 @@ pub struct JointForm {
     pub found_note: Option<String>,
     /// The design and the joint (as the dialog had it) the found limits are for.
     pub searched: Option<Searched>,
+    /// Edit Joint Limits: open the Limits section when the dialog first draws.
+    pub show_limits: bool,
     pub animate: bool,
     /// Animation phase, 0…1.
     pub phase: f64,
@@ -221,6 +223,7 @@ impl JointForm {
             found: Vec::new(),
             found_note: None,
             searched: None,
+            show_limits: false,
             animate: false,
             phase: 0.0,
             hover: None,
@@ -519,7 +522,15 @@ pub fn edit_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     Some(Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f))), inputs))
 }
 
-/// The Drive Joints dialog on a joint (by id).
+/// Edit Joint with its Limits section open (the browser's Edit Joint Limits).
+pub fn edit_joint_limits(app: &SolveApp, id: u64) -> Option<Dialog> {
+    let mut d = edit_joint(app, id)?;
+    if let Kind::Assembly(Asm::Joint(f)) = &mut d.kind {
+        f.show_limits = true;
+    }
+    Some(d)
+}
+
 /// Edit Joint with its motion playing (the browser's Animate Joint).
 pub fn animate_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let mut d = edit_joint(app, id)?;
@@ -557,6 +568,7 @@ pub fn occurrence_bounds(s: &Session, occs: &[u64]) -> Aabb3 {
     bb
 }
 
+/// The Drive Joints dialog on a joint (by id).
 pub fn drive_joint(app: &SolveApp, id: u64) -> Option<Dialog> {
     let joint = app.session.doc.assembly.joints.iter().position(|j| j.id == id)?;
     Some(Dialog::new(Kind::Assembly(Asm::Drive { joint, values: current_values(&app.session, joint), focus: true }), vec![]))
@@ -792,6 +804,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                         f.animate = !f.animate;
                     }
                 });
+                if std::mem::take(&mut f.show_limits) {
+                    let id = ui.make_persistent_id("joint_limits");
+                    ui.ctx().data_mut(|d| d.insert_persisted(id, true));
+                }
                 crate::ui_kit::section(ui, "joint_limits", "Limits", false, |ui| {
                     let found = f.found.clone();
                     for (i, (on, lo, hi)) in f.limits.iter_mut().enumerate() {

@@ -1592,6 +1592,7 @@ fn every_context_target_has_identified_icon_rows_including_submenus() {
         Target::Canvas { id: 1 },
         Target::Section,
         Target::Folder { component: 0, folder: "bodies".into(), scope: "c0".into() },
+        Target::Timeline { feature },
     ] {
         let rows = context_menu::items(&app, &target);
         assert!(!rows.is_empty(), "unexercised target: {target:?}");
@@ -2150,4 +2151,72 @@ fn insert_design_offers_the_other_open_designs_then_browse() {
     assert!(!menu_open(&h.app));
     h.frames(3);
     assert_eq!(linked(&h.app, "plate.solidcraft"), 2);
+}
+
+/// `ui.menu` opens a menu only on something the design has, as a right-click can (#10745).
+#[test]
+fn ui_menu_refuses_a_target_the_design_does_not_have() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Blk"})).unwrap();
+    h.frames(2);
+    for (target, error) in [
+        (json!({"type": "body", "name": "NoSuchBody"}), "no body `NoSuchBody`"),
+        (json!({"type": "component", "id": 999}), "no component `999`"),
+        (json!({"type": "joint", "id": 7}), "no joint `7`"),
+        (json!({"type": "timeline", "feature": 999}), "no feature `999`"),
+        (json!({"type": "section"}), "no section"),
+    ] {
+        let reply = h.call("ui.menu", json!({"x": 150, "y": 400, "target": target}));
+        assert_eq!(reply["error"], error, "{target}");
+        assert_eq!(h.call("ui.menu", json!({}))["result"], json!({"open": false, "pending": false}), "{target}");
+    }
+    h.call("ui.menu", json!({"x": 150, "y": 400, "target": {"type": "body", "name": "Blk"}}));
+    assert_eq!(h.call("ui.menu", json!({}))["result"]["open"], true);
+}
+
+/// The History bar's feature menu is the shared context menu: `ui.menu` reports it after a
+/// right-click, `ui.menuPick` runs its items, and a `timeline` target opens it (#10745).
+#[test]
+fn the_history_bar_feature_menu_is_reported_and_picked() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Blk"})).unwrap();
+    h.frames(3);
+    let (id, name) = (h.app.session.doc.features[0].id, h.app.session.doc.features[0].name.clone());
+    let labels = |menu: &serde_json::Value| -> Vec<String> {
+        menu["items"].as_array().into_iter().flatten().filter_map(|i| i["label"].as_str()).map(str::to_string).collect()
+    };
+    let settle = |h: &mut crate::scenario::Harness| {
+        for _ in 0..500 {
+            if h.app.deferred.is_none() && h.app.deferred_queue.is_empty() {
+                break;
+            }
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        h.frames(1);
+    };
+
+    h.step(&json!({"click": {"handle": format!("timeline:{name}")}, "button": "right"})).unwrap();
+    let menu = h.call("ui.menu", json!({}))["result"].clone();
+    assert_eq!(menu["target"], json!({"type": "timeline", "feature": id}), "{menu}");
+    let shown = labels(&menu);
+    for label in ["Edit Feature", "Rename", "Suppress Features", "Roll History Marker Here", "Find in Browser", "Copy", "Paste", "Delete"] {
+        assert!(shown.iter().any(|l| l == label), "no `{label}` in {shown:?}");
+    }
+    assert_eq!(h.call("ui.menuPick", json!({"item": "Suppress Features"}))["ok"], true);
+    settle(&mut h);
+    assert!(h.app.session.doc.feature(id).unwrap().suppressed, "Suppress Features suppressed it");
+
+    // A target opens the same menu, as the right-click did.
+    h.call("ui.menu", json!({"x": 400, "y": 900, "target": {"type": "timeline", "feature": id}}));
+    let menu = h.call("ui.menu", json!({}))["result"].clone();
+    assert!(labels(&menu).iter().any(|l| l == "Unsuppress Features"), "{menu}");
+    assert_eq!(h.call("ui.menuPick", json!({"item": "Unsuppress Features"}))["ok"], true);
+    settle(&mut h);
+    assert!(!h.app.session.doc.feature(id).unwrap().suppressed);
+    h.call("ui.menu", json!({"x": 400, "y": 900, "target": {"type": "timeline", "feature": id}}));
+    assert_eq!(h.call("ui.menuPick", json!({"item": "Find in Browser"}))["ok"], true);
+    assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::Body { name: "Blk".into() }]);
 }

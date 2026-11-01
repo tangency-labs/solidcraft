@@ -1336,6 +1336,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                     },
                     None => crate::context_menu::Target::Viewport,
                 };
+                // A right-click opens a menu only on something that is there.
+                if let Err(e) = crate::context_menu::check_target(app, &target) {
+                    return err(e);
+                }
                 crate::context_menu::request_open(app, egui::pos2(x as f32, y as f32), target);
                 return ok(json!({"pending": true}));
             }

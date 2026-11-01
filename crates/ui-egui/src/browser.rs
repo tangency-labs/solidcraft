@@ -211,6 +211,9 @@ pub struct TreeState {
     /// Show components marked out of the History bar anyway (#10393). Held by the session, like
     /// the bar's Show All toggle; the History controls' menu carries the switch.
     pub history_show_hidden: bool,
+    /// The History bar's Show All toggle: every component's features, not only the active or
+    /// picked one's (#2880).
+    pub history_show_all: bool,
     /// The feature of the face or edge last picked in the view, so a new pick scrolls the
     /// history to it once.
     pub view_pick: Option<u64>,
