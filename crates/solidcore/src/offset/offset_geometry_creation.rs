@@ -2849,13 +2849,29 @@ impl OffsetGeometryCreation {
 
             // search every solution for the one closest to the BaseVertex to use as the trimPoint
             let base_point = brep.vertex_point(base_vertex)?;
+            // `Kernel::fixes.offset_open_edge_second_trim_point` (WR-673, #2174; the fork's
+            // tangency-labs/smlib@7ee0876): an open edge's second trim point is where its
+            // other vertex goes, never the first trim point again. On a closed 3D curve
+            // (the whole offset circle lifted for half a sphere cap's rim) the first point's
+            // twin across the curve's seam is another parameter but the same point: taken,
+            // it gave the half edge the whole circle and the loop a gap.
+            let open_second = k.fixes.offset_open_edge_second_trim_point
+                && i == 1
+                && !brep.edge_is_closed(base_edge)?;
+            let first = if open_second {
+                Some(curve_of(brep, curve_3d)?.evaluate_point(k, trim_ivl.min())?)
+            } else {
+                None
+            };
+            let same_tol = 10.0 * self.this_approx_tol_3d;
+            let first_again = |pnt: Point3| first.is_some_and(|f| distance(pnt, f) <= same_tol);
             for sol in solutions.as_slice() {
                 let t = sol.start.param(0)?;
                 let pnt = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
 
                 // search for the best solution
                 let dist_moved = distance(pnt, base_point);
-                if dist_moved < found_dist && !are_same(t, trim_ivl.min()) {
+                if dist_moved < found_dist && !are_same(t, trim_ivl.min()) && !first_again(pnt) {
                     found_param = t;
                     found_dist = dist_moved;
                     found = true;
@@ -2867,7 +2883,8 @@ impl OffsetGeometryCreation {
                     let pnt = curve_of(brep, curve_3d)?.evaluate_point(k, t)?;
                     let dist_moved = distance(pnt, base_point);
 
-                    if dist_moved < found_dist && !are_same(t, trim_ivl.min()) {
+                    if dist_moved < found_dist && !are_same(t, trim_ivl.min()) && !first_again(pnt)
+                    {
                         found_param = t;
                         found_dist = dist_moved;
                         found = true;
