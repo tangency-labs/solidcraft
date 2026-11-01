@@ -156,6 +156,7 @@ pub const NAV_PRESETS: &[NavPreset] = &[
         // middle drag with Ctrl (zoom) and Shift (pan).
         help: "Middle drag orbits, Shift+middle pans (NX's middle + right), Ctrl+middle zooms (NX's middle + left); right drag leaves the camera",
         reverse_zoom: false,
+        reverse_drag_zoom: false,
         middle_double_click: Some("fit"),
         right_drag_orbits: Some(false),
         bindings: &[bind(Middle, NavKeys::SHIFT, Pan), bind(Middle, NavKeys::CTRL, Zoom), bind(Middle, NavKeys::NONE, Orbit)],
