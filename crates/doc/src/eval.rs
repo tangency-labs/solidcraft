@@ -7150,6 +7150,35 @@ fn smooth_chain(b: &ModelBody, picks: &[Vec3]) -> Vec<Vec3> {
     out
 }
 
+/// A plane with each anchorless face reference replaced by that face's plane as the body has it
+/// now, leaving the offset/angle wrappers for `resolve_plane_in` to evaluate. A face reference
+/// without an exact anchor keeps following its face by name the way a sketch on that face does;
+/// where only geometry finds it, `note` says so, and where it is gone the stored plane stays.
+fn current_face_planes(st: &ModelState, plane: &PlaneRef, note: &mut Option<String>) -> PlaneRef {
+    match plane {
+        PlaneRef::Face { plane: picked, at, name, anchor: None } => {
+            let (current, why) = face_plane(st, picked, *at, name.as_deref());
+            if note.is_none() {
+                *note = why;
+            }
+            PlaneRef::Custom { plane: current }
+        }
+        PlaneRef::Offset { base, distance } => PlaneRef::Offset { base: Box::new(current_face_planes(st, base, note)), distance: distance.clone() },
+        PlaneRef::ThroughPoint { base, point } => {
+            PlaneRef::ThroughPoint { base: Box::new(current_face_planes(st, base, note)), point: point.clone() }
+        }
+        PlaneRef::AtAngle { base, axis_origin, axis_dir, angle, line } => PlaneRef::AtAngle {
+            base: Box::new(current_face_planes(st, base, note)),
+            axis_origin: *axis_origin,
+            axis_dir: *axis_dir,
+            angle: angle.clone(),
+            line: line.clone(),
+        },
+        PlaneRef::Flipped { base, about_y } => PlaneRef::Flipped { base: Box::new(current_face_planes(st, base, note)), about_y: *about_y },
+        other => other.clone(),
+    }
+}
+
 /// `plane` with the sheet face it names (see `sheet::plane_sheet_face`) replaced by that face's current
 /// plane in the frame of component `comp`, or an error when the face is gone: a lost
 /// attachment is reported, never moved to the nearest face.
@@ -7348,7 +7377,11 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 (None, plane) if crate::sheet::plane_sheet_face(plane).is_some() => {
                     (doc.resolve_plane_in(vals, &sheet_face_plane_in_frame(doc, st, f.component, plane)?, 0, Some(&fst))?, None)
                 }
-                (None, PlaneRef::Face { plane: picked, at, name, anchor: None }) => face_plane(&fst, picked, *at, name.as_deref()),
+                (None, plane) if crate::face_anchor::has_face_reference(plane) => {
+                    let mut note = None;
+                    let resolved = current_face_planes(&fst, plane, &mut note);
+                    (doc.resolve_plane_in(vals, &resolved, 0, Some(&fst))?, note)
+                }
                 (None, other) => (doc.resolve_plane_in(vals, other, 0, Some(&fst))?, None),
             };
             let mut sk = sketch.clone();
@@ -7575,6 +7608,17 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                         append_warning(warning, note);
                     }
                     pl
+                }
+                // A reference without an exact anchor still follows its face by name, as a
+                // sketch on it does; an offset from that face follows it too.
+                None if crate::face_anchor::has_face_reference(plane) && crate::sheet::plane_sheet_face(plane).is_none() => {
+                    let frame = construction_state(doc, st, f.component);
+                    let mut note = None;
+                    let resolved = current_face_planes(&frame, plane, &mut note);
+                    if let Some(note) = note {
+                        append_warning(warning, note);
+                    }
+                    doc.resolve_plane_in(vals, &resolved, 0, Some(&frame))?
                 }
                 // On a flat face of a sheet: that panel's plane as it is now, as a sketch on the
                 // face finds it (the stored plane is only where the face was picked).

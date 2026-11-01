@@ -1057,10 +1057,12 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         normal: bool,
     },
-    /// Move planar faces (at the given points) onto a target plane parallel to them.
+    /// Replace faces with a plane or another face surface, extending/trimming neighbours.
     ReplaceFace {
         faces: Vec<FacePick>,
         target: PlaneRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool: Option<FaceAt>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
     },

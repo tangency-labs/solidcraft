@@ -73,7 +73,20 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             let tools = rib_tools(vals, st, f, None)?;
             apply_op(doc, st, f, tools, Operation::Join, &[])
         }
-        FeatureKind::ReplaceFace { faces, target, body } => {
+        FeatureKind::ReplaceFace { faces, target, body, tool } => {
+            if let Some(t) = tool {
+                let i = body_at(st, body, &crate::plain(faces))?;
+                let mb = st.bodies.get(i).cloned().ok_or_else(|| DocError::Invalid("body".into()))?;
+                let tb = st.body(&t.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", t.body)))?;
+                let face = crate::appearance::face_index_at(tb, t.point.0).ok_or_else(|| DocError::Invalid("target face no longer exists".into()))?;
+                let target = kernel::SplitTool::Face { body: &tb.body, face };
+                let result = kernel::replace_faces(&mb.body, &crate::plain(faces), &target)?;
+                let made = Traced::step(result, &[&mb.traced()]);
+                if let Some(slot) = st.bodies.get_mut(i) {
+                    *slot = ModelBody::traced_new(mb.name, made, mb.feature);
+                }
+                return Ok(());
+            }
             let tp = doc.resolve_plane_in(vals, target, 0, Some(st))?;
             let tn = tp.normal();
             let i = body_at(st, body, &crate::plain(faces))?;
@@ -82,10 +95,15 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             // the result could take a sketch's attachment.
             let mut b = mb.traced();
             for p in faces {
-                let n = planar_normal_at(&b.body, p.0)
-                    .ok_or_else(|| DocError::Invalid("not supported yet: replacing a face that is not planar".into()))?;
+                let Some(n) = planar_normal_at(&b.body, p.0) else {
+                    let result = kernel::replace_faces(&b.body, &[p.0], &kernel::SplitTool::Plane(tp))?;
+                    b = Traced::step(result, &[&b]);
+                    continue;
+                };
                 if n.dot(tn).abs() < 1.0 - 1e-9 {
-                    return Err(DocError::Invalid("not supported yet: a target that is not parallel to the face".into()));
+                    let result = kernel::replace_faces(&b.body, &[p.0], &kernel::SplitTool::Plane(tp))?;
+                    b = Traced::step(result, &[&b]);
+                    continue;
                 }
                 let d = (tp.origin - p.0).dot(n);
                 if d.abs() > 1e-9 {
@@ -227,12 +245,11 @@ fn planar_normal_at(b: &Body, p: Vec3) -> Option<Vec3> {
             *d = d.min(crate::appearance::closest_on_triangle(p, u, v, w).dist(p));
         }
     }
-    faces
-        .iter()
-        .filter_map(|f| f.plane_normal.map(|n| (n, ((p - f.centroid).dot(n)).abs(), near.get(f.index).copied().unwrap_or(f64::INFINITY))))
-        .filter(|(_, d, _)| *d < tol * 5.0)
-        .min_by(|a, b| a.2.total_cmp(&b.2).then(a.1.total_cmp(&b.1)))
-        .map(|(n, _, _)| n)
+    // The nearest face decides: a pick on a round must not be read as the plane that passes
+    // beside it, or Replace Face would offset the round onto that plane instead of replacing it.
+    let nearest = faces.iter().min_by(|a, b| near[a.index].total_cmp(&near[b.index]).then(a.index.cmp(&b.index)))?;
+    let n = nearest.plane_normal?;
+    (((p - nearest.centroid).dot(n)).abs() < tol * 5.0).then_some(n)
 }
 
 /// The curves of a chain as one polyline in sketch coordinates, in order.

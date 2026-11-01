@@ -840,7 +840,7 @@ fn solve3(m: [[f64; 3]; 3], r: [f64; 3]) -> Option<[f64; 3]> {
 /// Taken per body rather than once, because an operation may be tried again on the same body
 /// with a face split in two, and the pieces are numbered differently then. The points do not
 /// move, so they pick the same surface either way.
-fn faces_at(body: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
+pub(crate) fn faces_at(body: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
     let size = body.size();
     let mesh = body.tessellate((size * 1e-3).max(1e-3))?;
     let mut chosen: Vec<usize> = Vec::new();

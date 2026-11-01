@@ -195,31 +195,31 @@ fn capture_impl(s: &Session, value: &Value, cmd: &str, internal: bool) -> Result
     let anchor = match doc.capture_face_anchor(body, index, &plane, &path, s.active_component, &author_path) {
         Ok(anchor) => Some(Box::new(anchor)),
         Err(solidcraft_doc::DocError::Invalid(message))
-            if internal
-                && matches!(
-                    message.as_str(),
-                    "this face has no exact planar source; choose a fixed plane instead"
-                        | "this face has no supported construction certificate; choose a fixed plane instead"
-                ) =>
-        {
-            if path.iter().any(|id| s.pending_moves.contains_key(id) && !author_path.contains(id)) {
-                return Err(bad(cmd, "capture the source occurrence position before generating a legacy face profile across components"));
-            }
-            None
-        }
-        Err(solidcraft_doc::DocError::Invalid(message))
             if matches!(
                 message.as_str(),
                 "this face has no exact planar source; choose a fixed plane instead"
                     | "this face has no supported construction certificate; choose a fixed plane instead"
             ) =>
         {
-            return Err(bad(
-                cmd,
-                "this face can't keep an attachment: its history can't tell it apart from other faces (an edit reshaped it, \
-                 or more than one face could claim its name). \
-                 Pick another face, or use a fixed plane here (fixed:true), which won't follow later changes to the face",
-            ));
+            if internal && path.iter().any(|id| s.pending_moves.contains_key(id) && !author_path.contains(id)) {
+                return Err(bad(cmd, "capture the source occurrence position before generating a legacy face profile across components"));
+            }
+            // Only a name a feature gave the face keeps standing for it. A piece of a face split
+            // on purpose, a name worked out from geometry (`F3:face:5`) or a body's own face
+            // number have no such name: they still take the fixed plane they asked for.
+            let keep_by_name = name.as_deref().is_some_and(|name| {
+                solidcraft_doc::persistent_name::made_by(name).is_some()
+                    && solidcraft_doc::naming::strip_piece(name) == name
+                    && !solidcraft_doc::persistent_name::split_feature(name).is_some_and(|(_, role)| role.starts_with("face:"))
+            });
+            if !keep_by_name {
+                return Err(bad(cmd, "this face has no name of its own; pick its own plane with fixed:true"));
+            }
+            // Keep the face reference by its name instead of refusing it: NX's face references
+            // survive an edit the same way. A rebuild that can no longer find the face reports
+            // the attachment and keeps the plane where it was; a match found by geometry alone
+            // is noted there (`eval::face_plane`), never taken silently.
+            None
         }
         Err(error) => return Err(bad(cmd, format!("{error}; choose a supported exact face or explicitly use fixed:true"))),
     };

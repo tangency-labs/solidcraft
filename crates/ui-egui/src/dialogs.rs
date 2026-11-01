@@ -872,10 +872,9 @@ impl Dialog {
                 Kind::Rib { web: id == "solid.web", thickness: length_default(s, "2"), depth: String::new(), flip: false, normal: false },
                 vec![SelInput::new("Curves", CURVES, true)],
             ),
-            "solid.replace_face" => Dialog::new(
-                Kind::ReplaceFace,
-                vec![SelInput::new("Faces", PLANAR_FACES, true), SelInput::new("Target", PLANES | PLANAR_FACES, false)],
-            ),
+            "solid.replace_face" => {
+                Dialog::new(Kind::ReplaceFace, vec![SelInput::new("Faces", FACES, true), SelInput::new("Target", PLANES | FACES, false)])
+            }
             "face.delete" => Dialog::new(Kind::DeleteFaces, vec![SelInput::new("Faces", FACES, true)]),
             "solid.boundary_fill" => {
                 Dialog::new(Kind::BoundaryFill { operation: 0, cells: Vec::new(), of: Vec::new() }, vec![SelInput::new("Tools", BODIES, true)])
@@ -4784,14 +4783,18 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             let mut p = json!({"faces": face_points(0)});
             match sels(d, 1).first() {
                 Some(Sel::Plane { name }) => p["target"] = json!(name),
-                Some(Sel::Face { point, .. }) => p["target_face"] = pt(*point),
-                _ => return Err("pick a plane or planar face".into()),
+                Some(Sel::Face { point, body, .. }) => {
+                    p["target_face"] = pt(*point);
+                    p["target_body"] = json!(body);
+                }
+                _ => return Err("pick a plane or face".into()),
             }
             ("solid.replace_face", p)
         }
         Kind::DeleteFaces => {
             need(0, "faces")?;
-            ("face.delete", json!({"faces": face_points(0)}))
+            let heal = d.extra.get("heal").and_then(Value::as_bool).unwrap_or(true);
+            ("face.delete", json!({"faces": face_points(0), "heal": heal}))
         }
         Kind::Align { flip, components, axes } => {
             need(0, if *components { "components" } else { "bodies" })?;
@@ -6613,13 +6616,16 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::ReplaceFace { faces, target, body } => {
+        FeatureKind::ReplaceFace { faces, target, body, tool } => {
             let mut d = start("solid.replace_face")?;
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = faces.iter().filter_map(|p| face_sel(s, p.0)).collect();
             }
             if let Some(inp) = d.inputs.get_mut(1) {
-                inp.items = plane_sel(s, target).into_iter().collect();
+                inp.items = match tool {
+                    Some(t) => face_sel(s, t.point.0).into_iter().collect(),
+                    None => plane_sel(s, target).into_iter().collect(),
+                };
             }
             if let Some(b) = body {
                 d.extra.insert("body".into(), json!(b));
