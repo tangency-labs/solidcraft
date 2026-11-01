@@ -1153,6 +1153,9 @@ preference_settings! {
     /// A design coming back to its tab reads again the linked designs whose files changed since
     /// it last read them. Off: they wait for Update Links, as before.
     update_changed_links: bool = true, PAGE_DESIGN => check_id("settings.update_changed_links");
+    /// Insert STEP keeps its disk source for Update Links and automatic refresh. Off: new
+    /// inserts are independent copies, as before; existing links are left alone.
+    link_step_inserts: bool = true, PAGE_DESIGN => check_id("settings.link_step_inserts");
     /// A double-click on a component, in the browser or on its face in the view, opens a linked
     /// one's design with the assembly around it (`edit_in_place`) and activates any other. Off:
     /// a double-click in the browser activates every component and one in the view does nothing,
@@ -5732,6 +5735,7 @@ mod tests {
     fn moved_preferences_reset_only_on_their_new_page() {
         use super::*;
         let fields = [
+            ("link_step_inserts", json!(false), PAGE_DESIGN),
             ("default_units", json!("ft"), PAGE_DESIGN),
             ("length_decimals", json!(5), PAGE_DESIGN),
             ("angle_decimals", json!(4), PAGE_DESIGN),

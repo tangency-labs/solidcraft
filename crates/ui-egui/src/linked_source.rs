@@ -199,7 +199,7 @@ pub(crate) fn update_changed(app: &mut SolveApp) {
         .collect();
     for (c, s) in now {
         if !app.docs.link_stamps.iter().any(|(k, _)| *k == c) {
-            app.docs.link_stamps.push((c, s));
+            app.docs.link_stamps.push((c, if changed.contains(&c) { None } else { s }));
         }
     }
     // No room to wait: they are still changed when the tab next comes back.
@@ -769,6 +769,96 @@ mod tests {
         crate::file_picker::tick(&mut app, &egui::Context::default());
         assert!(app.status.as_ref().is_some_and(|(s, _, error)| s.contains("check this component's joints") && *error));
         assert!(app.session.log.iter().any(|s| s.contains("check this component's joints")));
+        let _ = std::fs::remove_dir_all(folder);
+    }
+    #[test]
+    fn step_links_refresh_on_tab_return_obey_preferences_and_offer_link_actions() {
+        let shot = |app: &mut SolveApp, name: &str| {
+            if let Some(folder) = solidcraft_engine::geom::env::var("SCENARIO_SHOTS") {
+                #[cfg(not(target_arch = "wasm32"))]
+                if solidcraft_engine::capture::installed().is_none() {
+                    solidcraft_engine::capture::install(Arc::new(|scene, cam, width, height| {
+                        let (rgba, renderer) = solidcraft_gpu::capture::headless_rgba(scene, cam, width, height)?;
+                        Ok(solidcraft_engine::capture::Picture { rgba, renderer })
+                    }));
+                }
+                std::fs::create_dir_all(&folder).unwrap();
+                app.run("view.fit", json!({})).unwrap();
+                if let Some(animation) = app.cam_anim.take() {
+                    app.cam = animation.to;
+                }
+                let path = PathBuf::from(folder).join(format!("{name}.png"));
+                let (request, _reply) = crate::control::ControlRequest::new("ui.render", json!({"path": path, "width": 1000, "height": 700}));
+                match crate::control::handle(app, &crate::fonts::test_context(), &request) {
+                    crate::control::Outcome::Done(reply) => assert_eq!(reply["ok"], true, "{reply}"),
+                    _ => panic!("ui.render must finish without a window"),
+                }
+            }
+        };
+        let folder = std::env::temp_dir().join(format!("solidcraft-step-links-ui-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let source = folder.join("bracket.step");
+        let export = |length| {
+            let mut part = Session::default();
+            part.execute("solid.box", &json!({"length": length, "width": 10, "height": 10})).unwrap();
+            part.execute("file.export", &json!({"path": source})).unwrap();
+        };
+        export(10);
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let linked = app.run("file.insert_step", json!({"path": source})).unwrap()["component"].as_u64().unwrap();
+        for target in [Target::Component { id: linked }, Target::Occurrence { path: app.session.doc.first_path(linked) }] {
+            let items = context_menu::items(&app, &target);
+            assert!(items.iter().any(|item| item.id == "component.update_links"));
+            assert!(items.iter().any(|item| item.id == "component.break_link"));
+            assert!(!items.iter().any(|item| matches!(item.id.as_str(), "ui.editInPlace" | "ui.openLinkedDesign" | "ui.relinkSource")));
+        }
+        let update =
+            context_menu::items(&app, &Target::Component { id: linked }).into_iter().find(|item| item.id == "component.update_links").unwrap();
+        context_menu::run_item(&mut app, &update, egui::Pos2::ZERO);
+        assert!(app.file_load.busy(), "the Browser uses the same background update as the toolbar");
+        settle(&mut app);
+        shot(&mut app, "step-link-before");
+        app.preferences.link_step_inserts = false;
+        app.run("file.insert_step", json!({"path": source})).unwrap();
+        assert_eq!(app.session.doc.links.len(), 1, "off preserves independent inserts");
+        // Requests from the file picker and control channel use the same preference.
+        let request = crate::file_load::Request::new(source.to_str().unwrap(), crate::file_load::Kind::Insert);
+        crate::file_load::begin_request(&mut app, request).unwrap();
+        settle(&mut app);
+        assert_eq!(app.session.doc.links.len(), 1);
+        crate::documents::open_tab(&mut app, Session::default()).unwrap();
+        export(20);
+        app.preferences.update_changed_links = false;
+        crate::documents::switch(&mut app, 0);
+        assert!(app.file_load.idle());
+        let feature = app.session.doc.links[&linked].feature;
+        let volume = |app: &SolveApp| {
+            solidcraft_engine::kernel::measure(&app.session.model.state().bodies.iter().find(|b| b.feature == feature).unwrap().body).unwrap().volume
+        };
+        assert!((volume(&app) - 1000.0).abs() < 1e-6);
+        app.preferences.update_changed_links = true;
+        crate::documents::switch(&mut app, 1);
+        crate::documents::switch(&mut app, 0);
+        settle(&mut app);
+        assert!((volume(&app) - 2000.0).abs() < 1e-6);
+        shot(&mut app, "step-link-after");
+        // Corrupt source on tab return keeps the import and remains retryable.
+        crate::documents::switch(&mut app, 1);
+        std::fs::write(&source, b"corrupt STEP").unwrap();
+        crate::documents::switch(&mut app, 0);
+        settle(&mut app);
+        assert!((volume(&app) - 2000.0).abs() < 1e-6);
+        assert_eq!(app.session.execute("component.links", &json!({})).unwrap()["links"][0]["changed"], true);
+        crate::documents::switch(&mut app, 1);
+        crate::documents::switch(&mut app, 0);
+        assert!(app.file_load.busy(), "the same corrupt source is retried next time");
+        settle(&mut app);
+        assert!((volume(&app) - 2000.0).abs() < 1e-6);
+        crate::documents::switch(&mut app, 1);
+        export(30);
+        crate::documents::switch(&mut app, 0);
+        settle(&mut app);
+        assert!((volume(&app) - 3000.0).abs() < 1e-6);
         let _ = std::fs::remove_dir_all(folder);
     }
 }

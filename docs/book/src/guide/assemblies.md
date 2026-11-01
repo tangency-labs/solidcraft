@@ -401,7 +401,19 @@ a checkout. The parts it reads come in as one step, so one **Undo** takes them a
 that cannot be read keeps its bodies, is tried again the next time, and holds up no other.
 **Update changed linked designs when a tab comes back** (Preferences, Design,
 `update_changed_links`) turns this off.
-To edit the source, right-click a linked component or occurrence in the Browser and choose
+
+**Insert STEP** also links `.step` and `.stp` files on disk. Its component shows the same link
+in the Browser, with **Update Links** and **Break Link** in its menu. Saving the assembly stores
+the source path relative to its folder. Updates replace the imported bodies in one undo step;
+references that still resolve are kept, and references that no longer resolve are reported. Missing
+or corrupt sources keep their previous bodies and are retried next time, without holding up
+other links. The same **Update changed linked designs when a tab comes back** preference controls
+automatic STEP refresh. Turn off **Link inserted STEP files** (`link_step_inserts`) in
+Preferences › Design to keep new inserts as independent copies, or pass `link: false` to
+`file.insert_step`. Older designs keep their unlinked imports. The web app keeps independent
+copies because uploaded files have no disk source path.
+
+To edit a linked design's source, right-click its component or occurrence in the Browser and choose
 **Open Linked Design**. It opens the part in another tab and reports if its file is missing.
 **Break Link** (`component.break_link`) keeps the bodies and forgets the file, and
 `component.links` lists the links, whether their files are found, and whether they changed since

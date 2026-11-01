@@ -425,3 +425,8 @@ impl Session {
             .collect()
     }
 }
+
+/// Repeated STEP assembly placements omitted by the Import feature.
+pub(crate) fn step_skip(import: &StepImport) -> Vec<u64> {
+    Plan::of(import).skip
+}
