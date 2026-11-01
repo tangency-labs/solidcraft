@@ -2450,7 +2450,10 @@ impl CircularCrossSectionFsg {
     /// pRail1Curve, pRail2Curve, crFilletPoints, pSurf1, pUV1, pSurf2, pUV2,
     /// rpFilletSurface)`: [`CircularCrossSectionFsg::create_surface_from_curves`] at the
     /// solver's tolerance, without `G1` continuity (upstream keeps it off for every
-    /// solver type). The fillet points and surfaces are not used.
+    /// solver type). The fillet points and surfaces are not used. With
+    /// `fixes.fillet_gn_section_generator` a variable-radius or constant-distance
+    /// solver's sections are the balls' touch circles
+    /// ([`CircularCrossSectionFsg::create_surface_from_curves_of_balls`]; WR-685).
     ///
     /// # Errors
     ///
@@ -2459,7 +2462,7 @@ impl CircularCrossSectionFsg {
         &self,
         k: &Kernel,
         approx_tol_3d: f64,
-        _solver_type: FilletSolverType,
+        solver_type: FilletSolverType,
         center_line: &mut BSplineCurve,
         rail1: &mut BSplineCurve,
         rail2: &mut BSplineCurve,
@@ -2467,16 +2470,26 @@ impl CircularCrossSectionFsg {
         let need_g1_continuity = false;
         // (SM_FS_CONST_RADIUS: "bNeedG1Continuity = TRUE; // fix it later" is commented
         // out upstream)
+        // The fork's `SmGnSectionFSG::CircleSurface` (WR-685, f2ec002): the solvers whose
+        // ball changes its radius along the round (a radius law, or a constant chord
+        // between faces whose angle changes); the others' balls touch the round along
+        // their great circles.
+        let ball_radius_varies = k.fixes.fillet_gn_section_generator
+            && matches!(
+                solver_type,
+                FilletSolverType::VariableRadius | FilletSolverType::ConstDist
+            );
         // the centre line is a plain SmBSplineCurve here, so its virtuals are the
         // B-spline ones
         let mut cl = Curve::from(core::mem::take(center_line));
-        let r = self.create_surface_from_curves(
+        let r = self.create_surface_from_curves_of_balls(
             k,
             &mut cl,
             rail1,
             rail2,
             approx_tol_3d,
             need_g1_continuity,
+            ball_radius_varies,
         );
         let CurveKind::BSpline(b) = cl.into_kind() else {
             return Err(SolidError::invalid_input(

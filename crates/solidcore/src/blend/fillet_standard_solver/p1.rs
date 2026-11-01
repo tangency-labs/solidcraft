@@ -2566,6 +2566,45 @@ impl CircularCrossSectionFsg {
         approx_tol_3d: f64,
         need_g1_continuity: bool,
     ) -> Result<BSplineSurface> {
+        // (the fork's order-1 `CreateSurfaceFromCurves`: the curves of a ball of constant
+        // radius, an offset's edge or a corner's ease)
+        self.create_surface_from_curves_of_balls(
+            k,
+            center_line,
+            rail1,
+            rail2,
+            approx_tol_3d,
+            need_g1_continuity,
+            false,
+        )
+    }
+
+    /// [`CircularCrossSectionFsg::create_surface_from_curves`] as the fork's
+    /// `SmGnSectionFSG::CircleSurfaceFromCurves` (tangency-labs/smlib d2a6125, f2ec002,
+    /// e9560e3; `fixes.fillet_gn_section_generator`, WR-685): `ball_radius_varies`, the
+    /// solver's ball changes its radius along the centre line (a radius law, or a constant
+    /// chord between faces whose angle changes). With the flag each section is the circle
+    /// along which the balls' envelope touches the ball, square to the centre line: where
+    /// the ball's radius varies, its centre is the ball's centre moved along the centre
+    /// line by `-r r'/|c'|` (the envelope's condition `<p - c, c'> = -r r'` on the ball
+    /// `|p - c| = r`), `r` and `r'` read off the rails, which lie on the ball; at a
+    /// constant radius it is the great circle.
+    ///
+    /// # Errors
+    ///
+    /// As [`CircularCrossSectionFsg::create_surface_from_curves`]; those of the rails'
+    /// `Evaluate` with the flag.
+    #[allow(clippy::fn_params_excessive_bools)]
+    pub(crate) fn create_surface_from_curves_of_balls(
+        &self,
+        k: &Kernel,
+        center_line: &mut Curve,
+        rail1: &mut BSplineCurve,
+        rail2: &mut BSplineCurve,
+        approx_tol_3d: f64,
+        need_g1_continuity: bool,
+        ball_radius_varies: bool,
+    ) -> Result<BSplineSurface> {
         const OP: &str = OP_CIRC;
         if !is_b_spline_kind(center_line) {
             return Err(SolidError::invalid_input(
@@ -2716,6 +2755,7 @@ impl CircularCrossSectionFsg {
                     rail1,
                     rail2,
                     approx_tol_3d,
+                    ball_radius_varies,
                     &mut cross_sections,
                     &mut parameters_of_cross_sections,
                     &mut max_num_unique_knots,
@@ -2851,6 +2891,7 @@ impl CircularCrossSectionFsg {
         rail1: &BSplineCurve,
         rail2: &BSplineCurve,
         approx_tol_3d: f64,
+        ball_radius_varies: bool,
         cross_sections: &mut Vec<Option<BSplineCurve>>,
         parameters_of_cross_sections: &mut Vec<f64>,
         max_num_unique_knots: &mut usize,
@@ -2878,17 +2919,46 @@ impl CircularCrossSectionFsg {
             let knot_index = if jj == 0 && ii == 1 { 0 } else { ii };
 
             // get center, rail1, rail2 points for dT
-            let cent = center_line
-                .evaluate(k, t, 1, true, false)?
+            let cent_pv = center_line.evaluate(k, t, 1, true, false)?;
+            let mut cent = cent_pv
                 .first()
                 .copied()
                 .ok_or_else(|| SolidError::sm_err(OP))?;
-            let p1 = rail1.evaluate_point(t)?;
-            let p2 = rail2.evaluate_point(t)?;
+            let (p1, p2, v1, v2) = if k.fixes.fillet_gn_section_generator {
+                // the fork's `CircleSurfaceFromCurves` (WR-685): the rails' points and
+                // tangents, and the section the circle along which the balls' envelope
+                // touches the ball, square to the centre line
+                let tangent = |pv: &[Vec3]| match *pv {
+                    [p, d, ..] => Ok((p, d)),
+                    _ => Err(SolidError::sm_err(OP)),
+                };
+                let (_, cent_d) = tangent(&cent_pv)?;
+                let (p1, d1) = tangent(&rail1.evaluate(t, 1, true, false)?)?;
+                let (p2, d2) = tangent(&rail2.evaluate(t, 1, true, false)?)?;
+                let mut v1 = p1 - cent;
+                let mut v2 = p2 - cent;
+                let speed = cent_d.length();
+                if ball_radius_varies
+                    && speed > EFF_ZERO
+                    && v1.length() > EFF_ZERO
+                    && v2.length() > EFF_ZERO
+                {
+                    let r1 = v1.length();
+                    let r2 = v2.length();
+                    let rate = 0.5 * (v1.dot(d1 - cent_d) / r1 + v2.dot(d2 - cent_d) / r2);
+                    let along = cent_d / speed;
+                    cent += along * (-0.5 * (r1 + r2) * rate / speed);
+                    v1 = p1 - cent;
+                    v2 = p2 - cent;
+                }
+                (p1, p2, v1, v2)
+            } else {
+                let p1 = rail1.evaluate_point(t)?;
+                let p2 = rail2.evaluate_point(t)?;
 
-            // get sample Point gaps
-            let v1 = p1 - cent;
-            let v2 = p2 - cent;
+                // get sample Point gaps
+                (p1, p2, p1 - cent, p2 - cent)
+            };
 
             // when railCurve samplePoints are close together - make a degenerate cross section curve
             if p1.distance(p2) < approx_tol_3d {

@@ -112,6 +112,10 @@ pub enum NoRoomReason {
     /// A variable round of a cliff overflow, traced on its faces' continuations, does not
     /// hold its radius law (the fork's `sm_HoldsItsLaw`, WR-631).
     CliffLawNotHeld,
+    /// A variable round's balls fold over one another: its radius changes faster than a
+    /// rolling ball can follow (the fork's `sm_BallsFold` in its circular section;
+    /// `fixes.fillet_gn_section_generator`, WR-685).
+    BallsFold,
     /// A cliff overflow runs past a fillet end whose end face is not planar (WR-631).
     CliffEndFaceNotPlanar,
     /// The end face's plane does not cut a fillet that overflows its end in two, or does

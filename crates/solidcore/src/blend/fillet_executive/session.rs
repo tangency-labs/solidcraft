@@ -1107,6 +1107,11 @@ fn replay_solver_error(
     }
     error.location = note.location;
     error.comment.clone_from(&note.comment);
+    // the typed reason of a `NoRoom` the solver noted (the fork's circular section's
+    // fold of its balls, WR-685)
+    if note.no_room.is_some() {
+        error.no_room = note.no_room;
+    }
 }
 
 /// Replay one corner error note (`SmFilletErrorInfo::NoteError` with the corner
@@ -1758,7 +1763,9 @@ impl<'target> FilletSession<'target> {
     /// `SetDoGlobalMerge(TRUE)` then the same-parameters `SetFilletParameters`
     /// overload with `SM_FS_VARIABLE_RADIUS`, as `SmApiVariableRadiusFillet` does:
     /// one cross-section type for every edge, `radius` as the (unused) solver
-    /// distance, `law` shared by every edge's solver and default tolerances.
+    /// distance, `law` shared by every edge's solver and default tolerances. The
+    /// thumbweight is `SetFilletParameters`' default: upstream's `1.0`, or with
+    /// `fixes.fillet_gn_section_generator` the fork's `SM_GN_DEFAULT_THUMBWEIGHT`.
     ///
     /// Zero selects linear, two blend-curve, every other cross-section code circular.
     ///
@@ -1808,7 +1815,13 @@ impl<'target> FilletSession<'target> {
                 tan_tol_deg: -1.0,
                 xsect_tol: -1.0,
                 continuity,
-                thumbweight: 1.0,
+                // SetFilletParameters' default thumbweight: upstream's 1.0, the fork's
+                // SM_GN_DEFAULT_THUMBWEIGHT with its G^n section (WR-685), which refuses 1.0
+                thumbweight: if k.fixes.fillet_gn_section_generator {
+                    crate::blend::fillet_section::section::GN_DEFAULT_THUMBWEIGHT
+                } else {
+                    1.0
+                },
                 second_radii: None,
             },
         )

@@ -76,12 +76,14 @@ fn kernel(crossing: bool) -> Kernel {
     k
 }
 
-/// Every fix SolidCraft turns on: all but `geometric_g2_continuity`.
+/// Every fix SolidCraft turns on: all but `geometric_g2_continuity`, and but WR-685's
+/// `fillet_gn_section_generator`, the fork's later 11ea2d9 (= 0bd3f4d), which a87c502 does
+/// not have (its section refuses the curvature round's thumbweight 1).
 fn solidcraft_kernel() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
+        if name != "geometric_g2_continuity" && name != "fillet_gn_section_generator" {
             *f.flag_mut(name).unwrap() = true;
         }
     }

@@ -104,7 +104,7 @@
 
 use crate::blend::fillet_corner::p3::{ExecutiveErrorObject, FilletCorner};
 use crate::blend::fillet_executive::p3::ErrorInfo;
-use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps};
+use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, FilletSurfaceGenerator};
 use crate::curve::curve::p1::{ApproximateCurveOptions, GlobalPointSolveOptions};
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::hermite_curve::HermiteCurve;
@@ -1319,7 +1319,36 @@ impl FilletBrep {
                     // an end rib between two tangent ends
                     return Err(SolidError::sm_err(OP_SIDE));
                 }
-                let order = super::tangent_end_rib::section_contact_order(fs1)?;
+                let order = match fs1.fillet_surface_generator() {
+                    // the fork's G^n section (WR-685): the order found at the rail's station
+                    Some(FilletSurfaceGenerator::GnSection(g)) => {
+                        let null = || SolidError::null_pointer(OP_SIDE);
+                        let geom = self.geom(g1)?;
+                        let center = geom.center_line_curve().ok_or_else(null)?;
+                        let face = |r: usize| -> Result<&Surface> {
+                            Ok(fs1.surface(r)?.ok_or_else(null)?.surface.base_surface())
+                        };
+                        let rail = |r: usize| -> Result<(&Curve, &Curve)> {
+                            let e = geom.rail(r).ok_or_else(null)?;
+                            let c = edge::curve(self.brep(), e)?.ok_or_else(null)?;
+                            let uv = self.original_uv_curve(e)?.ok_or_else(null)?;
+                            Ok((c, uv))
+                        };
+                        let (c0, uv0) = rail(0)?;
+                        let (c1, uv1) = rail(1)?;
+                        super::tangent_end_rib::gn_section_contact_order(
+                            k,
+                            g,
+                            [face(0)?, face(1)?],
+                            center,
+                            [c0, c1],
+                            [uv0, uv1],
+                            fs1.approx_tol_3d,
+                            if start_tangent { start_pnt } else { end_pnt },
+                        )?
+                    }
+                    _ => super::tangent_end_rib::section_contact_order(fs1)?,
+                };
                 match &surface {
                     Some(surface) => super::tangent_end_rib::tangent_end_rib(
                         k,

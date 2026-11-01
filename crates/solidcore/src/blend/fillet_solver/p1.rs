@@ -125,6 +125,7 @@ use crate::blend::fillet_geom::p1::{
 };
 use crate::blend::fillet_geom::p3::SplitCorners;
 use crate::blend::fillet_intersector::HandlingAlgorithmType;
+use crate::blend::fillet_section::section::GnSectionFsg;
 use crate::blend::fillet_standard_solver::p1::{
     BlendCurveCrossSectionFsg, CircularCrossSectionFsg, LinearCrossSectionFsg,
 };
@@ -245,6 +246,10 @@ pub enum FilletSurfaceGenerator {
     /// `SmBlendCurveCrossSectionFSG` (its members and `CreateSurfaceFromCurves`:
     /// [`BlendCurveCrossSectionFsg`] of `blend.fillet_standard_solver_p1`).
     BlendCurve(BlendCurveCrossSectionFsg),
+    /// The fork's `SmGnSectionFSG` (tangency-labs/smlib@11ea2d9; [`GnSectionFsg`]), of
+    /// type `SM_FSG_BLEND_CURVE`: built in place of the blend curve with
+    /// `fixes.fillet_gn_section_generator` (WR-685).
+    GnSection(GnSectionFsg),
 }
 
 impl FilletSurfaceGenerator {
@@ -307,7 +312,7 @@ impl FilletSurfaceGenerator {
     pub const fn meets_its_faces_tangentially(&self) -> bool {
         match self {
             Self::Circular(g) => !g.mirror,
-            Self::BlendCurve(_) => true,
+            Self::BlendCurve(_) | Self::GnSection(_) => true,
             Self::Base | Self::Linear | Self::EiffelTower => false,
         }
     }
@@ -319,7 +324,7 @@ impl FilletSurfaceGenerator {
             Self::Base | Self::EiffelTower => FilletSurfaceGeneratorType::Unknown,
             Self::Linear => FilletSurfaceGeneratorType::Linear,
             Self::Circular(_) => FilletSurfaceGeneratorType::Circular,
-            Self::BlendCurve(_) => FilletSurfaceGeneratorType::BlendCurve,
+            Self::BlendCurve(_) | Self::GnSection(_) => FilletSurfaceGeneratorType::BlendCurve,
         }
     }
 
@@ -332,11 +337,23 @@ impl FilletSurfaceGenerator {
         }
     }
 
-    /// `SmBlendCurveCrossSectionFSG::GetContinuity` (`None` for the other kinds).
+    /// `SmGnSectionFSG::GetThumbweight` (`None` for the other kinds).
+    #[must_use]
+    pub const fn thumbweight(&self) -> Option<f64> {
+        match self {
+            Self::GnSection(g) => Some(g.thumbweight),
+            _ => None,
+        }
+    }
+
+    /// `SmBlendCurveCrossSectionFSG::GetContinuity`, `SmGnSectionFSG::GetOrder` (`None`
+    /// for the other kinds).
     #[must_use]
     pub const fn continuity(&self) -> Option<u32> {
         match self {
             Self::BlendCurve(g) => Some(g.continuity),
+            #[allow(clippy::cast_possible_truncation)]
+            Self::GnSection(g) => Some(g.order as u32),
             _ => None,
         }
     }
@@ -395,7 +412,75 @@ impl FilletSurfaceGenerator {
                 side1,
                 side2,
             ),
+            Self::GnSection(g) => {
+                // the uv curves rebuilt on the stations are dropped: a caller that owns
+                // them uses `create_surface_replacing_uv`
+                let none = || SolidError::null_pointer(OP);
+                let s1 = side1.surface.ok_or_else(none)?;
+                let s2 = side2.surface.ok_or_else(none)?;
+                let mut uv1 = side1.uv_curve.ok_or_else(none)?.clone();
+                let mut uv2 = side2.uv_curve.ok_or_else(none)?.clone();
+                let mut g = *g;
+                g.create_surface(
+                    k,
+                    approx_tol_3d,
+                    center_line.ok_or_else(no_center)?,
+                    [rail1, rail2],
+                    [s1, s2],
+                    [&mut uv1, &mut uv2],
+                )
+            }
         }
+    }
+
+    /// [`FilletSurfaceGenerator::create_surface`] for a caller that owns the rails' uv
+    /// curves: the G^n section generator rebuilds them on its stations with the rails,
+    /// as the fork's `SmGnSectionFSG::CreateSurface` does through `pUV1`, `pUV2`; every
+    /// other generator reads them.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`FilletSurfaceGenerator::create_surface`] and
+    /// [`GnSectionFsg::create_surface`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_surface_replacing_uv(
+        &self,
+        k: &Kernel,
+        approx_tol_3d: f64,
+        solver_type: FilletSolverType,
+        center_line: Option<&mut BSplineCurve>,
+        rail1: &mut BSplineCurve,
+        rail2: &mut BSplineCurve,
+        points: &[TsectPnt],
+        surfaces: [&Surface; 2],
+        uv: [&mut BSplineCurve; 2],
+    ) -> Result<crate::nurbs::b_spline_surface::BSplineSurface> {
+        use crate::blend::fillet_standard_solver::p1::RailSurface;
+        if let Self::GnSection(g) = self {
+            let center =
+                center_line.ok_or_else(|| SolidError::invalid_input(OP, "NULL centre line"))?;
+            let mut g = *g;
+            return g.create_surface(k, approx_tol_3d, center, [rail1, rail2], surfaces, uv);
+        }
+        let [s1, s2] = surfaces;
+        let [uv1, uv2] = uv;
+        self.create_surface(
+            k,
+            approx_tol_3d,
+            solver_type,
+            center_line,
+            rail1,
+            rail2,
+            points,
+            RailSurface {
+                surface: Some(s1),
+                uv_curve: Some(uv1),
+            },
+            RailSurface {
+                surface: Some(s2),
+                uv_curve: Some(uv2),
+            },
+        )
     }
 }
 

@@ -16,13 +16,16 @@
 //! in a loop (a zero-speed rib's grows by the spans it halves, to at most 1024), each
 //! Newton solve takes at most 40 steps.
 
+use crate::blend::fillet_section::section::GnSectionFsg;
 use crate::blend::fillet_solver::p1::{
     FilletSolver, FilletSurfaceGenerator, FilletSurfaceGeneratorType,
 };
+use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
+use crate::geom::global_solver::SolverOperation;
 use crate::geom::vector2d::Point2;
 use crate::kernel::Kernel;
-use crate::math::{Point3, Vec3, EFF_ZERO, EFF_ZERO_SQRT};
+use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::p2::ControlPointForm;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
@@ -70,6 +73,62 @@ pub fn section_contact_order(solver: &FilletSolver) -> Result<u32> {
         },
         FilletSurfaceGeneratorType::Unknown => Err(SolidError::sm_err(OP_ORDER)),
     }
+}
+
+/// The fork's `sm_SectionContactOrder` for a G^n section (`SM_FSG_BLEND_CURVE` with
+/// `fixes.fillet_gn_section_generator`, WR-685; tangency-labs/smlib@11ea2d9): the order of
+/// contact k of the section with the face it meets at `at`, a point of one of its rails:
+/// `n + 1`, or `n + 2` where its jets make the `t^(n+1)` term vanish (two planes), found at
+/// that rail's station (`SmGnSectionFSG::ContactOrderAt`). The rail through `at` is the one
+/// whose drop of `at` (over its natural interval, within `tol`) is nearest.
+///
+/// # Errors
+///
+/// `SM_ERR` when `at` is on no rail within `tol` ("the point is on no rail"); those of
+/// the drops, the evaluations and [`GnSectionFsg::contact_order_at`].
+#[allow(clippy::too_many_arguments)]
+pub fn gn_section_contact_order(
+    k: &Kernel,
+    g: &GnSectionFsg,
+    faces: [&Surface; 2],
+    center: &BSplineCurve,
+    rails: [&Curve; 2],
+    uvs: [&Curve; 2],
+    tol: f64,
+    at: Point3,
+) -> Result<u32> {
+    // the rail through crAt, and its parameter there
+    let mut rail = 2usize;
+    let mut s = 0.0;
+    let mut best = BIG_DOUBLE;
+    for (r, c) in rails.iter().enumerate() {
+        let d = c.drop_point(
+            k,
+            &c.natural_interval(),
+            at,
+            None,
+            tol,
+            None,
+            SolverOperation::Minimize,
+        )?;
+        if d.success && d.distance < best {
+            best = d.distance;
+            rail = r;
+            s = d.parameter;
+        }
+    }
+    if rail > 1 || best > tol {
+        // "sm_SectionContactOrder(): the point is on no rail"
+        return Err(SolidError::sm_err(OP_ORDER));
+    }
+    let [uv0, uv1] = uvs;
+    let [r0, r1] = rails;
+    let w0 = uv0.evaluate_point(k, s)?;
+    let w1 = uv1.evaluate_point(k, s)?;
+    let seed = [w0.x, w0.y, w1.x, w1.y];
+    let points = [r0.evaluate_point(k, s)?, r1.evaluate_point(k, s)?];
+    let order = g.contact_order_at(k, faces, center, s, seed, points, rail)?;
+    u32::try_from(order).map_err(|_| SolidError::sm_err(OP_ORDER))
 }
 
 /// `D[0][0]`, `D[1][0]` (u) and `D[0][1]` (v) of `surface` at `uv`

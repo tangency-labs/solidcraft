@@ -149,6 +149,7 @@ use crate::blend::fillet_geom::p1::{
     FilletGeomType, FilletSolverId, FilletVertexType,
 };
 use crate::blend::fillet_geom::p4::set_edge_curve;
+use crate::blend::fillet_section::section::{GnSectionFsg, GN_DEFAULT_THUMBWEIGHT};
 use crate::blend::fillet_solver::p1::{
     FilletExecutiveRef, FilletSolver, FilletSolverOps, FilletSolverType, FilletSurfaceGenerator,
     FilletSurfaceGeneratorType,
@@ -2692,11 +2693,27 @@ impl FilletCorner {
         let fsg_type = fsg0.fillet_surface_generator_type();
         let mut blend_scale = 1.5; // For use in SmBlendCurveCrossSectionFSG cases only
         let mut max_continuity = 0u32;
+        // the fork's SmGnSectionFSG (WR-685, fixes.fillet_gn_section_generator): its
+        // thumbweight, and its order as the continuity
+        let gn = matches!(fsg0, FilletSurfaceGenerator::GnSection(_));
+        let mut thumbweight = GN_DEFAULT_THUMBWEIGHT;
         if fsg_type != fsg1.fillet_surface_generator_type() {
             return Err(sm_err());
         }
 
-        if fsg_type == FilletSurfaceGeneratorType::BlendCurve {
+        if fsg_type == FilletSurfaceGeneratorType::BlendCurve && gn {
+            thumbweight = fsg0.thumbweight().unwrap_or(thumbweight);
+            let first_order = fsg0.continuity();
+            if (thumbweight - fsg1.thumbweight().unwrap_or(f64::NAN)).abs() > EFF_ZERO
+                || fsg1.continuity() != first_order
+            {
+                return Err(sm_err()); // Unable to convert
+            }
+            let continuity = fsg1.continuity().unwrap_or(0);
+            if continuity > max_continuity {
+                max_continuity = continuity;
+            }
+        } else if fsg_type == FilletSurfaceGeneratorType::BlendCurve {
             blend_scale = fsg0.blend_scale().unwrap_or(blend_scale);
             if (blend_scale - fsg1.blend_scale().unwrap_or(blend_scale)).abs() > EFF_ZERO {
                 return Err(sm_err()); // Unable to convert
@@ -2711,6 +2728,16 @@ impl FilletCorner {
         let fsg = match fsg_type {
             FilletSurfaceGeneratorType::Circular => {
                 FilletSurfaceGenerator::circular(true, 1.0e-3, false, false)
+            }
+            FilletSurfaceGeneratorType::BlendCurve if gn => {
+                FilletSurfaceGenerator::GnSection(GnSectionFsg::new(
+                    if max_continuity > 1 {
+                        max_continuity as usize
+                    } else {
+                        2
+                    },
+                    thumbweight,
+                ))
             }
             FilletSurfaceGeneratorType::BlendCurve => {
                 FilletSurfaceGenerator::blend_curve(blend_scale, max_continuity)

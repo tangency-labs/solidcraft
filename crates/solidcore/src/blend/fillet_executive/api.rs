@@ -215,7 +215,8 @@ pub fn fillet_edges_per_edge(
 /// (`SmLinearFilletLaw`) and one cross-section (`xsect_type` 0 linear, 2 blend
 /// curve, any other value circular), then `StitchAndOrient` with its defaults.
 /// `continuity` (1, 2 or 3 for G1-G3) applies to blend-curve cross-sections, whose
-/// thumbweight is the `SetFilletParameters` default `1.0`.
+/// thumbweight is the `SetFilletParameters` default (`1.0`; the fork's
+/// `SM_GN_DEFAULT_THUMBWEIGHT` with `fixes.fillet_gn_section_generator`).
 ///
 /// # Errors
 /// `SM_ERR_INVALID_INPUT` for an empty edge list or a start or end radius below 8

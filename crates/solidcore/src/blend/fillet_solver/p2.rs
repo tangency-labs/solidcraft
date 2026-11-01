@@ -1229,9 +1229,11 @@ impl FilletSolver {
         // blend-curve section whose centre line is a point on the arc's axis (a blend as
         // wide as the face it uses up, whose marched centre line has no length to march)
         // is revolved too; any other blend-curve section is still refused here
+        // (the G^n section of WR-685 has no section to revolve: it is marched)
         let blend_section = class.is_none()
             && k.fixes.fillet_blend_curve_revolved_on_arc
-            && section == FilletSurfaceGeneratorType::BlendCurve;
+            && section == FilletSurfaceGeneratorType::BlendCurve
+            && !matches!(s.fsg.as_ref(), Some(FilletSurfaceGenerator::GnSection(_)));
         let (ref_frame, start_ang) = if let Some(class) = class {
             // WR-669: the circular or linear cross-section turned about the faces' common
             // axis (the class's); the frame's origin: the centre of the edge's circle, where

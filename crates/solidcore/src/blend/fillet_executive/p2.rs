@@ -65,6 +65,7 @@ use crate::blend::fillet_executive::p3::{
     ContextMark, ErrorInfo, ExecutionOptions, ExecutiveAccess, FilletExecutive,
 };
 use crate::blend::fillet_geom::p1::{FilStatus, FilletEdgeType, FilletErrorType};
+use crate::blend::fillet_section::section::GnSectionFsg;
 use crate::blend::fillet_solver::p1::FilletSurfaceGenerator;
 use crate::blend::fillet_standard_solver::p1::{
     BoundaryTrimmingType, FilletLaw, FilletLawKind, FilletSolverType, FilletSurfaceGeneratorType,
@@ -182,6 +183,10 @@ where
         ExecutiveAccess::find_fillet_brep_edge(self, k, edge, candidates, multiple)
     }
 }
+
+/// `SetFilletParameters`' note for a G^n section of another order or thumbweight (WR-685).
+const GN_INVALID: &str =
+    "SetFilletParameters: a G^n section's order must be 2 to 4 and its thumbweight in [0, 1).";
 
 const OP: &str = "blend::fillet_executive::p2";
 
@@ -714,6 +719,13 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut generator: Option<O> = None;
 
         let at_thirds = self.blend_curve_at_thirds;
+        // the fork's SmGnSectionFSG in place of the blend curve (WR-685)
+        let gn = k.fixes.fillet_gn_section_generator;
+        let gn_order = params.continuity as usize;
+        let gn_invalid = |kind: FilletSurfaceGeneratorType| {
+            gn && kind == FilletSurfaceGeneratorType::BlendCurve
+                && !GnSectionFsg::is_valid(gn_order, params.thumbweight)
+        };
         let generator_spec = |kind: FilletSurfaceGeneratorType, circular_tol: f64| match kind {
             FilletSurfaceGeneratorType::Linear => Some(FilletSurfaceGenerator::Linear),
             FilletSurfaceGeneratorType::Circular => Some(FilletSurfaceGenerator::circular(
@@ -722,6 +734,9 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 false,
                 false,
             )),
+            FilletSurfaceGeneratorType::BlendCurve if gn => Some(
+                FilletSurfaceGenerator::GnSection(GnSectionFsg::new(gn_order, params.thumbweight)),
+            ),
             FilletSurfaceGeneratorType::BlendCurve => {
                 Some(FilletSurfaceGenerator::blend_curve_at_thirds(
                     params.thumbweight,
@@ -733,6 +748,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         };
 
         if single_xsect_type {
+            if gn_invalid(xsect_type) {
+                self.error
+                    .note_error(FilletErrorType::InvalidInput, Some(GN_INVALID));
+                return Err(status(SM_ERR_INVALID_INPUT));
+            }
             let Some(spec) = generator_spec(xsect_type, xsect_tol) else {
                 self.error.note_error(
                     FilletErrorType::InvalidInput,
@@ -858,6 +878,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     .xsect_types
                     .get(ii)
                     .ok_or_else(|| first("cross-section type list too short"))?;
+                if gn_invalid(xsect_type) {
+                    self.error
+                        .note_error(FilletErrorType::InvalidInput, Some(GN_INVALID));
+                    return Err(status(SM_ERR_INVALID_INPUT));
+                }
                 let Some(spec) = generator_spec(xsect_type, 0.1) else {
                     self.error.note_error(
                         FilletErrorType::InvalidInput,
