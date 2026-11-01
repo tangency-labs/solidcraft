@@ -321,6 +321,19 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     }
                 }
             });
+            ui_kit::settings_form(ui, t.form_label_width + t.space_24, |ui| {
+                ui_kit::row(ui, app.tr_label("Joint symbols"), |ui| {
+                    let styles = crate::joint_symbols::STYLES;
+                    let mut selected = usize::from(app.preferences.joint_symbols).min(styles.len() - 1);
+                    ui_kit::dropdown(ui, "pref_joint_symbols", &mut selected, &styles);
+                    app.preferences.joint_symbols = selected as u8;
+                });
+            });
+            // Only badges tell moving joints from the rest.
+            ui.add_enabled_ui(app.preferences.joint_symbols != crate::joint_symbols::RING_AND_AXIS, |ui| {
+                let response = setting::highlight_moving_joints(app, ui).on_hover_text(app.tr("prefs.highlight_moving_joints_help"));
+                crate::scenario::publish_handle("prefs:highlight_moving_joints", response.rect.center());
+            });
         });
         ui_kit::settings_section(ui, "surfaces_edges", app.tr("prefs.graphics_page.surfaces_edges"), |ui| {
             let response = ui_kit::checkbox(ui, app.tr("ui.cosmetic_thread_markings"), &mut app.preferences.cosmetic_threads)
