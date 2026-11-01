@@ -238,7 +238,7 @@ pub struct MenuState {
     /// A delete waiting for its confirmation (it takes or breaks other features).
     pub confirm: Option<crate::delete::Pending>,
     /// A selected part has no free joint value for the explicit assembly Move command.
-    pub joint_move_warning: Option<String>,
+    pub(crate) joint_move_warning: Option<crate::joint_handles::Blocked>,
     /// Identical copies Extract to File found, waiting to be linked too.
     pub link_copies: Option<crate::linked_source::Copies>,
     /// The Properties window: title and measurements.

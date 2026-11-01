@@ -1,0 +1,38 @@
+{
+  "en": {
+    "joint_move.conflict": "A joint of this part conflicts with the others: {joint}.",
+    "joint_move.conflict_hint": "Edit, suppress or delete the conflicting joint so the other joints can place the part."
+  },
+  "ar": {
+    "joint_move.conflict": "يتعارض أحد مفاصل هذا الجزء مع المفاصل الأخرى: {joint}.",
+    "joint_move.conflict_hint": "عدّل المفصل المتعارض أو عطّله أو احذفه حتى تتمكن المفاصل الأخرى من وضع الجزء."
+  },
+  "de": {
+    "joint_move.conflict": "Ein Gelenk dieses Bauteils steht im Konflikt mit den anderen: {joint}.",
+    "joint_move.conflict_hint": "Bearbeiten, unterdrücken oder löschen Sie das widersprüchliche Gelenk, damit die anderen Gelenke das Bauteil platzieren können."
+  },
+  "he": {
+    "joint_move.conflict": "אחד המפרקים של החלק הזה מתנגש עם האחרים: {joint}.",
+    "joint_move.conflict_hint": "ערכו, השביתו או מחקו את המפרק המתנגש כדי שהמפרקים האחרים יוכלו למקם את החלק."
+  },
+  "ja": {
+    "joint_move.conflict": "この部品のジョイントが他のジョイントと競合しています: {joint}。",
+    "joint_move.conflict_hint": "競合しているジョイントを編集、抑制、または削除して、他のジョイントで部品を配置できるようにしてください。"
+  },
+  "ko": {
+    "joint_move.conflict": "이 부품의 조인트가 다른 조인트와 충돌합니다: {joint}.",
+    "joint_move.conflict_hint": "충돌하는 조인트를 편집, 비활성화 또는 삭제하여 다른 조인트가 부품을 배치할 수 있게 하세요."
+  },
+  "vi": {
+    "joint_move.conflict": "Một khớp nối của chi tiết này xung đột với các khớp nối khác: {joint}.",
+    "joint_move.conflict_hint": "Chỉnh sửa, tạm nén hoặc xóa khớp nối xung đột để các khớp nối khác có thể định vị chi tiết."
+  },
+  "zh": {
+    "joint_move.conflict": "此零部件的一个关节与其他关节冲突：{joint}。",
+    "joint_move.conflict_hint": "请编辑、抑制或删除冲突的关节，以便其他关节可以放置该零部件。"
+  },
+  "zh-TW": {
+    "joint_move.conflict": "此零件的一個接頭與其他接頭衝突：{joint}。",
+    "joint_move.conflict_hint": "請編輯、抑制或刪除衝突的接頭，讓其他接頭可以放置此零件。"
+  }
+}
