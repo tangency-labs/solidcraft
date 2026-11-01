@@ -2353,6 +2353,8 @@
   "prefs.structure.appearance": "Appearance",
   "prefs.structure.appearance_note": "Colors, text and accessibility.",
   "prefs.structure.in_profile": "In profile",
+  "prefs.structure.interaction": "Interaction",
+  "prefs.structure.interaction_note": "How the pointer and the keys act on the model.",
   "prefs.structure.layout": "Layout",
   "prefs.structure.layout_note": "Where the parts of the window sit.",
   "prefs.structure.look": "Look",

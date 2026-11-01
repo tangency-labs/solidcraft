@@ -2353,6 +2353,8 @@
   "prefs.structure.appearance": "外観",
   "prefs.structure.appearance_note": "色、文字、アクセシビリティ。",
   "prefs.structure.in_profile": "プロファイルに保存",
+  "prefs.structure.interaction": "操作",
+  "prefs.structure.interaction_note": "ポインターとキーがモデルにどのように作用するか。",
   "prefs.structure.layout": "レイアウト",
   "prefs.structure.layout_note": "ウィンドウ内の配置。",
   "prefs.structure.look": "表示",

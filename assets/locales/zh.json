@@ -2353,6 +2353,8 @@
   "prefs.structure.appearance": "外观",
   "prefs.structure.appearance_note": "颜色、文字和无障碍。",
   "prefs.structure.in_profile": "包含在配置中",
+  "prefs.structure.interaction": "交互",
+  "prefs.structure.interaction_note": "指针和按键如何作用于模型。",
   "prefs.structure.layout": "布局",
   "prefs.structure.layout_note": "窗口各部分的位置。",
   "prefs.structure.look": "外观",

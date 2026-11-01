@@ -934,6 +934,87 @@ fn v_toggles_what_is_selected() {
     assert_eq!(find(&context_menu::items(&app, &Target::Body { name: body(&app) }), "Show/Hide").shortcut, "V");
 }
 
+/// #4128: with the preference on (the default), V hides the element under the cursor in the
+/// view — by the same rule as picking — without selecting it first.
+#[test]
+fn v_hide_under_cursor_hovers_without_selecting() {
+    let mut app = sample_app();
+    let b = body(&app);
+    assert!(app.session.hide_under_cursor, "on by default");
+    app.viewport.hover = Some(Hit::Face { body: b.clone(), index: 0, point: Vec3::ZERO });
+    context_menu::toggle_visibility_key(&mut app);
+    assert!(app.session.visibility.hidden_bodies.contains(&b), "the hovered body hides");
+    assert!(app.session.selection.is_empty(), "without being selected");
+    context_menu::toggle_visibility_key(&mut app);
+    assert!(!app.session.visibility.hidden_bodies.contains(&b), "V again shows it");
+    // A sketch hit hides its sketch; a plane hit hides the plane.
+    let sk = app.session.doc.features.iter().find(|f| f.name == "Base").unwrap().id;
+    crate::browser::set_sketch_visible(&mut app, sk, true);
+    app.viewport.hover = Some(Hit::SketchCurve { sketch: sk, id: "c1".into(), straight: false, point: Vec3::ZERO });
+    context_menu::toggle_visibility_key(&mut app);
+    assert!(!crate::browser::sketch_visible(&app, sk));
+    app.viewport.hover = Some(Hit::Plane { name: "XY".into(), point: Vec3::ZERO });
+    context_menu::toggle_visibility_key(&mut app);
+    assert!(app.session.visibility.hidden_origin.iter().any(|h| h == "XY"));
+}
+
+/// #4128: with a multi-selection and the cursor over a selected element, V still hides the
+/// whole selection; with the cursor over empty space it acts on the selection as before.
+#[test]
+fn v_hide_under_cursor_keeps_the_selection_rules() {
+    let mut app = sample_app();
+    let b = body(&app);
+    app.run("select.set", json!({"items": [{"type": "body", "name": b.clone()}, {"type": "plane", "name": "XY"}]})).unwrap();
+    app.viewport.hover = Some(Hit::Face { body: b.clone(), index: 0, point: Vec3::ZERO });
+    context_menu::toggle_visibility_key(&mut app);
+    assert!(
+        app.session.visibility.hidden_bodies.contains(&b) && app.session.visibility.hidden_origin.iter().any(|h| h == "XY"),
+        "the whole selection hides, not just the hovered body"
+    );
+    // The cursor over empty space: the selection, as today.
+    context_menu::run_item(&mut app, &find(&context_menu::items(&app, &Target::Viewport), "Show All"), pos2(0.0, 0.0));
+    app.viewport.hover = None;
+    context_menu::toggle_visibility_key(&mut app);
+    assert!(
+        app.session.visibility.hidden_bodies.contains(&b) && app.session.visibility.hidden_origin.iter().any(|h| h == "XY"),
+        "empty space acts on the selection"
+    );
+}
+
+/// #4128: with the preference off, V acts on the selection only, as it did before.
+#[test]
+fn v_hide_under_cursor_off_acts_on_the_selection_only() {
+    let mut app = sample_app();
+    let b = body(&app);
+    app.session.hide_under_cursor = false;
+    app.viewport.hover = Some(Hit::Face { body: b.clone(), index: 0, point: Vec3::ZERO });
+    context_menu::toggle_visibility_key(&mut app);
+    assert!(app.session.visibility.hidden_bodies.is_empty(), "nothing is selected: V does nothing");
+    app.run("select.set", json!({"items": [{"type": "body", "name": b.clone()}]})).unwrap();
+    context_menu::toggle_visibility_key(&mut app);
+    assert!(app.session.visibility.hidden_bodies.contains(&b), "the selection hides");
+}
+
+/// #4128: hovering a Browser row and pressing V hides that row's element without selecting
+/// it; when the row's element is part of a multi-selection, the whole selection hides.
+#[test]
+fn v_hide_under_cursor_acts_on_the_hovered_browser_row() {
+    let mut app = sample_app();
+    let b = body(&app);
+    app.tree.hover_target = Some(Target::Body { name: b.clone() });
+    context_menu::toggle_visibility_key(&mut app);
+    assert!(app.session.visibility.hidden_bodies.contains(&b), "the hovered row hides");
+    assert!(app.session.selection.is_empty(), "without being selected");
+    context_menu::toggle_visibility_key(&mut app);
+    assert!(!app.session.visibility.hidden_bodies.contains(&b), "V again shows it");
+    app.run("select.set", json!({"items": [{"type": "body", "name": b.clone()}, {"type": "plane", "name": "XY"}]})).unwrap();
+    context_menu::toggle_visibility_key(&mut app);
+    assert!(
+        app.session.visibility.hidden_bodies.contains(&b) && app.session.visibility.hidden_origin.iter().any(|h| h == "XY"),
+        "a row of the selection hides the whole selection"
+    );
+}
+
 /// V pressed with a browser menu open runs that menu's Show/Hide, as its row says, on the row
 /// the menu was opened for: a folder, the Origin folder or an origin plane is not selected by
 /// the right-click, so V used to act on the selection instead (nothing, or another body).

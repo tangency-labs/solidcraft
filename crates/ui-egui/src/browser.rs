@@ -151,6 +151,11 @@ pub struct TreeState {
     /// The bodies a row at the top of the history lights this frame (`history_rows`), for the
     /// browser, drawn after it, to keep.
     history_hover: Vec<String>,
+    /// The element the Browser row under the pointer is for, kept across the frame the same way
+    /// as `history_hover`: V acts on it without selecting it (#4128).
+    pub(crate) hover_target: Option<crate::context_menu::Target>,
+    /// The same from the history rows drawn before the browser.
+    history_hover_target: Option<crate::context_menu::Target>,
     /// The Edit Point Cloud panel.
     pub cloud_panel: Option<CloudPanel>,
     /// The plane a row at the top of the history lights this frame, kept the same way (#6975).
@@ -729,6 +734,8 @@ pub fn apply_fold(app: &mut SolveApp, open: bool, open_by_default: &[String], cl
 #[derive(Default)]
 struct Actions {
     menu: Option<(Pos2, Target)>,
+    /// The element the row under the pointer is for: V acts on it without selecting it (#4128).
+    hover_target: Option<Target>,
     hover_bodies: Vec<String>,
     hovered: bool,
     /// The plane whose row is under the pointer, lit in the view (#6975).
@@ -1384,6 +1391,7 @@ pub(crate) fn history_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     DRAWN.with(|d| d.borrow_mut().truncate(drawn));
     app.viewport.hover_bodies = acts.hover_bodies.clone();
     app.tree.history_hover = acts.hover_bodies;
+    app.tree.history_hover_target = acts.hover_target;
     app.viewport.hover_plane = acts.hover_plane.clone();
     app.tree.history_plane = acts.hover_plane;
     if let Some(d) = acts.drop {
@@ -1404,6 +1412,9 @@ fn finish_browser(app: &mut SolveApp, ui: &mut egui::Ui, mut acts: Actions) {
     app.viewport.hover_bodies = if acts.hover_bodies.is_empty() { history } else { acts.hover_bodies };
     let history_plane = app.tree.history_plane.take();
     app.viewport.hover_plane = acts.hover_plane.or(history_plane);
+    // The row under the pointer, from the browser or from the history rows above it (#4128).
+    let history_target = app.tree.history_hover_target.take();
+    app.tree.hover_target = acts.hover_target.or(history_target);
     if let Some(d) = acts.drop {
         apply_drop(app, d);
     }
@@ -1528,6 +1539,7 @@ fn component_rows_inner(
     }
     if r.hovered {
         acts.hover(bodies.iter());
+        acts.hover_target = Some(Target::Component { id });
     }
     if let Some(p) = r.secondary {
         acts.menu = Some((p, Target::Component { id }));
@@ -1712,6 +1724,7 @@ fn occurrence_rows_inner(
     if r.hovered {
         let bodies = placement.hover_bodies.get_or_insert_with(|| app.session.occurrence_bodies(path, true).unwrap_or_default());
         acts.hover(bodies.iter());
+        acts.hover_target = Some(Target::Occurrence { path: path.to_vec() });
     }
     if let Some(p) = r.secondary {
         if !selected {
@@ -1912,6 +1925,13 @@ fn origin_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
             if let Some(target) = target {
                 crate::context_menu::open_for(app, p, target);
             }
+        }
+        if r.hovered {
+            acts.hover_target = match icon {
+                "plane" => Some(Target::OriginPlane { name: k.into() }),
+                "axis" => Some(Target::OriginAxis { name: k.into() }),
+                _ => None,
+            };
         }
         if r.hovered && icon == "plane" {
             acts.hover_plane = Some(k.into());
@@ -2157,6 +2177,9 @@ fn canvas_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize, acts: &mut A
         }
         if r.double {
             app.tree.canvas_panel = Some(CanvasPanel::new(app, id, false));
+        }
+        if r.hovered {
+            acts.hover_target = Some(Target::Canvas { id });
         }
         if let Some(p) = r.secondary {
             if !selected {
@@ -2630,6 +2653,7 @@ fn folder_rows_at(
         }
         if r.hovered {
             acts.hover(data.entries().flat_map(|e| &e.bodies));
+            acts.hover_target = Some(Target::Folder { component: comp, folder: fstatic.to_string(), scope: prefix.to_owned() });
         }
         if let Some(p) = r.secondary {
             acts.menu = Some((p, Target::Folder { component: comp, folder: fstatic.to_string(), scope: prefix.to_owned() }));
@@ -2736,6 +2760,7 @@ fn folder_level(
         }
         if r.hovered {
             acts.hover(group.entries().into_iter().flat_map(|e| &e.bodies));
+            acts.hover_target = Some(Target::Group { id, scope: prefix.to_owned() });
         }
         if let Some(p) = r.secondary {
             acts.menu = Some((p, Target::Group { id, scope: prefix.to_owned() }));
@@ -2953,6 +2978,9 @@ fn entry_row(
     }
     if r.hovered && !e.bodies.is_empty() {
         acts.hover(e.bodies.iter());
+    }
+    if r.hovered {
+        acts.hover_target = e.target.clone();
     }
     if r.hovered
         && let Thing::Plane(name) = &e.thing

@@ -2353,6 +2353,8 @@
   "prefs.structure.appearance": "المظهر",
   "prefs.structure.appearance_note": "الألوان والنصوص وإمكانية الوصول.",
   "prefs.structure.in_profile": "ضمن ملف التعريف",
+  "prefs.structure.interaction": "التفاعل",
+  "prefs.structure.interaction_note": "كيف يؤثر المؤشر والمفاتيح على النموذج.",
   "prefs.structure.layout": "التخطيط",
   "prefs.structure.layout_note": "مواضع أجزاء النافذة.",
   "prefs.structure.look": "العرض",

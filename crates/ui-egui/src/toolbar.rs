@@ -3177,7 +3177,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
             // With a menu open, V runs that menu's Show/Hide on what the menu is for.
             Key::V => {
                 if !crate::context_menu::press_shortcut(app, "V") {
-                    crate::context_menu::toggle_visibility(app);
+                    crate::context_menu::toggle_visibility_key(app);
                 }
             }
             Key::F2 => {

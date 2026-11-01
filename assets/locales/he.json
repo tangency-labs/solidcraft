@@ -2353,6 +2353,8 @@
   "prefs.structure.appearance": "מראה",
   "prefs.structure.appearance_note": "צבעים, טקסט ונגישות.",
   "prefs.structure.in_profile": "כלול בפרופיל",
+  "prefs.structure.interaction": "אינטראקציה",
+  "prefs.structure.interaction_note": "כיצד הסמן והמקשים פועלים על המודל.",
   "prefs.structure.layout": "פריסה",
   "prefs.structure.layout_note": "מיקום חלקי החלון.",
   "prefs.structure.look": "מראה",

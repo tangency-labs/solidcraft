@@ -1942,6 +1942,92 @@ pub fn toggle_visibility(app: &mut SolveApp) {
     }
 }
 
+/// Show/Hide (the V key) with Preferences ▸ Interaction ▸ "Hide (V) acts on the element under
+/// the cursor" on (#4128): the element under the cursor — found by the same rule as picking in
+/// the viewport, or the row under the pointer in the Browser tree — flips its visibility
+/// without selecting it first. With the cursor over empty space, or over an element of the
+/// current selection, `toggle_visibility` acts on the selection as before. Off: the same.
+pub fn toggle_visibility_key(app: &mut SolveApp) {
+    if !app.session.hide_under_cursor {
+        return toggle_visibility(app);
+    }
+    // A Browser row under the pointer: run that row's own Show/Hide, without selecting it.
+    if let Some(target) = app.tree.hover_target.clone() {
+        if !target_in_selection(app, &target)
+            && let Some(item) = items(app, &target).into_iter().find(|i| i.shortcut == "V" && i.enabled && i.children.is_empty())
+        {
+            let at = app.viewport.context_menu.unwrap_or_default();
+            run_item(app, &item, at);
+            return;
+        }
+        return toggle_visibility(app);
+    }
+    // The viewport: the hit under the cursor is the pick's own candidate, kept for the highlight.
+    if let Some(hit) = app.viewport.hover.clone() {
+        if !hit_in_selection(app, &hit) {
+            toggle_hit(app, &hit);
+            return;
+        }
+    }
+    toggle_visibility(app)
+}
+
+/// Flip the visibility of the element a viewport hit belongs to, without touching the
+/// selection (#4128): the body of a face, edge or vertex; the sketch of a sketch hit; a
+/// construction or origin plane, axis or construction point.
+fn toggle_hit(app: &mut SolveApp, hit: &crate::viewport::Hit) {
+    use crate::viewport::Hit as H;
+    let (item, visible) = match hit {
+        H::Face { body, .. } | H::Edge { body, .. } | H::Vertex { body, .. } => (json!(body), app.session.visibility.hidden_bodies.contains(body)),
+        H::SketchCurve { sketch, .. } | H::SketchPoint { sketch, .. } | H::SketchMidpoint { sketch, .. } | H::Profile { sketch, .. } => {
+            (json!(sketch), !crate::browser::sketch_visible(app, *sketch))
+        }
+        H::Plane { name, .. } | H::Axis { name } | H::ConstructionPoint { name } => {
+            (json!(name), app.session.visibility.hidden_origin.contains(name))
+        }
+    };
+    let _ = app.run("browser.visibility", json!({ "items": [item], "visible": visible }));
+}
+
+/// Whether the element a viewport hit belongs to is part of the current selection: V then
+/// hides the whole selection as before (#4128).
+fn hit_in_selection(app: &SolveApp, hit: &crate::viewport::Hit) -> bool {
+    use crate::viewport::Hit as H;
+    let sel = &app.session.selection;
+    match hit {
+        H::Face { body, .. } | H::Edge { body, .. } | H::Vertex { body, .. } => sel.iter().any(|s| match s {
+            Sel::Body { name } => name == body,
+            Sel::Face { body: b, .. } | Sel::Edge { body: b, .. } | Sel::Vertex { body: b, .. } => b == body,
+            _ => false,
+        }),
+        H::SketchCurve { sketch, .. } | H::SketchPoint { sketch, .. } | H::SketchMidpoint { sketch, .. } | H::Profile { sketch, .. } => {
+            sel.iter().any(|s| match s {
+                Sel::Feature { id } => id == sketch,
+                Sel::Profile { sketch: s, .. } | Sel::ExternalSketchCurve { sketch: s, .. } | Sel::ExternalSketchPoint { sketch: s, .. } => {
+                    s == sketch
+                }
+                _ => false,
+            })
+        }
+        H::Plane { name, .. } => sel.iter().any(|s| matches!(s, Sel::Plane { name: n } if n == name)),
+        H::Axis { name } => sel.iter().any(|s| matches!(s, Sel::Axis { name: n } if n == name)),
+        H::ConstructionPoint { name } => sel.iter().any(|s| matches!(s, Sel::ConstructionPoint { name: n } if n == name)),
+    }
+}
+
+/// Whether the element a Browser row is for is part of the current selection: V then hides
+/// the whole selection as before (#4128).
+fn target_in_selection(app: &SolveApp, target: &Target) -> bool {
+    match target {
+        Target::Body { name } => app.session.selection.iter().any(|s| matches!(s, Sel::Body { name: n } if n == name)),
+        Target::Sketch { id } => app.session.selection.iter().any(|s| matches!(s, Sel::Feature { id: i } if i == id)),
+        Target::OriginPlane { name } => app.session.selection.iter().any(|s| matches!(s, Sel::Plane { name: n } if n == name)),
+        Target::OriginAxis { name } => app.session.selection.iter().any(|s| matches!(s, Sel::Axis { name: n } if n == name)),
+        Target::Occurrence { path } => app.session.selection.iter().any(|s| matches!(s, Sel::Occurrence { path: p } if p == path)),
+        _ => false,
+    }
+}
+
 /// Rename what is selected (F2): one body, sketch or feature, construction plane, component
 /// picked in the browser, canvas, or a group whose Browser row was clicked.
 pub fn rename_selection(app: &mut SolveApp, at: Pos2) -> bool {

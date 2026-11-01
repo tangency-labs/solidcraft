@@ -241,6 +241,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
     app.tree.picked_components.clear();
     // Preferences the session holds go with the user, not the tab (#680).
     app.session.auto_project = out.session.auto_project;
+    app.session.hide_under_cursor = out.session.hide_under_cursor;
     app.session.set_single_surface_analysis(app.preferences.single_surface_analysis);
     // Views cache by revision: the incoming design must not look unchanged.
     let before = app.session.revision;
@@ -1760,6 +1761,23 @@ mod tests {
         adopt(&mut a, Session::default());
         assert_eq!(a.docs.count(), 1);
         assert!(!a.session.auto_project, "a design adopted over a blank one");
+    }
+
+    /// #4128: "Hide (V) acts on the element under the cursor" is a preference the session holds:
+    /// it follows the user across tabs, like `auto_project` (#680).
+    #[test]
+    fn hide_under_cursor_follows_the_user_across_tabs() {
+        let mut a = app();
+        a.session.hide_under_cursor = false;
+        new_design(&mut a);
+        assert!(!a.session.hide_under_cursor, "a new tab");
+        a.session.hide_under_cursor = true;
+        switch(&mut a, 0);
+        assert!(a.session.hide_under_cursor, "the tab switched to");
+        let prefs: Value = serde_json::from_str(&a.prefs()).unwrap();
+        assert_eq!(prefs["hide_under_cursor"], true);
+        adopt(&mut a, Session::default());
+        assert!(a.session.hide_under_cursor, "a design adopted over a blank one");
     }
 
     /// Hide Origin by Default hides the Origin of designs that don't keep its eye; a design that

@@ -2353,6 +2353,8 @@
   "prefs.structure.appearance": "Giao diện",
   "prefs.structure.appearance_note": "Màu sắc, văn bản và khả năng tiếp cận.",
   "prefs.structure.in_profile": "Trong hồ sơ",
+  "prefs.structure.interaction": "Tương tác",
+  "prefs.structure.interaction_note": "Con trỏ và phím tác động lên mô hình như thế nào.",
   "prefs.structure.layout": "Bố cục",
   "prefs.structure.layout_note": "Vị trí các phần của cửa sổ.",
   "prefs.structure.look": "Hiển thị",
