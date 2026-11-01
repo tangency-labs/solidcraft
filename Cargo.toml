@@ -97,6 +97,9 @@ toml = "1"
 
 # ui
 egui = "0.36"
+# eframe 0.36.2 vendored with a RunLogicNow user event so the control channel can run a logic
+# pass at once, off the compositor's frame callbacks (#743); see vendor/eframe and vendor/README.md.
+# default-features off and persistence on match the previous crates.io dependency's feature set.
 eframe = { version = "0.36", default-features = false, features = ["persistence"] }
 # Instant/SystemTime that also work in the browser (std panics on wasm32-unknown-unknown).
 web-time = "1"
@@ -152,6 +155,8 @@ debug = "line-tables-only"
 
 # truck-shapeops with SolidCraft fixes (Apache-2.0, see vendor/truck-shapeops and ATTRIBUTION.md).
 [patch.crates-io]
+# Run control-channel logic without waiting for a compositor frame (#743).
+eframe = { path = "vendor/eframe" }
 truck-geometry = { path = "vendor/truck-geometry" }
 truck-shapeops = { path = "vendor/truck-shapeops" }
 truck-stepio = { path = "vendor/truck-stepio" }

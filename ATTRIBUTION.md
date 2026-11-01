@@ -696,6 +696,8 @@ copied into SolidCraft.
 | vendor/truck-shapeops | truck-shapeops 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | robust meshing and nearest-parameter fallback in booleans; degenerate intersection-curve rejection; face and edge history of booleans; trace macro; corner choice at vertices several intersection curves end on; reuse of an operand's meshes (vendor/README.md) |
 | vendor/truck-geometry | truck-geometry 0.5.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | intersection curves divided from their neighbours' surface parameters; surface second derivatives (vendor/README.md) |
 | vendor/matext4cgmath | matext4cgmath 0.1.0, https://github.com/ricosjp/matext4cgmath (RICOS Co. Ltd.) | Apache-2.0 | root refinement stops after 100 Newton steps (vendor/README.md) |
+| vendor/eframe | eframe 0.36.2, https://github.com/emilk/egui (Emil Ernerfeldt and contributors) | MIT OR Apache-2.0 | event loop's proxy handed to the app before the loop starts, so its threads can run a logic pass off the compositor's frame callbacks (vendor/README.md) |
+| vendor/eframe/data/icon.png | eframe 0.36.2, https://github.com/emilk/egui (Emil Ernerfeldt and contributors) | MIT OR Apache-2.0 | the eframe package's own default window icon, which its loader reads when no other icon is available |
 
 ## Vendored renderer compatibility fix
 
