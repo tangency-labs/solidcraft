@@ -1723,8 +1723,10 @@ fn section_analysis() {
     assert_eq!(s.undo.len(), undo);
 }
 
-/// A section index finds the same cut segments, in the same order, as cutting every triangle:
-/// tilted and axis normals, cuts through vertices, at the ends and beyond the part.
+/// A section index finds the same cut segments, in the same order and to the bit, as cutting
+/// every triangle: one index for every normal (tilting a Section Analysis turns it every frame,
+/// #10373), axis and tilted, cuts through vertices, at the ends and beyond the part, and a
+/// triangle with a corner that is not a number.
 #[test]
 fn section_index_cuts_like_every_triangle() {
     let mut s = Session::default();
@@ -1732,18 +1734,30 @@ fn section_index_cuts_like_every_triangle() {
     run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 8, "operation": "join"}));
     let st = s.model.state();
     let m = st.bodies.first().unwrap().mesh();
-    assert!(m.triangles.len() > 64, "enough triangles for several slabs: {}", m.triangles.len());
-    for n in [Vec3::Z, -Vec3::Y, Vec3::new(1.0, 2.0, 3.0).normalized().unwrap(), Vec3::new(-0.3, 0.1, 0.9).normalized().unwrap()] {
-        let index = view::SectionIndex::new(&m, n);
-        let heights: Vec<f64> = m.positions.iter().map(|p| n.dot(*p)).collect();
-        let (lo, hi) = heights.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), h| (a.min(*h), b.max(*h)));
-        let mut cuts: Vec<f64> = (0..=40).map(|k| lo - 1.0 + (hi - lo + 2.0) * k as f64 / 40.0).collect();
-        cuts.extend(heights.iter().step_by(7).copied());
-        cuts.extend([lo, hi]);
-        for at in cuts {
-            let o = n * at;
-            let segments = view::section_segments(&m, o, n);
-            assert_eq!(index.segments(&m, o), segments, "{n:?} at {at}");
+    assert!(m.triangles.len() > 64, "enough triangles for several cells: {}", m.triangles.len());
+    let bits = |v: Vec<(Vec3, Vec3)>| v.iter().flat_map(|(a, b)| [a.x, a.y, a.z, b.x, b.y, b.z].map(f64::to_bits)).collect::<Vec<_>>();
+    let mut hostile = (*m).clone();
+    hostile.positions.push(Vec3::new(f64::NAN, 0.0, 0.0));
+    let nan = u32::try_from(hostile.positions.len() - 1).unwrap();
+    hostile.triangles.extend([[0, 1, nan], [0, 1, u32::MAX]]);
+    for m in [&*m, &hostile] {
+        let index = view::SectionIndex::new(m);
+        let mut normals = vec![Vec3::Z, -Vec3::Y, Vec3::new(1.0, 2.0, 3.0).normalized().unwrap(), Vec3::new(-0.3, 0.1, 0.9).normalized().unwrap()];
+        // A tilt drag: the normal turns a little every frame.
+        normals.extend((0..30).map(|k| {
+            let a = (5.0 + 3.0 * k as f64).to_radians();
+            Vec3::new(0.1, a.sin(), a.cos()).normalized().unwrap()
+        }));
+        for n in normals {
+            let heights: Vec<f64> = m.positions.iter().map(|p| n.dot(*p)).filter(|h| h.is_finite()).collect();
+            let (lo, hi) = heights.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), h| (a.min(*h), b.max(*h)));
+            let mut cuts: Vec<f64> = (0..=40).map(|k| lo - 1.0 + (hi - lo + 2.0) * k as f64 / 40.0).collect();
+            cuts.extend(heights.iter().step_by(7).copied());
+            cuts.extend([lo, hi]);
+            for at in cuts {
+                let o = n * at;
+                assert_eq!(bits(index.segments(m, o, n)), bits(view::section_segments(m, o, n)), "{n:?} at {at}");
+            }
         }
     }
 }
