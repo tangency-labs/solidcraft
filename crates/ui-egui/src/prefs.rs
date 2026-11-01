@@ -1093,13 +1093,13 @@ preference_settings! {
     cosmetic_threads: bool = false, PAGE_GRAPHICS;
     /// The grid turns to the upright origin plane facing a side view (#1470). Off by default: the
     /// grid stays on the ground plane (XY) whatever the view.
-    grid_follows_view: bool = false => check("Grid follows the view", "Side views show the grid on the upright plane facing them instead of the ground");
+    grid_follows_view: bool = false => check_id("ui.grid_follows_view");
     /// Draw reference geometry such as inactive sketches and datum planes through shaded bodies.
     /// Off by default to preserve the depth-tested viewport behaviour.
     reference_geometry_through_bodies: bool = false, PAGE_GRAPHICS => check_id("settings.reference_geometry_through_bodies");
     /// A small dot at every vertex wherever edges are drawn (#7834). Off by default: the viewport
     /// draws edges only, as it always has.
-    vertex_markers: bool = false => check("Vertex markers", "Show a small dot at every vertex wherever edges are drawn");
+    vertex_markers: bool = false;
     /// Restore the previous platform-specific fixed Render preview geometry budget.
     render_previous_geometry_budget: bool = false, PAGE_GRAPHICS => check_id("prefs.render_previous_geometry_budget");
     /// How finely the viewport tessellates curved faces and edges: `coarse`, `normal`, `fine` or
@@ -1111,7 +1111,7 @@ preference_settings! {
     /// Supersample only while the view holds still (full speed while orbiting).
     supersampling_adaptive: bool = true, PAGE_GRAPHICS => check_tr("ui.supersampling_adaptive");
     /// Show the frame rate in the view's corner (the view then redraws every frame).
-    show_frame_rate: bool = false, PAGE_GRAPHICS => check_id("ui.frame_rate");
+    show_frame_rate: bool = false, PAGE_GRAPHICS;
     /// With the frame rate: a frame-time graph, a histogram and what the GPU drew (#2548).
     frame_rate_details: bool = false, PAGE_GRAPHICS;
     /// Draw a wider rim under finished sketch curves to improve contrast on shaded faces.
@@ -1198,10 +1198,10 @@ preference_settings! {
     ribbon_labels: bool = true, PAGE_LAYOUT;
     /// Show engine-derived persistent selection in the ribbon; off retains neutral buttons.
     persistent_ribbon_pressed: bool = true, PAGE_LAYOUT;
-    viewport_analysis_status: bool = true, PAGE_GRAPHICS => check_id("prefs.viewport_analysis_status");
-    viewport_section_status: bool = true, PAGE_GRAPHICS => check_id("prefs.viewport_section_status");
-    viewport_status_details: bool = true, PAGE_GRAPHICS => check_id("prefs.viewport_status_details");
-    viewport_status_summary: bool = true, PAGE_GRAPHICS => check_id("prefs.viewport_status_summary");
+    viewport_analysis_status: bool = true, PAGE_GRAPHICS;
+    viewport_section_status: bool = true, PAGE_GRAPHICS;
+    viewport_status_details: bool = true, PAGE_GRAPHICS;
+    viewport_status_summary: bool = true, PAGE_GRAPHICS;
     /// Keep the SKETCH tab in the ribbon, right after MODEL, while no sketch is open; its drawing
     /// tools then start a sketch first (#7904).
     sketch_tab_always: bool = false, PAGE_LAYOUT;
@@ -1240,7 +1240,7 @@ preference_settings! {
     status_bar: bool = false, PAGE_LAYOUT;
     /// The selection's length, area or distance in the view's bottom right corner (#7000). Off by
     /// default.
-    quick_measure: bool = false, PAGE_GRAPHICS => check_id("prefs.quick_measure");
+    quick_measure: bool = false, PAGE_GRAPHICS;
     /// Put the feature history to the left of the browser instead of below the viewport.
     timeline_left: bool = false, PAGE_LAYOUT;
     /// Measured outer width; the contents react to this width without a names mode.
@@ -2480,27 +2480,41 @@ pub const WAYLAND_DROP_ISSUE: &str = "https://github.com/rust-windowing/winit/is
 /// which one is running now, and when native Wayland is in use or chosen, that some features are
 /// limited there, linking to [`WAYLAND_DROP_ISSUE`].
 #[cfg(target_os = "linux")]
-fn window_system_row(app: &mut SolveApp, ui: &mut egui::Ui) {
+fn window_system_row(app: &mut SolveApp, ui: &mut egui::Ui, label_width: f32) {
     let t = Tokens::get();
     let label = |id: &str| crate::i18n::tr(&format!("ui.window_system_{id}")).to_string();
     let labels: Vec<_> = WINDOW_SYSTEMS.iter().copied().map(label).collect();
     let labels: Vec<_> = labels.iter().map(String::as_str).collect();
-    // The note below says that it applies after a restart, and which one runs now.
-    let response = ui.allocate_ui_with_layout(egui::vec2(t.form_card_width, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-        let mut selected = WINDOW_SYSTEMS.iter().position(|id| *id == app.preferences.window_system).unwrap_or(0);
-        if ui_kit::segmented(ui, &mut selected, &labels, ui_kit::Segments::default())
-            && let Some(id) = WINDOW_SYSTEMS.get(selected)
-        {
-            app.preferences.window_system = (*id).into();
-        }
-    });
-    crate::scenario::publish_handle("prefs:window_system", response.response.rect.center());
     let now = app.services.window_system.map(label);
     let text = match &now {
         Some(now) => crate::i18n::format("settings.window_system_note_now", &[("now", now)]),
         None => app.tr("settings.msaa_applies_on_restart").to_string(),
     };
-    ui_kit::text(ui, &text, ui_kit::Text::Hint("window_system"));
+    let row_width = (label_width + t.space_14 + t.space_24 * 10.0).min(ui.available_width());
+    ui.horizontal_wrapped(|ui| {
+        ui.allocate_ui_with_layout(egui::vec2(row_width, t.control_height), egui::Layout::top_down(egui::Align::Min), |ui| {
+            ui_kit::settings_form(ui, label_width, |ui| {
+                ui_kit::settings_row_help(ui, app.tr("ui.window_system"), &text, |ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2((t.space_24 * 10.0).min(ui.available_width()), t.control_height),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            let mut selected = WINDOW_SYSTEMS.iter().position(|id| *id == app.preferences.window_system).unwrap_or(0);
+                            let before = selected;
+                            let response = ui_kit::dropdown(ui, "window_system", &mut selected, &labels);
+                            crate::scenario::publish_target("prefs:window_system", response.rect);
+                            if selected != before
+                                && let Some(id) = WINDOW_SYSTEMS.get(selected)
+                            {
+                                app.preferences.window_system = (*id).into();
+                            }
+                        },
+                    );
+                });
+            });
+        });
+        ui_kit::settings_badge(ui, "Linux", false);
+    });
     let choice = app.preferences.window_system.as_str();
     if choice == "wayland" || (choice == "auto" && app.services.window_system == Some("wayland")) {
         ui.horizontal_wrapped(|ui| {
@@ -5771,7 +5785,7 @@ mod tests {
             out.textures_delta.clear();
         }
         let mut previous = 0;
-        for label in ["Coarse", "Normal", "Fine", "Ultra"] {
+        for (label, segments) in [("Coarse", 8), ("Normal", 16), ("Fine", 32), ("Ultra", 64)] {
             let card = crate::scenario::rect_of(&format!("prefs:option:{label}")).expect("quality card");
             let facets = shapes
                 .iter()
@@ -5785,6 +5799,7 @@ mod tests {
                 .max()
                 .unwrap_or(0);
             assert!(facets > previous, "{label} must visibly add detail to the preceding quality: {facets} <= {previous}");
+            assert_eq!(facets, segments + 1, "{label} uses the canonical faceting caption, with the closing vertex");
             previous = facets;
         }
     }
@@ -9697,16 +9712,6 @@ mod ui_scale_regression_tests {
     }
 }
 
-/// View ▸ View angles and Preferences ▸ Graphics run the same command (#6032).
-pub(crate) fn view_angles_checkbox(app: &mut SolveApp, ui: &mut egui::Ui) {
-    let mut enabled = app.preferences.show_view_angles;
-    let response = ui_kit::checkbox(ui, crate::i18n::tr("ui.view_angles"), &mut enabled).on_hover_text(crate::i18n::tr("ui.view_angles_help"));
-    crate::scenario::publish_handle("view:view_angles", response.rect.center());
-    if response.changed() {
-        let _ = app.run("view.angle_readout", json!({"enabled": enabled}));
-    }
-}
-
 #[cfg(test)]
 mod ambient_occlusion_tests {
     use super::*;
@@ -9783,6 +9788,253 @@ pub(crate) fn graphics_preset(prefs: &Prefs) -> &'static str {
 #[cfg(test)]
 mod graphics_preset_tests {
     use super::*;
+
+    fn click_graphics(h: &mut crate::scenario::Harness, query: &str, handle: &str) {
+        h.app.prefs_window.filter = query.into();
+        h.frames(5);
+        reveal_preference(h, handle);
+        h.step(&json!({"click":{"handle":handle}})).unwrap();
+        h.frames(2);
+    }
+
+    #[test]
+    fn graphics_cards_follow_manual_changes_and_preserve_non_preset_settings_in_both_themes() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.call("ui.prefs", json!({"theme":theme,"language":"en","msaa":2,"dark_parts_shading":true,"frame_rate_details":true}));
+            h.call("ui.prefs", json!({"open":"Graphics"}));
+            let camera = h.app.cam;
+            let design = h.app.session.doc.to_json();
+            click_graphics(&mut h, "Quality", "view:graphics_preset:quality");
+            assert_eq!(graphics_preset(&h.app.preferences), "quality");
+            assert_eq!(
+                (h.app.preferences.display_quality.as_str(), h.app.preferences.supersampling, h.app.preferences.supersampling_adaptive),
+                ("fine", 2.0, true)
+            );
+            assert!(h.app.preferences.ambient_occlusion);
+            assert_eq!(h.app.preferences.msaa, 2);
+            assert!(h.app.preferences.dark_parts_shading && h.app.preferences.frame_rate_details);
+            let quality = h.app.preferences.clone();
+            click_graphics(&mut h, "Custom", "view:graphics_preset:custom");
+            assert_eq!(h.app.preferences, quality, "Custom represents the mixture and sets nothing");
+            click_graphics(&mut h, "Ultra", "prefs:display_quality:ultra");
+            assert_eq!(h.app.preferences.display_quality, "ultra");
+            assert_eq!(graphics_preset(&h.app.preferences), "custom");
+            click_graphics(&mut h, "Performance", "view:graphics_preset:performance");
+            assert_eq!(graphics_preset(&h.app.preferences), "performance");
+            assert_eq!(
+                (h.app.preferences.ambient_occlusion, h.app.preferences.supersampling, h.app.preferences.display_quality.as_str()),
+                (false, 1.0, "normal")
+            );
+            h.call("ui.prefs", json!({"supersampling_adaptive":false}));
+            assert_eq!(graphics_preset(&h.app.preferences), "performance", "Performance ignores the stored adaptive flag");
+            assert_eq!(h.app.preferences.msaa, 2);
+            assert!(h.app.preferences.dark_parts_shading && h.app.preferences.frame_rate_details);
+            assert_eq!(h.app.cam, camera);
+            assert_eq!(h.app.session.doc.to_json(), design);
+            assert!(h.app.session.undo.is_empty());
+        }
+    }
+
+    #[test]
+    fn graphics_tiles_and_status_chips_edit_real_values_and_cancel_in_both_themes() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.call("ui.prefs", json!({"theme":theme,"language":"en"}));
+            h.call("ui.prefs", json!({"open":"Graphics"}));
+            let original = h.app.preferences.clone();
+            let session = (h.app.ui.show_grid, h.app.ui.ground_shadow, h.app.ui.perspective);
+            for (query, handle) in [("Grid", "prefs:grid"), ("Ground shadow", "prefs:ground_shadow"), ("Perspective", "prefs:perspective")] {
+                click_graphics(&mut h, query, handle);
+            }
+            assert_eq!((h.app.ui.show_grid, h.app.ui.ground_shadow, h.app.ui.perspective), (!session.0, !session.1, !session.2));
+            for (query, field) in [
+                ("Ambient occlusion", "ambient_occlusion"),
+                ("View angles", "show_view_angles"),
+                ("Vertex markers", "vertex_markers"),
+                ("Quick measurement", "quick_measure"),
+                ("Frame rate", "show_frame_rate"),
+                ("Analysis", "viewport_analysis_status"),
+                ("Section", "viewport_section_status"),
+                ("Live details", "viewport_status_details"),
+                ("Fold items", "viewport_status_summary"),
+            ] {
+                let before = serde_json::to_value(&h.app.preferences).unwrap();
+                click_graphics(&mut h, query, &format!("prefs:{field}"));
+                let after = serde_json::to_value(&h.app.preferences).unwrap();
+                let mut expected = before.clone();
+                expected[field] = json!(!before[field].as_bool().unwrap());
+                assert_eq!(after, expected, "{theme}: {field} changes precisely its own setting");
+            }
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.preferences, original);
+            assert_eq!((h.app.ui.show_grid, h.app.ui.ground_shadow, h.app.ui.perspective), session);
+        }
+    }
+
+    #[test]
+    fn graphics_overlay_cards_apply_persist_and_reset_without_adding_unpaged_fields() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"language":"en"}));
+        h.call("ui.prefs", json!({"open":"Graphics"}));
+        for (query, handle) in [
+            ("View angles", "prefs:show_view_angles"),
+            ("Vertex markers", "prefs:vertex_markers"),
+            ("Quick measurement", "prefs:quick_measure"),
+            ("Frame rate", "prefs:show_frame_rate"),
+            ("Frame rate details", "prefs:frame_rate_details"),
+            ("Analysis", "prefs:viewport_analysis_status"),
+            ("Section", "prefs:viewport_section_status"),
+            ("Live details", "prefs:viewport_status_details"),
+            ("Fold items", "prefs:viewport_status_summary"),
+        ] {
+            click_graphics(&mut h, query, handle);
+        }
+        h.call("ui.prefs", json!({"button":"apply"}));
+        let applied = h.app.preferences.clone();
+        let mut restored = SolveApp::new(Default::default(), Default::default());
+        restored.load_prefs(&h.app.prefs());
+        assert!(restored.preferences.show_view_angles && restored.preferences.vertex_markers && restored.preferences.quick_measure);
+        assert!(restored.preferences.show_frame_rate && restored.preferences.frame_rate_details);
+        assert!(!restored.preferences.viewport_analysis_status && !restored.preferences.viewport_section_status);
+        assert!(!restored.preferences.viewport_status_details && !restored.preferences.viewport_status_summary);
+        h.call("ui.prefs", json!({"button":"defaults"}));
+        assert!(!h.app.preferences.show_view_angles && !h.app.preferences.quick_measure);
+        assert!(!h.app.preferences.show_frame_rate && !h.app.preferences.frame_rate_details);
+        assert!(h.app.preferences.viewport_analysis_status && h.app.preferences.viewport_section_status);
+        assert!(h.app.preferences.viewport_status_details && h.app.preferences.viewport_status_summary);
+        assert!(h.app.preferences.vertex_markers, "the visible unpaged control remains excluded from page defaults");
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(h.app.preferences, applied, "Cancel after Apply restores the applied overlay state");
+    }
+
+    #[test]
+    fn graphics_style_dropdown_uses_the_real_indices_and_icon_masters() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.call("ui.prefs", json!({"theme":theme,"language":"en"}));
+            h.call("ui.prefs", json!({"open":"Graphics"}));
+            for (index, (_, label)) in crate::navigation_bar::VISUAL_STYLES.into_iter().enumerate() {
+                click_graphics(&mut h, "Visual style", "prefs:visual_style");
+                h.step(&json!({"click":{"handle":format!("dialog:Visual style:{label}")}})).unwrap();
+                h.frames(3);
+                assert_eq!(h.app.ui.visual_style, index as u8);
+                let icon = crate::navigation_bar::visual_style_icon(index as u8);
+                let painted = crate::scenario::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
+                assert!(crate::scenario::rect_of("prefs:visual_style").unwrap().contains_rect(painted));
+            }
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.ui.visual_style, 0);
+        }
+    }
+
+    #[test]
+    fn graphics_style_popup_owns_escape_and_leaves_snapshot_cancel_to_the_next_escape() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width":1600,"height":1100}));
+            h.call("ui.prefs", json!({"language":"en","theme":theme}));
+            let before = h.app.preferences.clone();
+            h.call("ui.prefs", json!({"open":"Graphics","dark_parts_shading":true}));
+            let edited = h.app.preferences.clone();
+            assert_ne!(before, edited);
+            reveal_preference(&mut h, "prefs:visual_style");
+            h.step(&json!({"click":{"handle":"prefs:visual_style"}})).unwrap();
+            h.frames(2);
+            let popup = "dialog:Visual style:Wireframe";
+            assert!(crate::scenario::handle_at(popup).is_some());
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(h.app.prefs_window.open && h.app.prefs_window.section == PAGE_GRAPHICS);
+            assert!(h.app.prefs_window.snapshot.is_some());
+            assert_eq!(h.app.preferences, edited, "first Escape retains unapplied Graphics edits");
+            assert!(crate::scenario::handle_at(popup).is_none());
+            h.step(&json!({"key":"Enter"})).unwrap();
+            h.frames(2);
+            assert!(h.app.prefs_window.open && crate::scenario::handle_at(popup).is_some(), "Enter reopens the focused style trigger");
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(h.app.prefs_window.open && h.app.prefs_window.snapshot.is_some());
+            assert!(crate::scenario::handle_at(popup).is_none());
+            assert_eq!(h.app.preferences, edited);
+            h.step(&json!({"key":"Escape"})).unwrap();
+            h.frames(2);
+            assert!(!h.app.prefs_window.open && h.app.prefs_window.snapshot.is_none());
+            assert_eq!(h.app.preferences, before, "Escape without a popup performs normal Preferences Cancel");
+        }
+    }
+
+    #[test]
+    fn graphics_disabled_controls_keep_stored_values_and_msaa_waits_for_restart() {
+        use egui::accesskit::Role;
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            let dir = std::env::temp_dir().join(format!("solidcraft-graphics-cards-{}-{theme}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join("graphics.json");
+            std::fs::write(&path, r#"{"backend":"vulkan","msaa":4}"#).unwrap();
+            h.app.services.graphics_path = Some(path.to_string_lossy().into_owned());
+            h.app.msaa_supported = vec![1, 2, 4];
+            let active_samples = h.app.viewport.gpu.as_ref().map(|gpu| gpu.samples);
+            h.call("ui.prefs", json!({"theme":theme,"language":"en","frame_rate_details":true}));
+            h.call("ui.prefs", json!({"open":"Graphics"}));
+            click_graphics(&mut h, "Anti-aliasing", "prefs:msaa:8");
+            assert_eq!(h.app.preferences.msaa, 4, "an unavailable card cannot coerce MSAA");
+            assert!(h.widget("Restart needed").is_some());
+            let tree = h.output.accesskit_update.as_ref().unwrap();
+            assert!(tree.nodes.iter().any(|(_, node)| node.role() == Role::RadioButton && node.label() == Some("8×") && node.is_disabled()));
+            click_graphics(&mut h, "Anti-aliasing", "prefs:msaa:2");
+            assert_eq!(h.app.preferences.msaa, 2);
+            let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(saved["msaa"], 2);
+            assert_eq!(saved["backend"], "vulkan");
+            assert_eq!(
+                h.app.viewport.gpu.as_ref().map(|gpu| gpu.samples),
+                active_samples,
+                "changing the saved level leaves the running renderer alone"
+            );
+            click_graphics(&mut h, "Only when the view is still", "prefs:supersampling_adaptive");
+            assert!(h.app.preferences.supersampling_adaptive, "disabled adaptive control retains its saved value");
+            click_graphics(&mut h, "Frame rate details", "prefs:frame_rate_details");
+            assert!(h.app.preferences.frame_rate_details, "visible disabled details control retains its saved value");
+            let tree = h.output.accesskit_update.as_ref().unwrap();
+            assert!(
+                tree.nodes.iter().any(|(_, node)| node.role() == Role::CheckBox && node.label() == Some("Frame rate details") && node.is_disabled())
+            );
+            click_graphics(&mut h, "Frame rate", "prefs:show_frame_rate");
+            click_graphics(&mut h, "Frame rate details", "prefs:frame_rate_details");
+            assert!(!h.app.preferences.frame_rate_details, "enabling Frame rate enables its details checkbox");
+            h.call("ui.prefs", json!({"button":"cancel"}));
+            assert_eq!(h.app.preferences.msaa, 4);
+            assert!(h.app.preferences.frame_rate_details);
+            let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(saved["msaa"], 4, "Cancel restores startup persistence too");
+            assert_eq!(saved["backend"], "vulkan");
+            std::fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn graphics_page_keeps_the_untouched_radian_default_and_unpaged_reset_exclusions() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.call("ui.prefs", json!({"theme":theme,"language":"en","vertex_markers":true,"grid_follows_view":true}));
+            h.call("ui.prefs", json!({"open":"Graphics"}));
+            for (perspective, auto_ortho) in [(false, false), (true, false), (false, true)] {
+                h.app.ui.perspective = perspective;
+                h.app.ui.auto_ortho_faces = auto_ortho;
+                h.app.prefs_window.filter = "Field of view".into();
+                h.frames(5);
+                assert_eq!(h.app.preferences.perspective_fov, 0.6, "drawing a whole-degree readout never rounds the default");
+            }
+            for page in 0..PAGES.len() {
+                defaults(&mut h.app, page);
+                assert!(h.app.preferences.vertex_markers && h.app.preferences.grid_follows_view, "{page}: neither unpaged field joins resets");
+            }
+            assert_eq!(h.app.preferences.perspective_fov, 0.6);
+        }
+    }
 
     #[test]
     fn viewport_preset_popup_accepts_quality_and_performance() {

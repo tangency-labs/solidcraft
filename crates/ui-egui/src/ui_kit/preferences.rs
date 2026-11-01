@@ -548,9 +548,6 @@ pub(crate) fn settings_badge(ui: &mut Ui, text: &str, warning: bool) {
 #[derive(Clone, Copy)]
 pub(crate) enum PreferenceFigure {
     Pivot(usize),
-    Quality(usize),
-    Antialiasing(u32),
-    ContactShading(bool),
     UpAxis(bool),
 }
 
@@ -567,12 +564,9 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
         }
     }
     let t = Tokens::get();
-    let width = match figure {
-        PreferenceFigure::Antialiasing(_) => t.space_24 * 3.0 + t.space_16,
-        _ => t.form_label_width + t.space_24 * 2.0 + t.space_6,
-    };
-    let preview_height = if matches!(figure, PreferenceFigure::Antialiasing(_)) { t.space_24 * 3.0 } else { t.space_24 * 3.0 + t.space_3 };
-    let label_height = if matches!(figure, PreferenceFigure::ContactShading(_)) { t.space_16 * 2.0 } else { t.space_16 };
+    let width = t.form_label_width + t.space_24 * 2.0 + t.space_6;
+    let preview_height = t.space_24 * 3.0 + t.space_3;
+    let label_height = t.space_16;
     let height = preview_height + t.space_6 * 2.0 + t.space_4 + label_height + if note.is_some() { t.space_16 } else { 0.0 };
     let enabled = enabled && ui.is_enabled();
     let (rect, response) =
@@ -598,11 +592,8 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
         if selected { Stroke::new(2.0, t.form_primary) } else { t.control_border_stroke(t.control_border) },
         egui::StrokeKind::Inside,
     );
-    let mut preview = Rect::from_min_size(rect.min + vec2(t.space_6, t.space_6), vec2((rect.width() - t.space_12).max(0.0), preview_height));
-    if matches!(figure, PreferenceFigure::Antialiasing(_)) {
-        preview = Rect::from_center_size(preview.center(), vec2(preview.height(), preview.height()));
-    }
-    paint_preference_figure(ui.painter(), preview, figure, enabled);
+    let preview = Rect::from_min_size(rect.min + vec2(t.space_6, t.space_6), vec2((rect.width() - t.space_12).max(0.0), preview_height));
+    paint_preference_figure(ui.painter(), preview, figure);
     let label_rect =
         Rect::from_min_size(pos2(rect.left() + t.space_4, preview.bottom() + t.space_4), vec2((rect.width() - t.space_8).max(0.0), label_height));
     centred_text_rows(
@@ -611,7 +602,7 @@ pub(crate) fn option_card(ui: &mut Ui, label: &str, note: Option<&str>, selected
         label,
         if selected { crate::fonts::semibold(t.font_label) } else { FontId::proportional(t.font_label) },
         ink,
-        if matches!(figure, PreferenceFigure::ContactShading(_)) { 2 } else { 1 },
+        1,
     );
     if let Some(note) = note {
         centred_text(
@@ -647,66 +638,17 @@ fn centred_text_rows(p: &egui::Painter, rect: Rect, label: &str, font: FontId, i
     p.with_clip_rect(rect).galley(rect.center() - galley.rect.center().to_vec2(), galley, ink);
 }
 
-fn point(r: Rect, x: f32, y: f32) -> Pos2 {
-    pos2(r.left() + r.width() * x, r.top() + r.height() * y)
-}
-
-fn paint_preference_figure(p: &egui::Painter, rect: Rect, figure: PreferenceFigure, enabled: bool) {
+fn paint_preference_figure(p: &egui::Painter, rect: Rect, figure: PreferenceFigure) {
     if !p.clip_rect().intersects(rect) {
         return;
     }
     let t = Tokens::get();
     let p = p.with_clip_rect(rect);
-    let alpha = if enabled { 1.0 } else { 0.4 };
-    let accent = t.form_primary.gamma_multiply(alpha);
     p.rect_filled(rect, t.control_radius, t.viewport_top);
     t.container_rect(&p, rect, t.control_radius, egui::Color32::TRANSPARENT, t.dialog_rule);
     match figure {
-        PreferenceFigure::Quality(sides) => {
-            let n = sides.clamp(3, 96);
-            let centre = rect.center();
-            let radius = rect.height() * 0.34;
-            let guide: Vec<_> = (0..=96)
-                .map(|i| {
-                    let a = std::f32::consts::TAU * i as f32 / 96.0;
-                    centre + vec2(a.cos(), a.sin()) * radius
-                })
-                .collect();
-            p.extend(egui::Shape::dashed_line(&guide, t.control_border_stroke(t.control_border), t.space_2, t.space_3));
-            let points = (0..n)
-                .map(|i| {
-                    let a = std::f32::consts::TAU * i as f32 / n as f32;
-                    centre + vec2(a.cos(), a.sin()) * radius
-                })
-                .collect();
-            p.add(egui::Shape::convex_polygon(points, accent.gamma_multiply(0.15), Stroke::new(1.5, accent)));
-        }
-        PreferenceFigure::Antialiasing(samples) => {
-            let n = 10;
-            let s = samples.clamp(1, 8);
-            for y in 0..n {
-                for x in 0..n {
-                    let mut covered = 0;
-                    for sy in 0..s {
-                        for sx in 0..s {
-                            let px = (x as f32 + (sx as f32 + 0.5) / s as f32) / n as f32;
-                            let py = (y as f32 + (sy as f32 + 0.5) / s as f32) / n as f32;
-                            if py > 0.3 + px * 0.35 {
-                                covered += 1;
-                            }
-                        }
-                    }
-                    let cell = Rect::from_min_max(
-                        point(rect, x as f32 / n as f32, y as f32 / n as f32),
-                        point(rect, (x + 1) as f32 / n as f32, (y + 1) as f32 / n as f32),
-                    );
-                    p.rect_filled(cell, 0, t.viewport_top.lerp_to_gamma(accent, covered as f32 / (s * s) as f32));
-                }
-            }
-        }
         PreferenceFigure::UpAxis(y_up) => super::preferences_figures::paint_orientation(&p, rect, y_up),
         PreferenceFigure::Pivot(pivot) => super::preferences_figures::paint_orbit(&p, rect, pivot),
-        PreferenceFigure::ContactShading(on) => super::preferences_figures::paint_contact_shading(&p, rect, on),
     }
 }
 

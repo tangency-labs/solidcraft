@@ -92,7 +92,10 @@ pub(crate) use preferences_assistant::*;
 #[allow(unused_imports, reason = "composed by the Preferences pages of #9875 to #9883")]
 pub(crate) use preferences_cards::*;
 pub(crate) use preferences_figure_data::{
-    paint_browser_card, paint_browser_column, paint_history_bottom, paint_history_in_browser, paint_history_left, paint_history_under_browser,
+    paint_aa_2x, paint_aa_4x, paint_aa_8x, paint_aa_off, paint_ao_on, paint_browser_card, paint_browser_column, paint_frame_rate,
+    paint_history_bottom, paint_history_in_browser, paint_history_left, paint_history_under_browser, paint_quick_measure, paint_tess_coarse,
+    paint_tess_fine, paint_tess_normal, paint_tess_ultra, paint_vertex_markers, paint_view_angles, paint_view_grid, paint_view_perspective,
+    paint_view_shadow,
 };
 pub(crate) use preferences_figures::{ThemeSample, paint_theme_system, paint_theme_thumbnail};
 pub(crate) use preferences_navigation::*;

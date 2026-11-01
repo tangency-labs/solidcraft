@@ -439,7 +439,26 @@ pub(crate) fn list_picker(ui: &mut Ui, key: &str, text: &str, selected: bool) ->
 
 /// Intrinsic-width selection chip for horizontal lists, sharing list-picker styling.
 pub(crate) fn choice_chip(ui: &mut Ui, key: &str, text: &str, selected: bool) -> egui::Response {
+    crate::prefs_search::note_unlabelled(ui, &[text]);
+    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[text]) {
+        return crate::prefs_search::hidden_response(ui);
+    }
     let t = Tokens::get();
+    if super::settings_page_active(ui) {
+        let font = if selected { crate::fonts::semibold(t.font_small) } else { egui::FontId::proportional(t.font_small) };
+        let width = ui.painter().layout_no_wrap(text.to_owned(), font.clone(), t.form_ink).size().x + t.space_16;
+        let response = ui.add_sized(
+            vec2(width.min(dimension(ui.max_rect().width())), t.space_24 - t.space_2),
+            egui::Button::selectable(selected, egui::RichText::new(text).font(font).color(if selected { t.selected_ink } else { t.form_ink }))
+                .fill(if selected { t.selected_bg } else { t.control_fill })
+                .stroke(egui::Stroke::new(1.0, if selected { t.form_primary } else { t.control_border }))
+                .corner_radius(t.radius_xl),
+        );
+        crate::prefs_search::remember(ui, text, response.rect);
+        crate::prefs_search::follow(ui, text, response.rect);
+        crate::scenario::publish_target(&format!("dialog:list:{key}"), response.rect);
+        return response;
+    }
     if super::layout::in_catalog(ui) {
         let accent = crate::theme::TabAccent::current(ui.ctx());
         let width = ui.painter().layout_no_wrap(text.to_string(), crate::fonts::semibold(t.font_small), t.form_ink).size().x + t.space_16;

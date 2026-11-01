@@ -23,6 +23,7 @@ Board: `Prefs2_Graphics` (1920x1821). Heading: Look. Subtitle "Trade speed for s
 | Anti-aliasing + badge "Restart needed" | Four picture cards: Off, 2x, 4x, 8x ("not on this GPU") | `Prefs.msaa` (1, 2, 4, 8) | `4` | tooltip on the cards: `settings.msaa_applies_on_restart` (the restart note) | `aa-off`, `aa-2x`, `aa-4x`, `aa-8x` | A level the adapter lacks (`app.msaa_supported`) is disabled with the badge "not on this GPU". Changing it applies on restart. |
 | Supersampling | Segmented: Off / 1.5x / 2x | `Prefs.supersampling` (1.0, 1.5, 2.0) | `1.0` (Off) | `settings.supersampling_note` | none | |
 | Only while the view is still | Checkbox | `Prefs.supersampling_adaptive` | `true` | none | none | Disabled while Supersampling is Off (`supersampling > 1.0`). |
+| Keep the shape of dark parts | Checkbox | `Prefs.dark_parts_shading` | `false` | Existing `prefs.dark_parts_shading_help` | none | Retain the current control once, as the final Edges and shading row after Supersampling and its adaptive checkbox. Accepted reference-gap resolution on #9879. |
 
 ## Current view (with the badge "Also in the view bar")
 
@@ -47,7 +48,8 @@ Four toggle tiles, then a chip row.
 | Vertex markers | Toggle tile | `Prefs.vertex_markers` | `false` | none | `vertex-markers` | |
 | Quick measurement | Toggle tile | `Prefs.quick_measure` (today on the Interface page) | `false` | none | `quick-measure` | Moves here. |
 | Frame rate | Toggle tile | `Prefs.show_frame_rate` | `false` | none | `frame-rate` | |
-| Status chips: Analysis, Section, Live details, Fold items | Four small chips (the row is labelled "Status chips") | `Prefs.viewport_analysis_status`, `Prefs.viewport_section_status`, `Prefs.viewport_status_details`, `Prefs.viewport_status_summary` | all `true` | none | none | Mapping by catalog label: "Live details" is `viewport_status_details` ("Live viewport details") and "Fold items" is `viewport_status_summary` ("Fold viewport status items"). These four move here from Interface. `Prefs.frame_rate_details` (frame rate details) has no control on the board. |
+| Frame rate details | Checkbox | `Prefs.frame_rate_details` | `false` | Existing `settings.frame_rate_details_note` | none | Retain the current control directly below the four-tile row containing Frame rate and before the status chips. Always visible; disabled while `show_frame_rate` is false, retaining its stored value. Accepted reference-gap resolution on #9879. |
+| Status chips: Analysis, Section, Live details, Fold items | Four small chips (the row is labelled "Status chips") | `Prefs.viewport_analysis_status`, `Prefs.viewport_section_status`, `Prefs.viewport_status_details`, `Prefs.viewport_status_summary` | all `true` | none | none | Mapping by catalog label: "Live details" is `viewport_status_details` ("Live viewport details") and "Fold items" is `viewport_status_summary` ("Fold viewport status items"). These four move here from Interface. |
 
 ## Surfaces and edges
 
@@ -71,7 +73,9 @@ Four toggle tiles, then a chip row.
 ## Mismatches
 
 * "Axis distances in Measure" (`Prefs.measure_axis_distances`) leaves this page for Tools.
-* The board has no control for `frame_rate_details`.
+* The board omits `dark_parts_shading` and `frame_rate_details`. Retain their current controls,
+  labels, help, defaults and behavior in the adjacent locations recorded above; absence from the
+  board does not remove a current setting.
 * Renderer and window system rows come from the old page's "Renderer" block.
 * The tracker's "Edges and shading" note says Ambient occlusion moves to Current view; the code still
   lists it under Graphics with `PAGE_GRAPHICS`.

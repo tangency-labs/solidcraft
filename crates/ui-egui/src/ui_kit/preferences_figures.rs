@@ -156,31 +156,6 @@ pub(crate) fn paint_orientation(p: &Painter, rect: Rect, y_up: bool) {
     p.circle_filled(centre, c.width(1.2), t.viewport_top);
 }
 
-/// Contact shading is visible in a physically grounded model, with a broad penumbra and
-/// a tight occlusion core following its footprint. The unshaded option retains a light
-/// ground reference so the model never appears to float.
-pub(crate) fn paint_contact_shading(p: &Painter, rect: Rect, on: bool) {
-    let t = Tokens::get();
-    let c = Canvas { rect };
-    let p = p.with_clip_rect(rect);
-    let centre = (61.0, 51.0);
-    let ground = [c.at(61.0, 37.0), c.at(105.0, 59.0), c.at(61.0, 80.0), c.at(17.0, 59.0)];
-    face(&p, ground, t.form_dim.gamma_multiply(0.035));
-    if on {
-        radial_shadow(&p, c.at(61.0, 60.0), vec2(c.width(35.0), c.width(12.5)), t.body_edge.gamma_multiply(0.24));
-        radial_shadow(&p, c.at(61.0, 60.0), vec2(c.width(25.0), c.width(7.5)), t.body_edge.gamma_multiply(0.35));
-    } else {
-        radial_shadow(&p, c.at(61.0, 60.0), vec2(c.width(28.0), c.width(7.0)), t.body_edge.gamma_multiply(0.07));
-    }
-    let footprint = solid(&p, &c, centre, 28.0, 25.0, 0.9, &t);
-    if on {
-        // The front two contact edges align exactly with the projected solid, never an
-        // arbitrary ellipse painted over the faces.
-        let [_, right, front, left] = footprint;
-        p.add(Shape::line(vec![left, front, right], Stroke::new(c.width(2.0), t.body_edge.gamma_multiply(0.38))));
-    }
-}
-
 /// A single carefully composed shell preview demonstrates the four layout settings.
 /// It is explanatory vector content: no second viewport, live scene, or nested host.
 /// A restrained workspace schematic: panel placement remains primary, with a few

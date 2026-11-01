@@ -763,15 +763,32 @@ const ELEMENTS: &[Element] = &[
     }),
     element!("preference_option_cards", |ui, _| {
         ui.horizontal_wrapped(|ui| {
-            for figure in [
-                PreferenceFigure::Pivot(2),
-                PreferenceFigure::Quality(24),
-                PreferenceFigure::Antialiasing(8),
-                PreferenceFigure::ContactShading(true),
-                PreferenceFigure::UpAxis(true),
-            ] {
+            for figure in [PreferenceFigure::Pivot(2), PreferenceFigure::UpAxis(true)] {
                 option_card(ui, "Choice", Some("Example"), true, true, figure);
             }
+            let t = Tokens::get();
+            let width = t.space_24 * 5.0 + t.space_10;
+            for (label, figure) in [("Fine", paint_tess_fine as fn(&egui::Painter, egui::Rect)), ("8×", paint_aa_8x)] {
+                picture_card(
+                    ui,
+                    &Card { label, sub: None, selected: true, enabled: true, options: None, check: true, aspect: 120.0 / 64.0, figure: &figure },
+                    width,
+                );
+            }
+            toggle_tile(
+                ui,
+                &Card {
+                    label: "Ambient occlusion",
+                    sub: None,
+                    selected: true,
+                    enabled: true,
+                    options: None,
+                    check: false,
+                    aspect: 120.0 / 64.0,
+                    figure: &paint_ao_on,
+                },
+                width,
+            );
         });
     }),
     element!("settings_font_row", |ui, sample| {
@@ -1590,6 +1607,16 @@ const ELEMENTS: &[Element] = &[
             dropdown(ui, "gallery", &mut s.selected, &["One", "Two"]);
         });
     }),
+    element!("dropdown_icons", "dialog:row:Visual style", Some("dialog:Visual style"), |ui, s| {
+        row(ui, "Visual style", |ui| {
+            let options: Vec<_> = crate::navigation_bar::VISUAL_STYLES
+                .iter()
+                .enumerate()
+                .map(|(index, (_, label))| (*label, crate::navigation_bar::visual_style_icon(index as u8)))
+                .collect();
+            dropdown_icons(ui, "gallery_visual_style", &mut s.selected, &options);
+        });
+    }),
     element!("dropdown_previews", "dialog:row:Gallery", Some("dialog:Gallery"), |ui, s| {
         row(ui, "Gallery", |ui| {
             dropdown_previews(ui, "gallery_previews", &mut s.selected, &["One", "Two"], |ui, index| {
@@ -1913,6 +1940,46 @@ fn every_element_has_geometry_and_stays_in_its_allocation_in_both_themes() {
                     }
                 }
             }
+        }
+    }
+    crate::theme::set_dark(previous);
+}
+
+#[test]
+fn visual_style_dropdown_specimen_selects_real_options_and_paints_their_icons() {
+    let previous = crate::theme::is_dark();
+    let element = ELEMENTS.iter().find(|element| element.name == "dropdown_icons").unwrap();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        let ctx = crate::fonts::test_context();
+        let sample = std::cell::RefCell::new(Sample { value: String::new(), second: String::new(), selected: 0, checked: false });
+        let mut draw = |ui: &mut Ui| {
+            (element.draw)(ui, &mut sample.borrow_mut());
+        };
+        for _ in 0..3 {
+            super::test_support::frame(&ctx, vec![], &mut draw);
+        }
+        for (index, (_, label)) in crate::navigation_bar::VISUAL_STYLES.into_iter().enumerate() {
+            let trigger = scenario::handle_at("dialog:Visual style").unwrap();
+            super::test_support::frame(&ctx, super::test_support::pointer(trigger, true), &mut draw);
+            super::test_support::frame(&ctx, super::test_support::pointer(trigger, false), &mut draw);
+            super::test_support::frame(&ctx, vec![], &mut draw);
+            for (option, (_, name)) in crate::navigation_bar::VISUAL_STYLES.into_iter().enumerate() {
+                let rect = scenario::rect_of(&format!("dialog:Visual style:{name}")).unwrap();
+                let icon = crate::navigation_bar::visual_style_icon(option as u8);
+                let painted = scenario::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap();
+                let owner = if option == sample.borrow().selected { scenario::rect_of("dialog:Visual style").unwrap() } else { rect };
+                assert!(owner.contains_rect(painted), "{name}: its real icon is in its option or selected trigger");
+            }
+            let option = scenario::handle_at(&format!("dialog:Visual style:{label}")).unwrap();
+            super::test_support::frame(&ctx, super::test_support::pointer(option, true), &mut draw);
+            super::test_support::frame(&ctx, super::test_support::pointer(option, false), &mut draw);
+            super::test_support::frame(&ctx, vec![], &mut draw);
+            assert_eq!(sample.borrow().selected, index, "the specimen edits the real selection index");
+            let icon = crate::navigation_bar::visual_style_icon(index as u8);
+            let trigger = scenario::rect_of("dialog:Visual style").unwrap();
+            assert!(trigger.contains_rect(scenario::rect_of(&format!("dialog:dropdown_icon:{icon}")).unwrap()));
+            assert!(scenario::handle_at("dialog:Visual style:Wireframe").is_none(), "the native popup closes after selection");
         }
     }
     crate::theme::set_dark(previous);

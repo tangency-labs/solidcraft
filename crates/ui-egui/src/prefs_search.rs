@@ -565,6 +565,17 @@ fn keywords(text: &str) -> &'static [&'static str] {
     match fold(text).as_str() {
         "theme" => &["dark", "light", "appearance"],
         "anti-aliasing" | "antialiasing" => &["antialiasing", "msaa"],
+        "curved surfaces" => &["display quality"],
+        "perspective" => &["perspective view"],
+        "quick measurement" => &["quick measurement in the view's corner"],
+        "analysis" => &["show viewport analysis status"],
+        "section" => &["show viewport section status"],
+        "live details" => &["live viewport details"],
+        "fold items" => &["fold viewport status items"],
+        "reference geometry through bodies" => &["show reference geometry through bodies"],
+        "single surface analysis" => &["use a single surface analysis"],
+        "only while the view is still" => &["only when the view is still"],
+        "supersampling" => &["supersampling (ssaa)"],
         _ => &[],
     }
 }
@@ -770,6 +781,42 @@ mod tests {
                     let centre = egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32);
                     assert!(crate::scenario::rect_of(target).unwrap().contains(centre));
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn graphics_cards_tiles_and_short_status_labels_keep_search_paths_and_reveal() {
+        for theme in ["light", "dark"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.prefs", serde_json::json!({"theme":theme,"language":"en"}));
+            h.call("ui.prefs", serde_json::json!({"open":"Graphics"}));
+            for (query, label, handle) in [
+                ("Display quality", "Curved surfaces", "prefs:display_quality:normal"),
+                ("MSAA", "Anti-aliasing", "prefs:msaa:4"),
+                ("Ambient occlusion", "Ambient occlusion", "prefs:ambient_occlusion"),
+                ("Quick measurement in the view's corner", "Quick measurement", "prefs:quick_measure"),
+                ("Show viewport analysis status", "Analysis", "prefs:viewport_analysis_status"),
+                ("Show viewport section status", "Section", "prefs:viewport_section_status"),
+                ("Live viewport details", "Live details", "prefs:viewport_status_details"),
+                ("Fold viewport status items", "Fold items", "prefs:viewport_status_summary"),
+            ] {
+                h.app.prefs_window.filter = query.into();
+                h.frames(5);
+                let (_, _, hits) = nav(&h.ctx);
+                let matching: Vec<_> =
+                    hits.iter().enumerate().filter(|(_, hit)| hit.page == crate::prefs::PAGE_GRAPHICS && hit.label == label).collect();
+                assert_eq!(matching.len(), 1, "{theme}: {query} keeps one real Graphics search target");
+                let index = matching[0].0;
+                set_cursor(&h.ctx, index);
+                h.frames(2);
+                h.step(&serde_json::json!({"key":"Enter"})).unwrap();
+                h.frames(3);
+                assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GRAPHICS);
+                assert!(h.app.prefs_window.filter.is_empty());
+                let page = crate::scenario::rect_of("dialog:page_body").unwrap();
+                assert!(page.contains_rect(crate::scenario::rect_of(handle).unwrap()), "{query} reveals the real control");
             }
         }
     }

@@ -110,10 +110,20 @@ pub(crate) fn settings_row_card<R>(ui: &mut Ui, selected: bool, height: f32, add
 }
 
 fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
+    crate::prefs_search::note_unlabelled(ui, &[card.label]);
+    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[card.label, card.sub.unwrap_or("")]) {
+        return crate::prefs_search::hidden_response(ui);
+    }
     let t = Tokens::get();
     let width = dimension(width);
     let enabled = card.enabled && ui.is_enabled();
     let (rect, response) = ui.allocate_exact_size(vec2(width, card_height(&t, width, card)), if enabled { Sense::click() } else { Sense::hover() });
+    // Labelled compound rows own their search index (settings_picture_choices, for example).
+    // Standalone cards and tiles are independently searchable settings.
+    if super::layout::label(ui).is_empty() {
+        crate::prefs_search::remember(ui, card.label, rect);
+        crate::prefs_search::follow(ui, card.label, rect);
+    }
     let look = card_look(card.selected, enabled, response.hovered(), response.has_focus());
     let p = ui.painter();
     let dim = |c: Color32| c.gamma_multiply(look.alpha);
@@ -177,6 +187,7 @@ fn paint_card(ui: &mut Ui, card: &Card, width: f32, tile: bool) -> Response {
     let kind = if tile { egui::WidgetType::Checkbox } else { egui::WidgetType::RadioButton };
     response.widget_info(|| egui::WidgetInfo::selected(kind, enabled, card.selected, card.label));
     scenario::publish_target(&format!("prefs:card:{}", card.label), rect);
+    let response = response.on_hover_text(card.label);
     let response = if let Some(options) = card.options { response.on_hover_text(options) } else { response };
     if enabled { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
@@ -279,11 +290,17 @@ pub(crate) fn preset_card(
     icon: &dyn Fn(&Painter, Rect, Color32),
     width: f32,
 ) -> Response {
+    crate::prefs_search::note_unlabelled(ui, &[name, word]);
+    if crate::prefs_search::querying(ui) && !crate::prefs_search::visible(ui, &[name, word]) {
+        return crate::prefs_search::hidden_response(ui);
+    }
     let t = Tokens::get();
     let enabled = enabled && ui.is_enabled();
     let width = dimension(width);
     let height = t.space_24 * 3.0 - t.space_2;
     let (rect, response) = ui.allocate_exact_size(vec2(width, height), if enabled { Sense::click() } else { Sense::hover() });
+    crate::prefs_search::remember(ui, name, rect);
+    crate::prefs_search::follow(ui, name, rect);
     let look = card_look(selected, enabled, response.hovered(), response.has_focus());
     let dim = |c: Color32| c.gamma_multiply(look.alpha);
     let p = ui.painter();
