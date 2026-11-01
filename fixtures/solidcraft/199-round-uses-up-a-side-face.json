@@ -1,0 +1,222 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/199",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/317",
+ "test": "crates/kernel/src/tests.rs: fillet_consuming_a_side_face_makes_a_full_round",
+ "summary": "A round that uses up a whole side face must make a full round, not be refused (#199). A 14 x 6 x 10 bar has its four vertical edges rounded r 3: both 6 mm end faces are used up, each end becomes a half cylinder. With one end only, two rounds meet on that end face. A 6 x 6 x 10 post rounded r 3 on all four vertical edges is a cylinder of radius 3. Closed-form volumes; SolidCraft checked 2e-4 relative on a mesh, these check 1e-4 mm^3. The test's past-the-limit refusals are not ported.",
+ "cases": [
+  {
+   "name": "both_ends_full_round",
+   "note": "All four vertical edges of the 14 x 6 x 10 bar, r 3.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "bar",
+     "origin": [
+      14,
+      0,
+      0
+     ],
+     "size": [
+      14,
+      6,
+      10
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "bar",
+     "edges": [
+      [
+       14,
+       0,
+       5
+      ],
+      [
+       28,
+       0,
+       5
+      ],
+      [
+       14,
+       6,
+       5
+      ],
+      [
+       28,
+       6,
+       5
+      ]
+     ],
+     "radius": 3.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 762.7433388230813,
+     "tol": 0.0001,
+     "formula": "14*6*10 - (4 - pi)*3^2*10"
+    }
+   }
+  },
+  {
+   "name": "both_ends_full_round_reversed",
+   "note": "The same edges picked in the reverse order.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "bar",
+     "origin": [
+      14,
+      0,
+      0
+     ],
+     "size": [
+      14,
+      6,
+      10
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "bar",
+     "edges": [
+      [
+       28,
+       6,
+       5
+      ],
+      [
+       14,
+       6,
+       5
+      ],
+      [
+       28,
+       0,
+       5
+      ],
+      [
+       14,
+       0,
+       5
+      ]
+     ],
+     "radius": 3.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 762.7433388230813,
+     "tol": 0.0001,
+     "formula": "14*6*10 - (4 - pi)*3^2*10"
+    }
+   }
+  },
+  {
+   "name": "one_end_full_round",
+   "note": "The two vertical edges at x = 28 only: two rounds meeting on that end face.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "bar",
+     "origin": [
+      14,
+      0,
+      0
+     ],
+     "size": [
+      14,
+      6,
+      10
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "bar",
+     "edges": [
+      [
+       28,
+       0,
+       5
+      ],
+      [
+       28,
+       6,
+       5
+      ]
+     ],
+     "radius": 3.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 801.3716694115407,
+     "tol": 0.0001,
+     "formula": "14*6*10 - (4 - pi)*3^2*10/2"
+    }
+   }
+  },
+  {
+   "name": "square_post_becomes_a_cylinder",
+   "note": "A 6 x 6 x 10 post, all four vertical edges r 3.",
+   "steps": [
+    {
+     "op": "box",
+     "id": "post",
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "size": [
+      6,
+      6,
+      10
+     ]
+    },
+    {
+     "op": "fillet",
+     "id": "result",
+     "body": "post",
+     "edges": [
+      [
+       0,
+       0,
+       5
+      ],
+      [
+       6,
+       0,
+       5
+      ],
+      [
+       6,
+       6,
+       5
+      ],
+      [
+       0,
+       6,
+       5
+      ]
+     ],
+     "radius": 3.0
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 282.7433388230814,
+     "tol": 0.0001,
+     "formula": "pi*3^2*10"
+    }
+   }
+  }
+ ]
+}
