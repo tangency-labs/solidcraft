@@ -194,3 +194,149 @@ fn second_occurrence_drawn_wire_fit_picks_and_world_triad_drag_stay_aligned() {
     let restored = h.app.session.model.state();
     assert!(restored.sketch(sketch).unwrap().sketch.wires[0].fit[0].dist(Vec3::new(2.0, 3.0, 5.0)) < 1e-6);
 }
+
+#[test]
+fn arc_tool_draws_an_exact_3d_arc_off_the_plane() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"corner":[10,0,5],"length":10,"width":10,"height":5,"body_name":"ArcPicks"})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Arcs"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.options", json!({"sketch_3d":true})).unwrap();
+    h.app.session.visibility.origin_hidden = Some(true);
+    h.call("ui.view", json!({"view":"home"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(3);
+    h.app.start("sketch.arc.three_point");
+    h.frames(2);
+    h.app.status = None;
+    // Three top-face vertices: off the XY sketch plane, so the arc tool draws a 3D arc.
+    for p in [[10.0, 0.0, 10.0], [20.0, 10.0, 10.0], [10.0, 10.0, 10.0]] {
+        let [x, y] = h.at(&json!({"world": p})).unwrap();
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        let picked = crate::sketch3d::point_at(&h.app, &proj, egui::pos2(x as f32, y as f32));
+        assert!(picked.is_some_and(|(q, _)| (q - Vec3::new(p[0], p[1], p[2])).dist(Vec3::ZERO) < 1e-5), "p={p:?}, picked={picked:?}");
+        h.step(&json!({"click": {"world": p}})).unwrap();
+    }
+    h.step(&json!({"key": "Escape"})).unwrap();
+    let state = h.app.session.world_state();
+    let wires = &state.sketch(sketch).unwrap().sketch.wires;
+    assert_eq!(wires.len(), 1, "three off-plane clicks draw one 3D arc");
+    let w = &wires[0];
+    let arc = w.arc.expect("the drawn arc is stored exactly");
+    assert!(arc.center.dist(Vec3::new(15.0, 5.0, 10.0)) < 1e-6, "{:?}", arc.center);
+    assert!((arc.radius - 50.0_f64.sqrt()).abs() < 1e-6, "{}", arc.radius);
+    assert_eq!(w.fit.len(), 3);
+}
+
+#[test]
+fn arc3d_button_starts_its_own_tool() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"corner":[10,0,5],"length":10,"width":10,"height":5,"body_name":"Arc3dBtn"})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Arcs"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.options", json!({"sketch_3d":true})).unwrap();
+    h.app.session.visibility.origin_hidden = Some(true);
+    h.call("ui.view", json!({"view":"home"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(3);
+    h.app.start("sketch.arc3d");
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.arc3d"), "the 3D Arc button starts a tool: {:?}", h.app.status);
+    h.frames(2);
+    h.app.status = None;
+    // Same click order as the 2D arc tool: start, end, then a point on the arc.
+    for p in [[10.0, 0.0, 10.0], [10.0, 10.0, 10.0], [20.0, 10.0, 10.0]] {
+        h.step(&json!({"click": {"world": p}})).unwrap();
+    }
+    let state = h.app.session.world_state();
+    let wires = &state.sketch(sketch).unwrap().sketch.wires;
+    assert_eq!(wires.len(), 1, "three clicks draw one exact 3D arc");
+    let arc = wires[0].arc.expect("the drawn arc is stored exactly");
+    assert!(arc.center.dist(Vec3::new(15.0, 5.0, 10.0)) < 1e-6, "{:?}", arc.center);
+    assert!((arc.radius - 50.0_f64.sqrt()).abs() < 1e-6, "{}", arc.radius);
+    assert!(arc.start.dist(Vec3::new(10.0, 0.0, 10.0)) < 1e-6, "{:?}", arc.start);
+    assert!(arc.end.dist(Vec3::new(10.0, 10.0, 10.0)) < 1e-6, "{:?}", arc.end);
+    // With 3D Sketch off the button is not offered: its tool could only fail.
+    h.step(&json!({"key": "Escape"})).unwrap();
+    assert!(h.app.tool.is_none(), "Escape ends the tool");
+    h.app.run("sketch.options", json!({"sketch_3d": false})).unwrap();
+    h.app.start("sketch.arc3d");
+    assert!(h.app.tool.is_none(), "3D Arc is disabled while 3D Sketch is off");
+}
+
+/// Shared setup: a box whose top-face vertices sit off the active 3D sketch's XY plane.
+fn box_and_3d_sketch(name: &str) -> (crate::scenario::Harness, u64) {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"corner":[10,0,5],"length":10,"width":10,"height":5,"body_name":name})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":name})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.options", json!({"sketch_3d":true})).unwrap();
+    h.app.session.visibility.origin_hidden = Some(true);
+    h.call("ui.view", json!({"view":"home"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(3);
+    (h, sketch)
+}
+
+/// Three top-face box vertices: off the XY sketch plane, so the 3D tools keep them as world points.
+const OFF_PLANE: [[f64; 3]; 3] = [[10.0, 0.0, 10.0], [20.0, 10.0, 10.0], [10.0, 10.0, 10.0]];
+
+#[test]
+fn line3d_tool_draws_polyline_off_plane() {
+    let (mut h, sketch) = box_and_3d_sketch("Line3dPicks");
+    h.app.start("sketch.line3d");
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.line3d"), "the 3D Line button starts a tool: {:?}", h.app.status);
+    h.frames(2);
+    h.app.status = None;
+    for p in OFF_PLANE {
+        let [x, y] = h.at(&json!({"world": p})).unwrap();
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        let picked = crate::sketch3d::point_at(&h.app, &proj, egui::pos2(x as f32, y as f32));
+        assert!(picked.is_some_and(|(q, _)| (q - Vec3::new(p[0], p[1], p[2])).dist(Vec3::ZERO) < 1e-5), "p={p:?}, picked={picked:?}");
+        h.step(&json!({"click": {"world": p}})).unwrap();
+    }
+    h.step(&json!({"key": "Escape"})).unwrap();
+    let state = h.app.session.world_state();
+    let wires = &state.sketch(sketch).unwrap().sketch.wires;
+    assert_eq!(wires.len(), 2, "three off-plane clicks finish as two joined 3D segments");
+    let expected = [[Vec3::new(10.0, 0.0, 10.0), Vec3::new(20.0, 10.0, 10.0)], [Vec3::new(20.0, 10.0, 10.0), Vec3::new(10.0, 10.0, 10.0)]];
+    for (w, pair) in wires.iter().zip(expected) {
+        assert!(w.fit[0].dist(pair[0]) < 1e-6 && w.fit[1].dist(pair[1]) < 1e-6, "{:?}", w.fit);
+    }
+}
+
+#[test]
+fn spline3d_tool_fit_points_off_plane() {
+    let (mut h, sketch) = box_and_3d_sketch("Spline3dPicks");
+    h.app.start("sketch.spline3d");
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.spline3d"), "the 3D Spline button starts a tool: {:?}", h.app.status);
+    h.frames(2);
+    h.app.status = None;
+    for p in OFF_PLANE {
+        h.step(&json!({"click": {"world": p}})).unwrap();
+    }
+    h.step(&json!({"key": "Escape"})).unwrap();
+    let state = h.app.session.world_state();
+    let wires = &state.sketch(sketch).unwrap().sketch.wires;
+    assert_eq!(wires.len(), 1, "three off-plane clicks finish as one 3D spline");
+    let w = &wires[0];
+    assert_eq!(w.fit.len(), 3, "{:?}", w.fit);
+    for (fit, p) in w.fit.iter().zip(OFF_PLANE) {
+        assert!(fit.dist(Vec3::new(p[0], p[1], p[2])) < 1e-6, "{:?}", w.fit);
+    }
+}
+
+#[test]
+fn point3d_tool_places_points_and_stays() {
+    let (mut h, sketch) = box_and_3d_sketch("Point3dPicks");
+    h.app.start("sketch.point3d");
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.point3d"), "the 3D Point button starts a tool: {:?}", h.app.status);
+    h.frames(2);
+    h.app.status = None;
+    for p in [OFF_PLANE[0], OFF_PLANE[1]] {
+        h.step(&json!({"click": {"world": p}})).unwrap();
+    }
+    let state = h.app.session.world_state();
+    let wires = &state.sketch(sketch).unwrap().sketch.wires;
+    assert_eq!(wires.len(), 2, "two clicks place two drawn 3D points");
+    assert!(wires.iter().all(|w| w.fit.len() == 1), "{:?}", wires.iter().map(|w| &w.fit).collect::<Vec<_>>());
+    assert!(wires[0].fit[0].dist(Vec3::new(10.0, 0.0, 10.0)) < 1e-6, "{:?}", wires[0].fit);
+    assert!(wires[1].fit[0].dist(Vec3::new(20.0, 10.0, 10.0)) < 1e-6, "{:?}", wires[1].fit);
+    assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == "sketch.point3d"), "the tool stays for the next point");
+}

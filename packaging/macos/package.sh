@@ -2,7 +2,8 @@
 # Build and package SolidCraft for macOS:
 #
 #   $DIST/solidcraft-<version>-macos-<arch>.dmg        SolidCraft.app (with solidcraft-cli inside) on a
-#                                                      drag-to-Applications DMG
+#                                                      drag-to-Applications DMG with a drawn window
+#                                                      (assets/platforms/macos/dmg)
 #   $DIST/solidcraft-cli-<version>-macos-<arch>.zip    the headless CLI (and its solvecraft-cli
 #                                                      compatibility alias) with the licence files
 #
@@ -25,7 +26,7 @@ set -euo pipefail
 # shellcheck source=../env.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../env.sh"
 # The same reverse-DNS id as the Linux APP_ID.
-MACOS_BUNDLE_ID=ai.storyteller.solidcraft
+MACOS_BUNDLE_ID=io.tangencylabs.solidcraft
 
 # sign_code <path> [identifier] [entitlements]: Developer ID with the hardened runtime and a secure
 # timestamp, or the ad-hoc signature (Apple silicon refuses unsigned code) without an identity.
@@ -170,7 +171,7 @@ printf 'APPL????' >"$APP/Contents/PkgInfo"
 # Signature over the whole bundle. Nested code is signed first: the bundle signature refuses an
 # unsigned helper in Contents/MacOS. The entitlements go on the bundle (they apply to the main
 # executable): the 3D mouse driver is loaded by the app, not by the CLI.
-sign_code "$APP/Contents/MacOS/solidcraft-cli" "$MACOS_BUNDLE_ID-cli"
+sign_code "$APP/Contents/MacOS/solidcraft-cli" "$MACOS_BUNDLE_ID.cli"
 sign_code "$APP" "" "$SCRIPT_DIR/entitlements.plist"
 codesign --verify --strict --deep --verbose=2 "$APP"
 if [ -n "$SIGN_IDENTITY" ]; then
@@ -193,23 +194,26 @@ fi
 
 # ---- DMG ---------------------------------------------------------------------------------------
 echo "==> building $DMG"
-STAGE="$WORK/dmg"
-mkdir -p "$STAGE"
-ditto "$APP" "$STAGE/SolidCraft.app"
-ln -s /Applications "$STAGE/Applications"
-cp "$ROOT/assets/platforms/macos/README.txt" "$STAGE/README.txt"
-rm -f "$DMG" "$WORK/raw.dmg"
-# makehybrid + convert builds the image without attaching a device, unlike `create -srcfolder`,
-# which is flaky on CI runners ("Resource busy").
-hdiutil makehybrid -hfs -hfs-volume-name "SolidCraft" -hfs-openfolder "$STAGE" -o "$WORK/raw.dmg" "$STAGE"
-hdiutil convert "$WORK/raw.dmg" -format UDZO -imagekey zlib-level=9 -o "$DMG"
-rm -f "$WORK/raw.dmg"
+DMG_ART="$ROOT/assets/platforms/macos/dmg"
+# dmgbuild (hash-pinned, packaging/macos/dmg-requirements.txt) writes the window layout, the
+# background and the icon positions into the image without a Finder session.
+VENV="$WORK/dmg-venv"
+python3 -m venv "$VENV"
+"$VENV/bin/pip" install --quiet --disable-pip-version-check --require-hashes -r "$ROOT/packaging/macos/dmg-requirements.txt"
+rm -f "$DMG"
+"$VENV/bin/dmgbuild" -s "$DMG_ART/settings.py" \
+  -D "here=$DMG_ART" -D "app=$APP" -D "readme=$ROOT/assets/platforms/macos/README.txt" \
+  -D "icns=$ROOT/assets/icons/app/macos/exports/icon.icns" \
+  SolidCraft "$DMG"
 
 # Check the image as a user gets it: mount it and look inside.
 MNT="$(mktemp -d)"
 hdiutil attach -readonly -nobrowse -mountpoint "$MNT" "$DMG"
 ls -la "$MNT" "$MNT/SolidCraft.app/Contents" "$MNT/SolidCraft.app/Contents/MacOS" "$MNT/SolidCraft.app/Contents/Resources"
 test -L "$MNT/Applications" && test "$(readlink "$MNT/Applications")" = /Applications
+# The window's look: Finder layout, background art and the volume icon.
+test -s "$MNT/.DS_Store" && test -s "$MNT/.VolumeIcon.icns"
+test -s "$MNT/.background.tiff"
 plutil -lint "$MNT/SolidCraft.app/Contents/Info.plist"
 # Check the names Finder/LaunchServices actually use, and the bundle identity.
 for key in CFBundleName CFBundleDisplayName CFBundleExecutable CFBundleIconFile CFBundleIconName; do
@@ -252,10 +256,10 @@ echo "==> building $CLI_ZIP"
 CLI_DIR="$WORK/solidcraft-cli-$VERSION-macos-$ARCH"
 mkdir -p "$CLI_DIR"
 cp "$WORK/bin/solidcraft-cli" "$CLI_DIR/"
-sign_code "$CLI_DIR/solidcraft-cli" "$MACOS_BUNDLE_ID-cli"
+sign_code "$CLI_DIR/solidcraft-cli" "$MACOS_BUNDLE_ID.cli"
 # Compatibility shim (docs/compatibility.md): the old CLI name forwards to solidcraft-cli.
 cp "$WORK/bin/solvecraft-cli" "$CLI_DIR/"
-sign_code "$CLI_DIR/solvecraft-cli" "$MACOS_BUNDLE_ID-cli-alias"
+sign_code "$CLI_DIR/solvecraft-cli" "$MACOS_BUNDLE_ID.cli-alias"
 copy_docs "$CLI_DIR"
 rm -f "$CLI_ZIP"
 ditto -c -k --keepParent "$CLI_DIR" "$CLI_ZIP"

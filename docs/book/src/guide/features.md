@@ -1,5 +1,8 @@
 # Solid features
 
+For prerequisites, a readable options table and a first example, open the
+[practical Extrude guide](../reference/commands.md#command-solid.extrude).
+
 Features live on the **timeline** and rebuild incrementally from the first one that changed.
 Each one can be edited (double-click), suppressed, renamed, reordered (if nothing it depends on
 moves after it), rolled back to, and deleted. Deleting asks first when other features depend on
@@ -12,14 +15,29 @@ it.
 | Construct | offset plane (at a distance or through a point), plane at angle, plane along path |
 | Inspect | measure, section analysis, interference, compare bodies, curvature comb and map, zebra, draft, minimum radius, isocurves, centre of mass |
 
-Extrude automatically selects **Join** for additions when the active component already has a
-solid, including sideways elbow connections and screw bosses that meet only part of a face.
-Extruding into existing material selects **Cut**. In an empty component it selects **New Body**;
-choose **New Body** explicitly to keep an addition separate. Changing the default does not alter
-operations already saved in a design. A Join (of an extrude, revolve, sweep, loft, primitive…)
-whose material touches none of its target bodies still joins it, to the first one as a separate
-piece, and the feature's warning says so: "`Body1` is now in 2 separate pieces". Combine joins
-the bodies it is given without that warning.
+**Quick measurement** (off by default; turn it on under Preferences › Interface): with edges,
+faces, sketch curves or points selected, the view's bottom right corner, above History, shows
+what they measure: an edge's length (Ø and R for a round one), a face's area, a point's position,
+two items' distance and angle, several edges' or faces' total. A click copies it. The Measure tool
+(I) does more.
+
+Extrude, Revolve, Sweep, Loft, Coil and the Box, Cylinder, Sphere and Torus choose their
+operation from what their material does, until you pick one: **Join** when it makes one body with
+a body it touches (a block against a wall, a ring round a hole, a boss meeting only part of a
+face), **New Body** when it would be a separate piece, and **Cut** when it goes into a body
+(Extrude) or lies inside one (Revolve and the Box, Cylinder, Sphere and Torus). The window finds
+out by running the Join on a copy of the design in the background, so its choice is what OK
+makes; it changes only when that check is in, and OK waits for it. An operation you pick stays,
+and a feature you edit keeps its own. Pipe, Thicken and Boundary Fill start as a New Body. Only
+shown bodies take part: with some bodies hidden, the feature names the shown ones as its targets,
+so a hidden body is never joined or cut, and showing it again later changes nothing.
+**Choose the operation automatically** (Preferences › Design, on by default) turns this choice
+off: each window then keeps the operation it opens with, Extrude its own Join or Cut, as before.
+
+A Join you pick whose material touches none of its target bodies still joins it, to the first
+one as a separate piece, and the feature's warning says so: "`Body1` is now in 2 separate
+pieces". Combine joins the bodies it is given without that warning. Changing the default does not
+alter operations already saved in a design.
 
 **Extrude to a picked target** (Preferences › Design, off by default) lets a pick choose the
 extent. With it on and a profile selected in the solid Extrude dialog, picking a face away from
@@ -62,7 +80,7 @@ radius of a curve it follows on the inside is refused. Spline walls follow the e
 within 0.0001 mm.
 
 Editing an extrusion retains its signed distances, From/To Object inputs, taper expressions
-and explicit body targets. Revolve edits retain world, sketch and explicit-line axes, both
+and explicit body targets. Revolve edits retain world, sketch, explicit-line and model-edge or face axes, both
 angle expressions and To Object targets. An unchanged **All profiles** selection continues
 to include profiles added later. Cancel restores the complete timeline; a successful edit is
 one undo step, including downstream parameter changes. Editing a placed component previews the
@@ -111,6 +129,13 @@ measured in the face's plane. Moving the hole measures the distances again. The 
 distances when the part changes: it follows its edges, and the distances are parameters like its
 diameter.
 
+A **Cylinder** placed on a planar face takes reference edges the same way. Select the face, then
+start **Cylinder**: it stands where you clicked, and the window has **Reference 1** and
+**Reference 2**. Pick one or two straight edges of that face; each gets a **Distance**, measured
+from where you clicked, which you can also type in the window or in its box on the canvas. The
+cylinder's base centre then follows the edges when the part changes, and the distances are
+parameters like its radius. Edit Feature picks the edges again.
+
 A **Hole** with **Single** placement drills where you pick a planar face. A pick on or near a
 point of a shown sketch that lies on that face, such as a circle's centre, places the hole
 exactly at that point, as **Multiple** placement picks it; **Select Other** (press and hold) also
@@ -134,6 +159,14 @@ a Single hole is placed:
 The Hole dialog draws a section through the hole as its options make it (type, extents, drill
 point, tapped) and puts each size in a field beside the dimension it sets; hovering a field, or
 typing in it, lights its dimension.
+
+Tapped holes and **Thread** features have a **Thread direction** choice: **Right-hand**
+(the default) or **Left-hand**. Editing and reopening keep the chosen direction. Tapped
+holes carry a cosmetic thread; the separate Thread feature can also cut a **Modeled**
+left-hand helix. Cosmetic direction is recorded with the thread annotation and does not
+change the body. Scripts use `handedness: "left"` or `"right"` on `solid.hole` (with `thread`)
+and `solid.thread`. Existing designs and omitted values remain right-handed. Changing the
+direction keeps the pitch, thread length and axis; it does not change a hole's drill size.
 
 Fillets and chamfers handle straight edges between planar faces, whole smooth loops, runs of
 neighbouring edges with mitred or spherical corners, and closed chains of curved edges (a rolling
@@ -203,13 +236,42 @@ across). Large bodies are sampled more coarsely, at about `max_points` (eight mi
 each; `sampling.spacing_mm` says what was used, and a larger `max_points` (up to 50 million)
 samples them finer, at the cost of time.
 
+When editing an Extrude in the UI, the Browser's bodies, sketches, construction objects and
+feature rows follow the history marker before that feature. Later objects return when editing
+ends. Rolling back manually keeps feature rows listed, so they remain available to edit.
+A hidden body supplying the profile's face is shown temporarily during the edit, including
+when a folder or component hides it. OK, Cancel and Escape end that display override; the body's
+saved visibility and unrelated visibility changes are preserved.
+
 ## Editing a feature from a script
 
-For `solid.pattern.circular`, `axis` accepts `X`, `Y`, `Z`, or `{origin, dir}`.
+For `solid.pattern.circular`, `axis` accepts `X`, `Y`, `Z`, `{origin, dir}`, or an edge or
+round face of the model, `{edge: [x, y, z]}` or `{face: [x, y, z]}` (a point on it).
 An explicit origin must contain three finite numeric coordinates in millimetres
 (`[x, y, z]` or `{x, y, z}`); omitting it uses the world origin. Expressions and
 construction-axis references are not supported. Invalid origins are rejected rather than
 silently replaced with zero.
+
+## Axes and points on round edges and faces
+
+Wherever a 3D command takes an axis (Revolve, Surface Revolve, Circular Pattern, Plane at
+Angle, and Move's Rotate) you can pick a circular edge, which gives the axis through its centre
+along its normal, or a cylinder, cone or torus face, which gives that surface's axis. Hovering
+one in an axis input draws the axis as a dashed construction line, and the line stays drawn once
+the axis is picked. Flat faces and edges that are neither straight nor circular can't be picked
+there.
+
+Revolve, Surface Revolve, Circular Pattern and Plane at Angle keep the picked edge or face as a
+reference (`{edge: [x, y, z]}` or `{face: [x, y, z]}` from a script), found again by its
+persistent name every time the design is evaluated. If a parameter moves the cylinder, the
+feature turns about it where it is now. The axis always points the same way, with its largest
+component positive, so a rebuild that reverses the edge doesn't flip the turn. Straight edges
+picked as axes keep working as before, as a fixed line.
+
+Where a 3D command takes a point (the construction points, axes and planes built from points,
+Revolve and Extrude's To Object, a surface patch's pass-through points, and Move's pivot and
+points), a circular edge stands for its centre. A hovered circle shows a small star at its centre.
+A construction point keeps the edge, so it follows the circle's centre as the model changes.
 
 `timeline.inspect {feature}` returns a feature's `definition`: the fields `timeline.edit` changes,
 with their current values. `timeline.edit {feature, set}` merges `set` into that definition
@@ -238,7 +300,7 @@ still be added through `set`. The fields of the common features:
 | Fillet | `radius`, `edges` (a point on each edge), `body`, `style` |
 | Chamfer | `distance`, `distance2` or `angle`, `flip`, `edges`, `body` |
 | Box | `length`, `width`, `height`, `corner`, `operation` |
-| Cylinder | `radius`, `height`, `base`, `axis`, `operation` |
+| Cylinder | `radius`, `height`, `base`, `axis`, `operation`, `references` (an `edge` point and a `distance` each, as a hole's) |
 | Hole | `diameter`, `depth`, `position`, `direction`, `hole` (simple, drilled, counterbore, countersink), `thread`, `to`, `references` (an `edge` point and a `distance` each) |
 | Shell | `thickness`, `faces`, `direction`, `body`, `tangent_chain` |
 | Draft | `angle`, `faces`, `neutral`, `pull`, `body` |

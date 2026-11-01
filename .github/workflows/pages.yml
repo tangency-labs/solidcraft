@@ -65,6 +65,7 @@ jobs:
         run: |
           mkdir -p site
           cp -r target/book/. site/
+          bash docs/book/seo.sh site  # canonical links, robots.txt, sitemap.xml
           cp -r dist/web site/app
       - uses: actions/configure-pages@v5
         id: pages

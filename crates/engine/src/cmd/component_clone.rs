@@ -83,14 +83,10 @@ fn cloned_path(source: &Document, path: &[u64], root: u64, destination: &[u64], 
     Ok(mapped)
 }
 
-fn unique(base: &str, used: &mut BTreeSet<String>) -> String {
-    let stem = format!("{base} (copy)");
-    let mut name = stem.clone();
-    let mut n = 2;
-    while used.contains(&name) {
-        name = format!("{stem} {n}");
-        n += 1;
-    }
+/// A name for a copy of `base` that isn't in `used` (and then is): numbered, or with `keep`
+/// (pasting into another design, where the original isn't) `base` itself while it is free.
+fn unique(base: &str, used: &mut BTreeSet<String>, keep: bool) -> String {
+    let name = if keep && !used.contains(base.trim()) { base.trim().to_string() } else { solidcraft_doc::copy_name(base, |n| used.contains(n)) };
     used.insert(name.clone());
     name
 }
@@ -188,6 +184,32 @@ fn graph(doc: &Document, root: u64) -> Result<Vec<u64>> {
     Ok(sorted)
 }
 
+/// The design Paste New copies from: its document, its evaluated model and its placements moved
+/// but not yet applied. The session pasted into is the target; they are the same design for a
+/// paste within one design.
+pub(super) struct Source<'a> {
+    pub doc: &'a Document,
+    pub model: &'a solidcraft_doc::Model,
+    pub pending_moves: &'a BTreeMap<u64, Mat>,
+    /// Another design than the target: the copy can't point at anything outside it (it is
+    /// refused, saying what), and the user parameters it uses come along.
+    pub other_design: bool,
+}
+
+impl<'a> Source<'a> {
+    /// The session's own design.
+    pub fn of(s: &'a Session) -> Source<'a> {
+        Source { doc: &s.doc, model: &s.model, pending_moves: &s.pending_moves, other_design: false }
+    }
+
+    /// What was copied in another design.
+    pub fn copied(copy: &'a crate::ForeignCopy) -> Source<'a> {
+        Source { doc: &copy.doc, model: &copy.model, pending_moves: &copy.pending_moves, other_design: true }
+    }
+}
+
+/// An independent copy of `component` (and what it holds), from the session's own design, into
+/// `parent`.
 pub(super) fn paste(
     s: &mut Session,
     component: u64,
@@ -196,7 +218,26 @@ pub(super) fn paste(
     parent: u64,
     params: &Value,
 ) -> Result<Value> {
-    let source = s.doc.clone();
+    let (scratch, out) = build(s, &Source::of(s), component, source_occurrence, transform, parent, None, params)?;
+    s.accept_computed(scratch);
+    Ok(out)
+}
+
+/// [`paste`] from `origin` into `s`: the computed session to accept, and what the paste made.
+/// `parent_path`: the placement of `parent` the copy is placed by (default: the source
+/// placement's parent's).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn build(
+    s: &Session,
+    origin: &Source<'_>,
+    component: u64,
+    source_occurrence: Option<Occurrence>,
+    transform: Mat,
+    parent: u64,
+    parent_path: Option<Vec<u64>>,
+    params: &Value,
+) -> Result<(Session, Value)> {
+    let source = origin.doc;
     let source_parameters: BTreeMap<_, _> = source.params.iter().map(|p| (p.name.as_str(), p)).collect();
     let generated_parameters: BTreeSet<_> = source
         .params
@@ -205,22 +246,25 @@ pub(super) fn paste(
         .map(|p| p.name.as_str())
         .chain(source.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str)))
         .collect();
-    let definitions = graph(&source, component)?;
+    let definitions = graph(source, component)?;
     let definition_records: BTreeMap<_, _> = source.components.iter().map(|c| (c.id, c)).collect();
     let selected: BTreeSet<_> = definitions.iter().copied().collect();
     if source.marker.is_some_and(|m| m < source.features.len()) {
         return Err(bad(CMD, "move the timeline marker to the end before Paste New"));
+    }
+    if origin.other_design && s.doc.marker.is_some_and(|m| m < s.doc.features.len()) {
+        return Err(bad(CMD, "move the timeline marker to the end in this design before pasting"));
     }
     let feats: Vec<Feature> = source.features.iter().filter(|f| selected.contains(&f.component)).cloned().collect();
     if feats.len() + source.features.len() > MAX_WORK {
         return Err(bad(CMD, "too many features to copy"));
     }
     for f in &feats {
-        if s.model.result(f.id).is_some_and(|r| r.error.is_some()) {
+        if origin.model.result(f.id).is_some_and(|r| r.error.is_some()) {
             return Err(bad(CMD, format!("source feature {} has an evaluation error", f.name)));
         }
     }
-    let state = s.model.state();
+    let state = origin.model.state();
     if state.bodies.len() > MAX_WORK {
         return Err(bad(CMD, "body set exceeds copy work limit"));
     }
@@ -234,13 +278,12 @@ pub(super) fn paste(
     let mut names = BTreeMap::new();
     let mut bodies = BTreeMap::new();
     let mut parameters = BTreeMap::new();
-    let mut used: BTreeSet<String> = source
-        .features
-        .iter()
-        .map(|f| f.name.clone())
-        .chain(source.components.iter().map(|c| c.name.clone()))
-        .chain(state.bodies.iter().map(|b| b.name.clone()))
-        .collect();
+    // Names are numbered among their own kind, against the names the target has: a component
+    // named after its body takes the same number as the body's copy, and neither skips one the
+    // other took.
+    let mut used_components: BTreeSet<String> = s.doc.components.iter().map(|c| c.name.clone()).collect();
+    let mut used_features: BTreeSet<String> = s.doc.features.iter().map(|f| f.name.clone()).collect();
+    let mut used_bodies: BTreeSet<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
     let mut new_ids = Vec::new();
     let mut frozen = Vec::new();
     // Allocate definitions, discarding their automatic placeholder occurrence except root.
@@ -251,12 +294,13 @@ pub(super) fn paste(
         } else {
             components.get(&c.parent).copied().unwrap_or(*components.get(&component).ok_or_else(|| bad(CMD, "missing clone root"))?)
         };
-        let name = unique(&c.name, &mut used);
+        let name = unique(&c.name, &mut used_components, origin.other_design);
         let new = scratch.doc_mut().add_component(Some(&name), mapped_parent)?;
         // A copy keeps the definition's part properties.
         if let Some(added) = scratch.doc_mut().components.iter_mut().find(|x| x.id == new) {
             added.metadata = c.metadata.clone();
             added.properties = c.properties.clone();
+            added.identification_color = c.identification_color;
         }
         components.insert(*old, new);
         if *old != component {
@@ -265,12 +309,14 @@ pub(super) fn paste(
     }
     let root = *components.get(&component).ok_or_else(|| bad(CMD, "missing clone root"))?;
     let root_occurrence = scratch.doc.occurrence_of(root).map(|o| o.id).ok_or_else(|| bad(CMD, "missing cloned placement"))?;
-    let mut clone_path = if let Some(o) = &source_occurrence {
+    let mut clone_path = if let Some(path) = parent_path {
+        path
+    } else if let Some(o) = &source_occurrence {
         let mut path = super::component::occurrence_path(s, params, o.id, CMD)?;
         path.pop();
         path
     } else {
-        source.first_path(parent)
+        s.doc.first_path(parent)
     };
     clone_path.push(root_occurrence);
     if let Some(o) = scratch.doc_mut().occurrences.iter_mut().find(|o| o.id == root_occurrence) {
@@ -284,7 +330,7 @@ pub(super) fn paste(
     for old in source.occurrences.iter().filter(|o| selected.contains(&o.parent)) {
         let child = *components.get(&old.component).ok_or_else(|| bad(CMD, "missing child definition"))?;
         let owner = *components.get(&old.parent).ok_or_else(|| bad(CMD, "missing parent definition"))?;
-        let pose = s.pending_moves.get(&old.id).copied().unwrap_or(old.transform);
+        let pose = origin.pending_moves.get(&old.id).copied().unwrap_or(old.transform);
         if !super::component::valid_position(&pose) {
             return Err(bad(CMD, "invalid internal pending occurrence transform"));
         }
@@ -299,10 +345,10 @@ pub(super) fn paste(
     // The names the bodies of a feature have in the model, where they are its stored names, numbered.
     let mut shown: BTreeMap<u64, Vec<String>> = BTreeMap::new();
     for f in &feats {
-        if let Some(result) = s.model.result(f.id) {
+        if let Some(result) = origin.model.result(f.id) {
             let created: Vec<_> = result.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.clone()).collect();
             for name in &created {
-                bodies.entry(name.clone()).or_insert_with(|| unique(name, &mut used));
+                bodies.entry(name.clone()).or_insert_with(|| unique(name, &mut used_bodies, origin.other_design));
             }
             if named_by(&f.body_names, &created) {
                 shown.insert(f.id, created.clone());
@@ -314,7 +360,7 @@ pub(super) fn paste(
         if !shown.contains_key(&f.id) {
             for name in &f.body_names {
                 if !name.is_empty() {
-                    bodies.entry(name.clone()).or_insert_with(|| unique(name, &mut used));
+                    bodies.entry(name.clone()).or_insert_with(|| unique(name, &mut used_bodies, origin.other_design));
                 }
             }
         }
@@ -335,23 +381,32 @@ pub(super) fn paste(
             !f.suppressed
                 && matches!(&f.kind, FeatureKind::BodyTransfer { bodies, from, to, .. }
             if !selected.contains(from) && bodies.iter().any(|b| *b == body.name)
-                && s.model.result(f.id).is_some_and(|result| !result.skipped && result.error.is_none()
+                && origin.model.result(f.id).is_some_and(|result| !result.skipped && result.error.is_none()
                     && result.state.body(&body.name).is_some_and(|entered| source.model_body_component(entered) == *to)))
         });
         let before = feats.iter().find_map(|f| {
-            let before = s.model.state_before(f.id);
+            let before = origin.model.state_before(f.id);
             let prior = before.body(&body.name)?;
-            let after = s.model.result(f.id)?.state.body(&body.name);
+            let after = origin.model.result(f.id)?.state.body(&body.name);
             if after.is_none_or(|after| !prior.body.same(&after.body)) { Some(before) } else { None }
         });
-        let entered = entry.and_then(|f| s.model.result(f.id)).map(|r| r.state.clone());
+        let entered = entry.and_then(|f| origin.model.result(f.id)).map(|r| r.state.clone());
         let base = entered.as_ref().and_then(|st| st.body(&body.name)).or_else(|| before.as_ref().and_then(|st| st.body(&body.name))).unwrap_or(body);
         let baseline_component = source.model_body_component(base);
         let geometry = solidcraft_kernel::transform_matrix(&base.body, offset)?;
         let step = solidcraft_kernel::step_export(&[&geometry], "SolidCraft independent reassigned body")?;
-        let new_name = unique(&body.name, &mut used);
+        let new_name = unique(&body.name, &mut used_bodies, origin.other_design);
         bodies.insert(body.name.clone(), new_name.clone());
-        let feature_name = unique(&format!("{} Base", body.name), &mut used);
+        // From another design it is named as what it is there, an imported body, numbered as
+        // the timeline numbers its features ("BodyImport1").
+        let feature_name = if origin.other_design {
+            let name =
+                (1..=MAX_WORK + 1).map(|n| format!("BodyImport{n}")).find(|n| !used_features.contains(n)).unwrap_or_else(|| "BodyImport".into());
+            used_features.insert(name.clone());
+            name
+        } else {
+            unique(&format!("{} Base", body.name), &mut used_features, false)
+        };
         let id = scratch.doc_mut().add_feature(
             FeatureKind::Import { file: format!("{} independent base", body.name), step: step.into(), components: Vec::new(), skip: Vec::new() },
             Some(&feature_name),
@@ -365,8 +420,12 @@ pub(super) fn paste(
     }
     // Allocate all history IDs before rewriting any forward reference.
     for f in &feats {
-        let name = unique(&f.name, &mut used);
-        let id = scratch.doc_mut().add_feature(f.kind.clone(), Some(&name))?;
+        let name = unique(&f.name, &mut used_features, origin.other_design);
+        // A transfer is checked as it is added: it names the copy's components (another design
+        // has none of the original ones).
+        let mut kind = f.kind.clone();
+        transfer_into_copy(&mut kind, &components)?;
+        let id = scratch.doc_mut().add_feature(kind, Some(&name))?;
         if let Some(new) = scratch.doc.feature(id) {
             for (old, pn) in f.param_names.iter().zip(&new.param_names) {
                 parameters.insert(old.clone(), pn.clone());
@@ -393,6 +452,11 @@ pub(super) fn paste(
                 }
             }
         }
+    }
+    // From another design, the user parameters the copy uses come along (and the ones they use),
+    // renamed `w_2` where this design has a `w` already.
+    if origin.other_design {
+        copy_user_parameters(&mut scratch, source, &feats, &mut parameters)?;
     }
     for (old, new) in &parameters {
         if let Some(comment) = source.param_comments.get(old) {
@@ -421,26 +485,18 @@ pub(super) fn paste(
             f.body_names = outputs.get(&old.id).cloned().unwrap_or_default();
         }
         f.remap_clone(&features, &names, &bodies, &parameters)?;
-        if let FeatureKind::BodyTransfer { from, to, transform, .. } = &mut f.kind {
-            *to = *components.get(to).ok_or_else(|| bad(CMD, "transfer destination is outside the copied graph"))?;
-            if let Some(mapped) = components.get(from) {
-                *from = *mapped;
-            } else {
-                *from = *to;
-                *transform = solidcraft_doc::IDENTITY;
-            }
-        }
+        transfer_into_copy(&mut f.kind, &components)?;
         if let FeatureKind::Emboss { face: Some(face), .. } = &mut f.kind
             && !face.path.is_empty()
             && let FeatureKind::Emboss { face: Some(old_face), .. } = &old.kind
             && bodies.contains_key(old_face.body.as_ref())
         {
-            face.path = cloned_path(&source, &old_face.path, component, &clone_path, &occurrences)?;
+            face.path = cloned_path(source, &old_face.path, component, &clone_path, &occurrences)?;
         }
         if let FeatureKind::Emboss { face: Some(face), .. } = &mut f.kind
             && !face.author_path.is_empty()
         {
-            face.author_path = cloned_path(&source, &face.author_path, component, &clone_path, &occurrences)?;
+            face.author_path = cloned_path(source, &face.author_path, component, &clone_path, &occurrences)?;
         }
         if let (FeatureKind::Sketch { plane, .. }, FeatureKind::Sketch { plane: old_plane, .. }) = (&mut f.kind, &old.kind)
             && let (Some(anchor), Some(original)) = (super::sketch::face::anchor_mut(plane), super::sketch::face::anchor(old_plane))
@@ -448,9 +504,9 @@ pub(super) fn paste(
             if bodies.contains_key(&original.target.body) {
                 anchor.component =
                     *components.get(&original.component).ok_or_else(|| bad(CMD, "anchored source component is outside copied graph"))?;
-                anchor.path = cloned_path(&source, &original.path, component, &clone_path, &occurrences)?;
+                anchor.path = cloned_path(source, &original.path, component, &clone_path, &occurrences)?;
             }
-            anchor.author_path = cloned_path(&source, &original.author_path, component, &clone_path, &occurrences)?;
+            anchor.author_path = cloned_path(source, &original.author_path, component, &clone_path, &occurrences)?;
         }
         if let Some(slot) = scratch.doc_mut().feature_mut(f.id) {
             *slot = f;
@@ -489,7 +545,7 @@ pub(super) fn paste(
         .filter_map(|b| bodies.get(&b.name).cloned())
         .collect();
     if !moved_out.is_empty() {
-        let name = unique("Assigned-out bodies", &mut used);
+        let name = unique("Assigned-out bodies", &mut used_features, origin.other_design);
         let id = scratch.doc_mut().add_feature(FeatureKind::Remove { bodies: moved_out.into_iter().map(BodyName).collect() }, Some(&name))?;
         if let Some(f) = scratch.doc_mut().feature_mut(id) {
             f.component = root;
@@ -521,14 +577,20 @@ pub(super) fn paste(
             scratch.doc_mut().appearances.faces.push(face);
         }
     }
-    // Typed configuration and assembly helpers preserve original targets.
-    scratch.doc_mut().configs.clone_targets(&solidcraft_doc::config::ConfigCloneMaps {
-        features: features.clone(),
-        components: components.clone(),
-        bodies: bodies.clone(),
-        parameters: parameters.clone(),
-    })?;
-    let mut notices = super::component_clone_assembly::clone_assembly(scratch.doc_mut(), &source, &occurrences, &features, &bodies)?;
+    // Typed configuration and assembly helpers preserve original targets (another design's
+    // configurations stay with it: this design's table has its own targets).
+    if !origin.other_design {
+        scratch.doc_mut().configs.clone_targets(&solidcraft_doc::config::ConfigCloneMaps {
+            features: features.clone(),
+            components: components.clone(),
+            bodies: bodies.clone(),
+            parameters: parameters.clone(),
+        })?;
+    }
+    let mut notices = super::component_clone_assembly::clone_assembly(scratch.doc_mut(), source, &occurrences, &features, &bodies)?;
+    // Joints and motion to the outside are left behind (those notices); what follows is what
+    // the copied features point at outside it.
+    let assembly_notices = notices.len();
     let mut reference_work = 0usize;
     for feature in &feats {
         if let FeatureKind::Emboss { face: Some(face), .. } = &feature.kind
@@ -594,9 +656,9 @@ pub(super) fn paste(
             }
         }
         if let FeatureKind::Pattern { features: references, .. } | FeatureKind::Mirror { features: references, .. } = &feature.kind {
-            for name in references {
-                if !names.contains_key(name.as_ref()) {
-                    notices.push(format!("{} retains external feature reference {name}", feature.name));
+            for id in references {
+                if !features.contains_key(&id.0) {
+                    notices.push(format!("{} retains external feature reference {id}", feature.name));
                 }
             }
         }
@@ -612,12 +674,22 @@ pub(super) fn paste(
             }
         }
     }
+    if origin.other_design {
+        // What the copy points at outside itself isn't in this design.
+        let mut outside = outside_references(notices.get(assembly_notices..).unwrap_or_default(), &feats, &bodies);
+        if !outside.is_empty() {
+            outside.sort();
+            outside.dedup();
+            let name = definition_records.get(&component).map(|c| c.name.clone()).unwrap_or_default();
+            return Err(bad(CMD, format!("{name} uses what isn't in it, so it can't be pasted into another design: {}", outside.join("; "))));
+        }
+    }
     notices.sort();
     notices.dedup();
     scratch.refresh();
     let original_errors: BTreeMap<_, _> = s.model.results.iter().map(|result| (result.id, result.error.as_ref())).collect();
     let refreshed_errors: BTreeMap<_, _> = scratch.model.results.iter().map(|result| (result.id, result.error.as_ref())).collect();
-    if source.features.iter().any(|feature| original_errors.get(&feature.id) != refreshed_errors.get(&feature.id)) {
+    if s.doc.features.iter().any(|feature| original_errors.get(&feature.id) != refreshed_errors.get(&feature.id)) {
         return Err(bad(CMD, "copy would change an original feature's error state"));
     }
     // Base imports acquire new face identities. Resolve copied face overrides against the
@@ -647,14 +719,14 @@ pub(super) fn paste(
     let copied_bodies: BTreeMap<_, _> = copied.bodies.iter().map(|body| (body.name.as_str(), body)).collect();
     // Adding placements can invalidate cached source evaluation. Compare clone effects
     // against that same evaluation's source prefix, not older shared B-rep pointers.
-    if scratch.doc.features.get(..source.features.len()) != Some(source.features.as_slice())
-        || scratch.doc.params.get(..source.params.len()) != Some(source.params.as_slice())
+    if scratch.doc.features.get(..s.doc.features.len()) != Some(s.doc.features.as_slice())
+        || scratch.doc.params.get(..s.doc.params.len()) != Some(s.doc.params.as_slice())
     {
         return Err(bad(CMD, "copy would change original feature history or parameters"));
     }
     let original_state = new_ids.first().map(|id| scratch.model.state_before(*id)).unwrap_or_else(|| copied.clone());
     let all_columns = std::mem::take(&mut scratch.doc_mut().configs.columns);
-    scratch.doc_mut().configs.columns = all_columns.iter().skip(source.configs.columns.len()).cloned().collect();
+    scratch.doc_mut().configs.columns = all_columns.iter().skip(s.doc.configs.columns.len()).cloned().collect();
     let style_validation = scratch.doc.configuration_style_status(&copied);
     scratch.doc_mut().configs.columns = all_columns;
     style_validation?;
@@ -721,10 +793,86 @@ pub(super) fn paste(
         }
     }
     scratch.selection = vec![Sel::Occurrence { path: clone_path }];
-    s.accept_computed(scratch);
-    Ok(
-        json!({"component":root,"occurrence":root_occurrence,"features":new_ids,"components":components.len(),"bodies":expected_count,"frozen_bodies":frozen,"notices":notices}),
-    )
+    let out = json!({"component":root,"occurrence":root_occurrence,"features":new_ids,"components":components.len(),"bodies":expected_count,"frozen_bodies":frozen,"notices":notices});
+    Ok((scratch, out))
+}
+
+/// A copied body transfer moves its bodies between the copies of its components; one from
+/// outside the copy is where the copy starts (it stays in place, in its destination).
+fn transfer_into_copy(kind: &mut FeatureKind, components: &BTreeMap<u64, u64>) -> Result<()> {
+    if let FeatureKind::BodyTransfer { from, to, transform, .. } = kind {
+        *to = *components.get(to).ok_or_else(|| bad(CMD, "transfer destination is outside the copied graph"))?;
+        if let Some(mapped) = components.get(from) {
+            *from = *mapped;
+        } else {
+            *from = *to;
+            *transform = solidcraft_doc::IDENTITY;
+        }
+    }
+    Ok(())
+}
+
+/// What copied features point at outside the copy, in words: the external references Paste New
+/// keeps within one design (`notices`), and the bodies they work on that aren't copied.
+fn outside_references(notices: &[String], feats: &[Feature], bodies: &BTreeMap<String, String>) -> Vec<String> {
+    let mut out: Vec<String> =
+        notices.iter().map(|n| n.replace(" retains an external ", " uses a ").replace(" retains external ", " uses ")).collect();
+    for f in feats {
+        for body in f.kind.input_bodies() {
+            if !bodies.contains_key(&body) {
+                out.push(format!("{} uses body {body}", f.name));
+            }
+        }
+    }
+    out
+}
+
+/// The user parameters copied features use (their expressions and their dimensions'), and the
+/// ones those use, copied from `source` into `scratch`: named as they were where that name is
+/// free, else `w_2`, `w_3`…; `parameters` maps each to its copy.
+fn copy_user_parameters(scratch: &mut Session, source: &Document, feats: &[Feature], parameters: &mut BTreeMap<String, String>) -> Result<()> {
+    let user: BTreeMap<&str, &solidcraft_doc::Param> = source.params.iter().filter(|p| !p.model).map(|p| (p.name.as_str(), p)).collect();
+    let mut pending: Vec<String> = feats.iter().flat_map(|f| f.kind.expressions()).map(str::to_string).collect();
+    pending.extend(parameters.keys().filter_map(|old| source.params.iter().find(|p| p.model && p.name == *old)).map(|p| p.expr.clone()));
+    let mut used: BTreeSet<&str> = BTreeSet::new();
+    let mut work = 0usize;
+    while let Some(expr) = pending.pop() {
+        for name in solidcraft_doc::expr::references(&expr) {
+            work += 1;
+            if work > 100_000 {
+                return Err(bad(CMD, "parameter references exceed copy work limit"));
+            }
+            if let Some((key, p)) = user.get_key_value(name.as_str())
+                && used.insert(key)
+            {
+                pending.push(p.expr.clone());
+            }
+        }
+    }
+    let copied: Vec<&solidcraft_doc::Param> = source.params.iter().filter(|p| used.contains(p.name.as_str())).collect();
+    if scratch.doc.params.len() + copied.len() > solidcraft_doc::MAX_PARAMS {
+        return Err(bad(CMD, "too many copied parameters"));
+    }
+    let mut taken: BTreeSet<String> = scratch.doc.params.iter().map(|p| p.name.clone()).collect();
+    for p in &copied {
+        let mut name = p.name.clone();
+        let mut n = 2;
+        while taken.contains(&name) || Document::param_name_problem(&name).is_some() {
+            name = format!("{}_{n}", p.name);
+            n += 1;
+            if n > 10_000 {
+                return Err(bad(CMD, format!("no free name for parameter {}", p.name)));
+            }
+        }
+        taken.insert(name.clone());
+        parameters.insert(p.name.clone(), name);
+    }
+    for p in copied {
+        let name = parameters.get(&p.name).cloned().unwrap_or_default();
+        let expr = solidcraft_doc::clone_expression(&p.expr, parameters);
+        scratch.doc_mut().params.push(solidcraft_doc::Param { name, expr, unit: p.unit.clone(), comment: p.comment.clone(), model: false });
+    }
+    Ok(())
 }
 
 #[cfg(test)]

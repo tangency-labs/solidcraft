@@ -139,6 +139,29 @@ fn bare_numbers_show_their_units() {
     assert_eq!(count(&app), n);
 }
 
+/// #1994: the Snap Fit dialog sends Base Height and New Body when set, nothing when not,
+/// and Edit Feature refills them.
+#[test]
+fn snap_fit_base_height_and_new_body_dialog() {
+    let mut app = app_with(&[("solid.box", json!({"length": 40, "width": 40, "height": 4}))]);
+    app.session.selection = face_sel(&app.session, Vec3::new(20.0, 20.0, 4.0)).into_iter().collect();
+    app.start("plastic.snap_fit");
+    let mut d = app.dialog.clone().unwrap();
+    let p = &apply_commands(&app, &d).unwrap()[0].1;
+    assert!(p.get("base_height").is_none() && p.get("new_body").is_none(), "defaults send nothing: {p}");
+    if let Kind::Plastic(Pl::SnapFit { base_height, new_body, .. }) = &mut d.kind {
+        *base_height = "2 mm".into();
+        *new_body = true;
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c[0].1["base_height"], "2 mm");
+    assert_eq!(c[0].1["new_body"], true);
+    run_all(&mut app, c);
+    let f = app.session.doc.features.last().unwrap().clone();
+    let e = edit_dialog(&app, f.id, None).unwrap();
+    assert!(matches!(&e.kind, Kind::Plastic(Pl::SnapFit { base_height, new_body, .. }) if base_height == "2 mm" && *new_body));
+}
+
 /// `shown_expr` adds the unit only to a bare number of a length or an angle.
 #[test]
 fn shown_expr_adds_units_to_bare_numbers() {
@@ -169,4 +192,14 @@ fn inch_plastic_rule_edit_preserves_material_angles_and_stored_lengths() {
     assert_eq!(changed["thickness"], json!("0.25 in"));
     assert_eq!(changed["draft"], unchanged["draft"]);
     assert_eq!(changed["material"], unchanged["material"]);
+}
+
+/// The hints the plastic dialogs show in an empty optional field ("from the rule", "at the
+/// face", …) are in the user's language: each has a message.
+#[test]
+fn optional_field_hints_have_messages() {
+    let ja = crate::i18n::Locale::for_language("ja");
+    for hint in ["no hole", "to the face", "from the rule", "none", "at the face", "solid"] {
+        assert_ne!(ja.label(hint), hint, "`{hint}` has a Japanese message");
+    }
 }

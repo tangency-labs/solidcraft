@@ -3,6 +3,7 @@
 //! set any of their colours (`theme_files`). Every colour the UI uses comes from [`Tokens`].
 
 use std::cell::Cell;
+use std::collections::BTreeMap;
 
 #[path = "../../../assets/styles/ui/palettes.rs"]
 mod palettes;
@@ -25,6 +26,308 @@ thread_local! {
     /// The palette of a theme file (`theme_files`) in place of the built-in one of its base
     /// (dark or light), per thread like the rest. `None`: the built-in palettes.
     static CUSTOM: Cell<Option<Custom>> = const { Cell::new(None) };
+    static CUSTOM_GENERATION: Cell<u64> = const { Cell::new(0) };
+    /// The application bar's logo in the theme's accent instead of its own logo colours
+    /// (Preferences › Interface › Logo), per thread like the rest.
+    static LOGO_ACCENT: Cell<bool> = const { Cell::new(false) };
+    /// The 3D view's own dark or light when Preferences give it one ([`ViewportTheme`], #4146),
+    /// per thread like the rest. `None`: the view is as dark as the window.
+    static VIEWPORT_DARK: Cell<Option<bool>> = const { Cell::new(None) };
+    /// The 3D view's background colour when Preferences give it one (#7688), per thread like the
+    /// rest. `None`: the theme's gradient.
+    static VIEWPORT_BACKGROUND: Cell<Option<[u8; 3]>> = const { Cell::new(None) };
+    /// The last published frame, guarded by every palette input so another app/context cannot
+    /// reuse it after changing the thread's theme. Resolution/fade state lives in that context.
+    static PUBLISHED: Cell<Option<PublishedTab>> = const { Cell::new(None) };
+}
+
+/// Exact registry names, including contextual/specialty tabs and legacy Render sub-tabs that
+/// still share the Render accent. Unknown names must never silently become Model on import.
+pub(crate) const TAB_NAMES: &[&str] = &[
+    "MODEL",
+    "SKETCH",
+    "SURFACE",
+    "MESH",
+    "FORM",
+    "SHEET METAL",
+    "WELDMENTS",
+    "ASSEMBLE",
+    "INSERT",
+    "INSPECT",
+    "MANAGE",
+    "VIEW",
+    "RENDER",
+    "RENDER APPEARANCE",
+    "RENDER SCENE",
+    "RENDER CAMERA",
+];
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Environment {
+    dark: bool,
+    vision: ColorVision,
+    custom_generation: u64,
+    logo: bool,
+    viewport: Option<bool>,
+    background: Option<[u8; 3]>,
+}
+
+impl Environment {
+    fn current() -> Self {
+        Self {
+            dark: is_dark(),
+            vision: vision(),
+            custom_generation: CUSTOM_GENERATION.get(),
+            logo: LOGO_ACCENT.get(),
+            viewport: VIEWPORT_DARK.get(),
+            background: viewport_background(),
+        }
+    }
+
+    fn window(self, tokens: Tokens) -> Tokens {
+        let tokens = if self.logo { tokens.with_accent_logo() } else { tokens };
+        tokens.with_vision(self.dark, self.vision)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct PublishedTab {
+    environment: Environment,
+    tokens: Tokens,
+    view: Tokens,
+    tab_surfaces: bool,
+}
+
+#[derive(Clone)]
+struct PreparedTheme {
+    file: crate::theme_files::ThemeFile,
+    raw: Option<BTreeMap<String, serde_json::Value>>,
+    values: BTreeMap<String, crate::theme_files::OptionValue>,
+    base: Custom,
+    enabled: bool,
+    fade_ms: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Surfaces {
+    panel: Color32,
+    top: Color32,
+    bottom: Color32,
+}
+
+impl Surfaces {
+    fn of(t: Tokens) -> Self {
+        Self { panel: t.panel, top: t.viewport_top, bottom: t.viewport_bottom }
+    }
+
+    fn apply(self, t: &mut Tokens) {
+        t.panel = self.panel;
+        t.viewport_top = self.top;
+        t.viewport_bottom = self.bottom;
+    }
+
+    fn blend(self, to: Self, progress: f32) -> Self {
+        // Return endpoints verbatim, including premultiplied alpha and byte rounding.
+        if progress <= 0.0 {
+            return self;
+        }
+        if progress >= 1.0 {
+            return to;
+        }
+        let eased = 1.0 - (1.0 - progress).powi(3);
+        Self {
+            panel: oklab_blend(self.panel, to.panel, eased),
+            top: oklab_blend(self.top, to.top, eased),
+            bottom: oklab_blend(self.bottom, to.bottom, eased),
+        }
+    }
+}
+
+/// Interpolate unassociated sRGB in Oklab; alpha stays independent and is premultiplied once
+/// by Color32 on output. This avoids dark fringes when an opacity provider is also enabled.
+fn oklab_blend(from: Color32, to: Color32, fraction: f32) -> Color32 {
+    let lab = |color: Color32| {
+        let [r, g, b, a] = color.to_srgba_unmultiplied();
+        let decode = solidcraft_engine::geom::srgb::decode8;
+        let (r, g, b) = (decode(r), decode(g), decode(b));
+        let l = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b).cbrt();
+        let m = (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b).cbrt();
+        let s = (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b).cbrt();
+        [
+            0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+            1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+            0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
+            f64::from(a),
+        ]
+    };
+    let (a, b) = (lab(from), lab(to));
+    let mix = |i: usize| a[i] + (b[i] - a[i]) * f64::from(fraction);
+    let (light, a, b) = (mix(0), mix(1), mix(2));
+    let l = (light + 0.3963377774 * a + 0.2158037573 * b).powi(3);
+    let m = (light - 0.1055613458 * a - 0.0638541728 * b).powi(3);
+    let s = (light - 0.0894841775 * a - 1.2914855480 * b).powi(3);
+    let encode = |linear: f64| {
+        let linear = linear.clamp(0.0, 1.0);
+        let srgb = if linear <= 0.0031308 { 12.92 * linear } else { 1.055 * linear.powf(1.0 / 2.4) - 0.055 };
+        (srgb * 255.0).round() as u8
+    };
+    Color32::from_rgba_unmultiplied(
+        encode(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s),
+        encode(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s),
+        encode(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s),
+        mix(3).round() as u8,
+    )
+}
+
+#[derive(Clone, Copy)]
+struct Fade {
+    from: Surfaces,
+    to: Surfaces,
+    start: f64,
+    seconds: f64,
+}
+
+impl Fade {
+    fn sample(self, now: f64) -> (Surfaces, bool) {
+        if !now.is_finite() || self.seconds <= 0.0 {
+            return (self.to, false);
+        }
+        let progress = ((now - self.start) / self.seconds).clamp(0.0, 1.0) as f32;
+        (self.from.blend(self.to, progress), progress < 1.0)
+    }
+}
+
+#[derive(Clone, Default)]
+struct TabThemeState {
+    prepared: Option<PreparedTheme>,
+    environment: Option<Environment>,
+    targets: BTreeMap<String, TabTarget>,
+    tab: String,
+    shown: Option<Surfaces>,
+    fade: Option<Fade>,
+    /// Ownership of the two egui fills survives target/theme invalidation until restored.
+    styled_surfaces: bool,
+    #[cfg(test)]
+    resolutions: usize,
+}
+
+#[derive(Clone, Copy)]
+struct TabTarget {
+    tokens: Tokens,
+    view: Tokens,
+    accent: TabAccent,
+}
+
+const TAB_STATE: &str = "sc_tab_theme_state";
+
+/// Cache the authored theme and raw saved values before any effective-value normalization.
+/// Followed-file reloads use full content equality, including edits that keep the same id/base.
+/// The caller supplies its existing normalization contract only on a cache miss.
+pub(crate) fn prepare_tabs(
+    ctx: &egui::Context,
+    file: Option<&crate::theme_files::ThemeFile>,
+    raw: Option<&BTreeMap<String, serde_json::Value>>,
+    values: impl FnOnce() -> BTreeMap<String, crate::theme_files::OptionValue>,
+) -> Option<Custom> {
+    ctx.data_mut(|data| {
+        let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE));
+        let same = match (&state.prepared, file) {
+            (Some(old), Some(file)) => old.file == *file && old.raw.as_ref() == raw,
+            (None, None) => true,
+            _ => false,
+        };
+        if !same {
+            state.prepared = file.map(|file| {
+                let values = values();
+                let (enabled, fade_ms) = crate::theme_options::tab_settings(file, &values);
+                let base = Custom { dark: file.base.is_dark(), tokens: crate::theme_files::resolve_with(file, &values) };
+                PreparedTheme { file: file.clone(), raw: raw.cloned(), values, base, enabled, fade_ms }
+            });
+            state.environment = None;
+            state.targets.clear();
+            // A theme/option change applies immediately; only tab changes animate.
+            state.shown = None;
+            state.fade = None;
+            PUBLISHED.set(None);
+        }
+        state.prepared.as_ref().map(|p| p.base)
+    })
+}
+
+impl TabThemeState {
+    fn publish(&mut self, tab: &str, now: f64) -> (PublishedTab, TabAccent, bool) {
+        let environment = Environment::current();
+        if self.environment != Some(environment) {
+            self.environment = Some(environment);
+            self.targets.clear();
+            self.shown = None;
+            self.fade = None;
+        }
+        // Bound the cache even if an internal caller supplies an unknown tab name.
+        let tab = if TAB_NAMES.contains(&tab) { tab } else { "MODEL" };
+        // Borrow the key on resting frames; own a name only when caching a new target.
+        let target = if let Some(target) = self.targets.get(tab) {
+            *target
+        } else {
+            #[cfg(test)]
+            {
+                self.resolutions += 1;
+            }
+            let window = if let Some(prepared) = &self.prepared {
+                environment.window(crate::theme_files::resolve_for_tab(&prepared.file, &prepared.values, Some(tab)))
+            } else {
+                Tokens::themed(environment.dark, environment.vision)
+            };
+            let accent = TabAccent::for_tab(&window, tab);
+            let window = if viewport_dark() == is_dark() { window } else { window.with_viewport(Tokens::themed(viewport_dark(), vision())) };
+            let target = TabTarget {
+                tokens: window.with_background(environment.background),
+                view: Tokens::themed(viewport_dark(), vision()).with_background(environment.background),
+                accent,
+            };
+            self.targets.insert(tab.to_owned(), target);
+            target
+        };
+        let destination = Surfaces::of(target.tokens);
+        // Sample the old fade before retargeting, even when two tab changes happen in one frame.
+        if let Some(fade) = self.fade {
+            let (shown, running) = fade.sample(now);
+            let mut current = target.tokens;
+            shown.apply(&mut current);
+            if running {
+                current.protect_tab_panel();
+            }
+            self.shown = Some(Surfaces::of(current));
+            if !running {
+                self.fade = None;
+            }
+        }
+        if self.tab != tab || self.shown.is_none() {
+            let duration = self.prepared.as_ref().filter(|p| p.enabled).map_or(0.0, |p| p.fade_ms);
+            self.fade = self.shown.filter(|from| *from != destination && duration > 0.0 && now.is_finite()).map(|from| Fade {
+                from,
+                to: destination,
+                start: now,
+                seconds: f64::from(duration) / 1000.0,
+            });
+            tab.clone_into(&mut self.tab);
+            if self.fade.is_none() {
+                self.shown = Some(destination);
+            }
+        }
+        let mut tokens = target.tokens;
+        self.shown.unwrap_or(destination).apply(&mut tokens);
+        // Protect interpolated alpha too; opacity's readability floor applies throughout a fade.
+        if self.fade.is_some() {
+            tokens.protect_tab_panel();
+        }
+        self.shown = Some(Surfaces::of(tokens));
+        let mut view = if viewport_dark() == is_dark() { tokens } else { target.view };
+        view.viewport_top = tokens.viewport_top;
+        view.viewport_bottom = tokens.viewport_bottom;
+        let tab_surfaces = self.prepared.as_ref().is_some_and(|p| p.enabled && !p.file.tabs.is_empty());
+        (PublishedTab { environment, tokens, view, tab_surfaces }, target.accent, self.fade.is_some())
+    }
 }
 
 /// Three structural border levels plus independent content and control outlines.
@@ -224,7 +527,17 @@ pub struct Custom {
 /// Use a theme file's palette for its base, or the built-in palettes (`None`). Returns whether
 /// that changed anything (the visuals follow on the next [`apply`]).
 pub fn set_custom(custom: Option<Custom>) -> bool {
-    CUSTOM.with(|c| c.replace(custom) != custom)
+    let changed = CUSTOM.with(|c| c.replace(custom) != custom);
+    if changed {
+        CUSTOM_GENERATION.with(|generation| generation.set(generation.get().wrapping_add(1)));
+    }
+    changed
+}
+
+/// Draw the logo in the theme's accent (`true`) or its own logo colours. Returns whether that
+/// changed anything (the visuals follow on the next [`apply`]).
+pub fn set_logo_accent(on: bool) -> bool {
+    LOGO_ACCENT.with(|c| c.replace(on) != on)
 }
 
 /// Isolated widget tests restore the thread's theme even when an assertion fails.
@@ -264,14 +577,44 @@ pub(crate) fn icon_accent_for_tab(tab: &str) -> Option<&'static str> {
 /// WCAG contrast of two opaque sRGB colours.
 pub(crate) fn contrast_ratio(a: Color32, b: Color32) -> f64 {
     let luminance = |c: Color32| {
-        let linear = |v: u8| {
-            let v = f64::from(v) / 255.0;
-            if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
-        };
+        let linear = solidcraft_engine::geom::srgb::decode8;
         0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
     };
     let (a, b) = (luminance(a), luminance(b));
     (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+/// Composite a translucent foreground over an opaque background in sRGB for contrast checks.
+pub(crate) fn composite(fill: Color32, background: Color32) -> Color32 {
+    let rgb = fill.to_srgba_unmultiplied();
+    let a = f64::from(rgb[3]) / 255.0;
+    let channel = |index: usize| (f64::from(rgb[index]) * a + f64::from(background[index]) * (1.0 - a)).round() as u8;
+    Color32::from_rgb(channel(0), channel(1), channel(2))
+}
+
+fn readable_fill(fill: Color32, inks: &[Color32], scale: f32) -> Color32 {
+    let readable = |candidate| {
+        [Color32::BLACK, Color32::WHITE].iter().all(|background| {
+            let ground = composite(candidate, *background);
+            inks.iter().all(|ink| contrast_ratio(composite(*ink, ground), ground) >= 4.5)
+        })
+    };
+    // A sampled/retargeted colour that already reads must stay bit-exact, including alpha.
+    if scale >= 1.0 && readable(fill) {
+        return fill;
+    }
+    let [r, g, b, alpha] = fill.to_srgba_unmultiplied();
+    let requested = (f32::from(alpha) * scale).round() as u8;
+    // At most 256 cheap colour comparisons per changed role; no allocations, GPU or I/O.
+    for a in requested..=255 {
+        let candidate = Color32::from_rgba_unmultiplied(r, g, b, a);
+        if readable(candidate) {
+            return candidate;
+        }
+    }
+    // An authored foreground may already fail at full opacity. Never alter that foreground;
+    // full alpha gives it the strongest protection this option can supply.
+    Color32::from_rgb(r, g, b)
 }
 
 impl TabAccent {
@@ -282,7 +625,7 @@ impl TabAccent {
             "MESH" => (t.mesh_fill, t.mesh_ink, t.mesh_soft),
             "FORM" => (t.form_fill, t.form_tab_ink, t.form_soft),
             "SHEET METAL" => (t.sheet_fill, t.sheet_ink, t.sheet_soft),
-            "RENDER" => (t.render_fill, t.render_ink, t.render_soft),
+            "RENDER" | "RENDER APPEARANCE" | "RENDER SCENE" | "RENDER CAMERA" => (t.render_fill, t.render_ink, t.render_soft),
             // Model and shared utility tabs retain their existing selection exactly.
             _ => (t.accent, t.selected_ink, t.accent_soft),
         };
@@ -322,7 +665,30 @@ impl TabAccent {
     }
 
     pub fn publish(app: &crate::SolveApp, ctx: &egui::Context) {
-        let accent = Self::for_tab(&Tokens::get(), &app.ui.tab);
+        let now = ctx.input(|i| i.time);
+        let (published, accent, fading, style_surfaces) = ctx.data_mut(|data| {
+            let state = data.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE));
+            let (published, accent, fading) = state.publish(&app.ui.tab, now);
+            let style_surfaces = published.tab_surfaces || state.styled_surfaces;
+            state.styled_surfaces = published.tab_surfaces;
+            (published, accent, fading, style_surfaces)
+        });
+        PUBLISHED.set(Some(published));
+        if style_surfaces {
+            let fills = {
+                let style = ctx.global_style();
+                (style.visuals.panel_fill, style.visuals.window_fill)
+            };
+            if fills != (published.tokens.panel, published.tokens.panel) {
+                ctx.global_style_mut(|style| {
+                    style.visuals.panel_fill = published.tokens.panel;
+                    style.visuals.window_fill = published.tokens.panel;
+                });
+            }
+        }
+        if fading {
+            ctx.request_repaint();
+        }
         ctx.data_mut(|d| {
             d.insert_temp(egui::Id::new("sc_tab_accent"), accent);
             d.insert_temp(egui::Id::new("sc_tab_icon_accent"), icon_accent_for_tab(&app.ui.tab));
@@ -346,6 +712,22 @@ impl TabAccent {
 /// Is the dark theme on?
 pub fn is_dark() -> bool {
     DARK.get()
+}
+
+/// Is the 3D view dark? As the window, unless Preferences give the view its own (#4146).
+pub fn viewport_dark() -> bool {
+    VIEWPORT_DARK.get().unwrap_or_else(is_dark)
+}
+
+/// The 3D view's own background colour, or `None` for the theme's gradient (#7688).
+pub fn viewport_background() -> Option<[u8; 3]> {
+    VIEWPORT_BACKGROUND.get()
+}
+
+/// Whether the published theme opts into per-tab surfaces. Render's unauthored preview uses
+/// this cached policy; it must retain its existing scene backplate when the option is absent/off.
+pub(crate) fn tab_surfaces_enabled() -> bool {
+    PUBLISHED.get().is_some_and(|p| p.environment == Environment::current() && p.tab_surfaces)
 }
 
 /// The common conversion boundary for compiled icon palette data.
@@ -415,6 +797,60 @@ impl<'de> Deserialize<'de> for ColorVision {
     }
 }
 
+/// The 3D view's colours (#4146): the theme's own, or the built-in Light or Dark theme's whatever
+/// the window uses, so a dark window can show the model on a light view and the other way round.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ViewportTheme {
+    #[default]
+    Theme,
+    Light,
+    Dark,
+}
+
+impl ViewportTheme {
+    pub const ALL: [ViewportTheme; 3] = [ViewportTheme::Theme, ViewportTheme::Light, ViewportTheme::Dark];
+
+    /// The saved value (`ui.prefs` `viewport_theme`).
+    pub fn id(self) -> &'static str {
+        match self {
+            ViewportTheme::Theme => "theme",
+            ViewportTheme::Light => "light",
+            ViewportTheme::Dark => "dark",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<ViewportTheme> {
+        ViewportTheme::ALL.into_iter().find(|m| m.id() == id)
+    }
+
+    /// Its name in the Preferences (a message id).
+    pub fn label_id(self) -> &'static str {
+        match self {
+            ViewportTheme::Theme => "ui.viewport_theme_follow",
+            ViewportTheme::Light => "ui.light",
+            ViewportTheme::Dark => "ui.dark",
+        }
+    }
+
+    /// The view's own dark or light, or `None` to draw it as the window ([`set_viewport_dark`]).
+    pub fn dark(self) -> Option<bool> {
+        match self {
+            ViewportTheme::Theme => None,
+            ViewportTheme::Light => Some(false),
+            ViewportTheme::Dark => Some(true),
+        }
+    }
+}
+
+/// From saved preferences: an unknown value is Theme, as [`ColorVision`]'s is Off.
+impl<'de> Deserialize<'de> for ViewportTheme {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = serde_json::Value::deserialize(d)?;
+        Ok(v.as_str().and_then(ViewportTheme::from_id).unwrap_or_default())
+    }
+}
+
 /// The colour vision mode on now (on this thread).
 pub fn vision() -> ColorVision {
     VISION.with(Cell::get)
@@ -423,6 +859,11 @@ pub fn vision() -> ColorVision {
 /// Switch the colour vision mode (the visuals follow on the next [`apply`]).
 pub fn set_vision(mode: ColorVision) {
     VISION.with(|v| v.set(mode));
+}
+
+/// An sRGB colour carried by model data, including file colours and point-cloud shading.
+pub(crate) const fn model_color(rgb: [u8; 3]) -> Color32 {
+    Color32::from_rgb(rgb[0], rgb[1], rgb[2])
 }
 
 /// An sRGB colour given as 0..1 (the analysis colours), for drawing in the UI.
@@ -443,8 +884,21 @@ pub struct IconColors {
     pub marker_halo: Color32,
 }
 
+/// Every colour and size the UI draws with. The colours drawn in the 3D view are listed again in
+/// [`Tokens::with_viewport`], which takes them from the other side when the 3D view is set to the
+/// other one's colours (#4146): a new colour drawn in the view goes in both.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Tokens {
+    /// Navigation chrome from the approved Navbar boards.
+    pub nav_hover: Color32,
+    pub nav_press: Color32,
+    pub nav_dim: Color32,
+    pub nav_viewport: Color32,
+    pub nav_tip: Color32,
+    pub nav_tip_ink: Color32,
+    pub nav_tip_key_border: Color32,
+    pub nav_field: Color32,
+
     /// Optional structural/control strokes. None retains each surface’s legacy styling.
     pub borders: Borders,
     /// File/start presentation, with explicit foreground/background pairs.
@@ -522,6 +976,8 @@ pub struct Tokens {
     pub form_ink: Color32,
     pub form_dim: Color32,
     pub form_primary: Color32,
+    /// Primary action fill; theme files without this token inherit `form_primary`.
+    pub form_primary_fill: Color32,
     pub form_error: Color32,
     pub form_error_fill: Color32,
     /// Successful validation text and its badge surface.
@@ -637,6 +1093,9 @@ pub struct Tokens {
     pub origin_plane_edge: Color32,
     pub origin_plane_hover: Color32,
     pub origin_point: Color32,
+    /// The X, Y and Z colours, one set for every axis drawn (#976): the origin axes, the view
+    /// triad, the navigation cube's triad, the Move gizmo, a 3D sketch point's triad, joint
+    /// origins, measured distances along the axes and the headless picture's origin axes.
     pub axis_x: Color32,
     pub axis_y: Color32,
     pub axis_z: Color32,
@@ -649,6 +1108,10 @@ pub struct Tokens {
     pub body_edge: Color32,
     /// Command manipulators (direction arrows, handles).
     pub manipulator: Color32,
+    /// Allowed assembly motion, separate from the selected face's blue.
+    pub joint_manipulator: Color32,
+    /// Assembly Move axis and centre, distinct from its draggable amber arrows.
+    pub joint_axis: Color32,
     /// New surface in a feature preview.
     pub preview_add: Color32,
     /// The surface of a body a feature preview creates (New Body), apart from a join (#1805).
@@ -674,9 +1137,16 @@ pub struct Tokens {
     /// Sketch curves: under-constrained, fully constrained (and finished sketches).
     pub sketch: Color32,
     pub sketch_fixed: Color32,
+    /// Wider rim beneath sketch curves to separate them from shaded faces.
+    pub sketch_halo: Color32,
     /// Fixed (locked) sketch geometry.
     pub sketch_locked: Color32,
-    /// Sketch dimensions: driving, driven (reference).
+    /// The open sketch's curves and points that a failing constraint holds, and that
+    /// constraint's glyph or dimension, while the constraints conflict (#7244). The error red by
+    /// default; a theme file that sets `error` but not this key takes its `error`.
+    pub sketch_conflict: Color32,
+    /// Sketch dimensions: driving, driven (reference). Each theme gives them a colour of their
+    /// own, apart from the sketch curves they measure (#7861).
     pub dimension: Color32,
     pub dimension_driven: Color32,
     /// Sketch points: fully constrained, free.
@@ -733,10 +1203,6 @@ pub struct Tokens {
     pub sketch_lost: Color32,
     pub sketch_construction: Color32,
     pub sketch_centerline: Color32,
-    /// The view triad's X, Y and Z (and the CPU scene's origin axes).
-    pub triad: [Color32; 3],
-    /// The move gizmo's X, Y and Z.
-    pub gizmo: [Color32; 3],
     /// Sheet metal flat pattern: bend up, bend down.
     pub bend_up: Color32,
     pub bend_down: Color32,
@@ -766,16 +1232,169 @@ impl Tokens {
         egui::Shadow { offset: [0, self.space_2 as i8], blur: self.space_8 as u8, spread: 0, color: self.app_bar.gamma_multiply(0.18) }
     }
 
-    /// The tokens of the current theme and colour vision mode.
+    /// The X, Y and Z axis colours, in that order.
+    pub const fn axes(&self) -> [Color32; 3] {
+        [self.axis_x, self.axis_y, self.axis_z]
+    }
+
+    /// The tokens of the current theme and colour vision mode, the colours drawn in the 3D view
+    /// from the view's own dark or light ([`viewport_dark`]).
     pub fn get() -> Tokens {
-        Tokens::themed(is_dark(), vision())
+        Tokens::get_in(vision())
+    }
+
+    /// [`Tokens::get`] in another colour vision mode: the Colour vision preference previews the
+    /// mode being chosen before it is applied (#7152).
+    pub fn get_in(mode: ColorVision) -> Tokens {
+        if let Some(published) = PUBLISHED.get().filter(|p| p.environment == Environment::current()) {
+            if mode == published.environment.vision {
+                return published.tokens;
+            }
+            let mut tokens = Self::base_in(mode);
+            Surfaces::of(published.tokens).apply(&mut tokens);
+            return tokens;
+        }
+        Self::base_in(mode)
+    }
+
+    /// Unanimated colours for geometry cache keys: fading backgrounds must not rebuild bodies.
+    pub(crate) fn base() -> Tokens {
+        Self::base_in(vision())
+    }
+
+    fn base_in(mode: ColorVision) -> Tokens {
+        let window = Tokens::themed(is_dark(), mode);
+        let tokens = if viewport_dark() == is_dark() { window } else { window.with_viewport(Tokens::themed(viewport_dark(), mode)) };
+        tokens.with_background(viewport_background())
+    }
+
+    /// The tokens of the 3D view's side (#4146), for a window colour drawn straight onto the view
+    /// with nothing behind it (a status line, a label or a warning beside the geometry), so it
+    /// reads on the view's background. As [`Tokens::get`] unless the view has its own side.
+    pub fn view() -> Tokens {
+        if let Some(published) = PUBLISHED.get().filter(|p| p.environment == Environment::current()) {
+            return published.view;
+        }
+        Tokens::themed(viewport_dark(), vision()).with_background(viewport_background())
+    }
+
+    pub(crate) fn protect_tab_panel(&mut self) {
+        self.panel = readable_fill(self.panel, &[self.text, self.text_dim, self.form_ink, self.dialog_label], 1.0);
+    }
+
+    /// Scale only floating surface fill alpha, preserving full-opacity tokens exactly.
+    /// Raise each fill's floor to protect text over both black and white viewport extremes.
+    pub(crate) fn apply_panel_opacity(&mut self, percent: f32) {
+        if !percent.is_finite() || percent >= 100.0 {
+            return;
+        }
+        let scale = percent.clamp(40.0, 100.0) / 100.0;
+        let body_inks = [self.text, self.form_ink, self.dialog_label];
+        for fill in [&mut self.panel, &mut self.panel_header, &mut self.dialog_bg, &mut self.dialog_body, &mut self.dialog_footer, &mut self.overlay]
+        {
+            *fill = readable_fill(*fill, &body_inks, scale);
+        }
+        self.nav_tip = readable_fill(self.nav_tip, &[self.nav_tip_ink], scale);
+    }
+
+    /// These tokens with the 3D view's background one flat colour (#7688), or as they are for `None`.
+    pub fn with_background(mut self, colour: Option<[u8; 3]>) -> Tokens {
+        if let Some([r, g, b]) = colour {
+            self.viewport_top = Color32::from_rgb(r, g, b);
+            self.viewport_bottom = self.viewport_top;
+        }
+        self
+    }
+
+    /// These tokens with the colours drawn in the 3D view taken from `view`: the background and
+    /// grid, bodies, selection and hover, the origin and construction geometry, previews, sketches
+    /// and their dimensions and glyphs, the navigation cube and triads, box selection and the
+    /// analysis colours. The window keeps its own: panels, dialogs, menus, and the chips and cards
+    /// over the view (`overlay` with its text, icons and borders).
+    pub fn with_viewport(self, view: Tokens) -> Tokens {
+        Tokens {
+            sel_face: view.sel_face,
+            sel_edge: view.sel_edge,
+            sel_edge_rim: view.sel_edge_rim,
+            hover_edge: view.hover_edge,
+            hover_edge_halo: view.hover_edge_halo,
+            hover_face_lift: view.hover_face_lift,
+            sel_profile: view.sel_profile,
+            sel_profile_edge: view.sel_profile_edge,
+            hover_profile: view.hover_profile,
+            hover_profile_edge: view.hover_profile_edge,
+            sel_vertex: view.sel_vertex,
+            origin_plane: view.origin_plane,
+            origin_plane_edge: view.origin_plane_edge,
+            origin_plane_hover: view.origin_plane_hover,
+            origin_point: view.origin_point,
+            axis_x: view.axis_x,
+            axis_y: view.axis_y,
+            axis_z: view.axis_z,
+            construction_plane: view.construction_plane,
+            construction_geom: view.construction_geom,
+            body: view.body,
+            body_edge: view.body_edge,
+            manipulator: view.manipulator,
+            joint_manipulator: view.joint_manipulator,
+            joint_axis: view.joint_axis,
+            preview_add: view.preview_add,
+            preview_new: view.preview_new,
+            preview_sketch: view.preview_sketch,
+            preview_cut: view.preview_cut,
+            cube_face: view.cube_face,
+            cube_border: view.cube_border,
+            cube_text: view.cube_text,
+            cube_hover: view.cube_hover,
+            viewport_top: view.viewport_top,
+            viewport_bottom: view.viewport_bottom,
+            grid: view.grid,
+            grid_major: view.grid_major,
+            body_selected: view.body_selected,
+            sketch: view.sketch,
+            sketch_fixed: view.sketch_fixed,
+            sketch_locked: view.sketch_locked,
+            sketch_conflict: view.sketch_conflict,
+            dimension: view.dimension,
+            dimension_driven: view.dimension_driven,
+            sketch_point: view.sketch_point,
+            sketch_point_free: view.sketch_point_free,
+            section_cap: view.section_cap,
+            profile_fill: view.profile_fill,
+            glyph_bg: view.glyph_bg,
+            glyph_edge: view.glyph_edge,
+            glyph_text: view.glyph_text,
+            rubber_band: view.rubber_band,
+            box_window: view.box_window,
+            box_crossing: view.box_crossing,
+            sketch_projected: view.sketch_projected,
+            sketch_lost: view.sketch_lost,
+            sketch_construction: view.sketch_construction,
+            sketch_centerline: view.sketch_centerline,
+            bend_up: view.bend_up,
+            bend_down: view.bend_down,
+            interference: view.interference,
+            continuity: view.continuity,
+            analysis: view.analysis,
+            ..self
+        }
     }
 
     /// The tokens of a theme and colour vision mode: a theme file's palette when one is on for
     /// that base ([`set_custom`]), else the built-in one; the colour vision mode on top.
     pub fn themed(dark: bool, mode: ColorVision) -> Tokens {
         let custom = CUSTOM.get().filter(|c| c.dark == dark).map(|c| c.tokens);
-        custom.unwrap_or(if dark { Tokens::dark() } else { Tokens::light() }).with_vision(dark, mode)
+        let t = custom.unwrap_or(if dark { Tokens::dark() } else { Tokens::light() });
+        let t = if LOGO_ACCENT.get() { t.with_accent_logo() } else { t };
+        t.with_vision(dark, mode)
+    }
+
+    /// These tokens with the logo's three faces in shades of the accent: lighter, the accent
+    /// itself, darker (as the built-in logo's blues are).
+    pub fn with_accent_logo(mut self) -> Tokens {
+        let accent = self.accent.to_opaque();
+        self.logo = [accent.lerp_to_gamma(Color32::WHITE, 0.22), accent, accent.lerp_to_gamma(Color32::BLACK, 0.2)];
+        self
     }
 
     /// These tokens with a colour vision mode's values on top (the tables in `palettes.rs`); Off
@@ -812,6 +1431,16 @@ pub fn material_color(name: &str) -> Option<Color32> {
 /// Switch themes (the visuals follow on the next [`apply`]).
 pub fn set_dark(dark: bool) {
     DARK.set(dark);
+}
+
+/// Give the 3D view its own dark or light (#4146), or `None` to draw it as dark as the window.
+pub fn set_viewport_dark(dark: Option<bool>) {
+    VIEWPORT_DARK.set(dark);
+}
+
+/// Give the 3D view a background colour of its own (#7688), or `None` for the theme's gradient.
+pub fn set_viewport_background(colour: Option<[u8; 3]>) {
+    VIEWPORT_BACKGROUND.set(colour);
 }
 
 fn visuals(dark: bool) -> egui::Visuals {
@@ -865,6 +1494,188 @@ pub fn apply(ctx: &egui::Context) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    fn tabs_state(base: &str, overrides: BTreeMap<String, crate::theme_files::OptionValue>) -> TabThemeState {
+        let file = crate::theme_files::tab_fixture(base);
+        let values = crate::theme_files::effective_values(&file, &overrides).0;
+        let (enabled, fade_ms) = crate::theme_options::tab_settings(&file, &values);
+        let base = Custom { dark: file.base.is_dark(), tokens: crate::theme_files::resolve_with(&file, &values) };
+        set_dark(base.dark);
+        set_custom(Some(base));
+        set_vision(ColorVision::Off);
+        set_viewport_dark(None);
+        set_viewport_background(None);
+        TabThemeState { prepared: Some(PreparedTheme { file, values, raw: None, base, enabled, fade_ms }), ..Default::default() }
+    }
+
+    #[test]
+    fn tabs_fade_has_exact_endpoints_oklab_cubic_midpoint_and_independent_alpha() {
+        let from = Surfaces { panel: Color32::BLACK, top: Color32::BLACK, bottom: Color32::BLACK };
+        let to = Surfaces { panel: Color32::WHITE, top: Color32::WHITE, bottom: Color32::WHITE };
+        assert_eq!(from.blend(to, 0.0), from);
+        assert_eq!(from.blend(to, 1.0), to);
+        // Neutral Oklab L at half-time is 1 - (1 - .5)^3 = .875. The independent
+        // sRGB encoding of .875^3 is .8375, or byte 214 (gamma blending would give 223).
+        assert_eq!(from.blend(to, 0.5), Surfaces { panel: Color32::from_gray(214), top: Color32::from_gray(214), bottom: Color32::from_gray(214) });
+        let a = Color32::from_rgba_unmultiplied(40, 90, 130, 128);
+        let b = Color32::from_rgba_unmultiplied(90, 150, 190, 64);
+        assert_eq!(oklab_blend(a, b, 0.875).a(), 72);
+        let fade = Fade { from, to, start: 1.0, seconds: 0.24 };
+        assert_eq!(fade.sample(1.0), (from, true));
+        assert_eq!(fade.sample(1.24), (to, false));
+        assert_eq!(Fade { seconds: 0.0, ..fade }.sample(1.0), (to, false));
+        assert_eq!(fade.sample(f64::NAN), (to, false));
+    }
+
+    #[test]
+    fn tabs_fade_retargets_from_displayed_surfaces_and_stops_resolving_at_rest() {
+        for opacity in [40.0, 100.0] {
+            let mut state = tabs_state("dark", BTreeMap::from([("opacity".into(), crate::theme_files::OptionValue::Num(opacity))]));
+            let (model, _, repaint) = state.publish("MODEL", 0.0);
+            assert!(!repaint);
+            let (start, _, repaint) = state.publish("SKETCH", 1.0);
+            assert!(repaint);
+            assert_eq!(Surfaces::of(start.tokens), Surfaces::of(model.tokens));
+            let (middle, _, _) = state.publish("SKETCH", 1.12);
+            let (retarget, _, repaint) = state.publish("RENDER", 1.12);
+            assert!(repaint);
+            assert_eq!(Surfaces::of(retarget.tokens), Surfaces::of(middle.tokens));
+            assert_eq!(retarget.view.viewport_top, retarget.tokens.viewport_top);
+            assert_eq!(retarget.view, retarget.tokens);
+            let (end, _, repaint) = state.publish("RENDER", 1.36);
+            assert!(!repaint);
+            assert_eq!(state.resolutions, 3);
+            for frame in 0..20 {
+                let (resting, _, repaint) = state.publish("RENDER", 2.0 + f64::from(frame));
+                assert!(!repaint);
+                assert_eq!(resting.tokens, end.tokens);
+            }
+            assert_eq!(state.resolutions, 3, "resting frames must hit the resolved-token cache");
+            state.publish("MODEL", 30.0);
+            assert_eq!(state.resolutions, 3, "returning to a tab reuses its target");
+        }
+    }
+
+    #[test]
+    fn tabs_panel_text_contrast_holds_at_five_fade_steps_with_opacity() {
+        use crate::theme_files::OptionValue;
+        for base in ["dark", "light"] {
+            for percent in [40.0, 75.0, 100.0] {
+                for mode in ColorVision::ALL {
+                    for destination in ["SKETCH", "RENDER", "MODEL"] {
+                        let mut state = tabs_state(base, BTreeMap::from([("opacity".into(), OptionValue::Num(percent))]));
+                        set_vision(mode);
+                        state.publish(if destination == "MODEL" { "RENDER" } else { "MODEL" }, 0.0);
+                        state.publish(destination, 1.0);
+                        for step in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                            let (frame, _, _) = state.publish(destination, 1.0 + step * 0.24);
+                            let t = frame.tokens;
+                            for behind in [Color32::BLACK, Color32::WHITE] {
+                                let ground = composite(t.panel, behind);
+                                for ink in [t.text, t.text_dim, t.form_ink, t.dialog_label] {
+                                    assert!(
+                                        contrast_ratio(composite(ink, ground), ground) >= 4.5,
+                                        "{base} {mode:?} opacity {percent} tab {destination} step {step}"
+                                    );
+                                }
+                            }
+                            assert_eq!((frame.view.viewport_top, frame.view.viewport_bottom), (t.viewport_top, t.viewport_bottom));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tabs_cache_invalidates_for_theme_values_vision_and_viewport_overrides() {
+        let ctx = egui::Context::default();
+        let mut file = crate::theme_files::tab_fixture("dark");
+        let normalizations = Cell::new(0);
+        let prepare = |file: &crate::theme_files::ThemeFile, raw: Option<&BTreeMap<String, serde_json::Value>>| {
+            let custom = prepare_tabs(&ctx, Some(file), raw, || {
+                normalizations.set(normalizations.get() + 1);
+                let saved = raw.into_iter().flatten().map(|(k, v)| (k.clone(), serde_json::from_value(v.clone()).unwrap())).collect();
+                crate::theme_files::effective_values(file, &saved).0
+            });
+            set_dark(file.base.is_dark());
+            set_custom(custom);
+        };
+        let publish = || ctx.data_mut(|d| d.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE)).publish("SKETCH", 1.0));
+        set_vision(ColorVision::Off);
+        set_viewport_dark(None);
+        set_viewport_background(None);
+        prepare(&file, None);
+        let before = publish().0.tokens;
+        prepare(&file, None);
+        assert_eq!(publish().0.tokens, before);
+        assert_eq!(normalizations.get(), 1);
+        // The content changes while identity/base remain the same, as with a followed reload.
+        file.tabs.get_mut("SKETCH").unwrap().insert("viewport_top".into(), serde_json::json!("#1a4232"));
+        prepare(&file, None);
+        assert_ne!(publish().0.tokens.viewport_top, before.viewport_top);
+        assert_eq!(normalizations.get(), 2);
+        set_vision(ColorVision::Tritan);
+        assert_eq!(publish().0.tokens.axis_x, before.with_vision(true, ColorVision::Tritan).axis_x);
+        set_viewport_dark(Some(false));
+        assert_eq!(publish().0.tokens.viewport_top, Tokens::light().viewport_top);
+        set_viewport_background(Some([3, 7, 11]));
+        assert_eq!(publish().0.tokens.viewport_top, Color32::from_rgb(3, 7, 11));
+        set_viewport_background(None);
+        set_viewport_dark(None);
+        let raw = BTreeMap::from([("tab_colours".into(), serde_json::json!(false))]);
+        prepare(&file, Some(&raw));
+        assert_eq!(publish().0.tokens, Tokens::base());
+        assert_eq!(normalizations.get(), 3);
+    }
+
+    #[test]
+    fn tabs_publish_requests_repaints_only_during_fade_and_zero_is_instant() {
+        use crate::theme_files::OptionValue;
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let ctx = crate::fonts::test_context();
+        let mut state = tabs_state("dark", BTreeMap::new());
+        state.publish("MODEL", 0.0);
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new(TAB_STATE), state));
+        app.ui.tab = "SKETCH".into();
+        let frame = |time| {
+            let mut out = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
+                TabAccent::publish(&app, ui.ctx());
+                crate::gpu::paint_background(ui.painter(), ui.max_rect(), &Tokens::get());
+            });
+            let colors: Vec<_> = out
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) => Some(mesh.vertices.iter().map(|vertex| vertex.color).collect()),
+                    _ => None,
+                })
+                .unwrap();
+            let tokens = Tokens::get();
+            assert_eq!(colors, [tokens.viewport_top, tokens.viewport_top, tokens.viewport_bottom, tokens.viewport_bottom]);
+            out.textures_delta.clear();
+            out.viewport_output[&egui::ViewportId::ROOT].repaint_delay
+        };
+        assert!(frame(1.0).is_zero());
+        assert!(frame(1.12).is_zero());
+        // Drain the previously requested pass, then verify the endpoint leaves the loop asleep.
+        for time in [1.24, 1.3, 1.4] {
+            frame(time);
+        }
+        assert_eq!(frame(2.0), std::time::Duration::MAX);
+        let (end, _, _) = ctx.data_mut(|d| d.get_temp_mut_or_default::<TabThemeState>(egui::Id::new(TAB_STATE)).publish("SKETCH", 2.0));
+        assert_eq!(Tokens::get(), end.tokens);
+        let mut instant = tabs_state("dark", BTreeMap::from([("tab_fade_ms".into(), OptionValue::Num(0.0))]));
+        instant.publish("MODEL", 0.0);
+        let (frame, _, repaint) = instant.publish("SKETCH", 1.0);
+        assert!(!repaint);
+        assert_eq!(
+            frame.tokens,
+            crate::theme_files::resolve_for_tab(&instant.prepared.as_ref().unwrap().file, &instant.prepared.as_ref().unwrap().values, Some("SKETCH"))
+        );
+    }
+
     #[test]
     fn widget_states_and_popup_frames_follow_theme_radii_without_changing_defaults() {
         use super::*;
@@ -1012,6 +1823,23 @@ mod tests {
     }
 
     #[test]
+    fn built_in_selected_tab_labels_hold_wcag_small_text_contrast() {
+        let mut themes = vec![("Dark", super::Tokens::dark()), ("Light", super::Tokens::light())];
+        themes.extend(crate::theme_files::builtin().iter().map(|theme| (theme.name.as_str(), crate::theme_files::resolve(theme))));
+        let mut failures = Vec::new();
+        for (name, tokens) in themes {
+            for tab in crate::workspace::TABS.iter().copied().chain(["SKETCH", "MESH", "FORM", "SHEET METAL", "RENDER"]) {
+                let accent = super::TabAccent::for_tab(&tokens, tab);
+                let ratio = super::contrast_ratio(accent.ink, accent.soft);
+                if ratio < 4.5 {
+                    failures.push(format!("{name} {tab}: {ratio:.4}:1 ({:?} on {:?})", accent.ink, accent.soft));
+                }
+            }
+        }
+        assert!(failures.is_empty(), "selected tab contrast below 4.5:1:\n{}", failures.join("\n"));
+    }
+
+    #[test]
     fn tab_accents_hold_wcag_small_text_contrast_in_both_themes() {
         for (dark, t) in [(false, super::Tokens::light()), (true, super::Tokens::dark())] {
             for tab in ["MODEL", "SKETCH", "SURFACE", "MESH", "FORM", "SHEET METAL", "RENDER"] {
@@ -1053,6 +1881,69 @@ mod tests {
     }
 
     #[test]
+    fn tabs_surface_publication_restores_base_fills_without_restyling_widgets() {
+        use crate::theme_files::{OptionValue, ThemeFile};
+        for base in ["dark", "light"] {
+            let ctx = crate::fonts::test_context();
+            let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+            let file = crate::theme_files::tab_fixture(base);
+            set_dark(file.base.is_dark());
+            set_vision(ColorVision::Off);
+            set_viewport_dark(None);
+            set_viewport_background(None);
+            set_custom(None);
+            let prepare = |file: &ThemeFile, enabled: Option<bool>| {
+                let raw = enabled.map(|enabled| BTreeMap::from([("tab_colours".into(), serde_json::json!(enabled))]));
+                let custom = prepare_tabs(&ctx, Some(file), raw.as_ref(), || {
+                    let saved = enabled.map(|enabled| BTreeMap::from([("tab_colours".into(), OptionValue::Bool(enabled))])).unwrap_or_default();
+                    crate::theme_files::effective_values(file, &saved).0
+                });
+                set_custom(custom)
+            };
+            let publish = |app: &crate::SolveApp, time| {
+                ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| TabAccent::publish(app, ui.ctx())).textures_delta.clear();
+            };
+            prepare(&file, Some(true));
+            apply(&ctx);
+            let before = ctx.global_style().visuals.clone();
+            let base_custom = CUSTOM.get();
+            app.ui.tab = "MODEL".into();
+            publish(&app, 0.0);
+            assert_eq!(ctx.global_style().visuals, before);
+            app.ui.tab = "SKETCH".into();
+            publish(&app, 1.0);
+            publish(&app, 1.12);
+            let panel = Tokens::get().panel;
+            assert_ne!(panel, before.panel_fill, "exercise an actual animated panel fill");
+            let mut animated = before.clone();
+            animated.panel_fill = panel;
+            animated.window_fill = panel;
+            assert_eq!(ctx.global_style().visuals, animated, "all non-surface widget/selection/status visuals stay unchanged");
+            // Repair either owned fill independently, even when the panel already matches.
+            ctx.global_style_mut(|style| style.visuals.window_fill = before.window_fill);
+            publish(&app, 1.12);
+            assert_eq!(ctx.global_style().visuals, animated);
+
+            assert!(!prepare(&file, Some(false)), "toggling surfaces does not change the base Custom tokens");
+            assert_eq!(CUSTOM.get(), base_custom);
+            // Deliberately omit apply(): a full restyle would conceal stale animated fills.
+            publish(&app, 1.13);
+            assert_eq!(ctx.global_style().visuals, before, "turning surfaces off must restore both base fills");
+
+            assert!(!prepare(&file, Some(true)));
+            publish(&app, 2.0);
+            assert_ne!(ctx.global_style().visuals.panel_fill, before.panel_fill);
+            let mut plain = file.clone();
+            plain.tabs.clear();
+            plain.options.clear();
+            assert!(!prepare(&plain, None), "a no-option theme can retain the exact same base tokens");
+            assert_eq!(CUSTOM.get(), base_custom);
+            publish(&app, 2.1);
+            assert_eq!(ctx.global_style().visuals, before, "restoring a no-option theme must release the surface fills");
+        }
+    }
+
+    #[test]
     fn concurrent_ui_renderers_keep_their_own_theme_and_vision() {
         let barrier = std::sync::Barrier::new(2);
         std::thread::scope(|scope| {
@@ -1068,5 +1959,64 @@ mod tests {
                 });
             }
         });
+    }
+
+    /// A 3D view set to the other side's colours (#4146): the view's colours come from the other
+    /// side and everything else stays the window's, in every colour vision mode. A view as dark as
+    /// the window gives the window's tokens unchanged.
+    #[test]
+    fn a_view_on_the_other_side_takes_its_colours() {
+        use super::{ColorVision, Tokens};
+        for mode in ColorVision::ALL {
+            super::set_vision(mode);
+            for window in [false, true] {
+                super::set_dark(window);
+                for same in [None, Some(window)] {
+                    super::set_viewport_dark(same);
+                    assert_eq!(super::viewport_dark(), window);
+                    assert_eq!(Tokens::get(), Tokens::themed(window, mode), "{mode:?} {window} {same:?}");
+                    assert_eq!(Tokens::view(), Tokens::get(), "{mode:?} {window} {same:?}");
+                }
+                super::set_viewport_dark(Some(!window));
+                assert_eq!(super::viewport_dark(), !window);
+                let (t, w, v) = (Tokens::get(), Tokens::themed(window, mode), Tokens::themed(!window, mode));
+                // What is drawn straight onto the view takes all of its side's colours.
+                assert_eq!(Tokens::view(), v);
+                // The two sides differ, so the checks below tell them apart.
+                assert_ne!((w.viewport_top, w.panel), (v.viewport_top, v.panel));
+                // The view's: background and grid, bodies, selection and hover, sketches with their
+                // dimensions and glyphs, the origin, the cube and triads, box selection, analysis.
+                assert_eq!((t.viewport_top, t.viewport_bottom, t.grid, t.grid_major), (v.viewport_top, v.viewport_bottom, v.grid, v.grid_major));
+                assert_eq!(
+                    (t.body, t.body_edge, t.body_selected, t.sel_face, t.sel_edge, t.hover_edge),
+                    (v.body, v.body_edge, v.body_selected, v.sel_face, v.sel_edge, v.hover_edge)
+                );
+                assert_eq!(
+                    (t.sketch, t.sketch_fixed, t.dimension, t.glyph_bg, t.glyph_text, t.profile_fill),
+                    (v.sketch, v.sketch_fixed, v.dimension, v.glyph_bg, v.glyph_text, v.profile_fill)
+                );
+                assert_eq!(
+                    (t.origin_plane, t.axis_x, t.cube_face, t.cube_text, t.axis_y, t.axis_z),
+                    (v.origin_plane, v.axis_x, v.cube_face, v.cube_text, v.axis_y, v.axis_z)
+                );
+                assert_eq!(
+                    (t.box_window, t.section_cap, t.preview_add, t.sketch_construction, t.continuity),
+                    (v.box_window, v.section_cap, v.preview_add, v.sketch_construction, v.continuity)
+                );
+                assert_eq!((t.joint_manipulator, t.joint_axis), (v.joint_manipulator, v.joint_axis));
+                assert_eq!(t.analysis, v.analysis);
+                // The window's: panels, text, accents, dialogs, and the chips over the view with
+                // their borders and icons.
+                assert_eq!(
+                    (t.panel, t.text, t.border, t.accent, t.accent_soft, t.icon),
+                    (w.panel, w.text, w.border, w.accent, w.accent_soft, w.icon)
+                );
+                assert_eq!(
+                    (t.overlay, t.hover, t.dialog_bg, t.field, t.timeline, t.app_bar),
+                    (w.overlay, w.hover, w.dialog_bg, w.field, w.timeline, w.app_bar)
+                );
+            }
+        }
+        super::set_viewport_dark(None);
     }
 }

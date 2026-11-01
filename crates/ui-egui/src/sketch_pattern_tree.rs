@@ -34,7 +34,13 @@ pub(crate) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, sketch: u64, depth: us
                     .entities
                     .iter()
                     .chain(pattern.instances.iter().flat_map(|i| &i.curves))
-                    .map(|id| if sk.curve_index(id).is_some() { Sel::SketchCurve { id: id.clone() } } else { Sel::SketchPoint { id: id.clone() } })
+                    .map(|id| {
+                        if sk.curve_index(id).is_some() {
+                            Sel::SketchCurve { id: id.clone(), sketch: None }
+                        } else {
+                            Sel::SketchPoint { id: id.clone() }
+                        }
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -129,5 +135,37 @@ mod tests {
         h.app.run("edit.undo", json!({})).unwrap();
         h.frames(3);
         assert!(crate::scenario::handle_at(&handle).is_some());
+    }
+
+    /// Where a text starts, drawn inside `within`.
+    fn text_left(h: &Harness, text: &str, within: egui::Rect) -> f32 {
+        let mut at = None;
+        for clipped in &h.shapes {
+            crate::test_support::each_shape(&clipped.shape, &mut |s| {
+                if let egui::Shape::Text(t) = s
+                    && t.galley.text() == text
+                    && within.contains(t.pos + t.galley.rect.center().to_vec2())
+                {
+                    at = Some(t.pos.x + t.galley.rect.left());
+                }
+            });
+        }
+        at.unwrap_or_else(|| panic!("{text} in {within:?}"))
+    }
+
+    /// #8718: in the vertical History a sketch's pattern rows step in from the sketch's name as far
+    /// as they do in the browser, with the eye at the rows' end.
+    #[test]
+    fn left_history_patterns_step_in_from_their_sketch_like_the_browser() {
+        let (mut h, sketch, rectangular, _) = harness(true);
+        let label = format!("{} {}", crate::i18n::tr_label("Rectangular Pattern"), rectangular.strip_prefix("pat").unwrap_or(&rectangular));
+        h.frame();
+        let browser = crate::scenario::rect_of("browser:card").unwrap();
+        let in_browser = text_left(&h, &label, browser) - text_left(&h, "Patterned Sketch", browser);
+        let sketch_row = crate::scenario::rect_of("history:feature:Patterned Sketch").unwrap();
+        let pattern_y = crate::scenario::handle_at(&format!("timeline:sketch-pattern:{sketch}:{rectangular}")).unwrap().y;
+        let pattern_row = egui::Rect::from_x_y_ranges(sketch_row.x_range(), pattern_y - 8.0..=pattern_y + 8.0);
+        let in_history = text_left(&h, &label, pattern_row) - text_left(&h, "Patterned Sketch", sketch_row);
+        assert!((in_history - in_browser).abs() <= 2.0, "History steps in {in_history}, the browser {in_browser}");
     }
 }

@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use solidcraft_geom::Vec2;
 
-use crate::{CurveKind, Sketch, SketchError};
+use crate::{ConstraintKind, Curve, CurveKind, Sketch, SketchError};
 
 /// Placement relative to the original, along a pattern direction's oriented line.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +81,8 @@ pub struct SketchPattern {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub count_expression: Option<String>,
     pub instances: Vec<PatternInstance>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub expressions: std::collections::BTreeMap<String, String>,
 }
 
 impl SketchPattern {
@@ -106,120 +108,150 @@ impl SketchPattern {
 }
 
 impl Sketch {
-    /// Rebuild a circular pattern after its Quantity expression changes. Surviving slots keep
-    /// their ids; new slots are copied from the authored seed. The caller owns the edit transaction.
+    /// Rebuild a circular Quantity while retaining surviving copy ids.
     pub fn resize_circular_pattern(&mut self, id: &str, count: usize) -> Result<(), SketchError> {
         if !(2..=500).contains(&count) {
             return Err(SketchError::Invalid("circular pattern Quantity must be 2…500".into()));
         }
         self.validate_patterns()?;
         let index = self.patterns.iter().position(|p| p.id == id).ok_or_else(|| SketchError::Invalid("missing sketch pattern".into()))?;
-        let mut pattern = self.patterns.remove(index);
-        let SketchPatternKind::Circular { center, count: previous, angle, alignment, reversed } = &mut pattern.kind else {
+        let mut kind = self.patterns.get(index).ok_or_else(|| SketchError::Invalid("missing sketch pattern".into()))?.kind.clone();
+        let SketchPatternKind::Circular { count: previous, .. } = &mut kind else {
             return Err(SketchError::Invalid("Quantity expression requires a circular pattern".into()));
         };
         if *previous == count {
-            self.patterns.insert(index, pattern);
             return Ok(());
         }
         *previous = count;
-        let (center_id, total, alignment, reversed) = (center.clone(), *angle, *alignment, *reversed);
-        for instance in pattern.instances.iter().filter(|i| i.index[0] >= count) {
+        self.update_pattern(index, kind)
+    }
+
+    /// Rebuild a pattern after its driving expressions change, retaining surviving copy ids.
+    pub fn update_pattern(&mut self, index: usize, kind: SketchPatternKind) -> Result<(), SketchError> {
+        let old = self.patterns.get(index).cloned().ok_or_else(|| SketchError::Invalid("missing sketch pattern".into()))?;
+        let check_count = |n: usize| {
+            if !(1..=500).contains(&n) { Err(SketchError::Invalid("pattern count must be a positive integer from 1 to 500".into())) } else { Ok(()) }
+        };
+        match &kind {
+            SketchPatternKind::Circular { count, angle, .. } => {
+                check_count(*count)?;
+                if !angle.is_finite() || angle.abs() <= 1e-9 || angle.abs() > 360.0 {
+                    return Err(SketchError::Invalid("pattern angle must be nonzero and at most 360 degrees".into()));
+                }
+            }
+            SketchPatternKind::Rectangular { count, count2, spacing, spacing2, .. } => {
+                check_count(*count)?;
+                check_count(*count2)?;
+                if count.checked_mul(*count2).is_none_or(|n| n > 500) {
+                    return Err(SketchError::Invalid("pattern counts must make at most 500 instances total".into()));
+                }
+                if ![spacing, spacing2].iter().all(|v| v.is_finite() && v.abs() <= crate::MAX_COORD) {
+                    return Err(SketchError::Invalid("pattern spacing must be finite and in range".into()));
+                }
+            }
+        }
+        self.patterns.remove(index);
+        let entity_ids = old.entities.clone();
+        let (center, slots) = match &kind {
+            SketchPatternKind::Circular { center, count, angle, alignment, reversed } => {
+                let center = self.resolve_point(center).ok_or_else(|| SketchError::Invalid("missing pattern center".into()))?;
+                let full = (angle.abs() - 360.0).abs() < 1e-9;
+                let step = angle / if full { *count as f64 } else { (count.max(&2) - 1) as f64 };
+                (
+                    Some(center),
+                    (1..*count).map(|i| ([i, 0], (step * alignment.multiplier(i, *reversed)).to_radians(), Vec2::ZERO)).collect::<Vec<_>>(),
+                )
+            }
+            SketchPatternKind::Rectangular { count, count2, .. } => {
+                (None, (0..*count).flat_map(|i| (0..*count2).filter_map(move |j| (i != 0 || j != 0).then_some(([i, j], 0.0, Vec2::ZERO)))).collect())
+            }
+        };
+        let center_id = center.and_then(|i| self.points.get(i)).map(|p| p.id.clone());
+        let mut existing = old.instances.clone();
+        // Remove retired instances first: all following indices are resolved by stable id.
+        for instance in existing.iter().filter(|instance| !slots.iter().any(|(index, _, _)| *index == instance.index)) {
             let curves: Vec<_> = instance.curves.iter().filter_map(|id| self.curve_index(id)).collect();
             self.constraints.retain(|c| !instance.constraints.contains(&c.id));
             self.remove_curves(&curves);
             let points: Vec<_> = instance.points.iter().filter_map(|(_, id)| self.resolve_point(id)).collect();
             self.remove_points(&points);
         }
-        pattern.instances.retain(|i| i.index[0] < count);
-        let center = self.resolve_point(&center_id).ok_or_else(|| SketchError::Invalid("missing pattern center".into()))?;
-        let origin = self.point(center).ok_or_else(|| SketchError::Invalid("missing pattern center".into()))?;
-        let step = total / if (total.abs() - 360.0).abs() < 1e-9 { count as f64 } else { (count - 1) as f64 };
-        for slot in 1..count {
-            let angle = (step * alignment.multiplier(slot, reversed)).to_radians();
-            let (sin, cos) = angle.sin_cos();
-            let transform = |p: Vec2| {
-                let d = p - origin;
-                origin + Vec2::new(d.x * cos - d.y * sin, d.x * sin + d.y * cos)
-            };
-            if let Some(instance) = pattern.instances.iter().find(|i| i.index == [slot, 0]) {
+        if let SketchPatternKind::Rectangular { direction, direction2, .. } = &kind {
+            for id in direction.iter().chain(direction2) {
+                if self.curve_index(id).is_none() {
+                    return Err(SketchError::Invalid("the direction belongs to an instance removed by this edit".into()));
+                }
+            }
+        }
+        let mut instances = Vec::new();
+        let center = center_id.as_ref().and_then(|id| self.resolve_point(id));
+        if center_id.is_some() && center.is_none() {
+            return Err(SketchError::Invalid("the center belongs to an instance removed by this edit".into()));
+        }
+        for (index, angle, offset) in slots {
+            let (base_offset, directions) = linear_displacement(self, &kind, index, offset);
+            let c = center.and_then(|i| self.point(i)).unwrap_or(Vec2::ZERO);
+            let mut displacement = base_offset;
+            for (line, distance) in directions.into_iter().flatten() {
+                if let Some(crate::Shape::Line { a, b }) = self.shape(line)
+                    && let Some(u) = (b - a).normalized()
+                {
+                    displacement += u * distance.x + u.perp() * distance.y;
+                }
+            }
+            let transform = |p| rotate(c, angle)(p) + displacement;
+            let instance = if let Some(i) = existing.iter().position(|instance| instance.index == index) {
+                let instance = existing.remove(i);
                 for cid in &instance.constraints {
-                    if let Some(crate::ConstraintKind::PatternPoint { angle: value, .. }) =
-                        self.constraints.iter_mut().find(|c| c.id == *cid).map(|c| &mut c.kind)
+                    if let Some(constraint) = self.constraints.iter_mut().find(|constraint| constraint.id == *cid)
+                        && let ConstraintKind::PatternPoint { center: slot, angle: a, offset: off, directions: dirs, .. } = &mut constraint.kind
                     {
-                        *value = angle;
+                        *slot = center;
+                        *a = angle;
+                        *off = base_offset;
+                        *dirs = directions;
                     }
                 }
                 for (seed, copy) in &instance.points {
-                    let p =
-                        self.resolve_point(seed).and_then(|p| self.point(p)).ok_or_else(|| SketchError::Invalid("missing pattern seed".into()))?;
-                    let q = self
-                        .resolve_point(copy)
-                        .and_then(|p| self.points.get_mut(p))
-                        .ok_or_else(|| SketchError::Invalid("missing pattern copy".into()))?;
-                    q.pos = transform(p);
+                    let pos =
+                        self.resolve_point(seed).and_then(|i| self.point(i)).ok_or_else(|| SketchError::Invalid("missing seed point".into()))?;
+                    if let Some(point) = self.resolve_point(copy).and_then(|i| self.points.get_mut(i)) {
+                        let at = transform(pos);
+                        if !crate::model::in_range(at) {
+                            return Err(SketchError::Invalid("pattern point is out of range".into()));
+                        }
+                        point.pos = at;
+                    }
                 }
-                continue;
-            }
-            let curves: Vec<_> = pattern.entities.iter().filter_map(|id| self.curve_index(id)).collect();
-            let mut points = Vec::new();
-            for id in &pattern.entities {
-                if let Some(c) = self.curve_index(id).and_then(|i| self.curves.get(i)) {
-                    points.extend(c.kind.point_ids());
-                } else if let Some(p) = self.resolve_point(id) {
-                    points.push(p);
-                } else {
-                    return Err(SketchError::Invalid("missing pattern entity".into()));
+                instance
+            } else {
+                let cs: Vec<_> = entity_ids.iter().filter_map(|id| self.curve_index(id)).collect();
+                let ps: Vec<_> = entity_ids.iter().filter(|id| self.curve_index(id).is_none()).filter_map(|id| self.resolve_point(id)).collect();
+                let (made, map) = copy_through(self, &cs, &ps, &transform)?;
+                let mut cons = Vec::new();
+                for (p, q) in &map {
+                    cons.push(
+                        self.add_constraint(ConstraintKind::PatternPoint { p: *p, q: *q, center, angle, offset: base_offset, directions }, None)?,
+                    );
                 }
-            }
-            let mut map = Vec::new();
-            for p in points {
-                if map.iter().any(|(seed, _)| *seed == p) {
-                    continue;
+                for (a, b) in cs.iter().zip(&made) {
+                    if matches!(self.curves.get(*a).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Ellipse { .. })) {
+                        cons.push(self.add_constraint(ConstraintKind::PatternRadius { a: *a, b: *b }, None)?);
+                    }
                 }
-                let pos = self.point(p).ok_or_else(|| SketchError::Invalid("missing pattern point".into()))?;
-                map.push((p, self.add_point(transform(pos), None)?));
-            }
-            if self.curves.len().saturating_add(curves.len()) > crate::MAX_CURVES {
-                return Err(SketchError::TooLarge);
-            }
-            let mut made = Vec::new();
-            for source in &curves {
-                let mut copy = self.curves.get(*source).cloned().ok_or_else(|| SketchError::Invalid("missing pattern curve".into()))?;
-                copy.kind.map_points(&|p| map.iter().find(|(seed, _)| *seed == p).map_or(p, |(_, q)| *q));
-                let prefix = match copy.kind {
-                    CurveKind::Line { .. } => "l",
-                    CurveKind::Circle { .. } => "c",
-                    CurveKind::Arc { .. } => "a",
-                    CurveKind::Ellipse { .. } => "e",
-                    CurveKind::Spline { .. } => "s",
-                    CurveKind::Conic { .. } => "k",
-                };
-                copy.id = self.fresh(prefix)?;
-                copy.link = None;
-                copy.fixed = false;
-                copy.centerline = false;
-                made.push(copy.id.clone());
-                self.curves.push(copy);
-            }
-            let mut constraints = Vec::new();
-            for (p, q) in &map {
-                constraints.push(self.add_constraint(
-                    crate::ConstraintKind::PatternPoint { p: *p, q: *q, center: Some(center), angle, offset: Vec2::ZERO, directions: [None; 2] },
-                    None,
-                )?);
-            }
-            for (source, copy) in curves.iter().zip(&made) {
-                if matches!(self.curves.get(*source).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Ellipse { .. })) {
-                    let b = self.curve_index(copy).ok_or_else(|| SketchError::Invalid("missing pattern curve".into()))?;
-                    constraints.push(self.add_constraint(crate::ConstraintKind::PatternRadius { a: *source, b }, None)?);
+                PatternInstance {
+                    index,
+                    curves: made.iter().filter_map(|i| self.curves.get(*i).map(|c| c.id.clone())).collect(),
+                    points: map.iter().filter_map(|(p, q)| Some((self.points.get(*p)?.id.clone(), self.points.get(*q)?.id.clone()))).collect(),
+                    constraints: cons,
                 }
-            }
-            let points = map.iter().filter_map(|(p, q)| Some((self.points.get(*p)?.id.clone(), self.points.get(*q)?.id.clone()))).collect();
-            pattern.instances.push(PatternInstance { index: [slot, 0], curves: made, points, constraints });
+            };
+            instances.push(instance);
         }
-        self.patterns.insert(index.min(self.patterns.len()), pattern);
-        self.validate_patterns()
+
+        self.patterns.insert(index.min(self.patterns.len()), SketchPattern { kind, instances, ..old });
+        self.follow_pattern_seeds();
+        Ok(())
     }
 
     /// Start an explicit Move/Scale of seed geometry with its copies already transformed.
@@ -274,9 +306,9 @@ impl Sketch {
         if self.patterns.is_empty() {
             return;
         }
-        let curves: std::collections::BTreeSet<_> = self.curves.iter().map(|c| c.id.as_str()).collect();
-        let points: std::collections::BTreeSet<_> = self.points.iter().map(|p| p.id.as_str()).collect();
-        let constraint_ids: std::collections::BTreeSet<_> = self.constraints.iter().map(|c| c.id.as_str()).collect();
+        let curves: std::collections::HashSet<_> = self.curves.iter().map(|c| c.id.as_str()).collect();
+        let points: std::collections::HashSet<_> = self.points.iter().map(|p| p.id.as_str()).collect();
+        let constraint_ids: std::collections::HashSet<_> = self.constraints.iter().map(|c| c.id.as_str()).collect();
         let retired: Vec<_> = self
             .patterns
             .iter()
@@ -302,15 +334,31 @@ impl Sketch {
     /// Conic rho is an authored shape parameter rather than a solver unknown. Like its
     /// defining points, the copies follow the seed's shape when that parameter is edited.
     pub(crate) fn refresh_pattern_shapes(&mut self) {
-        if !self.curves.iter().any(|c| matches!(c.kind, CurveKind::Conic { .. } | CurveKind::Arc { .. })) {
+        if self.patterns.is_empty() || !self.curves.iter().any(|c| matches!(c.kind, CurveKind::Conic { .. } | CurveKind::Arc { .. })) {
             return;
         }
-        for pattern in &self.patterns {
-            let sources: Vec<_> = pattern.entities.iter().filter_map(|id| self.curve_index(id)).collect();
-            for instance in &pattern.instances {
-                for (seed, copy) in sources.iter().zip(&instance.curves) {
+        // This runs before every solve, drag frames included. Ids resolve through maps built
+        // once here: a linear search per copy cost patterns × copies × seeds × curves string
+        // comparisons, which dominated dragging anything in a sketch with a large pattern.
+        // Only curve shapes change below, so the indices stay valid throughout.
+        let (sources, copies): (Vec<Vec<usize>>, Vec<Vec<Vec<Option<usize>>>>) = {
+            let curves = first_index(self.curves.iter().map(|c| c.id.as_str()));
+            self.patterns
+                .iter()
+                .map(|pattern| {
+                    (
+                        pattern.entities.iter().filter_map(|id| curves.get(id.as_str()).copied()).collect(),
+                        pattern.instances.iter().map(|i| i.curves.iter().map(|id| curves.get(id.as_str()).copied()).collect()).collect(),
+                    )
+                })
+                .unzip()
+        };
+        let points = first_index(self.points.iter().map(|p| p.id.as_str()));
+        for ((pattern, sources), copies) in self.patterns.iter().zip(&sources).zip(&copies) {
+            for (instance, copies) in pattern.instances.iter().zip(copies) {
+                for (seed, copy) in sources.iter().zip(copies) {
                     if let Some(CurveKind::Conic { rho, .. }) = self.curves.get(*seed).map(|c| &c.kind)
-                        && let Some(copy) = self.curve_index(copy)
+                        && let Some(copy) = *copy
                     {
                         let rho = *rho;
                         if let Some(CurveKind::Conic { rho: slot, .. }) = self.curves.get_mut(copy).map(|c| &mut c.kind) {
@@ -323,9 +371,9 @@ impl Sketch {
                             self.points
                                 .get(p)
                                 .and_then(|p| instance.points.iter().find(|(id, _)| *id == p.id))
-                                .and_then(|(_, id)| self.point_index(id))
+                                .and_then(|(_, id)| points.get(id.as_str()).copied())
                         };
-                        if let (Some(c), Some(a), Some(b), Some(copy)) = (mapped(c), mapped(a), mapped(b), self.curve_index(copy))
+                        if let (Some(c), Some(a), Some(b), Some(copy)) = (mapped(c), mapped(a), mapped(b), *copy)
                             && let Some(curve) = self.curves.get_mut(copy)
                         {
                             curve.kind = CurveKind::Arc { c, a, b };
@@ -343,6 +391,15 @@ impl Sketch {
         }
         let mut ids = std::collections::BTreeSet::new();
         for pattern in &self.patterns {
+            if pattern.expressions.len() > 5
+                || pattern.expressions.iter().any(|(key, expression)| {
+                    !matches!(key.as_str(), "count" | "count2" | "spacing" | "spacing2" | "angle")
+                        || expression.trim().is_empty()
+                        || expression.len() > 4096
+                })
+            {
+                return Err(SketchError::Invalid("invalid sketch pattern expression".into()));
+            }
             if pattern.count_expression.as_ref().is_some_and(|e| e.trim().is_empty() || e.len() > 4096)
                 || (pattern.count_expression.is_some() && !matches!(pattern.kind, SketchPatternKind::Circular { .. }))
             {
@@ -423,4 +480,109 @@ impl Sketch {
         }
         Ok(())
     }
+}
+
+/// Keep sampled vector directions compatible with older designs, while picked lines are
+/// solver references. The default second direction follows the first line's perpendicular.
+fn linear_displacement(sk: &Sketch, kind: &SketchPatternKind, [i, j]: [usize; 2], fallback: Vec2) -> (Vec2, [Option<(usize, Vec2)>; 2]) {
+    let SketchPatternKind::Rectangular { dir, dir2, direction, direction2, spacing, spacing2, alignment, alignment2, reversed, reversed2, .. } = kind
+    else {
+        return (fallback, [None; 2]);
+    };
+    let mut offset = Vec2::ZERO;
+    let mut directions = [None; 2];
+    let d1 = *spacing * alignment.multiplier(i, *reversed);
+    let d2 = *spacing2 * alignment2.multiplier(j, *reversed2);
+    if let Some(l) = direction.as_ref().and_then(|id| sk.curve_index(id)) {
+        directions[0] = Some((l, Vec2::new(d1, if dir2.is_none() && direction2.is_none() { d2 } else { 0.0 })));
+    } else {
+        offset += *dir * d1;
+        if dir2.is_none() && direction2.is_none() {
+            offset += dir.perp() * d2;
+        }
+    }
+    if let Some(l) = direction2.as_ref().and_then(|id| sk.curve_index(id)) {
+        directions[1] = Some((l, Vec2::new(d2, 0.0)));
+    } else if let Some(dir2) = dir2 {
+        offset += *dir2 * d2;
+    }
+    (offset, directions)
+}
+
+fn involved_points(sk: &Sketch, cs: &[usize], ps: &[usize]) -> Vec<usize> {
+    let mut v: Vec<usize> = Vec::new();
+    for c in cs {
+        if let Some(k) = sk.curves.get(*c).map(|c| &c.kind) {
+            v.extend(k.point_ids());
+        }
+    }
+    v.extend(ps);
+    let mut out = Vec::new();
+    for q in v {
+        if !out.contains(&q) {
+            out.push(q);
+        }
+    }
+    out
+}
+
+/// Copy seed curves and their points, returning curves and the original-to-copy point map.
+fn copy_through(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Vec2) -> Vec2) -> Result<(Vec<usize>, Vec<(usize, usize)>), SketchError> {
+    if sk.curves.len().saturating_add(cs.len()) > crate::MAX_CURVES {
+        return Err(crate::SketchError::TooLarge);
+    }
+    let pts = involved_points(sk, cs, ps);
+    let mut map: Vec<(usize, usize)> = Vec::new();
+    for q in &pts {
+        let pos = sk.point(*q).unwrap_or_default();
+        let n = sk.add_point(f(pos), None)?;
+        map.push((*q, n));
+    }
+    let m = |q: usize| map.iter().find(|x| x.0 == q).map(|x| x.1).unwrap_or(q);
+    let mut made = Vec::new();
+    for c in cs {
+        let Some(cu) = sk.curves.get(*c).cloned() else { continue };
+        let mut kind = cu.kind.clone();
+        kind.map_points(&m);
+        let prefix = match &kind {
+            CurveKind::Ellipse { .. } => "e",
+            CurveKind::Spline { .. } => "s",
+            CurveKind::Conic { .. } => "n",
+            CurveKind::Line { .. } => "l",
+            CurveKind::Circle { .. } => "c",
+            CurveKind::Arc { .. } => "a",
+        };
+        let id = sk.fresh(prefix)?;
+        // Copies retain the seed line's extent.
+        let infinite = cu.infinite && matches!(kind, CurveKind::Line { .. });
+        sk.curves.push(Curve {
+            id,
+            kind,
+            construction: cu.construction,
+            reversed: cu.reversed,
+            link: None,
+            centerline: false,
+            fixed: false,
+            infinite,
+        });
+        made.push(sk.curves.len() - 1);
+    }
+    Ok((made, map))
+}
+
+fn rotate(c: Vec2, ang: f64) -> impl Fn(Vec2) -> Vec2 {
+    move |q: Vec2| {
+        let d = q - c;
+        let (s, co) = ang.sin_cos();
+        c + Vec2::new(d.x * co - d.y * s, d.x * s + d.y * co)
+    }
+}
+
+/// Each id's first index, as `position` finds it.
+fn first_index<'a>(ids: impl Iterator<Item = &'a str>) -> std::collections::HashMap<&'a str, usize> {
+    let mut map = std::collections::HashMap::new();
+    for (i, id) in ids.enumerate() {
+        map.entry(id).or_insert(i);
+    }
+    map
 }

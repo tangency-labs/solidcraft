@@ -38,9 +38,12 @@ impl Model {
             if !matches!(feature.kind, FeatureKind::Sketch { .. }) {
                 features.entry(feature.component).or_default().push(i);
             }
+            if session.doc.marker.is_some_and(|marker| i >= marker) {
+                continue;
+            }
             let index = match feature.kind {
                 FeatureKind::Sketch { .. } => &mut sketches,
-                FeatureKind::ConstructionPlane { .. } => &mut planes,
+                FeatureKind::ConstructionPlane { .. } | FeatureKind::ConstructionAxis { .. } | FeatureKind::ConstructionPoint { .. } => &mut planes,
                 _ => continue,
             };
             index.entry(feature.component).or_default().push(i);
@@ -48,6 +51,10 @@ impl Model {
         let mut children: HashMap<u64, Vec<u64>> = HashMap::new();
         for occurrence in &session.doc.occurrences {
             children.entry(occurrence.parent).or_default().push(occurrence.id);
+        }
+        // Sub-components in the order the design saved for them; the rest follow in placement order.
+        for (parent, ids) in &mut children {
+            session.doc.sort_placements(*parent, ids);
         }
         Self {
             doc: session.doc.clone(),

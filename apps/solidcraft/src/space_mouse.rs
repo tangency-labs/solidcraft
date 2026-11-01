@@ -528,6 +528,9 @@ struct Candidate<D> {
     device: D,
     layout: Layout,
     ids: (u16, u16),
+    /// The device's manufacturer and product strings ([`device_strings`]).
+    #[cfg_attr(not(any(target_os = "windows", target_os = "macos")), allow(dead_code))]
+    strings: Vec<String>,
 }
 
 /// Input reports read with a timeout in milliseconds: hidapi's devices, and the tests' simulated
@@ -634,8 +637,15 @@ fn follow<D: ReportSource>(mut candidates: Vec<Candidate<D>>, now: impl Fn() -> 
     }
 }
 
+/// The device's manufacturer and product strings, which say whether a device app has it
+/// ([`crate::nav_bridge::Claim`]). Asked of the opened 3D mouse only.
 #[cfg(any(target_os = "windows", target_os = "macos"))]
-fn reader(ctx: Context, shared: Arc<Mutex<Reading>>) {
+fn device_strings(device: &hidapi::HidDevice) -> Vec<String> {
+    [device.get_manufacturer_string(), device.get_product_string()].into_iter().filter_map(|s| s.ok().flatten()).collect()
+}
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+fn reader(ctx: Context, shared: Arc<Mutex<Reading>>, bridge: crate::nav_bridge::Claim) {
     let Ok(mut api) = hid_api() else {
         log::warn!("3D mouse: HID initialization failed");
         return;
@@ -657,11 +667,17 @@ fn reader(ctx: Context, shared: Arc<Mutex<Reading>>) {
                 // Read when the device was opened, from this device alone.
                 let info = device.get_device_info().ok()?;
                 let layout = device_layout(&device, info.vendor_id())?;
-                Some(Candidate { device, layout, ids: (info.vendor_id(), info.product_id()) })
+                let strings = device_strings(&device);
+                Some(Candidate { device, layout, ids: (info.vendor_id(), info.product_id()), strings })
             })
             .collect();
+        let names: Vec<_> = open.iter().map(|candidate| (candidate.ids, candidate.strings.clone())).collect();
+        // Whether the device read now is one a device app has: it moves the view over the navigation
+        // bridge, so read here as well the device would move it twice. What was read before ages out.
+        let mut strings: &[String] = &[];
         follow(open, Instant::now, |event| match event {
             Followed::Device(ids, buttons) => {
+                strings = names.iter().find(|(known, _)| *known == ids).map_or(&[][..], |(_, strings)| strings.as_slice());
                 connected(&ctx, &shared, Source::Hid(Some(ids)));
                 // Taken over from another device: what it reported meanwhile is its baseline.
                 if let Some(buttons) = buttons
@@ -670,6 +686,7 @@ fn reader(ctx: Context, shared: Arc<Mutex<Reading>>) {
                     reading.set_buttons(buttons);
                 }
             }
+            Followed::Report(..) if bridge.claims(strings) => {}
             Followed::Report(layout, report) => publish(&ctx, &shared, *layout, report),
             Followed::Gone => reset(&ctx, &shared),
         });
@@ -1054,7 +1071,8 @@ pub struct SpaceMouse {
 }
 
 impl SpaceMouse {
-    pub fn start(ctx: &Context) -> Self {
+    /// Starts the reader. A device that `bridge` says its own app reads is left to that app.
+    pub fn start(ctx: &Context, bridge: crate::nav_bridge::Claim) -> Self {
         let now = Instant::now();
         let shared = Arc::new(Mutex::new(Reading::new(now)));
         let worker_state = Arc::clone(&shared);
@@ -1063,11 +1081,14 @@ impl SpaceMouse {
         let drivers = Arc::new(Drivers::default());
         #[cfg(target_os = "linux")]
         let worker_drivers = Arc::clone(&drivers);
+        // hidraw names no device's strings to compare (`Claim`).
+        #[cfg(target_os = "linux")]
+        let _ = bridge;
         let spawned = std::thread::Builder::new().name("solidcraft-3d-mouse".into()).spawn(move || {
             #[cfg(target_os = "linux")]
             reader(worker_ctx, worker_state, worker_drivers, Machine);
             #[cfg(not(target_os = "linux"))]
-            reader(worker_ctx, worker_state);
+            reader(worker_ctx, worker_state, bridge);
         });
         if let Err(error) = spawned {
             log::warn!("3D mouse: reader could not start: {error}");
@@ -1458,6 +1479,7 @@ mod tests {
                 },
                 layout,
                 ids: (0x256f, *product),
+                strings: Vec::new(),
             })
             .collect();
         let (mut seen, mut read) = (Vec::new(), 0);

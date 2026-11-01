@@ -10,7 +10,7 @@ use solidcraft_sketch::linalg;
 
 use super::{
     Assembly, Held, MAX_LOOP_VALUES, MAX_LOOP_WORK, MAX_LOOPS, Solution, Tree, Values, apply_links, build, close_within, jacobian, joint_values,
-    largest, least_squares, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
+    largest, limit_bounds, link_chains, loop_groups, loop_scale, loose_gap, unknowns,
 };
 use crate::{Document, ModelState, apply_point, apply_vector, mat_mul};
 
@@ -325,7 +325,7 @@ fn stride(asm: &Assembly, vals: &Values, vars: &[(u64, usize)], paced: &[((u64, 
 /// Levenberg-Marquardt that stays on the loops: move `x` (within `bounds`, at most `cap` per value
 /// and a step of every value `stride` measures, links included, a step) to bring the first `mt` values of `f` (the target's misses) toward zero, the rest (the
 /// loops' weighted gaps) at zero. Each step is solved over all the rows, values on a limit the
-/// step pushes past held, then put back on the loops (`least_squares` on their gaps) and taken
+/// step pushes past held, then put back on the loops (`close_within` on their gaps) and taken
 /// when it gets closer. It ends at the target, or as close as the limits and loops let it get.
 /// Returns `f` there, or `None` when the loops don't close at the start (within `loose`).
 fn approach(
@@ -341,14 +341,14 @@ fn approach(
     let n = x.len();
     let miss = |r: &[f64]| r.iter().take(mt).map(|v| v * v).sum::<f64>();
     // The loops close first, to `tol` or as near as they come within `loose` (`close_within`),
-    // and stay that closed.
+    // and stay that closed, or within `loose` where their gap grows as they move (#6211).
     let loops = f(x)?.len() > mt;
     let mut loop_tol = tol * LOOP_WEIGHT;
     if loops {
         loop_tol = close_within(&mut |y| f(y).map(|r| r.get(mt..).unwrap_or_default().to_vec()), x, bounds, loop_tol, loose * LOOP_WEIGHT)?;
     }
     let close = |f: &mut dyn FnMut(&[f64]) -> Option<Vec<f64>>, x: &mut Vec<f64>| {
-        least_squares(&mut |y| f(y).map(|r| r.get(mt..).unwrap_or_default().to_vec()), x, bounds, loop_tol)
+        close_within(&mut |y| f(y).map(|r| r.get(mt..).unwrap_or_default().to_vec()), x, bounds, loop_tol, loose * LOOP_WEIGHT).is_some()
     };
     let mut r = f(x)?;
     let (mut lambda, mut kicked) = (1e-3, false);

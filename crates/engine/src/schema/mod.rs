@@ -36,6 +36,12 @@
 //! `strict_keeps_todays_errors`. Then run the whole test suite with the audit recorder (see
 //! `record.rs`): a call that succeeds today but breaks the contract is either a form the
 //! contract is missing or a caller's mistake.
+//!
+//! New commands come with both schemas: `coverage_tests.rs` warns about a command without a
+//! contract or an output type (it will fail once `SCHEMA_RULE_STRICT` flips), unless it is a `planned!` placeholder or listed in
+//! `unconverted.txt`, which holds the commands that predate the rule. That list only shrinks:
+//! converting a command removes its line, and nothing is added to it. How to write a contract,
+//! with the shared types and a checklist: docs/book/src/dev/schemas.md.
 
 mod check;
 #[cfg_attr(target_arch = "wasm32", path = "record_wasm.rs")]
@@ -43,22 +49,42 @@ mod record;
 mod types;
 
 #[cfg(test)]
+mod coverage_tests;
+#[cfg(test)]
 mod tests;
 
 // The contracts, by command file.
+pub mod component;
+pub mod construct;
+pub mod edit;
 pub mod features;
 pub mod inspect;
+pub mod joints;
+pub mod mass_properties;
+pub mod print_face;
+pub mod render;
+pub mod render_lights;
+pub mod render_ui;
+pub mod section;
+pub mod sheet;
+pub mod sketch_constraints;
+pub mod sketch_create;
+pub mod sketch_equation;
+pub mod surface_analysis;
+pub mod ui_prefs;
+pub mod view_navigation;
 
-pub use check::{Contract, Issue, ParamCheck, TypedContract, input_schema_for, output_schema_for, run_checked};
+pub use check::{Contract, Issue, ParamCheck, TypedContract, input_schema_for, issues, output_schema_for, run_checked, run_checked_as};
 pub use types::*;
 
-/// A command's `run` that checks the call against `$contract` before running `$handler`
-/// (see [`run_checked`]). Expands to a non-capturing closure, which coerces to the registry's
-/// `Run` function pointer.
+/// A command's `run` that checks the call against the contract command `$id` publishes
+/// (`.contract(…)` on its `CommandSpec`) before running `$handler` (see [`run_checked_as`]), so
+/// the contract enforced is always the one described. Expands to a non-capturing closure, which
+/// coerces to the registry's `Run` function pointer.
 #[macro_export]
 #[doc(hidden)]
 macro_rules! checked {
-    ($id:literal, $contract:path, $handler:path) => {
-        |s: &mut $crate::Session, p: &serde_json::Value| $crate::schema::run_checked(s, p, $id, &$contract, $handler)
+    ($id:literal, $handler:path) => {
+        |s: &mut $crate::Session, p: &serde_json::Value| $crate::schema::run_checked_as(s, p, $id, $handler)
     };
 }

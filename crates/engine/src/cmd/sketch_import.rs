@@ -9,6 +9,7 @@ use solidcraft_sketch::{CurveKind, LinkKind, LinkSource, Sketch};
 
 use super::CommandSpec;
 use super::sketch::{edit, ids_of};
+use super::sketch_store;
 use crate::params::{bad, num, str_, vec2};
 use crate::{EngineError, Result, Session};
 
@@ -16,17 +17,33 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.insert_dxf", "Insert DXF", insert_dxf)
         .at("SKETCH", "INSERT")
         .icon("sketch_dxf")
-        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale?, tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.insert_svg", "Insert SVG", insert_svg)
         .at("SKETCH", "INSERT")
         .icon("svg")
-        .params(concat!("path | text: SVG; at?: [x,y] offset, scale?, tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+    CommandSpec::new("sketch.drawing_bounds", "Drawing Size", drawing_bounds)
+        .icon("svg")
+        .noundo()
+        .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); returns min, max, width and height in the file's own size"),
     CommandSpec::new("sketch.export_dxf", "Save As DXF", export_dxf).icon("sketch_dxf")
         .noundo()
         .params("sketch?: id|name (default active); path?: file to write (else the DXF text is returned)"),
 ];
 
-fn source_text(p: &Value, cmd: &str) -> Result<String> {
+/// The sketch import command for a drawing file name, regardless of extension case.
+pub fn drawing_import_command(path: &str) -> Option<&'static str> {
+    let ext = std::path::Path::new(path).extension()?.to_str()?;
+    if ext.eq_ignore_ascii_case("dxf") {
+        Some("sketch.insert_dxf")
+    } else if ext.eq_ignore_ascii_case("svg") {
+        Some("sketch.insert_svg")
+    } else {
+        None
+    }
+}
+
+fn source_text(p: &Value, cmd: &str, svg: bool) -> Result<String> {
     if let Some(t) = str_(p, "text") {
         if t.len() > MAX_DRAWING_BYTES {
             return Err(bad(cmd, "the drawing is too large"));
@@ -35,13 +52,26 @@ fn source_text(p: &Value, cmd: &str) -> Result<String> {
     }
     let path = str_(p, "path").filter(|x| !x.trim().is_empty() && x.len() < 4096).ok_or_else(|| bad(cmd, "give `path` or `text`"))?;
     let bytes = solidcraft_io::vfs::read(path, MAX_DRAWING_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    if svg {
+        return solidcraft_io::decode_svg(&bytes).map_err(|e| drawing_error(p, svg, e.to_string()));
+    }
     Ok(String::from_utf8_lossy(&bytes).to_string())
+}
+
+/// A problem with the drawing file's contents (not with the command's parameters), named after
+/// the file so the message says which drawing it is about (#9641).
+fn drawing_error(p: &Value, svg: bool, msg: String) -> EngineError {
+    let name = str_(p, "path")
+        .and_then(|x| std::path::Path::new(x).file_name())
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| if svg { "SVG" } else { "DXF" }.to_string());
+    EngineError::Other(format!("{name}: {msg}"))
 }
 
 /// Add imported geometry to a sketch, sharing end points that meet.
 /// Adds the geometry; end points closer than `q` (mm) become one point, so drawings whose
 /// ends almost meet still make closed profiles.
-fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> Vec2, k: f64, q: f64) -> Result<(Vec<usize>, Vec<Geom2>)> {
+pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> Vec2, k: f64, q: f64) -> Result<(Vec<usize>, Vec<Geom2>)> {
     let mut map: HashMap<(i64, i64), Vec<(Vec2, usize)>> = HashMap::new();
     let mut pt = |sk: &mut Sketch, p: Vec2| -> Result<usize> {
         let p = f(p);
@@ -105,13 +135,101 @@ fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> Vec2, k: f6
     Ok((curves, texts))
 }
 
-fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
-    let text = source_text(p, cmd)?;
-    let geom = if svg { solidcraft_io::read_svg(&text) } else { solidcraft_io::read_dxf(&text) }.map_err(|e| bad(cmd, e.to_string()))?;
-    if geom.is_empty() {
-        return Err(bad(cmd, "the drawing has no geometry SolidCraft reads"));
+/// The box around a drawing's geometry (arcs, circles and curves by their extent).
+fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
+    let mut pts: Vec<Vec2> = Vec::new();
+    for g in geom {
+        match g {
+            Geom2::Point(p) => pts.push(*p),
+            Geom2::Line(a, b) => pts.extend([*a, *b]),
+            Geom2::Circle(c, r) => pts.extend([*c + Vec2::new(*r, *r), *c - Vec2::new(*r, *r)]),
+            Geom2::Arc { c, a, b } => {
+                let r = c.dist(*a);
+                let (a0, mut a1) = ((*a - *c).angle(), (*b - *c).angle());
+                while a1 <= a0 {
+                    a1 += std::f64::consts::TAU;
+                }
+                pts.extend([*a, *b]);
+                // The four extreme directions that lie on the arc.
+                for q in 0..4 {
+                    let mut d = f64::from(q) * std::f64::consts::FRAC_PI_2;
+                    while d < a0 {
+                        d += std::f64::consts::TAU;
+                    }
+                    if d < a1 {
+                        pts.push(*c + Vec2::from_angle(d) * r);
+                    }
+                }
+            }
+            Geom2::Ellipse { c, major, minor } => {
+                let r = c.dist(*major).max(*minor);
+                pts.extend([*c + Vec2::new(r, r), *c - Vec2::new(r, r)]);
+            }
+            Geom2::Spline { pts: sp, .. } => pts.extend(sp.iter().copied()),
+            // Points along the curve, not its apex, which can lie well outside it (an elliptical
+            // arc of a DXF comes in as conics, #8155).
+            Geom2::Conic { a, apex, b, rho } if *rho > 0.0 && *rho < 1.0 => {
+                let seg = solidcraft_geom::Seg2::Conic { a: *a, apex: *apex, b: *b, w: rho / (1.0 - rho) };
+                pts.extend((0..=64).map(|i| seg.point_at(f64::from(i) / 64.0)));
+            }
+            Geom2::Conic { a, apex, b, .. } => pts.extend([*a, *apex, *b]),
+            Geom2::Text { at, .. } => pts.push(*at),
+        }
     }
-    let k = num(p, "scale").filter(|k| *k > 1e-9 && *k < 1e6).unwrap_or(1.0);
+    let first = *pts.first()?;
+    let (lo, hi) = pts.iter().fold((first, first), |(lo, hi), p| (Vec2::new(lo.x.min(p.x), lo.y.min(p.y)), Vec2::new(hi.x.max(p.x), hi.y.max(p.y))));
+    (lo.x.is_finite() && lo.y.is_finite() && hi.x.is_finite() && hi.y.is_finite()).then_some((lo, hi))
+}
+
+/// The drawing's geometry and the box around it; a drawing with none is an error that says why
+/// (#9641).
+fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<(Vec<Geom2>, (Vec2, Vec2))> {
+    let text = source_text(p, cmd, svg)?;
+    let geom = if svg { solidcraft_io::read_svg(&text) } else { solidcraft_io::read_dxf(&text) }.map_err(|e| drawing_error(p, svg, e.to_string()))?;
+    let Some(bounds) = bounds_of(&geom) else {
+        let why = if svg { solidcraft_io::svg_nothing_to_import(&text) } else { "the DXF has no entities SolidCraft reads".to_string() };
+        return Err(drawing_error(p, svg, why));
+    };
+    Ok((geom, bounds))
+}
+
+/// How big a drawing is in its own file, to size it before it is inserted.
+fn drawing_bounds(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.drawing_bounds";
+    let name_is_dxf = str_(p, "path").is_some_and(|x| x.to_ascii_lowercase().ends_with(".dxf"));
+    let svg = match str_(p, "format") {
+        Some(f) => !f.eq_ignore_ascii_case("dxf"),
+        None => !name_is_dxf,
+    };
+    let (_, (lo, hi)) = read_drawing(p, cmd, svg)?;
+    Ok(json!({"min": [lo.x, lo.y], "max": [hi.x, hi.y], "width": hi.x - lo.x, "height": hi.y - lo.y}))
+}
+
+fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
+    let (geom, (lo, hi)) = read_drawing(p, cmd, svg)?;
+    // A size in millimetres wins over a factor; the aspect ratio is always kept.
+    let natural = (hi.x - lo.x, hi.y - lo.y);
+    let sized = |key: &str, of: fn(&(f64, f64)) -> f64| -> Result<Option<f64>> {
+        let Some(v) = p.get(key) else { return Ok(None) };
+        let want = v.as_f64().filter(|w| w.is_finite() && *w > 0.0).ok_or_else(|| bad(cmd, format!("`{key}` must be a positive number (mm)")))?;
+        let have = Some(of(&natural)).filter(|h| *h > 1e-9).ok_or_else(|| bad(cmd, format!("the drawing has no {key} to size")))?;
+        Ok(Some(want / have))
+    };
+    let from_size = match sized("width", |n| n.0)? {
+        Some(k) => Some(k),
+        None => sized("height", |n| n.1)?,
+    };
+    let k = from_size.or_else(|| num(p, "scale")).filter(|k| *k > 1e-9 && *k < 1e6).unwrap_or(1.0);
+    let angle = match p.get("angle") {
+        Some(v) => v.as_f64().filter(|a| a.is_finite()).ok_or_else(|| bad(cmd, "`angle` must be a number (degrees)"))?.to_radians(),
+        None => 0.0,
+    };
+    let (sin, cos) = angle.sin_cos();
+    let pivot = match str_(p, "align") {
+        None | Some("origin") => Vec2::ZERO,
+        Some("center") => (lo + hi) * 0.5,
+        Some(_) => return Err(bad(cmd, "`align` must be \"origin\" or \"center\"")),
+    };
     let off = p.get("at").and_then(vec2).unwrap_or(Vec2::ZERO);
     let mut created = None;
     if s.active_sketch.is_none() {
@@ -123,29 +241,33 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         created = r.get("sketch").and_then(Value::as_u64);
     }
     let tol = num(p, "tolerance").filter(|t| t.is_finite() && *t > 0.0).unwrap_or(1e-4).clamp(1e-9, 10.0);
-    let f = move |q: Vec2| q * k + off;
+    let f = move |q: Vec2| {
+        let v = (q - pivot) * k;
+        Vec2::new(v.x * cos - v.y * sin, v.x * sin + v.y * cos) + off
+    };
     let ((curves, texts), info) = edit(s, p, cmd, false, |sk, _| {
         let (cs, texts) = add_geometry(sk, &geom, &f, k, tol)?;
         Ok((ids_of(sk, &cs), texts))
     })?;
     // Text becomes sketch text.
-    let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch"))?;
+    let id = sketch_store::active(s).ok_or_else(|| bad(cmd, "no sketch"))?;
     let mut n_text = 0;
     for t in texts {
-        if let Geom2::Text { text, at, height, angle } = t {
+        if let Geom2::Text { text, at, height, angle: own } = t {
+            // Not `sketch_store::update`: a text that can't be linked is skipped, not refused.
             let mut doc = (*s.doc).clone();
-            let mut sk = doc.sketch(id)?.clone();
+            let mut sk = sketch_store::read(&doc, id)?.clone();
             if super::sketch_project::add_link(
                 s,
                 &doc,
                 id,
                 &mut sk,
                 LinkKind::Text,
-                LinkSource::Text { text, at, height, angle, font: None, style: Default::default(), exprs: Default::default() },
+                LinkSource::Text { text, at, height, angle: own + angle, font: None, style: Default::default(), exprs: Default::default() },
             )
             .is_ok()
             {
-                *doc.sketch_mut(id)? = sk;
+                sketch_store::write(&mut doc, id, sk)?;
                 *s.doc_mut() = doc;
                 n_text += 1;
             }
@@ -164,12 +286,7 @@ fn insert_svg(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.export_dxf";
-    let id = match p.get("sketch") {
-        Some(Value::Number(n)) => n.as_u64(),
-        Some(Value::String(x)) => s.doc.find_feature(x).map(|f| f.id),
-        _ => s.active_sketch,
-    }
-    .ok_or_else(|| bad(cmd, "no such sketch (and none is active)"))?;
+    let id = sketch_store::target(s, p, cmd)?;
     let st = s.model.state();
     let ss = st.sketch(id).ok_or_else(|| EngineError::Other("that sketch is not evaluated".into()))?;
     let sk = &ss.sketch;
@@ -251,6 +368,109 @@ mod tests {
             let r = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap();
             assert_eq!(r["curves"], 1, "{n} points: {r}");
             s.execute("sketch.finish", &json!({})).unwrap();
+        }
+    }
+
+    /// #9641: an SVG with nothing SolidCraft can draw (here only an embedded picture) is refused
+    /// with a message naming the file and saying why, not "invalid parameters … no geometry"; a
+    /// UTF-16 SVG file inserts.
+    #[test]
+    fn an_svg_with_nothing_to_import_says_why() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-9641-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let picture = dir.join("logo.svg");
+        std::fs::write(
+            &picture,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><image width="64" height="64" href="data:image/png;base64,iVBORw0KGgo="/></svg>"#,
+        )
+        .unwrap();
+        let mut s = Session::default();
+        for cmd in ["sketch.insert_svg", "sketch.drawing_bounds"] {
+            let e = s.execute(cmd, &json!({"path": picture.to_string_lossy(), "align": "center"})).unwrap_err().to_string();
+            assert!(e.starts_with("logo.svg: ") && e.contains("embedded picture") && !e.contains("invalid parameters"), "{cmd}: {e}");
+        }
+        assert!(s.active_sketch.is_none(), "a refused insert leaves no empty sketch behind");
+        let square = r#"<svg xmlns="http://www.w3.org/2000/svg" width="10mm" height="10mm" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>"#;
+        let utf16 = dir.join("square.svg");
+        std::fs::write(&utf16, [0xFF, 0xFE].into_iter().chain(square.encode_utf16().flat_map(u16::to_le_bytes)).collect::<Vec<u8>>()).unwrap();
+        let r = s.execute("sketch.insert_svg", &json!({"path": utf16.to_string_lossy()})).unwrap();
+        assert_eq!(r["curves"], 4, "{r}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #8155: an elliptical arc of a DXF (as Fusion writes one) comes into the sketch as exact
+    /// conics, and the drawing's size is the arc's own, not the box round the conics' apexes.
+    #[test]
+    fn an_elliptical_arc_comes_in_as_conics_at_its_own_size() {
+        // Centre (0, 0), major radius 10 along X, minor 5, from -45° to 45°: one quarter turn,
+        // whose apex is at x = 10 / cos 45° = 14.1, past the arc's end at x = 10.
+        let dxf = format!(
+            "0\nSECTION\n2\nENTITIES\n0\nELLIPSE\n10\n0\n20\n0\n11\n10\n21\n0\n40\n0.5\n41\n{}\n42\n{}\n0\nENDSEC\n0\nEOF\n",
+            -std::f64::consts::FRAC_PI_4,
+            std::f64::consts::FRAC_PI_4
+        );
+        let mut s = Session::default();
+        let b = s.execute("sketch.drawing_bounds", &json!({"text": dxf, "format": "dxf"})).unwrap();
+        let (w, h) = (b["width"].as_f64().unwrap(), b["height"].as_f64().unwrap());
+        let half = std::f64::consts::FRAC_1_SQRT_2;
+        assert!((w - 10.0 * (1.0 - half)).abs() < 1e-3 && (h - 10.0 * half).abs() < 1e-3, "{b}");
+        let r = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap();
+        assert_eq!(r["curves"], 1, "{r}");
+        let st = s.model.state();
+        let sk = &st.sketch(r["sketch"].as_u64().unwrap()).unwrap().sketch;
+        assert!(matches!(sk.curves[0].kind, solidcraft_sketch::CurveKind::Conic { .. }), "{:?}", sk.curves[0].kind);
+        // Every point the sketch draws it with lies on the ellipse.
+        let worst = sk.polyline(0).iter().map(|p| ((p.x / 10.0).powi(2) + (p.y / 5.0).powi(2) - 1.0).abs()).fold(0.0, f64::max);
+        assert!(worst < 1e-9, "{worst}");
+    }
+
+    const PLATE: &str =
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm" viewBox="0 0 20 10"><rect x="0" y="0" width="20" height="10"/></svg>"#;
+
+    fn span(s: &Session) -> (f64, f64, f64, f64) {
+        let st = s.model.state();
+        let sk = &st.sketch(s.active_sketch.unwrap()).unwrap().sketch;
+        let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+        for p in (0..sk.curves.len()).flat_map(|i| sk.polyline(i)) {
+            lo = (lo.0.min(p.x), lo.1.min(p.y));
+            hi = (hi.0.max(p.x), hi.1.max(p.y));
+        }
+        (lo.0, lo.1, hi.0, hi.1)
+    }
+
+    fn inserted(params: serde_json::Value) -> (f64, f64, f64, f64) {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let mut p = json!({"text": PLATE});
+        p.as_object_mut().unwrap().extend(params.as_object().unwrap().clone());
+        s.execute("sketch.insert_svg", &p).unwrap();
+        span(&s)
+    }
+
+    /// A drawing can be given a size in millimetres (its aspect kept), turned about its origin and
+    /// placed; the size of the file itself is read without inserting anything.
+    #[test]
+    fn an_inserted_drawing_takes_a_width_a_height_and_an_angle() {
+        let mut s = Session::default();
+        let b = s.execute("sketch.drawing_bounds", &json!({"text": PLATE, "format": "svg"})).unwrap();
+        assert_eq!((b["width"].as_f64(), b["height"].as_f64()), (Some(20.0), Some(10.0)));
+        let near = |a: (f64, f64, f64, f64), e: (f64, f64, f64, f64)| {
+            assert!((a.0 - e.0).abs() < 1e-6 && (a.1 - e.1).abs() < 1e-6 && (a.2 - e.2).abs() < 1e-6 && (a.3 - e.3).abs() < 1e-6, "{a:?} vs {e:?}")
+        };
+        near(inserted(json!({"width": 40})), (0.0, -20.0, 40.0, 0.0));
+        near(inserted(json!({"height": 5, "at": [3, 4]})), (3.0, -1.0, 13.0, 4.0));
+        near(inserted(json!({"width": 40, "scale": 9})), (0.0, -20.0, 40.0, 0.0));
+        // Turned 90 degrees about the origin, then placed.
+        near(inserted(json!({"angle": 90, "at": [100, 0]})), (100.0, 0.0, 110.0, 20.0));
+        // About its centre: the middle lands on `at` whatever the size and angle.
+        near(inserted(json!({"align": "center", "at": [50, 50]})), (40.0, 45.0, 60.0, 55.0));
+        near(inserted(json!({"align": "center", "at": [50, 50], "width": 40})), (30.0, 40.0, 70.0, 60.0));
+        near(inserted(json!({"align": "center", "at": [50, 50], "angle": 90})), (45.0, 40.0, 55.0, 60.0));
+        for bad in [json!({"width": 0}), json!({"height": -1}), json!({"angle": "x"}), json!({"align": "left"})] {
+            s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+            let mut p = json!({"text": PLATE});
+            p.as_object_mut().unwrap().extend(bad.as_object().unwrap().clone());
+            assert!(s.execute("sketch.insert_svg", &p).is_err(), "{bad}");
         }
     }
 }

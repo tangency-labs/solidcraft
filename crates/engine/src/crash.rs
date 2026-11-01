@@ -3,7 +3,7 @@
 //!
 //! - **Panics** are caught by a hook. One inside a command becomes a report with the design as
 //!   it was before the command and the command itself, so `solidcraft-cli run replay.json --in
-//!   design.solidcraft` reproduces it. Panics the third-party kernel raises (and
+//!   design.sc` reproduces it. Panics the third-party kernel raises (and
 //!   `solidcraft_kernel::guard` turns into errors) are reported the same way, marked recovered.
 //! - **Crashes no hook sees** (an abort, a stack overflow, a segfault, the process being killed)
 //!   are found at the next start: every running app keeps a small, locked command journal; a
@@ -20,12 +20,13 @@
 //! - **Startup steps** ([`phase`]): the journal keeps the step the app is in while it gets its
 //!   window and graphics device up, so a crash inside a graphics driver still says where it
 //!   happened, and the renderer ([`set_environment`]) once it is known.
-//! - **Native crashes** (Windows): the app's exception filter writes what it caught (exception
-//!   code, faulting module and offset) and a minidump next to the journal ([`native_paths`]);
-//!   the next start puts both into the unclean exit's report.
+//! - **Native crashes** (Windows, macOS): the app's exception filter or signal handler writes what
+//!   it caught (exception code or signal, faulting module and offset, on macOS a walk up the stack)
+//!   and on Windows a minidump next to the journal ([`native_paths`]); the next start puts them
+//!   into the unclean exit's report.
 //!
 //! Reports are folders `crashes/<time>-<signature>/` holding `report.json`, and when known
-//! `design.solidcraft`, `replay.json` and `minidump.dmp`. Nothing is ever sent anywhere.
+//! `design.sc` (`design.solidcraft` in reports from earlier releases), `replay.json` and `minidump.dmp`. Nothing is ever sent anywhere.
 
 use std::backtrace::Backtrace;
 use std::cell::{Cell, RefCell};
@@ -87,7 +88,7 @@ pub struct Summary {
     pub version: String,
     /// The report's folder.
     pub path: String,
-    /// `replay.json` and `design.solidcraft` are there: the crash can be replayed.
+    /// `replay.json` and the design (`design.sc`) are there: the crash can be replayed.
     pub replayable: bool,
 }
 
@@ -364,11 +365,25 @@ pub fn phase(step: &str) {
         j.write(&line);
         j.phase = Some(line);
         j.phase_step = Some(step.to_string());
+        j.running |= step == RUNNING;
     }
 }
 
+/// A step of getting a window's graphics up (egui-wgpu's `window surface`, `surface configure`,
+/// …): the [`phase`] until the app is [`RUNNING`], ignored after. A window opened later (the
+/// agent chat on its own, say) goes through the same steps, and must not make a crash an hour
+/// later read as a crash during startup (#8776).
+pub fn startup_step(step: &str) {
+    let Some(s) = STATE.get() else { return };
+    if s.journal.lock().is_ok_and(|j| j.running) {
+        return;
+    }
+    phase(step);
+}
+
 /// Where a native crash handler writes what it caught for this run: a small JSON file
-/// (`code`, `name`, `address`, `module`, `offset`, `detail`, `thread`) and a minidump. The next
+/// (`code`, `name`, `address`, `module`, `offset`, `detail`, `thread`, and from macOS
+/// `thread_name` and `frames`) and a minidump. The next
 /// start reports both with this run's unclean exit. `None` before [`install`] or without a journal.
 pub fn native_paths() -> Option<(PathBuf, PathBuf)> {
     let s = STATE.get()?;
@@ -507,18 +522,45 @@ pub(crate) fn command_begin(s: &Session, id: &str, params: &Value) {
     let ptr = std::sync::Arc::as_ptr(&s.doc) as usize;
     if ptr != j.last_doc {
         // The design changed outside commands (opened, a new tab, a dialog): what is it now?
-        let base = if s.is_dirty() {
-            json!("unknown")
-        } else if let Some(p) = &s.path {
-            json!({ "file": p })
-        } else if s.doc.features.is_empty() {
-            json!("new")
-        } else {
-            json!("unknown")
-        };
+        j.rebase(&journal_base(s), ptr);
+    }
+    j.run(id, params);
+}
+
+fn journal_base(s: &Session) -> Value {
+    if s.is_dirty() {
+        json!("unknown")
+    } else if let Some(path) = &s.path {
+        json!({ "file": path })
+    } else if s.doc.features.is_empty() {
+        json!("new")
+    } else {
+        json!("unknown")
+    }
+}
+
+/// Record a successful isolated command only after its entire transaction is accepted.
+pub(crate) fn accepted_command(
+    s: &Session,
+    before: &std::sync::Arc<Document>,
+    after: &std::sync::Arc<Document>,
+    id: &str,
+    params: &Value,
+    changed: bool,
+) {
+    let Some(state) = STATE.get() else { return };
+    if !s.crash_journal {
+        return;
+    }
+    let Ok(mut j) = state.journal.lock() else { return };
+    let ptr = std::sync::Arc::as_ptr(before) as usize;
+    if ptr != j.last_doc {
+        let base = if std::sync::Arc::ptr_eq(&s.doc, before) { journal_base(s) } else { json!("unknown") };
         j.rebase(&base, ptr);
     }
     j.run(id, params);
+    j.done(&Ok(()), changed);
+    j.last_doc = std::sync::Arc::as_ptr(after) as usize;
 }
 
 /// A top-level command ended: the journal records how, and panics caught inside it are reported
@@ -593,6 +635,8 @@ struct Journal {
     /// The latest startup step's line and name, and the renderer's line (kept across rebases).
     phase: Option<String>,
     phase_step: Option<String>,
+    /// The app reached [`RUNNING`] once: later startup steps are not startup ([`startup_step`]).
+    running: bool,
     environment: Option<String>,
 }
 
@@ -613,6 +657,7 @@ impl Journal {
             running_at: None,
             phase: None,
             phase_step: None,
+            running: false,
             environment: None,
         };
         j.rebase(&json!("new"), 0);
@@ -816,7 +861,14 @@ fn unclean_exit(dir: &Path, build: &Build, journal: &Path) {
             let mut frames = vec![format!("{code} {name}{}", field("detail").map(|d| format!(" ({d})")).unwrap_or_default())];
             frames.push(format!("at {module}+{offset} (address {})", field("address").unwrap_or_else(|| "?".into())));
             if let Some(t) = native.as_ref().and_then(|n| n.get("thread")).and_then(Value::as_u64) {
-                frames.push(format!("on thread {t}"));
+                frames.push(match field("thread_name").filter(|n| !n.is_empty()) {
+                    Some(n) => format!("on thread {t} ({n})"),
+                    None => format!("on thread {t}"),
+                });
+            }
+            // The handler's own walk up the stack (macOS): `module+offset symbol+offset`.
+            if let Some(walk) = native.as_ref().and_then(|n| n.get("frames")).and_then(Value::as_array) {
+                frames.extend(walk.iter().filter_map(Value::as_str).take(MAX_FRAMES).map(|f| limited(f, 300)));
             }
             (
                 format!("SolidCraft {was} (started {when}) crashed with {name} ({code}) in {at} {during}"),
@@ -853,6 +905,7 @@ fn unclean_exit(dir: &Path, build: &Build, journal: &Path) {
             running_at: None,
             phase: None,
             phase_step: None,
+            running: false,
             environment: None,
         }),
         known: Mutex::new(list(dir).into_iter().filter_map(|s| sig_of(&s.id).map(|sig| (sig, (0, s.id)))).collect()),
@@ -977,8 +1030,9 @@ fn write_report(state: &State, kind: &str, p: Option<&Panic>, extra: Extra) -> O
         let mut notes = extra.notes;
         if let Some(d) = &extra.design {
             if d.len() <= MAX_DESIGN_BYTES {
-                if solidcraft_io::write_atomic(&folder.join("design.solidcraft"), d, false).is_ok() {
-                    files.insert("design".into(), json!("design.solidcraft"));
+                let name = format!("design.{}", solidcraft_io::DESIGN_EXT);
+                if solidcraft_io::write_atomic(&folder.join(&name), d, false).is_ok() {
+                    files.insert("design".into(), json!(name));
                 }
             } else {
                 notes.push(format!("the design is larger than {} MB and was not copied", MAX_DESIGN_BYTES >> 20));
@@ -1153,7 +1207,11 @@ pub fn read(dir: &Path, id: &str) -> std::result::Result<Value, String> {
     let folder = dir.join(id);
     let mut v = read_report_file(&folder.join("report.json")).ok_or_else(|| format!("no crash report `{id}`"))?;
     v["path"] = json!(folder.to_string_lossy());
-    for (k, f) in [("design_path", "design.solidcraft"), ("replay_path", "replay.json"), ("minidump_path", "minidump.dmp")] {
+    // Reports from earlier releases hold `design.solidcraft`.
+    if let Some(design) = solidcraft_io::DESIGN_EXTS.iter().map(|ext| folder.join(format!("design.{ext}"))).find(|p| p.is_file()) {
+        v["design_path"] = json!(design.to_string_lossy());
+    }
+    for (k, f) in [("replay_path", "replay.json"), ("minidump_path", "minidump.dmp")] {
         if folder.join(f).is_file() {
             v[k] = json!(folder.join(f).to_string_lossy());
         }

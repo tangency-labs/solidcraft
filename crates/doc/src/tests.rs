@@ -103,6 +103,40 @@ fn set_back_reports_restored_features() {
     assert_eq!((m.last_recomputed, m.last_restored), (0, 0));
 }
 
+/// Setting a parameter back restores every feature on a design whose states are large next to
+/// the cache's budget: each cached state shares the bodies it did not change with the states
+/// before it, so it is charged only for what it made, not for the whole model again.
+#[test]
+fn set_back_restores_everything_when_states_share_bodies() {
+    let mut doc = Document::new("blocks");
+    doc.set_param("h", "10 mm", Some("mm"), None).unwrap();
+    for i in 0..30 {
+        let height = if i == 0 { "h" } else { "10" };
+        doc.add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(20.0 * i as f64, 0.0, 0.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: height.into(),
+                operation: Operation::NewBody,
+            },
+            None,
+        )
+        .unwrap();
+    }
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    // Room for a few whole models: enough for both timelines' new bodies, not for every state
+    // charged as a whole model.
+    m.cache.lock().unwrap().budget = 3 * m.state().retained_bytes();
+    doc.set_param("h", "12 mm", None, None).unwrap();
+    m.evaluate(&doc);
+    assert_eq!(m.last_recomputed, 30);
+    doc.set_param("h", "10 mm", None, None).unwrap();
+    m.evaluate(&doc);
+    assert_eq!((m.last_recomputed, m.last_restored), (0, 30));
+}
+
 /// #1989: what an evaluation ahead on a copy of the model computed is kept for the run that
 /// follows on the model itself, which finds it there even once the evaluation cache has dropped
 /// it (the cache keeps only a few states of a design with large bodies). Copies keep nothing.
@@ -123,6 +157,113 @@ fn results_kept_ahead_outlive_the_cache() {
     m.evaluate(&doc);
     assert_eq!((m.last_recomputed, m.last_restored), (0, 2), "nothing computed again");
     assert!(rel(measure(&m.state().bodies[0].body).unwrap().volume, 30000.0) < 1e-9);
+}
+
+/// A saved model whose feature warning is longer than 65,536 characters is still taken on open
+/// (#8541): Save writes it, so Open reads it.
+#[test]
+fn a_saved_model_with_a_long_warning_is_adopted() {
+    let (doc, _) = plate_doc();
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    let mut saved = m.saved(&doc).unwrap();
+    let last = doc.features.last().unwrap().id;
+    let warning = "w".repeat(122_701);
+    let features = saved.records["features"].as_array_mut().unwrap();
+    features.last_mut().unwrap()["warning"] = warning.clone().into();
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+    assert_eq!(reopened.result(last).and_then(|r| r.warning.as_deref()), Some(warning.as_str()));
+}
+
+/// Rolling the marker back must not discard unchanged results just because the bounded cache
+/// evicted them. Opening an earlier feature and returning to the end otherwise rebuilds it all.
+#[test]
+fn rolling_the_marker_back_keeps_results_after_cache_eviction() {
+    for reopen in [false, true] {
+        let (mut doc, _) = plate_doc();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        if reopen {
+            m = Model::adopt(&doc, &m.saved(&doc).unwrap()).unwrap();
+        }
+        let finished = m.state();
+        let computed = m.recomputed;
+        // Simulate eviction by previews or the cache's byte limit, without a large/slow fixture.
+        *m.cache.lock().unwrap() = Default::default();
+        for marker in [Some(1), Some(0), Some(1), None] {
+            doc.marker = marker;
+            m.evaluate(&doc);
+            assert_eq!(m.recomputed, computed, "reopen {reopen}, marker {marker:?}: unchanged features must be reused");
+            assert_eq!(m.state().bodies.len(), usize::from(marker.is_none()));
+        }
+        assert!(std::sync::Arc::ptr_eq(&m.state(), &finished), "return to the original evaluated state");
+    }
+}
+
+#[test]
+fn rolling_a_large_unchanged_timeline_forward_reuses_its_geometry() {
+    let mut doc = Document::new("marker cache budget");
+    for i in 0..80 {
+        doc.add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new((i % 10) as f64 * 15.0, (i / 10) as f64 * 15.0, 0.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+            },
+            None,
+        )
+        .unwrap();
+    }
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    assert!(m.results.iter().all(|r| r.error.is_none()));
+    // Exceed the actual byte budget without manually clearing the cache.
+    assert!(m.results.iter().map(|r| r.state.retained_bytes()).sum::<usize>() > 64 << 20);
+    let finished = m.state();
+    doc.marker = Some(1);
+    m.evaluate(&doc);
+    assert_eq!(m.state().bodies.len(), 1);
+    doc.marker = None;
+    m.evaluate(&doc);
+    assert_eq!(m.last_recomputed, 0, "returning to the end must not rebuild unchanged boxes");
+    assert_eq!(m.state().bodies.len(), 80);
+    assert!(std::sync::Arc::ptr_eq(&m.state(), &finished));
+}
+
+#[test]
+fn rolled_results_never_mask_edits_or_disabled_reuse() {
+    for change in ["parameter", "feature", "suppressed", "units", "no_cache"] {
+        let (mut doc, _) = plate_doc();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        doc.marker = Some(0);
+        m.evaluate(&doc);
+        *m.cache.lock().unwrap() = Default::default();
+        match change {
+            "parameter" => doc.set_param("width", "50 mm", None, None).unwrap(),
+            "feature" => {
+                let FeatureKind::Extrude { extent, .. } = &mut doc.features[1].kind else { panic!("extrude") };
+                extent.distance = "25".into();
+            }
+            "suppressed" => doc.features[1].suppressed = true,
+            "units" => doc.units = "in".into(),
+            "no_cache" => m.no_cache = true,
+            _ => panic!("unknown edit case"),
+        }
+        doc.marker = None;
+        m.evaluate(&doc);
+        let mut fresh = Model::new();
+        fresh.evaluate(&doc);
+        let volume = |model: &Model| model.state().bodies.iter().map(|b| measure(&b.body).unwrap().volume).sum::<f64>();
+        assert_eq!(m.state().bodies.len(), fresh.state().bodies.len(), "{change}");
+        assert!((volume(&m) - volume(&fresh)).abs() < 1e-6, "{change}: retained geometry must match a fresh evaluation");
+        assert_eq!(m.results.iter().map(|r| &r.error).collect::<Vec<_>>(), fresh.results.iter().map(|r| &r.error).collect::<Vec<_>>(), "{change}");
+        if matches!(change, "parameter" | "feature" | "units" | "no_cache") {
+            assert!(m.last_recomputed > 0, "{change}: changed inputs must rebuild");
+        }
+    }
 }
 
 #[test]
@@ -311,6 +452,7 @@ fn primitives_and_combine() {
             radius: "2".into(),
             height: "20".into(),
             operation: Operation::NewBody,
+            references: Vec::new(),
         },
         None,
     )
@@ -344,6 +486,8 @@ fn hostile_expressions_never_panic() {
         "deg",
         "x",
         "sqrt",
+        "cosh",
+        "atanh",
         "pow",
         "min",
         "max",
@@ -424,7 +568,7 @@ fn feature_inserted_at_a_marker_inside_a_timeline_folder_joins_it() {
     let first = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() }, Some("First")).unwrap();
     let second =
         doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() }, Some("Second")).unwrap();
-    doc.timeline_groups.push(TimelineGroup { id: 100, name: "Pair".into(), parent: None, features: vec![first, second] });
+    doc.timeline_groups.push(TimelineGroup { id: 100, name: "Pair".into(), parent: None, features: vec![first, second], joints: vec![] });
     doc.marker = Some(1);
 
     let inserted =
@@ -437,25 +581,41 @@ fn feature_inserted_at_a_marker_inside_a_timeline_folder_joins_it() {
     assert!(Document::from_json(&doc.to_json()).is_ok(), "the inserted feature must leave a reopenable design");
 }
 
+/// A marker after the last feature leaves every feature active, as no marker does, so a feature
+/// added then is active too, not added rolled back (#7741: editing the last feature from the
+/// History runs its command with the marker there).
+#[test]
+fn feature_added_with_the_marker_at_the_end_is_active() {
+    let mut doc = Document::new("marker at the end");
+    let first = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() }, Some("First")).unwrap();
+    doc.marker = Some(1);
+
+    let added = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() }, Some("Added")).unwrap();
+
+    assert_eq!(doc.features.iter().map(|feature| feature.id).collect::<Vec<_>>(), vec![first, added]);
+    assert_eq!(doc.marker, Some(2), "the marker stays after the last feature");
+}
+
 /// A construction plane that is its own side resolves through the model and back into the
 /// document. The depth count has to survive that hop, or the recursion overflows the stack and
 /// aborts the process, which no panic guard can intercept.
 #[test]
 fn self_referencing_construction_planes_are_errors() {
-    let selfref = |name: &str| Box::new(construct::GeoRef::Plane { plane: PlaneRef::Construction { name: name.into() } });
+    // Feature ids are assigned from 1, so each design below knows its own feature's id.
+    let selfref = |id: u64| Box::new(construct::GeoRef::Plane { plane: PlaneRef::Construction { feature: id.into() } });
     let xz = || Box::new(construct::GeoRef::Plane { plane: PlaneRef::Origin { name: "XZ".into() } });
 
     // Directly its own first side.
     let mut doc = Document::new("selfplane");
-    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref("P1"), b: xz() } }, Some("P1")).unwrap();
+    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref(1), b: xz() } }, Some("P1")).unwrap();
     let mut m = Model::new();
     m.evaluate(&doc);
     assert!(m.results.iter().any(|r| r.error.is_some()), "a plane that is its own side must report an error: {:?}", m.results);
 
     // Two planes that are each other's side.
     let mut doc = Document::new("twoplanes");
-    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref("P2"), b: xz() } }, Some("P1")).unwrap();
-    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref("P1"), b: xz() } }, Some("P2")).unwrap();
+    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref(2), b: xz() } }, Some("P1")).unwrap();
+    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Midplane { a: selfref(1), b: xz() } }, Some("P2")).unwrap();
     let mut m = Model::new();
     m.evaluate(&doc);
     assert!(m.results.iter().any(|r| r.error.is_some()), "a two-plane cycle must report an error: {:?}", m.results);
@@ -463,8 +623,8 @@ fn self_referencing_construction_planes_are_errors() {
     // A perpendicular plane whose base is itself, and a sketch placed on it.
     let mut doc = Document::new("perpplane");
     let line = Box::new(construct::GeoRef::World { axis: "X".into() });
-    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Perpendicular { plane: selfref("P1"), line } }, Some("P1")).unwrap();
-    doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Construction { name: "P1".into() }, sketch: Sketch::new() }, Some("Sketch1")).unwrap();
+    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Perpendicular { plane: selfref(1), line } }, Some("P1")).unwrap();
+    doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Construction { feature: 1.into() }, sketch: Sketch::new() }, Some("Sketch1")).unwrap();
     let mut m = Model::new();
     m.evaluate(&doc);
     assert!(m.results.iter().any(|r| r.error.is_some()), "a cyclic perpendicular plane must report an error: {:?}", m.results);
@@ -491,4 +651,222 @@ fn new_names_take_the_first_free_number() {
     }
     let next = sketch(&mut doc);
     assert_eq!(name(&doc, next), names[0], "the first freed number is taken again");
+}
+
+#[test]
+fn empty_boolean_targets_name_overlapping_component() {
+    for (operation, offset) in [(Operation::Cut, 0.0), (Operation::Intersect, 0.0), (Operation::Cut, 40.0)] {
+        let (mut doc, sketch) = plate_doc();
+        let imported = doc.add_component(Some("Imported STEP"), 0).unwrap();
+        let part = doc.add_component(Some("Part1"), 0).unwrap();
+        doc.features.last_mut().unwrap().component = imported;
+        doc.feature_mut(sketch).unwrap().component = imported;
+        doc.occurrences.iter_mut().find(|o| o.component == imported).unwrap().transform[2][3] = offset;
+        let mut kind = doc.features.last().unwrap().kind.clone();
+        if let FeatureKind::Extrude { operation: op, .. } = &mut kind {
+            *op = operation;
+        }
+        let cut = doc.add_feature(kind, None).unwrap();
+        doc.feature_mut(cut).unwrap().component = part;
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        let error = model.result(cut).unwrap().error.as_deref().unwrap();
+        assert!(error.contains("component 'Part1'"), "offset {offset}: {error}");
+        assert!(error.contains("'Body1' in component 'Imported STEP'"), "offset {offset}: {error}");
+        assert!(error.contains("activate that component or pick the body as a target"), "offset {offset}: {error}");
+        assert_eq!(model.state().bodies.len(), 1);
+        assert!(rel(measure(&model.state().bodies[0].body).unwrap().volume, 24000.0) < 1e-9);
+    }
+}
+
+#[test]
+fn empty_boolean_targets_without_overlap_keep_plain_message() {
+    for operation in [Operation::Cut, Operation::Intersect] {
+        let (mut doc, _) = plate_doc();
+        let part = doc.add_component(Some("Part1"), 0).unwrap();
+        let cut = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(Vec3::new(100.0, 100.0, 100.0)),
+                    length: "1".into(),
+                    width: "1".into(),
+                    height: "1".into(),
+                    operation,
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(cut).unwrap().component = part;
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        assert_eq!(model.result(cut).unwrap().error.as_deref(), Some("there is no body to cut or intersect"));
+    }
+}
+
+#[test]
+fn timeline_group_legacy_json_omits_empty_joint_membership() {
+    let old = serde_json::json!({"id":100, "name":"Folder", "parent":null, "features":[]});
+    let group: TimelineGroup = serde_json::from_value(old.clone()).unwrap();
+    assert!(group.joints.is_empty());
+    assert_eq!(serde_json::to_value(&group).unwrap(), old);
+    let mut doc = Document::new("legacy folders");
+    doc.timeline_groups.push(group);
+    doc.next_id = 101;
+    let saved = doc.to_json();
+    let value: serde_json::Value = serde_json::from_str(&saved).unwrap();
+    assert!(value["timeline_groups"][0].get("joints").is_none());
+    assert_eq!(Document::from_json(&saved).unwrap().to_json(), saved);
+}
+
+/// A sketch whose touching curves are cut into more pieces than the profile search looks at
+/// says that some profiles may be missing, instead of leaving them out silently (#6896); an
+/// ordinary sketch says nothing.
+#[test]
+fn a_sketch_too_large_to_search_whole_says_profiles_may_be_missing() {
+    let mut doc = Document::new("large");
+    let mut sk = Sketch::new();
+    // Concentric ellipses 100 m across, each sampled into thousands of pieces, all one island.
+    let c = sk.add_point(Vec2::ZERO, None).unwrap();
+    for k in 0..5 {
+        let m = sk.add_point(Vec2::new(1e5 - k as f64 * 1e3, 0.0), None).unwrap();
+        sk.add_curve(solidcraft_sketch::CurveKind::Ellipse { c, m, r: 6e4 - k as f64 * 1e3 }, None).unwrap();
+    }
+    let large = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+    let (plate, plate_sketch) = plate_doc();
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    let warning = m.result(large).and_then(|r| r.warning.clone()).unwrap_or_default();
+    assert!(warning.contains("some profiles may be missing"), "{warning}");
+    let mut m = Model::new();
+    m.evaluate(&plate);
+    assert!(m.result(plate_sketch).and_then(|r| r.warning.as_deref()).is_none());
+}
+
+fn browser_group(id: u64, component: u64, folder: &str, parent: Option<u64>, items: &[BrowserEntry]) -> BrowserGroup {
+    BrowserGroup { id, name: format!("G{id}"), component, folder: folder.into(), parent, items: items.to_vec() }
+}
+
+fn item(key: &str) -> BrowserEntry {
+    BrowserEntry::item(key)
+}
+
+fn group(id: u64) -> BrowserEntry {
+    BrowserEntry::Group(id)
+}
+
+/// The design with what `browser_pruned` drops gone (the design itself when nothing is).
+fn pruned(doc: &Document) -> Document {
+    let mut out = doc.clone();
+    if let Some((groups, order)) = doc.browser_pruned() {
+        (out.browser_groups, out.browser_order) = (groups, order);
+    }
+    out
+}
+
+/// Pruning keeps every group but cuts a parent that loops, is the group itself, is past the
+/// nesting limit, or is in another component or folder, to the top level; and it drops entries
+/// for deleted sketches and placements, repeats, and the lists of a missing component. Body names
+/// are never judged.
+#[test]
+fn browser_pruning_cuts_bad_parents_and_drops_stale_and_repeated_entries() {
+    let mut doc = Document::new("prune");
+    let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: Sketch::new() }, None).unwrap();
+    let key = sketch.to_string();
+    doc.components.push(Component { id: 7, name: "Part".into(), ..Default::default() });
+    doc.occurrences.push(Occurrence { id: 20, component: 7, parent: 0, name: "Part".into(), transform: IDENTITY, grounded: false });
+    let deep = MAX_GROUP_NESTING as u64 + 2;
+    doc.browser_groups = vec![
+        browser_group(1, 0, "bodies", Some(2), &[]),
+        browser_group(2, 0, "bodies", Some(1), &[]),
+        browser_group(3, 0, "bodies", Some(3), &[]),
+        browser_group(4, 7, "bodies", Some(5), &[]),
+        browser_group(5, 0, "bodies", None, &[item("a"), group(7), group(7), item("a")]),
+        browser_group(6, 0, "sketches", Some(5), &[item(&key), item("999")]),
+        browser_group(7, 0, "bodies", Some(5), &[]),
+        browser_group(8, 0, "bodies", None, &[item("a"), item("b")]),
+    ];
+    doc.browser_groups.extend((0..deep).map(|i| browser_group(100 + i, 0, "construction", i.checked_sub(1).map(|p| 100 + p), &[])));
+    doc.browser_order.insert("0/bodies".into(), vec![item("Lid"), item("Ghost"), item("Lid"), group(5), group(5)]);
+    doc.browser_order.insert("0/components".into(), vec![item("21"), item("20")]);
+    doc.browser_order.insert("99/bodies".into(), vec![item("x")]);
+    let after = pruned(&doc);
+    let parent = |id| after.browser_group(id).unwrap().parent;
+    assert_eq!(after.browser_groups.len(), doc.browser_groups.len(), "no group is dropped");
+    assert_eq!([1, 2, 3, 4, 6].map(parent), [None; 5], "a loop, itself, another component, another folder");
+    assert_eq!(parent(7), Some(5));
+    for i in 0..deep {
+        assert_eq!(parent(100 + i), (1..MAX_GROUP_NESTING as u64).contains(&i).then(|| 99 + i), "level {} of a chain {deep} deep", i + 1);
+    }
+    assert_eq!(after.browser_group(5).unwrap().items, [item("a"), group(7)]);
+    assert_eq!(after.browser_group(8).unwrap().items, [item("b")], "an item stays in the first group that has it");
+    assert_eq!(after.browser_group(6).unwrap().items, [item(&key)], "the deleted sketch goes");
+    assert_eq!(after.browser_order["0/bodies"], [item("Lid"), item("Ghost"), group(5)], "body names stay; repeats go");
+    assert_eq!(after.browser_order["0/components"], [item("20")], "the deleted placement goes");
+    assert!(!after.browser_order.contains_key("99/bodies"));
+    assert!(Document::new("clean").browser_pruned().is_none(), "nothing to prune is not a change");
+}
+
+/// Levels and ancestry follow the parents. Groups a list does not name go after the last one it
+/// names, in creation order, or first when it names none: above the items, as a design saved
+/// before groups could be ordered has always shown them.
+#[test]
+fn group_levels_and_the_order_of_groups_a_list_does_not_name() {
+    let mut doc = Document::new("order");
+    doc.browser_groups = vec![
+        browser_group(1, 0, "bodies", None, &[item("x")]),
+        browser_group(2, 0, "bodies", None, &[]),
+        browser_group(3, 0, "bodies", None, &[]),
+        browser_group(4, 0, "bodies", Some(1), &[]),
+        browser_group(5, 0, "bodies", Some(4), &[]),
+    ];
+    assert_eq!([1, 2, 4, 5].map(|id| doc.group_level(id)), [1, 1, 2, 3]);
+    assert!(doc.group_within(5, 1) && doc.group_within(5, 5) && !doc.group_within(1, 5) && !doc.group_within(2, 5));
+    assert_eq!(doc.group_height(1), 3);
+    let top = |doc: &Document| doc.ordered_entries(0, "bodies", None);
+    assert_eq!(top(&doc), [group(1), group(2), group(3)], "no list: creation order");
+    doc.browser_order.insert("0/bodies".into(), vec![item("a")]);
+    assert_eq!(top(&doc), [group(1), group(2), group(3), item("a")], "a list of items only: groups above them");
+    doc.browser_order.insert("0/bodies".into(), vec![item("a"), group(2), item("b"), group(2), group(9)]);
+    assert_eq!(top(&doc), [item("a"), group(2), group(1), group(3), item("b")], "after the last listed; repeats and unknown ignored");
+    assert_eq!(doc.ordered_entries(0, "bodies", Some(1)), [group(4), item("x")], "inside a group too");
+}
+
+/// Nested groups and a `components` order survive a save and a load, saved as numbers (groups) and
+/// strings (items). A design from before groups could nest reads with the browser it always had:
+/// no parents, groups in creation order above the items in their saved order, saved back as read.
+#[test]
+fn browser_data_survives_a_save_and_old_designs_read_unchanged() {
+    let mut doc = Document::new("nested");
+    doc.components.push(Component { id: 7, name: "Part".into(), ..Default::default() });
+    for id in [20, 21] {
+        doc.occurrences.push(Occurrence { id, component: 7, parent: 0, name: format!("P{id}"), transform: IDENTITY, grounded: false });
+    }
+    doc.browser_groups = vec![browser_group(2, 0, "bodies", None, &[item("Lid"), group(3)]), browser_group(3, 0, "bodies", Some(2), &[item("Base")])];
+    doc.browser_order.insert("0/bodies".into(), vec![item("Cap"), group(2)]);
+    doc.browser_order.insert("0/components".into(), vec![item("21"), item("20")]);
+    let saved = doc.to_json();
+    let value: serde_json::Value = serde_json::from_str(&saved).unwrap();
+    assert_eq!(value["browser_order"]["0/bodies"], serde_json::json!(["Cap", 2]));
+    assert_eq!((&value["browser_groups"][1]["parent"], value["browser_groups"][0].get("parent")), (&serde_json::json!(2), None));
+    let loaded = Document::from_json(&saved).unwrap();
+    assert_eq!((&loaded.browser_groups, &loaded.browser_order), (&doc.browser_groups, &doc.browser_order));
+    let resaved: serde_json::Value = serde_json::from_str(&loaded.to_json()).unwrap();
+    assert_eq!((&resaved["browser_groups"], &resaved["browser_order"]), (&value["browser_groups"], &value["browser_order"]));
+
+    let groups = serde_json::json!([
+        {"id": 3, "name": "Fasteners", "component": 0, "folder": "bodies", "items": ["Bolt", "Nut"]},
+        {"id": 4, "name": "Plates", "component": 0, "folder": "bodies", "items": ["Plate"]},
+    ]);
+    for (order, top) in [
+        (serde_json::json!({}), vec![group(3), group(4)]),
+        (serde_json::json!({"0/bodies": ["Washer", "Bolt", "Cap"]}), vec![group(3), group(4), item("Washer"), item("Bolt"), item("Cap")]),
+    ] {
+        let mut old: serde_json::Value = serde_json::from_str(&Document::new("old").to_json()).unwrap();
+        (old["browser_groups"], old["browser_order"]) = (groups.clone(), order.clone());
+        let loaded = Document::from_json(&old.to_string()).unwrap();
+        assert!(loaded.browser_groups.iter().all(|g| g.parent.is_none()), "{order}");
+        assert_eq!(loaded.ordered_entries(0, "bodies", None), top, "{order}");
+        let resaved: serde_json::Value = serde_json::from_str(&loaded.to_json()).unwrap();
+        assert_eq!(resaved["browser_groups"], groups, "{order}");
+    }
 }

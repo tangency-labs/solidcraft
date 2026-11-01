@@ -201,3 +201,39 @@ fn all_lists_the_faces_along_the_ray_and_the_cap_is_enforced() {
     assert_eq!(v["ok"], false);
     assert!(v["error"].as_str().is_some_and(|e| e.contains("1024")), "{v}");
 }
+
+/// The pointer over a section's cap picks nothing behind it (#6328): hovering the cut used to
+/// pick the removed top face, whose highlighted outline then showed dimmed through the cap
+/// wherever it ran behind it, so the cut looked see-through. Through the pocket the cut opens,
+/// the pointer still finds the pocket's floor.
+#[test]
+fn the_mouse_picker_stops_at_a_section_cap() {
+    use crate::viewport::{Hit, pick, pick_all, projection};
+    let mut h = top_view();
+    h.call(
+        "engine.execute",
+        json!({"command": "solid.box", "params": {"length": 4, "width": 4, "height": 4, "corner": [3, 3, 6], "operation": "cut"}}),
+    );
+    h.call("engine.execute", json!({"command": "inspect.section", "params": {"plane": {"origin": [0, 0, 8], "normal": [0, 0, 1]}}}));
+    let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(600.0, 600.0));
+    let proj = projection(&h.app, rect);
+    let faces = |hits: &[Hit]| hits.iter().filter(|x| matches!(x, Hit::Face { .. })).cloned().collect::<Vec<_>>();
+    // Over the cut material, between the pocket and the box's side: no face, and no edge or
+    // corner behind the cap.
+    let solid = proj.to_screen(Vec3::new(1.5, 5.0, 8.0)).unwrap();
+    let hits = pick(&h.app, &proj, solid);
+    assert!(hits.iter().all(|x| !matches!(x, Hit::Face { .. } | Hit::Edge { .. } | Hit::Vertex { .. })), "{hits:?}");
+    assert!(faces(&pick_all(&h.app, &proj, solid)).is_empty());
+    // Over the pocket: its floor at z = 6, below the cut.
+    let pocket = proj.to_screen(Vec3::new(5.0, 5.0, 8.0)).unwrap();
+    match faces(&pick(&h.app, &proj, pocket)).first() {
+        Some(Hit::Face { point, .. }) => assert!((point.z - 6.0).abs() < 1e-6, "{point:?}"),
+        other => panic!("the pocket's floor: {other:?}"),
+    }
+    // Without the section, the box's top face answers there.
+    h.call("engine.execute", json!({"command": "inspect.section", "params": {"clear": true}}));
+    match faces(&pick(&h.app, &proj, solid)).first() {
+        Some(Hit::Face { point, .. }) => assert!((point.z - 10.0).abs() < 1e-6, "{point:?}"),
+        other => panic!("the top face: {other:?}"),
+    }
+}

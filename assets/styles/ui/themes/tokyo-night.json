@@ -1,4 +1,6 @@
 {
+  "order": 140,
+  "provenance": "Original SolidCraft mapping of Tokyo Night (MIT palette)",
   "base": "dark",
   "colors": {
     "accent": "#7aa2f7",
@@ -50,8 +52,8 @@
     "dialog_footer": "#1a1b26",
     "dialog_label": "#c0caf5",
     "dialog_rule": "#414868",
-    "dimension": "#c0caf5",
-    "dimension_driven": "#9aa5ce",
+    "dimension": "#73daca",
+    "dimension_driven": "#4f9a90",
     "error": "#f7768e",
     "field": "#16161e",
     "form_accent": "#b190ec",
@@ -65,11 +67,6 @@
     "form_success": "#9ece6a",
     "form_success_fill": "#303932",
     "form_tab_ink": "#bb9af7",
-    "gizmo": [
-      "#f7768e",
-      "#9ece6a",
-      "#4775ce"
-    ],
     "glyph_bg": "#24283b",
     "glyph_edge": "#f6758d",
     "glyph_text": "#f6758d",
@@ -168,6 +165,7 @@
     "sketch_centerline": "#e0af68",
     "sketch_construction": "#e0af68",
     "sketch_fixed": "#c0caf5",
+    "sketch_halo": "#151722",
     "sketch_ink": "#9ece6a",
     "sketch_locked": "#9ece6a",
     "sketch_lost": "#f7768e",
@@ -188,11 +186,6 @@
     "timeline_item_error": "#4f313f",
     "timeline_marker": "#9aa5ce",
     "toolbar": "#1a1b26",
-    "triad": [
-      "#f7768e",
-      "#9ece6a",
-      "#4775ce"
-    ],
     "viewport_bottom": "#151722",
     "viewport_top": "#151722",
     "warning": "#e0af68"

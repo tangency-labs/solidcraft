@@ -67,11 +67,20 @@ fn design_names(app: &SolveApp) -> BTreeSet<String> {
 /// in `language`. (When one entry with the text is still English there, English is right.)
 /// `names` are the design's own names, which are not UI text, except the default names the
 /// language translates (a new design's `Untitled`, `Sketch1`): those must show translated.
+/// A text the language gives another message is its own word, not English: Romanian's Aspect
+/// (Appearance) is also the English Aspect of the Render Frame stage.
 fn english_leaks(language: &str, texts: &BTreeSet<String>, english: &BTreeMap<String, Vec<String>>, names: &BTreeSet<String>) -> Vec<String> {
     let locale = crate::i18n::Locale::for_language(language);
+    let own: BTreeSet<&str> = english
+        .iter()
+        .flat_map(|(text, ids)| ids.iter().map(move |id| (text.as_str(), locale.text(id))))
+        .filter(|(text, shown)| text != shown)
+        .map(|(_, shown)| shown)
+        .collect();
     texts
         .iter()
         .filter(|text| !names.contains(*text) || locale.given_name(text) != text.as_str())
+        .filter(|text| !own.contains(text.as_str()))
         .filter(|text| english.get(*text).is_some_and(|ids| ids.iter().all(|id| locale.text(id) != text.as_str())))
         .cloned()
         .collect()
@@ -153,7 +162,8 @@ fn no_english_is_painted_where_the_language_has_a_translation() {
 }
 
 /// The sweep can see a leak: English painted by a plain painter call is reported, the same text
-/// in the language is not, and English that the language leaves untranslated is not either.
+/// in the language is not, English that the language leaves untranslated is not either, and nor
+/// is a word the language gives another message.
 #[test]
 fn the_sweep_reports_english_only_where_a_translation_exists() {
     let english = english_ids();
@@ -165,4 +175,10 @@ fn the_sweep_reports_english_only_where_a_translation_exists() {
     // "Fillet" here is a feature someone named so: a design name, not a label.
     let names: BTreeSet<String> = ["Fillet".to_string()].into();
     assert_eq!(english_leaks("ja", &texts, &english, &names), vec!["Center Rectangle".to_string()]);
+    // A word the language gives another message is its own, though English has a message with
+    // the same letters: Romanian's Aspect is Appearance, English's Aspect is the Frame stage's.
+    let ro = crate::i18n::Locale::for_language("ro");
+    assert_eq!(ro.text("cmd.appearance_assign"), "Aspect");
+    assert_ne!(ro.text("render.frame_aspect"), "Aspect");
+    assert!(english_leaks("ro", &["Aspect".to_string()].into(), &english, &BTreeSet::new()).is_empty());
 }

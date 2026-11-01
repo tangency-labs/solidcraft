@@ -22,6 +22,19 @@ impl Scratch {
         std::fs::write(&path, json!({"commands": [{"command": "solid.box", "params": {"length": 2, "width": 3, "height": 4}}]}).to_string()).unwrap();
         path
     }
+
+    fn saving_script(&self) -> (PathBuf, PathBuf) {
+        let path = self.0.join("saving.json");
+        let saved = self.0.join("script-ran.solidcraft");
+        std::fs::write(
+            &path,
+            json!({"commands": [{"command": "solid.box", "params": {"length": 2, "width": 3, "height": 4}},
+                {"command": "file.save_as", "params": {"path": saved}}]})
+            .to_string(),
+        )
+        .unwrap();
+        (path, saved)
+    }
 }
 
 impl Drop for Scratch {
@@ -44,9 +57,95 @@ fn body_count(path: &Path) -> Value {
 }
 
 #[test]
+fn run_rejects_invalid_options_before_script_execution_or_output_writes() {
+    let dir = Scratch::new();
+    let (script, script_saved) = dir.saving_script();
+    let cases = [
+        (&["--out"][..], "--out needs a value"),
+        (&["--save"][..], "--save needs a value"),
+        (&["--in"][..], "--in needs a value"),
+        (&["--out", "--quiet"][..], "--out needs a value"),
+        (&["--ouut", "part.step"][..], "doesn't take --ouut"),
+        (&["--unknown"][..], "doesn't take --unknown"),
+    ];
+    for existing in [false, true] {
+        let saved = dir.0.join(format!("{existing}.solidcraft"));
+        let exported = dir.0.join(format!("{existing}.step"));
+        let report = dir.0.join(format!("{existing}.json"));
+        let outputs = [&saved, &exported, &report];
+        if existing {
+            for path in outputs {
+                std::fs::write(path, b"existing output").unwrap();
+            }
+        }
+        for (extra, message) in cases {
+            let output = cli()
+                .arg("run")
+                .arg(&script)
+                .arg("--save")
+                .arg(&saved)
+                .arg("--out")
+                .arg(&exported)
+                .arg("--json-out")
+                .arg(&report)
+                .args(extra)
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(1), "{extra:?}");
+            assert!(String::from_utf8_lossy(&output.stderr).contains(message), "{extra:?}: {}", String::from_utf8_lossy(&output.stderr));
+            assert!(output.stdout.is_empty());
+            assert!(!script_saved.exists(), "invalid arguments must be rejected before the script runs");
+            for path in outputs {
+                if existing {
+                    assert_eq!(std::fs::read(path).unwrap(), b"existing output");
+                } else {
+                    assert!(!path.exists());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn eval_and_inspect_reject_invalid_options_before_script_execution_or_reporting() {
+    let dir = Scratch::new();
+    let (script, script_saved) = dir.saving_script();
+    let cases = [
+        (&["--in"][..], "--in needs a value"),
+        (&["--in", "--quiet"][..], "--in needs a value"),
+        (&["--out", "part.step"][..], "doesn't take --out"),
+        (&["--unknown"][..], "doesn't take --unknown"),
+    ];
+    for command in ["eval", "inspect"] {
+        for existing in [false, true] {
+            let report = dir.0.join(format!("{command}-{existing}.json"));
+            if existing {
+                std::fs::write(&report, b"existing report").unwrap();
+            }
+            for (extra, message) in cases {
+                let output = cli().arg(command).arg(&script).arg("--json-out").arg(&report).args(extra).output().unwrap();
+                assert_eq!(output.status.code(), Some(1), "{command} {extra:?}");
+                assert!(
+                    String::from_utf8_lossy(&output.stderr).contains(message),
+                    "{command} {extra:?}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(output.stdout.is_empty());
+                assert!(!script_saved.exists(), "invalid arguments must be rejected before the script runs");
+                if existing {
+                    assert_eq!(std::fs::read(&report).unwrap(), b"existing report");
+                } else {
+                    assert!(!report.exists());
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn cli_loads_both_design_encodings_by_contents() {
     let dir = Scratch::new();
-    for extension in ["solidcraft", "solvecraft", "json"] {
+    for extension in ["sc", "solidcraft", "solvecraft", "json"] {
         let saved = dir.0.join(format!("box.{extension}"));
         json_output(cli().arg("run").arg(dir.script()).arg("--save").arg(&saved).output().unwrap());
         let bytes = std::fs::read(&saved).unwrap();
@@ -130,7 +229,9 @@ fn known_pending_concepts_and_released_files_round_trip_with_inert_metadata() {
             assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
             let reopened = io::read_design(&std::fs::read(&destination).unwrap()).unwrap();
             assert_eq!(reopened.metadata, document.metadata);
-            assert_eq!(reopened.name, document.name);
+            // #4907: `run --save` maps to Save As, and a borrowed design name
+            // follows the destination file's stem instead of keeping the old name.
+            assert_eq!(reopened.name, format!("resaved-{index}"));
             assert_eq!(reopened.features, document.features);
             assert_eq!(std::fs::read(&source).unwrap(), bytes);
         }
@@ -166,6 +267,110 @@ fn results_with_base_design_and_quiet_still_report_and_save() {
     assert_eq!(result.as_array().unwrap().len(), 1);
     assert_eq!(body_count(&saved), 2);
     assert_eq!(body_count(&base), 1);
+}
+
+/// `eval` and its alias must measure the script applied to the input design, rather than
+/// silently reporting the input alone (#6861).
+#[test]
+fn eval_runs_its_script_on_the_in_design() {
+    let dir = Scratch::new();
+    let base = dir.0.join("base.solidcraft");
+    let script = dir.0.join("add.json");
+    json_output(cli().arg("run").arg(dir.script()).arg("--save").arg(&base).output().unwrap());
+    let original = std::fs::read(&base).unwrap();
+    std::fs::write(
+        &script,
+        json!({"commands": [{"command": "solid.box", "params": {"length": 5, "width": 3, "height": 4, "corner": [10, 0, 0]}}]}).to_string(),
+    )
+    .unwrap();
+    for command in ["eval", "inspect"] {
+        // Both existing one-input forms still measure just the original body.
+        for input in [&base, &dir.script()] {
+            for named_input in [false, true] {
+                let mut c = cli();
+                c.arg(command);
+                if named_input {
+                    c.arg("--in");
+                }
+                let measured = json_output(c.arg(input).output().unwrap());
+                assert_eq!(measured["body_count"], 1);
+                assert!((measured["total"]["volume_mm3"].as_f64().unwrap() - 24.0).abs() < 1e-6);
+            }
+        }
+        for input_first in [false, true] {
+            for to_file in [false, true] {
+                let mut c = cli();
+                c.arg(command);
+                if input_first {
+                    c.arg("--in").arg(&base).arg(&script);
+                } else {
+                    c.arg(&script).arg("--in").arg(&base);
+                }
+                let report = dir.0.join("measurement.json");
+                if to_file {
+                    c.arg("--json-out").arg(&report);
+                }
+                let output = c.output().unwrap();
+                let measured = if to_file {
+                    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+                    assert!(output.stdout.is_empty());
+                    serde_json::from_slice(&std::fs::read(&report).unwrap()).unwrap()
+                } else {
+                    json_output(output)
+                };
+                assert_eq!(measured["body_count"], 2, "{command}, input_first={input_first}, to_file={to_file}");
+                assert!((measured["total"]["volume_mm3"].as_f64().unwrap() - 84.0).abs() < 1e-6);
+                assert_eq!(measured["timeline"].as_array().unwrap().len(), 2, "the script runs exactly once");
+                assert_eq!(std::fs::read(&base).unwrap(), original, "evaluation never saves its changes to the input");
+            }
+        }
+    }
+}
+
+#[test]
+fn eval_propagates_script_errors_before_writing_a_report() {
+    let dir = Scratch::new();
+    let base = dir.script();
+    let script = dir.0.join("bad.json");
+    for command in ["eval", "inspect"] {
+        for contents in ["{", r#"{"commands":[{"command":"missing.command","params":{}}]}"#] {
+            std::fs::write(&script, contents).unwrap();
+            let report = dir.0.join("report.json");
+            let output = cli().arg(command).arg(&script).arg("--in").arg(&base).arg("--json-out").arg(&report).output().unwrap();
+            assert_eq!(output.status.code(), Some(1));
+            assert!(!output.stderr.is_empty());
+            assert!(output.stdout.is_empty());
+            assert!(!report.exists());
+        }
+    }
+}
+
+#[test]
+fn eval_rejects_unknown_options_and_missing_input_values_before_writing_a_report() {
+    let dir = Scratch::new();
+    let script = dir.script();
+    let report = dir.0.join("report.json");
+    for command in ["eval", "inspect"] {
+        for (options, message) in [(&["--frobnicate", "1"][..], "doesn't take --frobnicate"), (&["--in"][..], "--in needs a value")] {
+            for options_first in [false, true] {
+                std::fs::write(&report, b"previous report").unwrap();
+                let mut c = cli();
+                c.arg(command);
+                if options_first {
+                    c.args(options).arg("--json-out").arg(&report).arg(&script);
+                } else {
+                    c.arg(&script).args(options).arg("--json-out").arg(&report);
+                }
+                // A following option also proves that --in cannot consume a flag as its value.
+                let output = c.output().unwrap();
+                assert_eq!(output.status.code(), Some(1), "{command}, {options:?}");
+                let error = String::from_utf8_lossy(&output.stderr);
+                assert!(error.contains(message), "{command}: {error}");
+                assert!(output.stdout.is_empty());
+                assert_eq!(std::fs::read(&report).unwrap(), b"previous report");
+            }
+        }
+    }
 }
 
 #[test]
@@ -209,6 +414,11 @@ fn legacy_extension_and_format_tag_still_open() {
     assert_eq!(body_count(&resaved), 2);
     let reopened = solidcraft_engine::io::read_design(&std::fs::read(&resaved).unwrap()).unwrap();
     assert!(reopened.to_json().contains("\"solidcraft/"));
+    // `.solidcraft` (before `.sc`) opens as `--in` and as the design to evaluate; `.sc` too.
+    let current = dir.0.join("current.sc");
+    json_output(cli().args(["run", "--in"]).arg(&resaved).arg(dir.script()).arg("--save").arg(&current).output().unwrap());
+    assert_eq!(body_count(&current), 3);
+    assert!(solidcraft_engine::io::is_design_container(&std::fs::read(&current).unwrap()), "a .sc file is a design container");
 }
 
 /// `snapshot` starts from `--in` as `run` does (its script runs on that design), and refuses an
@@ -286,6 +496,78 @@ fn timings_and_profile_report_each_command() {
     let output = cli().arg("run").arg("--in").arg(&saved).arg("--timings").output().unwrap();
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("--timings needs a script"));
+}
+
+/// #6921: `--param-check` checks a script's steps against their contracts on every path `run`
+/// takes (a script alone, on an `--in` design or script, with `--results`, `--timings` or
+/// `--profile`), and a warning reaches stderr even when a later step fails.
+#[test]
+fn param_check_reaches_every_script_run_takes() {
+    let dir = Scratch::new();
+    let typo = dir.0.join("typo.json");
+    let step = json!({"command": "solid.box", "params": {"length": 2, "width": 3, "height": 4, "operaton": "new"}});
+    std::fs::write(&typo, json!({"commands": [step.clone()]}).to_string()).unwrap();
+    let base = dir.0.join("base.solidcraft");
+    json_output(cli().arg("run").arg(dir.script()).arg("--save").arg(&base).output().unwrap());
+    let saved = dir.0.join("saved.solidcraft");
+    let start = dir.script();
+    let (typo, base, saved_arg, start) = (typo.to_str().unwrap(), base.to_str().unwrap(), saved.to_str().unwrap(), start.to_str().unwrap());
+    let paths = [&[][..], &["--in", base], &["--in", start], &["--results"], &["--timings"], &["--timings", "--profile"]];
+    let run = |level: Option<&str>, extra: &[&str]| {
+        std::fs::remove_file(&saved).ok();
+        let check = level.map(|l| ["--param-check", l]).into_iter().flatten();
+        cli().args(["run", typo, "--save", saved_arg]).args(check).args(extra).output().unwrap()
+    };
+
+    // Off, the default: the step runs as it always has, without a word.
+    let off = run(None, &[]);
+    assert!(off.status.success() && !String::from_utf8_lossy(&off.stderr).contains("operaton"), "{off:?}");
+    assert_eq!(body_count(&saved), 1);
+
+    // Warn: each path runs the step, saves, and reports it on stderr; `--results` keeps it too.
+    for extra in paths {
+        let output = run(Some("warn"), extra);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{extra:?}: {stderr}");
+        assert!(stderr.contains("step 1: unknown key `operaton`; did you mean `operation`?"), "{extra:?}: {stderr}");
+        assert!(saved.exists(), "{extra:?}");
+        if extra == ["--results"] {
+            let results: Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert!(results[0]["param_warnings"][0].as_str().is_some_and(|w| w.contains("operaton")), "{results}");
+        }
+    }
+
+    // Strict: on each path the run stops at the step, and nothing is written.
+    for extra in paths {
+        let output = run(Some("strict"), extra);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{extra:?}: {stderr}");
+        assert!(stderr.contains("unknown key `operaton`"), "{extra:?}: {stderr}");
+        assert!(!saved.exists(), "{extra:?}");
+    }
+
+    // Warn, with a later step that fails: the run fails, and the first step's warning is still
+    // reported, timed or not.
+    let failing = dir.0.join("failing.json");
+    let fail = json!({"command": "solid.extrude", "params": {"sketch": "Nope"}});
+    std::fs::write(&failing, json!({"commands": [step, fail]}).to_string()).unwrap();
+    for extra in [&[][..], &["--timings"]] {
+        let output = cli().arg("run").arg(&failing).args(["--param-check", "warn"]).args(extra).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{extra:?}: {stderr}");
+        assert!(stderr.contains("step 1: unknown key `operaton`") && stderr.contains("no sketch `Nope`"), "{extra:?}: {stderr}");
+    }
+
+    // A level it doesn't know and a missing value fail.
+    for (bad, says) in [
+        (&["--param-check", "loud"][..], "--param-check wants off, warn or strict, not `loud`"),
+        (&["--param-check"], "run: --param-check wants off, warn or strict"),
+    ] {
+        let output = cli().args(["run", typo]).args(bad).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{bad:?}: {stderr}");
+        assert!(stderr.contains(says), "{bad:?}: {stderr}");
+    }
 }
 
 fn render_setup_script(dir: &Scratch, job: Value) -> PathBuf {

@@ -1,4 +1,6 @@
 {
+  "order": 40,
+  "provenance": "Original SolidCraft mapping of Gruvbox (MIT palette)",
   "format": "solidcraft-theme/1",
   "name": "Gruvbox Light",
   "base": "light",
@@ -53,9 +55,10 @@
     "body_selected": "#83a598",
     "sketch": "#076678",
     "sketch_fixed": "#282828",
+    "sketch_halo": "#fcf5d8",
     "sketch_locked": "#79740e",
-    "dimension": "#3c3836",
-    "dimension_driven": "#7c6f64",
+    "dimension": "#1f5c40",
+    "dimension_driven": "#4f7d64",
     "sketch_point": "#282828",
     "sketch_point_free": "#076678",
     "dialog_bg": "#fbf1c7",
@@ -83,16 +86,6 @@
     "bend_up": "#79740e",
     "bend_down": "#af3a03",
     "interference": "#cc241d",
-    "triad": [
-      "#cc241d",
-      "#98971a",
-      "#458588"
-    ],
-    "gizmo": [
-      "#cc241d",
-      "#98971a",
-      "#458588"
-    ],
     "icons.agent": "#8f3f71",
     "surface_fill": "#df663c",
     "surface_soft": "#f5e2b7",
@@ -174,5 +167,127 @@
       "#df663c",
       "#9b3407"
     ]
-  }
+  },
+  "options": [
+    {
+      "id": "contrast",
+      "type": "choice",
+      "default": "standard",
+      "label": {
+        "de": "Kontrast",
+        "en": "Contrast",
+        "ja": "コントラスト",
+        "ko": "대비",
+        "zh": "对比度"
+      },
+      "help": {
+        "de": "Wähle die weiche, normale oder harte Gruvbox-Palette.",
+        "en": "Choose the soft, standard or hard Gruvbox palette.",
+        "ja": "Gruvboxのソフト・標準・ハードのパレットを選びます。",
+        "ko": "Gruvbox의 부드러운, 표준 또는 강한 팔레트를 선택합니다.",
+        "zh": "选择柔和、标准或强对比的 Gruvbox 配色。"
+      },
+      "values": [
+        {
+          "id": "soft",
+          "label": {
+            "de": "Weich",
+            "en": "Soft",
+            "ja": "ソフト",
+            "ko": "부드럽게",
+            "zh": "柔和"
+          }
+        },
+        {
+          "id": "standard",
+          "label": {
+            "de": "Standard",
+            "en": "Standard",
+            "ja": "標準",
+            "ko": "표준",
+            "zh": "标准"
+          }
+        },
+        {
+          "id": "hard",
+          "label": {
+            "de": "Hart",
+            "en": "Hard",
+            "ja": "ハード",
+            "ko": "강하게",
+            "zh": "强对比"
+          }
+        }
+      ]
+    }
+  ],
+  "overlays": [
+    {
+      "when": {
+        "opt": "contrast",
+        "eq": "soft"
+      },
+      "colors": {
+        "toolbar": "#f2e5bc",
+        "panel": "#f2e5bc",
+        "accent_soft": "#c3ccae",
+        "hover": "#eedfb6",
+        "viewport_top": "#f6edd0",
+        "sketch_halo": "#f6edd0",
+        "dialog_bg": "#f2e5bc",
+        "glyph_bg": "#f8f2de",
+        "overlay": "#f2e5bceb",
+        "timeline_item": "#f2e5bc",
+        "timeline_item_error": "#eabe9c",
+        "field": "#f8f2de",
+        "surface_soft": "#edd7ad",
+        "surface_ink": "#a83803",
+        "mesh_soft": "#eddcaf",
+        "mesh_ink": "#84560f",
+        "form_soft": "#ead8b6",
+        "sheet_soft": "#e4ddb4",
+        "sheet_ink": "#38694b",
+        "render_soft": "#ebd3ad",
+        "sketch_soft": "#e8dcae",
+        "sketch_ink": "#66610c",
+        "form_error_fill": "#eabe9c",
+        "dialog_body": "#f2e5bc",
+        "control_fill": "#f8f2de",
+        "selected_bg": "#c3ccae"
+      }
+    },
+    {
+      "when": {
+        "opt": "contrast",
+        "eq": "hard"
+      },
+      "colors": {
+        "toolbar": "#f9f5d7",
+        "panel": "#f9f5d7",
+        "accent_soft": "#c9d8c4",
+        "hover": "#f1e5c1",
+        "viewport_top": "#fbf8e3",
+        "sketch_halo": "#fbf8e3",
+        "dialog_bg": "#f9f5d7",
+        "glyph_bg": "#fcfaeb",
+        "overlay": "#f9f5d7eb",
+        "timeline_item": "#f9f5d7",
+        "timeline_item_error": "#f0cbb2",
+        "field": "#fcfaeb",
+        "surface_soft": "#f3e6c6",
+        "mesh_soft": "#f4ebc7",
+        "mesh_ink": "#915e10",
+        "form_soft": "#f1e6cf",
+        "sheet_soft": "#eaebcd",
+        "sheet_ink": "#3d7252",
+        "render_soft": "#f2e1c6",
+        "sketch_soft": "#efebc7",
+        "sketch_ink": "#6e6a0d",
+        "form_error_fill": "#f0cbb2",
+        "dialog_body": "#f9f5d7",
+        "control_fill": "#fcfaeb",
+        "selected_bg": "#c9d8c4"
+      }
+    }
+  ]
 }

@@ -6,7 +6,9 @@
 
 - [Getting started](guide/getting-started.md)
 - [A tour of the window](guide/ui-tour.md)
+- [How a design is built](guide/design-approach.md)
 - [Sketching and constraints](guide/sketching.md)
+  - [Equation curves](guide/equation-curves.md)
 - [Solid features](guide/features.md)
 - [Parameters and expressions](guide/parameters.md)
 - [Components and joints](guide/assemblies.md)
@@ -18,15 +20,18 @@
 - [Troubleshooting: SolidCraft won't start](guide/troubleshooting.md)
 - [Driving SolidCraft with an AI agent (MCP)](guide/mcp.md)
 - [Agent chat](guide/agent-chat.md)
+- [Local models with the Assistant](guide/local-models.md)
 
 # Developer guide
 
 - [Contributing](dev/contributing.md)
+- [Command guides and community resources](dev/command-guides.md)
 - [Architecture](dev/architecture.md)
 - [UI kit](dev/ui-kit.md)
 - [Extensible library proposal](dev/libraries.md)
   - [Local scalar libraries](dev/local-libraries.md)
 - [The command engine](dev/commands.md)
+  - [Command schemas](dev/schemas.md)
 - [The kernel boundary and truck](dev/kernel.md)
 - [Persistent naming](dev/naming.md)
 - [Test harnesses](dev/testing.md)

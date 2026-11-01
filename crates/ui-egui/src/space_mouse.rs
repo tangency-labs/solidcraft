@@ -2,7 +2,9 @@
 //! desktop through HID, the web app through the browser's Gamepad API) and hands its six raw axes
 //! to [`navigate_frame`] once per frame. This module maps them, applies the dead zone and drops
 //! 3DxWare's emulated wheel; the page showing the camera moves it (`navigation::device`), so the
-//! cap does what that page's camera may do.
+//! cap does what that page's camera may do. A device with a program of its own can drive the view
+//! through that program instead: the desktop app reads it over the navigation bridge and hands
+//! its motion to [`bridge_frame`], which goes to the same page.
 
 use std::time::Duration;
 
@@ -94,6 +96,9 @@ pub struct Input {
     /// Which of the Linux readers exist, as the app's reader last saw them; none where there is
     /// only one way to read the device.
     pub drivers: Option<DriversPresent>,
+    /// The device app connected over the navigation bridge, by the name it gave (or "?" before it
+    /// gave one); none while no app is connected, and in builds without a bridge.
+    pub bridge: Option<String>,
 }
 
 /// What the Linux reader found: the spacenavd socket and a direct (hidraw) 3D mouse, and whether that
@@ -302,7 +307,7 @@ pub fn buttons_hook(app: &mut SolveApp, ctx: &egui::Context, seen: Buttons, raw:
 fn run_button_job(app: &mut SolveApp, job: &ButtonJob, modifiers: egui::Modifiers, raw: &mut egui::RawInput) {
     match job {
         // Navigation, where the 3D mouse's section is.
-        ButtonJob::Settings => crate::prefs::open_at(app, crate::prefs::PAGE_NAVIGATION),
+        ButtonJob::Settings => crate::prefs::open_at(app, crate::prefs::PAGE_MOUSE3D),
         ButtonJob::View(view) => app.animate_view(view),
         ButtonJob::Key(ButtonKey::Esc) => {
             for pressed in [true, false] {
@@ -577,6 +582,10 @@ pub fn navigate_frame(app: &mut SolveApp, ctx: &egui::Context, mapping: DriverMa
     // Then the user's choice of which motion drives which axis (invert and speed then go with the
     // axis, not the motion). After the settle: that works on the device's own calibrated axes.
     let axes = reassigned(axes, app.preferences.space_mouse_axis_source);
+    // Back at rest: the next push picks what the view turns around afresh.
+    if !axes.moving() {
+        app.viewport.device_pivot = None;
+    }
     // Only the window with focus: with two windows open, the cap moves the one being used, not both.
     if !app.preferences.space_mouse_enabled || app.home.open || app.file_picker_busy() || !axes.moving() || !ctx.input(|i| i.focused) {
         return false;
@@ -598,6 +607,76 @@ pub fn navigate_frame(app: &mut SolveApp, ctx: &egui::Context, mapping: DriverMa
     true
 }
 
+/// How far one message of a device app may move the view along one of its motions (points, or
+/// zoom steps), and how far a frame may sum to: a flood of large values can't throw the camera out.
+pub const BRIDGE_MAX_STEP: f64 = 10_000.0;
+
+/// The standard views a device app may ask for over the navigation bridge, by the names
+/// `SolveApp::animate_view` takes ("fit" frames everything, as Fit does).
+pub const BRIDGE_VIEWS: [&str; 8] = ["front", "back", "left", "right", "top", "bottom", "iso", "fit"];
+
+/// What a device app (a homemade 3D input device's own program, read by the desktop app through
+/// its navigation bridge) moved the view by since the last frame. Unlike a 3D mouse's deflection,
+/// these are distances: orbit and pan as a pointer drag of that many points would move the view
+/// (the model follows), and zoom in steps (positive zooms in, as a wheel turned forward).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct BridgeMotion {
+    pub orbit: [f64; 2],
+    pub pan: [f64; 2],
+    pub zoom: f64,
+}
+
+impl BridgeMotion {
+    /// Nothing to move.
+    pub fn is_still(self) -> bool {
+        self == Self::default()
+    }
+
+    /// Both motions summed, each within [`BRIDGE_MAX_STEP`]; a value that isn't a finite number
+    /// counts as none.
+    pub fn plus(self, other: Self) -> Self {
+        let sum = |a: f64, b: f64| (bridge_step(a) + bridge_step(b)).clamp(-BRIDGE_MAX_STEP, BRIDGE_MAX_STEP);
+        Self {
+            orbit: [sum(self.orbit[0], other.orbit[0]), sum(self.orbit[1], other.orbit[1])],
+            pan: [sum(self.pan[0], other.pan[0]), sum(self.pan[1], other.pan[1])],
+            zoom: sum(self.zoom, other.zoom),
+        }
+    }
+}
+
+/// One value of a device app's message: finite and within [`BRIDGE_MAX_STEP`], else none.
+pub fn bridge_step(value: f64) -> f64 {
+    if value.is_finite() { value.clamp(-BRIDGE_MAX_STEP, BRIDGE_MAX_STEP) } else { 0.0 }
+}
+
+/// Hands one frame of a device app's navigation to the page showing the camera, and shows the
+/// standard `views` it asked for (names outside [`BRIDGE_VIEWS`] are ignored). As with a 3D mouse,
+/// nothing happens with the bridge switched off, on the start page or while a file picker is open,
+/// or in a window without focus. Returns whether there was anything to hand over.
+pub fn bridge_frame(app: &mut SolveApp, ctx: &egui::Context, motion: BridgeMotion, views: &[String]) -> bool {
+    if !app.preferences.nav_bridge_enabled || app.home.open || app.file_picker_busy() || !ctx.input(|i| i.focused) {
+        return false;
+    }
+    let motion = BridgeMotion::default().plus(motion);
+    let moved = !motion.is_still();
+    if moved {
+        app.begin_external_navigation();
+        app.viewport.bridge_motion = Some(app.viewport.bridge_motion.unwrap_or_default().plus(motion));
+        ctx.request_repaint();
+    }
+    // After the motion, which would stop the view's animation.
+    let mut viewed = false;
+    for view in views.iter().filter_map(|name| BRIDGE_VIEWS.iter().find(|v| **v == name.as_str())) {
+        if *view == "fit" {
+            app.animate_fit_all();
+        } else {
+            app.animate_view(view);
+        }
+        viewed = true;
+    }
+    moved || viewed
+}
+
 /// A small dead zone avoids drift at rest. A full cap deflection takes roughly one viewport
 /// per second to pan and about two radians per second to turn, independent of frame rate.
 fn normalized(value: i16) -> f64 {
@@ -614,8 +693,8 @@ mod tests {
 
     /// The camera math the page applies the motion with (`navigation::device`): `sketch` keeps
     /// the orientation, as editing a sketch does.
-    fn navigate(cam: &mut Camera, motion: Motion, seconds: f64, height: f64, sketch: bool, reverse_zoom: bool) {
-        crate::navigation::device_camera(cam, motion, seconds, height, !sketch, reverse_zoom, false);
+    fn navigate(cam: &mut Camera, motion: Motion, seconds: f64, height: f64, sketch: bool) {
+        crate::navigation::device_camera(cam, motion, seconds, height, !sketch, false, None, None);
     }
 
     /// A window that has run a frame, with or without focus. A context that has never run one
@@ -749,6 +828,25 @@ mod tests {
         app.preferences.space_mouse_buttons.insert("hid 046d:c62b".into(), [(23, ButtonJob::Key(ButtonKey::Alt))].into());
         let raw = press(&mut app, &ctx, ESC, vec![]);
         assert_eq!((escapes(&raw), ctx.input(|i| i.modifiers.alt)), (0, true));
+    }
+
+    #[test]
+    fn a_button_set_to_perspective_view_switches_it_once_per_press() {
+        let device = "hid 046d:c62b";
+        let mut app = app();
+        app.space_mouse.device = Some(device.into());
+        app.preferences.space_mouse_buttons.insert(device.into(), [(2, ButtonJob::Command("view.perspective".into()))].into());
+        let ctx = window(true);
+        let before = app.ui.perspective;
+        press(&mut app, &ctx, 0b10, vec![]);
+        assert_eq!(app.ui.perspective, !before);
+        // Held, it doesn't switch again; the next press switches back.
+        press(&mut app, &ctx, 0b10, vec![]);
+        assert_eq!(app.ui.perspective, !before);
+        press(&mut app, &ctx, 0, vec![]);
+        press(&mut app, &ctx, 0b10, vec![]);
+        assert_eq!(app.ui.perspective, before);
+        assert!(app.session.undo.is_empty(), "a view setting, not an edit");
     }
 
     /// The keyboard and a button hold the same modifier: it stays down until both let go, whichever
@@ -976,6 +1074,22 @@ mod tests {
         assert!(raw.events.iter().any(|e| matches!(e, egui::Event::MouseWheel { modifiers, .. } if modifiers.shift)));
     }
 
+    /// What the cap turns the view around is chosen when it starts turning and let go when it is
+    /// back at rest.
+    #[test]
+    fn the_cap_lets_go_of_its_turning_point_at_rest() {
+        let mut app = app();
+        app.preferences.space_mouse_model_pivot = true;
+        let ctx = window(true);
+        app.space_mouse.device = Some("hid 046d:c62b".into());
+        frame(&mut app, &ctx, DriverMapping::default(), Axes { translation: [300, 0, 0], rotation: [0; 3] }, 0.016);
+        assert_eq!(app.viewport.device_pivot, None, "a pan alone turns around nothing");
+        frame(&mut app, &ctx, DriverMapping::default(), Axes { translation: [300, 0, 0], rotation: [300, 0, 0] }, 0.016);
+        assert!(app.viewport.device_pivot.is_some(), "a turn holds a point");
+        frame(&mut app, &ctx, DriverMapping::default(), Axes::default(), 0.016);
+        assert_eq!(app.viewport.device_pivot, None, "at rest it is let go");
+    }
+
     #[test]
     fn another_device_starts_with_no_buttons_seen_and_no_settling() {
         let mut app = app();
@@ -1060,14 +1174,14 @@ mod tests {
     fn six_axes_move_the_camera_and_sketches_keep_their_orientation() {
         let mut cam = Camera::default();
         let before = cam;
-        navigate(&mut cam, raw(Axes { translation: [350, 350, 350], rotation: [350, 350, 350] }), 0.02, 600.0, false, false);
+        navigate(&mut cam, raw(Axes { translation: [350, 350, 350], rotation: [350, 350, 350] }), 0.02, 600.0, false);
         assert_ne!(cam.target, before.target);
         assert!(cam.distance < before.distance);
         assert_ne!(cam.yaw, before.yaw);
         assert_ne!(cam.pitch, before.pitch);
         assert_ne!(cam.roll, before.roll);
         let orientation = (cam.yaw, cam.pitch, cam.roll);
-        navigate(&mut cam, raw(Axes { translation: [350, 0, 0], rotation: [350, 350, 350] }), 0.02, 600.0, true, false);
+        navigate(&mut cam, raw(Axes { translation: [350, 0, 0], rotation: [350, 350, 350] }), 0.02, 600.0, true);
         assert_eq!((cam.yaw, cam.pitch, cam.roll), orientation);
         assert!(cam.is_valid());
     }
@@ -1077,57 +1191,79 @@ mod tests {
         let before = Camera::default();
 
         let mut slide = before;
-        navigate(&mut slide, raw(Axes { translation: [350, 0, 0], rotation: [0; 3] }), 0.02, 600.0, false, false);
+        navigate(&mut slide, raw(Axes { translation: [350, 0, 0], rotation: [0; 3] }), 0.02, 600.0, false);
         assert_ne!(slide.target, before.target);
         assert_eq!(slide.distance, before.distance);
 
         let mut push = before;
-        navigate(&mut push, raw(Axes { translation: [0, 350, 0], rotation: [0; 3] }), 0.02, 600.0, false, false);
+        navigate(&mut push, raw(Axes { translation: [0, 350, 0], rotation: [0; 3] }), 0.02, 600.0, false);
         assert_eq!(push.target, before.target);
         assert!(push.distance < before.distance);
 
         let mut lift = before;
-        navigate(&mut lift, raw(Axes { translation: [0, 0, 350], rotation: [0; 3] }), 0.02, 600.0, false, false);
+        navigate(&mut lift, raw(Axes { translation: [0, 0, 350], rotation: [0; 3] }), 0.02, 600.0, false);
         assert_ne!(lift.target, before.target);
         assert_eq!(lift.distance, before.distance);
 
         let mut tilt = before;
-        navigate(&mut tilt, raw(Axes { translation: [0; 3], rotation: [350, 0, 0] }), 0.02, 600.0, false, false);
+        navigate(&mut tilt, raw(Axes { translation: [0; 3], rotation: [350, 0, 0] }), 0.02, 600.0, false);
         assert_eq!((tilt.yaw, tilt.roll), (before.yaw, before.roll));
         assert_ne!(tilt.pitch, before.pitch);
 
         let mut roll = before;
-        navigate(&mut roll, raw(Axes { translation: [0; 3], rotation: [0, 350, 0] }), 0.02, 600.0, false, false);
+        navigate(&mut roll, raw(Axes { translation: [0; 3], rotation: [0, 350, 0] }), 0.02, 600.0, false);
         assert_eq!((roll.pitch, roll.roll), (before.pitch, before.roll));
         assert_ne!(roll.yaw, before.yaw);
 
         let mut twist = before;
-        navigate(&mut twist, raw(Axes { translation: [0; 3], rotation: [0, 0, 350] }), 0.02, 600.0, false, false);
+        navigate(&mut twist, raw(Axes { translation: [0; 3], rotation: [0, 0, 350] }), 0.02, 600.0, false);
         assert_eq!((twist.yaw, twist.pitch), (before.yaw, before.pitch));
         assert_ne!(twist.roll, before.roll);
     }
 
+    /// Reverse zoom direction is a wheel and trackpad setting: it turns the wheel's zoom around
+    /// and leaves the cap's, which has its own invert switch (#8993).
     #[test]
-    fn reverse_zoom_setting_applies_to_spacemouse() {
-        let before = Camera::default();
-        let motion = raw(Axes { translation: [0, 350, 0], rotation: [0; 3] });
-        let mut normal = before;
-        navigate(&mut normal, motion, 0.02, 600.0, false, false);
-        let mut reversed = before;
-        navigate(&mut reversed, motion, 0.02, 600.0, false, true);
-        assert!(normal.distance < before.distance);
-        assert!(reversed.distance > before.distance);
+    fn reverse_zoom_setting_flips_the_wheel_and_leaves_the_cap() {
+        let wheel_zooms_in = |reverse: bool| {
+            let mut h = crate::scenario::Harness::new();
+            h.app.preferences.zoom_reverse = reverse;
+            h.app.preferences.smooth_wheel_zoom = false;
+            h.call("ui.move", serde_json::json!({"x":800,"y":500}));
+            let before = h.app.cam.half_height();
+            h.call("ui.scroll", serde_json::json!({"x":800,"y":500,"delta":120}));
+            h.app.cam.half_height() < before
+        };
+        assert!(wheel_zooms_in(false));
+        assert!(!wheel_zooms_in(true), "the wheel turns around");
+        // The cap's zoom axis pushed forward with the wheel reversed or not, and with the cap's own
+        // invert switch for that axis on or off.
+        let cap_distance = |wheel_reversed: bool, cap_inverted: bool| {
+            let mut app = app();
+            app.preferences.zoom_reverse = wheel_reversed;
+            app.preferences.space_mouse_reverse[1] = cap_inverted;
+            let ctx = window(true);
+            app.space_mouse.device = Some("hid 046d:c62b".into());
+            let before = app.cam.distance;
+            frame(&mut app, &ctx, DriverMapping::default(), Axes { translation: [0, 350, 0], rotation: [0; 3] }, 0.02);
+            (before, app.cam.distance)
+        };
+        let (before, normal) = cap_distance(false, false);
+        assert!(normal < before, "pushing the cap forward zooms in");
+        assert_eq!(cap_distance(true, false).1, normal, "the cap zooms the same way with the wheel reversed");
+        assert!(cap_distance(false, true).1 > before, "the cap's own invert switch turns it around");
+        assert_eq!(cap_distance(true, true).1, cap_distance(false, true).1);
     }
 
     #[test]
     fn object_mode_tilts_roll_and_twists_spin() {
         let before = Camera::default();
         let mut tilt = before;
-        navigate(&mut tilt, DriverMapping::object_mode().apply(Axes { translation: [0; 3], rotation: [0, 350, 0] }), 0.02, 600.0, false, false);
+        navigate(&mut tilt, DriverMapping::object_mode().apply(Axes { translation: [0; 3], rotation: [0, 350, 0] }), 0.02, 600.0, false);
         assert_eq!((tilt.yaw, tilt.pitch), (before.yaw, before.pitch));
         assert_ne!(tilt.roll, before.roll);
         let mut twist = before;
-        navigate(&mut twist, DriverMapping::object_mode().apply(Axes { translation: [0; 3], rotation: [0, 0, 350] }), 0.02, 600.0, false, false);
+        navigate(&mut twist, DriverMapping::object_mode().apply(Axes { translation: [0; 3], rotation: [0, 0, 350] }), 0.02, 600.0, false);
         assert_ne!(twist.yaw, before.yaw);
         assert_eq!((twist.pitch, twist.roll), (before.pitch, before.roll));
         // The physical tilt right (Ry−) rolls one way and the clockwise twist (Rz+) spins the
@@ -1632,6 +1768,99 @@ mod tests {
         let (_, wizard) = app.space_mouse.calibrating.as_ref().unwrap();
         let calibration = wizard.result().unwrap().unwrap();
         assert!(calibration.axes.iter().enumerate().all(|(c, axis)| axis.source == c && !axis.reversed), "{calibration:?}");
+    }
+
+    /// One frame of a device app's navigation, taken by the modelling viewport.
+    fn bridge(app: &mut SolveApp, ctx: &egui::Context, motion: BridgeMotion, views: &[&str]) -> bool {
+        let views: Vec<String> = views.iter().map(|v| v.to_string()).collect();
+        let handed = bridge_frame(app, ctx, motion, &views);
+        let page = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+        crate::navigation::device(app, page, crate::navigation::NavCaps::MODEL);
+        handed
+    }
+
+    const ORBIT: BridgeMotion = BridgeMotion { orbit: [40.0, 10.0], pan: [0.0; 2], zoom: 0.0 };
+
+    #[test]
+    fn a_device_app_moves_the_view_only_with_the_bridge_on_and_the_window_focused() {
+        let ctx = window(true);
+        let mut off = app();
+        let before = off.cam;
+        assert!(!bridge(&mut off, &ctx, ORBIT, &[]), "the bridge is off by default");
+        assert_eq!(off.cam, before);
+        let on = || {
+            let mut app = app();
+            app.preferences.nav_bridge_enabled = true;
+            app
+        };
+        let mut home = on();
+        home.home.open = true;
+        assert!(!bridge(&mut home, &ctx, ORBIT, &[]));
+        let mut unfocused = on();
+        assert!(!bridge(&mut unfocused, &window(false), ORBIT, &[]));
+        assert_eq!((home.cam, unfocused.cam), (before, before));
+        let mut app = on();
+        assert!(bridge(&mut app, &ctx, ORBIT, &[]));
+        assert_ne!((app.cam.yaw, app.cam.pitch), (before.yaw, before.pitch), "orbit turns the view");
+        assert!(app.viewport.bridge_motion.is_none(), "the page took the motion");
+        // At rest, nothing to hand over.
+        assert!(!bridge(&mut app, &ctx, BridgeMotion::default(), &[]));
+    }
+
+    #[test]
+    fn a_device_apps_motion_pans_and_zooms_as_a_drag_and_the_wheel_would() {
+        let ctx = window(true);
+        let mut app = app();
+        app.preferences.nav_bridge_enabled = true;
+        let before = app.cam;
+        bridge(&mut app, &ctx, BridgeMotion { pan: [30.0, -20.0], ..Default::default() }, &[]);
+        let mut dragged = before;
+        dragged.pan(30.0, -20.0, 600.0);
+        assert_eq!(app.cam, dragged, "a pan of so many points is a pan drag of as many");
+        let panned = app.cam;
+        bridge(&mut app, &ctx, BridgeMotion { zoom: 2.0, ..Default::default() }, &[]);
+        assert!(app.cam.distance < panned.distance, "positive steps zoom in");
+        bridge(&mut app, &ctx, BridgeMotion { zoom: -2.0, ..Default::default() }, &[]);
+        assert!((app.cam.distance - panned.distance).abs() < 1e-9, "and back out to where it was");
+        // Reverse zoom direction reverses it, as it does the wheel's.
+        app.preferences.zoom_reverse = true;
+        bridge(&mut app, &ctx, BridgeMotion { zoom: 2.0, ..Default::default() }, &[]);
+        assert!(app.cam.distance > panned.distance);
+    }
+
+    #[test]
+    fn a_device_app_asks_for_standard_views_by_name() {
+        let ctx = window(true);
+        let mut app = app();
+        app.preferences.nav_bridge_enabled = true;
+        app.preferences.look_at_anim = false;
+        assert!(bridge(&mut app, &ctx, BridgeMotion::default(), &["top"]));
+        let mut top = Camera::default();
+        top.set_view(solidcraft_engine::render::StandardView::Top);
+        let target = app.cam_anim.map_or(app.cam, |a| a.to);
+        assert_eq!((target.yaw, target.pitch), (top.yaw, top.pitch));
+        // Names it doesn't know are no view.
+        let still = app.cam;
+        assert!(!bridge(&mut app, &ctx, BridgeMotion::default(), &["TOP", "named view", ""]));
+        assert_eq!(app.cam, still);
+    }
+
+    #[test]
+    fn a_flood_of_device_app_motion_stays_within_range() {
+        let ctx = window(true);
+        let mut app = app();
+        app.preferences.nav_bridge_enabled = true;
+        let hostile = [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, f64::MAX, -f64::MAX, 1e12];
+        for value in hostile {
+            let motion = BridgeMotion { orbit: [value, -value], pan: [value, value], zoom: value };
+            for _ in 0..3 {
+                bridge(&mut app, &ctx, motion, &[]);
+                assert!(app.cam.is_valid(), "{value}");
+            }
+        }
+        let summed = (0..10).fold(BridgeMotion::default(), |sum, _| sum.plus(BridgeMotion { pan: [f64::MAX, 1.0], ..Default::default() }));
+        assert_eq!(summed.pan, [BRIDGE_MAX_STEP, 10.0]);
+        assert_eq!(BridgeMotion { zoom: f64::NAN, ..Default::default() }.plus(BridgeMotion::default()), BridgeMotion::default());
     }
 
     #[test]

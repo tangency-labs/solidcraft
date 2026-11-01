@@ -32,7 +32,9 @@ impl Effect {
 /// (`ui.screenshot` with a `path`, and `ui.render`, write a file: see [`effect`].)
 const READ_METHODS: &[&str] = &[
     "control.pending",
+    "control.subscribe",
     "document.inspect",
+    "document.revision",
     "engine.commands",
     "ui.at",
     "ui.handles",
@@ -54,6 +56,8 @@ pub fn command_reads_only(id: &str) -> bool {
         || id.starts_with("model.")
         || id.ends_with(".inspect")
         || id.ends_with(".list")
+        || id == "document.revision"
+        || id == "view.status_items"
         || matches!(id, "document.inspect" | "engine.commands" | "render.status" | "render.backends" | "render.settings.get" | "file.slicers")
 }
 
@@ -117,6 +121,7 @@ mod tests {
             ("ui.screenshot", json!({})),
             ("document.inspect", json!({"measure": true})),
             ("engine.execute", json!({"command": "sketch.inspect"})),
+            ("engine.execute", json!({"command": "view.status_items", "params": {}})),
             ("engine.execute", json!({"command": "inspect.measure"})),
             ("engine.execute", json!({"command": "model.edges", "params": {"body": "Body1"}})),
             ("engine.execute", json!({"command": "parameters.export", "params": {"format": "csv"}})),

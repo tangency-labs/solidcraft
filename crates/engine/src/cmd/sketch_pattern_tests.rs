@@ -678,3 +678,80 @@ fn a_pattern_too_large_to_solve_says_why() {
         .to_string();
     assert!(e.contains("unknowns") && e.contains(&solidcraft_sketch::MAX_COMPONENT_VARS.to_string()) && !e.contains("conflicts with"), "{e}");
 }
+
+#[test]
+fn rectangular_pattern_expressions_follow_parameters_and_survive_reopening() {
+    let mut s = new_sketch();
+    for (name, expression, unit) in [("pitch", "30", "mm"), ("copies", "3", "")] {
+        run(&mut s, "parameters.add", json!({"name":name,"expression":expression,"unit":unit}));
+    }
+    run(&mut s, "sketch.circle.center", json!({"id":"seed","center":[5,5],"radius":1}));
+    let out = run(
+        &mut s,
+        "sketch.pattern.rectangular",
+        json!({"entities":["seed"],"count":"copies","spacing":"pitch","count2":"2","spacing2":"pitch / 2"}),
+    );
+    let first = ids(&out["curves"])[0].clone();
+    assert!(!s.doc.param_users("pitch").is_empty());
+    run(&mut s, "sketch.finish", json!({}));
+    let mut s = Session { doc: solidcraft_doc::format::read(&s.doc.to_json()).unwrap().into(), ..Default::default() };
+    s.refresh();
+    run(&mut s, "parameters.change", json!({"name":"pitch","expression":"40"}));
+    run(&mut s, "parameters.change", json!({"name":"copies","expression":"4"}));
+    let state = s.world_state();
+    let sk = &state.sketch(1).unwrap().sketch;
+    assert_eq!(sk.patterns[0].instances.len(), 7);
+    assert_eq!(sk.patterns[0].instances[0].curves[0], first);
+    assert!(point(sk, &format!("{first}.center")).dist(Vec2::new(5., 25.)) < 1e-6);
+    let last = &sk.patterns[0].instances.last().unwrap().curves[0];
+    assert!(point(sk, &format!("{last}.center")).dist(Vec2::new(125., 25.)) < 1e-6);
+    run(&mut s, "parameters.change", json!({"name":"copies","expression":"2"}));
+    assert_eq!(s.world_state().sketch(1).unwrap().sketch.patterns[0].instances.len(), 3);
+    run(&mut s, "parameters.change", json!({"name":"pitch","new_name":"step"}));
+    assert_eq!(serde_json::to_value(&s.doc.sketch(1).unwrap().patterns[0]).unwrap()["expressions"]["spacing"], "step");
+    assert!(s.execute("parameters.change", &json!({"delete":"step"})).is_err());
+}
+
+#[test]
+fn circular_pattern_expressions_validate_inputs_and_keep_numeric_compatibility() {
+    let mut s = new_sketch();
+    for (name, expression, unit) in [("turn", "90", "deg"), ("copies", "3", "")] {
+        run(&mut s, "parameters.add", json!({"name":name,"expression":expression,"unit":unit}));
+    }
+    run(&mut s, "sketch.circle.center", json!({"id":"seed","center":[20,0],"radius":1}));
+    let out = run(&mut s, "sketch.pattern.circular", json!({"entities":["seed"],"center":"origin","count":"copies","angle":"turn"}));
+    run(&mut s, "parameters.change", json!({"name":"turn","expression":"180"}));
+    run(&mut s, "parameters.change", json!({"name":"copies","expression":"4"}));
+    let sk = sketch(&s);
+    let last = &sk.patterns[0].instances.last().unwrap().curves[0];
+    assert!(point(&sk, &format!("{last}.center")).dist(Vec2::new(-20., 0.)) < 1e-6);
+    for expression in ["2.5", "501", "0", "-1"] {
+        let error = s.execute("parameters.change", &json!({"name":"copies","expression":expression})).unwrap_err().to_string();
+        assert!(error.contains("whole number"), "{error}");
+    }
+    for (key, value, message) in [("count", json!("2.5"), "count"), ("count", json!("501"), "count"), ("angle", json!("missing + 1"), "missing")] {
+        let mut p = json!({"pattern":out["pattern"]});
+        p[key] = value;
+        let error = s.execute("sketch.pattern.circular", &p).unwrap_err().to_string();
+        assert!(error.contains(message), "{error}");
+    }
+    let error = s.execute("sketch.pattern.rectangular", &json!({"entities":["seed"],"count":2,"spacing":"unknown_pitch"})).unwrap_err().to_string();
+    assert!(error.contains("spacing") && error.contains("unknown_pitch"), "{error}");
+    run(&mut s, "sketch.pattern.circular", json!({"pattern":out["pattern"],"count":3,"angle":90}));
+    assert!(serde_json::to_value(&sketch(&s).patterns[0]).unwrap().get("expressions").is_none());
+    let legacy = s.doc.to_json();
+    // Numeric patterns omit the optional expression field, just as older files do.
+    assert!(!s.doc.to_json().contains("\"expressions\""));
+    let reopened = solidcraft_doc::format::read(&legacy).unwrap();
+    assert_eq!(reopened.sketch(1).unwrap().patterns[0].instances.len(), 2);
+    // A design with plain numbers saves back unchanged and evaluates to the same copies.
+    assert_eq!(reopened.to_json(), legacy);
+    let before = sketch(&s);
+    let mut s = Session { doc: reopened.into(), ..Default::default() };
+    s.refresh();
+    let state = s.world_state();
+    let after = &state.sketch(1).unwrap().sketch;
+    for (a, b) in before.points.iter().zip(&after.points) {
+        assert!(a.id == b.id && a.pos.dist(b.pos) < 1e-9, "{} moved", a.id);
+    }
+}

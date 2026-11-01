@@ -4,9 +4,10 @@ MODEL → MODIFY offers Convert to Sheet Metal. The SHEET METAL tab is always av
 and selected when the active body is a sheet), and builds parts from a sheet of constant thickness under a **sheet metal rule**
 (thickness, bend radius, K-factor), set in **Sheet Metal Rules** (`sheet.manage_rules`).
 
-- **Flange** (`sheet.flange`): a base flange from a sketch profile, a contour flange from an open
+- [**Flange**](../reference/commands.md#command-sheet.flange): a base flange from a sketch profile, a contour flange from an open
   sketch, or an edge flange from a part edge.
-- **Hem** (`sheet.hem`) and **Fold** (`sheet.fold`) along a sketch line.
+- [**Hem**](../reference/commands.md#command-sheet.hem) returns a sheet edge back toward the sheet; no new sketch is required.
+- **Fold** (`sheet.fold`) bends the sheet along a sketch line.
 - **Unfold / Refold** (`sheet.unfold`, `sheet.refold`) for working on the flat part.
 - **Convert** (`sheet.convert`) turns a plate of constant thickness into sheet metal, or, with
   bend edges, a solid or a shelled body.
@@ -16,6 +17,22 @@ and selected when the active body is a sheet), and builds parts from a sheet of 
 Bends follow the rule's K-factor, so flat lengths match what a press brake will make. Tests
 check flat lengths against hand-computed bend allowances.
 
+A rule is saved in its design, and a new design starts with only the default steel rule. To use
+the same rules in every design, keep them as **personal rules**, saved in your profile: open
+**Personal rules** at the top of Sheet Metal Rules.
+
+- **Save new** keeps the rule the manager shows under a name: its thickness, K factor, bend
+  radius, reliefs, gaps, corner relief shape and angle display. A bare number is saved with the
+  design's unit, so the rule makes the same sheet in a millimetre or an inch design. `Thickness`
+  and other expressions are kept as typed, and are worked out in the design the rule is used in.
+- Picking a personal rule fills the manager with it: the design's own rule of that name, or else
+  a new rule. **OK** adds it to the design (or updates that rule); picking alone changes nothing.
+- The save icon beside the box saves the manager's values over the picked personal rule.
+  **Rename** and **Delete** change the personal rule only, never the rules already in designs.
+
+A design keeps its own copy of each rule it uses, so it builds the same on a computer without
+your personal rules. The profile keeps up to 64 of them.
+
 A copy of a sheet metal body is sheet metal too. **Mirror** (`solid.mirror` with `bodies`)
 makes the opposite hand: its own flat pattern, DXF and bend table, the mirror image of the
 original's flat, with the same thickness side, bends and flat lengths, and holes where the
@@ -23,6 +40,41 @@ mirror puts them. A copy from **Move** (`copy: true`) or a body pattern keeps th
 flat pattern. Every copy takes further sheet metal features of its own. Mirroring with
 `combine` joins the two halves into one solid, which has no single sheet model yet; mirroring
 or patterning flange features themselves is not supported yet.
+
+An edge flange's `height` runs along the flange to its far edge. Where it is measured from is
+the feature's `height_from` (Height From in the Flange dialog): `outer` (the default, Outer
+Sharp) starts at the outer virtual sharp, where the lines of the base's and the flange's outer
+faces meet, so (R + T)·tan(θ/2) of it is bend before the flat leg starts (θ the bend angle, R
+the inner radius, T the thickness); `inner` (Inner Sharp) starts at the inner virtual sharp,
+R·tan(θ/2) before the leg; `tangent` is for bends past 90°, where the outer sharp runs far
+out: it starts at the line square to the flange that touches the outside of the bend, R + T
+before the leg. Up to 90° `tangent` is the outer sharp (at 90° the two are the same line, the
+base's outer face, so the leg does not jump as the angle passes 90°). A height shorter than
+what lies before the leg is refused with the smallest one that fits. With a 2 mm sheet and a
+2 mm radius, a 90° flange 20 high has a leg of 16 from the outer sharp or the tangent and 18
+from the inner sharp; at 120° it has a leg of 13.07 from the outer sharp, 16.54 from the inner
+sharp and 16 from the tangent.
+
+```json
+{"command":"sheet.flange","params":{"edges":[[50,0,2]],"height":20,"height_from":"inner"}}
+```
+
+Where an edge flange's bend starts is its `position` (Bend Position in the Flange dialog): how
+far inside the picked edge the base is cut back. `inside` (the default) puts the outer virtual
+sharp on the edge, (R + T)·tan(θ/2) inside it, so at 90° the flange's outer face is flush with
+the edge's face; `outside` (`sheet.flange` also takes `bend_outside` and saves it as `outside`) starts the bend at the edge, which
+leaves the base whole and the bend wholly outside; `middle` cuts back half of `inside`;
+`material_outside` puts the inner virtual sharp on the edge, R·tan(θ/2) inside it, so at 90°
+the flange's inner face is flush with the edge's face and its material is outside; `tangent`
+is for bends past 90°: it cuts back R + T, so the outside of the bend is tangent to the edge's
+face, touching it a quarter turn into the bend with nothing of the bend past it. At 90° that
+is `inside`. Below 90° the outside of the bend never turns parallel to the edge's face, so
+`tangent` cuts back (R + T)·sin θ instead: the bend's end is on the edge's face and the leg
+leans on out past it.
+
+```json
+{"command":"sheet.flange","params":{"edges":[[50,0,2]],"height":20,"angle":"120 deg","position":"tangent"}}
+```
 
 An edge flange takes its setback off its own edge only. Where that edge ends at an inside
 corner of the base (the base runs on past it, like the leg of an L), the rest of the base

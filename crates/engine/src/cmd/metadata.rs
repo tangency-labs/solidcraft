@@ -1,11 +1,12 @@
 //! Design properties (#1015): `document.metadata` reads the design's `metadata` object, and
 //! `document.metadata.set` and `document.metadata.remove` change it, each in one undo step. The
-//! keys SolidCraft reads, and the checks a change gets, are `solidcraft_doc::metadata`'s; keys
-//! other tools wrote are kept as they are. The UI's Design Properties dialog, scripts and MCP
-//! agents all go through these commands.
+//! keys SolidCraft reads, and the checks a change gets, are `solidcraft_doc::metadata`'s
+//! (`KEYS`, the rows the design takes); keys other tools wrote are kept as they are. The UI's Design
+//! Properties dialog, scripts and MCP agents all go through these commands. A change evaluates
+//! nothing: properties are no geometry.
 
 use serde_json::{Map, Value, json};
-use solidcraft_doc::metadata::{MAX_KEYS, WELL_KNOWN};
+use solidcraft_doc::metadata::{self, BOM_TYPE, MAX_KEYS, Owner};
 
 use super::CommandSpec;
 use crate::params::{bad, str_};
@@ -13,13 +14,13 @@ use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("document.metadata", "Design Properties", read).icon("settings").noundo().doc_only().params(
-        "→ metadata: the design's metadata object as saved (other tools' keys too); properties: project, part_number, revision, \
-         author, organization, description and license, each its text or null (absent, or not text)",
+        "→ metadata: the design's metadata object as saved (other tools' keys too); properties: each of SolidCraft's design \
+         properties (project, part number, revision…), its text or null (absent, or not text)",
     ),
     CommandSpec::new("document.metadata.set", "Change Design Properties", set).icon("settings").doc_only().params(
-        "key and value, or values: {key: value, …} (all or nothing, one undo step). SolidCraft's keys: project, part_number, \
-         revision, author, organization, description, license (text; \"\" or null removes); another tool's data goes under its \
-         reverse-DNS key such as com.example.tool (an object; null removes) → metadata, changed: [keys]",
+        "key and value, or values: {key: value, …} (all or nothing, one undo step). SolidCraft's keys, the ones document.metadata's \
+         properties lists, take text (\"\" or null removes); another tool's data goes under its reverse-DNS key such as \
+         com.example.tool (an object; null removes) → metadata, changed: [keys]",
     ),
     CommandSpec::new("document.metadata.remove", "Remove Design Property", remove)
         .icon("delete")
@@ -29,7 +30,7 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 fn read(s: &mut Session, _: &Value) -> Result<Value> {
     let m = &s.doc.metadata;
-    let properties: Map<String, Value> = WELL_KNOWN.iter().map(|k| (k.to_string(), m.text(k).map_or(Value::Null, |t| json!(t)))).collect();
+    let properties: Map<String, Value> = metadata::keys(Owner::Design).map(|k| (k.name.to_string(), json!(m.text(k.name)))).collect();
     Ok(json!({"metadata": m, "properties": properties}))
 }
 
@@ -48,7 +49,10 @@ fn set(s: &mut Session, p: &Value) -> Result<Value> {
     let mut next = s.doc.metadata.clone();
     let mut changed = Vec::new();
     for (key, value) in entries {
-        if next.set(key, value.clone()).map_err(|e| bad(cmd, e.to_string()))? {
+        if key == BOM_TYPE {
+            return Err(bad(cmd, "`bom_type` is a component's part property: set it with component.metadata.set"));
+        }
+        if next.set(Owner::Design, key, value.clone()).map_err(|e| bad(cmd, e.to_string()))? {
             changed.push(key.to_string());
         }
     }
@@ -250,6 +254,80 @@ mod tests {
         let assembly = String::from_utf8(text(&mut s, "assembly.step")).unwrap();
         assert!(assembly.contains("('Jane Doe'),('ACME')"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn changing_design_properties_does_not_evaluate_the_model_again() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+        s.evaluations = 0;
+        let revision = s.revision;
+        run(&mut s, "document.metadata.set", json!({"values": {"author": "Jane", "com.acme.tool": {"id": 7}}}));
+        run(&mut s, "document.metadata.remove", json!({"key": "com.acme.tool"}));
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "edit.redo", json!({}));
+        assert_eq!(s.evaluations, 0, "design properties change no geometry");
+        assert!(s.revision > revision, "the views still see each change");
+        assert_eq!(s.model.state().bodies.len(), 1, "the model is kept as it was");
+        assert_eq!(s.doc.metadata.author(), Some("Jane"));
+        // Anything else still evaluates.
+        run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5}));
+        assert!(s.evaluations > 0);
+    }
+
+    #[test]
+    fn opening_a_design_that_differs_only_in_its_properties_refreshes_it() {
+        // Two revisions of one assembly, B held on A by a rigid joint. The open session's B was
+        // moved off the joint and never solved since; the file is the same design with another
+        // author. Opening it is no property edit: the new session's joints are solved.
+        let dir = scratch("revision");
+        let mut s = Session::default();
+        for (name, x) in [("A", 0), ("B", 20)] {
+            run(&mut s, "component.activate", json!({"component": "root"}));
+            run(&mut s, "component.create", json!({"name": name}));
+            run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0]}));
+        }
+        let placement =
+            |s: &Session, name: &str| s.doc.find_component(name).and_then(|c| s.doc.occurrence_of(c)).map(|o| (o.id, o.transform)).unwrap();
+        let a = placement(&s, "A").0;
+        run(&mut s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+        run(&mut s, "joint.create", json!({"type": "rigid", "a": {"face": [5, 5, 10]}, "b": {"face": [25, 5, 0]}}));
+        let (b, solved) = placement(&s, "B");
+        let mut unsolved = (*s.doc).clone();
+        unsolved.name = "Bracket".into();
+        if let Some(o) = unsolved.occurrences.iter_mut().find(|o| o.id == b) {
+            o.transform[3][0] += 3.0;
+        }
+        let mut s = Session::new(unsolved.clone());
+        let mut revision_c = unsolved;
+        revision_c.metadata.set(Owner::Design, "author", json!("Jane")).unwrap();
+        let path = dir.join("bracket-rev-c.json");
+        std::fs::write(&path, revision_c.to_json()).unwrap();
+        let (read, _) = solidcraft_io::read_design_file(path.to_str().unwrap(), None::<fn(solidcraft_io::DesignPreview)>).unwrap();
+        assert!(read.differs_only_in_part_properties(&s.doc), "the two revisions differ only in their properties");
+
+        run(&mut s, "doc.open", json!({"path": path}));
+        assert_eq!(s.doc.metadata.author(), Some("Jane"));
+        let opened = s.doc.occurrences.iter().find(|o| o.id == b).map(|o| o.transform).unwrap();
+        let off = opened.iter().flatten().zip(solved.iter().flatten()).map(|(p, q)| (p - q).abs()).fold(0.0, f64::max);
+        assert!(off < 1e-6, "the opened design's joint is solved: B is {off} mm off it");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn every_key_the_design_took_before_is_still_taken() {
+        let mut s = Session::default();
+        let keys = ["project", "part_number", "revision", "author", "organization", "description", "license"];
+        let values: Map<String, Value> = keys.iter().map(|k| (k.to_string(), json!(format!("{k} text")))).collect();
+        let r = run(&mut s, "document.metadata.set", json!({ "values": values }));
+        assert_eq!(r["changed"].as_array().map(Vec::len), Some(keys.len()), "{r}");
+        let properties = run(&mut s, "document.metadata", json!({}))["properties"].clone();
+        for k in keys {
+            assert_eq!(properties[k], format!("{k} text"), "{k}");
+        }
+        assert_eq!(properties.as_object().map(Map::len), Some(keys.len()), "{properties}");
+        let refused = s.execute("document.metadata.set", &json!({"key": "colour", "value": "red"})).unwrap_err().to_string();
+        assert!(refused.contains("`colour` is not a design property: SolidCraft's are project, part_number,"), "{refused}");
     }
 
     #[test]

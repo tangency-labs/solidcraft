@@ -9,127 +9,279 @@
 use serde_json::Value;
 use solidcraft_doc::construct::{AxisDef, GeoRef, PointDef};
 use solidcraft_doc::{FeatureKind, PlaneRef};
+use solidcraft_geom::Vec3;
 
 use super::CommandSpec;
 use super::features::{add_feature, check_expr, plane_param, sketch_id};
 use crate::params::{bad, req_expr, str_, vec3};
+use crate::schema::construct::{
+    AxisEdgeParams, AxisNormalToFaceParams, AxisThroughCylinderParams, AxisTwoPlanesParams, AxisTwoPointsParams, MidplaneParams,
+    PlaneAlongPathParams, PlaneAxisPointParams, PlanePerpendicularParams, PlaneTangentParams, PlaneThreePointsParams, PlaneTwoEdgesParams,
+    PointAlongPathParams, PointCenterParams, PointEdgePlaneParams, PointThreePlanesParams, PointTwoEdgesParams, PointVertexParams,
+};
+use crate::schema::features::FeatureResult;
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
-const REF: &str =
+pub(crate) const REF: &str =
     "{face|edge|vertex|point: [x,y,z]} | {plane: XY|name|{origin, normal}} | {axis: X|Y|Z|name} | {construct_point: name} | {sketch, point|curve}";
 
+const AXIS_THROUGH_CYLINDER_CONTRACT: TypedContract<AxisThroughCylinderParams> = TypedContract::new();
+const AXIS_NORMAL_TO_FACE_CONTRACT: TypedContract<AxisNormalToFaceParams> = TypedContract::new();
+const AXIS_TWO_PLANES_CONTRACT: TypedContract<AxisTwoPlanesParams> = TypedContract::new();
+const AXIS_TWO_POINTS_CONTRACT: TypedContract<AxisTwoPointsParams> = TypedContract::new();
+const AXIS_EDGE_CONTRACT: TypedContract<AxisEdgeParams> = TypedContract::new();
+const POINT_VERTEX_CONTRACT: TypedContract<PointVertexParams> = TypedContract::new();
+const POINT_TWO_EDGES_CONTRACT: TypedContract<PointTwoEdgesParams> = TypedContract::new();
+const POINT_THREE_PLANES_CONTRACT: TypedContract<PointThreePlanesParams> = TypedContract::new();
+const POINT_CENTER_CONTRACT: TypedContract<PointCenterParams> = TypedContract::new();
+const POINT_EDGE_PLANE_CONTRACT: TypedContract<PointEdgePlaneParams> = TypedContract::new();
+const POINT_ALONG_PATH_CONTRACT: TypedContract<PointAlongPathParams> = TypedContract::new();
+const PLANE_MIDPLANE_CONTRACT: TypedContract<MidplaneParams> = TypedContract::new();
+const PLANE_TWO_EDGES_CONTRACT: TypedContract<PlaneTwoEdgesParams> = TypedContract::new();
+const PLANE_AXIS_POINT_CONTRACT: TypedContract<PlaneAxisPointParams> = TypedContract::new();
+const PLANE_THREE_POINTS_CONTRACT: TypedContract<PlaneThreePointsParams> = TypedContract::new();
+const PLANE_TANGENT_CONTRACT: TypedContract<PlaneTangentParams> = TypedContract::new();
+const PLANE_ALONG_PATH_CONTRACT: TypedContract<PlaneAlongPathParams> = TypedContract::new();
+const PLANE_PERPENDICULAR_CONTRACT: TypedContract<PlanePerpendicularParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("construct.axis.through_cylinder", "Axis Through Cylinder/Cone/Torus", axis_face)
+    CommandSpec::new("construct.axis.through_cylinder", "Axis Through Cylinder/Cone/Torus", crate::checked!("construct.axis.through_cylinder", axis_face))
         .at("SOLID", "CONSTRUCT")
         .icon("axis_through_cylinder")
+        .contract(&AXIS_THROUGH_CYLINDER_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("face: ref (a cylinder, cone or torus face, or a circular edge); name?"),
-    CommandSpec::new("construct.axis.normal_to_face", "Axis Perpendicular To Face", axis_normal)
+    CommandSpec::new("construct.axis.normal_to_face", "Axis Perpendicular To Face", crate::checked!("construct.axis.normal_to_face", axis_normal))
         .at("SOLID", "CONSTRUCT")
         .icon("axis_normal_to_face")
+        .contract(&AXIS_NORMAL_TO_FACE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("face: ref; point: ref (the axis goes through it, square to the face); name?"),
-    CommandSpec::new("construct.axis.two_planes", "Axis Through Two Planes", axis_planes)
+    CommandSpec::new("construct.axis.two_planes", "Axis Through Two Planes", crate::checked!("construct.axis.two_planes", axis_planes))
         .at("SOLID", "CONSTRUCT")
         .icon("axis_two_planes")
+        .contract(&AXIS_TWO_PLANES_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("a, b: plane or planar face refs; name?"),
-    CommandSpec::new("construct.axis.two_points", "Axis Through Two Points", axis_points)
+    CommandSpec::new("construct.axis.two_points", "Axis Through Two Points", crate::checked!("construct.axis.two_points", axis_points))
         .at("SOLID", "CONSTRUCT")
         .icon("axis_two_points")
+        .contract(&AXIS_TWO_POINTS_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("a, b: point refs (vertices, sketch points, points); name?"),
-    CommandSpec::new("construct.axis.edge", "Axis Through Edge", axis_edge)
+    CommandSpec::new("construct.axis.edge", "Axis Through Edge", crate::checked!("construct.axis.edge", axis_edge))
         .at("SOLID", "CONSTRUCT")
         .icon("axis_edge")
+        .contract(&AXIS_EDGE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("edge: ref (a straight edge or sketch line); name?"),
-    CommandSpec::new("construct.point.vertex", "Point At Vertex", point_at)
+    CommandSpec::new("construct.point.vertex", "Point At Vertex", crate::checked!("construct.point.vertex", point_at))
         .at("SOLID", "CONSTRUCT")
         .icon("point_vertex")
+        .contract(&POINT_VERTEX_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("point: ref (vertex, sketch point, point); name?"),
-    CommandSpec::new("construct.point.two_edges", "Point Through Two Edges", point_edges)
+    CommandSpec::new("construct.point.two_edges", "Point Through Two Edges", crate::checked!("construct.point.two_edges", point_edges))
         .at("SOLID", "CONSTRUCT")
         .icon("point_two_edges")
+        .contract(&POINT_TWO_EDGES_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("a, b: edge or line refs (where they meet, or come closest); name?"),
-    CommandSpec::new("construct.point.three_planes", "Point Through Three Planes", point_planes)
+    CommandSpec::new("construct.point.three_planes", "Point Through Three Planes", crate::checked!("construct.point.three_planes", point_planes))
         .at("SOLID", "CONSTRUCT")
         .icon("point_three_planes")
+        .contract(&POINT_THREE_PLANES_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("a, b, c: plane or planar face refs; name?"),
-    CommandSpec::new("construct.point.center", "Point At Center Of Circle/Sphere/Torus", point_center)
+    CommandSpec::new("construct.point.center", "Point At Center Of Circle/Sphere/Torus", crate::checked!("construct.point.center", point_center))
         .at("SOLID", "CONSTRUCT")
         .icon("point_center")
+        .contract(&POINT_CENTER_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("of: ref (circular edge, sketch circle or arc, sphere or torus face); name?"),
-    CommandSpec::new("construct.point.edge_plane", "Point At Edge And Plane", point_edge_plane)
+    CommandSpec::new("construct.point.edge_plane", "Point At Edge And Plane", crate::checked!("construct.point.edge_plane", point_edge_plane))
         .at("SOLID", "CONSTRUCT")
         .icon("point_edge_plane")
+        .contract(&POINT_EDGE_PLANE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("edge: edge or line ref; plane: plane or planar face ref; name?"),
-    CommandSpec::new("construct.point.along_path", "Point Along Path", point_along)
+    CommandSpec::new("construct.point.along_path", "Point Along Path", crate::checked!("construct.point.along_path", point_along))
         .at("SOLID", "CONSTRUCT")
         .icon("point_along_path")
+        .contract(&POINT_ALONG_PATH_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("path: edge or sketch curve ref; t: expr, 0…1 along it (default 0.5); name?"),
-    CommandSpec::new("construct.plane.midplane", "Midplane", plane_mid)
+    CommandSpec::new("construct.plane.midplane", "Midplane", crate::checked!("construct.plane.midplane", plane_mid))
         .at("SOLID", "CONSTRUCT")
         .icon("plane_midplane")
+        .contract(&PLANE_MIDPLANE_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("a, b: plane or planar face refs (halfway between; bisecting when they meet at an angle); name?"),
-    CommandSpec::new("construct.plane.two_edges", "Plane Through Two Edges", plane_edges)
+    CommandSpec::new("construct.plane.two_edges", "Plane Through Two Edges", crate::checked!("construct.plane.two_edges", plane_edges))
         .at("SOLID", "CONSTRUCT")
         .icon("plane_two_edges")
+        .contract(&PLANE_TWO_EDGES_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("a, b: straight edge or line refs in one plane; name?"),
-    CommandSpec::new("construct.plane.three_points", "Plane Through Three Points", plane_points)
+    CommandSpec::new("construct.plane.axis_point", "Plane Through Axis And Point", crate::checked!("construct.plane.axis_point", plane_axis_point))
+        .at("SOLID", "CONSTRUCT")
+        .icon("plane_axis_point")
+        .contract(&PLANE_AXIS_POINT_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params("axis: origin axis, construction axis, straight edge or sketch line ref; point: off-axis point ref; name?"),
+    CommandSpec::new("construct.plane.three_points", "Plane Through Three Points", crate::checked!("construct.plane.three_points", plane_points))
         .at("SOLID", "CONSTRUCT")
         .icon("plane_three_points")
+        .contract(&PLANE_THREE_POINTS_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("a, b, c: point refs; name?"),
-    CommandSpec::new("construct.plane.tangent", "Tangent Plane", plane_tangent)
+    CommandSpec::new("construct.plane.tangent", "Tangent Plane", crate::checked!("construct.plane.tangent", plane_tangent))
         .at("SOLID", "CONSTRUCT")
         .icon("plane_tangent")
+        .contract(&PLANE_TANGENT_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("face: ref (cylinder, cone, sphere or torus); at?: [x,y,z] where it touches (default: the face pick); name?"),
-    CommandSpec::new("construct.plane.along_path", "Plane Along Path", plane_along)
+    CommandSpec::new("construct.plane.along_path", "Plane Along Path", crate::checked!("construct.plane.along_path", plane_along))
         .at("SOLID", "CONSTRUCT")
         .icon("plane_along_path")
+        .contract(&PLANE_ALONG_PATH_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
         .params("path: edge or sketch curve ref; t: expr, 0…1 along it (default 0.5); name? The plane is square to the path there"),
-    CommandSpec::new("construct.plane.perpendicular", "Perpendicular Plane", plane_perpendicular).at("SOLID", "CONSTRUCT").icon("plane_perpendicular").params(
-        "plane: plane or planar face ref; line: straight edge, sketch line or axis ref; name? The plane holds the line and is square to the plane",
-    ),
+    CommandSpec::new("construct.plane.perpendicular", "Perpendicular Plane", crate::checked!("construct.plane.perpendicular", plane_perpendicular))
+        .at("SOLID", "CONSTRUCT")
+        .icon("plane_perpendicular")
+        .contract(&PLANE_PERPENDICULAR_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+            "plane: plane or planar face ref; line: straight edge, sketch line or axis ref; name? The plane holds the line and is square to the plane",
+        ),
 ];
+
+/// Whether [`model_axis_param`] reads `v` as an edge or face of the model: `{edge: …}`,
+/// `{face: …}`, or as saved (`{type: edge|face, at, name?}`), as an edit dialog gives back one it
+/// kept.
+pub(crate) fn is_model_axis(v: &Value) -> bool {
+    v.get("edge").is_some() || v.get("face").is_some() || matches!(v.get("type").and_then(Value::as_str), Some("edge" | "face"))
+}
+
+/// An axis on an edge or round face of the model (`{edge: [x,y,z]}` or `{face: [x,y,z]}`, the
+/// point on it), with the line it gives now (`solidcraft_doc::construct::model_axis`); `None`
+/// for any other form of `axis`.
+pub(super) fn model_axis_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<Option<(GeoRef, Vec3, Vec3)>> {
+    let Some(v) = v.filter(|v| is_model_axis(v)) else { return Ok(None) };
+    let g = geo(s, Some(v), cmd, "axis")?;
+    let (o, d) = solidcraft_doc::construct::model_axis(&s.world_state(), &g).map_err(|e| bad(cmd, format!("`axis`: {e}")))?;
+    Ok(Some((g, o, d)))
+}
+
+/// A reference as [`geo`] reads it before looking anything up in the design: which form it has.
+pub(crate) enum GeoForm<'a> {
+    /// As saved (`{type, …}`), read whole.
+    Saved(GeoRef),
+    Face(Vec3),
+    Edge(Vec3),
+    Vertex(Vec3),
+    /// `{sketch, point|curve}`: the sketch as given, and the point or curve, when one is given.
+    Sketch {
+        sketch: &'a Value,
+        part: Option<SketchPart<'a>>,
+    },
+    Point(Vec3),
+    /// `{plane: …}`'s value, or a bare string: a plane, as `plane_param` reads it.
+    Plane(&'a Value),
+    /// `{axis: X|Y|Z|name}`.
+    Axis(&'a str),
+    /// `{construct_point: name}`.
+    ConstructPoint(&'a str),
+}
+
+/// A sketch reference's point or curve id.
+pub(crate) enum SketchPart<'a> {
+    Point(&'a str),
+    Curve(&'a str),
+}
+
+/// Why [`geo_form`] refuses a reference.
+pub(crate) enum GeoFormError {
+    /// A saved form serde refuses, with its message.
+    Saved(String),
+    /// None of the forms.
+    Unknown,
+}
+
+/// What [`geo`] says when a sketch reference has neither `point` nor `curve`.
+pub(crate) const SKETCH_PART: &str = "a sketch reference needs `point` or `curve`";
+
+/// The form [`geo`] reads `v` as. The first that fits wins, in this order: `type` (read whole), a
+/// point at `face`, `edge` or `vertex`, `sketch` (whatever else it has), a point at `point`,
+/// `plane` (whatever it holds), `axis` and `construct_point` as text, and a bare string.
+pub(crate) fn geo_form(v: &Value) -> std::result::Result<GeoForm<'_>, GeoFormError> {
+    let p3 = |k: &str| v.get(k).and_then(vec3);
+    Ok(if v.get("type").is_some() {
+        GeoForm::Saved(serde_json::from_value::<GeoRef>(v.clone()).map_err(|e| GeoFormError::Saved(e.to_string()))?)
+    } else if let Some(at) = p3("face") {
+        GeoForm::Face(at)
+    } else if let Some(at) = p3("edge") {
+        GeoForm::Edge(at)
+    } else if let Some(at) = p3("vertex") {
+        GeoForm::Vertex(at)
+    } else if let Some(sketch) = v.get("sketch") {
+        let part = match (str_(v, "point"), str_(v, "curve")) {
+            (Some(point), _) => Some(SketchPart::Point(point)),
+            (None, Some(curve)) => Some(SketchPart::Curve(curve)),
+            _ => None,
+        };
+        GeoForm::Sketch { sketch, part }
+    } else if let Some(p) = p3("point") {
+        GeoForm::Point(p)
+    } else if let Some(plane) = v.get("plane") {
+        GeoForm::Plane(plane)
+    } else if let Some(a) = str_(v, "axis") {
+        GeoForm::Axis(a)
+    } else if let Some(n) = str_(v, "construct_point") {
+        GeoForm::ConstructPoint(n)
+    } else if v.is_string() {
+        GeoForm::Plane(v)
+    } else {
+        return Err(GeoFormError::Unknown);
+    })
+}
 
 /// A reference from its JSON form.
 pub(super) fn geo(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Result<GeoRef> {
     let v = v.ok_or_else(|| bad(cmd, format!("`{what}` is required: {REF}")))?;
-    let p3 = |k: &str| v.get(k).and_then(vec3);
-    let mut g = if v.get("type").is_some() {
-        serde_json::from_value::<GeoRef>(v.clone()).map_err(|e| bad(cmd, format!("`{what}`: {e}")))?
-    } else if let Some(at) = p3("face") {
-        GeoRef::Face { at, name: None }
-    } else if let Some(at) = p3("edge") {
-        GeoRef::Edge { at, name: None }
-    } else if let Some(at) = p3("vertex") {
-        GeoRef::Vertex { at, edges: None }
-    } else if let Some(sk) = v.get("sketch") {
-        let sketch = sketch_id(s, Some(sk), cmd, what)?;
-        match (str_(v, "point"), str_(v, "curve")) {
-            (Some(point), _) => GeoRef::SketchPoint { sketch, point: point.to_string() },
-            (None, Some(curve)) => GeoRef::SketchCurve { sketch, curve: curve.to_string() },
-            _ => return Err(bad(cmd, format!("`{what}`: a sketch reference needs `point` or `curve`"))),
-        }
-    } else if let Some(p) = p3("point") {
-        GeoRef::Point { p }
-    } else if v.get("plane").is_some() {
-        GeoRef::Plane { plane: plane_param(s, v.get("plane"), cmd)? }
-    } else if let Some(a) = str_(v, "axis") {
-        if ["x", "y", "z"].contains(&a.to_ascii_lowercase().as_str()) {
-            GeoRef::World { axis: a.to_ascii_uppercase() }
-        } else {
-            match s.doc.find_feature(a).map(|f| &f.kind) {
-                Some(FeatureKind::ConstructionAxis { .. }) => GeoRef::Axis { name: a.into() },
-                _ => return Err(bad(cmd, format!("no axis `{a}`"))),
+    let mut g = match geo_form(v) {
+        Ok(GeoForm::Saved(g)) => g,
+        Ok(GeoForm::Face(at)) => GeoRef::Face { at, name: None },
+        Ok(GeoForm::Edge(at)) => GeoRef::Edge { at, name: None },
+        Ok(GeoForm::Vertex(at)) => GeoRef::Vertex { at, edges: None },
+        Ok(GeoForm::Sketch { sketch, part }) => {
+            let sketch = sketch_id(s, Some(sketch), cmd, what)?;
+            match part {
+                Some(SketchPart::Point(point)) => GeoRef::SketchPoint { sketch, point: point.to_string() },
+                Some(SketchPart::Curve(curve)) => GeoRef::SketchCurve { sketch, curve: curve.to_string() },
+                None => return Err(bad(cmd, format!("`{what}`: {SKETCH_PART}"))),
             }
         }
-    } else if let Some(n) = str_(v, "construct_point") {
-        match s.doc.find_feature(n).map(|f| &f.kind) {
+        Ok(GeoForm::Point(p)) => GeoRef::Point { p },
+        Ok(GeoForm::Plane(plane)) => GeoRef::Plane { plane: plane_param(s, Some(plane), cmd)? },
+        Ok(GeoForm::Axis(a)) => {
+            if ["x", "y", "z"].contains(&a.to_ascii_lowercase().as_str()) {
+                GeoRef::World { axis: a.to_ascii_uppercase() }
+            } else {
+                match s.doc.find_feature(a).map(|f| &f.kind) {
+                    Some(FeatureKind::ConstructionAxis { .. }) => GeoRef::Axis { name: a.into() },
+                    _ => return Err(bad(cmd, format!("no axis `{a}`"))),
+                }
+            }
+        }
+        Ok(GeoForm::ConstructPoint(n)) => match s.doc.find_feature(n).map(|f| &f.kind) {
             Some(FeatureKind::ConstructionPoint { .. }) => GeoRef::ConstructPoint { name: n.into() },
             _ => return Err(bad(cmd, format!("no construction point `{n}`"))),
-        }
-    } else if v.as_str().is_some() {
-        // A bare string: a plane.
-        GeoRef::Plane { plane: plane_param(s, Some(v), cmd)? }
-    } else {
-        return Err(bad(cmd, format!("`{what}` must be {REF}")));
+        },
+        Err(GeoFormError::Saved(e)) => return Err(bad(cmd, format!("`{what}`: {e}"))),
+        Err(GeoFormError::Unknown) => return Err(bad(cmd, format!("`{what}` must be {REF}"))),
     };
     g.name_picks(&s.model.state());
     Ok(g)
@@ -227,6 +379,19 @@ fn plane_edges(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "construct.plane.two_edges";
     let (a, b) = (geo(s, p.get("a"), cmd, "a")?, geo(s, p.get("b"), cmd, "b")?);
     plane(s, p, PlaneRef::TwoEdges { a: Box::new(a), b: Box::new(b) })
+}
+
+fn plane_axis_point(s: &mut Session, p: &Value) -> Result<Value> {
+    let kind = plane_axis_point_kind(s, p)?;
+    add_feature(s, p, kind)
+}
+
+/// Shared parser for the constructor and its world-to-authoring-frame boundary.
+pub(crate) fn plane_axis_point_kind(s: &Session, p: &Value) -> Result<FeatureKind> {
+    let cmd = "construct.plane.axis_point";
+    let axis = geo(s, p.get("axis"), cmd, "axis")?;
+    let point = geo(s, p.get("point"), cmd, "point")?;
+    Ok(FeatureKind::ConstructionPlane { plane: PlaneRef::AxisPoint { axis: Box::new(axis), point: Box::new(point) } })
 }
 
 fn plane_points(s: &mut Session, p: &Value) -> Result<Value> {

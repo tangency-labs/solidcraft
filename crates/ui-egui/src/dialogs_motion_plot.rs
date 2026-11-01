@@ -317,7 +317,7 @@ fn collision_rows(
         }
         Some(Err(e)) => {
             ui.vertical(|ui| {
-                ui.add(egui::Label::new(RichText::new(e.as_str()).color(t.error)).wrap());
+                ui.add(egui::Label::new(RichText::new(crate::i18n::tr_label(e)).color(t.error)).wrap());
             });
         }
         None => {}
@@ -356,7 +356,7 @@ fn plot_rows(
     let what = list.get(a.what).map_or(Plotted::Nothing, |(_, w)| *w);
     let bands = a.collisions.as_ref().and_then(|(_, r)| r.as_ref().ok()).map(collision_bands).unwrap_or_default();
     if what != Plotted::Nothing {
-        choice_row(ui, "Quantity", "ms_quantity", &mut a.quantity, &QUANTITIES);
+        choice_row(ui, "motion.plot_quantity", "ms_quantity", &mut a.quantity, &QUANTITIES);
         form_row(ui, "Duration", |ui| {
             let r = crate::ui_kit::cell_editor(ui, ui.id().with("duration"), &mut a.duration, "motion.duration_hint", false);
             crate::scenario::publish_handle("dialog:Duration", r.rect.center());
@@ -385,7 +385,7 @@ fn plot_rows(
                 });
             }
             Some(Err(e)) => {
-                ui.add(egui::Label::new(RichText::new(e.as_str()).color(t.text_dim)).wrap());
+                ui.add(egui::Label::new(RichText::new(crate::i18n::tr_label(e)).color(t.text_dim)).wrap());
             }
             None => {}
         });

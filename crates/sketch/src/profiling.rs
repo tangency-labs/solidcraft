@@ -63,6 +63,8 @@ pub enum StopReason {
     ResidualTolerance,
     NoImprovement,
     IterationLimit,
+    /// A status-only solve gave up: the iteration stalled far from a solution.
+    Stalled,
     /// The shared frame-work budget was exhausted after evaluating the initial residual.
     WorkBudget,
 }
@@ -321,13 +323,17 @@ mod tests {
 
     #[test]
     fn measurements_preserve_geometry_and_explain_a_stalled_solve() {
-        for x in [0.0, 1e-5] {
+        for (x, stalled) in [(0.0, true), (0.0, false), (1e-5, false)] {
             let mut plain = distance(x);
+            if stalled {
+                // Horizontal distances retain the magnitude residual and its zero slope.
+                plain.constraints[0].kind = ConstraintKind::DistanceX { p: 0, q: 1, value: 10.0 };
+            }
             let mut measured = plain.clone();
             let run = |sk: &mut Sketch| solve_with(sk, &Hold::default(), None, Analysis::StatusOnly, None);
             let a = run(&mut plain);
             let (b, profile) = crate::construct::switch::without_differential(|| capture(|| run(&mut measured)));
-            assert_eq!(serde_json::to_value(a).unwrap(), serde_json::to_value(b).unwrap());
+            assert_eq!(serde_json::to_value(a).unwrap(), serde_json::to_value(&b).unwrap());
             assert_eq!(plain, measured);
             assert_eq!(profile.counters.solve_calls, 1);
             assert_eq!(profile.counters.lm_runs, 1);
@@ -337,13 +343,16 @@ mod tests {
             );
             assert!(profile.counters.residual_block_evaluations > profile.counters.residual_system_evaluations);
             let first = profile.trials.first().unwrap();
-            if x == 0.0 {
+            if stalled {
                 assert_eq!(profile.runs[0].stop_reason, Some(StopReason::NoImprovement));
                 assert_eq!(first.gradient_inf, Some(0.0));
                 assert_eq!(first.step_norm, Some(0.0));
                 assert_eq!(profile.counters.accepted_trials, 0);
             } else {
+                assert!(b.ok());
                 assert_eq!(profile.runs[0].stop_reason, Some(StopReason::ResidualTolerance));
+                assert!(first.gradient_inf.unwrap() > 0.0);
+                assert!(first.step_norm.unwrap() > 0.0);
                 assert!(profile.counters.accepted_trials > 0);
                 assert!((first.rho.unwrap() - 1.0).abs() < 1e-6, "the positive radial step is a linear residual");
             }

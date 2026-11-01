@@ -1,0 +1,658 @@
+{
+  "light-0": {
+    "format": "solidcraft-theme/1",
+    "name": "Options light 0",
+    "base": "light",
+    "options": []
+  },
+  "light-1": {
+    "format": "solidcraft-theme/1",
+    "name": "Options light 1",
+    "base": "light",
+    "options": [
+      {
+        "id": "opacity",
+        "type": "range",
+        "default": 100
+      }
+    ]
+  },
+  "light-3": {
+    "format": "solidcraft-theme/1",
+    "name": "Options light 3",
+    "base": "light",
+    "options": [
+      {
+        "id": "opacity",
+        "type": "range",
+        "default": 100
+      },
+      {
+        "id": "warm",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Warm accent"
+        },
+        "section": "Theme controls"
+      },
+      {
+        "id": "palette",
+        "type": "choice",
+        "default": "v1",
+        "label": {
+          "en": "Palette"
+        },
+        "values": [
+          {
+            "id": "v1",
+            "label": {
+              "en": "Soft"
+            }
+          },
+          {
+            "id": "v2",
+            "label": {
+              "en": "Warm"
+            }
+          },
+          {
+            "id": "v3",
+            "label": {
+              "en": "Cool"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "light-6": {
+    "format": "solidcraft-theme/1",
+    "name": "Options light 6",
+    "base": "light",
+    "options": [
+      {
+        "id": "opacity",
+        "type": "range",
+        "default": 100
+      },
+      {
+        "id": "warm",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Warm accent"
+        },
+        "section": "Theme controls"
+      },
+      {
+        "id": "palette",
+        "type": "choice",
+        "default": "v1",
+        "label": {
+          "en": "Palette"
+        },
+        "values": [
+          {
+            "id": "v1",
+            "label": {
+              "en": "Soft"
+            }
+          },
+          {
+            "id": "v2",
+            "label": {
+              "en": "Warm"
+            }
+          },
+          {
+            "id": "v3",
+            "label": {
+              "en": "Cool"
+            }
+          }
+        ]
+      },
+      {
+        "id": "radius",
+        "type": "range",
+        "default": 5,
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "unit": "px",
+        "label": {
+          "en": "Rounding"
+        }
+      },
+      {
+        "id": "shadow",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Shadow"
+        }
+      },
+      {
+        "id": "details",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Details"
+        }
+      }
+    ]
+  },
+  "light-12": {
+    "format": "solidcraft-theme/1",
+    "name": "Options light 12",
+    "base": "light",
+    "options": [
+      {
+        "id": "opacity",
+        "type": "range",
+        "default": 100
+      },
+      {
+        "id": "warm",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Warm accent"
+        },
+        "section": "Theme controls"
+      },
+      {
+        "id": "palette",
+        "type": "choice",
+        "default": "v1",
+        "label": {
+          "en": "Palette"
+        },
+        "values": [
+          {
+            "id": "v1",
+            "label": {
+              "en": "Soft"
+            }
+          },
+          {
+            "id": "v2",
+            "label": {
+              "en": "Warm"
+            }
+          },
+          {
+            "id": "v3",
+            "label": {
+              "en": "Cool"
+            }
+          },
+          {
+            "id": "v4",
+            "label": {
+              "en": "Bold"
+            }
+          }
+        ]
+      },
+      {
+        "id": "radius",
+        "type": "range",
+        "default": 5,
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "unit": "px",
+        "label": {
+          "en": "Rounding"
+        }
+      },
+      {
+        "id": "shadow",
+        "type": "bool",
+        "default": true,
+        "label": {
+          "en": "Shadow"
+        }
+      },
+      {
+        "id": "softness",
+        "type": "range",
+        "default": 5,
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "unit": "px",
+        "label": {
+          "en": "Softness"
+        },
+        "parent": "shadow"
+      },
+      {
+        "id": "details",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Details"
+        }
+      },
+      {
+        "id": "pattern",
+        "type": "choice",
+        "default": "v1",
+        "label": {
+          "en": "Pattern"
+        },
+        "values": [
+          {
+            "id": "v1",
+            "label": {
+              "en": "Soft"
+            }
+          },
+          {
+            "id": "v2",
+            "label": {
+              "en": "Warm"
+            }
+          },
+          {
+            "id": "v3",
+            "label": {
+              "en": "Cool"
+            }
+          },
+          {
+            "id": "v4",
+            "label": {
+              "en": "Bold"
+            }
+          },
+          {
+            "id": "v5",
+            "label": {
+              "en": "Muted"
+            }
+          },
+          {
+            "id": "v6",
+            "label": {
+              "en": "Plain"
+            }
+          }
+        ]
+      },
+      {
+        "id": "grid_tint",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Tint grid"
+        }
+      },
+      {
+        "id": "strong_edges",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Strong edges"
+        }
+      },
+      {
+        "id": "compact",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Compact"
+        }
+      },
+      {
+        "id": "extra",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Extra"
+        },
+        "advanced": true,
+        "section": "Fine tuning"
+      },
+      {
+        "id": "outline",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Outline"
+        }
+      }
+    ]
+  },
+  "dark-0": {
+    "format": "solidcraft-theme/1",
+    "name": "Options dark 0",
+    "base": "dark",
+    "options": []
+  },
+  "dark-1": {
+    "format": "solidcraft-theme/1",
+    "name": "Options dark 1",
+    "base": "dark",
+    "options": [
+      {
+        "id": "opacity",
+        "type": "range",
+        "default": 100
+      }
+    ]
+  },
+  "dark-3": {
+    "format": "solidcraft-theme/1",
+    "name": "Options dark 3",
+    "base": "dark",
+    "options": [
+      {
+        "id": "opacity",
+        "type": "range",
+        "default": 100
+      },
+      {
+        "id": "warm",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Warm accent"
+        },
+        "section": "Theme controls"
+      },
+      {
+        "id": "palette",
+        "type": "choice",
+        "default": "v1",
+        "label": {
+          "en": "Palette"
+        },
+        "values": [
+          {
+            "id": "v1",
+            "label": {
+              "en": "Soft"
+            }
+          },
+          {
+            "id": "v2",
+            "label": {
+              "en": "Warm"
+            }
+          },
+          {
+            "id": "v3",
+            "label": {
+              "en": "Cool"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "dark-6": {
+    "format": "solidcraft-theme/1",
+    "name": "Options dark 6",
+    "base": "dark",
+    "options": [
+      {
+        "id": "opacity",
+        "type": "range",
+        "default": 100
+      },
+      {
+        "id": "warm",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Warm accent"
+        },
+        "section": "Theme controls"
+      },
+      {
+        "id": "palette",
+        "type": "choice",
+        "default": "v1",
+        "label": {
+          "en": "Palette"
+        },
+        "values": [
+          {
+            "id": "v1",
+            "label": {
+              "en": "Soft"
+            }
+          },
+          {
+            "id": "v2",
+            "label": {
+              "en": "Warm"
+            }
+          },
+          {
+            "id": "v3",
+            "label": {
+              "en": "Cool"
+            }
+          }
+        ]
+      },
+      {
+        "id": "radius",
+        "type": "range",
+        "default": 5,
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "unit": "px",
+        "label": {
+          "en": "Rounding"
+        }
+      },
+      {
+        "id": "shadow",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Shadow"
+        }
+      },
+      {
+        "id": "details",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Details"
+        }
+      }
+    ]
+  },
+  "dark-12": {
+    "format": "solidcraft-theme/1",
+    "name": "Options dark 12",
+    "base": "dark",
+    "options": [
+      {
+        "id": "opacity",
+        "type": "range",
+        "default": 100
+      },
+      {
+        "id": "warm",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Warm accent"
+        },
+        "section": "Theme controls"
+      },
+      {
+        "id": "palette",
+        "type": "choice",
+        "default": "v1",
+        "label": {
+          "en": "Palette"
+        },
+        "values": [
+          {
+            "id": "v1",
+            "label": {
+              "en": "Soft"
+            }
+          },
+          {
+            "id": "v2",
+            "label": {
+              "en": "Warm"
+            }
+          },
+          {
+            "id": "v3",
+            "label": {
+              "en": "Cool"
+            }
+          },
+          {
+            "id": "v4",
+            "label": {
+              "en": "Bold"
+            }
+          }
+        ]
+      },
+      {
+        "id": "radius",
+        "type": "range",
+        "default": 5,
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "unit": "px",
+        "label": {
+          "en": "Rounding"
+        }
+      },
+      {
+        "id": "shadow",
+        "type": "bool",
+        "default": true,
+        "label": {
+          "en": "Shadow"
+        }
+      },
+      {
+        "id": "softness",
+        "type": "range",
+        "default": 5,
+        "min": 0,
+        "max": 10,
+        "step": 0.5,
+        "unit": "px",
+        "label": {
+          "en": "Softness"
+        },
+        "parent": "shadow"
+      },
+      {
+        "id": "details",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Details"
+        }
+      },
+      {
+        "id": "pattern",
+        "type": "choice",
+        "default": "v1",
+        "label": {
+          "en": "Pattern"
+        },
+        "values": [
+          {
+            "id": "v1",
+            "label": {
+              "en": "Soft"
+            }
+          },
+          {
+            "id": "v2",
+            "label": {
+              "en": "Warm"
+            }
+          },
+          {
+            "id": "v3",
+            "label": {
+              "en": "Cool"
+            }
+          },
+          {
+            "id": "v4",
+            "label": {
+              "en": "Bold"
+            }
+          },
+          {
+            "id": "v5",
+            "label": {
+              "en": "Muted"
+            }
+          },
+          {
+            "id": "v6",
+            "label": {
+              "en": "Plain"
+            }
+          }
+        ]
+      },
+      {
+        "id": "grid_tint",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Tint grid"
+        }
+      },
+      {
+        "id": "strong_edges",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Strong edges"
+        }
+      },
+      {
+        "id": "compact",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Compact"
+        }
+      },
+      {
+        "id": "extra",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Extra"
+        },
+        "advanced": true,
+        "section": "Fine tuning"
+      },
+      {
+        "id": "outline",
+        "type": "bool",
+        "default": false,
+        "label": {
+          "en": "Outline"
+        }
+      }
+    ]
+  }
+}

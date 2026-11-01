@@ -9,6 +9,23 @@
 use serde_json::Value;
 
 pub use super::acp::{AuthMethod, PermissionOption, ToolStatus};
+pub use super::acp::{ConfigChoice, ConfigOption};
+
+/// A connection test keeps authentication failures distinct from transport or protocol errors.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TestError {
+    AuthRequired,
+    Other(String),
+}
+
+impl TestError {
+    pub fn message(&self) -> &str {
+        match self {
+            Self::AuthRequired => crate::i18n::tr("ui.agent_chat_state_auth"),
+            Self::Other(message) => message,
+        }
+    }
+}
 
 /// One part of a message to the agent.
 #[derive(Clone, Debug, PartialEq)]
@@ -34,30 +51,66 @@ pub enum PromptPart {
 pub enum Event {
     /// Whether the agent takes documents (PDFs) in a message; sent before [`Event::Ready`].
     Documents(bool),
+    /// Whether SolidCraft tools were offered by the backend.
+    ToolsAvailable(bool),
     /// Ready for a message. `agent`: its name and version; `images`: it takes pictures.
-    Ready { agent: String, images: bool },
+    Ready {
+        agent: String,
+        images: bool,
+    },
     /// Text it streams (`thought`: its reasoning, shown dimmed).
-    Text { thought: bool, text: String },
-    /// A new tool call, or news about one.
-    Tool { id: String, title: Option<String>, kind: Option<String>, status: Option<ToolStatus>, output: Option<String> },
+    Text {
+        thought: bool,
+        text: String,
+    },
+    /// A new tool call, or news about one (`input`: its arguments, when the agent says).
+    Tool {
+        id: String,
+        title: Option<String>,
+        kind: Option<String>,
+        status: Option<ToolStatus>,
+        input: Option<Value>,
+        output: Option<String>,
+    },
     /// Its plan, replaced whole: each entry with its status.
     Plan(Vec<(String, String)>),
     /// It asks before running something of its own; answered with [`ChatBackend::answer_permission`].
-    Permission { key: u64, title: String, options: Vec<PermissionOption> },
+    Permission {
+        key: u64,
+        title: String,
+        options: Vec<PermissionOption>,
+    },
     /// It needs the user to sign in; `methods` are its own ways to do so.
-    AuthRequired { methods: Vec<AuthMethod> },
+    AuthRequired {
+        methods: Vec<AuthMethod>,
+    },
     /// What it says about its login.
     AuthStatus(String),
     /// Its own modes (an ACP agent's `modes`: ask, accept edits, plan, …) and the current one.
-    Modes { current: String, available: Vec<(String, String)> },
+    Modes {
+        current: String,
+        available: Vec<(String, String)>,
+    },
     /// Its models (empty `available`: only the current one changed).
-    Models { current: String, available: Vec<super::acp::ModelInfo> },
+    Models {
+        current: String,
+        available: Vec<super::acp::ModelInfo>,
+    },
+    ConfigOptions(Vec<ConfigOption>),
+    ConfigOptionFinished {
+        id: String,
+        result: Result<Vec<ConfigOption>, String>,
+    },
     /// The message is answered (`reason`: why it stopped, empty for a normal end).
-    TurnEnded { reason: String },
+    TurnEnded {
+        reason: String,
+    },
     /// Something failed; the backend is still running unless [`Event::Exited`] follows.
     Error(String),
     /// It ended; its last error output.
-    Exited { tail: Vec<String> },
+    Exited {
+        tail: Vec<String>,
+    },
 }
 
 /// What a backend gets to start.
@@ -94,6 +147,9 @@ pub trait ChatBackend {
     fn set_mode(&mut self, _mode: &str) {}
     /// An endpoint's new request timeout, in seconds, from the next request on.
     fn set_request_timeout(&mut self, _secs: u64) {}
+    /// An endpoint's new reasoning effort (empty: send nothing), from the next request on.
+    fn set_reasoning_effort(&mut self, _effort: &str) {}
+    fn set_config_option(&mut self, _id: &str, _value: &str) {}
     /// Its process, for status and tests.
     fn pid(&self) -> Option<u32> {
         None

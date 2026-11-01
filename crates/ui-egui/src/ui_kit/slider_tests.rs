@@ -26,6 +26,7 @@ fn every_slider_option_uses_the_same_token_thumb_in_both_themes() {
                                         format: if formatted { |v| format!("{:.0} %", v * 100.0) } else { |v| format!("{v:.2}") },
                                         show_value,
                                         integer,
+                                        workspace_accent: false,
                                     },
                                 );
                             });
@@ -152,4 +153,43 @@ fn a_sliders_value_box_takes_typed_numbers_and_clamps_them_to_its_range() {
         frame(&ctx, vec![], &mut draw);
         assert!((value - expected).abs() < 1e-3, "typed {typed}: {value}");
     }
+}
+
+/// At the top of its range egui's own handle reaches the right edge of the rectangle the kit
+/// paints over it, so the mask has to pass that edge; flush with it, the handle's last column
+/// survives as a light sliver beside the value box (#5708).
+#[test]
+fn the_mask_passes_the_edge_of_egui_s_own_handle_at_the_top_of_the_range() {
+    let ctx = crate::fonts::test_context();
+    let t = Tokens::get();
+    let mut value: f64 = 2.0;
+    let mut output =
+        ctx.run_ui(egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 200.0))), ..Default::default() }, |ui| {
+            scope(ui, |ui| {
+                slider(ui, &mut value, 0.0..=2.0, Slider { step: Some(0.05), ..Default::default() });
+            });
+        });
+    output.textures_delta.clear();
+    let handle = output
+        .shapes
+        .iter()
+        .find_map(|s| match &s.shape {
+            egui::Shape::Circle(c) if c.stroke.color != t.form_primary => Some(*c),
+            _ => None,
+        })
+        .expect("egui's own slider handle");
+    let mask = output
+        .shapes
+        .iter()
+        .find_map(|s| match &s.shape {
+            egui::Shape::Rect(r) if r.fill == t.dialog_body => Some(r.rect),
+            _ => None,
+        })
+        .expect("the rectangle the kit paints over egui's slider");
+    assert!(
+        mask.right() > handle.center.x + handle.radius,
+        "the mask ends at {} and egui's handle at {}: its last column would show",
+        mask.right(),
+        handle.center.x + handle.radius
+    );
 }

@@ -4,22 +4,109 @@ use solidcraft_render::{Camera, StandardView};
 
 use super::CommandSpec;
 use crate::params::{bad, num, req_vec2, req_vec3, vec3};
+use crate::schema::view_navigation::{RenderBrowser, RenderFocus, RenderSelect, TabStep, TabStepParams};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Sel, Session};
 
+const FOCUS_CONTRACT: TypedContract<RenderFocus> = TypedContract::new();
+const BROWSER_CONTRACT: TypedContract<RenderBrowserRequest> = TypedContract::new();
+const TAB_STEP_CONTRACT: TypedContract<TabStepParams> = TypedContract::new();
+
+// Both existing request forms share the Browser command and its published schema.
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(untagged)]
+enum RenderBrowserRequest {
+    Open(RenderBrowser),
+    Controls(RenderBrowserControls),
+}
+
+#[derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RenderBrowserControls {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    by_look: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    search: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    query: Option<String>,
+}
+
+const RENDER_SELECT: TypedContract<RenderSelect> = TypedContract::new();
+const STATUS_ITEMS_CONTRACT: TypedContract<crate::schema::view_navigation::StatusItemsParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
+CommandSpec::new("view.status_details", "Viewport Status Details", crate::checked!("view.status_details", status_details))
+    .icon("list").noundo().doc_only()
+    .contract(&STATUS_ITEMS_CONTRACT).output(output_schema_for::<crate::status_details::StatusDetails>)
+    .params("no parameters → current effect settings/detail capabilities and retained per-seam Continuity diagnostics, with current geometry validity; read-only, no evaluation"),
+CommandSpec::new("view.status_items", "Viewport Status Items", crate::checked!("view.status_items", status_items))
+    .icon("list").noundo().doc_only()
+    .contract(&STATUS_ITEMS_CONTRACT).output(output_schema_for::<crate::status_items::StatusItems>)
+    .params("no parameters → {items}; persistent viewport effects, oldest slot first, with structured settings and executable clear requests; read-only, no model evaluation"),
+CommandSpec::new("view.fit", "Fit", fit)
+    .icon("fit").key("F6").noundo().doc_only().params("no parameters → frame the active canvas or selection; display only"),
+CommandSpec::new("view.home", "Home view", home)
+    .icon("home").noundo().doc_only().params("no parameters → home orientation framing the active canvas; display only"),
+CommandSpec::new("view.tool", "Navigation tool", tool)
+    .icon("orbit").noundo().doc_only().params("tool: orbit|pan|zoom|none → tool; latch a camera tool, none releases it"),
+CommandSpec::new("view.spin", "Continuous orbit", spin)
+    .icon("spin").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; continuous orbit until the next click or key"),
+CommandSpec::new("view.visual_style", "Visual style", visual_style)
+    .icon("style").noundo().doc_only().params("style: shaded_with_edges|shaded|wireframe|shaded_with_hidden_edges → style, index (0..3 in that order)"),
+CommandSpec::new("view.grid", "Grid", grid)
+    .icon("style").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; show the viewport grid"),
+CommandSpec::new("view.ground_shadow", "Ground shadow", ground_shadow)
+    .icon("style").noundo().doc_only().params("on?: bool (omitted: toggle) → on?; show the ground shadow"),
+CommandSpec::new("view.navigation_bar", "Navigation bar", navigation_bar)
+    .icon("pan").noundo().doc_only().params("visible?: bool (omitted: toggle) → visible?; show the navigation bar (window setting)"),
+CommandSpec::new("view.render_focus", "Render Focus View", crate::checked!("view.render_focus", render_focus))
+    .icon("render_scene").noundo().doc_only()
+    .contract(&FOCUS_CONTRACT).output(output_schema_for::<RenderFocus>)
+    .params("on: bool → {on}; per-window UI state, never saved in the design; headless validation only"),
+CommandSpec::new("view.render_frame", "Render Frame Guides", crate::checked!("view.render_frame", render_frame))
+    .icon("camera").noundo().doc_only()
+    .contract(&RENDER_FRAME_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::view_navigation::RenderFrame>)
+    .params("aspect?: 16:9|3:2|1:1|4:5|9:16|custom; thirds?, safe_area?, centre_mark?: bool. At least one field. Validated transient overlay request, echoed headlessly; never saves guides, changes output size, evaluates geometry or opens a dialog"),
+CommandSpec::new("view.render_browser", "Render Browser", crate::checked!("view.render_browser", render_browser))
+    .icon("list").noundo().doc_only()
+    .contract(&BROWSER_CONTRACT).output(output_schema_for::<RenderBrowserRequest>)
+    .params("open: bool; or by_look?: bool; search?: bool; query?: string (up to 1024 bytes) → validated transient Browser controls; never edits the design or opens a dialog"),
+CommandSpec::new("view.render_inspector", "Render Inspector", render_inspector)
+    .icon("inspect").noundo().doc_only()
+    .params("visible: bool → {visible}; per-document Inspector visibility; never edits the design or opens a dialog"),
+CommandSpec::new("view.render_select", "Render selection", crate::checked!("view.render_select", render_select))
+    .contract(&RENDER_SELECT).output(output_schema_for::<RenderSelect>)
+    .icon("select").noundo().doc_only()
+    .params("kind: nothing|environment|lighting|light|shot|output|wear|sampling|effects|check; id?: bounded nonempty string for light/shot → validated transient Browser focus; never edits the design or opens a dialog"),
+CommandSpec::new("view.render_stage", "Render Stage", render_stage)
+    .icon("render_scene").noundo().doc_only()
+    .params("stage: look|light|frame|output → {stage}; per-document UI state, never edits or evaluates the design; headless validation only"),
+CommandSpec::new("view.shots_strip", "Shots Strip", shots_strip)
+    .icon("camera").noundo().doc_only()
+    .params("visible: bool → {visible}; Render Shots strip UI preference. Headless echo only, no document edits or undo"),
+CommandSpec::new("view.render_dock", "Move Render Dock", crate::checked!("view.render_dock", render_dock))
+    .at("RENDER", "SCENE").icon("settings").noundo().doc_only()
+    .contract(&RENDER_DOCK_CONTRACT)
+    .output(crate::schema::output_schema_for::<crate::schema::view_navigation::RenderDock>)
+    .params("panel: inspector|browser; side: left|right → {panel, side}; Render dock UI preference; headless echo only, no document edits or undo"),
 CommandSpec::new("view.layout", "Workspace layout", layout)
     .icon("settings").noundo().doc_only().params("mode: floating|compact → validated workspace layout; display only, never opens a dialog"),
 CommandSpec::new("view.history_layout", "History layout", history_layout)
-    .icon("settings").noundo().doc_only().params("width?: 1..1000000; dock?: bottom|left|under_browser; collapsed?: bool → validated layout request; display only, never opens a dialog"),
+    .icon("settings").noundo().doc_only().params("width?: 1..1000000; dock?: bottom|left|under_browser|browser (browser: the history in the browser, no timeline); collapsed?: bool → validated layout request; display only, never opens a dialog"),
 CommandSpec::new("view.graphics_preset", "Graphics Preset", graphics_preset)
     .icon("settings").noundo().doc_only().params("preset: performance|quality → preset, enabled, display_quality, supersampling, supersampling_adaptive; Quality: AO, Fine, adaptive 2x SSAA; Performance: no AO, Normal, no SSAA"),
 CommandSpec::new("view.ambient_occlusion", "Ambient Occlusion", ambient_occlusion)
     .icon("settings").noundo().doc_only().params("enabled: bool → enabled; apply soft contact shading in the GPU viewport"),
+CommandSpec::new("view.perspective", "Perspective view", perspective)
+    .icon("perspective").noundo().doc_only().params("enabled: bool → enabled; draw the view in perspective, or orthographic when false; a sketch being edited is always shown orthographic"),
+CommandSpec::new("view.angle_readout", "View Angles", crate::checked!("view.angle_readout", angle_readout))
+    .icon("camera").noundo().doc_only().contract(&ANGLE_READOUT_CONTRACT).output(crate::schema::output_schema_for::<crate::schema::view_navigation::AngleReadoutResult>).params("enabled: bool → enabled; show the view's pitch, yaw and roll (degrees, as view.apply's camera in radians) and Ortho or Persp under the orientation gizmo; display only, never opens a dialog"),
 CommandSpec::new("view.navigate", "Navigate View", navigate)
     .icon("orbit")
     .noundo()
     .doc_only()
-    .params("camera: Camera; direction?: [x,y,z] in the camera's up-axis frame; or action: left|right|up|down|clockwise|counterclockwise|home|fit, degrees?: 0..180 (how far left|right|up|down turn; default 90); or motion: pan|orbit|zoom, delta?: [dx,dy] (pixels, each ±10000), free_orbit?: bool (orbit through poles, default false), viewport?: [width,height] (1..1000000, required for pan or pivot), pivot?: [x,y,z], factor?: 0.05..20 (required for zoom), anchor?: [x,y,z] → camera, fit, continuous?"),
+    .params("camera: Camera; direction?: [x,y,z] in the camera's up-axis frame; or action: left|right|up|down|clockwise|counterclockwise|home|fit, degrees?: 0..180 (how far left|right|up|down turn; default 90), fit?: bool (frame the whole model from the new direction as well, as home does; default false); or motion: pan|orbit|zoom, delta?: [dx,dy] (pixels, each ±10000), free_orbit?: bool (orbit through poles, default false), viewport?: [width,height] (1..1000000, required for pan or pivot), pivot?: [x,y,z], factor?: 0.05..20 (required for zoom), anchor?: [x,y,z] → camera, fit, continuous?"),
 CommandSpec::new("view.normal_to", "Normal to Selection", normal_to)
         .icon("camera")
         .noundo()
@@ -31,7 +118,13 @@ CommandSpec::new("view.left", "Left View", left).icon("camera").noundo().key("Ct
 CommandSpec::new("view.right", "Right View", right).icon("camera").noundo().key("Ctrl+4").params(STANDARD_PARAMS),
 CommandSpec::new("view.top", "Top View", top).icon("camera").noundo().key("Ctrl+5").params(STANDARD_PARAMS),
 CommandSpec::new("view.bottom", "Bottom View", bottom).icon("camera").noundo().key("Ctrl+6").params(STANDARD_PARAMS),
-CommandSpec::new("view.isometric", "Isometric View", isometric).icon("camera").noundo().key("Ctrl+7").params(STANDARD_PARAMS)];
+CommandSpec::new("view.isometric", "Isometric View", isometric).icon("camera").noundo().key("Ctrl+7").params(STANDARD_PARAMS),
+CommandSpec::new("view.next_tab", "Next Tab", crate::checked!("view.next_tab", next_tab))
+    .icon("chevron_right").noundo().doc_only().key("Ctrl+Tab").contract(&TAB_STEP_CONTRACT).output(output_schema_for::<TabStep>)
+    .params("no parameters → step: 1; the window shows the design tab to the right of the shown one (after the last, the first); never edits the design or opens a dialog"),
+CommandSpec::new("view.previous_tab", "Previous Tab", crate::checked!("view.previous_tab", previous_tab))
+    .icon("chevron_right").noundo().doc_only().key("Ctrl+Shift+Tab").contract(&TAB_STEP_CONTRACT).output(output_schema_for::<TabStep>)
+    .params("no parameters → step: -1; the window shows the design tab to the left of the shown one (before the first, the last); never edits the design or opens a dialog")];
 
 const STANDARD_PARAMS: &str = "camera?: Camera (default: current session camera or home view) → camera; turns to that standard view as the view cube does, keeping target, distance and projection";
 
@@ -97,6 +190,23 @@ fn normal_target(s: &Session) -> Option<(solidcraft_geom::Vec3, solidcraft_geom:
     })
 }
 
+fn status_details(s: &mut Session, p: &Value) -> Result<Value> {
+    let p = if p.is_null() { json!({}) } else { p.clone() };
+    if !p.as_object().is_some_and(|object| object.is_empty()) {
+        return Err(bad("view.status_details", "parameters must be an empty object"));
+    }
+    let _: crate::schema::view_navigation::StatusItemsParams = serde_json::from_value(p).map_err(|e| bad("view.status_details", e.to_string()))?;
+    let items =
+        s.status_items().into_iter().map(|source| crate::status_details::StatusDetailItem { has_details: source.has_details(), source }).collect();
+    serde_json::to_value(crate::status_details::StatusDetails {
+        document_id: s.document_id.clone(),
+        items,
+        continuity: s.continuity_details(),
+        param_warnings: Vec::new(),
+    })
+    .map_err(|e| bad("view.status_details", e.to_string()))
+}
+
 fn normal_to(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "view.normal_to";
     let (point, normal) = normal_target(s).ok_or_else(|| bad(cmd, "select a planar face or plane"))?;
@@ -121,6 +231,165 @@ fn normal_to(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"camera": to}))
 }
 
+// UI-owned settings follow the layout command: validate here, apply in the UI adapter.
+fn view_params(p: &Value, cmd: &str, allowed: &[&str]) -> Result<()> {
+    let object = p.as_object().ok_or_else(|| bad(cmd, "parameters must be an object"))?;
+    if let Some(key) = object.keys().find(|key| !allowed.contains(&key.as_str())) {
+        return Err(bad(cmd, format!("unknown parameter: {key}")));
+    }
+    Ok(())
+}
+
+fn fit(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_params(p, "view.fit", &[])?;
+    Ok(json!({}))
+}
+
+fn home(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_params(p, "view.home", &[])?;
+    Ok(json!({}))
+}
+
+fn tool(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.tool";
+    view_params(p, cmd, &["tool"])?;
+    let tool = p
+        .get("tool")
+        .and_then(Value::as_str)
+        .filter(|v| matches!(*v, "orbit" | "pan" | "zoom" | "none"))
+        .ok_or_else(|| bad(cmd, "tool must be orbit, pan, zoom or none"))?;
+    Ok(json!({"tool": tool}))
+}
+
+fn visual_style(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.visual_style";
+    view_params(p, cmd, &["style"])?;
+    let style = p.get("style").and_then(Value::as_str);
+    let index = match style {
+        Some("shaded_with_edges") => 0,
+        Some("shaded") => 1,
+        Some("wireframe") => 2,
+        Some("shaded_with_hidden_edges") => 3,
+        _ => return Err(bad(cmd, "style must be shaded_with_edges, shaded, wireframe or shaded_with_hidden_edges")),
+    };
+    Ok(json!({"style": style, "index": index}))
+}
+
+fn view_toggle(p: &Value, cmd: &str, key: &str) -> Result<Value> {
+    view_params(p, cmd, &[key])?;
+    match p.get(key) {
+        Some(value) => value.as_bool().map(|on| json!({key: on})).ok_or_else(|| bad(cmd, format!("{key} must be a boolean"))),
+        None => Ok(json!({})),
+    }
+}
+
+fn spin(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.spin", "on")
+}
+fn grid(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.grid", "on")
+}
+fn ground_shadow(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.ground_shadow", "on")
+}
+fn navigation_bar(_s: &mut Session, p: &Value) -> Result<Value> {
+    view_toggle(p, "view.navigation_bar", "visible")
+}
+
+fn status_items(s: &mut Session, p: &Value) -> Result<Value> {
+    if !p.is_object() {
+        return Err(bad("view.status_items", "parameters must be an empty object"));
+    }
+    let _: crate::schema::view_navigation::StatusItemsParams =
+        serde_json::from_value(p.clone()).map_err(|e| bad("view.status_items", e.to_string()))?;
+    Ok(json!(crate::status_items::StatusItems { items: s.status_items() }))
+}
+
+fn render_focus(_s: &mut Session, p: &Value) -> Result<Value> {
+    let request: RenderFocus = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_focus", e.to_string()))?;
+    Ok(json!(request))
+}
+
+fn render_select(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: RenderSelect = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_select", e.to_string()))?;
+    let result = serde_json::to_value(request).map_err(|e| bad("view.render_select", e.to_string()))?;
+    if !s.selection.is_empty() {
+        s.selection.clear();
+        s.revision += 1;
+    }
+    Ok(result)
+}
+
+fn render_browser(_s: &mut Session, p: &Value) -> Result<Value> {
+    if !p.is_object() {
+        return Err(bad("view.render_browser", "expected an object with Browser controls"));
+    }
+    if p.get("open").is_some() {
+        let request: RenderBrowser = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_browser", e.to_string()))?;
+        return Ok(json!(request));
+    }
+    let request: RenderBrowserControls = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_browser", e.to_string()))?;
+    if request.by_look.is_none() && request.search.is_none() && request.query.is_none() {
+        return Err(bad("view.render_browser", "expected at least one Browser control"));
+    }
+    if request.query.as_ref().is_some_and(|q| q.len() > 1024) {
+        return Err(bad("query", "expected at most 1024 bytes"));
+    }
+    serde_json::to_value(request).map_err(|e| bad("view.render_browser", e.to_string()))
+}
+
+static RENDER_FRAME_CONTRACT: crate::schema::TypedContract<crate::schema::view_navigation::RenderFrame> = crate::schema::TypedContract::new();
+
+fn render_frame(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.render_frame";
+    let request: crate::schema::view_navigation::RenderFrame = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
+    if request.aspect.is_none() && request.thirds.is_none() && request.safe_area.is_none() && request.centre_mark.is_none() {
+        return Err(bad(cmd, "expected at least one frame control"));
+    }
+    serde_json::to_value(request).map_err(|e| bad(cmd, e.to_string()))
+}
+
+fn render_stage(_s: &mut Session, p: &Value) -> Result<Value> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Request {
+        stage: String,
+    }
+    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_stage", e.to_string()))?;
+    if !matches!(request.stage.as_str(), "look" | "light" | "frame" | "output") {
+        return Err(bad("stage", "expected look, light, frame or output"));
+    }
+    Ok(json!({"stage":request.stage}))
+}
+
+const RENDER_DOCK_CONTRACT: crate::schema::TypedContract<crate::schema::view_navigation::RenderDock> = crate::schema::TypedContract::new();
+
+fn render_dock(_s: &mut Session, p: &Value) -> Result<Value> {
+    let request: crate::schema::view_navigation::RenderDock =
+        serde_json::from_value(p.clone()).map_err(|e| bad("view.render_dock", e.to_string()))?;
+    serde_json::to_value(request).map_err(|e| bad("view.render_dock", e.to_string()))
+}
+
+fn render_inspector(_s: &mut Session, p: &Value) -> Result<Value> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Request {
+        visible: bool,
+    }
+    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("view.render_inspector", e.to_string()))?;
+    Ok(json!({"visible":request.visible}))
+}
+
+fn shots_strip(_s: &mut Session, p: &Value) -> Result<Value> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Request {
+        visible: bool,
+    }
+    let request: Request = serde_json::from_value(p.clone()).map_err(|e| bad("view.shots_strip", e.to_string()))?;
+    Ok(json!({"visible": request.visible}))
+}
+
 fn layout(_s: &mut Session, p: &Value) -> Result<Value> {
     let mode = p
         .get("mode")
@@ -143,8 +412,8 @@ fn history_layout(_s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(value) = p.get("dock") {
         let dock = value
             .as_str()
-            .filter(|v| matches!(*v, "bottom" | "left" | "under_browser"))
-            .ok_or_else(|| bad(cmd, "dock must be bottom, left or under_browser"))?;
+            .filter(|v| matches!(*v, "bottom" | "left" | "under_browser" | "browser"))
+            .ok_or_else(|| bad(cmd, "dock must be bottom, left, under_browser or browser"))?;
         result.insert("dock".into(), json!(dock));
     }
     if let Some(value) = p.get("collapsed") {
@@ -167,10 +436,19 @@ fn navigate(_s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(cmd, "invalid camera"));
     }
+    // A turn may ask the window to frame the whole model from the new direction, as `home` does
+    // (the navigators' Fit preference, #10091).
+    let framed = match p.get("fit") {
+        None => false,
+        Some(value) => value.as_bool().ok_or_else(|| bad(cmd, "fit must be a boolean"))?,
+    };
     if p.get("motion").is_some() {
+        if framed {
+            return Err(bad(cmd, "fit does not apply to a motion"));
+        }
         return continuous(cam, p);
     }
-    let mut fit = false;
+    let mut fit = framed;
     if let Some(value) = p.get("direction") {
         let dir = vec3(value)
             .filter(|v| v.is_finite() && v.len() <= 2.0)
@@ -288,6 +566,48 @@ mod tests {
     use super::*;
     use solidcraft_geom::Vec3;
     use solidcraft_render::UpAxis;
+
+    #[test]
+    fn view_bar_commands_validate_json_without_editing_design_or_history() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        for id in ["view.fit", "view.home"] {
+            assert_eq!(s.execute(id, &json!({})).unwrap(), json!({}));
+            assert_eq!(s.execute(id, &Value::Null).unwrap(), json!({}));
+            assert!(s.execute(id, &json!({"unexpected": true})).is_err());
+        }
+        for tool in ["orbit", "pan", "zoom", "none"] {
+            assert_eq!(s.execute("view.tool", &json!({"tool":tool})).unwrap(), json!({"tool":tool}));
+        }
+        for (index, style) in ["shaded_with_edges", "shaded", "wireframe", "shaded_with_hidden_edges"].into_iter().enumerate() {
+            assert_eq!(s.execute("view.visual_style", &json!({"style":style})).unwrap(), json!({"style":style,"index":index}));
+        }
+        for (id, key) in [("view.tool", "tool"), ("view.visual_style", "style")] {
+            assert!(s.execute(id, &json!({})).is_err());
+            assert!(s.execute(id, &Value::Null).is_err());
+            for value in [json!("unknown"), json!(""), json!(0), json!(true), Value::Null, json!([]), json!({})] {
+                assert!(s.execute(id, &json!({key:value})).is_err(), "{id}: {value}");
+            }
+        }
+        for (id, key) in [("view.spin", "on"), ("view.grid", "on"), ("view.ground_shadow", "on"), ("view.navigation_bar", "visible")] {
+            assert_eq!(s.execute(id, &json!({})).unwrap(), json!({}));
+            assert_eq!(s.execute(id, &Value::Null).unwrap(), json!({}));
+            for on in [false, true] {
+                assert_eq!(s.execute(id, &json!({key:on})).unwrap(), json!({key:on}));
+            }
+            for value in [Value::Null, json!(0), json!("true"), json!([]), json!({})] {
+                assert!(s.execute(id, &json!({key:value})).is_err(), "{id}: {value}");
+            }
+        }
+        for id in ["view.fit", "view.home", "view.tool", "view.spin", "view.visual_style", "view.grid", "view.ground_shadow", "view.navigation_bar"] {
+            for params in [json!(true), json!(1), json!("orbit"), json!([]), json!({"unexpected":true})] {
+                assert!(s.execute(id, &params).is_err(), "{id}: {params}");
+            }
+        }
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
+        assert!(s.camera.is_none());
+    }
 
     #[test]
     fn look_at_planes_uses_the_first_supported_selection_and_flips_on_repeat() {
@@ -439,6 +759,34 @@ mod tests {
         for bad in [json!(0), json!(-15), json!(181), json!(f64::NAN.to_string()), json!("15"), json!(null)] {
             assert!(turn("left", Some(bad.clone())).is_err(), "{bad}");
         }
+    }
+
+    /// #10091: a turn asked to frame the model reports `fit`, as home does; a motion can't.
+    #[test]
+    fn a_turn_with_fit_asks_the_window_to_frame_the_model() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        let cam = Camera { distance: 100.0, ..Default::default() };
+        for params in
+            [json!({"camera": cam, "direction": [0, 0, 1]}), json!({"camera": cam, "action": "right"}), json!({"camera": cam, "action": "clockwise"})]
+        {
+            let plain = s.execute("view.navigate", &params).unwrap();
+            assert_eq!(plain["fit"], false, "{params}");
+            let mut framed = params.clone();
+            framed["fit"] = json!(true);
+            let result = s.execute("view.navigate", &framed).unwrap();
+            assert_eq!(result["fit"], true, "{params}");
+            assert_eq!(result["camera"], plain["camera"], "fit asks for the framing, the turn is the same");
+            framed["fit"] = json!(false);
+            assert_eq!(s.execute("view.navigate", &framed).unwrap(), plain);
+        }
+        assert_eq!(s.execute("view.navigate", &json!({"camera": cam, "action": "home", "fit": false})).unwrap()["fit"], true, "home frames anyway");
+        for value in [json!(1), json!("yes"), Value::Null, json!([true])] {
+            assert!(s.execute("view.navigate", &json!({"camera": cam, "action": "right", "fit": value})).is_err(), "{value}");
+        }
+        assert!(s.execute("view.navigate", &json!({"camera": cam, "motion": "zoom", "factor": 2.0, "fit": true})).is_err());
+        assert!(s.execute("view.navigate", &json!({"camera": cam, "motion": "zoom", "factor": 2.0, "fit": false})).is_ok());
+        assert_eq!(s.doc.to_json(), before);
     }
 
     #[test]
@@ -617,9 +965,51 @@ fn ambient_occlusion(_s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({"enabled": enabled}))
 }
 
+fn perspective(_s: &mut Session, p: &Value) -> Result<Value> {
+    let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad("view.perspective", "enabled must be a boolean"))?;
+    Ok(json!({"enabled": enabled}))
+}
+
+const ANGLE_READOUT_CONTRACT: crate::schema::TypedContract<crate::schema::view_navigation::AngleReadoutParams> = crate::schema::TypedContract::new();
+
+/// The View angles readout under the orientation gizmo (#6032): a display setting the UI keeps.
+fn angle_readout(_s: &mut Session, p: &Value) -> Result<Value> {
+    let enabled = p.get("enabled").and_then(Value::as_bool).ok_or_else(|| bad("view.angle_readout", "`enabled` must be a boolean"))?;
+    let reply = crate::schema::view_navigation::AngleReadoutResult { enabled, param_warnings: Vec::new() };
+    serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
+fn next_tab(_s: &mut Session, _p: &Value) -> Result<Value> {
+    tab_step(1)
+}
+
+fn previous_tab(_s: &mut Session, _p: &Value) -> Result<Value> {
+    tab_step(-1)
+}
+
+/// The engine holds one design: the window, which holds the tabs, makes the step (#8565).
+fn tab_step(step: i8) -> Result<Value> {
+    serde_json::to_value(TabStep { step, param_warnings: Vec::new() }).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
 #[cfg(test)]
 mod ambient_occlusion_tests {
     use super::*;
+
+    #[test]
+    fn angle_readout_validates_display_setting_without_editing_design_or_history() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        for enabled in [true, false] {
+            assert_eq!(s.execute("view.angle_readout", &json!({"enabled": enabled})).unwrap(), json!({"enabled": enabled}));
+        }
+        for p in [json!({}), json!({"enabled": 1}), json!({"enabled": "true"}), json!({"enabled": null}), json!({"enabled": f64::NAN})] {
+            assert!(s.execute("view.angle_readout", &p).is_err(), "{p}");
+        }
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
+        assert!(s.camera.is_none(), "a display setting leaves the view where it is");
+    }
     #[test]
     fn validates_display_setting_without_editing_design_or_history() {
         let mut s = Session::default();
@@ -629,6 +1019,20 @@ mod ambient_occlusion_tests {
         }
         for p in [json!({}), json!({"enabled": 1}), json!({"enabled": "true"}), json!({"enabled": null})] {
             assert!(s.execute("view.ambient_occlusion", &p).is_err());
+        }
+        assert_eq!(s.doc.to_json(), before);
+        assert!(s.undo.is_empty());
+    }
+
+    #[test]
+    fn perspective_is_a_display_setting_without_editing_design_or_history() {
+        let mut s = Session::default();
+        let before = s.doc.to_json();
+        for enabled in [true, false] {
+            assert_eq!(s.execute("view.perspective", &json!({"enabled": enabled})).unwrap(), json!({"enabled": enabled}));
+        }
+        for p in [json!({}), json!({"enabled": 1}), json!({"enabled": "true"}), json!({"enabled": null})] {
+            assert!(s.execute("view.perspective", &p).is_err());
         }
         assert_eq!(s.doc.to_json(), before);
         assert!(s.undo.is_empty());
@@ -696,5 +1100,269 @@ fn workspace_layout_validates_modes_without_mutating_the_design() {
         assert!(session.execute("view.layout", &params).is_err());
     }
     assert_eq!(session.doc.to_json(), before);
+    assert!(session.undo.is_empty());
+}
+
+#[cfg(test)]
+#[test]
+fn render_workspace_focus_and_browser_validate_without_side_effects() {
+    let mut session = Session { camera: Some(Camera::default()), ..Default::default() };
+    let camera = session.camera;
+    let document = session.doc.clone();
+    let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
+    for (id, field) in [("view.render_focus", "on"), ("view.render_browser", "open")] {
+        let command = crate::find_command(id).unwrap();
+        assert!(command.contract.is_some() && command.output.is_some());
+        for on in [true, false] {
+            let request = json!({field:on});
+            assert_eq!(session.execute(id, &request).unwrap(), request);
+        }
+        for params in [
+            Value::Null,
+            json!([]),
+            json!({}),
+            json!({field:null}),
+            json!({field:"true"}),
+            json!({field:1e300}),
+            json!({field:[]}),
+            json!({field:true,"unknown":false}),
+        ] {
+            assert!(session.execute(id, &params).is_err(), "{id}: {params}");
+        }
+    }
+    assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
+    assert_eq!(session.camera, camera);
+    assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+}
+
+#[cfg(test)]
+#[test]
+fn render_workspace_shots_strip_is_a_validated_headless_preference_request() {
+    let mut session = Session::default();
+    let document = session.doc.clone();
+    let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
+    for visible in [false, true] {
+        assert_eq!(session.execute("view.shots_strip", &json!({"visible":visible})).unwrap(), json!({"visible":visible}));
+    }
+    for params in [
+        Value::Null,
+        json!({}),
+        json!([]),
+        json!({"visible":null}),
+        json!({"visible":"yes"}),
+        json!({"visible":1e300}),
+        json!({"visible":true,"unknown":true}),
+    ] {
+        assert!(session.execute("view.shots_strip", &params).is_err());
+    }
+    assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
+    assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+}
+
+#[cfg(test)]
+#[test]
+fn render_frame_validates_hostile_requests_without_saving_guides_or_evaluating() {
+    let mut s = Session::default();
+    let document = s.doc.clone();
+    let before = (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty());
+    for mode in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Strict] {
+        s.param_check = mode;
+        for aspect in ["16:9", "3:2", "1:1", "4:5", "9:16", "custom"] {
+            let request = json!({"aspect":aspect,"thirds":true,"safe_area":false,"centre_mark":true});
+            assert_eq!(s.execute("view.render_frame", &request).unwrap(), request);
+        }
+        for request in [json!({"thirds":false}), json!({"safe_area":true}), json!({"centre_mark":false})] {
+            assert_eq!(s.execute("view.render_frame", &request).unwrap(), request);
+        }
+        for request in [
+            Value::Null,
+            json!({}),
+            json!([]),
+            json!({"thirds":null}),
+            json!({"thirds":1e300}),
+            json!({"safe_area":"yes"}),
+            json!({"centre_mark":[]}),
+            json!({"aspect":"4:3"}),
+            json!({"aspect":"x".repeat(1025)}),
+            json!({"aspect":null}),
+            json!({"thirds":true,"extra":1}),
+        ] {
+            assert!(s.execute("view.render_frame", &request).is_err(), "{request}");
+        }
+    }
+    assert!(std::sync::Arc::ptr_eq(&document, &s.doc));
+    assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty()));
+    let command = crate::find_command("view.render_frame").unwrap();
+    assert!(command.contract.is_some() && command.output.is_some());
+}
+
+#[cfg(test)]
+#[test]
+fn render_workspace_stage_validates_without_document_changes_or_evaluation() {
+    let mut session = Session::default();
+    let document = session.doc.clone();
+    let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
+    for stage in ["look", "light", "frame", "output"] {
+        assert_eq!(session.execute("view.render_stage", &json!({"stage":stage})).unwrap(), json!({"stage":stage}));
+    }
+    for params in [
+        Value::Null,
+        json!({}),
+        json!([]),
+        json!({"stage":true}),
+        json!({"stage":1e300}),
+        json!({"stage":"camera"}),
+        json!({"stage":"look","extra":true}),
+    ] {
+        assert!(session.execute("view.render_stage", &params).is_err());
+    }
+    assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
+    assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+}
+
+#[cfg(test)]
+#[test]
+fn render_workspace_dock_validates_without_mutation() {
+    let mut session = Session::default();
+    session.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+    session.execute("edit.undo", &json!({})).unwrap();
+    let document = session.doc.clone();
+    let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty(), session.camera);
+    for panel in ["inspector", "browser"] {
+        for side in ["left", "right"] {
+            let params = json!({"panel":panel,"side":side});
+            assert_eq!(session.execute("view.render_dock", &params).unwrap(), params);
+        }
+    }
+    for params in [
+        Value::Null,
+        json!([]),
+        json!({}),
+        json!({"panel":"inspector"}),
+        json!({"side":"left"}),
+        json!({"panel":true,"side":"left"}),
+        json!({"panel":"inspector","side":null}),
+        json!({"panel":"inspector","side":1e300}),
+        json!({"panel":"other","side":"left"}),
+        json!({"panel":"inspector","side":"top"}),
+        json!({"panel":"browser","side":"left","unknown":true}),
+    ] {
+        assert!(session.execute("view.render_dock", &params).is_err(), "{params}");
+    }
+    assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
+    assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty(), session.camera));
+}
+
+#[cfg(test)]
+#[test]
+fn render_browser_focus_validates_without_document_changes_or_evaluation() {
+    let mut session = Session::default();
+    let doc = session.doc.clone();
+    let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
+    for request in [
+        json!({"kind":"nothing"}),
+        json!({"kind":"environment"}),
+        json!({"kind":"wear"}),
+        json!({"kind":"lighting"}),
+        json!({"kind":"light","id":"sun:0"}),
+        json!({"kind":"shot","id":"Hero"}),
+        json!({"kind":"output"}),
+        json!({"kind":"sampling"}),
+        json!({"kind":"effects"}),
+        json!({"kind":"check"}),
+    ] {
+        assert_eq!(session.execute("view.render_select", &request).unwrap(), request);
+    }
+    for request in [
+        Value::Null,
+        json!([]),
+        json!({}),
+        json!({"kind":"wear","id":"extra"}),
+        json!({"kind":"wear","extra":true}),
+        json!({"kind":"wear","id":1e300}),
+        json!({"kind":"object"}),
+        json!({"kind":"shot"}),
+        json!({"kind":"light","id":1}),
+        json!({"kind":"light","id":" "}),
+        json!({"kind":"shot","id":"x".repeat(1025)}),
+        json!({"kind":"output","id":"extra"}),
+        json!({"kind":"sampling","id":"extra"}),
+        json!({"kind":"effects","id":"extra"}),
+        json!({"kind":"check","id":"extra"}),
+        json!({"kind":"lighting","id":"extra"}),
+        json!({"kind":"environment","extra":true}),
+    ] {
+        assert!(session.execute("view.render_select", &request).is_err(), "{request}");
+    }
+    assert!(std::sync::Arc::ptr_eq(&doc, &session.doc));
+    assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+    let description = session.execute("engine.describe", &json!({"command":"view.render_select"})).unwrap();
+    for key in ["input", "output"] {
+        assert!(description[key].is_object());
+        assert!(description[key].to_string().contains("\"lighting\""));
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn render_select_wear_schema_and_strict_contract_agree() {
+    let mut session = Session { param_check: crate::schema::ParamCheck::Strict, ..Session::default() };
+    let spec = crate::find_command("view.render_select").unwrap();
+    let contract = spec.contract.unwrap();
+    assert_eq!(contract.allowed_keys().iter().map(String::as_str).collect::<Vec<_>>(), ["id", "kind"]);
+    let input = contract.input_schema().to_value();
+    let output = spec.output.unwrap()().to_value();
+    for schema in [input, output] {
+        assert!(schema["oneOf"][0]["properties"]["kind"]["enum"].as_array().unwrap().contains(&json!("wear")));
+        assert_eq!(schema["oneOf"][0]["additionalProperties"], false);
+    }
+    let request = json!({"kind":"wear"});
+    assert!(contract.check(&request).is_empty());
+    assert_eq!(session.execute("view.render_select", &request).unwrap(), request);
+    for request in [json!({"kind":"wear","id":"extra"}), json!({"kind":"wear","extra":true}), json!({"kind":"wear","id":1e300})] {
+        assert!(!contract.check(&request).is_empty());
+        assert!(session.execute("view.render_select", &request).is_err());
+    }
+    assert!(session.undo.is_empty() && session.redo.is_empty());
+    assert_eq!(session.evaluations, 0);
+}
+
+#[cfg(test)]
+#[test]
+fn render_browser_controls_validate_without_document_changes_or_evaluation() {
+    let mut session = Session::default();
+    let document = session.doc.clone();
+    let before = (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty());
+    for request in [json!({"by_look":true}), json!({"search":true,"query":"Copper"}), json!({"query":""})] {
+        assert_eq!(session.execute("view.render_browser", &request).unwrap(), request);
+    }
+    for request in [
+        Value::Null,
+        json!([]),
+        json!({}),
+        json!({"by_look":null}),
+        json!({"by_look":1}),
+        json!({"search":null,"extra":true}),
+        json!({"query":"x".repeat(1025)}),
+    ] {
+        assert!(session.execute("view.render_browser", &request).is_err());
+    }
+    assert!(std::sync::Arc::ptr_eq(&document, &session.doc));
+    assert_eq!(before, (session.undo.len(), session.redo.len(), session.revision, session.evaluations, session.is_dirty()));
+}
+
+#[test]
+fn render_inspector_visibility_is_validated_without_mutation() {
+    let mut session = Session::default();
+    let before = session.doc.to_json();
+    let revision = session.revision;
+    for visible in [false, true] {
+        assert_eq!(session.execute("view.render_inspector", &json!({"visible":visible})).unwrap(), json!({"visible":visible}));
+    }
+    for value in [json!({}), json!({"visible":null}), json!({"visible":"false"}), json!({"visible":true,"extra":1})] {
+        assert!(session.execute("view.render_inspector", &value).is_err());
+    }
+    assert_eq!(session.doc.to_json(), before);
+    assert_eq!(session.revision, revision);
     assert!(session.undo.is_empty());
 }

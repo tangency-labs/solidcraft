@@ -1,9 +1,12 @@
-//! 3D sketching in the viewport (the Sketch Palette's 3D Sketch option): the Line, Spline and
-//! Point tools take points off the sketch plane by snapping to model vertices, edges and faces
-//! and to points already drawn in 3D; segments that stay on the plane are ordinary sketch lines.
-//! A drawn 3D point (or curve end) clicked without a tool gets a move triad: drag an arrow to
-//! move along X, Y or Z, or the square to move parallel to the sketch plane. Everything runs
-//! `sketch.line3d`, `sketch.spline3d`, `sketch.point3d`, `sketch.move3d` and `sketch.line`.
+//! 3D sketching in the viewport (the Sketch Palette's 3D Sketch option): the Line, Arc, Spline
+//! and Point tools take points off the sketch plane by snapping to model vertices, edges and
+//! faces and to points already drawn in 3D; segments that stay on the plane are ordinary sketch
+//! lines and arcs. The 3D Line, Arc, Spline and Point commands have their own tools: every point
+//! they take is a world point, with no on-plane downgrade.
+//! A drawn 3D point (or curve end) clicked without a tool gets a move triad:
+//! drag an arrow to move along X, Y or Z, or the square to move parallel to the sketch plane.
+//! Everything runs `sketch.line3d`, `sketch.arc3d`, `sketch.spline3d`, `sketch.point3d`,
+//! `sketch.move3d`, `sketch.line` and `sketch.arc.three_point`.
 
 use std::cell::RefCell;
 
@@ -37,7 +40,17 @@ pub fn active(app: &SolveApp) -> bool {
 }
 
 fn takes(cmd: &str) -> bool {
-    matches!(cmd, "sketch.line" | "sketch.spline.fit_point" | "sketch.point")
+    matches!(
+        cmd,
+        "sketch.line"
+            | "sketch.arc.three_point"
+            | "sketch.arc3d"
+            | "sketch.spline.fit_point"
+            | "sketch.point"
+            | "sketch.line3d"
+            | "sketch.spline3d"
+            | "sketch.point3d"
+    )
 }
 
 /// Only 3D point-placing tools broaden sketch-point picking; ordinary selection stays local.
@@ -138,6 +151,11 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) -> 
             };
             report(app, r);
         }
+        "sketch.point3d" => {
+            // The dedicated 3D Point tool: every click is a world point, and the tool stays.
+            let r = app.run("sketch.point3d", json!({"point": [p.x, p.y, p.z]}));
+            report(app, r);
+        }
         "sketch.line" => {
             if let Some(a) = chain().last().copied() {
                 let r = match (on_plane(app, a), on_plane(app, p)) {
@@ -148,6 +166,23 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) -> 
             }
             let mut c = chain();
             c.push(p);
+            set_chain(Some(tool.cmd), c);
+        }
+        "sketch.arc.three_point" | "sketch.arc3d" => {
+            let mut c = chain();
+            c.push(p);
+            if c.len() >= 3 {
+                // Same click order as the 2D tool: start, end, then a point on the arc.
+                let (a, e, t) = (c[0], c[1], c[2]);
+                let r = match (on_plane(app, a), on_plane(app, e), on_plane(app, t)) {
+                    (Some(qa), Some(qe), Some(qt)) if tool.cmd == "sketch.arc.three_point" => {
+                        app.run("sketch.arc.three_point", json!({"start": [qa.x, qa.y], "end": [qe.x, qe.y], "through": [qt.x, qt.y]}))
+                    }
+                    _ => app.run("sketch.arc3d", json!({"start": [a.x, a.y, a.z], "through": [t.x, t.y, t.z], "end": [e.x, e.y, e.z]})),
+                };
+                report(app, r);
+                c.clear();
+            }
             set_chain(Some(tool.cmd), c);
         }
         _ => {
@@ -187,6 +222,12 @@ pub fn finish(app: &mut SolveApp) -> bool {
         };
         report(app, r);
     }
+    // The dedicated 3D tools keep every point as a world point: no on-plane downgrade.
+    if matches!(cmd, "sketch.line3d" | "sketch.spline3d") && pts.len() >= 2 {
+        let q: Vec<Value> = pts.iter().map(|p| json!([p.x, p.y, p.z])).collect();
+        let r = app.run(cmd, json!({ "points": q }));
+        report(app, r);
+    }
     set_chain(Some(cmd), Vec::new());
     true
 }
@@ -196,7 +237,8 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
     if !takes(t.cmd) || !active(app) {
         return false;
     }
-    let tk = Tokens::get();
+    // Drawn straight onto the view: its side's colours (#4146).
+    let tk = Tokens::view();
     let stroke = Stroke::new(1.5, tk.sketch_accent);
     let pts = if CHAIN.with(|c| c.borrow().0) == Some(t.cmd) { chain() } else { Vec::new() };
     let hover = HOVER.with(|h| *h.borrow());
@@ -218,14 +260,25 @@ pub fn preview(app: &SolveApp, t: &Tool, painter: &egui::Painter, proj: &Proj) -
             );
         }
         painter.text(
-            s + vec2(10.0, 10.0),
+            crate::tool_cursor::readout_at(painter, proj.rect, s),
             egui::Align2::LEFT_TOP,
             format!("{}, {}, {}", crate::prefs::show_mm(app, h.x, 1), crate::prefs::show_mm(app, h.y, 1), crate::prefs::show_mm(app, h.z, 1)),
             egui::FontId::proportional(crate::theme::Tokens::get().font_small),
             tk.text_dim,
         );
     }
-    if t.cmd == "sketch.spline.fit_point" && all.len() >= 2 {
+    if matches!(t.cmd, "sketch.arc.three_point" | "sketch.arc3d") && pts.len() == 2 {
+        // The arc the third click would finish: from the first point to the second, through the cursor.
+        let poly = match hover.map(|(h, _)| h) {
+            Some(h) => match solidcraft_engine::sketch::arc_from_3_points(pts[0], h, pts[1]) {
+                Some(a) => solidcraft_engine::sketch::arc_polyline(&a, 0.2),
+                None => vec![pts[0], h, pts[1]],
+            },
+            None => vec![pts[0], pts[1]],
+        };
+        let screen: Vec<Pos2> = poly.into_iter().filter_map(|p| proj.to_screen(p)).collect();
+        painter.add(Shape::line(screen, stroke));
+    } else if matches!(t.cmd, "sketch.spline.fit_point" | "sketch.spline3d") && all.len() >= 2 {
         let mut w: Vec<Vec3> = pts.clone();
         if let Some((h, _)) = hover {
             w.push(h);
@@ -355,7 +408,8 @@ pub fn show(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     if app.session.active_sketch.is_none() {
         return;
     }
-    let tk = Tokens::get();
+    // Drawn straight onto the view: its side's colours (#4146).
+    let tk = Tokens::view();
     let sel = TRIAD.with(|t| t.borrow().clone());
     for (w, i, p) in drawn_points(app) {
         if let Some(s) = proj.to_screen(p) {

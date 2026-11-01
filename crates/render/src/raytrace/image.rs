@@ -13,7 +13,7 @@ use crate::{
     film::primary::PrimaryFilm,
     surface::{OpaqueSurface, srgb8_to_linear},
 };
-use solidcraft_geom::Vec3;
+use solidcraft_geom::{Vec3, srgb::encode8};
 
 #[cfg(test)]
 #[path = "environment_image_tests.rs"]
@@ -471,8 +471,10 @@ pub struct ImageTask {
     looks: Vec<Look>,
     body: usize,
     triangle: usize,
-    face_cursor: usize,
-    chosen: Option<crate::FaceAppearance>,
+    /// The current body's face looks as (face, index into `faces`), sorted by
+    /// face with only the first entry per face, so each triangle is one lookup.
+    face_looks: Vec<(u32, usize)>,
+    face_looks_ready: bool,
     builder: Option<BvhBuilder>,
     bvh: Option<Bvh>,
     build_used: u64,
@@ -624,8 +626,8 @@ impl ImageTask {
             looks,
             body: 0,
             triangle: 0,
-            face_cursor: 0,
-            chosen: None,
+            face_looks: Vec::new(),
+            face_looks_ready: false,
             builder: None,
             bvh: None,
             build_used: 0,
@@ -682,8 +684,20 @@ impl ImageTask {
         let Some(indices) = body.mesh.triangles.get(self.triangle) else {
             self.body += 1;
             self.triangle = 0;
+            self.face_looks_ready = false;
             return Ok(());
         };
+        if !self.face_looks_ready {
+            // Built once per body instead of scanning `faces` for every triangle.
+            // The first entry for a face wins, as the scan this replaces did.
+            self.work.charge(body.faces.len() as u64, &self.cancel).map_err(error)?;
+            self.face_looks.clear();
+            self.face_looks.try_reserve_exact(body.faces.len()).map_err(|_| error(TraceError::AllocationFailed))?;
+            self.face_looks.extend(body.faces.iter().enumerate().map(|(index, look)| (look.face, index)));
+            self.face_looks.sort_unstable();
+            self.face_looks.dedup_by_key(|entry| entry.0);
+            self.face_looks_ready = true;
+        }
         let mut vertices = [Vec3::ZERO; 3];
         let mut normals = [Vec3::ZERO; 3];
         for ((p, n), i) in vertices.iter_mut().zip(normals.iter_mut()).zip(indices) {
@@ -693,20 +707,14 @@ impl ImageTask {
         let face = body.mesh.tri_face.get(self.triangle).copied();
         let mut color = body.color;
         let mut surface = body.surface;
-        if let Some(look) = body.faces.get(self.face_cursor) {
-            self.face_cursor += 1;
-            if Some(look.face) == face {
-                self.chosen = Some(look.clone());
-                self.face_cursor = body.faces.len();
-            } else {
-                return Ok(());
-            }
-        }
-        if let Some(look) = self.chosen.take() {
+        let look = face
+            .and_then(|face| self.face_looks.binary_search_by_key(&face, |entry| entry.0).ok())
+            .and_then(|at| self.face_looks.get(at))
+            .and_then(|entry| body.faces.get(entry.1));
+        if let Some(look) = look {
             color = look.color;
             surface = look.surface;
         }
-        self.face_cursor = 0;
         let surface = match surface {
             Some(s) => s,
             None => OpaqueSurface::new(Vec3::new(srgb8_to_linear(color[0]), srgb8_to_linear(color[1]), srgb8_to_linear(color[2])), 0.0, 0.7, 1.5)
@@ -749,7 +757,7 @@ impl ImageTask {
         for _ in 0..repeats {
             self.pixel_radiance += radiance;
             if !self.pixel_radiance.is_finite()
-                || [self.pixel_radiance.x, self.pixel_radiance.y, self.pixel_radiance.z].into_iter().any(|v| v < 0.0 || v > 1e12)
+                || [self.pixel_radiance.x, self.pixel_radiance.y, self.pixel_radiance.z].into_iter().any(|v| !(0.0..=1e12).contains(&v))
             {
                 return Err(invalid("reflection radiance exceeds finite transport bound"));
             }
@@ -758,7 +766,7 @@ impl ImageTask {
         self.pending.clear();
         if self.sample == self.sample_count() {
             let display = map_to_display(self.pixel_radiance / self.sample as f64, self.options.exposure_ev).map_err(error)?;
-            self.pixels.extend_from_slice(&[encode(display.x), encode(display.y), encode(display.z), 255]);
+            self.pixels.extend_from_slice(&[encode8(display.x), encode8(display.y), encode8(display.z), 255]);
             self.pixel += 1;
             self.sample = 0;
             self.pixel_radiance = Vec3::ZERO;
@@ -1641,7 +1649,7 @@ fn composite_spatial(premultiplied: Vec3, covered: u16, attempts: u16, backgroun
         let bg = Vec3::new(srgb8_to_linear(background[0]), srgb8_to_linear(background[1]), srgb8_to_linear(background[2]));
         geometry * coverage + bg * (1.0 - coverage)
     };
-    Ok([encode(display.x), encode(display.y), encode(display.z), 255])
+    Ok([encode8(display.x), encode8(display.y), encode8(display.z), 255])
 }
 
 /// One sample preparation, one traversal operation OR one visible-sum operation.
@@ -1734,11 +1742,6 @@ fn add_punctual_radiance(pending: &mut PendingPixel, contribution: Vec3, diagnos
 fn multiply(a: Vec3, b: Vec3) -> Vec3 {
     Vec3::new(a.x * b.x, a.y * b.y, a.z * b.z)
 }
-fn encode(c: f64) -> u8 {
-    let s = if c <= 0.0031308 { 12.92 * c } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
-    (s.clamp(0.0, 1.0) * 255.0).round() as u8
-}
-
 #[cfg(test)]
 fn shadow_ray(ray: Ray, hit: super::Hit, light: Vec3, vertices: [Vec3; 3]) -> super::Result<Ray> {
     let mut n = hit.geometry.geometric_normal;

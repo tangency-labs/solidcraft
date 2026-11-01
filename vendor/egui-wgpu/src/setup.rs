@@ -151,8 +151,9 @@ impl From<WgpuSetupExisting> for WgpuSetup {
 ///
 /// This can be used for fully custom adapter selection.
 /// If available, `wgpu::Surface` is passed to allow checking for surface compatibility.
+/// Return `Ok(None)` to use the normal wgpu adapter request.
 pub type NativeAdapterSelectorMethod = Arc<
-    dyn Fn(&[wgpu::Adapter], Option<&wgpu::Surface<'_>>) -> Result<wgpu::Adapter, String>
+    dyn Fn(&[wgpu::Adapter], Option<&wgpu::Surface<'_>>) -> Result<Option<wgpu::Adapter>, String>
         + Send
         + Sync,
 >;
@@ -189,13 +190,13 @@ pub struct WgpuSetupCreateNew {
     /// `eframe` 's winit & web integrations will attempt to fill the display handle automatically if it is left empty.
     pub display_handle: Option<Box<dyn EguiDisplayHandle>>,
 
-    /// Power preference for the adapter if [`Self::native_adapter_selector`] is not set or targeting web.
+    /// Power preference when the selector is absent, returns `Ok(None)`, or when targeting web.
     pub power_preference: wgpu::PowerPreference,
 
     /// Optional selector for native adapters.
     ///
     /// This field has no effect when targeting web!
-    /// Otherwise, if set [`Self::power_preference`] is ignored and the adapter is instead selected by this method.
+    /// Otherwise, this method can select an adapter or return `Ok(None)` to request one with [`Self::power_preference`].
     /// Note that [`Self::instance_descriptor`]'s [`wgpu::InstanceDescriptor::backends`]
     /// are still used to filter the adapter enumeration in the first place.
     ///

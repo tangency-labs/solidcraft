@@ -26,6 +26,7 @@
 //! `agent_off_thread`, off by default).
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, TryRecvError};
 
 use serde_json::{Value, json};
@@ -37,7 +38,7 @@ use crate::control::ControlRequest;
 
 /// Areas whose commands only compute the design (no files written, nothing started outside the
 /// app), so evaluating them ahead on a copy has no effect but a warm cache.
-const AHEAD_AREAS: [&str; 22] = [
+const AHEAD_AREAS: &[&str] = &[
     "appearance",
     "assembly",
     "body",
@@ -63,16 +64,24 @@ const AHEAD_AREAS: [&str; 22] = [
 ];
 
 /// Parameters that name a file or folder: a command given one runs here, as before.
-const NAMES_A_FILE: [&str; 8] = ["path", "paths", "file", "files", "dir", "folder", "url", "out"];
+const NAMES_A_FILE: &[&str] = &["path", "paths", "file", "files", "dir", "folder", "url", "out"];
 
 /// Commands that change nothing in the design and write a file: they run on a copy.
-const ANSWERED_ON_A_COPY: [&str; 2] = ["file.export", "file.save_mesh"];
+const ANSWERED_ON_A_COPY: &[&str] = &["file.export", "file.save_mesh"];
 
 /// Commands that only read the design, which can take long on a large one (a measure of every
 /// body, an inspection that measures them, #4604; a clearance or interference check of every pair
 /// of bodies, minutes on an assembly of 150): they run on a copy too, whatever the preference,
 /// since an answer from the design as it was when asked has no order to keep.
-const READ_ON_A_COPY: [&str; 4] = ["inspect.measure", "document.inspect", "inspect.clearance", "inspect.interference"];
+const READ_ON_A_COPY: &[&str] = &[
+    "inspect.measure",
+    "document.inspect",
+    "inspect.clearance",
+    "inspect.interference",
+    // Physical properties of a component or placement: every body of every placement (#8706).
+    "component.properties",
+    "occurrence.properties",
+];
 
 /// Exports and readings computing at once; more run here.
 const MAX_ANSWERING: usize = 4;
@@ -144,6 +153,8 @@ pub struct ControlJob {
     pub(crate) started: f64,
     /// The command, as the toolbar names it.
     pub(crate) label: String,
+    /// How far it has got (evaluated ahead).
+    steps: Option<Arc<Steps>>,
 }
 
 impl ControlJob {
@@ -178,23 +189,58 @@ fn spawn(
     Some(rx)
 }
 
+/// How far a request evaluating ahead has got: the step running (from 1) of how many, and
+/// each step's command as the toolbar names it.
+pub(crate) struct Steps {
+    now: AtomicUsize,
+    labels: Vec<String>,
+    total: usize,
+}
+
+impl Steps {
+    fn new(app: &SolveApp, request: &Value, commands: &[(String, Value)]) -> Arc<Steps> {
+        // A batch counts all its steps, also those after the ones computed ahead.
+        let total = request.get("commands").and_then(Value::as_array).map_or(commands.len(), Vec::len).max(commands.len());
+        Arc::new(Steps { now: AtomicUsize::new(0), labels: commands.iter().map(|(c, _)| label(app, c)).collect(), total })
+    }
+
+    /// What the chip says: the command running, and in a batch which step it is
+    /// (`3/21 · Extrude`).
+    pub(crate) fn shown(&self) -> String {
+        let now = self.now.load(Ordering::Relaxed).max(1);
+        let label = self.labels.get(now - 1).or(self.labels.last()).cloned().unwrap_or_default();
+        if self.total > 1 { format!("{now}/{} · {label}", self.total) } else { label }
+    }
+}
+
 /// Evaluate `commands` ahead on a copy of the session, on a worker (with the folder scope
 /// `request` names). What it computes is kept for the run here.
-fn evaluate_ahead(app: &SolveApp, request: &Value, commands: Vec<(String, Value)>) -> Option<(Receiver<Option<Value>>, Arc<KeptResults>)> {
+fn evaluate_ahead(
+    app: &SolveApp,
+    request: &Value,
+    commands: Vec<(String, Value)>,
+) -> Option<(Receiver<Option<Value>>, Arc<KeptResults>, Arc<Steps>)> {
     let scope = crate::control::request_scope(app, request).ok()?;
     let ahead = app.session.ahead();
     let kept = ahead.kept();
+    let steps = Steps::new(app, request, &commands);
+    let counting = steps.clone();
     let rx = spawn(scope, move || {
-        let _ = ahead.evaluate(&commands);
+        let _ = ahead.evaluate_counting(&commands, &counting.now);
         None
     })?;
-    Some((rx, kept))
+    Some((rx, kept, steps))
 }
 
 /// Start computing a design change ahead, for the design as it is now.
-fn begin_ahead(app: &SolveApp, req: &ControlRequest, commands: Vec<(String, Value)>, tries: u8) -> Option<(Work, Receiver<Option<Value>>)> {
-    let (rx, kept) = evaluate_ahead(app, &req.params, commands.clone())?;
-    Some((Work::Ahead { commands, doc: app.session.doc.clone(), revision: app.session.revision, tries, kept }, rx))
+fn begin_ahead(
+    app: &SolveApp,
+    req: &ControlRequest,
+    commands: Vec<(String, Value)>,
+    tries: u8,
+) -> Option<(Work, Receiver<Option<Value>>, Arc<Steps>)> {
+    let (rx, kept, steps) = evaluate_ahead(app, &req.params, commands.clone())?;
+    Some((Work::Ahead { commands, doc: app.session.doc.clone(), revision: app.session.revision, tries, kept }, rx, steps))
 }
 
 impl SolveApp {
@@ -222,6 +268,8 @@ pub struct Ahead {
     pub(crate) started: f64,
     /// The command, as the toolbar names it.
     pub(crate) label: String,
+    /// How far it has got.
+    pub(crate) steps: Arc<Steps>,
 }
 
 impl Ahead {
@@ -235,8 +283,8 @@ impl Ahead {
         }
         let commands = ahead_commands(method, request);
         let label = label(app, &commands.first()?.0);
-        let (done, kept) = evaluate_ahead(app, request, commands)?;
-        Some(Ahead { done, kept, started: crate::now_ms(), label })
+        let (done, kept, steps) = evaluate_ahead(app, request, commands)?;
+        Some(Ahead { done, kept, started: crate::now_ms(), label, steps })
     }
 
     /// The evaluation is in (or its worker ended).
@@ -298,8 +346,11 @@ fn within_wait(app: &SolveApp, rx: &Receiver<Option<Value>>) -> Option<Option<Va
 impl SolveApp {
     /// Since when an agent's design change has been computing off the window thread (ms), and
     /// its command.
-    pub fn agent_computing(&self) -> Option<(f64, &str)> {
-        self.control_job.as_ref().map(|j| (j.started, j.label.as_str())).or_else(|| self.agent.computing())
+    pub fn agent_computing(&self) -> Option<(f64, String)> {
+        self.control_job
+            .as_ref()
+            .map(|j| (j.started, j.steps.as_ref().map_or_else(|| j.label.clone(), |s| s.shown())))
+            .or_else(|| self.agent.computing())
     }
 
     /// Stop waiting for the agent's design change that is computing: it is answered as stopped
@@ -346,8 +397,8 @@ impl SolveApp {
         }
         let commands = ahead_commands(&req.method, &req.params);
         let Some(first) = commands.first().map(|(c, _)| c.clone()) else { return Some(req) };
-        let Some((work, rx)) = begin_ahead(self, &req, commands, 0) else { return Some(req) };
-        let job = ControlJob { label: label(self, &first), req, work, done: rx, started: crate::now_ms() };
+        let Some((work, rx, steps)) = begin_ahead(self, &req, commands, 0) else { return Some(req) };
+        let job = ControlJob { label: label(self, &first), req, work, done: rx, started: crate::now_ms(), steps: Some(steps) };
         if within_wait(self, &job.done).is_some() {
             // Computed within the wait: it runs now, as before, finding what was computed.
             let Work::Ahead { kept, .. } = job.work else { return Some(job.req) };
@@ -363,15 +414,35 @@ impl SolveApp {
     /// is taken care of; `Some`: it runs here (no threads).
     fn answer_on_a_copy(&mut self, req: ControlRequest, id: &'static str, params: Value) -> Option<ControlRequest> {
         let Ok(scope) = crate::control::request_scope(self, &req.params) else { return Some(req) };
+        // The request's own level (#9184) checks it on the copy, and the reply says so, as
+        // `control::handle` does; a word that is no level is refused there.
+        let Ok(level) = crate::control::request_param_check(&req.method, &req.params) else { return Some(req) };
         let mut copy = self.session.scratch();
+        if let Some(level) = level {
+            copy.param_check = level;
+        }
+        // The copy has no history and no file (#9624): an inspection reports the design's own.
+        let s = &self.session;
+        let own = (id == "document.inspect").then(|| (s.undo.len(), s.redo.len(), s.path.clone()));
         let rx = spawn(scope, move || {
-            Some(match copy.execute(id, &params) {
-                Ok(v) => json!({"ok": true, "result": v}),
+            let mut reply = match copy.execute(id, &params) {
+                Ok(mut v) => {
+                    if let (Some((undo, redo, path)), Some(o)) = (own, v.as_object_mut()) {
+                        o.insert("undo".into(), json!(undo));
+                        o.insert("redo".into(), json!(redo));
+                        o.insert("path".into(), json!(path));
+                    }
+                    json!({"ok": true, "result": v})
+                }
                 Err(e) => json!({"ok": false, "error": e.to_string()}),
-            })
+            };
+            if let Some(level) = level {
+                reply["param_check"] = json!(level.name());
+            }
+            Some(reply)
         });
         let Some(rx) = rx else { return Some(req) };
-        let job = ControlJob { label: label(self, id), req, work: Work::Answer, done: rx, started: crate::now_ms() };
+        let job = ControlJob { label: label(self, id), req, work: Work::Answer, done: rx, started: crate::now_ms(), steps: None };
         match within_wait(self, &job.done) {
             Some(reply) => self.answered(job, reply),
             None => self.control_answering.push(job),
@@ -442,8 +513,8 @@ impl SolveApp {
         }
         if (!same || s.revision != revision) && tries < MAX_TRIES {
             // A person's edit went first: computed again for the design as it is now.
-            if let Some((work, rx)) = begin_ahead(self, &job.req, commands, tries + 1) {
-                self.control_job = Some(ControlJob { work, done: rx, ..job });
+            if let Some((work, rx, steps)) = begin_ahead(self, &job.req, commands, tries + 1) {
+                self.control_job = Some(ControlJob { work, done: rx, steps: Some(steps), ..job });
                 return;
             }
         }

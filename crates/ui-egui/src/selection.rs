@@ -29,6 +29,19 @@ pub(crate) fn alignment_points(selection: &[Sel]) -> Option<[serde_json::Value; 
     (a != b).then_some([a, b])
 }
 
+/// Coincident's two operands for a two-item selection: points and curves by id, a line's
+/// midpoint as `{midpoint: line}`, which the command ties a point to (#10311).
+pub(crate) fn coincident_operands(selection: &[Sel]) -> Option<serde_json::Value> {
+    let [a, b] = selection else { return None };
+    let operand = |s: &Sel| match s {
+        Sel::SketchPoint { id } | Sel::SketchCurve { id, .. } => Some(serde_json::json!(id)),
+        Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
+        _ => None,
+    };
+    let (a, b) = (operand(a)?, operand(b)?);
+    (a != b).then(|| serde_json::json!({"a": a, "b": b}))
+}
+
 /// The current middle of a finite straight sketch edge.
 pub(crate) fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, line: usize) -> Option<solidcraft_engine::geom::Vec2> {
     let curve = sk.curves.get(line)?;
@@ -67,6 +80,13 @@ pub const ORIGIN: Accept = 4096;
 pub const SKETCH_LINES: Accept = 8192;
 /// Sketch points with an explicit source sketch; only for commands that consume external references.
 pub const EXTERNAL_POINTS: Accept = 16384;
+/// Named construction points.
+pub const CONSTRUCTION_POINTS: Accept = 32768;
+/// What a 3D axis input takes (Revolve, Circular Pattern, Plane at Angle, Move's Rotate): an
+/// origin or construction axis, a straight sketch line, and an edge or face of the model that
+/// has an axis (a straight or circular edge, a cylinder, cone or torus face; the dialog takes
+/// only those, `Dialog::candidate_on`).
+pub const AXIS_PICKS: Accept = AXES | EDGES | FACES;
 
 /// One selection input of a command dialog ("Profiles", "Edges", "Plane", ...).
 #[derive(Clone, Debug, PartialEq)]
@@ -92,21 +112,25 @@ impl SelInput {
         self
     }
 
-    /// The selection a hit stands for, if this input accepts it.
-    pub fn accepts(&self, h: &Hit, planar: impl Fn(&str, usize) -> bool) -> Option<Sel> {
+    /// The selection a hit stands for, if this input accepts it. A curve of another sketch than
+    /// the `active` one names its sketch: curve ids repeat from one sketch to the next (#3726).
+    pub fn accepts(&self, h: &Hit, active: Option<u64>, planar: impl Fn(&str, usize) -> bool) -> Option<Sel> {
         let a = self.accept;
         match h {
             Hit::Profile { sketch, index } if a & PROFILES != 0 => Some(Sel::Profile { sketch: *sketch, index: *index }),
-            Hit::Edge { body, index, mid } if a & EDGES != 0 => Some(Sel::Edge { body: body.clone(), index: *index, point: *mid }),
+            Hit::Edge { body, index, mid, .. } if a & EDGES != 0 => Some(Sel::Edge { body: body.clone(), index: *index, point: *mid }),
             Hit::Face { body, index, point } if a & FACES != 0 || (a & PLANAR_FACES != 0 && planar(body, *index)) => {
                 Some(Sel::Face { body: body.clone(), index: *index, point: *point })
             }
             Hit::Face { body, .. } if a & BODIES != 0 => Some(Sel::Body { name: body.clone() }),
             Hit::Plane { name, .. } if a & PLANES != 0 => Some(Sel::Plane { name: name.clone() }),
             Hit::Axis { name } if a & AXES != 0 => Some(Sel::Axis { name: name.clone() }),
-            Hit::SketchCurve { id, straight: true, .. } if a & AXES != 0 => Some(Sel::SketchCurve { id: id.clone() }),
+            Hit::ConstructionPoint { name } if a & CONSTRUCTION_POINTS != 0 => Some(Sel::ConstructionPoint { name: name.clone() }),
+            // A straight sketch line stands for an axis only in an input that takes axes for
+            // what they are: an input that takes curves too (Measure) takes the line as its curve.
+            Hit::SketchCurve { sketch, id, straight: true, .. } if a & AXES != 0 && a & CURVES == 0 => Some(curve_pick(id, *sketch, active)),
             Hit::SketchCurve { sketch, id, .. } if a & SKETCH_LINES != 0 => Some(Sel::ExternalSketchCurve { sketch: *sketch, id: id.clone() }),
-            Hit::SketchCurve { id, .. } if a & CURVES != 0 => Some(Sel::SketchCurve { id: id.clone() }),
+            Hit::SketchCurve { sketch, id, .. } if a & CURVES != 0 => Some(curve_pick(id, *sketch, active)),
             Hit::SketchPoint { sketch, id, .. } if a & EXTERNAL_POINTS != 0 => Some(Sel::ExternalSketchPoint { sketch: *sketch, id: id.clone() }),
             Hit::SketchPoint { id, .. } if a & SKETCH_POINTS != 0 => Some(Sel::SketchPoint { id: id.clone() }),
             Hit::SketchPoint { sketch, id, .. } if a & POINTS != 0 => Some(Sel::SketchPoint { id: format!("{sketch}:{id}") }),
@@ -144,10 +168,18 @@ impl SelInput {
     }
 }
 
+/// A sketch curve as a dialog's pick. A curve of another sketch than the `active` one names its
+/// sketch: curve ids repeat from one sketch to the next (#3726).
+pub(crate) fn curve_pick(id: &str, sketch: u64, active: Option<u64>) -> Sel {
+    Sel::SketchCurve { id: id.to_string(), sketch: (active != Some(sketch)).then_some(sketch) }
+}
+
 /// Projections preserve pick order and repetitions; callers own any deduplication or frames.
 pub(crate) trait SelectionExt {
     fn body_names(&self) -> Vec<String>;
     fn curve_ids(&self) -> Vec<String>;
+    /// The sketch every curve pick names, when they all name the same one (#3726).
+    fn named_sketch(&self) -> Option<u64>;
     fn profiles(&self) -> Vec<(u64, usize)>;
     fn edge_points(&self) -> Vec<Vec3>;
     fn face_points(&self) -> Vec<Vec3>;
@@ -158,7 +190,12 @@ impl SelectionExt for [Sel] {
         self.iter().filter_map(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None }).collect()
     }
     fn curve_ids(&self) -> Vec<String> {
-        self.iter().filter_map(|x| if let Sel::SketchCurve { id } = x { Some(id.clone()) } else { None }).collect()
+        self.iter().filter_map(|x| if let Sel::SketchCurve { id, .. } = x { Some(id.clone()) } else { None }).collect()
+    }
+    fn named_sketch(&self) -> Option<u64> {
+        let mut named = self.iter().filter_map(|x| if let Sel::SketchCurve { sketch, .. } = x { Some(*sketch) } else { None });
+        let first = named.next()??;
+        named.all(|k| k == Some(first)).then_some(first)
     }
     fn profiles(&self) -> Vec<(u64, usize)> {
         self.iter().filter_map(|x| if let Sel::Profile { sketch, index } = x { Some((*sketch, *index)) } else { None }).collect()
@@ -235,16 +272,46 @@ pub fn ray_quad(o: Vec3, d: Vec3, q: &[Vec3; 4]) -> Option<f64> {
 }
 
 /// A rectangle dragged in the viewport selects by window (dragged left to right: items fully
-/// inside) or by crossing (right to left: items touching it).
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// inside) or by crossing (right to left: items touching it). A freehand lasso (#4376, the
+/// selection shape `UiState::lasso_select`) selects by window whichever way it is drawn.
+#[derive(Clone, Debug, PartialEq)]
 pub struct BoxSel {
+    /// The rectangle, or the bounds of the lasso.
     pub rect: Rect,
     pub crossing: bool,
+    /// The lasso's points in drawing order, closed back to the first; empty for a rectangle.
+    pub lasso: Vec<Pos2>,
 }
+
+/// Lasso points closer together than this (screen points) add nothing to its shape.
+const LASSO_STEP: f32 = 2.0;
 
 impl BoxSel {
     pub fn from_drag(start: Pos2, end: Pos2) -> BoxSel {
-        BoxSel { rect: Rect::from_two_pos(start, end), crossing: end.x < start.x }
+        BoxSel { rect: Rect::from_two_pos(start, end), crossing: end.x < start.x, lasso: Vec::new() }
+    }
+
+    /// A lasso through these screen points (non-finite ones are left out).
+    pub fn lasso(points: &[Pos2]) -> BoxSel {
+        let mut sel = BoxSel { rect: Rect::NOTHING, crossing: false, lasso: Vec::new() };
+        for p in points {
+            sel.extend(*p);
+        }
+        sel
+    }
+
+    /// Is this a lasso rather than a rectangle?
+    pub fn is_lasso(&self) -> bool {
+        !self.lasso.is_empty()
+    }
+
+    /// The lasso drawn on to `p` (a point too close to the last one adds nothing).
+    pub fn extend(&mut self, p: Pos2) {
+        if !p.is_finite() || self.lasso.last().is_some_and(|q| q.distance(p) < LASSO_STEP) {
+            return;
+        }
+        self.lasso.push(p);
+        self.rect = if self.lasso.len() == 1 { Rect::from_min_max(p, p) } else { self.rect.union(Rect::from_min_max(p, p)) };
     }
 
     /// Does the polyline (screen points) count as selected?
@@ -252,11 +319,36 @@ impl BoxSel {
         if pts.is_empty() {
             return false;
         }
+        if self.is_lasso() {
+            return self.lasso_takes(pts);
+        }
         if !self.crossing {
             return pts.iter().all(|p| self.rect.contains(*p));
         }
         pts.iter().any(|p| self.rect.contains(*p)) || pts.windows(2).any(|w| segment_hits_rect(w[0], w[1], self.rect))
     }
+
+    /// Every point inside the closed lasso, and no segment crossing its outline (a concave lasso
+    /// can hold both ends of a segment that leaves it in between).
+    fn lasso_takes(&self, pts: &[Pos2]) -> bool {
+        let n = self.lasso.len();
+        if n < 3 || !pts.iter().all(|p| self.rect.contains(*p) && inside_polygon(*p, &self.lasso)) {
+            return false;
+        }
+        let edges: Vec<(Pos2, Pos2)> = self.lasso.iter().copied().zip(self.lasso.iter().copied().cycle().skip(1)).collect();
+        !pts.windows(2).any(|w| edges.iter().any(|&(r, s)| segments_cross(w[0], w[1], r, s)))
+    }
+}
+
+/// Is `p` inside the closed polygon (even-odd rule)?
+pub fn inside_polygon(p: Pos2, polygon: &[Pos2]) -> bool {
+    let mut inside = false;
+    for (a, b) in polygon.iter().zip(polygon.iter().cycle().skip(1)) {
+        if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
+            inside = !inside;
+        }
+    }
+    inside
 }
 
 /// Does the segment a–b cross the rectangle's boundary or lie inside it?
@@ -327,6 +419,29 @@ mod tests {
         assert!(c.takes(&inside) && c.takes(&partly) && c.takes(&through) && !c.takes(&away));
     }
 
+    /// #4376: a freehand lasso takes what is wholly inside it, whichever way it was drawn. An L
+    /// shaped loop leaves out what sits in its notch, and a segment whose ends are both inside but
+    /// which cuts across the notch.
+    #[test]
+    fn a_lasso_takes_only_what_is_wholly_inside_it() {
+        let l = [pos2(0.0, 0.0), pos2(100.0, 0.0), pos2(100.0, 40.0), pos2(40.0, 40.0), pos2(40.0, 100.0), pos2(0.0, 100.0)];
+        for path in [l.to_vec(), l.iter().rev().copied().collect::<Vec<_>>()] {
+            let lasso = BoxSel::lasso(&path);
+            assert!(!lasso.crossing, "a lasso selects by window");
+            assert!(lasso.takes(&[pos2(10.0, 10.0), pos2(90.0, 20.0)]), "inside the bottom arm");
+            assert!(lasso.takes(&[pos2(10.0, 50.0), pos2(30.0, 90.0)]), "inside the left arm");
+            assert!(!lasso.takes(&[pos2(60.0, 60.0), pos2(90.0, 90.0)]), "in the notch");
+            assert!(!lasso.takes(&[pos2(20.0, 90.0), pos2(90.0, 20.0)]), "both ends inside, across the notch");
+            assert!(!lasso.takes(&[pos2(10.0, 10.0), pos2(120.0, 10.0)]), "partly outside");
+            assert!(!lasso.takes(&[]), "nothing");
+            assert_eq!(lasso.rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 100.0)), "the loop's bounds");
+        }
+        // Fewer than three points enclose nothing; hostile coordinates never panic.
+        assert!(!BoxSel::lasso(&[pos2(0.0, 0.0), pos2(10.0, 10.0)]).takes(&[pos2(5.0, 5.0)]));
+        let nan = BoxSel::lasso(&[pos2(f32::NAN, 0.0), pos2(10.0, f32::INFINITY), pos2(0.0, 10.0)]);
+        assert!(!nan.takes(&[pos2(1.0, 1.0)]));
+    }
+
     #[test]
     fn inputs_toggle_and_filter() {
         let mut inp = SelInput::new("Edges", EDGES, true);
@@ -337,10 +452,10 @@ mod tests {
         inp.toggle(vec![e(2), e(3)]);
         assert_eq!(inp.items, vec![e(1)]);
         let face = Hit::Face { body: "B".into(), index: 0, point: Vec3::ZERO };
-        assert!(inp.accepts(&face, |_, _| true).is_none());
+        assert!(inp.accepts(&face, None, |_, _| true).is_none());
         let planes = SelInput::new("Plane", PLANES | PLANAR_FACES, false);
-        assert!(planes.accepts(&face, |_, _| true).is_some());
-        assert!(planes.accepts(&face, |_, _| false).is_none());
+        assert!(planes.accepts(&face, None, |_, _| true).is_some());
+        assert!(planes.accepts(&face, None, |_, _| false).is_none());
         let mut one = SelInput::new("Plane", PLANES, false);
         one.toggle(vec![Sel::Plane { name: "XY".into() }]);
         one.toggle(vec![Sel::Plane { name: "YZ".into() }]);

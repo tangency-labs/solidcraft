@@ -23,6 +23,7 @@ solidcraft-ui-egui = { workspace = true }
 egui = { workspace = true }
 log = { workspace = true }
 url = "2"
+percent-encoding = "2"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit"] }
@@ -33,8 +34,8 @@ serde_json = { workspace = true }
 web-sys = { version = "0.3", features = [
     "Window", "Document", "Element", "HtmlElement", "HtmlCanvasElement", "Location", "Navigator", "StorageManager",
     "FileSystemHandle", "FileSystemDirectoryHandle", "FileSystemFileHandle", "FileSystemGetFileOptions", "FileSystemWritableFileStream",
-    "WritableStream", "File", "FileList", "Blob", "BlobPropertyBag", "Url", "HtmlAnchorElement", "HtmlInputElement", "Storage",
+    "WritableStream", "File", "FileList", "Blob", "BlobPropertyBag", "Url", "HtmlAnchorElement", "HtmlInputElement", "Storage", "StorageEvent",
     "IdbFactory", "IdbDatabase", "IdbObjectStore", "IdbOpenDbRequest", "IdbRequest", "IdbTransaction", "IdbTransactionMode",
     "Headers", "ReadableStream", "ReadableStreamDefaultReader",
-    "BeforeUnloadEvent", "Event", "EventTarget", "KeyboardEvent", "Response", "MediaQueryList", "Gamepad", "Performance",
+    "BeforeUnloadEvent", "Event", "EventTarget", "KeyboardEvent", "Response", "FormData", "RequestInit", "MediaQueryList", "Gamepad", "Performance",
 ] }

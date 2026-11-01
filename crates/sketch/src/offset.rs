@@ -52,6 +52,28 @@ impl Sketch {
         })
     }
 
+    /// An arc an offset made round its source's own centre (#6569). Its ends are held while the
+    /// sketch solves, so its own condition, both ends as far from the centre, only tied that
+    /// centre (and the source with it) to the middle of the held ends: a slot offset by 1 mm
+    /// could no longer be moved by the dimension that places it. The source's own arc keeps the
+    /// centre, and the offset is rebuilt from the source after the solve.
+    pub(crate) fn offset_arc_follows_source(&self, curve: usize) -> bool {
+        if self.offsets.is_empty() {
+            return false;
+        }
+        let Some(arc) = self.curves.get(curve) else { return false };
+        let CurveKind::Arc { c: centre, .. } = arc.kind else { return false };
+        let output = |id: &str| self.offsets.iter().any(|o| o.owns_output(id));
+        output(&arc.id) && self.curves.iter().enumerate().any(|(k, other)| k != curve && other.kind.uses(centre) && !output(&other.id))
+    }
+
+    /// A circle an offset made (#9264). The offset sets its radius from the source's after the
+    /// solve, so the solve holds that radius instead of counting it as a free unknown.
+    pub(crate) fn offset_circle_follows_source(&self, curve: usize) -> bool {
+        let Some(circle) = self.curves.get(curve) else { return false };
+        matches!(circle.kind, CurveKind::Circle { .. }) && self.offsets.iter().any(|o| o.owns_output(&circle.id))
+    }
+
     /// Endpoints of a normal-distance annotation, evaluated from its source curve.
     pub fn offset_dimension_points(&self, output: &str) -> Option<(Vec2, Vec2)> {
         let (source, forward, distance) = self
@@ -98,6 +120,80 @@ impl Sketch {
                 point.fixed = false;
             }
         }
+    }
+
+    /// Retry a failed solve whose source edit was blocked by attachments to an offset's old
+    /// fixed points. Seed the sources without those attachments, rebuild the offsets, then
+    /// solve every attachment with the sources held. Nothing is adopted unless the complete
+    /// sketch solves with its original constraints and orientation.
+    pub fn solve_after_offset_edit(
+        &mut self,
+        old: &crate::DrivingValues,
+        reference: Option<&[Vec2]>,
+        analysis: crate::Analysis,
+    ) -> Option<crate::SolveReport> {
+        let source =
+            |id: &str| self.offsets.iter().any(|o| o.sources.iter().any(|(s, _)| s == id)) || self.freeform_offsets.iter().any(|o| o.source == id);
+        let output = |id: &str| self.offsets.iter().any(|o| o.owns_output(id)) || self.freeform_offsets.iter().any(|o| o.output == id);
+        let source_points: std::collections::BTreeSet<usize> =
+            self.curves.iter().filter(|c| source(&c.id)).flat_map(|c| c.kind.point_ids()).collect();
+        let outputs: std::collections::BTreeSet<usize> = self.curves.iter().enumerate().filter(|(_, c)| output(&c.id)).map(|(i, _)| i).collect();
+        let output_points: std::collections::BTreeSet<usize> =
+            outputs.iter().filter_map(|i| self.curves.get(*i)).flat_map(|c| c.kind.point_ids()).filter(|p| !source_points.contains(p)).collect();
+        let mut candidate = self.clone();
+        candidate.constraints.retain(|c| {
+            !c.kind.indices().1.iter().any(|i| outputs.contains(i)) && !self.constraint_points(&c.kind).iter().any(|p| output_points.contains(p))
+        });
+        if candidate.constraints.len() == self.constraints.len() {
+            return None;
+        }
+        let before: Vec<Vec2> = reference.map_or_else(|| self.points.iter().map(|p| p.pos).collect(), <[Vec2]>::to_vec);
+        if !crate::solve_after_edit_with_analysis(&mut candidate, old, Some(&before), crate::Analysis::StatusOnly).keeps_orientation() {
+            return None;
+        }
+        candidate.constraints.clone_from(&self.constraints);
+        candidate.refresh_offsets().ok()?;
+        // Keep the freshly rebuilt offset exact while its attached geometry catches up.
+        // Refresh may retire output curves or refine a dependent spline: resolve holds again.
+        let hold = crate::Hold {
+            points: candidate.curves.iter().filter(|c| source(&c.id)).flat_map(|c| c.kind.point_ids()).collect(),
+            radii: candidate.curves.iter().enumerate().filter(|(_, c)| source(&c.id) || output(&c.id)).map(|(i, _)| i).collect(),
+        };
+        if !crate::solve_with(&mut candidate, &hold, Some(&before), crate::Analysis::StatusOnly, None).keeps_orientation() {
+            // A cap tangent to an arc can land on the other tangency branch after a large
+            // jump. Walk the held source and output points from their stored positions.
+            // Their own dimensions are restored after the walk, not imposed at each step.
+            let mut walking = candidate.clone();
+            walking.constraints.retain(|c| candidate.constraint_points(&c.kind).iter().any(|p| !hold.points.contains(p)));
+            for i in &hold.points {
+                if let Some(p) = walking.points.get_mut(*i) {
+                    p.fixed = true;
+                }
+            }
+            for i in &hold.radii {
+                if let Some(c) = walking.curves.get_mut(*i) {
+                    c.fixed = true;
+                }
+            }
+            let mut from = walking.clone();
+            for (p, pos) in from.points.iter_mut().zip(&before) {
+                p.pos = *pos;
+            }
+            crate::solve_after_link_move(&mut walking, &from, old, crate::Analysis::StatusOnly)?;
+            for (p, q) in candidate.points.iter_mut().zip(&walking.points) {
+                p.pos = q.pos;
+            }
+            for (c, d) in candidate.curves.iter_mut().zip(&walking.curves) {
+                c.kind.clone_from(&d.kind);
+            }
+        }
+        // Publish ordinary freedom/redundancy diagnostics, without the temporary holds.
+        let report = crate::solve_after_edit_with_analysis(&mut candidate, old, Some(&before), analysis);
+        if !report.keeps_orientation() {
+            return None;
+        }
+        *self = candidate;
+        Some(report)
     }
 
     pub fn refresh_offsets(&mut self) -> Result<(), SketchError> {

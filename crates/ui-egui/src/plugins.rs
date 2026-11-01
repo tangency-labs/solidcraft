@@ -1,8 +1,9 @@
 //! Preferences › Plugins: packages installed under the per-user data folder.
 //!
-//! A plugin is a directory of `{data}/plugins/<id>/plugin.json`. This page reads that file and
-//! records which ids are turned off. It does not load or run anything from the folder. Running a
-//! plugin (the wasm host in docs/plugins.md) is a later step; it will honour `disabled_plugins`.
+//! A plugin is a directory of `{data}/plugins/<id>/plugin.json`. The page searches that list.
+//! It reads `plugin.json` and records which ids are turned off. It does not load or run anything
+//! from the folder. Running a plugin (the wasm host in docs/plugins.md) is a later step; it will
+//! honour `disabled_plugins`.
 
 use std::path::{Path, PathBuf};
 
@@ -129,6 +130,17 @@ pub fn enabled(app: &SolveApp, id: &str) -> bool {
     !app.preferences.disabled_plugins.contains(id)
 }
 
+fn matches_query(plugin: &Plugin, query: &str) -> bool {
+    let query = query.trim();
+    if query.is_empty() {
+        return true;
+    }
+    let query = query.to_lowercase();
+    [plugin.name.as_str(), plugin.id.as_str(), plugin.description.as_str(), plugin.version.as_str()]
+        .iter()
+        .any(|text| text.to_lowercase().contains(&query))
+}
+
 /// The Plugins page. Desktop only: the browser build has no per-user plugin folder.
 pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get();
@@ -141,9 +153,21 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
         return;
     };
     let path = dir.display().to_string();
-    ui.add(egui::Label::new(RichText::new(crate::i18n::format("ui.plugins_note", &[("path", &path)])).size(t.font_small).color(t.text_dim)).wrap());
+    let searching = crate::prefs_search::querying(ui);
+    // The page's own box is for browsing Plugins. The dialog search is the filter while it is active.
+    if !searching {
+        crate::ui_kit::search_field(ui, ui.id().with("plugins_search"), &mut app.prefs_window.plugin_query, crate::i18n::tr("ui.plugins_search"));
+        ui.add_space(8.0);
+    }
+    if searching {
+        crate::prefs_search::begin_section(ui, crate::i18n::tr("ui.plugins"));
+    } else {
+        ui.add(
+            egui::Label::new(RichText::new(crate::i18n::format("ui.plugins_note", &[("path", &path)])).size(t.font_small).color(t.text_dim)).wrap(),
+        );
+    }
     ui.add_space(8.0);
-    if crate::ui_kit::button(ui, crate::i18n::tr_label("Show in folder"), crate::ui_kit::Button::Normal).clicked() {
+    if !searching && crate::ui_kit::button(ui, crate::i18n::tr_label("Show in folder"), crate::ui_kit::Button::Normal).clicked() {
         // `show_in_folder` opens the parent of the path it is given, so the argument is a name
         // inside the plugins directory (it need not exist).
         if let Err(e) = std::fs::create_dir_all(&dir) {
@@ -154,10 +178,20 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     ui.add_space(8.0);
     let (plugins, skipped) = scan(&dir);
-    if plugins.is_empty() {
+    let query = app.prefs_window.plugin_query.clone();
+    if plugins.is_empty() && !searching {
         ui.label(crate::i18n::tr("ui.plugins_empty"));
     }
-    for plugin in &plugins {
+    let mut shown = 0usize;
+    for plugin in plugins.iter().filter(|plugin| searching || matches_query(plugin, &query)) {
+        if searching && !crate::prefs_search::texts_hit(ui, &[&plugin.name, &plugin.id, &plugin.description, &plugin.version]) {
+            continue;
+        }
+        shown += 1;
+        if searching {
+            crate::prefs_search::reveal(ui);
+            crate::prefs_search::push_force(ui);
+        }
         let mut on = enabled(app, &plugin.id);
         ui.horizontal(|ui| {
             let check = crate::ui_kit::checkbox(ui, "", &mut on);
@@ -180,8 +214,14 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             });
         });
         ui.separator();
+        if searching {
+            crate::prefs_search::pop_force(ui);
+        }
     }
-    if !skipped.is_empty() {
+    if !searching && !plugins.is_empty() && shown == 0 {
+        ui.label(crate::i18n::tr("ui.plugins_none"));
+    }
+    if !searching && query.trim().is_empty() && !skipped.is_empty() {
         ui.add_space(6.0);
         ui.label(
             RichText::new(crate::i18n::format("ui.plugins_skipped", &[("count", &skipped.len().to_string())])).size(t.font_small).color(t.text_dim),
@@ -256,5 +296,21 @@ mod tests {
         assert_eq!(app.prefs_window.section, crate::prefs::PAGE_PLUGINS);
         assert!(enabled(&app, "ftc-frc-parts"));
         assert!(crate::prefs::control(&mut app, &json!({"open": "NoSuch"})).is_err());
+    }
+
+    #[test]
+    fn search_matches_the_name_the_id_and_the_description() {
+        let plugin = Plugin {
+            id: "ftc-frc-parts".into(),
+            name: "FTC and FRC parts".into(),
+            version: "0.1.0".into(),
+            description: "Commercial robot parts.".into(),
+        };
+        assert!(matches_query(&plugin, ""));
+        assert!(matches_query(&plugin, " frc "));
+        assert!(matches_query(&plugin, "FTC-FRC"));
+        assert!(matches_query(&plugin, "commercial"));
+        assert!(matches_query(&plugin, "0.1"));
+        assert!(!matches_query(&plugin, "bearing"));
     }
 }

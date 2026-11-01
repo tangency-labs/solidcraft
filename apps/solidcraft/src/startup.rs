@@ -8,8 +8,9 @@
 //!   row the next launch starts in safe mode by itself.
 //! - **Safe mode** (`--safe-mode` or `SOLIDCRAFT_SAFE_MODE=1`): default settings (the saved ones
 //!   are left untouched), no recovery offer, the software renderer and CPU meshing.
-//! - **No usable graphics device**: one retry on the software renderer
-//!   (`SOLIDCRAFT_RENDERER=cpu`), then a message box saying what failed and what to try.
+//! - **A renderer that cannot start**: on Windows, try the remaining graphics APIs in order,
+//!   then the software renderer (`SOLIDCRAFT_RENDERER=cpu`). An explicit `WGPU_BACKEND` fails
+//!   cleanly without switching. Exhausted retries show a message box with the error.
 
 use std::path::{Path, PathBuf};
 
@@ -129,6 +130,53 @@ pub fn pick_cpu_adapter(adapters: &[eframe::wgpu::Adapter], surface: Option<&efr
         })
 }
 
+/// Adapter properties used to choose a card without opening a device.
+#[derive(Clone, Debug)]
+pub struct AdapterChoice {
+    pub name: String,
+    pub compatible: bool,
+}
+
+/// Choose an adapter by name. The environment override follows wgpu's case-insensitive
+/// substring convention among surface-compatible adapters. A saved preference prefers an
+/// exact (then case-insensitive) name among compatible adapters, and if the named card is
+/// only listed as incompatible with the surface still picks it (#8341: otherwise the
+/// preference is kept in the dialog while wgpu silently uses another GPU).
+/// No match leaves selection to the normal wgpu request.
+pub fn choose_adapter(adapters: &[AdapterChoice], environment: Option<&str>, preference: Option<&str>) -> Option<usize> {
+    // wgpu's environment helper panics on a missing name; an override must remain recoverable.
+    let compatible = || adapters.iter().enumerate().filter(|(_, a)| a.compatible);
+    if let Some(name) = environment.filter(|s| !s.is_empty()) {
+        let name = name.to_lowercase();
+        if let Some((index, _)) = compatible().find(|(_, a)| a.name.to_lowercase().contains(&name)) {
+            return Some(index);
+        }
+    }
+    let name = preference.filter(|s| !s.is_empty())?;
+    let find = |pred: &dyn Fn(&AdapterChoice) -> bool, only_compatible: bool| {
+        adapters.iter().enumerate().find(|(_, a)| (!only_compatible || a.compatible) && pred(a)).map(|(i, _)| i)
+    };
+    find(&|a| a.name == name, true)
+        .or_else(|| find(&|a| a.name.eq_ignore_ascii_case(name), true))
+        .or_else(|| find(&|a| a.name == name, false))
+        .or_else(|| find(&|a| a.name.eq_ignore_ascii_case(name), false))
+}
+
+/// Leave Automatic on wgpu's normal request path; named choices may defer to it too.
+pub fn configure_adapter(setup: &mut eframe::egui_wgpu::WgpuSetupCreateNew, cpu: bool, environment: Option<String>, preference: Option<String>) {
+    if cpu {
+        setup.native_adapter_selector = Some(std::sync::Arc::new(|adapters, surface| pick_cpu_adapter(adapters, surface).map(Some)));
+    } else if environment.as_deref().is_some_and(|s| !s.is_empty()) || preference.as_deref().is_some_and(|s| !s.is_empty()) {
+        setup.native_adapter_selector = Some(std::sync::Arc::new(move |adapters, surface| {
+            let choices: Vec<_> = adapters
+                .iter()
+                .map(|a| AdapterChoice { name: a.get_info().name, compatible: surface.is_none_or(|s| a.is_surface_supported(s)) })
+                .collect();
+            Ok(choose_adapter(&choices, environment.as_deref(), preference.as_deref()).and_then(|i| adapters.get(i)).cloned())
+        }));
+    }
+}
+
 /// `WGPU_BACKEND`: when set, wgpu picks the backends from it and the order below is not used.
 pub const WGPU_BACKEND_ENV: &str = "WGPU_BACKEND";
 
@@ -176,6 +224,34 @@ pub fn choose_backends(
     Some(WINDOWS_ORDER.into_iter().find(|b| has_hardware(*b)).unwrap_or(Backends::DX12))
 }
 
+/// Internal, process-local retry choice; never written to the graphics preference.
+pub const RETRY_BACKEND_ENV: &str = "SOLIDCRAFT_STARTUP_BACKEND";
+/// Why this launch is using a fallback, carried to the new process for status and Preferences.
+pub const FALLBACK_NOTE_ENV: &str = "SOLIDCRAFT_GRAPHICS_FALLBACK";
+
+/// A handled startup failure tries each remaining Windows API once, then software rendering.
+/// An explicit environment choice is final, including when software rendering was requested.
+pub fn fallback_backend(windows: bool, explicit: bool, cpu: bool, failed: eframe::wgpu::Backends) -> Option<&'static str> {
+    if explicit || cpu {
+        return None;
+    }
+    if windows {
+        let last = WINDOWS_ORDER.iter().rposition(|backend| failed.intersects(*backend));
+        if let Some(next) = last.and_then(|i| WINDOWS_ORDER.get(i + 1)) {
+            return Some(if *next == eframe::wgpu::Backends::VULKAN { "vulkan" } else { "gl" });
+        }
+    }
+    Some("cpu")
+}
+
+/// Keep driver diagnostics on one bounded line, including across the finite retry chain.
+pub fn fallback_note(previous: &str, failed: eframe::wgpu::Backends, next: &str, error: &str) -> String {
+    let previous: String = previous.chars().take(2048).collect();
+    let error: String = error.chars().take(1024).collect();
+    let line = format!("{previous} Graphics fallback: {failed:?} failed ({error}); trying {next}.");
+    line.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(4096).collect()
+}
+
 /// The device feature for a 32-bit float depth buffer with a stencil (reversed depth, #1434).
 pub const FLOAT_DEPTH_STENCIL: eframe::wgpu::Features = eframe::wgpu::Features::DEPTH32FLOAT_STENCIL8;
 
@@ -184,7 +260,7 @@ pub const FLOAT_DEPTH_STENCIL: eframe::wgpu::Features = eframe::wgpu::Features::
 /// asks for a float one only when whichever it picks has it.
 pub fn float_depth_everywhere(options: &eframe::egui_wgpu::WgpuConfiguration) -> bool {
     let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &options.wgpu_setup else { return false };
-    let mut desc = eframe::wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+    let mut desc = solidcraft_gpu::instance_descriptor_from_env();
     desc.backends = setup.instance_descriptor.backends;
     let instance = eframe::wgpu::Instance::new(desc);
     let adapters = pollster::block_on(instance.enumerate_adapters(setup.instance_descriptor.backends));
@@ -201,6 +277,7 @@ pub fn has_hardware_adapter(backends: eframe::wgpu::Backends) -> bool {
     let mut desc = eframe::wgpu::InstanceDescriptor::new_without_display_handle();
     desc.backends = backends;
     desc.flags = eframe::wgpu::InstanceFlags::from_build_config().with_env();
+    desc.backend_options.dx12.shader_compiler = solidcraft_gpu::dx12_compiler();
     let instance = eframe::wgpu::Instance::new(desc);
     let adapters = pollster::block_on(instance.enumerate_adapters(backends));
     let found: Vec<String> = adapters.iter().map(|a| format!("{} ({:?})", a.get_info().name, a.get_info().device_type)).collect();
@@ -220,6 +297,71 @@ pub fn window_instance_flags(flags: eframe::wgpu::InstanceFlags, intel_mac: bool
     if intel_mac && env.map(str::trim).is_none_or(str::is_empty) { flags - eframe::wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL } else { flags }
 }
 
+/// The environment variable that makes the macOS compatibility shim report an older OS
+/// version to wgpu's Metal backend. On OCLP-patched machines the Metal compiler accepts
+/// only up to the MSL standard of the original GPU, not the one the patched OS reports,
+/// so wgpu picks a standard that the compiler refuses (`invalid value 'metal3.2'`).
+/// Setting this variable before the process starts causes the OS to report the older
+/// version and wgpu selects a supported MSL standard (#3080, #4605).
+#[cfg(target_os = "macos")]
+pub const SYSTEM_VERSION_COMPAT_ENV: &str = "SYSTEM_VERSION_COMPAT";
+
+/// The NVRAM variable that OpenCore Legacy Patcher writes on every OCLP-booted system.
+/// Its presence is the primary signal that `SYSTEM_VERSION_COMPAT=1` is needed.
+#[cfg(target_os = "macos")]
+pub const OCLP_NVRAM_KEY: &str = "4D1FDA02-38C7-4A6A-9CC6-4BCCA8B30102:OCLP-Version";
+
+/// `true` if the OCLP NVRAM key is present on this system.
+///
+/// Runs `nvram <key>` and treats exit 0 as present. Any error (missing binary,
+/// permission denied, key absent) returns `false` — this is a best-effort probe.
+#[cfg(target_os = "macos")]
+pub fn oclp_nvram_present() -> bool {
+    std::process::Command::new("nvram").arg(OCLP_NVRAM_KEY).output().map(|o| o.status.success()).unwrap_or(false)
+}
+
+/// Whether to re-launch with `SYSTEM_VERSION_COMPAT=1`: it is not set yet and OCLP shows through
+/// the NVRAM key. The probe runs only when it is needed, so a re-launched process (variable
+/// set) never starts `nvram`.
+#[cfg(target_os = "macos")]
+fn compat_wanted(compat_set: bool, nvram: impl FnOnce() -> bool) -> bool {
+    !compat_set && nvram()
+}
+
+/// If this process is running under OCLP and `SYSTEM_VERSION_COMPAT` has not been set,
+/// re-launch the current binary with `SYSTEM_VERSION_COMPAT=1` added to the environment,
+/// then exit with the child's status code.
+///
+/// `SYSTEM_VERSION_COMPAT=1` must be present **before** the process starts: setting it
+/// with `std::env::set_var` inside `main` is too late because the macOS frameworks have
+/// already queried the OS version by then. Re-launching is the only safe approach that
+/// works without `unsafe` (a true `execve` replacement would require it).
+///
+/// Returns `Ok(false)` immediately when:
+/// - `SYSTEM_VERSION_COMPAT` is already set (re-launched process, no loop), or
+/// - the OCLP NVRAM key is absent.
+///
+/// Returns `Err` only when `std::env::current_exe()` fails or the child process cannot
+/// be spawned; the caller should log the error and continue normally.
+///
+/// Never returns `Ok(true)`: a successful re-launch exits the current process.
+#[cfg(target_os = "macos")]
+pub fn relaunch_with_version_compat() -> Result<bool, String> {
+    // A set variable means this is the re-launched process: no loop.
+    if !compat_wanted(std::env::var_os(SYSTEM_VERSION_COMPAT_ENV).is_some(), oclp_nvram_present) {
+        return Ok(false);
+    }
+    log::info!("startup: OCLP detected; re-launching with {}=1", SYSTEM_VERSION_COMPAT_ENV);
+    eprintln!("SolidCraft: OCLP detected; re-launching with {}=1", SYSTEM_VERSION_COMPAT_ENV);
+    let exe = std::env::current_exe().map_err(|e| format!("could not find own executable: {e}"))?;
+    let status = std::process::Command::new(&exe)
+        .args(std::env::args_os().skip(1))
+        .env(SYSTEM_VERSION_COMPAT_ENV, "1")
+        .status()
+        .map_err(|e| format!("could not re-launch with {}: {e}", SYSTEM_VERSION_COMPAT_ENV))?;
+    std::process::exit(status.code().unwrap_or(1));
+}
+
 /// Windows with OpenGL: the window keeps the system title bar (#2063). The window without OS
 /// decorations keeps its caption style while having no frame, and some OpenGL drivers (older
 /// Intel HD/UHD) then show the picture a caption's height lower than the window, so it no longer
@@ -229,6 +371,14 @@ pub fn window_instance_flags(flags: eframe::wgpu::InstanceFlags, intel_mac: bool
 pub fn system_title_bar(windows: bool, backends: eframe::wgpu::Backends) -> bool {
     use eframe::wgpu::Backends;
     windows && backends.contains(Backends::GL) && !backends.intersects(Backends::DX12 | Backends::VULKAN)
+}
+
+/// The `--max-file-size` value (#4086): a size such as `2GB` or `1500MB`, at most 16 GB. It raises
+/// the largest STEP/import and design file this run reads, over the saved preference, without
+/// saving anything. A missing or bad value stops the start with this error.
+pub fn max_file_size(value: Option<&str>) -> Result<u64, String> {
+    let value = value.ok_or("--max-file-size needs a size, for example --max-file-size 2GB")?;
+    solidcraft_engine::io::limits::parse_flag(value).map_err(|e| format!("--max-file-size: {e}"))
 }
 
 /// The message shown when no window could be opened at all.
@@ -248,6 +398,68 @@ pub fn no_window_message(error: &str, settings: Option<&Path>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cards() -> Vec<AdapterChoice> {
+        ["Integrated", "Discrete small", "Discrete large"].into_iter().map(|name| AdapterChoice { name: name.into(), compatible: true }).collect()
+    }
+
+    #[test]
+    fn max_file_size_parses_sizes_and_refuses_bad_ones() {
+        assert_eq!(max_file_size(Some("2GB")), Ok(2 << 30));
+        assert_eq!(max_file_size(Some("1500MB")), Ok(1500 << 20));
+        for bad in [None, Some(""), Some("2"), Some("17GB"), Some("lots"), Some("-1GB")] {
+            let error = max_file_size(bad).unwrap_err();
+            assert!(error.contains("--max-file-size"), "{bad:?}: {error}");
+        }
+    }
+
+    #[test]
+    fn adapter_names_environment_override_and_missing_card_fallback() {
+        let cards = cards();
+        assert_eq!(choose_adapter(&cards, None, Some("Discrete small")), Some(1));
+        assert_eq!(choose_adapter(&cards, Some("LARGE"), Some("Discrete small")), Some(2));
+        assert_eq!(choose_adapter(&cards, None, Some("removed")), None);
+        assert_eq!(choose_adapter(&cards, Some("missing"), Some("Discrete small")), Some(1));
+        assert_eq!(choose_adapter(&cards, Some(""), Some("Discrete small")), Some(1));
+        assert_eq!(choose_adapter(&cards, None, Some("discrete small")), Some(1), "preference matches without regard to case");
+        assert_eq!(choose_adapter(&cards, None, Some("Discrete")), None, "a preference is the full name, not a substring");
+    }
+
+    #[test]
+    fn automatic_adapter_leaves_selection_to_wgpu() {
+        let mut cards = cards();
+        assert_eq!(choose_adapter(&cards, None, None), None);
+        assert_eq!(choose_adapter(&cards, Some(""), Some("")), None);
+        cards[2].compatible = false;
+        // Environment still needs a compatible adapter; a preference keeps the named card (#8341).
+        assert_eq!(choose_adapter(&cards, Some("large"), Some("Discrete large")), Some(2));
+        assert_eq!(choose_adapter(&cards, Some("small"), None), Some(1));
+        assert_eq!(choose_adapter(&[], None, None), None);
+    }
+
+    #[test]
+    fn preference_keeps_a_named_card_even_when_surface_says_incompatible() {
+        let mut cards = cards();
+        cards[1].compatible = false;
+        assert_eq!(choose_adapter(&cards, None, Some("Discrete small")), Some(1));
+        assert_eq!(choose_adapter(&cards, None, Some("discrete SMALL")), Some(1));
+    }
+
+    #[test]
+    fn automatic_adapter_preserves_the_previous_request_configuration() {
+        use eframe::egui_wgpu::WgpuSetupCreateNew;
+        let previous = WgpuSetupCreateNew::without_display_handle();
+        for preference in [None, Some(String::new())] {
+            let mut setup = WgpuSetupCreateNew::without_display_handle();
+            configure_adapter(&mut setup, false, None, preference);
+            assert!(setup.native_adapter_selector.is_none(), "Automatic must use the normal wgpu request");
+            assert_eq!(setup.power_preference, previous.power_preference);
+            assert_eq!(setup.instance_descriptor.backends, previous.instance_descriptor.backends);
+        }
+        let mut setup = WgpuSetupCreateNew::without_display_handle();
+        configure_adapter(&mut setup, false, Some("missing".into()), Some("removed".into()));
+        assert!(setup.native_adapter_selector.unwrap()(&[], None).unwrap().is_none(), "missing names must use the normal request too");
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let d = std::env::temp_dir().join(format!("solidcraft-startup-{name}-{}", std::process::id()));
@@ -280,6 +492,27 @@ mod tests {
         assert_eq!(window_instance_flags(F::VALIDATION, true, Some("0")), F::VALIDATION);
         // Every other machine keeps what it had.
         assert_eq!(window_instance_flags(on, false, None), on);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn oclp_relaunch_needs_the_signal_and_no_compat_variable() {
+        use super::compat_wanted;
+        let probed = std::cell::Cell::new(false);
+        let probe = |found: bool| {
+            let probed = &probed;
+            move || {
+                probed.set(true);
+                found
+            }
+        };
+        // The re-launched process has the variable: no probe, no second re-launch.
+        assert!(!compat_wanted(true, probe(true)));
+        assert!(!probed.get());
+        // The OCLP NVRAM key is the signal.
+        assert!(compat_wanted(false, probe(true)));
+        // No signal: an ordinary Mac starts as it is.
+        assert!(!compat_wanted(false, probe(false)));
     }
 
     #[test]
@@ -359,6 +592,42 @@ mod tests {
     }
 
     #[test]
+    fn failed_windows_backends_fall_back_in_order_and_stop_after_software() {
+        use eframe::wgpu::Backends as B;
+        assert_eq!(fallback_backend(true, false, false, B::DX12), Some("vulkan"));
+        assert_eq!(fallback_backend(true, false, false, B::VULKAN), Some("gl"));
+        assert_eq!(fallback_backend(true, false, false, B::GL), Some("cpu"));
+        assert_eq!(fallback_backend(true, false, true, B::DX12), None);
+        assert_eq!(fallback_backend(true, false, false, B::DX12 | B::VULKAN), Some("gl"));
+        assert_eq!(fallback_backend(false, false, false, B::VULKAN), Some("cpu"));
+        let note = fallback_note("", B::DX12, "vulkan", "egui_pipeline\n0x80070057");
+        assert!(note.contains("egui_pipeline 0x80070057") && note.contains("vulkan") && !note.contains('\n'));
+        let long = fallback_note(&"x".repeat(5000), B::VULKAN, "gl", &"y".repeat(5000));
+        assert!(long.chars().count() <= 4096 && long.ends_with("trying gl."));
+    }
+
+    #[test]
+    fn explicit_backend_failure_never_switches_api_or_retries_software() {
+        use eframe::wgpu::Backends as B;
+        for windows in [false, true] {
+            for cpu in [false, true] {
+                for backend in [B::DX12, B::VULKAN, B::GL, B::all()] {
+                    assert_eq!(fallback_backend(windows, true, cpu, backend), None);
+                    let mut probed = false;
+                    assert_eq!(
+                        choose_backends(windows, true, cpu, Some("vulkan"), |_| {
+                            probed = true;
+                            false
+                        }),
+                        None
+                    );
+                    assert!(!probed);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn only_opengl_on_windows_gets_the_system_title_bar() {
         use eframe::wgpu::Backends;
         assert!(system_title_bar(true, Backends::GL));
@@ -394,9 +663,16 @@ mod tests {
 
     #[test]
     fn probing_a_backend_alone_never_panics() {
-        // Whatever this machine has (often nothing): an answer, not a crash.
-        for b in WINDOWS_ORDER {
-            let _ = has_hardware_adapter(b);
+        // Whatever this machine has (often nothing): an answer, not a crash. On Windows the probe
+        // goes the way the app's does, stopping at the first backend with a GPU: a machine with
+        // D3D12 never loads its OpenGL driver into the test process, and AMD's (`atio6axx.dll`)
+        // aborted the process as it exited (#1156).
+        if cfg!(target_os = "windows") {
+            let _ = choose_backends(true, false, false, None, has_hardware_adapter);
+        } else {
+            for b in WINDOWS_ORDER {
+                let _ = has_hardware_adapter(b);
+            }
         }
     }
 
@@ -409,8 +685,18 @@ mod tests {
     #[test]
     fn the_software_adapter_is_preferred_and_its_absence_is_an_error_not_a_panic() {
         assert!(pick_cpu_adapter(&[], None).unwrap_err().contains("none"));
-        let instance = eframe::wgpu::Instance::new(eframe::wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapters = pollster::block_on(instance.enumerate_adapters(eframe::wgpu::Backends::all()));
+        // The adapters the software renderer chooses among: it starts D3D12 alone on Windows
+        // (WARP), not every backend, so the test doesn't load the OpenGL driver either (#1156).
+        let options = crate::wgpu_options(true, None);
+        let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &options.wgpu_setup else { panic!("the software renderer makes its own device") };
+        let backends = setup.instance_descriptor.backends;
+        if cfg!(target_os = "windows") && std::env::var_os(WGPU_BACKEND_ENV).is_none() {
+            assert_eq!(backends, eframe::wgpu::Backends::DX12);
+        }
+        let mut desc = solidcraft_gpu::instance_descriptor_from_env();
+        desc.backends = backends;
+        let instance = eframe::wgpu::Instance::new(desc);
+        let adapters = pollster::block_on(instance.enumerate_adapters(backends));
         if adapters.is_empty() {
             return;
         }

@@ -6,6 +6,24 @@ use crate::*;
 
 mod mesh_convert;
 
+/// Counts the copies `Session::doc_mut` makes of a shared document.
+pub(crate) mod doc_copies {
+    use std::cell::Cell;
+
+    thread_local! {
+        static COUNT: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub fn record() {
+        COUNT.with(|c| c.set(c.get() + 1));
+    }
+
+    /// The count since the last call.
+    pub fn take() -> usize {
+        COUNT.with(|c| c.replace(0))
+    }
+}
+
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     match s.execute(id, &p) {
         Ok(v) => v,
@@ -56,6 +74,26 @@ fn edge_picks_far_from_every_edge_are_refused() {
         assert!(err.contains("no edge at") && err.contains(far), "{id} {p}: {err}");
     }
     assert_eq!(s.doc.features.len(), features);
+}
+
+#[test]
+fn edge_picks_at_a_corner_are_refused() {
+    for (id, size) in [("solid.chamfer", "distance"), ("solid.fillet", "radius")] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 20}));
+        let features = s.doc.features.len();
+        for edge in [json!([20, 20, 20]), json!({"point": [20, 20, 20]})] {
+            let err = s.execute(id, &json!({"edges": [edge], size: 2})).unwrap_err().to_string();
+            assert!(err.contains("[20, 20, 20]") && err.contains("3 edges") && err.contains("midpoint"), "{id}: {err}");
+            assert_eq!(s.doc.features.len(), features);
+            assert!((volume(&mut s) - 8000.0).abs() < 1e-6);
+        }
+        // 1 mm from the corner along one edge: near the other two, but on just that one.
+        run(&mut s, id, json!({"edges": [[19, 20, 20]], size: 2}));
+        assert_eq!(s.doc.features.len(), features + 1);
+        let removed = if id == "solid.chamfer" { 40.0 } else { (4.0 - PI) * 20.0 };
+        assert!(rel(volume(&mut s), 8000.0 - removed) < 2e-4);
+    }
 }
 
 #[test]
@@ -325,6 +363,7 @@ mod primitive_points;
 mod rim_cut;
 mod robustness;
 mod robustness_goldens;
+mod rounded_loft_face;
 mod sphere_lens;
 mod spiral_join;
 mod step_import_options;
@@ -688,6 +727,10 @@ pub(crate) fn hostile_values() -> Vec<Value> {
         json!("mm = 5"),
         json!("w = w"),
         json!("w == 1/0"),
+        // Every value input reads `name = expression` (#4071).
+        json!("a = = 3"),
+        json!("é = 1e308 * 10"),
+        json!(format!("{} = 1", "n".repeat(5000))),
         json!([]),
         json!([1e308, -1e308]),
         json!([0, 0, 0]),
@@ -754,6 +797,8 @@ fn hostile_params_never_panic() {
         "base",
         "major",
         "minor",
+        "top_radius",
+        "top_diameter",
         "edges",
         "body",
         "target",
@@ -870,6 +915,33 @@ fn hostile_params_never_panic() {
         workers.into_iter().flat_map(|w| w.join().unwrap()).collect()
     });
     assert!(internal.is_empty(), "commands panicked:\n{}", internal.join("\n"));
+}
+
+/// #6651: a list parameter of the wrong type is refused, not read as an empty list. An empty
+/// list means "every body" to most commands, so a number, an object or a list with a number in
+/// it was read as no list at all: a cut meant for one body cut every body it touched, and the
+/// command reported success.
+///
+/// `null` is not in this list: the schema contract declares these parameters optional and
+/// reads `null` as absent, so it keeps the meaning it always had (no list given).
+#[test]
+fn a_list_parameter_of_the_wrong_type_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "solid.box", json!({"corner": [60, 0, 0], "length": 10, "width": 10, "height": 20, "body_name": "Block"}));
+    let before = volume(&mut s);
+    // A tool crossing both bodies, meant for the Block only.
+    for targets in [json!(7), json!(true), json!({"body": "Block"}), json!(["Block", 42])] {
+        let params =
+            json!({"corner": [35, 2, -1], "length": 30, "width": 3, "height": 30, "operation": "cut", "body_name": "Slot", "targets": targets});
+        let err = s.execute("solid.box", &params).expect_err("a list parameter of the wrong type is refused");
+        let EngineError::BadParams { cmd, msg } = &err else {
+            panic!("{params}: {err}");
+        };
+        assert_eq!(cmd, "solid.box", "{params}: {err}");
+        assert!(msg.contains("targets"), "{params}: {err}");
+        assert_eq!(volume(&mut s), before, "{params}: the design changed");
+    }
 }
 
 #[test]
@@ -1259,7 +1331,8 @@ fn body_volume(st: &solidcraft_doc::ModelState) -> f64 {
     st.bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum()
 }
 
-/// Deleting an inserted assembly frees its body names without leaving assembly ownership behind.
+/// Deleting an inserted assembly keeps the names of the bodies that remain, and leaves no assembly
+/// ownership behind.
 #[test]
 fn step_insert_delete_removes_assembly_and_undo_restores_it() {
     let dir = std::env::temp_dir().join(format!("solidcraft-step-delete-{}", std::process::id()));
@@ -1294,7 +1367,7 @@ fn step_insert_delete_removes_assembly_and_undo_restores_it() {
     assert!(s.doc.body_components.is_empty());
     assert!(s.doc.body_offsets.is_empty());
     let state = s.model.state();
-    let mirrored = state.body("Part (2)").unwrap();
+    let mirrored = state.body("Part (3)").unwrap();
     assert_eq!(s.doc.model_body_component(mirrored), 0);
     run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [40, 0, 0], "operation": "new", "body_name": "Other"}));
     assert_eq!(s.doc.model_body_component(s.model.state().body("Other").unwrap()), 0);
@@ -1562,6 +1635,23 @@ fn auto_extrude_starts_new_body_in_empty_component() {
 }
 
 /// Measuring picked geometry: distance between faces, angle, edge length.
+#[test]
+fn measure_origin_planes_axes_and_points() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    let at = |p: [f64; 3]| json!({"type": "vertex", "body": "Body1", "point": p});
+    // A point 10 above the XY plane.
+    let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "plane", "name": "XY"}, at([5.0, 5.0, 10.0])]}));
+    assert!((r["distance_mm"].as_f64().unwrap() - 10.0).abs() < 1e-9, "{r}");
+    assert_eq!(r["from"], json!([5.0, 5.0, 0.0]));
+    // The point's distance from the Z axis.
+    let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "axis", "name": "Z"}, at([3.0, 4.0, 7.0])]}));
+    assert!((r["distance_mm"].as_f64().unwrap() - 5.0).abs() < 1e-9, "{r}");
+    // The XY plane and the Z axis meet: nothing between them.
+    let r = run(&mut s, "inspect.measure", json!({"items": [{"type": "plane", "name": "XY"}, {"type": "axis", "name": "Z"}]}));
+    assert!(r["distance_mm"].as_f64().unwrap().abs() < 1e-9, "{r}");
+}
+
 #[test]
 fn measure_items() {
     let mut s = Session::default();
@@ -1875,6 +1965,24 @@ fn checkpoint_restores_with_a_full_undo_history() {
     assert!(s.execute("edit.restore_checkpoint", &json!({"checkpoint": id})).is_err());
 }
 
+/// Regression (#9746): a checkpoint restored already, or one of more than the 16 kept, was
+/// refused with only "no checkpoint N", so a script that restores twice could not tell why.
+#[test]
+fn a_used_up_or_dropped_checkpoint_says_why() {
+    let mut s = Session::default();
+    let id = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": id}));
+    let used = s.execute("edit.restore_checkpoint", &json!({"checkpoint": id})).unwrap_err().to_string();
+    assert!(used.contains("used up") && used.contains("16"), "{used}");
+    let first = run(&mut s, "edit.checkpoint", json!({}))["checkpoint"].as_u64().unwrap();
+    for _ in 0..MAX_CHECKPOINTS {
+        run(&mut s, "edit.checkpoint", json!({}));
+    }
+    let dropped = s.execute("edit.restore_checkpoint", &json!({"checkpoint": first})).unwrap_err().to_string();
+    assert!(dropped.contains("16"), "{dropped}");
+    run(&mut s, "edit.restore_checkpoint", json!({"checkpoint": first + 1}));
+}
+
 /// Regression (#3242): `file.new` replaced the session and its checkpoints with it, so a
 /// batch that failed after `file.new` could not go back to the design it began in.
 #[test]
@@ -1932,13 +2040,20 @@ fn components_occurrences_and_world_placement() {
     run(&mut s, "component.capture_position", json!({}));
     assert!(s.pending_moves.is_empty());
     assert!((bbox(&mut s, "ArmBody")["min"][2].as_f64().unwrap() - 5.0).abs() < 1e-9);
-    // A definition placed twice cannot receive one world body without duplicating it.
+    // A component placed twice gets a body in both instances, placed by the placement named or
+    // active: with neither, the move is refused and names the parameter that would settle it.
     let document = s.doc.to_json();
     let pending = s.pending_moves.clone();
     let error = s.execute("component.move_bodies", &json!({"bodies": ["Base"], "component": "Arm"})).unwrap_err();
-    assert!(error.to_string().contains("one source and destination placement"), "{error}");
+    assert!(error.to_string().contains("placed more than once") && error.to_string().contains("`component_path`"), "{error}");
     assert_eq!(s.doc.to_json(), document);
     assert_eq!(s.pending_moves, pending);
+    // Placed by the first placement, the body stays where it is in the world there.
+    run(&mut s, "component.move_bodies", json!({"bodies": ["Base"], "component": "Arm", "component_path": [occ]}));
+    assert_eq!(s.world_state().body("Base").unwrap().component, cid);
+    assert_eq!(bbox(&mut s, "Base")["min"], json!([0.0, 0.0, 0.0]));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), document);
     // The independent Paste New result has one placement and can receive it.
     let copied = pn["component"].as_u64().unwrap();
     run(&mut s, "component.move_bodies", json!({"bodies": ["Base"], "component": copied}));
@@ -2087,6 +2202,25 @@ fn material_and_appearance_colours_export_to_step() {
     run(&mut s2, "doc.open", json!({"path": p.to_string_lossy()}));
     let _ = std::fs::remove_file(&p);
     check(&step_round_trip(&mut s2, "colours2"));
+}
+
+/// The OBJ export carries the colours of the bodies: the mesh file names a material library
+/// beside it, and the library holds a material per body.
+#[test]
+fn obj_export_writes_the_colours_of_the_bodies() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Red Box"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Red Box"], "color": "#d03030"}));
+    let dir = std::env::temp_dir().join(format!("solidcraft-objcolours-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let obj = dir.join("part.obj");
+    run(&mut s, "file.export", json!({"path": obj.to_string_lossy(), "format": "obj"}));
+    let text = std::fs::read_to_string(&obj).unwrap();
+    assert!(text.contains("\nmtllib part.mtl\n"), "{text}");
+    let mtl = std::fs::read_to_string(dir.join("part.mtl")).unwrap();
+    assert!(mtl.contains("\nnewmtl Red_Box\n"), "{mtl}");
+    assert!(mtl.contains("Kd 0.816 0.188 0.188"), "{mtl}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// Face appearances and see-through bodies export: STEP styles on the faces with a
@@ -3338,6 +3472,48 @@ fn computed_import_preserves_file_and_earlier_undo_history() {
     assert!(s.model.state().bodies.is_empty());
 }
 
+/// The unsaved-changes answer is worked out once per pair of documents and revision, and stays
+/// right through every way the design changes: an edit in place (`doc_mut`, which stays in
+/// place), one that bypasses it, a new document equal to the saved one, Save, a change of what
+/// is hidden, and undo back to the saved design. Each answer is checked against the plain
+/// comparison it stands for.
+#[test]
+fn the_unsaved_changes_answer_follows_every_change() {
+    let plain = |s: &Session| (!std::sync::Arc::ptr_eq(&s.doc, &s.saved) && *s.doc != *s.saved) || s.visibility != s.saved_visibility;
+    let check = |s: &Session, want: bool, why: &str| {
+        for _ in 0..2 {
+            assert_eq!(s.is_dirty(), want, "{why}");
+            assert_eq!(plain(s), want, "{why}: the plain comparison");
+        }
+    };
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    s.mark_saved();
+    check(&s, false, "saved");
+    // An edit in place: the cached answer holds the document, yet the edit is not a copy.
+    s.doc = std::sync::Arc::new((*s.doc).clone());
+    check(&s, false, "an equal copy of the saved design");
+    let at = std::sync::Arc::as_ptr(&s.doc);
+    s.doc_mut().name = "Renamed".into();
+    assert_eq!(std::sync::Arc::as_ptr(&s.doc), at, "doc_mut edits in place");
+    check(&s, true, "renamed in place, same revision");
+    s.doc_mut().name = s.saved.name.clone();
+    check(&s, false, "named back in place");
+    // An edit that goes around doc_mut while the answer holds the document copies it.
+    std::sync::Arc::make_mut(&mut s.doc).name = "Elsewhere".into();
+    check(&s, true, "edited past doc_mut");
+    s.mark_saved();
+    check(&s, false, "saved again");
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 0]}));
+    check(&s, true, "a command");
+    run(&mut s, "edit.undo", json!({}));
+    check(&s, false, "undone back to the saved design");
+    s.visibility.hidden_bodies.push("Body1".into());
+    check(&s, true, "a body hidden");
+    s.visibility.hidden_bodies.clear();
+    check(&s, false, "shown again");
+}
+
 /// Commands evaluated ahead (off the window thread) and then run for real take what was
 /// evaluated: on a design whose states are past the shared cache's budget the second run
 /// evaluated everything again, so an off-thread command cost twice its time.
@@ -3576,6 +3752,64 @@ fn a_pick_bounded_by_a_projected_rim_takes_only_that_region() {
     assert!(rel(v, want) < 5e-3, "{v} vs {want}");
 }
 
+/// A circle drawn partly past the edge of the top face its sketch is on: the face's projected
+/// outline cuts it into a lens on the face and a crescent past it. A pick that asks for exactly
+/// its region, as the dialogs do, builds that region alone (#6724); a plain pick still takes the
+/// whole drawn circle (#5302).
+#[test]
+fn an_exact_pick_of_a_region_cut_by_the_face_outline_takes_only_that_region() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10, "body_name": "Base"}));
+    let id = run(&mut s, "sketch.create", json!({"plane": {"face": [0, 0, 10]}}))["sketch"].as_u64().unwrap();
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 0], "radius": 6}));
+    run(&mut s, "sketch.finish", json!({}));
+    // The two circles' lens, and the rest of the drawn circle past the face.
+    let (r1, r2, d) = (10.0_f64, 6.0_f64, 10.0_f64);
+    let lens = r1 * r1 * ((d * d + r1 * r1 - r2 * r2) / (2.0 * d * r1)).acos() + r2 * r2 * ((d * d + r2 * r2 - r1 * r1) / (2.0 * d * r2)).acos()
+        - 0.5 * ((-d + r1 + r2) * (d + r1 - r2) * (d - r1 + r2) * (d + r1 + r2)).sqrt();
+    let disc = PI * r2 * r2;
+    let crescent = disc - lens;
+    let state = s.model.state();
+    let ss = state.sketch(id).unwrap();
+    assert_eq!(ss.profiles.len(), 3, "the lens, the crescent past the face and the rest of the face");
+    let at = |x: f64| ss.profiles.iter().position(|p| p.region.contains(solidcraft_geom::Vec2::new(x, 0.0))).unwrap();
+    let (on_face, past_face) = (at(7.0), at(14.0));
+    // The volume of the new body, and how many profiles its extrude is built from.
+    let extrude = |extra: Value| -> (f64, usize) {
+        let mut s2 = Session::new((*s.doc).clone());
+        let mut p = json!({"sketch": id, "distance": 5, "operation": "new", "body_name": "Pad"});
+        if let (Some(p), Value::Object(extra)) = (p.as_object_mut(), extra) {
+            p.extend(extra);
+        }
+        run(&mut s2, "solid.extrude", p);
+        let state = s2.model.state();
+        let Some(solidcraft_doc::FeatureKind::Extrude { profiles, .. }) = s2.doc.features.last().map(|f| &f.kind) else { panic!("an extrude") };
+        let count = solidcraft_doc::profile_selection_indices(state.sketch(id).unwrap(), profiles).unwrap().len();
+        let v = state.bodies.iter().filter(|b| b.name.starts_with("Pad")).map(|b| b.body.tessellate(1e-2).unwrap().measure().volume).sum();
+        (v, count)
+    };
+    for (profiles, want, n) in [
+        (json!([on_face]), lens, 1),
+        (json!([past_face]), crescent, 1),
+        (json!([{"point": [7, 0]}]), lens, 1),
+        (json!([{"point": [14, 0]}]), crescent, 1),
+        (json!([on_face, past_face]), disc, 2),
+    ] {
+        let (v, count) = extrude(json!({"profiles": profiles.clone(), "exact_regions": true}));
+        assert!(rel(v, want * 5.0) < 5e-3, "{profiles}: {v} vs {}", want * 5.0);
+        assert_eq!(count, n, "{profiles}");
+    }
+    // Without `exact_regions`, a pick on either piece takes the whole drawn circle (#5302).
+    for profiles in [json!([on_face]), json!([{"point": [14, 0]}])] {
+        let (v, count) = extrude(json!({"profiles": profiles.clone()}));
+        assert!(rel(v, disc * 5.0) < 5e-3, "{profiles}: {v} vs {}", disc * 5.0);
+        assert_eq!(count, 2, "{profiles}");
+    }
+}
+
 /// An explicit pick of a drawn hole still fills only that hole (#5176).
 #[test]
 fn an_explicit_pick_of_a_drawn_hole_fills_only_that_hole() {
@@ -3705,7 +3939,7 @@ fn feature_params_docs_list_shared_keys() {
     let params =
         |id: &str| cmds.as_array().unwrap().iter().find(|c| c["id"] == id).and_then(|c| c["params"].as_str()).unwrap_or_default().to_string();
     let with_targets = ["solid.extrude", "solid.revolve", "solid.sweep", "solid.loft", "solid.pipe", "solid.coil"];
-    let without_targets = ["solid.box", "solid.cylinder", "solid.sphere", "solid.torus", "sheet.flange"];
+    let without_targets = ["solid.box", "solid.cylinder", "solid.sphere", "solid.torus", "solid.cone", "sheet.flange"];
     for id in with_targets.iter().chain(&without_targets) {
         let doc = params(id);
         assert!(doc.contains("name?") && doc.contains("body_name?"), "{id}: {doc}");
@@ -4205,6 +4439,40 @@ fn renaming_an_imported_assembly_body_reads_nothing_again() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Renaming one of an imported file's solids whose siblings are numbered after it (`Bolt` beside
+/// `Bolt (2)`, as the solids of a STEP file with one label are built) evaluates nothing either: the
+/// rename keeps the siblings' names, so the model is the one evaluating the renamed design gives.
+#[test]
+fn renaming_an_imported_body_with_numbered_siblings_evaluates_nothing() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-step-rename-siblings-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut a = Session::default();
+    run(&mut a, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Bolt"}));
+    run(&mut a, "solid.box", json!({"length": 4, "width": 4, "height": 4, "center": [30, 0, 2], "operation": "new", "body_name": "Bolt (2)"}));
+    let p = dir.join("Bolts.step");
+    run(&mut a, "file.export", json!({"path": p.to_string_lossy()}));
+    let mut s = Session::default();
+    run(&mut s, "doc.open", json!({"path": p.to_string_lossy()}));
+    let names = |s: &Session| s.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+    let before = names(&s);
+    let first = before.iter().find(|n| !n.ends_with(" (2)")).cloned().unwrap();
+    assert!(before.contains(&format!("{first} (2)")), "a sibling numbered after it: {before:?}");
+    s.evaluations = 0;
+    run(&mut s, "body.rename", json!({"body": first, "name": "Renamed"}));
+    assert_eq!(s.evaluations, 0, "a rename evaluates nothing");
+    let after = names(&s);
+    assert!(after.contains(&"Renamed".to_string()) && after.contains(&format!("{first} (2)")), "{after:?}");
+    let mut fresh = Session::new((*s.doc).clone());
+    fresh.refresh();
+    assert_eq!(names(&fresh), after, "the same names as evaluating the renamed design");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(names(&s), before);
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(names(&s), after);
+    assert_eq!(s.evaluations, 0, "nor do its undo and redo");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// #2467: renaming a body that later features change (a hole patterned over it, then a chamfer)
 /// evaluates nothing, and leaves the bodies, volumes and face names evaluating the renamed
 /// design gives; undo and redo do the same.
@@ -4248,10 +4516,10 @@ fn renaming_a_body_later_features_change_evaluates_nothing() {
     assert_eq!(s.evaluations, 0, "nor do its undo and redo");
 }
 
-/// A body whose name later bodies' names are worked out from (`X` patterned into `X (2)`) is still
-/// renamed by evaluating the design, so the copies follow it as they would on opening it.
+/// A body whose name later bodies' names are worked out from (`X` patterned into `X (2)`) keeps
+/// the same copies and face names as opening the renamed design.
 #[test]
-fn renaming_a_body_whose_copies_take_its_name_evaluates_the_design() {
+fn renaming_a_body_keeps_its_copies_consistent_with_rebuilding() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "X"}));
     run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["X"], "dir1": [1, 0, 0], "count1": 3, "spacing1": 20}));
@@ -4261,6 +4529,9 @@ fn renaming_a_body_whose_copies_take_its_name_evaluates_the_design() {
     let mut fresh = Session::new((*s.doc).clone());
     fresh.refresh();
     assert_eq!(names(&fresh), names(&s));
+    for (a, b) in fresh.model.state().bodies.iter().zip(&s.model.state().bodies) {
+        assert_eq!(solidcraft_doc::naming::face_names(a), solidcraft_doc::naming::face_names(b));
+    }
 }
 
 /// #3044: on a design with thousands of bodies the cheap commands stay cheap: showing, hiding,
@@ -4375,4 +4646,33 @@ fn parallel_pipe_large_nominals_support_shallow_and_thin_cylindrical_holes() {
             assert!((state.threads[0].end - state.threads[0].start - depth.unwrap_or(height)).abs() < 1e-6);
         }
     }
+}
+
+/// #3961: a cut made while a body is hidden leaves that body alone, and keeps doing so once it
+/// is shown again (the shown bodies are stored as the cut's targets); with nothing hidden, a
+/// cut still goes through every body it meets.
+#[test]
+fn a_cut_leaves_hidden_bodies_alone() {
+    let setup = |hide: bool| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Below"}));
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "corner": [0, 0, 10], "body_name": "Above", "operation": "new"}));
+        if hide {
+            run(&mut s, "browser.visibility", json!({"items": ["Below"], "visible": false}));
+        }
+        run(&mut s, "sketch.create", json!({"plane": {"face": [10, 10, 20]}}));
+        run(&mut s, "sketch.circle.center", json!({"center": [10, 10], "radius": 3}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 30, "direction": "negative", "operation": "cut"}));
+        s
+    };
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().body(name).unwrap().body).unwrap().volume;
+    let full = 20.0 * 20.0 * 10.0;
+    let mut hidden = setup(true);
+    assert!((vol(&hidden, "Below") - full).abs() < 1e-6, "the hidden body is not cut");
+    assert!(vol(&hidden, "Above") < full - 1.0, "the shown one is");
+    run(&mut hidden, "browser.visibility", json!({"items": ["Below"], "visible": true}));
+    assert!((vol(&hidden, "Below") - full).abs() < 1e-6, "shown again, it stays as it was");
+    let shown = setup(false);
+    assert!(vol(&shown, "Below") < full - 1.0 && vol(&shown, "Above") < full - 1.0, "with nothing hidden, both are cut");
 }

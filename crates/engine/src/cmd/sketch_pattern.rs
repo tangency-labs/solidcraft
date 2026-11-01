@@ -1,6 +1,6 @@
 //! Associative sketch patterns. Editing retains ids at surviving instance indices.
 
-use solidcraft_sketch::{PatternInstance, SketchPattern, SketchPatternKind};
+use solidcraft_sketch::{SketchPattern, SketchPatternKind};
 
 use super::*;
 use crate::cmd::{alignment_param, reversed_param};
@@ -50,6 +50,30 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
                 }
             }
         }
+        let mut expressions = old.as_ref().map(|old| old.expressions.clone()).unwrap_or_default();
+        for key in ["count", "count2", "spacing", "spacing2", "angle"] {
+            if p.get(key).is_some() {
+                expressions.remove(key);
+            }
+            if let Some(Value::String(e)) = p.get(key) {
+                expressions.insert(key.into(), e.clone());
+            }
+        }
+        for (key, expression) in &expressions {
+            let kind = match key.as_str() {
+                "count" | "count2" => solidcraft_doc::expr::Kind::Unitless,
+                "angle" => solidcraft_doc::expr::Kind::Angle,
+                _ => solidcraft_doc::expr::Kind::Length,
+            };
+            let value = doc.eval(expression, kind).map_err(|e| bad(cmd, format!("`{key}`: {e}")))?;
+            params[key] = json!(if key == "angle" { value.to_degrees() } else { value });
+        }
+        if !circular
+            && params.get("spacing2").is_none()
+            && let Some(e) = expressions.get("spacing").cloned()
+        {
+            expressions.insert("spacing2".into(), e);
+        }
         let (mut cs, mut ps) = entities(sk, &params, cmd)?;
         cs.sort_unstable();
         cs.dedup();
@@ -76,23 +100,18 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             }
         }
         let count_expression = if circular {
-            match params.get("count") {
-                Some(Value::String(expression)) => {
-                    let expression = expression.trim().to_string();
-                    let value = doc.eval(&expression, solidcraft_doc::expr::Kind::Unitless)?;
-                    params["count"] = json!(SketchPattern::circular_quantity(value)?);
-                    Some(expression)
-                }
-                _ => None,
+            let expression =
+                expressions.remove("count").or_else(|| old.as_ref().and_then(|p| p.count_expression.clone()).filter(|_| p.get("count").is_none()));
+            if let Some(expression) = &expression {
+                let value = doc.eval(expression, solidcraft_doc::expr::Kind::Unitless)?;
+                params["count"] = json!(SketchPattern::circular_quantity(value).map_err(|e| bad(cmd, format!("`count`: {e}")))?);
             }
+            expression
         } else {
             None
         };
         let n = count(&params, "count", cmd)?;
-        if count_expression.is_some() && n < 2 {
-            return Err(bad(cmd, "circular pattern Quantity must be 2…500"));
-        }
-        let (kind, center, slots) = if circular {
+        let (kind, center) = if circular {
             let total = if params.get("angle").is_some() { num(&params, "angle").ok_or_else(|| bad(cmd, "`angle` must be finite"))? } else { 360.0 };
             if !(total.abs() > 1e-9 && total.abs() <= 360.0) {
                 return Err(bad(cmd, "`angle` must be nonzero and at most 360 degrees"));
@@ -108,15 +127,9 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
                 None => return Err(bad(cmd, "missing `center`")),
             };
             let id = sk.points.get(center).ok_or_else(|| bad(cmd, "missing center point"))?.id.clone();
-            let full = (total.abs() - 360.0).abs() < 1e-9;
-            let step = total / if full { n as f64 } else { (n.max(2) - 1) as f64 };
             let alignment = alignment_param(&params, "alignment", cmd)?;
             let reversed = reversed_param(&params, "reversed", cmd)?;
-            (
-                SketchPatternKind::Circular { center: id, count: n, angle: total, alignment, reversed },
-                Some(center),
-                (1..n).map(|i| ([i, 0], (step * alignment.multiplier(i, reversed)).to_radians(), Vec2::ZERO)).collect::<Vec<_>>(),
-            )
+            (SketchPatternKind::Circular { center: id, count: n, angle: total, alignment, reversed }, Some(center))
         } else {
             let spacing = num(&params, "spacing").ok_or_else(|| bad(cmd, "`spacing` must be finite"))?;
             let count2 = if params.get("count2").is_some() { count(&params, "count2", cmd)? } else { 1 };
@@ -144,19 +157,6 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             let alignment2 = alignment_param(&params, "alignment2", cmd)?;
             let reversed = reversed_param(&params, "reversed", cmd)?;
             let reversed2 = reversed_param(&params, "reversed2", cmd)?;
-            let first = line_direction(sk, direction.as_deref()).unwrap_or(dir);
-            let second = line_direction(sk, direction2.as_deref()).or(dir2).unwrap_or_else(|| first.perp());
-            let slots = (0..n)
-                .flat_map(|i| {
-                    (0..count2).filter_map(move |j| {
-                        (i != 0 || j != 0).then_some((
-                            [i, j],
-                            0.0,
-                            first * (spacing * alignment.multiplier(i, reversed)) + second * (spacing2 * alignment2.multiplier(j, reversed2)),
-                        ))
-                    })
-                })
-                .collect();
             (
                 SketchPatternKind::Rectangular {
                     dir,
@@ -173,7 +173,6 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
                     reversed2,
                 },
                 None,
-                slots,
             )
         };
         let id = match &old {
@@ -181,82 +180,20 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
             None => sk.fresh("pat")?,
         };
         let center_id = center.and_then(|i| sk.points.get(i)).map(|p| p.id.clone());
-        let mut existing = old.map(|old| old.instances).unwrap_or_default();
-        // Remove retired instances first: all following indices are resolved by stable id.
-        for instance in existing.iter().filter(|instance| !slots.iter().any(|(index, _, _)| *index == instance.index)) {
-            let curves: Vec<_> = instance.curves.iter().filter_map(|id| sk.curve_index(id)).collect();
-            sk.constraints.retain(|c| !instance.constraints.contains(&c.id));
-            sk.remove_curves(&curves);
-            let points: Vec<_> = instance.points.iter().filter_map(|(_, id)| sk.resolve_point(id)).collect();
-            sk.remove_points(&points);
-        }
-        let mut instances = Vec::new();
-        let center = center_id.as_ref().and_then(|id| sk.resolve_point(id));
-        if center_id.is_some() && center.is_none() {
-            return Err(bad(cmd, "the center belongs to an instance removed by this edit"));
-        }
-        if !circular {
-            // A direction can have belonged to an instance retired above. Resolve it again
-            // before creating relations so an edit never silently substitutes a vector.
-            direction_ref(sk, &params, "direction", cmd)?;
-            direction_ref(sk, &params, "direction2", cmd)?;
-        }
-        let mut curves = Vec::new();
-        let mut constraints = Vec::new();
-        for (index, angle, offset) in slots {
-            let (base_offset, directions) = linear_displacement(sk, &kind, index, offset);
-            let c = center.and_then(|i| sk.point(i)).unwrap_or(Vec2::ZERO);
-            let transform = |p| rotate(c, angle)(p) + offset;
-            let instance = if let Some(i) = existing.iter().position(|instance| instance.index == index) {
-                let instance = existing.remove(i);
-                for cid in &instance.constraints {
-                    if let Some(constraint) = sk.constraints.iter_mut().find(|constraint| constraint.id == *cid)
-                        && let ConstraintKind::PatternPoint { center: slot, angle: a, offset: off, directions: dirs, .. } = &mut constraint.kind
-                    {
-                        *slot = center;
-                        *a = angle;
-                        *off = base_offset;
-                        *dirs = directions;
-                    }
-                }
-                for (seed, copy) in &instance.points {
-                    let pos = sk.resolve_point(seed).and_then(|i| sk.point(i)).ok_or_else(|| bad(cmd, "missing seed point"))?;
-                    if let Some(point) = sk.resolve_point(copy).and_then(|i| sk.points.get_mut(i)) {
-                        point.pos = transform(pos);
-                    }
-                }
-                instance
-            } else {
-                let cs: Vec<_> = entity_ids.iter().filter_map(|id| sk.curve_index(id)).collect();
-                let ps: Vec<_> = entity_ids.iter().filter(|id| sk.curve_index(id).is_none()).filter_map(|id| sk.resolve_point(id)).collect();
-                let (made, map) = copy_through(sk, &cs, &ps, &transform, false, &|_| false, 1.0)?;
-                let mut cons = Vec::new();
-                for (p, q) in &map {
-                    cons.push(add_c(sk, ConstraintKind::PatternPoint { p: *p, q: *q, center, angle, offset: base_offset, directions })?);
-                }
-                for (a, b) in cs.iter().zip(&made) {
-                    if matches!(sk.curves.get(*a).map(|c| &c.kind), Some(CurveKind::Circle { .. } | CurveKind::Ellipse { .. })) {
-                        cons.push(add_c(sk, ConstraintKind::PatternRadius { a: *a, b: *b })?);
-                    }
-                }
-                PatternInstance {
-                    index,
-                    curves: ids_of(sk, &made),
-                    points: map.iter().filter_map(|(p, q)| Some((sk.points.get(*p)?.id.clone(), sk.points.get(*q)?.id.clone()))).collect(),
-                    constraints: cons,
-                }
-            };
-            curves.extend(instance.curves.iter().cloned());
-            constraints.extend(instance.constraints.iter().cloned());
-            instances.push(instance);
-        }
-        let center_id = center.and_then(|i| sk.points.get(i)).map(|p| p.id.clone());
-        let pattern = SketchPattern { id: id.clone(), entities: entity_ids, kind, count_expression, instances };
-        if let Some(i) = old_index {
-            sk.patterns.insert(i.min(sk.patterns.len()), pattern);
-        } else {
-            sk.patterns.push(pattern);
-        }
+        let index = old_index.unwrap_or(sk.patterns.len());
+        let pattern = SketchPattern {
+            id: id.clone(),
+            entities: entity_ids,
+            kind: kind.clone(),
+            instances: old.map(|old| old.instances).unwrap_or_default(),
+            expressions,
+            count_expression,
+        };
+        sk.patterns.insert(index.min(sk.patterns.len()), pattern);
+        sk.update_pattern(index, kind)?;
+        let pattern = sk.patterns.get(index).ok_or_else(|| bad(cmd, "missing sketch pattern"))?;
+        let curves: Vec<_> = pattern.instances.iter().flat_map(|i| i.curves.iter().cloned()).collect();
+        let constraints: Vec<_> = pattern.instances.iter().flat_map(|i| i.constraints.iter().cloned()).collect();
         Ok(json!({"pattern":id,"center":center_id,"curves":curves,"constraints":constraints}))
     })?;
     let mut out = out;
@@ -264,6 +201,14 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
         out.insert("sketch".into(), info);
     }
     Ok(out)
+}
+
+fn count(p: &Value, k: &str, cmd: &str) -> Result<usize> {
+    let n = num(p, k).ok_or_else(|| bad(cmd, format!("`{k}` must be a number or expression")))?;
+    if !(1.0..=MAX_COPIES as f64).contains(&n) || n.fract() != 0.0 {
+        return Err(bad(cmd, format!("`{k}` must be a positive integer from 1 to {MAX_COPIES}")));
+    }
+    Ok(n as usize)
 }
 
 fn direction_ref(sk: &Sketch, p: &Value, key: &str, cmd: &str) -> Result<Option<String>> {
@@ -277,31 +222,4 @@ fn direction_ref(sk: &Sketch, p: &Value, key: &str, cmd: &str) -> Result<Option<
 fn line_direction(sk: &Sketch, id: Option<&str>) -> Option<Vec2> {
     let Shape::Line { a, b } = sk.shape(sk.curve_index(id?)?)? else { return None };
     (b - a).normalized()
-}
-
-/// Keep sampled vector directions compatible with older designs, while picked lines are
-/// solver references. The default second direction follows the first line's perpendicular.
-fn linear_displacement(sk: &Sketch, kind: &SketchPatternKind, [i, j]: [usize; 2], fallback: Vec2) -> (Vec2, [Option<(usize, Vec2)>; 2]) {
-    let SketchPatternKind::Rectangular { dir, dir2, direction, direction2, spacing, spacing2, alignment, alignment2, reversed, reversed2, .. } = kind
-    else {
-        return (fallback, [None; 2]);
-    };
-    let mut offset = Vec2::ZERO;
-    let mut directions = [None; 2];
-    let d1 = *spacing * alignment.multiplier(i, *reversed);
-    let d2 = *spacing2 * alignment2.multiplier(j, *reversed2);
-    if let Some(l) = direction.as_ref().and_then(|id| sk.curve_index(id)) {
-        directions[0] = Some((l, Vec2::new(d1, if dir2.is_none() && direction2.is_none() { d2 } else { 0.0 })));
-    } else {
-        offset += *dir * d1;
-        if dir2.is_none() && direction2.is_none() {
-            offset += dir.perp() * d2;
-        }
-    }
-    if let Some(l) = direction2.as_ref().and_then(|id| sk.curve_index(id)) {
-        directions[1] = Some((l, Vec2::new(d2, 0.0)));
-    } else if let Some(dir2) = dir2 {
-        offset += *dir2 * d2;
-    }
-    (offset, directions)
 }

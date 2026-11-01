@@ -1,9 +1,16 @@
 # UI localization
 
-SolidCraft embeds its translations and works offline. English, Czech, Danish, German, English (UK), Spanish, French, Galician, Italian,
-Japanese, Korean, Malay, Polish, Brazilian Portuguese, Russian, Turkish, Ukrainian and Chinese are currently registered in `crates/ui-egui/src/i18n.rs`. Adding a language requires an
+SolidCraft embeds its translations and works offline. English, Arabic, Bosnian, Czech, Danish, German, English (UK), Spanish, Finnish, French, Galician, Hebrew, Croatian, Italian,
+Japanese, Korean, Malay, Norwegian Bokmål, Dutch, Polish, Brazilian Portuguese, Russian, Serbian, Turkish, Ukrainian and Chinese are currently registered in `crates/ui-egui/src/i18n.rs`. Adding a language requires an
 embedded catalog and one registration there; the preferences selector and validation use the same
 registry.
+
+The `language` preference is a registered locale ID, or `system` (the default on a first start):
+the app then matches the system's preferred locales — the OS locale on desktop,
+`navigator.languages` in the browser, read with the `sys-locale` crate — against the registry:
+exact tag, then base language, then English (`match_system_tags` in
+`crates/ui-egui/src/i18n.rs`). A saved specific language always wins, so existing users keep
+their choice.
 
 ## Messages
 
@@ -44,9 +51,10 @@ that looks untranslated. Two guards catch that in the build:
 
 - `every_complete_catalog_carries_every_english_message` — adding a key to `en.json`
   without giving it to a complete catalog fails the tests. English is the source catalog,
-  Japanese and Chinese are delivered complete; Danish, German, Spanish, Galician, Italian, Korean, Malay, Polish, Brazilian Portuguese, Russian, French, Ukrainian and
+  Arabic, Hebrew, Japanese and Chinese are delivered complete; Bosnian, Croatian and Serbian carry
+  every English message today but are not held to it, so a new label may follow later in them; Danish, German, Spanish, Finnish, Galician, Italian, Korean, Malay, Norwegian Bokmål, Polish, Brazilian Portuguese, Russian, French, Ukrainian and
   Turkish are partial — their gaps fall back to English and are reported by `cargo xtask i18n` without
-  failing the build. A new label needs en, ja, zh, de and ko; Russian, French, Ukrainian and Malay may
+  failing the build. A new label needs en, ar, he, ja, zh, de and ko; Russian, French, Ukrainian and Malay may
   follow later.
 - `every_toolbar_tab_and_panel_is_in_the_english_catalog` — tabs and panels reach the UI as bare
   source strings, resolved only by the English-label adapter, so a heading missing from `en.json`
@@ -80,6 +88,30 @@ is Bozza; Counterbore is Lamatura and Countersink is Svasatura. Established tech
 terms such as Loft, Sweep, Spline and Offset remain unchanged. Command IDs, shortcuts,
 file formats, units and user-provided names are not translated.
 
+The Bosnian (`bs`, Bosanski), Croatian (`hr`, Hrvatski) and Serbian (`sr`, Српски) catalogs are
+original translations kept in step: Bosnian and Croatian are ijekavian in Latin script, Serbian is
+ekavian in Cyrillic. They share Skica (Sketch), Ograničenje (Constraint), Kota (Dimension),
+Ekstrudiraj (Extrude), Zaobljenje (Fillet), Skošenje (Chamfer), Niz (Pattern) and Spoj (Joint), and
+follow each standard where it differs: Tijelo/Tijelo/Telo (Body), Ravan/Ravnina/Ravan (Plane),
+Tačka/Točka/Tačka (Point), Ivica/Brid/Ivica (Edge), Ugao/Kut/Ugao (Angle), Rupa/Provrt/Rupa (Hole),
+Sačuvaj/Spremi/Sačuvaj (Save). A timeline feature is Operacija in Bosnian and Serbian and Značajka in
+Croatian; the Browser panel is Stablo modela, so it is never confused with a web browser
+(preglednik/pregledač); the undo history is Historija/Povijest/Istorija and the timeline Vremenska
+traka. In Serbian, brand and file names, acronyms, units, key names and placeholders stay in Latin
+script inside the Cyrillic text. Command IDs, shortcuts, file formats, units and user-provided names
+are not translated.
+
+The Finnish catalog (`fi`, shown as Suomi) uses Luonnos (Sketch), Kappale (Body), Piirre (timeline Feature), Rajoite (Constraint), Mitta (Dimension), Pyöristys (Fillet), Viiste (Chamfer), Pursotus (Extrude) and Pyöräytys (Revolve); a design is a malli and an AI model a tekoälymalli. Draft is Päästö, Flat Pattern is Levityskuva, Hem is Huulos, and Counterbore/Countersink are Upotus/Kartioupotus. Camera and view angles are Nyökkäys (pitch), Kääntö (yaw) and Kallistus (roll); a saved render shot is a Kuvakulma. Finnish puts a space before % (50 %). Command IDs, shortcuts, file formats, units and user-provided names stay unchanged.
+
+The Norwegian Bokmål catalog (`nb`, shown as Norsk bokmål) uses Skisse (Sketch),
+Kropp (Body), Funksjon (timeline Feature), Binding (Constraint), Avrunding (Fillet)
+and Fas (Chamfer). Ground/Unground are Fest posisjon/Frigjør posisjon, Draft is
+Slippvinkel, Flat Pattern is Utbretting, and Counterbore/Countersink are Sylindrisk
+forsenkning/Konisk forsenkning. Capture Position is Registrer posisjon, while
+sketch snapping is Punktfangst. Loft, Sweep, Spline and Offset remain technical
+terms. Command IDs, shortcuts, file formats, units and user-provided names stay
+unchanged.
+
 One immutable `Locale` type handles all translations. Table widgets without an app reference
 use a render scope that restores the previous locale when it exits, including nested renders.
 Standalone translated panels enter the same scope. Measure rendered text to size custom
@@ -94,19 +126,62 @@ Chinese font-name list (`PingFang`, `Microsoft YaHei`, `Noto Sans CJK SC`, …) 
 glyph. No fonts are redistributed in native desktop distribution packages; native builds rely
 entirely on existing operating system fonts or craft-fonts.
 
-In the browser, `solidcraft-web` bundles a self-hosted Japanese font (`BIZUDPGothic-Regular.ttf`, licensed
-under SIL OFL 1.1) within the web distribution artifacts only. The font is loaded asynchronously from the same
-origin (`./fonts/BIZUDPGothic-Regular.ttf`) on-demand when the interface language is a CJK one, or, with
-any other interface language, the first time Japanese text (kana, kanji or full-width forms in a design name,
-file name, body name or typed text) is drawn, without contacting any external CDNs or third-party servers.
-A session that never shows such text downloads no font. If font loading fails with a CJK interface, the web
-interface shows English for that session only to prevent missing glyphs (tofu); the saved language
-preference is kept, so the next visit tries again. The bundled font specifically targets Japanese; it also
-renders the kanji Chinese shares with Japanese, while Korean (Hangul) and simplified-only Chinese characters
-are not covered, so a self-hosted SC/Korean font bundle remains follow-up work for full web coverage.
+In the browser, `solidcraft-web` ships self-hosted script fonts (SIL OFL 1.1) in the web distribution
+artifacts only, loaded asynchronously from the same origin without contacting any external CDNs or
+third-party servers:
+
+- Japanese (and Hangul-less Korean UI for now): `./fonts/BIZUDPGothic-Regular.ttf`
+- Simplified Chinese (`zh`): `./fonts/CraftUI-SC.otf` (a locale-glyph subset of Noto Sans SC, renamed
+  under the OFL so it does not use the reserved name Noto)
+- Traditional Chinese (`zh-TW`): `./fonts/CraftUI-TC.otf` (same for Noto Sans TC)
+
+A CJK interface language fetches the matching face on demand. With any other interface language, the
+first time Japanese text (kana, kanji or full-width forms in a design name, file name, body name or
+typed text) is drawn, the Japanese face is fetched (#720). A session that never shows such text
+downloads no script font. If the needed face fails to load, the web interface shows English for that
+session only to prevent missing glyphs (tofu); the saved language preference is kept, so the next
+visit tries again. Korean Hangul coverage on the web remains follow-up work.
+
+## Right-to-left text
+
+egui 0.36 shapes each run of one font with harfrust, so a run of Hebrew letters is drawn right to
+left, but it has no bidirectional layout: the runs of a line (words, spaces, numbers, punctuation)
+are placed left to right in the order they are stored. A Hebrew sentence stored in reading order
+would show its words in the wrong order and its punctuation on the wrong side. `crate::bidi` runs
+the Unicode Bidirectional Algorithm (the `unicode-bidi` crate, UAX #9) over every message of a
+catalog that has right-to-left text, once, when the catalog is first used, and `Locale::text`
+returns the order egui needs: the runs of the line in display order, brackets inside
+right-to-left text mirrored, and the letters of each Hebrew run left in reading order for the
+shaper to reverse. Each line is its own paragraph and takes its direction from its first strong
+letter, so English fallback text is unchanged. `hebrew_messages_land_on_screen_in_display_order`
+lays messages out with a real Hebrew font and checks where the glyphs land.
+
+Arabic takes the same path. Its letters join, which the shaper does from the font's own tables, so
+each Arabic word is one run: the Arabic font comes after the Latin interface font, which keeps the
+spaces, digits and Latin text, and it is the first fallback for an Arabic UI (Segoe UI, Tahoma or
+Arial on Windows; SF Arabic, Geeza Pro, Damascus or Tahoma on macOS; Noto Sans or Naskh Arabic,
+KACST One or DejaVu Sans on Linux; `NotoSansArabic-Regular.ttf` in `CRAFT_FONTS_DIR`). Write Arabic
+messages with Western digits, which keep their left-to-right order inside the sentence.
+`arabic_messages_land_on_screen_in_display_order` checks the word order on screen.
+
+Placeholders are kept whole where they stand, so `format` substitutes values into the
+display-order text and a value keeps the order it has: a number, a file name, a label that is
+already in display order. Translators write normal Hebrew in reading order; they never add
+directional marks. When a prefix letter joins a Latin word or a placeholder, use the maqaf
+(`ב־{name}`, `ל־STEP`), which is a Hebrew letter to the algorithm, not an ASCII hyphen.
+
+This relies on Hebrew letters and the spaces and punctuation between them coming from different
+fonts (the bundled IBM Plex Sans has no Hebrew), which is how the default fonts are set up; an
+interface font that covers both Hebrew and Latin puts a whole line in one run and can reverse it.
+What this does not do yet: the layout is not mirrored (the browser stays on the left, labels stay
+left-aligned), and a message egui wraps onto several lines keeps the order of the whole string, so
+its lines read bottom to top. Names people type in Hebrew are shown as stored. The desktop host
+appends a system Hebrew font (Arial Hebrew or SF Hebrew on macOS, Segoe UI or Arial on Windows,
+Noto Sans Hebrew or DejaVu Sans on Linux); the web build has no Hebrew font yet, so a Hebrew
+interface shows empty boxes there.
 
 The current messages support named substitution, not locale-specific plural selection,
-number/date formatting, or right-to-left layout and shaping. Add those capabilities when
+number/date formatting, right-to-left layout mirroring, or shaping for joining scripts such as Arabic. Add those capabilities when
 introducing messages or languages that need them; use an established message formatter for
 plural rules instead of adding language branches to panels. The catalogs cover the UI surfaces
 introduced by this PR, not every engine error or every newer command dialog.

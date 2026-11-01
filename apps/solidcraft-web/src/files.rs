@@ -24,11 +24,13 @@ pub const OPFS: &str = disk::OPFS_PREFIX;
 pub const DOWNLOADS: &str = disk::DOWNLOADS_PREFIX;
 /// Files brought in from the computer.
 pub const UPLOAD: &str = "/upload/";
-/// The autosave of unsaved work (in OPFS: `recovery.solidcraft` and `recovery.json`).
-const RECOVERY: &str = "recovery.solidcraft";
-/// The autosave earlier releases kept (compatibility shim, docs/compatibility.md): recovered
-/// when there is no current one.
-const LEGACY_RECOVERY: &str = "recovery.solvecraft";
+/// The autosave of unsaved work (in OPFS: `recovery.sc` and `recovery.json`), named with
+/// `solidcraft_engine::io::DESIGN_EXT`.
+const RECOVERY: &str = "recovery.sc";
+/// The autosaves earlier releases kept, newest first, one per entry of
+/// `solidcraft_engine::io::LEGACY_DESIGN_EXTS` (compatibility shim, docs/compatibility.md): the
+/// newest is recovered when there is no current one.
+const LEGACY_RECOVERY: [&str; 2] = ["recovery.solidcraft", "recovery.solvecraft"];
 const RECOVERY_META: &str = "recovery.json";
 
 /// What to do with a file brought in from the computer.
@@ -38,6 +40,8 @@ pub enum Intent {
     Open,
     /// Add its bodies to the open design (STEP, 3MF, STL).
     Insert,
+    /// Import it as a theme: it was dropped on Preferences' Import tile (#8226).
+    Theme,
 }
 
 /// A stored design, as the file panel lists it.
@@ -282,9 +286,10 @@ pub fn start(files: &Rc<Files>) {
                 }
                 let mut entries = Vec::new();
                 let has_recovery = all.iter().any(|(n, _, _)| n == RECOVERY);
+                let legacy = (!has_recovery).then(|| LEGACY_RECOVERY.into_iter().find(|l| all.iter().any(|(n, _, _)| n == l))).flatten();
                 for (name, bytes, modified) in all {
-                    if name == LEGACY_RECOVERY {
-                        if !has_recovery {
+                    if LEGACY_RECOVERY.contains(&name.as_str()) {
+                        if legacy == Some(name.as_str()) {
                             vfs::insert(&format!("{OPFS}{RECOVERY}"), bytes);
                         }
                         continue;
@@ -424,7 +429,9 @@ pub fn autosave(files: &Rc<Files>, doc: Option<(&solidcraft_engine::doc::Documen
         }
         None => spawn_local(async move {
             let _ = remove_file(RECOVERY).await;
-            let _ = remove_file(LEGACY_RECOVERY).await;
+            for legacy in LEGACY_RECOVERY {
+                let _ = remove_file(legacy).await;
+            }
             let _ = remove_file(RECOVERY_META).await;
         }),
     }
@@ -446,6 +453,18 @@ pub fn free_name(name: &str) -> String {
 /// The autosaved design's path (in the engine's files) for opening it.
 pub fn recovery_path() -> String {
     format!("{OPFS}{RECOVERY}")
+}
+
+/// A recovery file lives in OPFS, but its relative links belong to the original design's
+/// folder (which can be on disk). Resolve them before Open sees the temporary file location.
+pub fn prepare_recovery(original_path: Option<&str>) -> Result<String, String> {
+    let path = recovery_path();
+    let bytes = vfs::read(&path, solidcraft_engine::io::MAX_DESIGN_BYTES).map_err(|e| e.to_string())?;
+    let mut doc = solidcraft_engine::io::read_design(&bytes).map_err(|e| e.to_string())?;
+    solidcraft_engine::resolve_design_links(&mut doc, original_path);
+    let bytes = solidcraft_engine::io::write_design_container(&doc).map_err(|e| e.to_string())?;
+    vfs::insert(&path, bytes);
+    Ok(path)
 }
 
 /// Pick files on the computer: the File System Access picker where there is one, else an
@@ -500,9 +519,10 @@ fn input_picker(files: &Rc<Files>, intent: Intent) {
     let Ok(input) = doc.create_element("input").map(|e| e.unchecked_into::<web_sys::HtmlInputElement>()) else { return };
     input.set_type("file");
     // Everything the browser build imports, from the format registry: cadmpeg is pure Rust, so
-    // FreeCAD and Rhino files are part of it.
-    let accept = solidcraft_engine::io::formats::open_extensions(true).iter().map(|e| format!(".{e}")).collect::<Vec<_>>().join(",");
-    input.set_accept(&accept);
+    // FreeCAD and Rhino files are part of it; plus the DXF and SVG drawings Open and Insert take.
+    let mut extensions = solidcraft_engine::io::formats::open_extensions(true);
+    extensions.extend(["dxf", "svg"]);
+    input.set_accept(&disk::input_accept(&extensions, apple_touch()));
     // Attached (hidden) while it is open: some browsers ignore a click on a detached input.
     let _ = input.set_attribute("style", "display:none");
     if let Some(body) = doc.body() {
@@ -527,14 +547,85 @@ fn input_picker(files: &Rc<Files>, intent: Intent) {
     input.click();
 }
 
+/// Ask for one file of these types (`extensions`, e.g. `["dxf"]`) with a plain file input, the
+/// dialog every browser has. The answer is the file's path in the engine's files (under
+/// [`UPLOAD`], as for a file picked in the disk dialog), so the command that asked runs on it;
+/// `None` when the dialog was closed or the file could not be read.
+pub fn pick_upload(files: &Rc<Files>, extensions: &[&str]) -> impl std::future::Future<Output = Option<String>> + use<> {
+    // Shown now, in the click: a file dialog needs the user's gesture.
+    let chosen = choose_file(&disk::input_accept(extensions, apple_touch()));
+    let limit = disk::upload_limit(extensions);
+    let files = files.clone();
+    async move {
+        let read = async {
+            let value = JsFuture::from(chosen?).await.map_err(err)?;
+            // Closing the dialog answers no file: nothing to say.
+            let Ok(file) = value.dyn_into::<web_sys::File>() else { return Ok(None) };
+            let name = file.name();
+            if limit.is_some_and(|max| !file.size().is_finite() || file.size() > max as f64) {
+                return Err(format!("{name}: the file is too large"));
+            }
+            let bytes = blob_bytes(&file).await.map_err(|e| format!("{name}: {e}"))?;
+            let path = format!("{UPLOAD}{name}");
+            vfs::insert(&path, bytes);
+            Ok(Some(path))
+        };
+        match read.await {
+            Ok(path) => path,
+            Err(e) => {
+                files.say(format!("open: {e}"), true);
+                None
+            }
+        }
+    }
+}
+
+/// The page runs on an iPhone or iPad, whose file inputs offer every file (`disk::input_accept`).
+fn apple_touch() -> bool {
+    web_sys::window().is_some_and(|w| {
+        let nav = w.navigator();
+        disk::apple_touch(&nav.user_agent().unwrap_or_default(), nav.max_touch_points())
+    })
+}
+
+/// Show a hidden `<input type=file>` offering `accept` (call in the click). The promise answers
+/// the picked `File`, or `null` when the dialog is closed (the input's `cancel` event).
+fn choose_file(accept: &str) -> Result<js_sys::Promise, String> {
+    let doc = web_sys::window().and_then(|w| w.document()).ok_or("this page can't show a file dialog")?;
+    let input = doc.create_element("input").map_err(err)?.dyn_into::<web_sys::HtmlInputElement>().map_err(|_| "no file input".to_string())?;
+    input.set_type("file");
+    input.set_accept(accept);
+    // Attached (hidden) while it is open: some browsers ignore a click on a detached input.
+    input.set_attribute("style", "display:none").map_err(err)?;
+    doc.body().ok_or("this page has no body")?.append_child(&input).map_err(err)?;
+    let promise = js_sys::Promise::new(&mut |resolve: Function, _reject: Function| {
+        // One answer for a pick or a cancel; read from the event, so it does not keep the input.
+        let done = Closure::once_into_js(move |event: web_sys::Event| {
+            let file = event.target().and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok()).and_then(|input| {
+                input.set_onchange(None);
+                input.set_oncancel(None);
+                input.remove();
+                input.files().and_then(|list| list.get(0))
+            });
+            let _ = resolve.call1(&JsValue::UNDEFINED, &file.map_or(JsValue::NULL, JsValue::from));
+        });
+        input.set_onchange(Some(done.unchecked_ref()));
+        input.set_oncancel(Some(done.unchecked_ref()));
+    });
+    input.click();
+    Ok(promise)
+}
+
 /// Read files dropped on the page.
-pub fn take_drops(files: &Rc<Files>, raw: &mut egui::RawInput) {
+/// `theme`: the pointer is over Preferences' Import tile, so the files are themes.
+pub fn take_drops(files: &Rc<Files>, raw: &mut egui::RawInput, theme: bool) {
+    let intent = if theme { Intent::Theme } else { Intent::Insert };
     for f in std::mem::take(&mut raw.dropped_files) {
         let files = files.clone();
         spawn_local(async move {
             let name = f.path().file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped".into());
             match f.bytes_async().await {
-                Ok(b) => files.arrive(name, b, Intent::Insert),
+                Ok(b) => files.arrive(name, b, intent),
                 Err(e) => files.say(format!("{name}: {e}"), true),
             }
         });

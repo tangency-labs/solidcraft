@@ -55,6 +55,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 width: String,
                 catch_depth: String,
                 catch_length: String,
+                base_height: String,
+                new_body: bool,
             },
             /// The rule manager: the rule shown (index into the rules, past the end for a new one).
             Rules {
@@ -103,6 +105,8 @@ fn snap_fit(app: &SolveApp) -> Pl {
         width: crate::dialogs::length_default(&app.session, "5"),
         catch_depth: crate::dialogs::length_default(&app.session, "1"),
         catch_length: crate::dialogs::length_default(&app.session, "2"),
+        base_height: String::new(),
+        new_body: false,
     }
 }
 
@@ -118,6 +122,15 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         "plastic.assign_rule" => (Pl::Assign { rule: 1 }, vec![SelInput::new("Bodies", BODIES, true)]),
         _ => Pl::simple_start(id)?,
     };
+    let mut inputs = inputs;
+    // A tool with placement handles snaps its place to sketch points on the face as a Single
+    // hole's does, so the marker can be dragged onto one; a bare sketch point is refused by OK as
+    // before.
+    if crate::place_gizmo::snaps_to_points(app, id)
+        && let Some(position) = inputs.first_mut()
+    {
+        position.accept |= crate::selection::POINTS;
+    }
     Some((crate::length_input::defaults(&app.session.doc, Kind::Plastic(pl)), inputs))
 }
 
@@ -185,7 +198,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pl, inputs: &[SelInpu
                 enter |= opt_field(ui, "Clearance", gap, crate::length_input::unit(&app.session.doc), "from the rule");
             }
         }
-        Pl::SnapFit { hook, length, thickness, width, catch_depth, catch_length } => {
+        Pl::SnapFit { hook, length, thickness, width, catch_depth, catch_length, base_height, new_body } => {
             let dirs = face_normal(app, inputs).map(hook_dirs).unwrap_or_default();
             if !dirs.is_empty() {
                 let names: Vec<&str> = dirs.iter().map(|(n, _)| n.as_str()).collect();
@@ -196,6 +209,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pl, inputs: &[SelInpu
             enter |= expr_row(ui, "Width", width);
             enter |= expr_row(ui, "Catch Depth", catch_depth);
             enter |= expr_row(ui, "Catch Length", catch_length);
+            enter |= opt_field(ui, "Base Height", base_height, crate::length_input::unit(&app.session.doc), "at the face");
+            form_row(ui, "Body", |ui| {
+                let mut op = usize::from(*new_body);
+                combo(ui, "pl_snap_body", &["Join", "New Body"], &mut op);
+                *new_body = op == 1;
+            });
         }
         Pl::Rest { round, width, length, height, draft, thickness } => {
             form_row(ui, "Shape", |ui| {
@@ -296,7 +315,7 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
             }
             ("plastic.lip", p)
         }
-        Pl::SnapFit { hook, length, thickness, width, catch_depth, catch_length } => {
+        Pl::SnapFit { hook, length, thickness, width, catch_depth, catch_length, base_height, new_body } => {
             let mut p = placed("a point on a face")?;
             let n = extra
                 .get("direction")
@@ -308,6 +327,10 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
                 [("length", length), ("thickness", thickness), ("width", width), ("catch_depth", catch_depth), ("catch_length", catch_length)]
             {
                 p[key] = json!(v);
+            }
+            put(&mut p, &[("base_height", base_height)]);
+            if *new_body {
+                p["new_body"] = json!(true);
             }
             ("plastic.snap_fit", p)
         }
@@ -365,7 +388,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             (Pl::simple_restore(kind)?, "plastic.lip", face.0)
         }
-        FeatureKind::SnapFit { position, direction, hook, length, thickness, width, catch_depth, catch_length, body } => {
+        FeatureKind::SnapFit { position, direction, hook, length, thickness, width, catch_depth, catch_length, base_height, new_body, body } => {
             extra.insert("direction".into(), pt(direction.0));
             if let Some(b) = body {
                 extra.insert("body".into(), json!(b));
@@ -381,6 +404,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 width: shown_expr(width, ValueKind::Length),
                 catch_depth: shown_expr(catch_depth, ValueKind::Length),
                 catch_length: shown_expr(catch_length, ValueKind::Length),
+                base_height: base_height.as_deref().map(|v| shown_expr(v, ValueKind::Length)).unwrap_or_default(),
+                new_body: *new_body,
             };
             (f, "plastic.snap_fit", position.0)
         }
@@ -406,6 +431,48 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         i.items = vec![Sel::Face { body: extra.get("body").and_then(Value::as_str).unwrap_or_default().to_string(), index: 0, point: at }];
     }
     Some((Kind::Plastic(pl), inputs, extra))
+}
+
+/// The placement handles' frame for a feature placed through its first input (a face place): the
+/// picked point and the direction the feature grows, the picked face's normal, else the stored
+/// `direction`.
+pub(crate) fn handle_frame(app: &SolveApp, d: &crate::dialogs::Dialog) -> Option<(Vec3, Vec3)> {
+    let Sel::Face { body, index, point } = d.inputs.first()?.items.first()? else { return None };
+    let n = crate::dialogs::planar_face(&app.session, body, *index)
+        .map(|(_, n)| n)
+        .or_else(|| d.extra.get("direction").and_then(crate::dialogs::vec3_of))
+        .and_then(|n| n.normalized())?;
+    Some((*point, n))
+}
+
+/// The placement handles' move for a feature placed through its first input: re-place it where a
+/// click at `pos` would (snapped to a sketch point as a click is when the input takes points), with
+/// the stored `direction` and in-face `along` carried onto the new face. False when nothing there
+/// can take it.
+pub(crate) fn handle_move(app: &SolveApp, d: &mut crate::dialogs::Dialog, proj: &crate::viewport::Proj, pos: egui::Pos2) -> bool {
+    use crate::place_gizmo::{angle_of, dir_at};
+    let s = &app.session;
+    let turned = handle_frame(app, d).and_then(|(_, n)| d.extra.get("along").and_then(crate::dialogs::vec3_of).map(|a| angle_of(a, n)));
+    let hits = crate::viewport::pick(app, proj, pos);
+    let snap = d.face_snap(s, &hits);
+    let Some(to) = hits.iter().find_map(|h| d.candidate_on(s, h, snap.as_ref()).filter(|c| matches!(c, Sel::Face { .. }))) else {
+        return false;
+    };
+    if let Sel::Face { body, index, .. } = &to
+        && let Some((_, nn)) = crate::dialogs::planar_face(s, body, *index)
+    {
+        if d.extra.contains_key("direction") {
+            d.extra.insert("direction".into(), pt(nn));
+        }
+        if let Some(a) = turned {
+            d.extra.insert("along".into(), pt(dir_at(nn, a)));
+        }
+    }
+    if let Some(inp) = d.inputs.first_mut() {
+        inp.items = vec![to];
+    }
+    d.error = None;
+    true
 }
 
 #[cfg(test)]

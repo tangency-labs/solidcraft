@@ -130,6 +130,7 @@ impl Document {
     /// A column's current value in the design.
     pub fn config_current(&self, c: &Column) -> Option<String> {
         match c {
+            Column::Param(n) if self.text_param(n).is_some() => self.text_param(n).map(|p| p.text.clone()),
             Column::Param(n) => self.all_param_exprs().into_iter().find(|(m, _, _)| m == n).map(|(_, e, kind)| {
                 // Feature literals are stored in base units, unlike newly typed bare
                 // row cells. Capture their unit explicitly before editing in an inch design.
@@ -262,6 +263,7 @@ impl Document {
         }
         self.configs.columns.iter().zip(&r.cells).all(|(c, v)| match c {
             Column::Suppress(id) => suppression_cell(v).is_ok_and(|on| self.feature(*id).is_some_and(|f| f.suppressed == on)),
+            Column::Param(name) if self.text_param(name).is_some() => self.text_param(name).is_some_and(|p| p.text == crate::text_params::unquote(v)),
             Column::Param(name) => {
                 let kind = self
                     .features

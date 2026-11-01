@@ -1,4 +1,6 @@
 {
+  "order": 190,
+  "provenance": "Original SolidCraft mapping of Dracula (MIT palette)",
   "base": "dark",
   "colors": {
     "accent": "#bd93f9",
@@ -50,8 +52,8 @@
     "dialog_footer": "#282a36",
     "dialog_label": "#f8f8f2",
     "dialog_rule": "#50546d",
-    "dimension": "#f8f8f2",
-    "dimension_driven": "#a1a4c4",
+    "dimension": "#8be9fd",
+    "dimension_driven": "#62a3b1",
     "error": "#ff5555",
     "field": "#21222c",
     "form_accent": "#c096e8",
@@ -65,11 +67,6 @@
     "form_success": "#50fa7b",
     "form_success_fill": "#2f4d42",
     "form_tab_ink": "#d6acff",
-    "gizmo": [
-      "#ff5555",
-      "#50fa7b",
-      "#8456b8"
-    ],
     "glyph_bg": "#343746",
     "glyph_edge": "#fc827b",
     "glyph_text": "#fc827b",
@@ -168,6 +165,7 @@
     "sketch_centerline": "#f1fa8c",
     "sketch_construction": "#f1fa8c",
     "sketch_fixed": "#f8f8f2",
+    "sketch_halo": "#1d1e29",
     "sketch_ink": "#50fa7b",
     "sketch_locked": "#50fa7b",
     "sketch_lost": "#ff5555",
@@ -188,11 +186,6 @@
     "timeline_item_error": "#5c343d",
     "timeline_marker": "#a1a4c4",
     "toolbar": "#282a36",
-    "triad": [
-      "#ff5555",
-      "#50fa7b",
-      "#8456b8"
-    ],
     "viewport_bottom": "#1d1e29",
     "viewport_top": "#1d1e29",
     "warning": "#f1fa8c"

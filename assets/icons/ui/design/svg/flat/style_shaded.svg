@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Shaded</title>
+  <g opacity="0.5"><path d="M32 6 L55 19 L32 32 L9 19Z" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" stroke-linecap="round"/></g>
+  <g opacity="0.8"><path d="M9 19 L32 32 L32 58 L9 45Z" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" stroke-linecap="round"/></g>
+  <path d="M32 32 L55 19 L55 45 L32 58Z" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

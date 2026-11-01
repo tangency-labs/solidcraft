@@ -106,24 +106,22 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.agent_chat.dock_space = Some(Rect::from_x_y_ranges(screen.x_range(), available.y_range()));
     let t = Tokens::get();
     let left = app.preferences.agent_chat_side == "left";
-    let side = |id: Id| Container::new(ui.ctx(), Surface::Panel).edge(id, if left { Edge::Left } else { Edge::Right });
+    let host = Container::new(ui.ctx(), Surface::Panel);
+    let side = |id: Id| host.edge(id, if left { Edge::Left } else { Edge::Right });
     if app.preferences.agent_chat_minimized {
-        let r = side(Id::new("sc_agent_chat_strip"))
-            .exact_size(STRIP)
-            .resizable(false)
-            .frame(Container::new(ui.ctx(), Surface::Panel).edge_frame(t.panel))
-            .show(ui, |ui| strip(app, ui));
+        let r = host
+            .show_edge(ui, side(Id::new("sc_agent_chat_strip")).exact_size(STRIP).resizable(false), host.edge_frame(t.panel), |ui| strip(app, ui));
         app.agent_chat.drop_rect = Some(r.response.rect);
         show_drop_hint(app, &ctx);
         return;
     }
     let width = app.preferences.agent_chat_width.clamp(MIN_WIDTH, MAX_WIDTH);
-    let r = side(panel_id(left))
-        .default_size(width)
-        .size_range(MIN_WIDTH..=MAX_WIDTH)
-        .resizable(true)
-        .frame(Container::new(ui.ctx(), Surface::Panel).edge_frame(t.dialog_body))
-        .show(ui, |ui| ui_kit::scope(ui, |ui| body(app, ui, left)));
+    let r = host.show_edge(
+        ui,
+        side(panel_id(left)).default_size(width).size_range(MIN_WIDTH..=MAX_WIDTH).resizable(true),
+        host.edge_frame(t.dialog_body),
+        |ui| ui_kit::scope(ui, |ui| body(app, ui, left)),
+    );
     crate::scenario::publish_rect("agent_chat:panel", r.response.rect);
     app.agent_chat.panel_rect = Some(r.response.rect);
     #[cfg(not(target_arch = "wasm32"))]
@@ -161,9 +159,9 @@ pub(crate) fn tool_space(app: &SolveApp, mut available: Rect) -> Rect {
         && let Some(chat) = app.agent_chat.panel_rect.filter(|r| r.is_finite() && r.is_positive())
     {
         if app.preferences.agent_chat_side == "left" {
-            available.min.x = (chat.right() + crate::shell::SHELL_GAP).clamp(available.left(), available.right());
+            available.min.x = crate::shell::within(chat.right() + crate::shell::SHELL_GAP, available.left(), available.right());
         } else {
-            available.max.x = (chat.left() - crate::shell::SHELL_GAP).clamp(available.left(), available.right());
+            available.max.x = crate::shell::within(chat.left() - crate::shell::SHELL_GAP, available.left(), available.right());
         }
     }
     available
@@ -211,7 +209,7 @@ fn floating(app: &mut SolveApp, ui: &mut egui::Ui) {
     let frame = ui_kit::Panel::feature_frame(&ctx, app.ui.layout, side);
     let inner = (vec2(width, height) - frame.total_margin().sum()).max(egui::Vec2::ZERO);
     let panel = ui_kit::Panel::new(tr("ui.assistant"), Id::new("sc_agent_chat_floating"), anchor, available, side, frame).width(width);
-    if let Some(card) = panel.window(&ctx).fixed_size(inner).show(&ctx, |ui| {
+    if let Some(card) = panel.fixed_window(&ctx, inner).show(&ctx, |ui| {
         ui.set_min_size(inner);
         ui.set_max_size(inner);
         ui.set_clip_rect(ui.clip_rect().intersect(Rect::from_min_size(ui.max_rect().min, inner)));
@@ -634,7 +632,7 @@ fn state_color(state: State) -> Color32 {
     let t = Tokens::get();
     match state {
         State::Ready | State::Busy => t.accent,
-        State::NeedsAuth | State::Exited => t.warning,
+        State::NeedsAuth | State::Exited | State::Failed => t.warning,
         _ => t.text_dim,
     }
 }
@@ -703,7 +701,7 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, left: bool) {
                             State::Ready => ui_kit::AssistantTone::Success,
                             State::Busy => ui_kit::AssistantTone::Working,
                             State::NeedsAuth => ui_kit::AssistantTone::Warning,
-                            State::Exited => ui_kit::AssistantTone::Error,
+                            State::Exited | State::Failed => ui_kit::AssistantTone::Error,
                             _ => ui_kit::AssistantTone::Neutral,
                         }
                     },
@@ -804,17 +802,19 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let state = app.agent_chat.state();
     if app.agent_chat.confirm_new {
         ui_kit::scope(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui_kit::text(ui, tr("ui.agent_chat_new_confirm"), ui_kit::Text::Report("new_chat", false));
-            ui.horizontal(|ui| {
-                let yes = ui_kit::button(ui, tr("ui.agent_chat_new"), ui_kit::Button::Normal);
-                crate::scenario::publish_handle("agent_chat:new_confirm", yes.rect.center());
-                if yes.clicked() {
-                    new_chat(app);
-                }
-                if ui_kit::button(ui, tr("ui.agent_chat_cancel"), ui_kit::Button::Normal).clicked() {
-                    app.agent_chat.confirm_new = false;
-                }
+            inset(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui_kit::text(ui, tr("ui.agent_chat_new_confirm"), ui_kit::Text::Report("new_chat", false));
+                ui.horizontal(|ui| {
+                    let yes = ui_kit::button(ui, tr("ui.agent_chat_new"), ui_kit::Button::Normal);
+                    crate::scenario::publish_handle("agent_chat:new_confirm", yes.rect.center());
+                    if yes.clicked() {
+                        new_chat(app);
+                    }
+                    if ui_kit::button(ui, tr("ui.agent_chat_cancel"), ui_kit::Button::Normal).clicked() {
+                        app.agent_chat.confirm_new = false;
+                    }
+                });
             });
         });
     }
@@ -826,7 +826,7 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         .auto_shrink([false, true])
         .show(ui, |ui| picker(app, ui));
     if state == State::NeedsAuth {
-        auth_box(app, ui);
+        inset(ui, |ui| auth_box(app, ui));
     }
     // The input sits at the bottom of the panel and grows upwards: a long message makes its box
     // taller up to `edit_max`, then it scrolls, and the conversation takes what is left above. It
@@ -847,8 +847,8 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let frame = Container::new(ui.ctx(), Surface::Viewport).edge_frame(egui::Color32::TRANSPARENT);
     let composer = Container::new(ui.ctx(), Surface::Viewport).edge(Id::new("sc_agent_chat_composer"), Edge::Bottom);
     composer.resizable(false).show_separator_line(false).frame(frame).show(ui, |ui| {
-        ui_kit::assistant_composer_footer(ui, |ui| {
-            ui_kit::assistant_composer(ui, focused, |ui| {
+        let footer = ui_kit::assistant_composer_footer(ui, |ui| {
+            let boxed = ui_kit::assistant_composer(ui, focused, |ui| {
                 // What Pick context chose for this message, each item with an ×.
                 if !app.agent_chat.picked_context.is_empty() {
                     let tray = app.agent_chat.picked_context.clone();
@@ -987,7 +987,9 @@ fn desktop_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                     },
                 );
             });
+            crate::scenario::publish_rect("agent_chat:composer_box", boxed.response.rect);
         });
+        crate::scenario::publish_rect("agent_chat:composer_footer", footer.response.rect);
     });
     if let Some(at) = remove_picked_at {
         remove_picked(app, at);
@@ -1033,14 +1035,20 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
     let all = agents::entries(app);
     let current = agents::current(app);
+    // An advertised (even empty) config list replaces the older ACP model/mode pickers.
+    let modern = app.agent_chat.config_options.is_some();
     ui.horizontal_wrapped(|ui| {
         let label = current.as_ref().map_or_else(
             || tr(if app.agent_chat.detecting.is_some() { "ui.agent_chat_detecting" } else { "ui.agent_chat_none_found_short" }).to_string(),
             |e| e.name.clone(),
         );
-        let models = models_shown(app);
-        let w =
-            (ui.available_width() - if app.agent_chat.modes.is_empty() { 4.0 } else { 116.0 } - if models { 146.0 } else { 0.0 }).clamp(90.0, 260.0);
+        let models = !modern && models_shown(app);
+        let providers = if models { model_providers(app) } else { Vec::new() };
+        let w = (ui.available_width()
+            - if modern || app.agent_chat.modes.is_empty() { 4.0 } else { 116.0 }
+            - if models { 146.0 } else { 0.0 }
+            - if providers.is_empty() { 0.0 } else { 146.0 })
+        .clamp(90.0, 260.0);
         let mut picked: Option<String> = None;
         let mut add = false;
         let combo = ui
@@ -1060,7 +1068,7 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                         add = true;
                     }
                     if ui_kit::list_picker(ui, "settings", tr("ui.ai_settings"), false).clicked() {
-                        crate::prefs::open_at(app, crate::prefs::PAGE_AI);
+                        crate::prefs::open_at(app, crate::prefs::PAGE_ASSISTANT);
                     }
                 })
             })
@@ -1078,7 +1086,7 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
             app.agent_chat.agent_id = Some(id);
         }
         // The agent's own modes (ACP `modes`): its own tools follow them.
-        if !app.agent_chat.modes.is_empty() {
+        if !modern && !app.agent_chat.modes.is_empty() {
             let modes = app.agent_chat.modes.clone();
             let cur = modes.iter().find(|(id, _)| *id == app.agent_chat.mode).map_or_else(|| app.agent_chat.mode.clone(), |(_, n)| n.clone());
             let mut pick: Option<String> = None;
@@ -1101,17 +1109,47 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
                 set_mode(app, &m);
             }
         }
+        // Models from several providers: pick the provider first, then one of its models.
+        if let Some(shown) = shown_provider(app).filter(|_| !providers.is_empty()) {
+            let mut pick: Option<String> = None;
+            let width = picker_width(ui, &shown);
+            let r = ui
+                .allocate_ui(vec2(width, t.control_height), |ui| {
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                    ui_kit::dropdown_menu(ui, "sc_agent_provider", &shown, |ui| {
+                        for (name, count) in &providers {
+                            let row = ui_kit::list_picker(ui, &format!("provider:{name}"), name, *name == shown)
+                                .on_hover_text(trf("ui.agent_chat_provider_models", &[("count", &count.to_string())]));
+                            crate::scenario::publish_handle(&format!("agent_chat:provider:{name}"), row.rect.center());
+                            if row.clicked() {
+                                pick = Some(name.clone());
+                            }
+                        }
+                    })
+                })
+                .inner;
+            crate::scenario::publish_rect("agent_chat:provider", r.rect);
+            crate::scenario::publish_handle("agent_chat:provider", r.rect.center());
+            r.on_hover_text(tr("ui.agent_chat_provider_tip"));
+            if let Some(p) = pick {
+                set_model_provider(app, &p);
+            }
+        }
         // The agent's models (ACP `models`, or an endpoint's list): shown only when it reports some.
         if models {
-            let list = app.agent_chat.models.clone();
-            let cur = list.iter().find(|m| m.id == app.agent_chat.model).map_or_else(|| app.agent_chat.model.clone(), |m| m.name.clone());
+            let list = listed_models(app);
+            let cur = list.iter().find(|(m, _)| m.id == app.agent_chat.model).map_or_else(
+                || if providers.is_empty() { app.agent_chat.model.clone() } else { tr("ui.agent_chat_choose_model").to_string() },
+                |(_, name)| name.clone(),
+            );
             let mut pick: Option<String> = None;
+            let width = if providers.is_empty() { t.form_label_width } else { picker_width(ui, &cur) };
             let r = ui
-                .allocate_ui(vec2(t.form_label_width, t.control_height), |ui| {
+                .allocate_ui(vec2(width, t.control_height), |ui| {
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
                     ui_kit::dropdown_menu(ui, "sc_agent_model", &cur, |ui| {
-                        for m in &list {
-                            let row = ui_kit::list_picker(ui, &m.id, &m.name, m.id == app.agent_chat.model);
+                        for (m, name) in &list {
+                            let row = ui_kit::list_picker(ui, &m.id, name, m.id == app.agent_chat.model);
                             let row = if m.description.is_empty() { row } else { row.on_hover_text(&m.description) };
                             crate::scenario::publish_handle(&format!("agent_chat:model:{}", m.id), row.rect.center());
                             if row.clicked() {
@@ -1129,11 +1167,18 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         }
     });
+    if let Some(warning) = settings::model_warning(app) {
+        ui.add(egui::Label::new(RichText::new(warning).color(t.warning).size(t.font_small)).wrap());
+    }
+    if let Some(options) = app.agent_chat.config_options.clone() {
+        config_selects(app, ui, &options);
+    }
     ui.horizontal(|ui| {
         let b = if app.agent_chat.state().running() {
             ui_kit::button(ui, tr("ui.agent_chat_stop"), ui_kit::Button::Normal).on_hover_text(tr("ui.agent_chat_stop_tip"))
         } else {
-            ui_kit::button(ui, tr("ui.agent_chat_connect"), ui_kit::Button::Normal)
+            let label = if app.agent_chat.state() == State::Failed { "ui.agent_chat_retry" } else { "ui.agent_chat_connect" };
+            ui_kit::button(ui, tr(label), ui_kit::Button::Normal)
         };
         crate::scenario::publish_handle("agent_chat:connect", b.rect.center());
         if b.clicked() {
@@ -1150,10 +1195,10 @@ fn switcher(app: &mut SolveApp, ui: &mut egui::Ui) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-const FLATPAK_OVERRIDE: &str = "flatpak override --user ai.storyteller.solidcraft --filesystem=~/.nvm:ro --filesystem=~/.local/bin:ro --filesystem=~/.local/share/claude:ro --filesystem=~/.claude --filesystem=~/.claude.json --share=network";
+const FLATPAK_OVERRIDE: &str = "flatpak override --user io.tangencylabs.solidcraft --filesystem=~/.nvm:ro --filesystem=~/.local/bin:ro --filesystem=~/.local/share/claude:ro --filesystem=~/.claude --filesystem=~/.claude.json --share=network";
 
 #[cfg(not(target_arch = "wasm32"))]
-fn no_agents_message() -> String {
+pub(super) fn no_agents_message() -> String {
     if std::env::var_os("FLATPAK_ID").is_some() { tr("ui.agent_chat_flatpak_none_found") } else { tr("ui.agent_chat_none_found") }.to_string()
 }
 
@@ -1173,6 +1218,239 @@ pub(super) fn no_agents(ui: &mut egui::Ui) {
     }
 }
 
+/// The width of a provider or model picker: its label's, from the usual picker width up to 200
+/// points and never wider than the panel, so a short name is read whole and a long one truncates.
+#[cfg(not(target_arch = "wasm32"))]
+fn picker_width(ui: &egui::Ui, label: &str) -> f32 {
+    let t = Tokens::get();
+    let label: String = label.chars().take(64).collect();
+    let text = ui.painter().layout_no_wrap(label, egui::FontId::proportional(t.font_label), t.text).size().x + 34.0;
+    let most = ui.max_rect().width().clamp(t.form_label_width, 200.0);
+    text.clamp(t.form_label_width, most)
+}
+
+/// An agent's select options are authoritative. Compact value pickers share a strip below the
+/// agent switcher; only a narrow chat wraps them, rather than spending two full rows per option.
+#[cfg(not(target_arch = "wasm32"))]
+fn config_selects(app: &mut SolveApp, ui: &mut egui::Ui, options: &[acp::ConfigOption]) {
+    let t = Tokens::get();
+    let pending = app.agent_chat.config_pending;
+    let strip_width = ui.available_width().min(ui.max_rect().width()).max(0.0);
+    let mut row = Vec::new();
+    let mut used = 0.0;
+    for option in options {
+        let current = option.options.iter().find(|choice| choice.value == option.current_value);
+        let selected = current.map_or(option.current_value.as_str(), |choice| choice.name.as_str());
+        let preview = compact_text(selected, 32);
+        let preferred = ui.painter().layout_no_wrap(preview, egui::FontId::proportional(t.font_label), t.text).size().x + 34.0;
+        let width = preferred.clamp(76.0, strip_width.clamp(76.0, 200.0));
+        let spacing = if row.is_empty() { 0.0 } else { ui.spacing().item_spacing.x };
+        if !row.is_empty() && used + spacing + width > strip_width {
+            ui.horizontal(|ui| {
+                for (option, width) in row.drain(..) {
+                    config_select(app, ui, option, width, pending);
+                }
+            });
+            used = 0.0;
+        }
+        used += if used == 0.0 { width } else { spacing + width };
+        row.push((option, width));
+    }
+    if !row.is_empty() {
+        ui.horizontal(|ui| {
+            for (option, width) in row {
+                config_select(app, ui, option, width, pending);
+            }
+        });
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn config_select(app: &mut SolveApp, ui: &mut egui::Ui, option: &acp::ConfigOption, width: f32, pending: bool) {
+    let t = Tokens::get();
+    let current = option.options.iter().find(|choice| choice.value == option.current_value);
+    let selected = current.map_or(option.current_value.as_str(), |choice| choice.name.as_str());
+    // Bound both the measurement and the visible label: agent-provided text may be huge.
+    // Width follows the current value, leaving short choices room to sit on one line.
+    let font = egui::FontId::proportional(t.font_label);
+    let mut chars = 32;
+    let displayed = loop {
+        let text = compact_text(selected, chars);
+        if chars == 1 || ui.painter().layout_no_wrap(text.clone(), font.clone(), t.text).size().x <= width - 36.0 {
+            break text;
+        }
+        chars -= 1;
+    };
+    let name = if option.name.is_empty() { &option.id } else { &option.name };
+    let tip = [name.as_str(), option.description.as_str(), current.map_or("", |choice| choice.description.as_str())]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut picked = None;
+    let response = ui
+        .add_enabled_ui(!pending && !option.options.is_empty(), |ui| {
+            ui.allocate_ui(vec2(width, t.control_height), |ui| {
+                ui_kit::dropdown_menu(ui, ("sc_agent_config", &option.id), &displayed, |ui| {
+                    let mut previous_group: Option<&str> = None;
+                    for choice in &option.options {
+                        let group = choice.group.as_deref().filter(|g| !g.is_empty());
+                        if let Some(group) = group
+                            && previous_group != Some(group)
+                        {
+                            ui.label(RichText::new(compact_text(group, 32)).color(t.text_dim).size(t.font_small)).on_hover_text(group);
+                        }
+                        previous_group = group;
+                        let row = ui_kit::list_picker(ui, &choice.value, &compact_text(&choice.name, 32), choice.value == option.current_value);
+                        let row = row.on_hover_text(
+                            [choice.name.as_str(), choice.description.as_str()]
+                                .into_iter()
+                                .filter(|part| !part.is_empty())
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                        );
+                        crate::scenario::publish_handle(&format!("agent_chat:config:{}:{}", option.id, choice.value), row.rect.center());
+                        if option.category == "model" {
+                            crate::scenario::publish_handle(&format!("agent_chat:model:{}", choice.value), row.rect.center());
+                        }
+                        if row.clicked() {
+                            picked = Some(choice.value.clone());
+                        }
+                    }
+                })
+            })
+            .inner
+        })
+        .inner;
+    crate::scenario::publish_handle(&format!("agent_chat:config:{}", option.id), response.rect.center());
+    crate::scenario::publish_rect(&format!("agent_chat:config:{}", option.id), response.rect);
+    if option.category == "model" {
+        crate::scenario::publish_handle("agent_chat:model", response.rect.center());
+    } else if option.category == "mode" {
+        crate::scenario::publish_handle("agent_chat:mode", response.rect.center());
+    }
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, !pending && !option.options.is_empty(), format!("{name}: {selected}")));
+    response.on_hover_text(tip);
+    if let Some(value) = picked {
+        super::set_config_option(app, &option.id, &value);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn compact_text(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let short: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() { format!("{short}…") } else { short }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod config_ui_tests {
+    use super::*;
+
+    fn option(id: &str, category: &str, choices: &[(&str, &str, Option<&str>)]) -> acp::ConfigOption {
+        acp::ConfigOption {
+            id: id.into(),
+            name: id.into(),
+            description: format!("Choose {id}"),
+            category: category.into(),
+            current_value: choices.first().map_or("", |choice| choice.0).into(),
+            options: choices
+                .iter()
+                .map(|(value, name, group)| acp::ConfigChoice {
+                    value: (*value).into(),
+                    name: (*name).into(),
+                    description: format!("Description for {name}"),
+                    group: group.map(str::to_owned),
+                })
+                .collect(),
+        }
+    }
+
+    fn draw_switcher(app: &mut SolveApp, ctx: &egui::Context, width: f32) {
+        crate::scenario::clear_handles();
+        let screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(width, 700.0));
+        let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| {
+            ui.allocate_ui(vec2(width - 16.0, 600.0), |ui| {
+                ui_kit::scope(ui, |ui| switcher(app, ui));
+            });
+        });
+    }
+
+    #[test]
+    fn config_options_share_one_row_when_they_fit_and_wrap_without_legacy_duplicates() {
+        assert_eq!(compact_text("Énergie très élevée", 7), "Énergie…");
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        // Make legacy provider/model pickers eligible so their absence is meaningful.
+        app.agent_chat.state = Some(State::Ready);
+        app.agent_chat.modes = vec![("legacy".into(), "Legacy mode".into())];
+        app.agent_chat.models = vec![
+            acp::ModelInfo { id: "old".into(), name: "North · Old model".into(), description: String::new() },
+            acp::ModelInfo { id: "other".into(), name: "South · Other model".into(), description: String::new() },
+        ];
+        assert!(models_shown(&app));
+        assert_eq!(model_providers(&app).len(), 2);
+        app.agent_chat.config_options = Some(vec![
+            option(
+                "engine",
+                "model",
+                &[("fast", "Énergie très élevée pour une conception détaillée", Some("Standard")), ("large", "Large", Some("Advanced"))],
+            ),
+            option("thought", "thought_level", &[("low", "Max", None), ("high", "High", None)]),
+            option("workflow", "mode", &[("plan", "Build", None)]),
+        ]);
+        let ctx = crate::fonts::test_context();
+        draw_switcher(&mut app, &ctx, 760.0);
+        let at = |name| crate::scenario::handle_at(name).expect("config picker handle");
+        let agent = at("agent_chat:switcher");
+        let model = at("agent_chat:config:engine");
+        let effort = at("agent_chat:config:thought");
+        let mode = at("agent_chat:config:workflow");
+        assert!(agent.y < model.y && (model.y - effort.y).abs() < 2.0 && (effort.y - mode.y).abs() < 2.0);
+        assert!(model.x < effort.x && effort.x < mode.x && mode.x < 760.0);
+        assert_eq!(at("agent_chat:model"), model);
+        assert_eq!(at("agent_chat:mode"), mode);
+        assert_eq!(crate::scenario::handles("agent_chat:mode").iter().filter(|(name, _)| name == "agent_chat:mode").count(), 1);
+        assert_eq!(crate::scenario::handles("agent_chat:model").iter().filter(|(name, _)| name == "agent_chat:model").count(), 1);
+        assert!(crate::scenario::handle_at("agent_chat:provider").is_none());
+        assert!(crate::scenario::handle_at("agent_chat:model:old").is_none());
+        assert!(crate::scenario::handle_at("agent_chat:model:other").is_none());
+
+        draw_switcher(&mut app, &ctx, 280.0);
+        let model = at("agent_chat:config:engine");
+        let effort = at("agent_chat:config:thought");
+        let mode = at("agent_chat:config:workflow");
+        assert!(model.y < effort.y && (effort.y - mode.y).abs() < 2.0, "only the long model needs its own line: {model:?}, {effort:?}, {mode:?}");
+        for id in ["engine", "thought", "workflow"] {
+            let rect = crate::scenario::rect_of(&format!("agent_chat:config:{id}")).expect("config control bounds");
+            assert!(rect.left() >= 0.0 && rect.right() <= 280.0, "{id} exceeds the narrow panel: {rect:?}");
+        }
+
+        app.agent_chat.config_options = Some(vec![option("engine", "model", &[("fast", "Fast", None)])]);
+        app.agent_chat.config_pending = true;
+        draw_switcher(&mut app, &ctx, 280.0);
+        assert!(crate::scenario::handle_at("agent_chat:config:engine").is_some());
+        assert!(crate::scenario::handle_at("agent_chat:config:thought").is_none());
+        assert!(crate::scenario::handle_at("agent_chat:config:workflow").is_none());
+        assert!(crate::scenario::handle_at("agent_chat:switcher").is_some());
+
+        app.agent_chat.config_options = Some(vec![]);
+        draw_switcher(&mut app, &ctx, 280.0);
+        assert!(crate::scenario::handle_at("agent_chat:switcher").is_some());
+        assert!(crate::scenario::handle_at("agent_chat:config:engine").is_none());
+        assert!(crate::scenario::handle_at("agent_chat:mode").is_none());
+        assert!(crate::scenario::handle_at("agent_chat:provider").is_none());
+        assert!(crate::scenario::handle_at("agent_chat:model").is_none());
+    }
+}
+
+/// What is drawn under the agent switcher keeps the switcher's side margin (#10172): it starts
+/// where the switcher's fields start, not at the panel's edge.
+#[cfg(not(target_arch = "wasm32"))]
+fn inset<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    egui::Frame::NONE.inner_margin(egui::Margin::symmetric(Tokens::get().space_12 as i8, 0)).show(ui, add).inner
+}
+
 /// Before the first connection: what's installed, how to install the rest, and Add agent.
 #[cfg(not(target_arch = "wasm32"))]
 fn picker(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -1180,6 +1458,12 @@ fn picker(app: &mut SolveApp, ui: &mut egui::Ui) {
     if !open {
         return;
     }
+    inset(ui, |ui| agent_list(app, ui));
+}
+
+/// [`picker`]'s content: the agents found, Refresh and Add agent, and what isn't installed.
+#[cfg(not(target_arch = "wasm32"))]
+fn agent_list(app: &mut SolveApp, ui: &mut egui::Ui) {
     let all = agents::entries(app);
     let current = agents::current(app);
     ui.horizontal(|ui| {
@@ -1285,6 +1569,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut undo: Option<usize> = None;
     let mut open_gallery: Option<Gallery> = None;
     let current_doc = app.session.doc.clone();
+    let units = summary::Units { units: &app.session.doc.units, decimals: app.preferences.length_decimals };
     for (n, item) in app.agent_chat.items.iter().enumerate() {
         match item {
             Item::User { text, image, pictures, context, files } => {
@@ -1318,8 +1603,17 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
                 ui_kit::assistant_tool_frame(ui, false, |ui| {
                     ui.spacing_mut().item_spacing.y = Tokens::get().space_2;
                     for (offset, next) in app.agent_chat.items.iter().skip(n).take_while(|next| matches!(next, Item::Tool { .. })).enumerate() {
-                        if let Item::Tool { title, kind, status, output, .. } = next {
-                            tool_card(ui, n + offset, title, kind, *status, output.as_deref());
+                        if let Item::Tool { title, kind, status, input, output, .. } = next {
+                            let words = summary::summary(title, input.as_ref(), output.as_deref(), *status == Some(ToolStatus::Completed), units);
+                            let call = ToolCall {
+                                title,
+                                summary: words.as_deref(),
+                                kind,
+                                status: *status,
+                                input: input.as_ref(),
+                                output: output.as_deref(),
+                            };
+                            tool_card(ui, n + offset, &call);
                         }
                     }
                 });
@@ -1424,7 +1718,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
             Item::Notice { text, error } => {
                 ui_kit::assistant_banner(ui, if *error { ui_kit::AssistantTone::Error } else { ui_kit::AssistantTone::Neutral }, |ui| {
-                    ui.label(RichText::new(text).color(if *error { t.error } else { t.text_dim }));
+                    ui.add(egui::Label::new(RichText::new(text).color(if *error { t.error } else { t.text_dim })).wrap());
                 });
             }
         }
@@ -1512,7 +1806,7 @@ fn conversation(app: &mut SolveApp, ui: &mut egui::Ui) {
         if agents::entries(app).is_empty() && app.agent_chat.detecting.is_none() {
             ui_kit::assistant_empty(ui, tr("ui.agent_chat_setup_title"), tr("ui.agent_chat_setup_body"), |ui| {
                 if ui_kit::primary_button(ui, tr("ui.agent_chat_open_settings")).clicked() {
-                    crate::prefs::open_at(app, crate::prefs::PAGE_AI);
+                    crate::prefs::open_at(app, crate::prefs::PAGE_ASSISTANT);
                 }
             });
         } else {
@@ -1751,16 +2045,37 @@ fn add_menu(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
 }
 
-/// A tool call as a card: its state, name and kind on one line; a click unfolds what it returned.
+/// A tool call as its card shows it.
 #[cfg(not(target_arch = "wasm32"))]
-fn tool_card(ui: &mut egui::Ui, n: usize, title: &str, kind: &str, status: Option<ToolStatus>, output: Option<&str>) {
+struct ToolCall<'a> {
+    /// The agent's title, shown when there are no words for the call.
+    title: &'a str,
+    /// What it did in words (#1457).
+    summary: Option<&'a str>,
+    kind: &'a str,
+    status: Option<ToolStatus>,
+    input: Option<&'a Value>,
+    output: Option<&'a str>,
+}
+
+/// Longest raw text shown under a card's Details (characters).
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_DETAIL: usize = 8000;
+
+/// A tool call as a card: its state and what it did in words on one line (the agent's own title
+/// when there are none); a click on the line unfolds Details, the raw arguments and what it
+/// returned.
+#[cfg(not(target_arch = "wasm32"))]
+fn tool_card(ui: &mut egui::Ui, n: usize, call: &ToolCall) {
     let t = Tokens::get();
+    let status = call.status;
     let (color, mark, state) = match status {
         Some(ToolStatus::Completed) => (t.form_success, ui_kit::AssistantToolState::Done, "ui.ai_tool_done"),
         Some(ToolStatus::Failed) => (t.error, ui_kit::AssistantToolState::Failed, "ui.ai_tool_failed"),
         Some(ToolStatus::InProgress) => (t.accent, ui_kit::AssistantToolState::Running, "ui.ai_tool_running"),
         _ => (t.text_dim, ui_kit::AssistantToolState::Pending, "ui.ai_tool_waiting"),
     };
+    let details = call.input.is_some() || call.output.is_some();
     ui_kit::assistant_tool_row(ui, status == Some(ToolStatus::Failed), |ui| {
         ui.set_width(ui.available_width());
         let id = ui.make_persistent_id(("sc_agent_tool", n));
@@ -1769,37 +2084,57 @@ fn tool_card(ui: &mut egui::Ui, n: usize, title: &str, kind: &str, status: Optio
             ui.spacing_mut().item_spacing.x = t.space_8;
             ui_kit::assistant_tool_status(ui, mark);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if output.is_some() {
+                if details {
                     let (rect, _) = ui.allocate_exact_size(vec2(t.space_14, t.space_14), Sense::hover());
                     ui_kit::disclosure(ui.painter(), rect.center(), state_.is_open(), t.text_dim);
+                    ui.label(RichText::new(tr("ui.ai_tool_details")).size(t.font_small).color(t.text_dim));
                 }
                 ui.label(RichText::new(tr(state)).size(t.font_small).color(color));
-                if !kind.is_empty() && kind != "other" {
-                    ui.label(RichText::new(kind).size(t.font_small).color(t.text_dim));
+                if !call.kind.is_empty() && call.kind != "other" {
+                    ui.label(RichText::new(call.kind).size(t.font_small).color(t.text_dim));
                 }
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                    ui.add(egui::Label::new(RichText::new(title).monospace().size(t.font_caption).color(t.text)).truncate()).on_hover_text(title);
+                    let text = match call.summary {
+                        Some(words) => RichText::new(words).size(t.font_caption).color(t.text),
+                        None => RichText::new(summary::plain_title(call.title)).monospace().size(t.font_caption).color(t.text),
+                    };
+                    ui.add(egui::Label::new(text).truncate().selectable(false)).on_hover_text(call.title);
                 });
             });
         });
         let click = ui.interact(head.response.rect, id.with("head"), Sense::click());
         crate::scenario::publish_handle(&format!("agent_chat:tool:{n}"), head.response.rect.center());
-        if output.is_some() && click.clicked() {
+        if details && click.clicked() {
             state_.toggle(ui);
         }
-        if output.is_some() {
+        if details {
             click.on_hover_text(tr("ui.ai_tool_unfold"));
         }
         state_.show_body_unindented(ui, |ui| {
-            if let Some(o) = output {
-                ui.indent(id.with("detail"), |ui| {
-                    ui_kit::assistant_tool_detail(ui, |ui| {
-                        egui::ScrollArea::vertical().id_salt(("sc_agent_tool_out", n)).max_height(180.0).show(ui, |ui| {
-                            ui.add(egui::Label::new(RichText::new(o).monospace().size(t.font_small)).selectable(true).wrap());
-                        });
-                    });
-                });
-            }
+            ui.indent(id.with("detail"), |ui| {
+                if let Some(input) = call.input {
+                    let text = serde_json::to_string_pretty(input).unwrap_or_default();
+                    tool_detail(ui, tr("ui.ai_tool_arguments"), &text, id.with("in"));
+                }
+                if let Some(o) = call.output {
+                    tool_detail(ui, tr("ui.ai_tool_result"), o, id.with("out"));
+                }
+            });
+        });
+    });
+}
+
+/// One part of a card's Details: its heading and the raw text, cut short and scrolling.
+#[cfg(not(target_arch = "wasm32"))]
+fn tool_detail(ui: &mut egui::Ui, heading: &str, text: &str, id: Id) {
+    let t = Tokens::get();
+    ui.label(RichText::new(heading).size(t.font_small).color(t.text_dim));
+    let shown: String =
+        if text.chars().count() > MAX_DETAIL { text.chars().take(MAX_DETAIL).chain(std::iter::once('…')).collect() } else { text.to_string() };
+    ui_kit::assistant_tool_detail(ui, |ui| {
+        ui.set_min_width(ui.available_width());
+        egui::ScrollArea::vertical().id_salt(id).max_height(180.0).show(ui, |ui| {
+            ui.add(egui::Label::new(RichText::new(shown).monospace().size(t.font_small)).selectable(true).wrap());
         });
     });
 }
@@ -1878,7 +2213,7 @@ mod tests {
             child.args(["--exact", "agent_chat::panel::tests::empty_discovery_explains_flatpak_permissions", "--nocapture"]);
             child.env(CHILD, case);
             if case == "flatpak" {
-                child.env("FLATPAK_ID", "ai.storyteller.solidcraft");
+                child.env("FLATPAK_ID", "io.tangencylabs.solidcraft");
             } else {
                 child.env_remove("FLATPAK_ID");
             }
@@ -1996,8 +2331,14 @@ mod tests {
         });
         app.agent_chat.modes = vec![("edit".into(), "A provider mode with a long descriptive label".into())];
         app.agent_chat.mode = "edit".into();
-        app.agent_chat.models =
-            vec![acp::ModelInfo { id: "model".into(), name: "A model with a long descriptive label".into(), description: String::new() }];
+        app.agent_chat.models = vec![
+            acp::ModelInfo {
+                id: "model".into(),
+                name: "A provider with a long name · A model with a long descriptive label".into(),
+                description: String::new(),
+            },
+            acp::ModelInfo { id: "other".into(), name: "Another provider · model".into(), description: String::new() },
+        ];
         app.agent_chat.model = "model".into();
         let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(296.0, 720.0))), ..Default::default() };
         crate::scenario::clear_handles();
@@ -2006,7 +2347,7 @@ mod tests {
             ui_kit::scope(ui, |ui| switcher(&mut app, ui));
         });
         output.textures_delta.clear();
-        let rects: Vec<_> = ["switcher", "mode", "model"]
+        let rects: Vec<_> = ["switcher", "mode", "provider", "model"]
             .into_iter()
             .map(|name| {
                 let rect = crate::scenario::rect_of(&format!("agent_chat:{name}")).expect("picker retained");

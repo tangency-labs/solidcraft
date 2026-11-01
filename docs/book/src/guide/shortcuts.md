@@ -1,6 +1,8 @@
 # Keyboard shortcuts
 
-Command shortcuts can be changed in File › Keyboard Shortcuts; these are the defaults.
+Command shortcuts can be changed in File › Keyboard Shortcuts; these are the defaults. Click a
+key to replace it, or the **+** after it to give the command another key: every key it has
+runs it, and menus and tooltips show the first one.
 
 Click a binding to record a new shortcut. A shortcut can contain Shift, Ctrl/Cmd and
 Alt/Option modifiers plus exactly one other key. Hold the modifiers, then press the final
@@ -41,17 +43,25 @@ if that happens; recording is cancelled if the app loses focus.
 | Ctrl+Z | Undo | Ctrl+Y | Redo |
 | Ctrl+N | New Design | Ctrl+O | Open |
 | Ctrl+S | Save | Delete | Delete the selection |
+| Ctrl+Shift+S | Save As | | |
 | Ctrl+1 | Front View | Ctrl+2 | Back View |
 | Ctrl+3 | Left View | Ctrl+4 | Right View |
 | Ctrl+5 | Top View | Ctrl+6 | Bottom View |
 | Ctrl+7 | Isometric View | | |
+
+L, R and C start their tool family (lines, rectangles, circles) in the variant you used last, as
+the family's toolbar button does: after a Midpoint Line, L starts a Midpoint Line again. Pick
+another variant from the button's drop-down (or the Sketch Palette) and the key starts that one
+from then on. The choice is kept across designs and restarts. With **Pressing a tool's shortcut
+again switches its mode** on (Preferences › Sketch), pressing the key again before the first
+click steps to the family's next variant.
 
 Keys handled by the window itself:
 
 | Key | Action |
 |---|---|
 | S | command search under the ribbon search field |
-| V | show or hide the selected bodies, sketches and planes |
+| V | show or hide the selected bodies, sketches and planes; with a right-click menu open, its Show/Hide (a folder, the Origin folder, an origin plane) |
 | F2 | rename the selected browser or timeline item |
 | F6 | fit the view to the model |
 | ← → ↑ ↓ | turn the view 15° (with Shift, a quarter turn) |

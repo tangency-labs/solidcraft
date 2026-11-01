@@ -4,6 +4,8 @@ use solidcraft_ui_egui::scenario::Harness;
 
 fn setup() -> (Harness, u64) {
     let mut h = Harness::new();
+    // These cover the direct pick workflow; the options dialog is covered in dialogs_sketch_tests.
+    h.app.preferences.project_options_dialog = false;
     let source = h.app.run("sketch.create", json!({"plane":"XY","offset":10})).unwrap()["sketch"].as_u64().unwrap();
     h.app.run("sketch.line", json!({"points":[[10,10],[30,10]],"infer":false})).unwrap();
     h.app.run("sketch.point", json!({"point":[20,20],"id":"p"})).unwrap();
@@ -93,7 +95,7 @@ fn axis_and_plane_preselection_projects_as_one_command() {
 #[test]
 fn mixed_local_and_external_selection_keeps_ordinary_project_picking() {
     let (mut h, source) = setup();
-    h.app.session.selection = vec![Sel::SketchCurve { id: "l1".into() }, Sel::ExternalSketchCurve { sketch: source, id: "l1".into() }];
+    h.app.session.selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }, Sel::ExternalSketchCurve { sketch: source, id: "l1".into() }];
     let before = h.app.session.doc.to_json();
     let selection = h.app.session.selection.clone();
     let undo = h.app.session.undo.len();

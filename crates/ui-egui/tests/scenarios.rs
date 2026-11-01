@@ -154,7 +154,7 @@ fn home_tab_and_file_recent_open_designs() {
         {"click":{"handle":"tab:home"}},
         {"click":{"handle":"home:recent:0"}},
         {"until":{"file_busy":false}},
-        {"expect":{"home":false,"bodies":1,"documents":2}},
+        {"expect":{"home":false,"bodies":1,"documents":1}},
         {"click":{"handle":"appbar:folder"}},
         {"widget":"Open Recent"}
     ]))
@@ -162,7 +162,7 @@ fn home_tab_and_file_recent_open_designs() {
     h.run(&json!([
         {"widget":path},
         {"until":{"file_busy":false}},
-        {"expect":{"home":false,"bodies":1,"documents":3}}
+        {"expect":{"home":false,"bodies":1,"documents":1}}
     ]))
     .unwrap();
 }
@@ -181,6 +181,9 @@ fn sketch_toolbar_imports_use_file_picker() {
         {"call":"engine.execute","params":{"command":"sketch.create","params":{"plane":"XY"}}},
         {"choose_file":path},
         {"start":"sketch.insert_svg"},
+        // The picked drawing is placed first (#2605): OK adds it.
+        {"expect":{"dialog":"InsertDrawing","sketch_curves":{"own":0}}},
+        {"key":"Enter"},
         {"expect":{"errors":0,"sketch_curves":{"own":4}}}
     ]))
     .unwrap();

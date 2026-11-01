@@ -117,6 +117,47 @@ fn revolve_cut_round_a_box_corner_does_not_panic() {
     }
 }
 
+/// #5543: a grid of 121 holes cut through a plate, four of its circles drawn a second time on
+/// top of themselves. Each of those was two profiles of one region and so two coincident tools:
+/// the cut retried with the tool nudged and took fifty times as long. The profiles drawn twice
+/// are cut once: no retry, and the plate is the one the 121 circles drawn once make.
+#[test]
+fn circles_drawn_twice_are_cut_once() {
+    let cut = |repeats: usize| {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        s.execute("sketch.rectangle.two_point", &json!({"p0": [-35, -35], "p1": [35, 35]})).unwrap();
+        s.execute("sketch.finish", &json!({})).unwrap();
+        s.execute("solid.extrude", &json!({"distance": 2, "operation": "new"})).unwrap();
+        s.execute("sketch.create", &json!({"plane": "XY", "offset": 2})).unwrap();
+        let mut centres = Vec::new();
+        for i in -7i32..8 {
+            for j in -8i32..9 {
+                let (x, y) = (f64::from(j) * 3.45 + if i % 2 != 0 { 1.725 } else { 0.0 }, f64::from(i) * 3.0);
+                if x.hypot(y) <= 20.7 {
+                    centres.push([x, y]);
+                }
+            }
+        }
+        assert_eq!(centres.len(), 121);
+        for c in centres.iter().chain(centres.iter().take(repeats)) {
+            s.execute("sketch.circle.center", &json!({"center": c, "radius": 1.15})).unwrap();
+        }
+        s.execute("sketch.finish", &json!({})).unwrap();
+        let r = s.execute("solid.extrude", &json!({"operation": "cut", "direction": "negative", "distance": 2, "targets": ["Body1"]})).unwrap();
+        assert!(r["warning"].is_null(), "{}", r["warning"]);
+        let state = s.model.state();
+        let body = &state.body("Body1").unwrap().body;
+        (body.volume_at(1e-4).unwrap(), body.face_count())
+    };
+    let (once, faces_once) = cut(0);
+    let (twice, faces_twice) = cut(4);
+    let analytic = 70.0 * 70.0 * 2.0 - 121.0 * std::f64::consts::PI * 1.15 * 1.15 * 2.0;
+    assert!((once - analytic).abs() < 0.2, "{once} vs {analytic}");
+    assert!((twice - once).abs() < 1e-9 * once, "{twice} vs {once}");
+    assert_eq!(faces_twice, faces_once);
+}
+
 /// #1985: the STEP export of a small enclosure never finished. The export reads its own file
 /// back, and meshing the screw hole's seam cylinder never ended: the boundary walk took
 /// projected angles millions of turns apart. The file is written, reads back cleanly, and holds

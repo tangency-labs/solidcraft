@@ -4,6 +4,43 @@ use super::*;
 pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = crate::theme::Tokens::get();
     ui_kit::settings_heading(ui, app.tr("prefs.graphics"), app.tr("prefs.graphics_note"));
+    if let Some(note) = &app.graphics_fallback {
+        ui_kit::text(ui, note, ui_kit::Text::Hint("graphics_fallback"));
+    }
+    if app.services.graphics_path.is_some() {
+        ui_kit::settings_section(ui, "graphics_card", app.tr("prefs.graphics_card"), |ui| {
+            let adapters = &app.services.graphics_adapters;
+            let selected = adapters.iter().position(|(name, _)| *name == app.preferences.graphics_adapter);
+            let missing = !app.preferences.graphics_adapter.is_empty() && selected.is_none();
+            let current = selected.and_then(|i| adapters.get(i)).map_or(app.tr("prefs.graphics_card_auto"), |(_, label)| label.as_str());
+            let mut requested = None;
+            let response = ui_kit::dropdown_menu(ui, "graphics_card", current, |ui| {
+                if ui_kit::list_picker(ui, "graphics_card:auto", app.tr("prefs.graphics_card_auto"), selected.is_none()).clicked() {
+                    requested = Some(String::new());
+                }
+                for (index, (name, label)) in adapters.iter().enumerate() {
+                    if ui_kit::list_picker(ui, &format!("graphics_card:{index}"), label, selected == Some(index)).clicked() {
+                        requested = Some(name.clone());
+                    }
+                }
+            });
+            crate::scenario::publish_target("prefs:graphics_card", response.rect);
+            if let Some(name) = requested {
+                let _ = super::set(app, &json!({"graphics_adapter": name}));
+            }
+            ui_kit::text(ui, app.tr("prefs.graphics_card_restart"), ui_kit::Text::Hint("graphics_card_restart"));
+            if missing {
+                ui_kit::text(ui, app.tr("prefs.graphics_card_missing"), ui_kit::Text::Hint("graphics_card_missing"));
+            } else if !app.preferences.graphics_adapter.is_empty() {
+                // Status / Help show the adapter actually in use; the dropdown shows the saved
+                // preference. When they differ the saved card was not applied (#8341).
+                let active = app.viewport.adapter.rsplit(" · ").next().unwrap_or("");
+                if !active.is_empty() && !active.eq_ignore_ascii_case(&app.preferences.graphics_adapter) {
+                    ui_kit::text(ui, app.tr("prefs.graphics_card_unused"), ui_kit::Text::Hint("graphics_card_unused"));
+                }
+            }
+        });
+    }
     ui.horizontal_wrapped(|ui| {
         let response =
             ui.allocate_ui_with_layout(egui::vec2(t.form_card_width + t.space_24 * 2.0, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
@@ -78,6 +115,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         });
         ui_kit::text(ui, app.tr("prefs.anti_aliasing_note"), ui_kit::Text::Hint("msaa"));
+        if app.msaa_compatibility {
+            ui_kit::text(ui, app.tr("prefs.anti_aliasing_amd_dx12"), ui_kit::Text::Hint("msaa_compatibility"));
+        }
         ui.add_space(t.space_6);
         ui_kit::text(ui, app.tr("ui.supersampling"), ui_kit::Text::Heading("supersampling"));
         ui.horizontal_wrapped(|ui| {
@@ -116,8 +156,16 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         });
         ui_kit::text(ui, app.tr("prefs.contact_shading_note"), ui_kit::Text::Hint("ao"));
+        let response = setting::dark_parts_shading(app, ui).on_hover_text(app.tr("prefs.dark_parts_shading_help"));
+        crate::scenario::publish_handle("prefs:dark_parts_shading", response.rect.center());
     });
     ui_kit::settings_section(ui, "viewport", app.tr("prefs.viewport"), |ui| {
+        let analysis_policy = setting::single_surface_analysis(app, ui).on_hover_text(app.tr("prefs.single_surface_analysis_help"));
+        crate::scenario::publish_target("prefs:single_surface_analysis", analysis_policy.rect);
+        if analysis_policy.changed() {
+            sync_surface_analysis(app);
+        }
+
         let response = ui_kit::checkbox(ui, app.tr("ui.cosmetic_thread_markings"), &mut app.preferences.cosmetic_threads)
             .on_hover_text(app.tr("ui.cosmetic_thread_markings_help"));
         crate::scenario::publish_handle("prefs:cosmetic_threads", response.rect.center());
@@ -125,24 +173,45 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             if let Some(left) = columns.get_mut(0) {
                 ui_kit::checkbox(left, crate::i18n::tr_label("Grid"), &mut app.ui.show_grid);
                 ui_kit::checkbox(left, crate::i18n::tr_label("Perspective view"), &mut app.ui.perspective);
+                left.add_enabled_ui(app.ui.perspective || app.ui.auto_ortho_faces, |ui| field_of_view_row(app, ui));
                 setting::show_frame_rate(app, left).on_hover_text(app.tr("settings.frame_rate_note"));
                 left.add_enabled_ui(app.preferences.show_frame_rate, |ui| {
                     ui_kit::checkbox(ui, app.tr("ui.frame_rate_details"), &mut app.preferences.frame_rate_details)
                         .on_hover_text(app.tr("settings.frame_rate_details_note"));
                 });
+                crate::prefs::view_angles_checkbox(app, left);
                 setting::reference_geometry_through_bodies(app, left).on_hover_text(app.tr("settings.reference_geometry_through_bodies_help"));
+                setting::sketch_halo(app, left);
+                setting::vertex_markers(app, left);
             }
             if let Some(right) = columns.get_mut(1) {
                 ui_kit::checkbox(right, crate::i18n::tr_label("Ground shadow"), &mut app.ui.ground_shadow);
                 right.add_enabled_ui(app.ui.show_grid, |ui| {
                     setting::grid_follows_view(app, ui);
                 });
-                let response = setting::measure_axis_distances(app, right);
-                crate::scenario::publish_rect("prefs:measure_axis_distances", response.rect);
-                response.on_hover_text(app.tr("settings.measure_axis_distances_help"));
             }
         });
         ui_kit::settings_form(ui, t.space_24 * 6.0 + t.space_6, |ui| {
+            ui_kit::row(ui, "", |ui| {
+                let check = setting::quick_measure(app, ui).on_hover_text(app.tr("prefs.quick_measure_note"));
+                crate::scenario::publish_target("prefs:quick_measure", check.rect);
+            });
+            ui_kit::row(ui, "", |ui| {
+                let check = setting::viewport_analysis_status(app, ui).on_hover_text(app.tr("prefs.viewport_analysis_status_help"));
+                crate::scenario::publish_target("prefs:viewport_analysis_status", check.rect);
+            });
+            ui_kit::row(ui, "", |ui| {
+                let check = setting::viewport_section_status(app, ui).on_hover_text(app.tr("prefs.viewport_section_status_help"));
+                crate::scenario::publish_target("prefs:viewport_section_status", check.rect);
+            });
+            ui_kit::row(ui, "", |ui| {
+                let check = setting::viewport_status_details(app, ui).on_hover_text(app.tr("prefs.viewport_status_details_help"));
+                crate::scenario::publish_target("prefs:viewport_status_details", check.rect);
+            });
+            ui_kit::row(ui, "", |ui| {
+                let check = setting::viewport_status_summary(app, ui).on_hover_text(app.tr("prefs.viewport_status_summary_help"));
+                crate::scenario::publish_target("prefs:viewport_status_summary", check.rect);
+            });
             ui_kit::row(ui, app.tr_label("Visual style"), |ui| {
                 let mut selected = usize::from(app.ui.visual_style.min(3));
                 ui_kit::dropdown(ui, "pref_style", &mut selected, &["Shaded with edges", "Shaded", "Wireframe", "Shaded with hidden edges"]);
@@ -152,6 +221,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     });
     #[cfg(target_os = "linux")]
     ui_kit::settings_section(ui, "window_system", app.tr("ui.window_system"), |ui| window_system_row(app, ui));
+    setting::render_previous_geometry_budget(app, ui).on_hover_text(app.tr("prefs.render_previous_geometry_budget_help"));
     ui.horizontal(|ui| {
         ui_kit::text(ui, app.tr_label("Renderer"), ui_kit::Text::Inline);
         let renderer = match (&app.viewport.gpu, &app.help.gpu) {
@@ -163,5 +233,19 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             _ => crate::i18n::tr("prefs.cpu").into(),
         };
         ui_kit::text(ui, &renderer, ui_kit::Text::Inline);
+    });
+}
+
+/// Perspective view's Field of view (#5364): the kit slider in degrees, typed or dragged, kept to
+/// whole degrees and written back in radians. No step on the slider itself: it would round the
+/// default 0.6 (34.4°) just by being drawn, so an untouched angle stays exactly as saved.
+fn field_of_view_row(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let mut degrees = perspective_fov(&app.preferences).to_degrees();
+    ui_kit::row(ui, app.tr("prefs.perspective_fov"), |ui| {
+        let response = ui_kit::slider(ui, &mut degrees, 15.0..=90.0, ui_kit::Slider { format: |v| format!("{v:.0}°"), ..Default::default() });
+        if response.changed() {
+            app.preferences.perspective_fov = degrees.round().to_radians();
+        }
+        response
     });
 }

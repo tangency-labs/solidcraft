@@ -415,3 +415,38 @@ fn face_sketch_holes_through_all_stay_in_their_body_unless_targets_say_otherwise
     run(&mut s, "solid.hole", json!({"sketch": "Pts", "points": ["in"], "diameter": 5, "targets": ["Back"], "name": "H"}));
     assert!(solid_at(&s, 20.0, 20.0, 15.0) && !solid_at(&s, 20.0, 20.0, 3.0));
 }
+
+/// A hole starts on a face: a position off every face (here 1 mm past the box's side) is
+/// refused at once, instead of drilling where nobody picked; a point on the face still drills.
+#[test]
+fn a_hole_position_off_every_face_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    let v0 = volume(&mut s);
+    let started = std::time::Instant::now();
+    let hole = |x: f64| json!({"position": [x, 15, 20], "diameter": 8, "depth": 10, "type": "drilled", "tip_angle": 118});
+    let e = s.execute("solid.hole", &hole(-1.0)).unwrap_err().to_string();
+    assert!(e.contains("is not on a face of a body"), "{e}");
+    assert!(started.elapsed().as_secs_f64() < 2.0, "refusing took {:?}", started.elapsed());
+    // Above the top face, and given a direction: still not on a face.
+    let e = s.execute("solid.hole", &json!({"position": [20, 15, 25], "direction": [0, 0, -1], "diameter": 8})).unwrap_err().to_string();
+    assert!(e.contains("is not on a face of a body"), "{e}");
+    assert_eq!(volume(&mut s), v0, "the refused holes changed nothing");
+    run(&mut s, "solid.hole", hole(20.0));
+    assert!(volume(&mut s) < v0, "a hole on the face drills");
+    assert!(!solid_at(&s, 20.0, 15.0, 15.0));
+}
+
+#[test]
+fn a_hole_may_start_over_the_mouth_of_an_existing_bore() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 20}));
+    run(&mut s, "solid.hole", json!({"position": [20, 15, 20], "diameter": 8, "depth": 10, "type": "drilled", "tip_angle": 118}));
+    // A counterbore centred on the bore starts in its mouth, which is in the top face's plane.
+    let v1 = volume(&mut s);
+    run(&mut s, "solid.hole", json!({"position": [20, 15, 20], "diameter": 12, "depth": 3, "type": "drilled", "tip_angle": 118}));
+    assert!(volume(&mut s) < v1, "the wider hole cuts round the bore");
+    // Past the face's edge is still off the face.
+    let e = s.execute("solid.hole", &json!({"position": [-1, 15, 20], "diameter": 8})).unwrap_err().to_string();
+    assert!(e.contains("is not on a face of a body"), "{e}");
+}

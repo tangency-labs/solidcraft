@@ -1,6 +1,7 @@
 //! `cargo xtask test`: build the workspace's tests once, then run every test binary.
 //! By default they all run at once, with sequential doc/wasm `side` jobs alongside.
-//! SOLIDCRAFT_TEST_JOBS opts into a shared bound for test binaries and those side jobs.
+//! SOLIDCRAFT_TEST_JOBS opts into a shared bound for test binaries and those side jobs, and
+//! splits each binary's libtest threads and action-matrix workers across the binaries in flight.
 
 use std::ffi::OsStr;
 use std::process::{Command, Stdio};
@@ -21,6 +22,7 @@ struct TestBin {
 /// Each prints a line when it ends; a failure prints its whole output and does not cancel work.
 pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>) -> Result<(), String> {
     let limit = job_limit(std::env::var_os("SOLIDCRAFT_TEST_JOBS").as_deref())?;
+    let split = thread_split(limit, std::thread::available_parallelism().map_or(1, |n| n.get()));
     let bins = build(cargo_args)?;
     let start = Instant::now();
     let side_count = side.len();
@@ -29,12 +31,11 @@ pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>
         batches.push(side);
     }
     for b in &bins {
-        let mut c = Command::new(&b.exe);
-        c.args(test_args).current_dir(&b.dir).env("CARGO_MANIFEST_DIR", &b.dir);
-        batches.push(vec![(b.label.clone(), c)]);
+        batches.push(vec![(b.label.clone(), binary_command(b, test_args, split))]);
     }
     let jobs = limit.unwrap_or(batches.len()).min(batches.len());
-    eprintln!("test: {} binaries, {side_count} side jobs; at most {jobs} concurrent top-level commands", bins.len());
+    let split_note = split.map_or(String::new(), |t| format!("; {t} test threads and matrix workers per binary unless overridden"));
+    eprintln!("test: {} binaries, {side_count} side jobs; at most {jobs} concurrent top-level commands{split_note}", bins.len());
     let mut failed = Vec::new();
     run_bounded(
         batches,
@@ -68,6 +69,19 @@ fn job_limit(value: Option<&OsStr>) -> Result<Option<usize>, String> {
         .ok_or_else(|| "SOLIDCRAFT_TEST_JOBS must be a positive integer".into())
 }
 
+/// The per-binary worker count that keeps the whole run inside the machine's parallelism:
+/// `cpus` shared between `jobs` binaries in flight, never below one. No limit means no split,
+/// so each binary keeps the thread count it would have chosen on its own.
+fn thread_split(limit: Option<usize>, cpus: usize) -> Option<usize> {
+    limit.map(|jobs| (cpus.max(1) / jobs.max(1)).max(1))
+}
+
+/// The value to hand a binary for `name`, or `None` when the caller set it explicitly: an
+/// inherited `RUST_TEST_THREADS` or `ACTION_MATRIX_JOBS` always outranks the budget.
+fn budget_env(name: &str, split: Option<usize>) -> Option<String> {
+    split.filter(|_| std::env::var_os(name).is_none()).map(|threads| threads.to_string())
+}
+
 /// Workers only hold the queue lock while taking a job. Reporting remains live, and neither
 /// a failed job nor a failed side command removes any remaining work from the queue.
 fn run_bounded<T: Send, R: Send>(tasks: Vec<T>, jobs: usize, work: impl Fn(T, &mpsc::Sender<R>) + Sync, mut report: impl FnMut(R)) {
@@ -92,6 +106,19 @@ fn run_bounded<T: Send, R: Send>(tasks: Vec<T>, jobs: usize, work: impl Fn(T, &m
             report(result);
         }
     });
+}
+
+/// The command for one built test binary. With a split in force each binary's own libtest
+/// threads and action-matrix workers are bounded to it, unless the caller already set them.
+fn binary_command(b: &TestBin, test_args: &[&str], split: Option<usize>) -> Command {
+    let mut c = Command::new(&b.exe);
+    c.args(test_args).current_dir(&b.dir).env("CARGO_MANIFEST_DIR", &b.dir);
+    for name in ["RUST_TEST_THREADS", "ACTION_MATRIX_JOBS"] {
+        if let Some(threads) = budget_env(name, split) {
+            c.env(name, threads);
+        }
+    }
+    c
 }
 
 /// Run to the end: the last `test result:` line on success, all output on failure.
@@ -145,8 +172,9 @@ pub fn doc_tests(cargo_args: &[&str], test_args: &[&str]) -> (String, Command) {
 
 #[cfg(test)]
 mod tests {
-    use super::{job_limit, run_bounded};
+    use super::{TestBin, binary_command, budget_env, job_limit, run_bounded, thread_split};
     use std::ffi::OsStr;
+    use std::path::Path;
     use std::sync::Barrier;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -228,5 +256,47 @@ mod tests {
         assert!(results.is_empty());
         run_bounded(vec![7], usize::MAX, |id, tx| tx.send(id).unwrap(), |id| results.push(id));
         assert_eq!(results, [7]);
+    }
+
+    #[test]
+    fn thread_split_shares_the_cpus_between_the_binaries_in_flight() {
+        assert_eq!(thread_split(None, 32), None);
+        assert_eq!(thread_split(Some(1), 32), Some(32));
+        assert_eq!(thread_split(Some(4), 32), Some(8));
+        assert_eq!(thread_split(Some(8), 32), Some(4));
+        assert_eq!(thread_split(Some(32), 32), Some(1));
+        // More binaries than cores still gives each one a worker, and one core is never zero.
+        assert_eq!(thread_split(Some(64), 32), Some(1));
+        assert_eq!(thread_split(Some(4), 1), Some(1));
+        assert_eq!(thread_split(Some(4), 0), Some(1));
+        assert_eq!(thread_split(Some(0), 8), Some(8));
+    }
+
+    #[test]
+    fn budget_env_leaves_an_explicit_caller_override_alone() {
+        // PATH is set in every test process, so it stands in for a caller-set override.
+        assert!(std::env::var_os("PATH").is_some());
+        assert_eq!(budget_env("PATH", Some(4)), None);
+        assert_eq!(budget_env("PATH", None), None);
+        assert_eq!(budget_env("SOLIDCRAFT_BUDGET_ENV_PROBE", Some(4)).as_deref(), Some("4"));
+        assert_eq!(budget_env("SOLIDCRAFT_BUDGET_ENV_PROBE", None), None);
+    }
+
+    #[test]
+    fn binary_command_bounds_threads_and_matrix_workers_only_under_a_budget() {
+        let bin = TestBin { label: "pkg test t".into(), exe: "true".into(), dir: ".".into() };
+        let env_of = |c: &std::process::Command, name: &str| {
+            c.get_envs().find(|(k, _)| *k == OsStr::new(name)).and_then(|(_, v)| v).map(|v| v.to_string_lossy().into_owned())
+        };
+        for name in ["RUST_TEST_THREADS", "ACTION_MATRIX_JOBS"] {
+            assert_eq!(env_of(&binary_command(&bin, &["--exact", "x"], None), name), None, "{name} unset without a budget");
+            if std::env::var_os(name).is_none() {
+                assert_eq!(env_of(&binary_command(&bin, &["--exact", "x"], Some(6)), name).as_deref(), Some("6"), "{name} follows the budget");
+            }
+        }
+        let c = binary_command(&bin, &["--exact", "x"], None);
+        assert_eq!(c.get_current_dir(), Some(Path::new(".")));
+        assert_eq!(env_of(&c, "CARGO_MANIFEST_DIR").as_deref(), Some("."));
+        assert_eq!(c.get_args().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>(), ["--exact", "x"]);
     }
 }

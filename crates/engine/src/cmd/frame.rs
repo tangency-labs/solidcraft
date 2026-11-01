@@ -30,7 +30,7 @@ macro_rules! profile_doc {
 }
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("frame.member", "Frame Member", member).at("SOLID", "CREATE").icon("frame_member").enabled(not_in_sketch).params(concat!(
+    CommandSpec::new("frame.member", "Frame Member", member).at("WELDMENTS", "CREATE").icon("frame_member").enabled(not_in_sketch).params(concat!(
         "sketch: the frame sketch (id or name; 2D or 3D); lines?: [curve ids] (one member each; default: every straight line drawn in the sketch: not construction, not projected or otherwise linked, not of no length); ",
         profile_doc!(),
         " | profile_sketch: a sketch whose profile is the section, in its own x and y around its origin, with profiles?: picks as solid.extrude takes them (default: its material, nested loops alternating, so two circles make a tube); anchor?: origin|center|centroid|top_left|top|top_right|left|right|bottom_left|bottom|bottom_right (the profile point that sits on each line, default origin); angle?: angle expr (the profile turned about the line; default 0: its y as near world up as the line allows, a vertical member's x along world X); mirror?: bool (the profile mirrored across its y axis); name?; body_name? (what the members are named after, then numbered: `Rail`, `Rail (2)`…; default the profile's description, `Rect Tube 40x40x3`, or the profile sketch's name); names?: {line id: name} (names to keep, as Edit Feature keeps them). One body per line, from its start to its end; each member keeps its name when other lines are added or deleted. Returns the feature and the bodies it made"
@@ -188,7 +188,7 @@ fn member(s: &mut Session, p: &Value) -> Result<Value> {
     let lines = match p.get("lines") {
         None | Some(Value::Null) => Vec::new(),
         Some(Value::Array(a)) if !a.is_empty() && a.len() <= frame::MAX_MEMBERS && a.iter().all(Value::is_string) => {
-            let lines = string_list(p, "lines");
+            let lines = string_list(cmd, p, "lines")?;
             let mut seen = std::collections::HashSet::new();
             if let Some(twice) = lines.iter().find(|l| !seen.insert(l.as_str())) {
                 return Err(bad(cmd, format!("line `{twice}` is listed twice")));

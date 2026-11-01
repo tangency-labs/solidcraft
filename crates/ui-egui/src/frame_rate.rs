@@ -138,11 +138,29 @@ fn budget_colour(t: &Tokens, ms: f32) -> Color32 {
     }
 }
 
-/// Records this frame and paints the readout in the view's bottom-right corner, with the details
-/// above it when they are on. The readout asks for no frames of its own, so it shows how often the
-/// view is really drawn and leaves an idle window idle (a readout that redrew every frame kept the
-/// GPU busy on an untouched window); the details show the frames the view drew. Once the frames
-/// stop, one more frame a little over [`IDLE_AFTER`] later shows the view idle.
+/// The readout's distance from the view's edges and from the panes beside it.
+const MARGIN: f32 = 12.0;
+
+/// `readout` moved left until none of the `panes` covering the view overlaps it, `MARGIN` clear
+/// of the leftmost of them; it stops at the view's left edge.
+fn beside_panes(mut readout: Rect, view: Rect, panes: &[Rect]) -> Rect {
+    for _ in 0..panes.len().min(32) {
+        let Some(pane) = panes.iter().find(|p| p.is_finite() && p.is_positive() && p.intersects(readout)) else { break };
+        let left = (pane.left() - MARGIN - readout.width()).max(view.left() + MARGIN);
+        if left >= readout.left() {
+            break;
+        }
+        readout = readout.translate(vec2(left - readout.left(), 0.0));
+    }
+    readout
+}
+
+/// Records this frame and paints the readout in the view's bottom-right corner, left of a pane over
+/// that corner, with the details above it when they are on. The readout asks for no frames of its
+/// own, so it shows how often the view is really drawn and leaves an idle window idle (a readout
+/// that redrew every frame kept the GPU busy on an untouched window); the details show the frames
+/// the view drew. Once the frames stop, one more frame a little over [`IDLE_AFTER`] later shows the
+/// view idle.
 pub(crate) fn paint(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, rect: Rect) {
     if !app.preferences.show_frame_rate {
         app.frame_rate = FrameRate::default();
@@ -164,7 +182,9 @@ pub(crate) fn paint(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, 
     let font = FontId::monospace(t.font_body);
     let galley = painter.layout_no_wrap(text, font.clone(), t.text);
     let size = galley.size() + vec2(16.0, 8.0);
-    let mut r = Rect::from_min_size(pos2(rect.right() - 12.0 - size.x, rect.bottom() - 12.0 - size.y), size);
+    let r = Rect::from_min_size(pos2(rect.right() - MARGIN - size.x, rect.bottom() - MARGIN - size.y), size);
+    // Just left of a pane over the view's right side (the Assistant, a dialog), not under it (#6755).
+    let mut r = beside_panes(r, rect, &crate::shell::covered_rects(app));
     // Above the navigation bar where a narrow view brings the two together.
     if let Some(nav) = app.viewport.layout.as_ref().map(|l| l.navigation)
         && r.intersects(nav.expand(4.0))
@@ -184,18 +204,18 @@ pub(crate) fn paint(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, 
     }
 }
 
-/// The details above the readout `below`: the frame-time graph with the triangles over it, the
-/// histogram and what the GPU drew.
+/// The details above the readout `below`, flush with its right edge: the frame-time graph with the
+/// triangles over it, the histogram and what the GPU drew.
 fn details(app: &SolveApp, painter: &egui::Painter, view: Rect, below: Rect, drawn: crate::gpu::DrawStats, font: &FontId) {
     let t = Tokens::get();
     let (pad, row, label_h, graph_h, hist_h) = (8.0, 16.0, 12.0, 56.0, 40.0);
     let lines = 7.0 + 0.8; // seven rows and the adapter's name
-    let w = 300.0_f32.min(view.width() - 24.0);
+    let w = 300.0_f32.min(below.right() - view.left() - MARGIN);
     let h = pad * 2.0 + row + label_h + graph_h + 6.0 + hist_h + row + lines * row;
     if w < 160.0 || h > view.height() - below.height() - 30.0 {
         return;
     }
-    let panel = Rect::from_min_size(pos2(view.right() - 12.0 - w, below.top() - 6.0 - h), vec2(w, h));
+    let panel = Rect::from_min_size(pos2(below.right() - w, below.top() - 6.0 - h), vec2(w, h));
     painter.rect(panel, t.radius_sm, t.dialog_bg, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
     crate::scenario::publish_handle("viewport:frame_details", panel.center());
     let inner = panel.shrink(pad);
@@ -412,6 +432,26 @@ mod tests {
         h.frames(2);
         assert!(!h.app.preferences.frame_rate_details);
         assert!(handle_at("viewport:frame_details").is_none());
+    }
+
+    /// Panes over the readout push it left, a pane-free corner keeps it, and hostile or
+    /// view-wide panes never push it out of the view (#6755).
+    #[test]
+    fn the_readout_moves_left_of_the_panes_over_it() {
+        use egui::{Rect, pos2};
+        let view = Rect::from_min_max(pos2(0.0, 0.0), pos2(1000.0, 600.0));
+        let readout = Rect::from_min_max(pos2(850.0, 560.0), pos2(988.0, 588.0));
+        assert_eq!(super::beside_panes(readout, view, &[]), readout);
+        let top = Rect::from_min_max(pos2(700.0, 0.0), pos2(1000.0, 100.0));
+        assert_eq!(super::beside_panes(readout, view, &[top]), readout, "a pane above leaves it in the corner");
+        let chat = Rect::from_min_max(pos2(600.0, 40.0), pos2(992.0, 593.0));
+        let dialog = Rect::from_min_max(pos2(380.0, 500.0), pos2(590.0, 580.0));
+        let moved = super::beside_panes(readout, view, &[chat, dialog]);
+        assert_eq!((moved.right(), moved.size()), (dialog.left() - 12.0, readout.size()), "left of both");
+        let nan = Rect::from_min_max(pos2(f32::NAN, 0.0), pos2(1000.0, 600.0));
+        assert_eq!(super::beside_panes(readout, view, &[nan]), readout);
+        let everything = view.expand(10.0);
+        assert_eq!(super::beside_panes(readout, view, &[everything]).left(), 12.0, "stops at the view's left edge");
     }
 
     #[test]

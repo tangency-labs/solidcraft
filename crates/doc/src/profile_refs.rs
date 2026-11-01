@@ -363,6 +363,7 @@ pub fn capture_profile_selection(ss: &SolvedSketch, indices: &[usize]) -> Result
 mod tests {
     #![allow(clippy::unwrap_used, clippy::panic)]
     use super::*;
+    use serde_json::json;
     use solidcraft_geom::{Plane, Vec2};
     use solidcraft_sketch::{Sketch, find_profiles, solve};
 
@@ -516,6 +517,25 @@ mod tests {
         assert_eq!(regions.len(), 600);
         assert!(regions.iter().all(|region| (region.area() - std::f64::consts::PI * 9.).abs() < 1e-9));
         assert!(profile_selection_indices(&ss, &ProfileSel::Indices { indices: vec![1] }).is_err());
+    }
+
+    #[test]
+    fn a_whole_source_selection_loads_in_any_curve_order() {
+        let ss = solved_square(&[]);
+        assert_eq!(ss.profiles.len(), 1);
+        let canonical = ProfileSel::WholeBoundaries {
+            profiles: vec![WholeProfileBoundary { outer: ["a", "b", "c", "d"].map(str::to_string).to_vec(), holes: Vec::new() }],
+        };
+        assert_eq!(profile_selection_indices(&ss, &canonical).unwrap(), vec![0]);
+        // The same loop written from another corner, or the other way round, names the same
+        // region: a design saved that way opens instead of being refused as damaged (#6499).
+        for order in [["b", "c", "d", "a"], ["d", "c", "b", "a"], ["c", "d", "a", "b"]] {
+            let written = json!({"type":"whole_boundaries","profiles":[{"outer":order,"holes":[]}]});
+            let loaded: ProfileSel = serde_json::from_value(written).unwrap();
+            assert_eq!(loaded, canonical, "the loaded identity is canonical");
+            assert_eq!(profile_selection_indices(&ss, &loaded).unwrap(), vec![0]);
+            assert_eq!(crate::select_profiles(&ss, &loaded).unwrap().len(), 1);
+        }
     }
 
     fn solved_square(extra: &[(&str, [f64; 4])]) -> SolvedSketch {

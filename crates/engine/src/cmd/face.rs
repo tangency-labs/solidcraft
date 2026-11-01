@@ -26,6 +26,90 @@ pub(super) fn face_normal(s: &Session, p: Vec3) -> Option<Vec3> {
 /// The outward normal of the planar face at `p` of `body` (any body when `None`).
 pub(super) fn face_normal_in(s: &Session, p: Vec3, body: Option<&str>) -> Option<Vec3> {
     let (m, f, d, _) = face_at_in(s, p, body).ok().flatten()?;
+    if !near_face(&m, d) {
+        return None;
+    }
+    m.triangles
+        .iter()
+        .zip(&m.tri_face)
+        .filter(|(_, tf)| **tf == f)
+        .filter_map(|(t, _)| m.tri(t))
+        .find_map(|[a, b, c]| (b - a).cross(c - a).normalized())
+}
+
+/// Is a face `d` from a point near enough to hold it: within a thousandth of the body's
+/// size (at least 1 µm), ten times over, as picks placed on faces are taken.
+fn near_face(m: &Mesh, d: f64) -> bool {
+    let tol = (m.bounds().diagonal() * 1e-3).max(1e-3);
+    d <= tol * 10.0
+}
+
+/// Does `p` lie on a face of a body (planar or curved), as features placed on a face need?
+/// Where flush bodies' faces are equally near, it lies on each of them. A point in the opening
+/// of a planar face (the mouth of an existing bore, which a counterbore is centred on) is on
+/// that face too.
+pub(super) fn on_a_face(s: &Session, p: Vec3) -> bool {
+    let on_one = match face_at_in(s, p, None) {
+        Ok(Some((m, _, d, _))) => near_face(&m, d),
+        Ok(None) => false,
+        Err(tied) => tied.first().is_some_and(|b| matches!(face_at_in(s, p, Some(b)), Ok(Some((m, _, d, _))) if near_face(&m, d))),
+    };
+    on_one || s.model.state().bodies.iter().any(|b| in_a_planar_face_outline(&b.mesh(), p))
+}
+
+/// Does `p` lie in the plane of a planar face of `m`, inside the hull of that face's corners
+/// (so over its openings, not past its edge)?
+fn in_a_planar_face_outline(m: &Mesh, p: Vec3) -> bool {
+    let mut faces: std::collections::BTreeMap<u32, Vec<[Vec3; 3]>> = std::collections::BTreeMap::new();
+    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+        if let Some(tri) = m.tri(t) {
+            faces.entry(*f).or_default().push(tri);
+        }
+    }
+    faces.values().any(|tris| {
+        let Some([a, b, c]) = tris.first().copied() else { return false };
+        let Some(n) = (b - a).cross(c - a).normalized() else { return false };
+        let planar = tris.iter().all(|[a, b, c]| (*b - *a).cross(*c - *a).normalized().is_some_and(|k| k.dot(n) > 1.0 - 1e-6));
+        if !planar || !near_face(m, (p - a).dot(n).abs()) {
+            return false;
+        }
+        let reference = if n.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) };
+        let Some(u) = n.cross(reference).normalized() else { return false };
+        let v = n.cross(u);
+        let flat = |q: Vec3| (q.dot(u), q.dot(v));
+        let mut corners: Vec<(f64, f64)> = tris.iter().flatten().map(|q| flat(*q)).collect();
+        corners.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+        corners.dedup();
+        inside_hull(&corners, flat(p))
+    })
+}
+
+/// Is `q` inside (or on) the convex hull of `sorted` points (sorted by x, then y)?
+fn inside_hull(sorted: &[(f64, f64)], q: (f64, f64)) -> bool {
+    let cross = |o: (f64, f64), a: (f64, f64), b: (f64, f64)| (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0);
+    let chain = |points: &mut dyn Iterator<Item = &(f64, f64)>| {
+        let mut h: Vec<(f64, f64)> = Vec::new();
+        for &pt in points {
+            while h.len() >= 2 && cross(h[h.len() - 2], h[h.len() - 1], pt) <= 0.0 {
+                h.pop();
+            }
+            h.push(pt);
+        }
+        h
+    };
+    let mut hull = chain(&mut sorted.iter());
+    hull.pop();
+    let mut upper = chain(&mut sorted.iter().rev());
+    upper.pop();
+    hull.extend(upper);
+    let eps = 1e-9;
+    hull.len() >= 3 && (0..hull.len()).all(|i| cross(hull[i], hull[(i + 1) % hull.len()], q) >= -eps)
+}
+
+/// The outward normal of the planar face at the world point `p`: on the model as the view
+/// places it (moved components where they are shown).
+pub(super) fn face_normal_world(s: &Session, p: Vec3) -> Option<Vec3> {
+    let (m, f, d, _) = face_at_state(&s.world_state(), p, None).ok().flatten()?;
     let tol = (m.bounds().diagonal() * 1e-3).max(1e-3);
     if d > tol * 10.0 {
         return None;
@@ -41,8 +125,7 @@ pub(super) fn face_normal_in(s: &Session, p: Vec3, body: Option<&str>) -> Option
 /// Is the body face at `p` planar (`None`: no face there)?
 pub(super) fn face_is_planar(s: &Session, p: Vec3) -> Option<bool> {
     let (m, f, d, _) = face_at(s, p)?;
-    let tol = (m.bounds().diagonal() * 1e-3).max(1e-3);
-    if d > tol * 10.0 {
+    if !near_face(&m, d) {
         return None;
     }
     let ns: Vec<Vec3> = m
@@ -98,9 +181,24 @@ type FacePick = (std::sync::Arc<Mesh>, u32, f64, String);
 
 /// The face under a point of `only` (any body when `None`). Where faces of several bodies are
 /// equally near (bodies touching flush), the pick is ambiguous: `Err` names those bodies.
+/// A pick of the running command was resolved against the placed model, so the body under it
+/// wins: a body that only shares its place in the model is not in the way (#419). A named
+/// body still wins over that.
 fn face_at_in(s: &Session, p: Vec3, only: Option<&str>) -> std::result::Result<Option<FacePick>, Vec<String>> {
     let st = s.model.state();
-    face_at_state(&st, p, only)
+    match (crate::frames::picked(p), only) {
+        (Some(names), None) if names.len() > 1 => Err(model_names(&st, &names)),
+        (Some(names), None) => {
+            let under = names.first().and_then(|n| st.bodies.iter().find(|b| b.definition_name() == n.as_str()).map(|b| b.name.clone()));
+            face_at_state(&st, p, under.as_deref())
+        }
+        (_, only) => face_at_state(&st, p, only),
+    }
+}
+
+/// The names the model gives the bodies a pick met.
+fn model_names(st: &solidcraft_doc::ModelState, names: &[String]) -> Vec<String> {
+    names.iter().map(|n| st.bodies.iter().find(|b| b.definition_name() == n.as_str()).map(|b| b.name.clone()).unwrap_or_else(|| n.clone())).collect()
 }
 
 pub(super) fn face_at_state(st: &solidcraft_doc::ModelState, p: Vec3, only: Option<&str>) -> std::result::Result<Option<FacePick>, Vec<String>> {

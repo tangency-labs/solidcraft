@@ -21,6 +21,9 @@ pub struct Progress {
     work_stage: std::sync::Mutex<&'static str>,
     work_done: AtomicUsize,
     work_total: AtomicUsize,
+    /// The item a command works through one at a time (the linked design Update Links reads
+    /// again): its name, its place and how many there are ([`item`]).
+    item: std::sync::Mutex<Option<(String, usize, usize)>>,
     /// A window wants the model as far as it is built, to show while the rest is ([`Progress::want_partial`]).
     partial_wanted: AtomicBool,
     /// The latest such model and when it was offered.
@@ -48,6 +51,7 @@ impl Default for Progress {
             work_stage: std::sync::Mutex::new(""),
             work_done: AtomicUsize::new(0),
             work_total: AtomicUsize::new(0),
+            item: std::sync::Mutex::new(None),
             partial_wanted: AtomicBool::new(false),
             partial: std::sync::Mutex::new((None, None)),
         }
@@ -86,6 +90,23 @@ impl Progress {
         let stage = self.work_stage.lock().map(|s| *s).unwrap_or("");
         (total > 0 && !stage.is_empty()).then(|| (stage, self.work_done.load(Ordering::Relaxed).min(total), total))
     }
+    /// The item being worked on, as [`item`] reported it: (name, index from 0, count).
+    pub fn item(&self) -> Option<(String, usize, usize)> {
+        self.item.lock().ok().and_then(|i| i.clone())
+    }
+}
+
+/// Tell a watcher which item a command is on (`name`, `index` from 0 of `count`), such as the
+/// linked design Update Links reads again; `None` once it is past them. Nothing happens unless
+/// the work is watched ([`watch`]).
+pub fn item(current: Option<(&str, usize, usize)>) {
+    CURRENT.with(|c| {
+        if let Some(cur) = c.borrow().as_ref()
+            && let Ok(mut i) = cur.progress.item.lock()
+        {
+            *i = current.map(|(name, index, count)| (name.to_string(), index.min(count), count));
+        }
+    });
 }
 
 /// The kernel's long work (STEP import) reports to the same progress and stops on Cancel.
@@ -152,6 +173,13 @@ pub(crate) fn begin(total: usize) -> Evaluation {
 }
 
 impl Evaluation {
+    /// Whether the watcher asked to stop. A feature cut short then (a STEP import that stopped
+    /// part way) failed only because of it: its result must not be kept for the same inputs, as
+    /// the evaluation cache is shared with the model a preview was copied from (#7167).
+    pub(crate) fn cancelled(&self) -> bool {
+        CURRENT.with(|c| c.borrow().as_ref().is_some_and(|cur| cur.progress.is_cancelled()))
+    }
+
     /// Feature `index` is next. True when the watcher asked to stop: skip it.
     pub(crate) fn step(&self, index: usize) -> bool {
         CURRENT.with(|c| {
@@ -240,6 +268,22 @@ mod tests {
         });
         assert_eq!(p.features(), (5, 5));
         assert!(!begin(1).step(0), "the watch ends with its scope");
+    }
+
+    /// The item a command is on reaches its watcher, and only a watcher.
+    #[test]
+    fn items_go_to_the_watcher() {
+        item(Some(("unwatched", 0, 1)));
+        let p = Arc::new(Progress::default());
+        assert_eq!(p.item(), None);
+        watch(p.clone(), || {
+            item(Some(("plate", 1, 3)));
+            assert_eq!(p.item(), Some(("plate".to_string(), 1, 3)));
+            item(None);
+        });
+        assert_eq!(p.item(), None, "cleared once past the items");
+        item(Some(("after", 0, 1)));
+        assert_eq!(p.item(), None, "the watch ends with its scope");
     }
 
     /// A watcher that asks for partial models gets the model built so far, placed, now and then;

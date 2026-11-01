@@ -835,16 +835,14 @@ fn solve3(m: [[f64; 3]; 3], r: [f64; 3]) -> Option<[f64; 3]> {
     Some(out)
 }
 
-/// Move the planar faces at the given points along their outward normals by `distance`
-/// (negative: into the body). The body's other faces follow (its topology is kept).
-pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
-    b.require_brep("offset faces")?;
-    if !distance.is_finite() || distance.abs() > 1e6 {
-        return Err(KernelError::Invalid("offset distance".into()));
-    }
-    let healed = crate::boolean_record::healed(b)?.with_split_lines(b.splits.clone());
-    let size = healed.size();
-    let mesh = healed.tessellate((size * 1e-3).max(1e-3))?;
+/// The faces of `body` the given points pick, each whole (every piece of its surface).
+///
+/// Taken per body rather than once, because an operation may be tried again on the same body
+/// with a face split in two, and the pieces are numbered differently then. The points do not
+/// move, so they pick the same surface either way.
+fn faces_at(body: &Body, at: &[Vec3]) -> Result<Vec<usize>> {
+    let size = body.size();
+    let mesh = body.tessellate((size * 1e-3).max(1e-3))?;
     let mut chosen: Vec<usize> = Vec::new();
     for p in at {
         let near = mesh
@@ -862,13 +860,39 @@ pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
             _ => return Err(KernelError::Invalid(format!("no face at {:?}", [p.x, p.y, p.z]))),
         }
     }
-    let chosen = crate::offset::with_same_surface(&healed, &chosen);
-    match offset_planar(&healed, |fi, _| if chosen.contains(&fi) { distance } else { 0.0 }) {
-        Ok(r) => Ok(record::after(r, &healed, &record::counts(&[b]))),
-        // A piece of a split face (its neighbour stays): the piece swept along its normal
-        // joins on (outward) or cuts in, with walls along the split lines.
-        Err(e) if !healed.split_keep().is_empty() => press_pieces(&healed, &chosen, distance).map_err(|_| e),
-        Err(e) => Err(e),
+    Ok(crate::offset::with_same_surface(body, &chosen))
+}
+
+/// Move the planar faces at the given points along their outward normals by `distance`
+/// (negative: into the body). The body's other faces follow (its topology is kept).
+pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
+    b.require_brep("offset faces")?;
+    if !distance.is_finite() || distance.abs() > 1e6 {
+        return Err(KernelError::Invalid("offset distance".into()));
+    }
+    // Healing is part of the attempt, not a step before it: a face that runs along a seam edge
+    // twice fails there, and the retry below needs the whole of it to run on the split body.
+    let run = |body: &Body| -> Result<Body> {
+        let healed = crate::boolean_record::healed(body)?.with_split_lines(body.splits.clone());
+        let chosen = faces_at(&healed, at)?;
+        match offset_planar(&healed, |fi, _| if chosen.contains(&fi) { distance } else { 0.0 }) {
+            Ok(r) => Ok(record::after(r, &healed, &record::counts(&[body]))),
+            // A piece of a split face (its neighbour stays): the piece swept along its normal
+            // joins on (outward) or cuts in, with walls along the split lines.
+            Err(e) if !healed.split_keep().is_empty() => press_pieces(&healed, &chosen, distance).map_err(|_| e),
+            Err(e) => Err(e),
+        }
+    };
+    match crate::guard("offset faces", || run(b)) {
+        Ok(r) => Ok(r),
+        // A face that runs along a seam edge twice — a hole's wall as a STEP file writes it, one
+        // whole turn bounded by one wire. Healing it, or moving its neighbour, fails where the
+        // same body with that face in two halves works, so split it and ask again, which is what
+        // a boolean already does (`seam_faces`).
+        Err(e) => match crate::seam_faces::one_body(b, "offset faces off their seams", &run) {
+            Some(Ok(r)) => Ok(r),
+            _ => Err(e),
+        },
     }
 }
 

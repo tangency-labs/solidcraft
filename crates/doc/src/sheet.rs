@@ -114,21 +114,6 @@ fn chorded_region(region: &Region2) -> Result<Region2> {
     })
 }
 
-/// A line or free-form segment with its points mapped by `f`: exact under any affine map (a
-/// conic keeps its weight). An arc is given by angles, not points, and stays as it is.
-pub(crate) fn map_controls(seg: &Seg2, f: impl Fn(Vec2) -> Vec2) -> Seg2 {
-    match *seg {
-        Seg2::Line { a, b } => Seg2::Line { a: f(a), b: f(b) },
-        Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic { p0: f(p0), p1: f(p1), p2: f(p2), p3: f(p3) },
-        Seg2::Conic { a, apex, b, w } => Seg2::Conic { a: f(a), apex: f(apex), b: f(b), w },
-        Seg2::Bezier { n, mut p } => {
-            p.iter_mut().take(usize::from(n) + 1).for_each(|q| *q = f(*q));
-            Seg2::Bezier { n, p }
-        }
-        arc @ Seg2::Arc { .. } => arc,
-    }
-}
-
 fn planar_region(region: &Region2) -> Result<Region2> {
     if region.holes.len() > MAX_FLAT_PIECES {
         return Err(flat_budget_error());
@@ -549,13 +534,75 @@ pub struct SheetFlange {
     pub tag: String,
 }
 
-/// One edge flange to make: a pick on the sheet's edge, and that flange's height (to the outer
-/// face, from the virtual sharp) and angle (radians).
+/// One edge flange to make: a pick on the sheet's edge, that flange's height (measured as `from`
+/// says) and angle (radians).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EdgeFlange {
     pub pick: Vec3,
     pub height: f64,
     pub angle: f64,
+    pub from: HeightFrom,
+}
+
+/// Where an edge flange's height is measured from (#5938). Every one measures along the flange,
+/// up to its far edge; they differ in where the measure starts, so in how much of the height is
+/// the bend rather than the leg (the flat panel past the bend). With bend angle θ, inner radius
+/// R and thickness T, the leg is the height less [`HeightFrom::before_leg`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HeightFrom {
+    /// From the outer virtual sharp, where the lines of the base's and the flange's outer faces
+    /// meet, along the outer face: (R + T)·tan(θ/2) of the height is before the leg.
+    #[default]
+    Outer,
+    /// From the inner virtual sharp, where the lines of the two inner faces meet, along the inner
+    /// face: R·tan(θ/2) of the height is before the leg.
+    Inner,
+    /// For bends past 90°: from the line square to the flange that touches the outside of the
+    /// bend (at the point a quarter turn before the bend's end), R + T before the leg. Up to 90°
+    /// it is the outer virtual sharp, (R + T)·tan(θ/2); at 90° the two are the same line (the
+    /// base's outer face), so the height does not jump as the angle passes 90°.
+    Tangent,
+}
+
+impl HeightFrom {
+    pub const NAMES: [&'static str; 3] = ["outer", "inner", "tangent"];
+
+    pub fn parse(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "outer" => Some(Self::Outer),
+            "inner" => Some(Self::Inner),
+            "tangent" => Some(Self::Tangent),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Outer => "outer",
+            Self::Inner => "inner",
+            Self::Tangent => "tangent",
+        }
+    }
+
+    /// How much of the height lies before the leg starts, for a bend of `angle` (radians), inner
+    /// `radius` and `thickness`: the smallest height that fits (a flange with no leg).
+    pub fn before_leg(self, angle: f64, radius: f64, thickness: f64) -> f64 {
+        match self {
+            Self::Outer => (radius + thickness) * (angle / 2.0).tan(),
+            Self::Inner => radius * (angle / 2.0).tan(),
+            Self::Tangent if angle <= std::f64::consts::FRAC_PI_2 => (radius + thickness) * (angle / 2.0).tan(),
+            Self::Tangent => radius + thickness,
+        }
+    }
+
+    /// What the measure starts at, for messages.
+    fn datum(self) -> &'static str {
+        match self {
+            Self::Outer => "the outer sharp",
+            Self::Inner => "the inner sharp",
+            Self::Tangent => "the bend's tangent",
+        }
+    }
 }
 
 /// The most lines a path flange's path may have (each one flange and its bend).
@@ -2360,8 +2407,9 @@ impl SheetBody {
         Ok(())
     }
 
-    /// Add an edge flange on the panel edge nearest `pick` (world): `height` to the outer face
-    /// from the virtual sharp, `angle` (0…180°), inside / outside / middle bend position.
+    /// Add an edge flange on the panel edge nearest `pick` (world): `height` measured from the
+    /// outer virtual sharp ([`HeightFrom::Outer`]), `angle` (0…180°), inside / outside / middle /
+    /// material_outside / tangent bend position (see `add_flanges_each`).
     pub fn add_flange(&mut self, pick: Vec3, height: f64, angle: f64, radius: f64, position: &str, flip: bool) -> Result<usize> {
         self.add_flanges(&[pick], height, angle, radius, position, flip)?.into_iter().next().ok_or_else(|| DocError::Invalid("flange".into()))
     }
@@ -2384,7 +2432,7 @@ impl SheetBody {
         position: &str,
         flip: bool,
     ) -> Result<(Vec<usize>, Vec<String>)> {
-        let each: Vec<EdgeFlange> = picks.iter().map(|&pick| EdgeFlange { pick, height, angle }).collect();
+        let each: Vec<EdgeFlange> = picks.iter().map(|&pick| EdgeFlange { pick, height, angle, from: HeightFrom::Outer }).collect();
         self.add_flanges_each(&each, radius, position, flip, ReliefOverride::default())
     }
 
@@ -2475,7 +2523,7 @@ impl SheetBody {
                 None => (pick, top == (turn < 0.0)),
                 Some(&i) => (self.far_edge_pick(i).ok_or_else(|| DocError::Invalid("the flange has no far edge to bend again".into()))?, turn < 0.0),
             };
-            let each = [EdgeFlange { pick: at, height, angle: turn.abs() }];
+            let each = [EdgeFlange { pick: at, height, angle: turn.abs(), from: HeightFrom::Outer }];
             let own = if k == 0 { relief } else { ReliefOverride::default() };
             let (new, more) = self.add_flanges_each(&each, radius, "inside", flip, own).map_err(line)?;
             made.extend(new);
@@ -2516,15 +2564,39 @@ impl SheetBody {
                 return Err(DocError::Invalid(format!("{}the flange angle must be between 0 and 180°", on(k))));
             }
             let sharp = (radius + self.t) * (e.angle / 2.0).tan();
+            // How far inside the picked edge the bend starts (the base is cut back that far), with
+            // bend angle θ, inner radius R and thickness T:
+            // - inside: (R + T)·tan(θ/2), the outer virtual sharp on the edge (at 90° the flange's
+            //   outer face is flush with the edge's face);
+            // - outside: 0, the bend starts at the edge and lies wholly outside it (`sheet.flange`
+            //   also takes `bend_outside` and saves it as `outside`);
+            // - middle: half of inside;
+            // - material_outside: R·tan(θ/2), the inner virtual sharp on the edge (at 90° the
+            //   flange's inner face is flush with the edge's face, its material outside);
+            // - tangent: from 90° on R + T, the bend's outer face tangent to the edge's face (it
+            //   touches that face a quarter turn into the bend and nothing of the bend passes it);
+            //   below 90° the outer face never turns parallel to the edge's face, so the bend
+            //   reaches furthest out at its end: (R + T)·sin θ puts that end on the edge's face
+            //   (the leg leans on out past it). Both are R + T at 90°.
             let setback = match position {
                 "inside" | "" => sharp,
                 "outside" => 0.0,
                 "middle" | "mid" => sharp / 2.0,
-                other => return Err(DocError::Invalid(format!("unknown bend position `{other}` (inside, outside or middle)"))),
+                "material_outside" => radius * (e.angle / 2.0).tan(),
+                "tangent" if e.angle < std::f64::consts::FRAC_PI_2 => (radius + self.t) * e.angle.sin(),
+                "tangent" => radius + self.t,
+                other => {
+                    return Err(DocError::Invalid(format!("unknown bend position `{other}` (inside, outside, middle, material_outside or tangent)")));
+                }
             };
-            let leg = e.height - sharp;
+            let least = e.from.before_leg(e.angle, radius, self.t);
+            let leg = e.height - least;
             if !(leg >= -1e-9) {
-                return Err(DocError::Invalid(format!("{}the flange height must be at least {sharp:.3} mm for this bend", on(k))));
+                let from = match e.from {
+                    HeightFrom::Outer => String::new(),
+                    other => format!(" from {}", other.datum()),
+                };
+                return Err(DocError::Invalid(format!("{}the flange height{from} must be at least {least:.3} mm for this bend", on(k))));
             }
             sizes.push((setback, leg));
         }
@@ -4228,7 +4300,7 @@ impl SheetBody {
                     }
                 }
                 // Free-form segments map exactly, through their control points.
-                other => map_controls(&other, map),
+                other => other.map_controls(map),
             }
         };
         let map_loop = |lp: &Loop2| Loop2 { segs: lp.segs.iter().map(seg).collect() };
@@ -4589,7 +4661,7 @@ fn flip_x_loop(l: &Loop2) -> Loop2 {
             Seg2::Arc { center, radius, start, sweep } => {
                 Seg2::Arc { center: flip_x(center), radius, start: std::f64::consts::PI - start, sweep: -sweep }
             }
-            other => map_controls(&other, flip_x),
+            other => other.map_controls(flip_x),
         })
         .collect();
     Loop2 { segs }.reversed()
@@ -5238,7 +5310,7 @@ mod tests {
         // right: the same ellipse on the sheet, every curve through its mirrored controls.
         let below = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Y * -1.0 };
         let mirror = |p: Vec2| Vec2::new(p.x, -p.y);
-        let seen = Region2 { outer: Loop2 { segs: hole.outer.segs.iter().map(|x| map_controls(x, mirror)).collect() }, holes: vec![] };
+        let seen = Region2 { outer: Loop2 { segs: hole.outer.segs.iter().map(|x| x.map_controls(mirror)).collect() }, holes: vec![] };
         let mapped = s.region_to_flat(None, &below, &seen).unwrap();
         assert!(mapped.outer.is_ccw() && mapped.outer.segs.len() == 4 && mapped.outer.segs.iter().all(|x| hole.outer.segs.contains(x)), "{mapped:?}");
         // A cubic and a quartic closed by a line, clockwise in that plane: counter-clockwise on
@@ -5986,7 +6058,8 @@ mod tests {
             Vec3::new(60.0 + u.x * 90.0, u.y * 90.0, 2.0),
             Vec3::new(u.x * 45.0, u.y * 45.0, 2.0),
         ];
-        let each: Vec<EdgeFlange> = (0..4).map(|i| EdgeFlange { pick: picks[i], height: heights[i], angle: angles[i].to_radians() }).collect();
+        let each: Vec<EdgeFlange> =
+            (0..4).map(|i| EdgeFlange { pick: picks[i], height: heights[i], angle: angles[i].to_radians(), from: HeightFrom::Outer }).collect();
         flanges_each(rhombus(), rv, &each)
     }
 
@@ -6016,7 +6089,7 @@ mod tests {
             Vec3::new(l * 0.75, -l * u.y / 2.0, 2.0),
             Vec3::new(l / 4.0, -l * u.y / 2.0, 2.0),
         ];
-        let flange = |i: usize| EdgeFlange { pick: picks[i], height: 38.6, angle: 90f64.to_radians() };
+        let flange = |i: usize| EdgeFlange { pick: picks[i], height: 38.6, angle: 90f64.to_radians(), from: HeightFrom::Outer };
         // The round relief reaches r from its corner and the two are 12 mm apart: it fits at both.
         for shape in [ReliefShape::Round, ReliefShape::Rectangular] {
             let what = format!("{shape:?} at two corners opposite each other");
@@ -6167,7 +6240,7 @@ mod tests {
         let pts = [Vec2::new(0.0, 0.0), Vec2::new(9.0, 0.0), Vec2::new(9.0, 40.0), Vec2::new(-20.0, 20.0 * 3.0f64.sqrt())];
         let base = || Region2 { outer: Loop2::polygon(&pts).ccw(), holes: vec![] };
         let picks = [Vec3::new(-10.0, 17.32, 2.0), Vec3::new(4.5, 0.0, 2.0), Vec3::new(9.0, 20.0, 2.0)];
-        let flange = |i: usize| EdgeFlange { pick: picks[i], height: 38.6, angle: 90f64.to_radians() };
+        let flange = |i: usize| EdgeFlange { pick: picks[i], height: 38.6, angle: 90f64.to_radians(), from: HeightFrom::Outer };
         for shape in [ReliefShape::Round, ReliefShape::Rectangular] {
             let what = format!("{shape:?} at both ends of a short edge");
             let rv = RuleValues { corner_relief_shape: shape, corner_relief: 4.0, ..alu() };
@@ -6261,6 +6334,16 @@ mod tests {
     }
 
     #[test]
+    fn a_bend_position_only_the_command_takes_as_another_name_is_refused_when_built() {
+        // `sheet.flange` saves `bend_outside` as `outside`; a design that names it itself is
+        // refused rather than built (or edited) as some other position.
+        let mut s = plate(200.0, 100.0);
+        let e = s.add_flange(Vec3::new(100.0, 0.0, 2.5), 40.0, std::f64::consts::FRAC_PI_2, 2.5, "bend_outside", false).unwrap_err().to_string();
+        assert!(e.contains("unknown bend position `bend_outside`"), "{e}");
+        assert!(s.flanges.is_empty());
+    }
+
+    #[test]
     fn edge_flanges_across_an_existing_bend_close_their_corner() {
         for position in ["inside", "outside", "middle"] {
             for reverse in [false, true] {
@@ -6341,7 +6424,7 @@ mod tests {
             let parent = s.flanges.get(wall).unwrap();
             let point = parent.p + parent.d * parent.len + parent.n * (s.allowance(parent) + parent.leg * 0.5);
             let side = apply_point(&s.world(Some(wall)), Vec3::new(point.x, point.y, s.t));
-            let edges = [Vec3::new(120.0, 45.0, 2.0), side].map(|pick| EdgeFlange { pick, height: 20.0, angle });
+            let edges = [Vec3::new(120.0, 45.0, 2.0), side].map(|pick| EdgeFlange { pick, height: 20.0, angle, from: HeightFrom::Outer });
             let (_, notes) = s.add_flanges_each(&edges, 1.0, "inside", false, ReliefOverride { shape: Some(shape), size: Some(4.0) }).unwrap();
             assert!(notes.is_empty(), "{shape:?}: {notes:?}");
             assert_eq!(s.holes.len(), 1);
@@ -7059,7 +7142,8 @@ mod tests {
         let base = rect(Vec2::new(0.0, 0.0), Vec2::new(120.0, 0.0), Vec2::new(120.0, 90.0), Vec2::new(0.0, 90.0));
         let t = rv.thickness;
         let picks = [Vec3::new(60.0, 0.0, t), Vec3::new(120.0, 45.0, t), Vec3::new(60.0, 90.0, t), Vec3::new(0.0, 45.0, t)];
-        let each: Vec<EdgeFlange> = (0..4).map(|i| EdgeFlange { pick: picks[i], height: heights[i], angle: angles[i].to_radians() }).collect();
+        let each: Vec<EdgeFlange> =
+            (0..4).map(|i| EdgeFlange { pick: picks[i], height: heights[i], angle: angles[i].to_radians(), from: HeightFrom::Outer }).collect();
         flanges_each(base, rv, &each)
     }
 
@@ -7259,7 +7343,8 @@ mod tests {
         let pts = [Vec2::new(0.0, 0.0), Vec2::new(120.0, 0.0), Vec2::new(100.0, 90.0), Vec2::new(20.0, 90.0)];
         let picks = [Vec3::new(60.0, 0.0, 2.0), Vec3::new(110.0, 45.0, 2.0), Vec3::new(60.0, 90.0, 2.0), Vec3::new(10.0, 45.0, 2.0)];
         let (angles, heights) = ([60.0f64, 105.0, 75.0, 120.0], [38.6, 30.0, 45.0, 25.0]);
-        let each: Vec<EdgeFlange> = (0..4).map(|i| EdgeFlange { pick: picks[i], height: heights[i], angle: angles[i].to_radians() }).collect();
+        let each: Vec<EdgeFlange> =
+            (0..4).map(|i| EdgeFlange { pick: picks[i], height: heights[i], angle: angles[i].to_radians(), from: HeightFrom::Outer }).collect();
         let (s, notes) = flanges_each(Region2 { outer: Loop2::polygon(&pts).ccw(), holes: vec![] }, &alu(), &each);
         assert!(notes.is_empty(), "{notes:?}");
         for i in 0..4 {
@@ -7283,7 +7368,7 @@ mod tests {
             .iter()
             .map(|&k| {
                 let m = (pts[k] + pts[(k + 1) % n]) * 0.5;
-                EdgeFlange { pick: Vec3::new(m.x, m.y, rv.thickness), height, angle: deg.to_radians() }
+                EdgeFlange { pick: Vec3::new(m.x, m.y, rv.thickness), height, angle: deg.to_radians(), from: HeightFrom::Outer }
             })
             .collect();
         let (s, notes) = flanges_each(Region2 { outer: Loop2::polygon(pts).ccw(), holes: vec![] }, rv, &each);
@@ -7602,8 +7687,9 @@ mod tests {
         let rv = alu();
         let (t, g) = (rv.thickness, rv.gap);
         let (mut s, _) = tray(&rv, 90.0, 20.0);
-        let each: Vec<EdgeFlange> =
-            (0..4).map(|i| EdgeFlange { pick: far_edge_pick(&s, i, true), height: 12.0, angle: [90f64, 70.0][i % 2].to_radians() }).collect();
+        let each: Vec<EdgeFlange> = (0..4)
+            .map(|i| EdgeFlange { pick: far_edge_pick(&s, i, true), height: 12.0, angle: [90f64, 70.0][i % 2].to_radians(), from: HeightFrom::Outer })
+            .collect();
         let (made, notes) = s.add_flanges_each(&each, 1.0, "inside", false, ReliefOverride::default()).unwrap();
         assert!(notes.is_empty() && made == [4, 5, 6, 7], "{made:?} {notes:?}");
         for (a, a_end, b, b_end) in TRAY_RETURNS {
@@ -7774,7 +7860,7 @@ mod tests {
             let each: Vec<EdgeFlange> = (0..4)
                 .map(|i| {
                     let deg: f64 = if square { 90.0 } else { 180.0 - angles[i] };
-                    EdgeFlange { pick: far_edge_pick(&s, i, true), height: 12.0, angle: deg.to_radians() }
+                    EdgeFlange { pick: far_edge_pick(&s, i, true), height: 12.0, angle: deg.to_radians(), from: HeightFrom::Outer }
                 })
                 .collect();
             let (_, notes) = s.add_flanges_each(&each, 1.0, "inside", false, ReliefOverride::default()).unwrap();
@@ -7914,8 +8000,8 @@ mod tests {
                 for b in SWEEP {
                     let what = format!("corner {alpha}°, flanges {a}° and {b}°");
                     let each = [
-                        EdgeFlange { pick: Vec3::new(60.0, 0.0, 2.0), height: 38.6, angle: a.to_radians() },
-                        EdgeFlange { pick: Vec3::new(u.x * 45.0, u.y * 45.0, 2.0), height: 38.6, angle: b.to_radians() },
+                        EdgeFlange { pick: Vec3::new(60.0, 0.0, 2.0), height: 38.6, angle: a.to_radians(), from: HeightFrom::Outer },
+                        EdgeFlange { pick: Vec3::new(u.x * 45.0, u.y * 45.0, 2.0), height: 38.6, angle: b.to_radians(), from: HeightFrom::Outer },
                     ];
                     let (s, notes) = flanges_each(Region2 { outer: Loop2::polygon(&pts).ccw(), holes: vec![] }, &rv, &each);
                     assert!(notes.is_empty(), "{what}: {notes:?}");
@@ -8314,8 +8400,8 @@ mod tests {
                 for b in SWEEP {
                     let what = format!("corner {alpha}°, flanges {a}° and {b}°");
                     let each = [
-                        EdgeFlange { pick: Vec3::new(60.0, 0.0, 2.0), height: 38.6, angle: a.to_radians() },
-                        EdgeFlange { pick: Vec3::new(u.x * 45.0, u.y * 45.0, 2.0), height: 38.6, angle: b.to_radians() },
+                        EdgeFlange { pick: Vec3::new(60.0, 0.0, 2.0), height: 38.6, angle: a.to_radians(), from: HeightFrom::Outer },
+                        EdgeFlange { pick: Vec3::new(u.x * 45.0, u.y * 45.0, 2.0), height: 38.6, angle: b.to_radians(), from: HeightFrom::Outer },
                     ];
                     let base = || Region2 { outer: Loop2::polygon(&pts).ccw(), holes: vec![] };
                     let (notch, _) = flanges_each(base(), &alu(), &each);
@@ -8482,8 +8568,8 @@ mod tests {
             let u = Vec2::new(alpha.cos(), alpha.sin());
             let pts = [Vec2::new(0.0, 0.0), Vec2::new(120.0, 0.0), Vec2::new(120.0, 0.0) + u * 90.0, u * 90.0];
             let each = [
-                EdgeFlange { pick: Vec3::new(60.0, 0.0, 2.0), height: 38.6, angle: a.to_radians() },
-                EdgeFlange { pick: Vec3::new(u.x * 45.0, u.y * 45.0, 2.0), height: 38.6, angle: b.to_radians() },
+                EdgeFlange { pick: Vec3::new(60.0, 0.0, 2.0), height: 38.6, angle: a.to_radians(), from: HeightFrom::Outer },
+                EdgeFlange { pick: Vec3::new(u.x * 45.0, u.y * 45.0, 2.0), height: 38.6, angle: b.to_radians(), from: HeightFrom::Outer },
             ];
             let base = || Region2 { outer: Loop2::polygon(&pts).ccw(), holes: vec![] };
             let (notch, none) = flanges_each(base(), &alu(), &each);

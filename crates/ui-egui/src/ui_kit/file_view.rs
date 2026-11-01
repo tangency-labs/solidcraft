@@ -1,5 +1,8 @@
 //! File/start presentation; callers retain commands, caches and recovery ownership.
-use super::{metrics::dimension, text::paint_text};
+use super::{
+    metrics::dimension,
+    text::{paint_text, paint_text_aligned},
+};
 use crate::theme::Tokens;
 use egui::{Align2, FontId, InnerResponse, Rect, Response, Sense, Stroke, TextureId, Ui, Vec2, pos2, vec2};
 
@@ -16,6 +19,9 @@ pub(crate) struct RecentRow<'a> {
     pub when: &'a str,
     pub workspace: &'a str,
     pub thumbnail: Option<(TextureId, Vec2)>,
+    /// The design's picture could not be made (empty or unreadable). Draws a dimmed placeholder,
+    /// so it reads as "no preview" rather than as one still loading.
+    pub thumbnail_failed: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -274,12 +280,15 @@ impl FileView {
         let preview = Rect::from_min_size(inner.min, vec2(t.space_24 * 2.0, inner.height()).min(inner.size()));
         thumbnail(ui, preview, row.thumbnail);
         if row.thumbnail.is_none() {
+            // A design whose picture could not be made shows a fainter box, so it reads as "no
+            // preview" rather than as one still being drawn.
+            let opacity = if row.thumbnail_failed { 0.4 } else { 1.0 };
             crate::icons::paint_accented(
                 ui.painter(),
                 Rect::from_center_size(preview.center(), Vec2::splat(t.space_24.min(preview.height()))),
                 "box",
                 None,
-                1.0,
+                opacity,
             );
         }
         let left = (preview.right() + t.space_14).min(inner.right());
@@ -295,7 +304,15 @@ impl FileView {
                 t.form_ink,
                 false,
             );
-            paint_text(ui, Rect::from_min_max(pos2(left, half), content.max), row.path, FontId::monospace(t.font_body), t.file_dim, false);
+            paint_text_aligned(
+                ui,
+                Rect::from_min_max(pos2(left, half), content.max),
+                row.path,
+                FontId::monospace(t.font_body),
+                t.file_dim,
+                false,
+                true,
+            );
         } else {
             let when_width = t.space_24 * 5.0;
             let workspace_width = t.form_label_width * 2.0;
@@ -312,13 +329,14 @@ impl FileView {
                 t.form_ink,
                 false,
             );
-            paint_text(
+            paint_text_aligned(
                 ui,
                 Rect::from_min_max(pos2(path_left, content.top()), pos2((when_left - t.space_14).max(path_left), content.bottom())),
                 row.path,
                 FontId::monospace(t.font_body),
                 t.file_dim,
                 false,
+                true,
             );
             paint_text(
                 ui,

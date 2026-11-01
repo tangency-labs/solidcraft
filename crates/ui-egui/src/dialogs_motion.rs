@@ -456,7 +456,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
             let list = app.session.execute("contact.list", &json!({})).unwrap_or(Value::Null);
             form_row(ui, "Contact", |ui| {
                 let mut on = list.get("enabled").and_then(Value::as_bool).unwrap_or(false);
-                if crate::ui_kit::checkbox(ui, "enabled", &mut on).changed() {
+                if crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Enabled"), &mut on).changed() {
                     let _ = app.run("contact.enable_sets", json!({ "enabled": on }));
                 }
             });
@@ -490,9 +490,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
                 let hits = c.get("collisions").and_then(Value::as_array).cloned().unwrap_or_default();
                 crate::ui_kit::section(ui, "contact_collisions", "Collisions", true, |ui| {
                     if let Some(e) = c.get("error").and_then(Value::as_str) {
-                        ui.label(RichText::new(e).color(t.error));
+                        ui.label(RichText::new(crate::i18n::tr_label(e)).color(t.error));
                     } else if hits.is_empty() {
-                        ui.label(RichText::new("none").color(t.text_dim));
+                        ui.label(RichText::new(crate::i18n::tr_label("none")).color(t.text_dim));
                     } else {
                         ui.vertical(|ui| {
                             for h in hits {
@@ -530,7 +530,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: &mut [Sel
             }
             if let Some(e) = error {
                 ui.vertical(|ui| {
-                    ui.label(RichText::new(e.as_str()).color(t.error));
+                    ui.label(RichText::new(crate::i18n::tr_label(e)).color(t.error));
                 });
             }
         }
@@ -599,7 +599,7 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
                 *playing = false;
             }
             ui.add_space(t.space_6);
-            crate::ui_kit::checkbox(ui, "Loop", looping);
+            crate::ui_kit::checkbox(ui, crate::i18n::tr_label("Loop"), looping);
             let names: Vec<String> = SPEEDS.iter().map(|x| format!("{x}×")).collect();
             let refs: Vec<&str> = names.iter().map(String::as_str).collect();
             ui.allocate_ui(vec2(t.form_label_width, t.control_height), |ui| combo(ui, "ms_speed", &refs, speed));
@@ -737,7 +737,7 @@ fn motion_study_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Mo, inputs: 
     }
     if let Some(e) = error {
         ui.vertical(|ui| {
-            ui.label(RichText::new(e.as_str()).color(t.text_dim));
+            ui.label(RichText::new(crate::i18n::tr_label(e)).color(t.text_dim));
         });
     }
     enter
@@ -895,11 +895,19 @@ mod tests {
 
     // Kit rows publish identities independently of translated text. Long forms scroll through
     // the same wheel events as a person; assertions still verify the saved rules and geometry.
+    // A table row scrolled out of view is not built, so its handle is missing until the form
+    // scrolls back up to the table above the rules.
     fn reveal_config_handle(h: &mut crate::scenario::Harness, handle: &str) {
         for _ in 0..24 {
-            let at = crate::scenario::handle_at(handle).unwrap_or_else(|| panic!("missing {handle}: {:?}", h.app.dialog));
             let header = crate::scenario::rect_of("dialog:header").unwrap();
             let footer = crate::scenario::rect_of("dialog:footer").unwrap();
+            let at = crate::scenario::handle_at(handle);
+            if handle.starts_with("config:activate:") && at.is_none() {
+                h.call("ui.scroll", json!({"x":header.left()+Tokens::get().space_6,"y":(header.bottom()+footer.top())*0.5,"delta":160.0}));
+                h.frames(6);
+                continue;
+            }
+            let at = at.unwrap_or_else(|| panic!("missing {handle}: {:?}", h.app.dialog));
             if at.y > header.bottom() + 8.0 && at.y < footer.top() - 8.0 {
                 return;
             }

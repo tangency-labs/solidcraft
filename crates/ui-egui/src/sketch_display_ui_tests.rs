@@ -78,7 +78,7 @@ fn pixel_circle_fit_exact_half_chord_hover_click_and_model_invariance() {
             h.app.viewport.hover
         );
         h.step(&json!({"click":{"world":[world.x,world.y,world.z]}})).unwrap();
-        assert!(h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::SketchCurve{id} if id == "c1")));
+        assert!(h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::SketchCurve{id, ..} if id == "c1")));
         h.app.session.selection.clear();
     }
     assert_eq!(h.app.session.doc.to_json(), baseline, "display and selection must not alter stored geometry, constraints or expressions");
@@ -216,7 +216,7 @@ fn pixel_curve_second_nested_rotated_occurrence_uses_its_world_plane() {
     assert!(dense_circle_error(&path, &ss.plane, &proj, 1.0, h.app.viewport.pixels_per_point()) <= 1.0);
     let world = ss.plane.to_world(Vec2::new(0.8090169943749475, 0.5877852522924731));
     h.step(&json!({"click":{"world":[world.x,world.y,world.z]}})).unwrap();
-    assert!(h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::SketchCurve{id} if id == "c1")));
+    assert!(h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::SketchCurve{id, ..} if id == "c1")));
     assert_eq!(h.app.session.doc.to_json(), baseline);
 }
 
@@ -288,6 +288,42 @@ fn pixel_frame_budget_does_not_cache_unbounded_empty_curve_results() {
     assert!(limited > 0, "fixture must actually exhaust the shared frame budget");
     assert!(h.app.viewport.display.lock().unwrap().len() <= 4096);
     assert_eq!(h.app.session.doc.to_json(), baseline);
+}
+
+/// #6524: an imported drawing of 5000 lines, shown and sampled first (sketches are drawn in
+/// timeline order), uses up its own sketch's budget only. A line drawn in a later sketch is still
+/// sampled, so drawn and pickable, instead of coming back empty while its end points show.
+#[test]
+fn a_large_sketch_drawn_first_leaves_a_later_sketch_its_curves() {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    let mut dxf = String::from("0\nSECTION\n2\nENTITIES\n");
+    for i in 0..5000 {
+        let (x, y) = (f64::from(i % 100) * 2.0, f64::from(i / 100) * 2.0);
+        dxf.push_str(&format!("0\nLINE\n8\n0\n10\n{x}\n20\n{y}\n11\n{}\n21\n{y}\n", x + 1.5));
+    }
+    dxf.push_str("0\nENDSEC\n0\nEOF\n");
+    h.app.run("sketch.insert_dxf", json!({"text": dxf, "plane": "XY", "name": "Drawing"})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"After"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[-30,-30],[-10,-20]],"ids":["new"]})).unwrap();
+    h.settle();
+    let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+    let state = h.app.session.world_state();
+    let drawing = state.sketches.iter().find(|s| s.name == "Drawing").unwrap().clone();
+    let after = state.sketches.iter().find(|s| s.name == "After").unwrap().clone();
+    drop(state);
+    assert_eq!(drawing.sketch.curves.len(), 5000);
+    // A fresh frame that samples the drawing first, as the viewport does.
+    *h.app.viewport.display.lock().unwrap() = Default::default();
+    let limited = (0..drawing.sketch.curves.len())
+        .filter(|&i| curve_sample(&h.app, drawing.feature, i, &drawing.plane, &proj).quality == SamplingQuality::BudgetLimited)
+        .count();
+    assert!(limited > 0, "the drawing must exceed one sketch's budget for this to test anything");
+    let line = after.sketch.curve_index("new").unwrap();
+    let path = curve_sample(&h.app, after.feature, line, &after.plane, &proj);
+    assert_eq!((path.quality, path.vertex_count), (SamplingQuality::Complete, 2), "{path:?}");
+    assert_eq!(path.parts.len(), 1);
 }
 
 /// A zoomed-in ring is sampled finely, but each slab of the fill still crosses only its

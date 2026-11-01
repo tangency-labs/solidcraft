@@ -251,6 +251,15 @@ pub fn model_xml(objects: &[MeshObject]) -> String {
 /// The model part's XML with model metadata after `Application`: (3MF metadata name, such as
 /// `Title` or `Designer`, and its text).
 pub fn model_xml_with(objects: &[MeshObject], metadata: &[(&str, &str)]) -> String {
+    model_xml_parts(objects, &[], metadata)
+}
+
+/// [`model_xml_with`], with `parts`: each a name and the indices of two or more `objects` written
+/// as one object whose `<components>` are their meshes, built once, so a slicer loads them as
+/// one object with parts (#8139). An index out of range or already in an earlier part is left
+/// out of it, and a part left with fewer than two objects is not made: those objects are built
+/// on their own, as every object not in a part is.
+pub fn model_xml_parts(objects: &[MeshObject], parts: &[(String, Vec<usize>)], metadata: &[(&str, &str)]) -> String {
     let mut x = String::new();
     x.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     let ft = if objects.iter().any(MeshObject::tagged) { format!(" xmlns:ft=\"{FACE_TAGS_NS}\"") } else { String::new() };
@@ -314,9 +323,36 @@ pub fn model_xml_with(objects: &[MeshObject], metadata: &[(&str, &str)]) -> Stri
         }
         x.push_str("    </triangles>\n   </mesh>\n  </object>\n");
     }
+    // Each part an object after the meshes it names (a component refers back), built in their
+    // place; the meshes in it are not built on their own.
+    let mut in_part = vec![false; objects.len()];
+    let mut built: Vec<usize> = Vec::new();
+    for (name, members) in parts {
+        let mut kept: Vec<usize> = Vec::new();
+        for &k in members {
+            if k < objects.len() && !in_part[k] && !kept.contains(&k) {
+                kept.push(k);
+            }
+        }
+        if kept.len() < 2 {
+            continue;
+        }
+        let id = objects.len() + 2 + built.len();
+        let _ = writeln!(x, "  <object id=\"{id}\" type=\"model\" name=\"{}\">", esc(name));
+        x.push_str("   <components>\n");
+        for &k in &kept {
+            in_part[k] = true;
+            let _ = writeln!(x, "    <component objectid=\"{}\"/>", k + 2);
+        }
+        x.push_str("   </components>\n  </object>\n");
+        built.push(id);
+    }
     x.push_str(" </resources>\n <build>\n");
-    for k in 0..objects.len() {
+    for k in (0..objects.len()).filter(|&k| !in_part[k]) {
         let _ = writeln!(x, "  <item objectid=\"{}\"/>", k + 2);
+    }
+    for id in built {
+        let _ = writeln!(x, "  <item objectid=\"{id}\"/>");
     }
     x.push_str(" </build>\n</model>\n");
     x
@@ -329,6 +365,11 @@ pub fn write_3mf(objects: &[MeshObject]) -> Result<Vec<u8>> {
 
 /// A 3MF package of meshes with model metadata (see [`model_xml_with`]).
 pub fn write_3mf_with(objects: &[MeshObject], metadata: &[(&str, &str)]) -> Result<Vec<u8>> {
+    write_3mf_parts(objects, &[], metadata)
+}
+
+/// A 3MF package of meshes, some of them written as objects with parts (see [`model_xml_parts`]).
+pub fn write_3mf_parts(objects: &[MeshObject], parts: &[(String, Vec<usize>)], metadata: &[(&str, &str)]) -> Result<Vec<u8>> {
     if objects.is_empty() {
         return Err(IoError::Empty);
     }
@@ -336,7 +377,7 @@ pub fn write_3mf_with(objects: &[MeshObject], metadata: &[(&str, &str)]) -> Resu
     let rels = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">\n <Relationship Target=\"/3D/3dmodel.model\" Id=\"rel0\" Type=\"{MODEL_REL}\"/>\n</Relationships>\n"
     );
-    let model = model_xml_with(objects, metadata);
+    let model = model_xml_parts(objects, parts, metadata);
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
     for (name, data) in [("[Content_Types].xml", content_types.as_bytes()), ("_rels/.rels", rels.as_bytes()), ("3D/3dmodel.model", model.as_bytes())]
     {
@@ -965,6 +1006,35 @@ pub(crate) mod tests {
         }
     }
 
+    /// #8139: objects in a part are written once as meshes and built once, as one object whose
+    /// components are those meshes; the others are built on their own, as before. Read back, the
+    /// part is one object named after it, with every triangle of its meshes.
+    #[test]
+    fn a_part_is_one_object_whose_components_are_its_meshes() {
+        let objects = [tetra("Cube"), tetra("Dome"), tetra("Loose")];
+        let x = model_xml_parts(&objects, &[("Bracket:1".into(), vec![0, 1])], &[]);
+        assert_eq!(x.matches("<mesh>").count(), 3, "{x}");
+        assert!(x.contains("<object id=\"5\" type=\"model\" name=\"Bracket:1\">"), "{x}");
+        assert!(x.contains("<component objectid=\"2\"/>") && x.contains("<component objectid=\"3\"/>"), "{x}");
+        let build = x.split("<build>").nth(1).unwrap_or_default();
+        assert_eq!(build.matches("<item ").count(), 2, "{x}");
+        assert!(build.contains("objectid=\"4\"") && build.contains("objectid=\"5\""), "{x}");
+        let (read, warnings) = read_3mf(&write_3mf_parts(&objects, &[("Bracket:1".into(), vec![0, 1])], &[]).unwrap()).unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let names: Vec<&str> = read.iter().map(|o| o.name.as_str()).collect();
+        assert_eq!(names, ["Loose", "Bracket:1"]);
+        assert_eq!(read[1].triangles.len(), 8);
+        // Without parts the file is as before: one built object per mesh.
+        assert_eq!(model_xml_parts(&objects, &[], &[]), model_xml_with(&objects, &[]));
+        assert_eq!(model_xml_with(&objects, &[]).split("<build>").nth(1).unwrap_or_default().matches("<item ").count(), 3);
+        // A part of one object, an index out of range, or one already in a part makes nothing new.
+        for parts in [vec![("One".to_string(), vec![2])], vec![("Out".to_string(), vec![0, 7])]] {
+            assert_eq!(model_xml_parts(&objects, &parts, &[]), model_xml_with(&objects, &[]), "{parts:?}");
+        }
+        let x = model_xml_parts(&objects, &[("A".into(), vec![0, 1]), ("B".into(), vec![1, 2])], &[]);
+        assert!(x.contains("name=\"A\"") && !x.contains("name=\"B\""), "{x}");
+    }
+
     /// A see-through object writes its alpha; triangles of faces with colours of their own
     /// point at their entries.
     #[test]
@@ -1331,9 +1401,13 @@ pub(crate) mod tests {
     /// Placements in every part draw on one budget (T4): three parts fanning out 300 ways each
     /// (27 million placements of an empty object) stop at it, and only the build item that went
     /// over fails.
+    ///
+    /// The clock is not read: the budget is spent inside the reader, so the reader stops on its
+    /// own and the test says what it wants to know, not how long it took. The one object that
+    /// survives and the warning that names the build item that went over are what show the budget
+    /// works (#2999 dropped the clock from the sibling tests the same way).
     #[test]
     fn parts_share_the_placement_budget() {
-        let t = std::time::Instant::now();
         let fan = |id: u32, path: &str| assembly(id, &vec![(path, 1); 300]);
         let root = root_model(&fan(10, "/3D/Objects/a.model"), r#"<item p:path="/3D/Objects/a.model" objectid="9"/><item objectid="10"/>"#);
         let a = model_part("millimeter", &format!("{}{}", fan(1, "/3D/Objects/b.model"), tet_object(9, "Tet", 1.0)));
@@ -1344,7 +1418,6 @@ pub(crate) mod tests {
         let (objs, warnings) = read_3mf(&package).unwrap();
         assert_eq!(objs.len(), 1);
         assert!(warnings.len() == 1 && warnings[0].starts_with("build item 2") && warnings[0].contains("placements"), "{warnings:?}");
-        assert!(t.elapsed() < std::time::Duration::from_secs(30), "took {:?}", t.elapsed());
     }
 
     /// A loop through three parts with different object ids is found, and a chain of parts deeper

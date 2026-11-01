@@ -15,6 +15,7 @@ mod imp {
     /// more than the caller's cap plus the byte that proves it was exceeded.
     pub fn read(path: &str, max: usize) -> Result<Vec<u8>> {
         check(path)?;
+        touched();
         // Cheap and non-blocking: refuse before opening, in case the open itself would block.
         let meta = std::fs::metadata(path)?;
         if !meta.is_file() {
@@ -37,22 +38,43 @@ mod imp {
     }
     pub fn write(path: &str, bytes: &[u8]) -> Result<()> {
         check(path)?;
+        touched();
         std::fs::write(path, bytes)
     }
     pub fn len(path: &str) -> Result<u64> {
         check(path)?;
+        touched();
         std::fs::metadata(path).map(|m| m.len())
     }
+    /// The file's modification time and size (`None`: not there, or the platform keeps no times).
+    pub fn stamp(path: &str) -> Option<(std::time::SystemTime, u64)> {
+        check(path).ok()?;
+        touched();
+        let meta = std::fs::metadata(path).ok()?;
+        Some((meta.modified().ok()?, meta.len()))
+    }
     pub fn exists(path: &str) -> bool {
-        check(path).is_ok() && std::path::Path::new(path).exists()
+        check(path).is_ok() && {
+            touched();
+            std::path::Path::new(path).exists()
+        }
+    }
+    /// Whether the path names a regular file the caller may access.
+    pub fn is_file(path: &str) -> bool {
+        check(path).is_ok() && {
+            touched();
+            std::path::Path::new(path).is_file()
+        }
     }
     pub fn remove(path: &str) -> Result<()> {
         check(path)?;
+        touched();
         std::fs::remove_file(path)
     }
     /// A folder and the folders above it, where missing.
     pub fn create_dir_all(path: &str) -> Result<()> {
         check(path)?;
+        touched();
         std::fs::create_dir_all(path)
     }
 }
@@ -93,8 +115,16 @@ mod imp {
     pub fn len(path: &str) -> Result<u64> {
         FILES.with(|f| f.borrow().get(path).map(|b| b.len() as u64)).ok_or_else(|| missing(path))
     }
+    /// Browser storage keeps no modification times.
+    pub fn stamp(_path: &str) -> Option<(std::time::SystemTime, u64)> {
+        None
+    }
     pub fn exists(path: &str) -> bool {
         FILES.with(|f| f.borrow().contains_key(path))
+    }
+    /// Every entry in browser storage is a regular file.
+    pub fn is_file(path: &str) -> bool {
+        exists(path)
     }
     pub fn remove(path: &str) -> Result<()> {
         FILES.with(|f| f.borrow_mut().remove(path)).map(|_| ()).ok_or_else(|| missing(path))
@@ -122,14 +152,17 @@ pub use imp::*;
 /// refuses paths outside it; without one (the user's own file dialogs, the CLI) nothing changes.
 ///
 /// Two kinds of folder: those named on purpose (`--allow-path`, the app's own recovery folder),
-/// where everything is reachable, and the open design's folder, which counts only when
-/// [`design_folder_refusal`] has nothing against it and never reaches hidden files or folders
-/// (`.env`, `.git`) inside it.
+/// where everything is reachable, and design folders (the open design's, and those an agent
+/// opened or saved a design in, #7181), which count only when [`design_folder_refusal`] has
+/// nothing against them and never reach hidden files or folders (`.env`, `.git`) inside them.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PathScope {
     roots: Vec<std::path::PathBuf>,
     design_roots: Vec<std::path::PathBuf>,
 }
+
+/// At most this many design folders in a scope; the oldest gives way.
+pub const MAX_DESIGN_FOLDERS: usize = 16;
 
 thread_local! {
     static SCOPE: std::cell::RefCell<Option<PathScope>> = const { std::cell::RefCell::new(None) };
@@ -158,7 +191,7 @@ fn hidden(name: &std::ffi::OsStr) -> bool {
 /// in a hidden folder. So a design saved in home itself, in `/`, on a drive root or in a system
 /// folder never puts `~/.ssh`, `~/.bashrc` or anything else of the user's in reach.
 pub fn design_folder_refusal(dir: &std::path::Path) -> Option<String> {
-    design_folder_refusal_in(dir, home_dir().as_deref(), Some(&std::env::temp_dir()))
+    design_folder_refusal_in(dir, home_dir().as_deref(), Some(&temp_dir()))
 }
 
 /// [`design_folder_refusal`] with the home and temporary folders given (tests).
@@ -197,15 +230,44 @@ impl PathScope {
     }
 
     /// Also the folder of the design at `path` (the open design), when
-    /// [`design_folder_refusal`] allows it; hidden entries inside it stay out of reach.
-    pub fn with_design(mut self, path: Option<&str>) -> PathScope {
-        let dir = path
-            .map(std::path::Path::new)
-            .and_then(std::path::Path::parent)
-            .map(|d| if d.as_os_str().is_empty() { std::path::Path::new(".") } else { d });
-        if let Some(d) = dir.filter(|d| design_folder_refusal(d).is_none()).and_then(canonical)
+    /// [`design_folder_refusal`] allows it; hidden entries inside it stay out of reach. It is the
+    /// folder of the file as [`PathScope::check`] resolves it: a link to a design elsewhere puts
+    /// the folder it leads to in reach, never the folder the link lies in.
+    pub fn with_design(self, path: Option<&str>) -> PathScope {
+        let file = path.and_then(|p| resolve(std::path::Path::new(p)).ok());
+        match file.as_deref().and_then(std::path::Path::parent) {
+            Some(d) => self.with_design_root(d),
+            None => self,
+        }
+    }
+
+    /// Also the folder of `path`, a design file an agent opened or saved (#7181), on the same
+    /// terms as the open design's. On Windows its text is judged first, as [`PathScope::check`]
+    /// judges a path: resolving a UNC path would already make Windows connect out.
+    pub fn with_design_file(self, path: &str) -> PathScope {
+        if cfg!(windows) && windows_refusal(path).is_some() {
+            return self;
+        }
+        self.with_design(Some(path))
+    }
+
+    /// Also `dir`, a folder an agent opened or saved a design in (a request's `design_folders`),
+    /// on the same terms as the open design's folder, its text judged first on Windows.
+    pub fn with_design_folder(self, dir: &std::path::Path) -> PathScope {
+        if cfg!(windows) && windows_refusal(&dir.to_string_lossy()).is_some() {
+            return self;
+        }
+        self.with_design_root(dir)
+    }
+
+    fn with_design_root(mut self, dir: &std::path::Path) -> PathScope {
+        if design_folder_refusal(dir).is_none()
+            && let Some(d) = canonical(dir)
             && !self.design_roots.contains(&d)
         {
+            if self.design_roots.len() >= MAX_DESIGN_FOLDERS {
+                self.design_roots.remove(0);
+            }
             self.design_roots.push(d);
         }
         self
@@ -216,7 +278,7 @@ impl PathScope {
         &self.roots
     }
 
-    /// The open design's folder, when it counts.
+    /// The design folders that count.
     pub fn design_roots(&self) -> &[std::path::PathBuf] {
         &self.design_roots
     }
@@ -241,6 +303,7 @@ impl PathScope {
         {
             return Err(windows(why));
         }
+        touched();
         let resolved = match resolve(std::path::Path::new(path)) {
             Ok(r) => r,
             Err(e) if e.kind() == ErrorKind::NotFound => return Err(self.missing_folder(path).unwrap_or_else(refused)),
@@ -342,14 +405,200 @@ pub fn windows_refusal(path: &str) -> Option<&'static str> {
         if short_name(name) {
             return Some("short (8.3) names such as `PROGRA~1`");
         }
-        let stem = name.split('.').next().unwrap_or("").trim_end_matches([' ', '.']).to_uppercase();
-        let numbered =
-            |p: &str| stem.strip_prefix(p).is_some_and(|n| matches!(n, "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"));
-        if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") || numbered("COM") || numbered("LPT") {
+        if device_name(name) {
             return Some("reserved device names (CON, NUL, COM1, …)");
         }
     }
     None
+}
+
+/// Whether a file or folder name is one Windows keeps for a device (`NUL`, `com1.txt`, `Con .x`).
+fn device_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or("").trim_end_matches([' ', '.']).to_uppercase();
+    let numbered =
+        |p: &str| stem.strip_prefix(p).is_some_and(|n| matches!(n, "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"));
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") || numbered("COM") || numbered("LPT")
+}
+
+/// Where a path would lead other than to a file on this computer, judged from its text by Windows
+/// rules on every platform (a design made on one system is opened on another).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Remote {
+    /// A file on another computer (`\\host\share\…`, `\\?\UNC\host\…`): the host as written.
+    Network(String),
+    /// A device or NT namespace path (`\\.\pipe\x`, `\\?\Volume{…}`, `\??\…`) or a reserved
+    /// device name (`NUL`, `COM1.txt`).
+    Device,
+}
+
+/// Where `path` leads when it is not to a file on this computer (`None`: a local path, absolute
+/// or relative). Text only: nothing on disk or the network is asked.
+pub fn remote(path: &str) -> Option<Remote> {
+    let norm = path.trim().replace('/', "\\");
+    let host = |rest: &str| -> Remote {
+        let h = rest.split('\\').next().unwrap_or("").trim();
+        if h.is_empty() || h == "." || h == "?" { Remote::Device } else { Remote::Network(h.to_string()) }
+    };
+    let starts = |p: &str| norm.get(..p.len()).is_some_and(|s| s.eq_ignore_ascii_case(p));
+    let body = if starts("\\\\?\\UNC\\") || starts("\\??\\UNC\\") {
+        return Some(host(norm.get(8..).unwrap_or("")));
+    } else if let Some(v) = norm.strip_prefix("\\\\?\\") {
+        if !matches!(v.as_bytes(), [d, b':', b'\\', ..] if d.is_ascii_alphabetic()) {
+            return Some(Remote::Device);
+        }
+        v
+    } else if norm.starts_with("\\\\.\\") || norm.starts_with("\\??\\") || norm == "\\\\." || norm == "\\\\?" {
+        return Some(Remote::Device);
+    } else if let Some(rest) = norm.strip_prefix("\\\\") {
+        return Some(host(rest));
+    } else {
+        norm.as_str()
+    };
+    body.split('\\').filter(|n| !n.is_empty()).any(device_name).then_some(Remote::Device)
+}
+
+/// Which network hosts the paths a design names may lead to. Empty by default: a design that
+/// names `\\host\share\part.solidcraft` reaches nothing on the network until the user allows that
+/// host, since on Windows merely asking whether the file exists connects to the host and sends
+/// it the user's sign-in.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NetworkPolicy {
+    /// Every host (a managed organisation that keeps its designs on file servers).
+    pub allow_all: bool,
+    /// Hosts allowed by name (case does not matter; a leading `\\` is ignored).
+    pub hosts: Vec<String>,
+}
+
+impl NetworkPolicy {
+    const NONE: NetworkPolicy = NetworkPolicy { allow_all: false, hosts: Vec::new() };
+
+    /// Whether `host` is allowed.
+    pub fn allows(&self, host: &str) -> bool {
+        let host = host_key(host);
+        self.allow_all || (!host.is_empty() && self.hosts.iter().any(|h| host_key(h) == host))
+    }
+}
+
+/// A host name as compared: without `\\` around it, lower case.
+fn host_key(host: &str) -> String {
+    host.trim().trim_matches('\\').trim_matches('/').to_ascii_lowercase()
+}
+
+static NETWORK: std::sync::RwLock<NetworkPolicy> = std::sync::RwLock::new(NetworkPolicy::NONE);
+
+thread_local! {
+    static ONCE_HOSTS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+    static FILE_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The hosts allowed for every design (the app's preferences).
+pub fn set_network_policy(policy: NetworkPolicy) {
+    if let Ok(mut p) = NETWORK.write()
+        && *p != policy
+    {
+        *p = policy;
+    }
+}
+
+/// The hosts allowed for every design.
+pub fn network_policy() -> NetworkPolicy {
+    NETWORK.read().map(|p| p.clone()).unwrap_or_default()
+}
+
+/// Run `f` with `hosts` also allowed on this thread: the user allowed them for this one action
+/// ("Allow once"), or picked the file on them in a file dialog.
+pub fn allowing_hosts<T>(hosts: &[String], f: impl FnOnce() -> T) -> T {
+    struct Restore(usize);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let n = self.0;
+            ONCE_HOSTS.with(|h| h.borrow_mut().truncate(n));
+        }
+    }
+    let _restore = Restore(ONCE_HOSTS.with(|h| {
+        let mut h = h.borrow_mut();
+        let n = h.len();
+        h.extend(hosts.iter().cloned());
+        n
+    }));
+    f()
+}
+
+/// The network host of a path, when it names one (`\\host\share\x` → `host`).
+pub fn network_host(path: &str) -> Option<String> {
+    match remote(path) {
+        Some(Remote::Network(h)) => Some(h),
+        _ => None,
+    }
+}
+
+/// Why a path a design names may not be reached, or `None` when it may: a device path never; a
+/// network path when its host is allowed (the preferences, [`allowing_hosts`], or the host the
+/// design itself was opened from, `design`, which the user already connected to).
+pub fn design_path_refusal(path: &str, design: Option<&str>) -> Option<Remote> {
+    let r = remote(path)?;
+    let Remote::Network(host) = &r else { return Some(r) };
+    let own = design.and_then(network_host).is_some_and(|d| host_key(&d) == host_key(host));
+    let once = || ONCE_HOSTS.with(|h| h.borrow().iter().any(|x| host_key(x) == host_key(host)));
+    if own || once() || network_policy().allows(host) { None } else { Some(r) }
+}
+
+/// The error for a refused design path.
+fn design_path_error(path: &str, why: &Remote) -> Error {
+    let text = match why {
+        Remote::Network(host) => format!(
+            "{path}: on the network location \\\\{host}, which designs may not reach until you allow that server \
+             (Update Links or Open Linked Design asks; or Preferences › Design › Network locations)"
+        ),
+        Remote::Device => format!("{path}: names a device, not a file"),
+    };
+    Error::new(ErrorKind::PermissionDenied, text)
+}
+
+/// Check a path a design names (a linked design, a font file) before anything reads it, judged
+/// from its text first: a network path whose host isn't allowed, or a device path, is refused
+/// without a filesystem call. An agent's scope ([`check`]) applies on top.
+pub fn check_design_path(path: &str, design: Option<&str>) -> Result<()> {
+    if let Some(why) = design_path_refusal(path, design) {
+        return Err(design_path_error(path, &why));
+    }
+    check(path)
+}
+
+/// [`read`] of a path a design names ([`check_design_path`] first).
+pub fn read_design_path(path: &str, design: Option<&str>, max: usize) -> Result<Vec<u8>> {
+    check_design_path(path, design)?;
+    read(path, max)
+}
+
+/// Whether a path a design names is a file; `None` (unknown) when [`check_design_path`] refuses
+/// it, which asks nothing of the disk or the network.
+pub fn design_path_is_file(path: &str, design: Option<&str>) -> Option<bool> {
+    design_path_refusal(path, design).is_none().then(|| is_file(path))
+}
+
+/// [`stamp`] of a path a design names; `None` when [`check_design_path`] refuses it, which asks
+/// nothing of the disk or the network.
+pub fn design_path_stamp(path: &str, design: Option<&str>) -> Option<(std::time::SystemTime, u64)> {
+    design_path_refusal(path, design).is_none().then(|| stamp(path)).flatten()
+}
+
+/// The checks the layers below ask before reading a file a design names (sketch text's font
+/// files). Done once; every session and agent scope does it.
+pub fn install_checks() {
+    solidcraft_doc::sketch::set_font_file_check(|p| check_design_path(&p.to_string_lossy(), None).map_err(|e| e.to_string()));
+}
+
+/// File system calls made on this thread through this module (tests: a refused path made none).
+#[doc(hidden)]
+pub fn file_calls() -> usize {
+    FILE_CALLS.with(|c| c.get())
+}
+
+/// Count one file system call (native).
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+fn touched() {
+    FILE_CALLS.with(|c| c.set(c.get().saturating_add(1)));
 }
 
 /// Whether a file or folder name looks like a short (8.3) name: a `~` and a digit (`PROGRA~1`).
@@ -385,9 +634,17 @@ pub fn long_names(path: &std::path::Path) -> std::path::PathBuf {
     }
 }
 
+/// The temporary folder in the browser. std has none there (`std::env::temp_dir` panics on
+/// wasm32-unknown-unknown), so it is a folder of the in-memory files: what is written in it stays
+/// in memory, neither stored nor downloaded (#7192).
+pub const BROWSER_TEMP: &str = "/tmp";
+
 /// The temporary folder spelled with long names ([`long_names`]), for the folders SolidCraft
-/// makes in it.
+/// makes in it; [`BROWSER_TEMP`] in the browser.
 pub fn temp_dir() -> std::path::PathBuf {
+    if cfg!(target_arch = "wasm32") {
+        return std::path::PathBuf::from(BROWSER_TEMP);
+    }
     long_names(&std::env::temp_dir())
 }
 
@@ -416,7 +673,7 @@ pub fn scoped<T>(scope: Option<PathScope>, f: impl FnOnce() -> T) -> T {
         }
     }
     // Sketch text reads the font files a design names, below this crate: it asks here first.
-    solidcraft_doc::sketch::set_font_file_check(|p| check(&p.to_string_lossy()).map_err(|e| e.to_string()));
+    install_checks();
     let _restore = Restore(SCOPE.with(|s| s.replace(scope)));
     f()
 }
@@ -451,9 +708,12 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let p = dir.join("a.txt").to_string_lossy().to_string();
         assert!(!super::exists(&p));
+        assert!(!super::is_file(&p));
+        assert!(!super::is_file(&dir.to_string_lossy()));
         assert!(super::read(&p, 16).is_err());
         super::write(&p, b"hello").unwrap();
         assert!(super::exists(&p));
+        assert!(super::is_file(&p));
         assert_eq!(super::len(&p).unwrap(), 5);
         assert_eq!(super::read_to_string(&p, 16).unwrap(), "hello");
         // The cap is the caller's, not the file's.
@@ -461,6 +721,7 @@ mod tests {
         assert_eq!(super::read(&p, 5).unwrap(), b"hello");
         super::remove(&p).unwrap();
         assert!(!super::exists(&p));
+        assert!(!super::is_file(&p));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -750,6 +1011,34 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
+    /// Folders an agent opened or saved a design in (#7181) count as the open design's folder
+    /// does, hidden ones never, and a scope keeps at most `MAX_DESIGN_FOLDERS`: the oldest gives
+    /// way.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_scope_keeps_the_latest_design_folders() {
+        use super::{MAX_DESIGN_FOLDERS, PathScope};
+        let base = super::temp_dir().join(format!("solidcraft-vfs-design-folders-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let dirs: Vec<_> = (0..=MAX_DESIGN_FOLDERS).map(|i| base.join(format!("d{i}"))).collect();
+        for d in dirs.iter().chain([&base.join(".hidden")]) {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let scope = dirs
+            .iter()
+            .fold(PathScope::new([]), |s, d| s.with_design_folder(d))
+            .with_design_folder(&dirs[1])
+            .with_design_folder(&base.join(".hidden"));
+        let canon = |d: &std::path::Path| std::fs::canonicalize(d).unwrap();
+        assert_eq!(scope.design_roots().len(), MAX_DESIGN_FOLDERS, "{scope:?}");
+        assert_eq!(scope.design_roots().last(), Some(&canon(&dirs[MAX_DESIGN_FOLDERS])), "{scope:?}");
+        let file = |d: &std::path::Path| d.join("part.solidcraft").to_string_lossy().to_string();
+        assert!(scope.check(&file(&dirs[1])).is_ok());
+        assert!(scope.check(&file(&dirs[0])).is_err(), "the oldest gave way");
+        assert!(scope.check(&file(&base.join(".hidden"))).is_err(), "a hidden folder never counts");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     /// A save follows a symbolic link to the file it points to (#845), so the link's target is
     /// what a scope judges: a link inside an allowed folder that leads out is refused, a chain of
     /// links that stays inside is fine.
@@ -781,6 +1070,110 @@ mod tests {
         assert_eq!(std::fs::read_to_string(out.join("part.solidcraft")).unwrap(), "outside");
         assert!(!out.join("new.solidcraft").exists());
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A path a design names (a linked design, a font file) that leads to another computer or a
+    /// device is refused from its text, on every platform, before any file call: on Windows even
+    /// asking whether `\\host\share\x` exists connects to the host and may send it the user's
+    /// sign-in. Local paths, absolute or relative, are unchanged.
+    #[test]
+    fn design_paths_on_network_locations_and_devices_are_refused_without_a_file_call() {
+        use super::{Remote, check_design_path, design_path_is_file, design_path_refusal, read_design_path, remote};
+        let net = |h: &str| Some(Remote::Network(h.into()));
+        for (path, want) in [
+            (r"\\server\share\part.solidcraft", net("server")),
+            ("//server/share/part.solidcraft", net("server")),
+            (r"\\Server.corp.example\share", net("Server.corp.example")),
+            (r"\\10.0.0.5\c$\x.solidcraft", net("10.0.0.5")),
+            (r"\\?\UNC\server\share\part.solidcraft", net("server")),
+            (r"\\?\unc\server\share\part.solidcraft", net("server")),
+            (r"\??\UNC\server\share\x", net("server")),
+            ("//?/UNC/server/share/x", net("server")),
+            (r"\\.\pipe\x", Some(Remote::Device)),
+            ("//./pipe/x", Some(Remote::Device)),
+            (r"\\.\COM1", Some(Remote::Device)),
+            (r"\\?\Volume{0}\x", Some(Remote::Device)),
+            (r"\\?\GLOBALROOT\Device\x", Some(Remote::Device)),
+            (r"\??\C:\x", Some(Remote::Device)),
+            (r"\\.", Some(Remote::Device)),
+            ("CON", Some(Remote::Device)),
+            ("nul", Some(Remote::Device)),
+            ("NUL.solidcraft", Some(Remote::Device)),
+            ("COM1", Some(Remote::Device)),
+            ("com1.txt.solidcraft", Some(Remote::Device)),
+            ("LPT9.ttf", Some(Remote::Device)),
+            (r"C:\work\aux.step", Some(Remote::Device)),
+            ("parts/Con .solidcraft", Some(Remote::Device)),
+            (r"\\?\C:\work\prn", Some(Remote::Device)),
+            // Local: unchanged.
+            (r"C:\work\part.solidcraft", None),
+            ("C:/work/part.solidcraft", None),
+            (r"\\?\C:\work\part.solidcraft", None),
+            ("/home/me/parts/plate.solidcraft", None),
+            ("parts/plate.solidcraft", None),
+            ("../parts/plate.solidcraft", None),
+            ("console.solidcraft", None),
+            (r"C:\com10\x.solidcraft", None),
+        ] {
+            assert_eq!(remote(path), want, "{path}");
+            assert_eq!(design_path_refusal(path, None), want, "{path}");
+            if want.is_some() {
+                let calls = super::file_calls();
+                let e = check_design_path(path, None).unwrap_err();
+                assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied, "{path}: {e}");
+                assert!(read_design_path(path, None, 1 << 20).is_err(), "{path}");
+                assert_eq!(design_path_is_file(path, None), None, "{path}");
+                assert_eq!(super::file_calls(), calls, "{path}: refused, yet a file call was made");
+                if let Some(Remote::Network(host)) = &want {
+                    assert!(e.to_string().contains(&format!(r"network location \\{host}")), "{e}");
+                } else {
+                    assert!(e.to_string().contains("names a device"), "{e}");
+                }
+            }
+        }
+        // A local file is read as before.
+        let dir = std::env::temp_dir().join(format!("solidcraft-vfs-design-path-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let p = dir.join("part.solidcraft").to_string_lossy().to_string();
+        super::write(&p, b"x").unwrap();
+        assert_eq!(read_design_path(&p, None, 16).unwrap(), b"x");
+        assert_eq!(design_path_is_file(&p, None), Some(true));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A server is reached once allowed: for one action ([`allowing_hosts`], "Allow once"), by
+    /// the preferences ([`NetworkPolicy`]) or because the design itself was opened from it. A
+    /// device path never is.
+    #[test]
+    fn an_allowed_network_host_passes_and_only_that_one() {
+        use super::{NetworkPolicy, Remote, allowing_hosts, design_path_refusal};
+        let unc = r"\\files.corp\cad\part.solidcraft";
+        assert!(design_path_refusal(unc, None).is_some());
+        allowing_hosts(&["FILES.corp".into()], || {
+            assert_eq!(design_path_refusal(unc, None), None);
+            assert_eq!(design_path_refusal(r"\\?\UNC\files.corp\cad\x", None), None);
+            assert_eq!(design_path_refusal(r"\\evil\share\x", None), Some(Remote::Network("evil".into())));
+            assert_eq!(design_path_refusal(r"\\.\pipe\x", None), Some(Remote::Device));
+        });
+        assert!(design_path_refusal(unc, None).is_some(), "allowed for that action only");
+        // The design was opened from that server: its links beside it are reached.
+        assert_eq!(design_path_refusal(unc, Some(r"\\Files.Corp\cad\asm.solidcraft")), None);
+        assert!(design_path_refusal(unc, Some(r"\\other\cad\asm.solidcraft")).is_some());
+        assert!(design_path_refusal(unc, Some("/home/me/asm.solidcraft")).is_some());
+        let listed = NetworkPolicy { allow_all: false, hosts: vec![r"\\Files.corp".into()] };
+        assert!(listed.allows("files.corp") && !listed.allows("evil") && !listed.allows(""));
+        assert!(NetworkPolicy { allow_all: true, hosts: vec![] }.allows("anything"));
+        assert!(!NetworkPolicy::default().allows("files.corp"), "empty by default");
+    }
+
+    /// The font file a design's sketch text names follows the same rule.
+    #[test]
+    fn a_design_font_file_on_a_network_location_is_refused() {
+        super::install_checks();
+        let calls = super::file_calls();
+        let e = solidcraft_doc::sketch::font_data(Some(r"\\evil.example\fonts\x.ttf")).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains(r"network location \\evil.example"), "{e}");
+        assert_eq!(super::file_calls(), calls);
     }
 
     /// A directory is not a file either.

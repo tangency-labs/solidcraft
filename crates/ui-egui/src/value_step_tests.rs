@@ -358,10 +358,18 @@ fn the_preference_is_on_the_design_page() {
     crate::prefs::set(&mut h.app, &json!({"step_values": false})).unwrap();
     h.call("ui.prefs", json!({"open": "Design"}));
     h.frames(3);
-    // The row is below the page's fold: scroll the page down to it, as a user would.
-    let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_prefs"))).unwrap();
-    h.call("ui.scroll", json!({"x": window.center().x, "y": window.center().y, "delta": -400.0}));
-    h.frames(30);
+    // The row can be below the page's fold: scroll the page to it, as a user would, a little at a
+    // time so the page's length doesn't matter.
+    for _ in 0..40 {
+        let window = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_prefs"))).unwrap();
+        let row = crate::scenario::handle_at("prefs:step_values").expect("the Design page shows the row");
+        if window.shrink(60.0).contains(row) {
+            break;
+        }
+        let delta = if row.y > window.center().y { -60.0 } else { 60.0 };
+        h.call("ui.scroll", json!({"x": window.center().x, "y": window.center().y, "delta": delta}));
+        h.frames(10);
+    }
     h.step(&json!({"click": {"handle": "prefs:step_values"}})).unwrap();
     h.frames(2);
     assert!(h.app.preferences.step_values, "the Design page's checkbox turns it on");

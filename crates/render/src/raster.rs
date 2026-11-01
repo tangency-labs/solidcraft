@@ -230,6 +230,8 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
     }
     for l in scene.grid.iter().chain(&scene.lines) {
         let col = l.color.f();
+        // A line that is not opaque is blended with what is under it (the grid fading out).
+        let alpha = f64::from(l.alpha).clamp(0.0, 1.0);
         let half = (l.width * SS as f64 * 0.5).max(0.5);
         for seg in l.points.windows(2) {
             let (Some(&p), Some(&q)) = (seg.first(), seg.get(1)) else { continue };
@@ -264,7 +266,7 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                         let visible = l.on_top
                             || c.depth.get(i).zip(slope.get(i)).is_some_and(|(dd, s)| z <= f64::from(*dd) + f64::from(*s) * d + z.abs() * DEPTH_EPS);
                         if visible {
-                            c.put(ix as usize, iy as usize, col, cov);
+                            c.put(ix as usize, iy as usize, col, cov * alpha);
                         }
                     }
                 }
@@ -428,6 +430,7 @@ mod tests {
             lines: vec![SceneLine {
                 points: vec![Vec3::new(-8.0, 2.0, 0.0), Vec3::new(8.0, 2.0, 0.0)],
                 color: Rgb(0, 0, 255),
+                alpha: 1.0,
                 width: 1.4,
                 on_top: false,
             }],
@@ -499,6 +502,30 @@ mod tests {
         render(scene, cam, 64, 64).rgba.chunks(4).filter(|p| p[0] > 150 && p[1] < 100 && p[2] < 100).count()
     }
 
+    /// #4214: a line that is not opaque is blended with what is under it: the grid fades out
+    /// with the distance, and the fade reaches the picture.
+    #[test]
+    fn a_line_that_is_not_opaque_is_blended_with_what_is_under_it() {
+        let line = |alpha: f32| SceneLine {
+            points: vec![Vec3::new(-8.0, 2.0, 0.0), Vec3::new(8.0, 2.0, 0.0)],
+            color: Rgb(0, 0, 255),
+            alpha,
+            width: 1.4,
+            on_top: false,
+        };
+        let cam = Camera { distance: 50.0, fov: 0.0, ..Default::default() };
+        // The blue of the line over the white background, at full strength and at half.
+        let blue = |alpha: f32| {
+            let scene = Scene { lines: vec![line(alpha)], radius: 30.0, ..Default::default() };
+            let img = render(&scene, &cam, 64, 64);
+            img.rgba.chunks(4).map(|p| p[2] as i32).max().unwrap_or(0)
+        };
+        let solid = blue(1.0);
+        let half = blue(0.5);
+        assert!(solid > 200, "the opaque line is blue: {solid}");
+        assert!(half < solid && half > 100, "the half-opaque line is between the background and the line: {half} against {solid}");
+    }
+
     /// An edge 1 mm behind a sheet is hidden in a close view of a large design. The old test
     /// allowed 2e-4 of the depth range, 2e-4 · (8 · 1200 + 2) = 1.92 mm here (orthographic; far
     /// more in perspective), so it was drawn on the sheet. Now the allowance is what the sheet's
@@ -515,6 +542,7 @@ mod tests {
                 let edge = SceneLine {
                     points: vec![Vec3::new(-10.0, 0.0, 0.0) + back, Vec3::new(10.0, 0.0, 0.0) + back],
                     color: Rgb(255, 0, 0),
+                    alpha: 1.0,
                     width: 1.2,
                     on_top: false,
                 };
@@ -534,7 +562,7 @@ mod tests {
     fn edges_on_a_steep_face_draw_whole() {
         let tilt = 70f64.to_radians();
         let on = |x: f64, z: f64| Vec3::new(x, z * tilt.tan(), z);
-        let line = |points: Vec<Vec3>| SceneLine { points, color: Rgb(255, 0, 0), width: 1.2, on_top: false };
+        let line = |points: Vec<Vec3>| SceneLine { points, color: Rgb(255, 0, 0), alpha: 1.0, width: 1.2, on_top: false };
         for fov in [0.0, 0.6] {
             for radius in [30.0, 1200.0] {
                 let lines = vec![

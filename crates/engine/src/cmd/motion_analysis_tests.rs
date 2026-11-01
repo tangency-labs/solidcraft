@@ -201,6 +201,10 @@ fn motion_analysis_refuses_what_it_cannot_do() {
         ("motion.interference", json!({"study": "Push", "occurrences": ["A"]})),
         ("motion.interference", json!({"study": "Push", "occurrences": ["A", "B"], "contact_sets": true})),
         ("motion.interference", json!({"study": "Push", "contact_sets": true})),
+        ("motion.interference", json!({"study": "Push", "budget_s": 0})),
+        ("motion.interference", json!({"study": "Push", "budget_s": -1})),
+        ("motion.interference", json!({"study": "Push", "budget_s": 1e9})),
+        ("motion.interference", json!({"study": "Push", "budget_s": "soon"})),
     ];
     for (cmd, p) in refused {
         assert!(s.execute(cmd, &p).is_err(), "{cmd} {p}");

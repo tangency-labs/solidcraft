@@ -5,11 +5,60 @@ description: Use when someone wants to contribute code or documentation to Solid
 
 # Contribute to SolidCraft
 
-Read [CONTRIBUTING.md](../../CONTRIBUTING.md), [AGENTS.md](../../AGENTS.md),
-the [contributor book page](../../docs/book/src/dev/contributing.md), and the
-[skills index](../README.md) first. Follow their current rules; use this skill to
+Read [CONTRIBUTING.md](../../CONTRIBUTING.md), [AGENTS.md](../../AGENTS.md) (the router
+to the other skills), the [contributor book page](../../docs/book/src/dev/contributing.md),
+and the [skills index](../README.md) first. Follow their current rules; use this skill to
 help a first-time contributor apply them. This skill concerns the repository,
 not modelling a part through MCP.
+
+## Rules for every PR
+
+- **Look at what is open first.** Pull the whole list, drafts included:
+  `gh pr list -R tangency-labs/solidcraft --state open --limit 500` and
+  `gh issue list -R tangency-labs/solidcraft --state open --limit 500`. Look for the same issue, the same
+  feature under another number, and PRs that change the files you will change
+  (`gh pr list ... --json number,title,files`). If someone has it, comment on their PR or issue
+  instead of opening a second one: two PRs for one change cannot both land.
+- **Claim with a draft PR.** `gh pr list -R tangency-labs/solidcraft --state open --search "#N"`; if none,
+  branch from the latest `origin/main`, `git commit --allow-empty -m "claim: #N"`, push, and open a
+  draft PR titled `<summary> (#N)`. The lowest-numbered open PR for an issue wins; close yours if it
+  lost. The bot assigns you and labels the issue `in progress`. Do not claim by editing files; comment
+  `/claim` only to stake a claim before you have a branch.
+- **Push daily.** A draft with no pushes for 72 hours may be taken over: comment first, then open your
+  own claim (you may start from its branch). The bot's automatic cleanup deadlines in CONTRIBUTING.md
+  are separate.
+- **One topic and one issue per PR.** Never commit `plan/`, build directories (`target*/`) or generated
+  reference data; check `git ls-files` before pushing. Run `cargo xtask ci` before every commit.
+  Commit after every feature arc that builds.
+- **Merge flow.** The heavy CI jobs start when a maintainer adds `approved-for-ci`; approved PRs go
+  through the merge queue (`gh pr merge N -R tangency-labs/solidcraft --squash --auto`), which runs the
+  full suite on each group before it lands on `main`. Never force-push `main`.
+- **Do not push only to catch up with `main`** (no merge of `main`, no Update branch, no rebase for
+  that alone): every push restarts the whole CI run, and `main`'s own run catches what lands in between.
+  When you push anyway, or GitHub reports a conflict, rebase onto the latest `main` and push your own
+  branch with `--force-with-lease`; never merge `main` into a PR. Resolve conflicts without discarding
+  others' work. Do not re-run CI on an unchanged commit: re-run only a job that runner trouble
+  cancelled, with "Re-run failed jobs".
+- **Evidence.** For observable CAD, UI or model behaviour (kernel, geometry, assembly and backend
+  changes included), the issue or PR carries real screenshots or a short recording from a small
+  reproduction, preferably before and after, with steps and expected/actual behaviour. Capture it
+  yourself; do not ask a human for evidence you can produce. Diagrams do not replace it. Changes with
+  nothing observable need none. Use a public-safe example, check for private designs, paths and account
+  details, attach the media rather than committing it.
+- **Follow through.** Check the PR's merge status throughout and before handoff. Report the state you
+  checked and any conflicts resolved. While the PR is open, keep monitoring it and say clearly that it
+  is pending; do not claim it merged without checking.
+- **Shared build machine.** Check the load before a big build (`cut -d' ' -f1 /proc/loadavg`), wait
+  while it is over 24, and build with `nice`.
+- **Maintainers' machines** keep a local, gitignored `plan/` folder: read `plan/STATUS.md` (current
+  milestone, next task), then the task in `plan/execution-plan.md` and the relevant `plan/architecture.md`
+  section. Kernel and library decisions are in `plan/adr/0001-geometry-kernel.md`. Follow the autonomous
+  operation protocol in `plan/execution-plan.md` section 6; do not stop to ask unless it lists the decision
+  as the owner's. Contributors without `plan/` can ignore this.
+- **Update the roadmap** when a milestone task lands: `docs/roadmap-detail.md` tracks status, milestones and estimates; `ROADMAP.md` is the short user-facing roadmap.
+- **Start here.** What to work on: `ROADMAP.md`, "Where help is wanted most" in CONTRIBUTING.md and the open issues labelled `help wanted`, `good first issue`, `needs-triage`; check what is already open first. Architecture: `docs/architecture.md` and "How the code is laid out" in CONTRIBUTING.md; kernel work is paused ("Kernel work is paused" in CONTRIBUTING.md). Licence rules: `deny.toml` and `cargo xtask licences --check`; only `crates/kernel` may use `truck`. When the code, docs and rules settle a question, act; ask on the issue or PR only when the answer changes what users see or what the change covers.
+- **Do not open a second PR** for an issue a lower-numbered open PR already closes, and keep the `Changes a default:` line filled in: `pr-checks.yml` fails both.
+- **The gate reads the working tree.** Do not switch branches while `cargo xtask ci` runs: it compiles the other branch's code and fails on a change not in the PR. Run it in the background and wait for its log.
 
 ## 1. Check the environment
 
@@ -111,10 +160,8 @@ the duplicate. Do not try to claim by editing files.
 
 ## 5. Make and check one focused change
 
-Explain the intended behaviour and follow AGENTS.md, including local instructions.
-Never crash: return `Result` errors, validate hostile input with finite checks and
-size caps, and avoid non-test panics. Preserve layering and route user-visible
-behaviour through commands. Use only permitted clean-room references and assets.
+Explain the intended behaviour, then pick the skill for the area from AGENTS.md's table and
+follow it (never crash, commands, layering, clean-room rules and tests all live there).
 Put synthetic regression tests in the existing test module for the affected area;
 prove a bug test fails before the fix and passes after it.
 
@@ -132,7 +179,7 @@ On small environments, use targeted tests and report exactly what passed and wha
 could not run; leave the full suite to CI rather than claiming it passed. Follow
 [testing guidance](../../docs/book/src/dev/testing.md) for applicable checks.
 Review the diff, keep one topic, and commit the finished change. Before an approved
-push, follow AGENTS.md's rebase and conflict rules; do not push solely to catch up
+push, follow "Rules for every PR" above; do not push solely to catch up
 with `main`. Explain progress and ask before publishing each update.
 
 ## 6. Show the result

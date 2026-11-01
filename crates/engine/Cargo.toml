@@ -37,6 +37,7 @@ solidcraft-kernel = { workspace = true }
 solidcraft-doc = { workspace = true }
 solidcraft-io = { workspace = true }
 solidcraft-render = { workspace = true }
+image = { workspace = true, features = ["jpeg"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 toml_edit = "0.25"

@@ -211,7 +211,9 @@ fn origins_take_a_long_piece_name() {
     run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 2, "corner": [100, 200, 0]}));
     run(&mut s, "solid.hole", json!({"position": [110, 210, 2], "diameter": 6}));
     let top = face_name(&mut s, "Tray", Vec3::new(20.0, 20.0, 1.0));
-    assert!(top.len() > 512, "{}: {top}", top.len());
+    // Split-face names are bounded at 512 bytes (#5860), so the name is as long as a piece name gets;
+    // joints take far more than that (`MAX_FACE_NAME`), so none is refused for its length.
+    assert!(top.len() > 400 && top.len() <= 512, "{}: {top}", top.len());
     let wall = face_name(&mut s, "Tray", Vec3::new(53.0, 50.0, 0.5));
     let foot = face_name(&mut s, "Bracket", Vec3::new(113.0, 210.0, 1.0));
     let under = face_name(&mut s, "Bracket", Vec3::new(105.0, 205.0, 0.0));
@@ -397,4 +399,178 @@ fn a_face_centre_stays_put_when_a_hole_in_its_face_moves_or_goes() {
             assert!(near(o, Vec3::new(100.0, 50.0, 2.0)) && near(z, Vec3::Z), "step {i}: {f:?}");
         }
     }
+}
+
+// ---- Two arms jointed together, the arm part edited: every joint type keeps its origins
+// together, for each way the joint dialog picks an origin, inside one design and through a link.
+
+/// The arm: a plate `L` × 20 × `T` (100 × 20 × 5 to start) along +X from the origin, with a Ø 6
+/// hole through it at x = `HX` (10) and another 10 mm in from its far end. Made at the active
+/// component.
+pub(crate) fn arm_part(s: &mut Session) {
+    for (name, e) in [("T", "5 mm"), ("L", "100 mm"), ("HX", "10 mm")] {
+        run(s, "parameters.add", json!({"name": name, "expression": e}));
+    }
+    run(s, "solid.box", json!({"length": "L", "width": 20, "height": "T", "corner": [0, -10, 0], "body_name": "Arm"}));
+    run(s, "solid.cylinder", json!({"diameter": 6, "height": 100, "base": ["HX", 0, -50], "operation": "cut"}));
+    run(s, "solid.cylinder", json!({"diameter": 6, "height": 100, "base": ["L - 10 mm", 0, -50], "operation": "cut"}));
+}
+
+/// The arm's edits, (parameter, value), applied in turn: thicker (A's top face moves along the
+/// joint's axis, as does B's bottom hole rim relative to A), A's hole moves sideways, and the arm
+/// grows so its far end (B's hole, edge and corner) moves sideways.
+pub(crate) const ARM_EDITS: [(&str, f64); 4] = [("T", 12.0), ("HX", 15.0), ("L", 140.0), ("T", 3.0)];
+
+/// The joint types tried (each between its own pair of arms) and as-built.
+pub(crate) const ARM_KINDS: [&str; 9] = ["rigid", "revolute", "slider", "cylindrical", "pin_slot", "planar", "ball", "point_on_plane", "as_built"];
+
+/// How the joint dialog picks an origin on arm A's top (a) and arm B's bottom (b), as world
+/// params, for the arms at A (0, y, 0) and B (0, y + 60, 0) in the arm's starting size.
+pub(crate) fn arm_origins(form: &str, y: f64) -> (serde_json::Value, serde_json::Value) {
+    let b = y + 60.0;
+    match form {
+        // A hole's rim (a round edge): its centre and the way out of the material.
+        "rim" => (json!({"circle": [10, y, 5], "z": [0, 0, 1]}), json!({"circle": [90, b, 0], "z": [0, 0, -1]})),
+        // A hole's wall.
+        "wall" => (json!({"circle": [13, y, 4]}), json!({"circle": [93, b, 1]})),
+        // The plate's top and bottom faces.
+        "face" => (json!({"face": [50, y + 5.0, 5]}), json!({"face": [50, b + 5.0, 0]})),
+        // A straight edge: its middle, z along it.
+        "edge" => (json!({"edge": [50, y + 10.0, 5], "z": [1, 0, 0]}), json!({"edge": [50, b + 10.0, 0], "z": [1, 0, 0]})),
+        // A corner (a vertex), z along the part's +Z.
+        _ => (
+            json!({"edge": [100, y + 10.0, 5], "corner": [100, y + 10.0, 5], "z": [0, 0, 1]}),
+            json!({"edge": [100, b + 10.0, 0], "corner": [100, b + 10.0, 0], "z": [0, 0, 1]}),
+        ),
+    }
+}
+
+pub(crate) const ARM_FORMS: [&str; 5] = ["rim", "wall", "face", "edge", "corner"];
+
+/// One joint of each of [`ARM_KINDS`] between arm pairs `pairs` (A, B occurrences), its origins
+/// picked as `form` picks them.
+pub(crate) fn joint_arms(s: &mut Session, form: &str, pairs: &[(u64, u64)]) {
+    for (k, (kind, (a, b))) in ARM_KINDS.iter().zip(pairs).enumerate() {
+        let (mut pa, mut pb) = arm_origins(form, 120.0 * k as f64);
+        pa["occurrence"] = json!(a);
+        pb["occurrence"] = json!(b);
+        let name = format!("{form}-{kind}");
+        let r = if *kind == "as_built" {
+            run(s, "joint.as_built", json!({"type": "rigid", "name": name, "a": a, "b": b, "at": pa}))
+        } else {
+            run(s, "joint.create", json!({"type": kind, "name": name, "a": pa, "b": pb}))
+        };
+        assert_eq!(r["errors"], json!([]), "{name}: {r}");
+    }
+}
+
+/// The arm's size as edited so far: T, HX, L (mm).
+pub(crate) fn arm_size(edits: &[(&str, f64)]) -> (f64, f64, f64) {
+    let at = |n: &str, d: f64| edits.iter().rev().find(|(m, _)| *m == n).map_or(d, |(_, v)| *v);
+    (at("T", 5.0), at("HX", 10.0), at("L", 100.0))
+}
+
+/// Where `form` picked A's and B's origins, on the arm as it is now (T, HX, L): component
+/// coordinates of the geometry itself (the hole's rim, the plate's top face's centre, …).
+fn arm_spots(form: &str, (t, hx, l): (f64, f64, f64)) -> (Vec3, Vec3) {
+    match form {
+        "rim" | "wall" => (Vec3::new(hx, 0.0, t), Vec3::new(l - 10.0, 0.0, 0.0)),
+        "face" => (Vec3::new(l / 2.0, 0.0, t), Vec3::new(l / 2.0, 0.0, 0.0)),
+        "edge" => (Vec3::new(l / 2.0, 10.0, t), Vec3::new(l / 2.0, 10.0, 0.0)),
+        _ => (Vec3::new(l, 10.0, t), Vec3::new(l, 10.0, 0.0)),
+    }
+}
+
+/// Each joint between `pairs` checked against the arm's geometry as it is now (`size`): A's
+/// origin is on the rim, face, edge or corner it was picked on; B's is on its own and sits on
+/// A's, z against z (point-on-plane: on A's plane; as-built: B keeps its place from A's
+/// origin). The joints that aren't, with why.
+pub(crate) fn arms_apart(s: &mut Session, edit: &str, form: &str, pairs: &[(u64, u64)], size: (f64, f64, f64)) -> Vec<String> {
+    let list = run(s, "joint.list", json!({}));
+    let mut out: Vec<String> = list["errors"].as_array().into_iter().flatten().map(|e| format!("{edit}: {} {}", e["name"], e["why"])).collect();
+    let v = |f: &serde_json::Value, k: &str| {
+        Vec3::new(f[k][0].as_f64().unwrap_or(f64::NAN), f[k][1].as_f64().unwrap_or(f64::NAN), f[k][2].as_f64().unwrap_or(f64::NAN))
+    };
+    let world = |o: u64, p: Vec3| solidcraft_doc::apply_point(&solidcraft_doc::joints::occurrence_world(&s.doc, o), p);
+    let (sa, sb) = arm_spots(form, size);
+    let (sa0, _) = arm_spots(form, arm_size(&[]));
+    for (kind, (a, b)) in ARM_KINDS.iter().zip(pairs) {
+        let name = format!("{form}-{kind}");
+        let Some(j) = list["joints"].as_array().into_iter().flatten().find(|j| j["name"] == name.as_str()) else {
+            out.push(format!("{edit}: {name} is gone"));
+            continue;
+        };
+        let (oa, ob, za, zb) = (v(&j["frame_a"], "origin"), v(&j["frame_b"], "origin"), v(&j["frame_a"], "z"), v(&j["frame_b"], "z"));
+        let (at_a, at_b) = (world(*a, sa), world(*b, sb));
+        let mut why = Vec::new();
+        if oa.dist(at_a) > 1e-6 {
+            why.push(format!("A's origin at {oa:?}, its geometry at {at_a:?}"));
+        }
+        match *kind {
+            "as_built" => {
+                // B was made 60 mm along Y from A, the origin wherever it was on A.
+                let want = world(*a, Vec3::new(0.0, 60.0, 0.0) + sa - sa0);
+                if world(*b, Vec3::ZERO).dist(want) > 1e-6 || oa.dist(ob) > 1e-6 {
+                    why.push(format!("B at {:?}, not {want:?}", world(*b, Vec3::ZERO)));
+                }
+            }
+            "point_on_plane" => {
+                if (at_b - at_a).dot(za).abs() > 1e-6 {
+                    why.push(format!("B's spot {at_b:?} is off A's plane at {at_a:?} z {za:?}"));
+                }
+            }
+            _ => {
+                if ob.dist(at_b) > 1e-6 || at_a.dist(at_b) > 1e-6 || za.dot(zb) > -1.0 + 1e-9 {
+                    why.push(format!("B's origin at {ob:?} z {zb:?}, its geometry at {at_b:?}, A's at {at_a:?} z {za:?}"));
+                }
+            }
+        }
+        if !why.is_empty() {
+            out.push(format!("{edit}: {name}: {}", why.join("; ")));
+        }
+    }
+    out
+}
+
+/// The A, B arm occurrence pairs (one per joint type), A grounded, from the arm's first
+/// occurrence `first` (at the origin).
+pub(crate) fn arm_pairs(s: &mut Session, first: u64) -> Vec<(u64, u64)> {
+    run(s, "occurrence.ground", json!({"occurrence": first, "grounded": true}));
+    (0..ARM_KINDS.len())
+        .map(|k| {
+            let y = 120.0 * k as f64;
+            let a = if k == 0 {
+                first
+            } else {
+                run(s, "occurrence.copy", json!({"occurrence": first, "translate": [0, y, 0]}))["occurrence"].as_u64().unwrap_or(0)
+            };
+            run(s, "occurrence.ground", json!({"occurrence": a, "grounded": true}));
+            let b = run(s, "occurrence.copy", json!({"occurrence": first, "translate": [0, y + 60.0, 0]}))["occurrence"].as_u64().unwrap_or(0);
+            (a, b)
+        })
+        .collect()
+}
+
+/// Two arms jointed top face to bottom face, the arm's thickness, holes and length changed in the
+/// design: every joint re-solves onto the moved faces, edges and corners (the joint dialog kept
+/// a round edge, a straight one and a corner as points where they were picked, so a thicker
+/// arm overlapped the one jointed to it).
+#[test]
+fn jointed_arms_stay_together_as_the_arm_changes() {
+    let mut apart = Vec::new();
+    for form in ARM_FORMS {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Arm"}));
+        arm_part(&mut s);
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let first = occ(&s, "Arm");
+        let pairs = arm_pairs(&mut s, first);
+        joint_arms(&mut s, form, &pairs);
+        apart.extend(arms_apart(&mut s, "as made", form, &pairs, arm_size(&[])));
+        for (i, (name, value)) in ARM_EDITS.into_iter().enumerate() {
+            run(&mut s, "parameters.change", json!({"name": name, "expression": format!("{value} mm")}));
+            apart.extend(arms_apart(&mut s, &format!("{name} = {value}"), form, &pairs, arm_size(&ARM_EDITS[..=i])));
+        }
+    }
+    assert!(apart.is_empty(), "{} joints apart:\n{}", apart.len(), apart.join("\n"));
 }

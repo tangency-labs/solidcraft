@@ -34,7 +34,7 @@ fn a_loop_of_sketch_curves_is_the_loop_patch() {
     h.frames(3);
     assert!(h.widget("Cross curves").is_some() && h.widget("Continuity").is_some() && h.widget("Operation").is_some());
     let d = h.app.dialog.as_mut().unwrap();
-    d.inputs[0].items = ["s1", "s2", "s3", "s4"].iter().map(|id| Sel::SketchCurve { id: (*id).into() }).collect();
+    d.inputs[0].items = ["s1", "s2", "s3", "s4"].iter().map(|id| Sel::SketchCurve { id: (*id).into(), sketch: None }).collect();
     ok(&mut h);
     let f = h.app.session.doc.features.last().unwrap();
     let FeatureKind::SurfaceBoundary { curves, orders, .. } = &f.kind else { panic!("{:?}", f.kind) };
@@ -68,7 +68,7 @@ fn edges_and_curves_make_a_network_and_come_back_in_an_edit() {
     h.step(&json!({"call":"ui.start","params":{"command":"surface.boundary"}})).unwrap();
     h.frames(3);
     let d = h.app.dialog.as_mut().unwrap();
-    d.inputs[0].items = vec![rim.clone(), Sel::SketchCurve { id: top.clone() }];
+    d.inputs[0].items = vec![rim.clone(), Sel::SketchCurve { id: top.clone(), sketch: None }];
     let Kind::Surface(Surf::Boundary { continuity, join }) = &mut d.kind else { panic!("{:?}", d.kind) };
     *continuity = 2;
     *join = true;
@@ -114,8 +114,8 @@ fn curves_that_meet_are_one_chain() {
     let sketch = h.app.session.doc.find_feature("Net").unwrap().id;
     let k = Surf::Boundary { continuity: 0, join: false };
     let (_, mut inputs) = crate::dialogs_surface::start(&h.app, "surface.boundary").unwrap();
-    inputs[0].items = ["a2", "b", "a1"].iter().map(|id| Sel::SketchCurve { id: (*id).into() }).collect();
-    inputs[1].items = ["c", "d"].iter().map(|id| Sel::SketchCurve { id: (*id).into() }).collect();
+    inputs[0].items = ["a2", "b", "a1"].iter().map(|id| Sel::SketchCurve { id: (*id).into(), sketch: None }).collect();
+    inputs[1].items = ["c", "d"].iter().map(|id| Sel::SketchCurve { id: (*id).into(), sketch: None }).collect();
     let cmds = crate::dialogs_surface::commands(&h.app, &k, &inputs, &Map::new()).unwrap();
     let (id, p) = &cmds[0];
     assert_eq!(id, "surface.boundary");

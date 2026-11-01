@@ -16,7 +16,7 @@ on:
 permissions:
   contents: read # to check out scripts/kernel-paused
   issues: write
-  pull-requests: read # to list a PR's changed paths
+  pull-requests: write # to list a PR's changed paths and add its label
   discussions: write
 
 concurrency:

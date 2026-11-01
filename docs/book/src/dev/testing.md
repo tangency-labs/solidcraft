@@ -17,8 +17,11 @@ profile and the wasm build check.
 
 ## Dependency advisories
 
-Scheduled and manually dispatched CI runs have a separate **Dependency advisories** job;
-new advisories do not fail unrelated pull requests. To run the same scan locally:
+Scheduled and manually dispatched CI runs have a separate **Dependency advisories** job that
+checks advisories, bans and sources. A pull request or merge group that changes `Cargo.lock` or
+any `Cargo.toml` runs the same job for advisories only, and `ci` requires it then; other pull
+requests skip it, so a new advisory does not fail an unrelated change. To run the nightly scan
+locally:
 
 ```sh
 cargo install cargo-deny --version 0.20.2 --locked
@@ -66,7 +69,12 @@ so in the PR.
 Run `cargo xtask test` to build with this profile and run the test binaries concurrently,
 with doc tests alongside. Arguments after `--` go to each test binary, for example
 `cargo xtask test -- shell`. To run the test binaries sequentially instead, use
-`cargo test --workspace --profile ci`.
+`cargo test --workspace --profile ci`. On a loaded machine set `SOLIDCRAFT_TEST_JOBS=N` to
+bound how many test binaries and side commands run at once; each binary then gets
+`RUST_TEST_THREADS` and `ACTION_MATRIX_JOBS` of `max(1, cpus / N)` so the binaries in flight
+share the machine instead of each defaulting to one worker per CPU. Setting
+`RUST_TEST_THREADS` or `ACTION_MATRIX_JOBS` yourself overrides that split, and leaving
+`SOLIDCRAFT_TEST_JOBS` unset keeps the original all-at-once behaviour.
 
 ## Test-level scheduling for full local CI
 

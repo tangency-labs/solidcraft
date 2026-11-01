@@ -60,8 +60,6 @@ dependencies = [
 [[package]]
 name = "accesskit_macos"
 version = "0.26.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce02dc63b43f0c9296af9ac946312a2dc8814427d7a64d2d600971dac55b6076"
 dependencies = [
  "accesskit",
  "accesskit_consumer 0.38.0",
@@ -1692,9 +1690,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi 6.0.0",
  "rand_core 0.10.1",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -3771,9 +3771,9 @@ checksum = "eec689c0bc40ff2458a5977b6619cb718087084a18e02a131c599b62d05e1a5f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.15"
+version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
 dependencies = [
  "ring",
  "rustls-pki-types",
@@ -4208,7 +4208,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft"
-version = "0.22.1"
+version = "0.29.0"
 dependencies = [
  "block2 0.6.2",
  "eframe",
@@ -4217,6 +4217,7 @@ dependencies = [
  "getrandom 0.3.4",
  "hidapi",
  "keyring",
+ "libc",
  "log",
  "muda",
  "objc2 0.6.5",
@@ -4228,23 +4229,27 @@ dependencies = [
  "rfd",
  "ron",
  "rustls",
+ "serde",
  "serde_json",
  "solidcraft-3dx-client",
  "solidcraft-engine",
+ "solidcraft-gpu",
  "solidcraft-space-mouse",
  "solidcraft-ui-egui",
  "ureq",
  "windows-sys 0.61.2",
  "winit",
+ "x11rb",
+ "zbus 5.19.0",
 ]
 
 [[package]]
 name = "solidcraft-3dx-client"
-version = "0.22.1"
+version = "0.29.0"
 
 [[package]]
 name = "solidcraft-cli"
-version = "0.22.1"
+version = "0.29.0"
 dependencies = [
  "image",
  "log",
@@ -4256,7 +4261,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-derive"
-version = "0.22.1"
+version = "0.29.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4265,7 +4270,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-doc"
-version = "0.22.1"
+version = "0.29.0"
 dependencies = [
  "log",
  "serde",
@@ -4282,8 +4287,9 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-engine"
-version = "0.22.1"
+version = "0.29.0"
 dependencies = [
+ "image",
  "log",
  "schemars",
  "serde",
@@ -4302,7 +4308,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-geom"
-version = "0.22.1"
+version = "0.29.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4311,7 +4317,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-gpu"
-version = "0.22.1"
+version = "0.29.0"
 dependencies = [
  "image",
  "log",
@@ -4331,7 +4337,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-io"
-version = "0.22.1"
+version = "0.29.0"
 dependencies = [
  "cadmpeg-core",
  "cadmpeg-ir",
@@ -4355,7 +4361,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-kernel"
-version = "0.22.1"
+version = "0.29.0"
 dependencies = [
  "log",
  "proptest",
@@ -4375,7 +4381,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-mcp"
-version = "0.22.1"
+version = "0.29.0"
 dependencies = [
  "serde_json",
  "solidcraft-engine",
@@ -4384,7 +4390,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-render"
-version = "0.22.1"
+version = "0.29.0"
 dependencies = [
  "image",
  "moxcms",
@@ -4398,25 +4404,27 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-sketch"
-version = "0.22.1"
+version = "0.29.0"
 dependencies = [
+ "harfrust",
  "serde",
  "serde_json",
  "solidcraft-geom",
  "thiserror 2.0.21",
  "ttf-parser",
+ "unicode-bidi",
 ]
 
 [[package]]
 name = "solidcraft-space-mouse"
-version = "0.22.1"
+version = "0.29.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "solidcraft-ui-egui"
-version = "0.22.1"
+version = "0.29.0"
 dependencies = [
  "arboard",
  "egui",
@@ -4435,9 +4443,11 @@ dependencies = [
  "solidcraft-gpu",
  "solidcraft-space-mouse",
  "syn 2.0.119",
+ "sys-locale",
  "tiny-skia",
  "toml",
  "ttf-parser",
+ "unicode-bidi",
  "web-time",
  "winreg",
  "zip",
@@ -4445,12 +4455,13 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-web"
-version = "0.22.1"
+version = "0.29.0"
 dependencies = [
  "eframe",
  "egui",
  "js-sys",
  "log",
+ "percent-encoding",
  "serde_json",
  "solidcraft-engine",
  "solidcraft-ui-egui",
@@ -4546,6 +4557,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "sys-locale"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8eab9a99a024a169fe8a903cf9d4a3b3601109bcc13bd9e3c6fff259138626c4"
+dependencies = [
+ "js-sys",
+ "libc",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -4913,9 +4936,9 @@ dependencies = [
 
 [[package]]
 name = "typed-path"
-version = "0.12.3"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e28f89b80c87b8fb0cf04ab448d5dd0dd0ade2f8891bae878de66a75a28600e"
+checksum = "9ce898823d8cd0f028662d2f349694b1af0a5cc9be83f1d213a00d3147445e1e"
 
 [[package]]
 name = "typeid"
@@ -4945,6 +4968,12 @@ name = "unarray"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eaea85b334db583fe3274d12b4cd1880032beab409c0d774be044d4480ab9a94"
+
+[[package]]
+name = "unicode-bidi"
+version = "0.3.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5"
 
 [[package]]
 name = "unicode-general-category"
@@ -5346,9 +5375,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b"
+checksum = "58ec80e73fd8baf57bf0d9615554c75348bda990d6d5bbeab964dd068319fecb"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -5829,8 +5858,6 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 [[package]]
 name = "winit"
 version = "0.30.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a6755fa58a9f8350bd1e472d4c3fcc25f824ec358933bba33306d0b63df5978d"
 dependencies = [
  "ahash",
  "android-activity",
@@ -5983,12 +6010,15 @@ checksum = "e450f9b2ed1dff33c94c12589a87338689467b9c4f5d8a5710bd09a847d2c8a7"
 
 [[package]]
 name = "xtask"
-version = "0.22.1"
+version = "0.29.0"
 dependencies = [
  "proc-macro2",
+ "serde",
  "serde_json",
  "sha2 0.10.9",
  "syn 2.0.119",
+ "toml",
+ "zip",
 ]
 
 [[package]]
@@ -6278,16 +6308,18 @@ dependencies = [
 
 [[package]]
 name = "zip"
-version = "9.0.4"
+version = "9.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a954114b47a54df49f83d2722814e86b23d4bb1b54a1b90fb7d92b41619ddc22"
+checksum = "1156b39d142a34b999c2310a50455e0cb3760bf7efad0122f796d813bee26ccb"
 dependencies = [
  "crc32fast",
  "flate2",
+ "getrandom 0.4.3",
  "indexmap",
  "memchr",
  "nix 0.31.3",
  "typed-path",
+ "windows-sys 0.61.2",
  "zopfli",
 ]
 

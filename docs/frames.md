@@ -12,7 +12,7 @@ members and their profiles. Corners, trims, end caps, gussets, welds and the cut
 2. **Choose a profile**: a built-in one from its dimensions (below), or your own drawn in a sketch
    (a vendor's extrusion: insert their DXF with `sketch.insert_dxf`). A profile sketch's origin is
    the point that sits on each line, and its x and y are the profile's.
-3. **Add members**: **Frame Member** (MODEL › CREATE, `frame.member`) makes one body per line,
+3. **Add members**: **Frame Member** (WELDMENTS › CREATE, `frame.member`) makes one body per line,
    square to it, from its start to its end. Repeat with another profile for the next group of
    lines.
 
@@ -23,6 +23,10 @@ members and their profiles. Corners, trims, end caps, gussets, welds and the cut
 
 Members are ordinary bodies: mirror, pattern, move, drill and combine them with the usual
 commands. Where members meet they overlap until corner treatments land.
+
+The **Weldments** ribbon tab gathers the frame commands: New Sketch, Frame Member and
+Parameters. Like Sheet Metal it is always there, and it selects itself when a frame member is
+the selected body (or the last body of the active component).
 
 ## The Frame Member dialog
 

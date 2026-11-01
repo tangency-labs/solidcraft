@@ -143,16 +143,12 @@ fn unique_name(base: &str, used: &mut BTreeSet<String>) -> Result<String> {
         used.insert(base.to_string());
         return Ok(base.to_string());
     }
-    for index in 1..=MAX_RECORDS {
-        let name = if index == 1 { format!("{base} (copy)") } else { format!("{base} (copy {index})") };
-        if name.len() > MAX_NAME {
-            return Err(invalid("copied assembly name is too long"));
-        }
-        if used.insert(name.clone()) {
-            return Ok(name);
-        }
+    let name = solidcraft_doc::copy_name(base, |n| used.contains(n));
+    if name.len() > MAX_NAME {
+        return Err(invalid("copied assembly name is too long"));
     }
-    Err(invalid("could not allocate a unique assembly name"))
+    used.insert(name.clone());
+    Ok(name)
 }
 
 fn next_id(id: &mut u64) -> Result<u64> {
@@ -271,6 +267,17 @@ pub(super) fn clone_assembly(
     features: &BTreeMap<u64, u64>,
     bodies: &BTreeMap<String, String>,
 ) -> Result<Vec<String>> {
+    clone_assembly_with_joint_ids(doc, source, occurrences, features, bodies).map(|(messages, _)| messages)
+}
+
+/// The copied joint identity map is also needed when extracting saved timeline folders.
+pub(super) fn clone_assembly_with_joint_ids(
+    doc: &mut Document,
+    source: &Document,
+    occurrences: &BTreeMap<u64, u64>,
+    features: &BTreeMap<u64, u64>,
+    bodies: &BTreeMap<String, String>,
+) -> Result<(Vec<String>, BTreeMap<u64, u64>)> {
     budget(&source.assembly)?;
     budget(&doc.assembly)?;
     validate_map(occurrences)?;
@@ -423,7 +430,7 @@ pub(super) fn clone_assembly(
     budget(&a)?;
     doc.next_id = item_id.checked_add(1).ok_or_else(|| invalid("assembly identifier space is exhausted"))?;
     doc.assembly = a;
-    Ok(messages)
+    Ok((messages, joints))
 }
 
 #[cfg(test)]

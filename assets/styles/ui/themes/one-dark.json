@@ -1,4 +1,6 @@
 {
+  "order": 130,
+  "provenance": "Original SolidCraft mapping of Atom One Dark (MIT palette)",
   "base": "dark",
   "colors": {
     "accent": "#61afef",
@@ -50,8 +52,8 @@
     "dialog_footer": "#2f343e",
     "dialog_label": "#b4bbc8",
     "dialog_rule": "#353b47",
-    "dimension": "#abb2bf",
-    "dimension_driven": "#7f848e",
+    "dimension": "#56b6c2",
+    "dimension_driven": "#3f8590",
     "error": "#e06c75",
     "field": "#1e2227",
     "form_accent": "#d283e9",
@@ -65,11 +67,6 @@
     "form_success": "#8fdb9a",
     "form_success_fill": "#2c4a33",
     "form_tab_ink": "#c97fdf",
-    "gizmo": [
-      "#e06c75",
-      "#98c379",
-      "#61afef"
-    ],
     "glyph_bg": "#282c34",
     "glyph_edge": "#f57f87",
     "glyph_text": "#f57f87",
@@ -168,6 +165,7 @@
     "sketch_centerline": "#d19a66",
     "sketch_construction": "#d19a66",
     "sketch_fixed": "#abb2bf",
+    "sketch_halo": "#181a1f",
     "sketch_ink": "#98c379",
     "sketch_locked": "#98c379",
     "sketch_lost": "#e06c75",
@@ -188,11 +186,6 @@
     "timeline_item_error": "#5c343d",
     "timeline_marker": "#abb2bf",
     "toolbar": "#21252b",
-    "triad": [
-      "#e06c75",
-      "#98c379",
-      "#61afef"
-    ],
     "viewport_bottom": "#282c34",
     "viewport_top": "#282c34",
     "warning": "#e5c07b"

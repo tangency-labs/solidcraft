@@ -3,6 +3,7 @@
 //! or a session: each agent found is asked for `--version` (with a time limit), and whether it
 //! looks logged in comes only from whether its own credentials file exists.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -162,7 +163,7 @@ pub enum Login {
 impl Login {
     pub fn id(self) -> &'static str {
         match self {
-            Login::LooksLoggedIn => "signed_in",
+            Login::LooksLoggedIn => "login_found",
             Login::KeyInEnvironment => "key",
             Login::NotLoggedIn => "signed_out",
             Login::Unknown => "unknown",
@@ -186,6 +187,11 @@ pub struct Found {
     pub argv: Vec<String>,
     pub version: Option<String>,
     pub login: Login,
+    /// Why its program doesn't start (#9034): asked for `--version`, it failed without printing
+    /// one, as the `opencode.exe` of an npm install whose setup script didn't run does on Windows.
+    pub problem: Option<String>,
+    /// Its one-line install hint, to reinstall it with.
+    pub install: &'static str,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -200,13 +206,20 @@ fn home() -> Option<PathBuf> {
     std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from).filter(|p| p.is_absolute())
 }
 
-/// PATH, then the usual places npm, Homebrew, nvm, Volta, bun, pipx and Grok put commands.
+/// PATH, then the usual places npm, Homebrew, nvm, Volta, bun, pipx and Grok put commands, and on
+/// Windows Node's own install folders: a launcher can start SolidCraft with a PATH that lacks
+/// them, and an npm agent's `.cmd` shim then can't find `node` (#9297).
 pub fn search_dirs() -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
-    if let Some(prefix) = std::env::var_os("NPM_CONFIG_PREFIX").map(PathBuf::from) {
-        dirs.push(if cfg!(windows) { prefix.clone() } else { prefix.join("bin") });
+    search_dirs_in(&|name| std::env::var_os(name), cfg!(windows))
+}
+
+/// [`search_dirs`] in the environment `var` reads, on Windows or not.
+fn search_dirs_in(var: &dyn Fn(&str) -> Option<OsString>, windows: bool) -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = var("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default();
+    if let Some(prefix) = var("NPM_CONFIG_PREFIX").map(PathBuf::from) {
+        dirs.push(if windows { prefix.clone() } else { prefix.join("bin") });
     }
-    if let Some(h) = home() {
+    if let Some(h) = var(if windows { "USERPROFILE" } else { "HOME" }).map(PathBuf::from).filter(|p| p.is_absolute()) {
         for d in [".local/bin", ".npm-global/bin", ".npm-packages/bin", ".volta/bin", ".bun/bin", ".cargo/bin", ".grok/bin", "bin"] {
             dirs.push(h.join(d));
         }
@@ -217,10 +230,15 @@ pub fn search_dirs() -> Vec<PathBuf> {
             dirs.extend(v.into_iter().rev());
         }
     }
-    if cfg!(windows) {
-        if let Some(a) = std::env::var_os("APPDATA") {
+    if windows {
+        if let Some(a) = var("APPDATA") {
             dirs.push(PathBuf::from(a).join("npm"));
         }
+        // Node's installers (64-bit and 32-bit), and nvm-windows' link to the version in use.
+        for program_files in ["ProgramFiles", "ProgramFiles(x86)"] {
+            dirs.extend(var(program_files).map(|d| PathBuf::from(d).join("nodejs")));
+        }
+        dirs.extend(var("NVM_SYMLINK").map(PathBuf::from));
     } else {
         for d in ["/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin", "/usr/bin"] {
             dirs.push(PathBuf::from(d));
@@ -275,8 +293,24 @@ pub(super) fn command_for(program: &Path) -> Command {
     cmd
 }
 
-/// `program --version`'s first line, or `None` after `limit` (the probe is then stopped).
-fn version(program: &Path, limit: Duration) -> Option<String> {
+/// What `program --version` showed.
+#[derive(Debug, Default, PartialEq)]
+struct Probe {
+    /// Its version number, from the first line it printed.
+    version: Option<String>,
+    /// Why it can't start: the system refused to start it, or it failed and printed nothing but
+    /// an error. A probe that runs out of time says nothing either way (a slow machine).
+    problem: Option<String>,
+}
+
+/// How long an agent is given to answer `--version`.
+const PROBE_LIMIT: Duration = Duration::from_secs(3);
+
+/// The longest reason kept from a failed probe.
+const PROBLEM_CHARS: usize = 300;
+
+/// Ask `program --version`; it is stopped after `limit`.
+fn probe(program: &Path, limit: Duration) -> Probe {
     let mut cmd = command_for(program);
     #[cfg(windows)]
     {
@@ -284,23 +318,50 @@ fn version(program: &Path, limit: Duration) -> Option<String> {
         // CREATE_NO_WINDOW: probing a console agent doesn't flash a terminal window.
         cmd.creation_flags(0x0800_0000);
     }
-    let mut child = cmd.arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let mut child = match cmd.arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
+        Ok(child) => child,
+        // Windows: "not a valid Win32 application" (193), "not compatible with the version of
+        // Windows you're running" (216); elsewhere: not allowed to run it, an unknown format.
+        // Windows leaves the program's place in its message as `%1`.
+        Err(e) => return Probe { version: None, problem: Some(cut(&e.to_string().replace("%1", &program.display().to_string()))) },
+    };
     let start = Instant::now();
-    loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(status)) => break status,
             Ok(None) if start.elapsed() < limit => std::thread::sleep(Duration::from_millis(20)),
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return None;
+                return Probe::default();
             }
         }
+    };
+    let out = read_capped(child.stdout.take());
+    if let Some(line) = out.lines().map(str::trim).find(|l| !l.is_empty()) {
+        return Probe { version: Some(version_of(line)), problem: None };
     }
-    let mut out = String::new();
-    std::io::Read::read_to_string(&mut child.stdout.take()?, &mut out).ok()?;
-    let line = out.lines().map(str::trim).find(|l| !l.is_empty())?;
-    Some(version_of(line))
+    if status.success() {
+        return Probe::default();
+    }
+    // Through a `.cmd` shim, Windows' own refusal arrives on stderr with a failing exit code.
+    let err = read_capped(child.stderr.take());
+    let reason = err.lines().map(str::trim).find(|l| !l.is_empty()).map(str::to_string).unwrap_or_else(|| status.to_string());
+    Probe { version: None, problem: Some(cut(&reason)) }
+}
+
+/// What a finished probe wrote on a pipe, up to 64 KiB.
+fn read_capped(pipe: Option<impl std::io::Read>) -> String {
+    let mut bytes = Vec::new();
+    if let Some(p) = pipe {
+        let _ = std::io::Read::read_to_end(&mut p.take(64 * 1024), &mut bytes);
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// `text`, cut short.
+fn cut(text: &str) -> String {
+    text.chars().take(PROBLEM_CHARS).collect()
 }
 
 /// The version number in a `--version` line (`codex-cli 0.162.1`, `2.1.295 (Claude Code)`,
@@ -329,10 +390,10 @@ fn login_of(k: &Known, home: Option<&Path>) -> Login {
 
 /// Look for every known agent. Blocking (each probe has a time limit): run it off the UI thread.
 pub fn detect() -> Detection {
-    detect_in(&search_dirs(), home().as_deref())
+    detect_in(&search_dirs(), home().as_deref(), PROBE_LIMIT)
 }
 
-fn detect_in(dirs: &[PathBuf], home: Option<&Path>) -> Detection {
+fn detect_in(dirs: &[PathBuf], home: Option<&Path>, limit: Duration) -> Detection {
     let t0 = Instant::now();
     let mut d = Detection::default();
     for k in KNOWN {
@@ -345,16 +406,99 @@ fn detect_in(dirs: &[PathBuf], home: Option<&Path>) -> Detection {
         let login = login_of(k, home);
         let mut argv = vec![path.to_string_lossy().into_owned()];
         argv.extend(k.args.iter().map(|a| a.to_string()));
-        let version = if k.reports_version { version(&path, Duration::from_secs(3)) } else { None };
-        d.found.push(Found { id: k.id, name: k.name, version, argv, login });
+        let Probe { version, problem } = if k.reports_version { probe(&path, limit) } else { Probe::default() };
+        d.found.push(Found { id: k.id, name: k.name, version, argv, login, problem, install: k.install });
     }
     d.took_ms = u64::try_from(t0.elapsed().as_millis()).unwrap_or(u64::MAX);
     d
 }
 
+/// Query only the endpoint's origin; OpenAI-compatible paths such as `/v1` are unrelated.
+#[cfg(not(target_arch = "wasm32"))]
+fn api_origin(base_url: &str) -> Option<String> {
+    let (scheme, rest) = base_url.trim().split_once("://")?;
+    if !matches!(scheme, "http" | "https") {
+        return None;
+    }
+    let authority = rest.split(['/', '?', '#']).next()?;
+    if authority.is_empty() || authority.contains(['@', ' ']) || authority.len() > 2048 {
+        return None;
+    }
+    Some(format!("{scheme}://{authority}"))
+}
+
+/// Blocking, best-effort Ollama probe. Call only on a background thread, without API keys.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn ollama_tools(http: &super::backend::HttpFn, base_url: &str, model: &str, known_ollama: bool) -> Option<bool> {
+    use super::backend::HttpRequest;
+    let origin = api_origin(base_url)?;
+    let request = |method, path: &str, body| {
+        let (status, bytes) = http(&HttpRequest {
+            method,
+            url: format!("{origin}/api/{path}"),
+            headers: if method == "POST" { vec![("Content-Type".into(), "application/json".into())] } else { Vec::new() },
+            body,
+            timeout_s: 5,
+        })
+        .ok()?;
+        if !(200..300).contains(&status) || bytes.len() > 4 * 1024 * 1024 {
+            return None;
+        }
+        serde_json::from_slice::<serde_json::Value>(&bytes).ok()
+    };
+    if !known_ollama {
+        let version = request("GET", "version", None)?;
+        version.get("version")?.as_str()?;
+    }
+    let body = serde_json::to_vec(&serde_json::json!({"model": model})).ok()?;
+    tools_capability(&request("POST", "show", Some(body))?)
+}
+
+/// Tool support is unknown unless Ollama returns a capabilities list of strings.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn tools_capability(value: &serde_json::Value) -> Option<bool> {
+    let capabilities = value.get("capabilities")?.as_array()?;
+    if capabilities.iter().any(|capability| !capability.is_string()) {
+        return None;
+    }
+    Some(capabilities.iter().any(|capability| capability.as_str() == Some("tools")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ollama_capabilities_distinguish_tools_chat_and_unknown() {
+        use serde_json::json;
+        assert_eq!(tools_capability(&json!({"capabilities": ["completion", "tools"]})), Some(true));
+        assert_eq!(tools_capability(&json!({"capabilities": ["completion"]})), Some(false));
+        assert_eq!(tools_capability(&json!({"capabilities": []})), Some(false));
+        for value in [json!({}), json!({"capabilities": null}), json!({"capabilities": [false]})] {
+            assert_eq!(tools_capability(&value), None);
+        }
+        assert_eq!(api_origin("http://[::1]:11434/proxy/v1/").as_deref(), Some("http://[::1]:11434"));
+        assert_eq!(api_origin("file:///tmp/model"), None);
+        let http: super::super::backend::HttpFn = std::sync::Arc::new(|request| {
+            assert_eq!(request.timeout_s, 5);
+            match request.method {
+                "GET" => {
+                    assert_eq!(request.url, "http://localhost:11434/api/version");
+                    Ok((200, br#"{"version":"0.0"}"#.to_vec()))
+                }
+                "POST" => {
+                    assert_eq!(request.url, "http://localhost:11434/api/show");
+                    assert_eq!(serde_json::from_slice::<serde_json::Value>(request.body.as_ref().unwrap()).unwrap(), json!({"model":"chat:4b"}));
+                    Ok((200, br#"{"capabilities":["completion"]}"#.to_vec()))
+                }
+                _ => Err("unexpected HTTP method".into()),
+            }
+        });
+        assert_eq!(ollama_tools(&http, "http://localhost:11434/custom/v1", "chat:4b", false), Some(false));
+        assert_eq!(ollama_tools(&http, "http://localhost:11434/v1", "chat:4b", true), Some(false));
+        let unavailable: super::super::backend::HttpFn = std::sync::Arc::new(|_| Err("unavailable".into()));
+        assert_eq!(ollama_tools(&unavailable, "http://localhost:11434/v1", "chat:4b", false), None);
+    }
 
     #[test]
     fn a_program_is_found_in_the_first_folder_that_has_it() {
@@ -448,7 +592,7 @@ mod tests {
         };
         let ids = |d: &Detection| (d.found.iter().map(|f| f.id).collect::<Vec<_>>(), d.missing.iter().map(|m| m.id).collect::<Vec<_>>());
 
-        let none = detect_in(std::slice::from_ref(&root), None);
+        let none = detect_in(std::slice::from_ref(&root), None, PROBE_LIMIT);
         let (found, missing) = ids(&none);
         assert!(found.is_empty());
         assert!(missing.contains(&"antigravity") && !missing.contains(&"gemini"), "{missing:?}");
@@ -458,7 +602,7 @@ mod tests {
         run("gemini", "echo gemini 0.64.0");
         // A server that would take seconds to answer `--version`, which Antigravity is never asked.
         run("agy_acp_server.par", "sleep 30");
-        let both = detect_in(std::slice::from_ref(&root), None);
+        let both = detect_in(std::slice::from_ref(&root), None, PROBE_LIMIT);
         let (found, missing) = ids(&both);
         assert_eq!(found, ["antigravity", "gemini"]);
         assert!(!missing.contains(&"antigravity") && !missing.contains(&"gemini"), "{missing:?}");
@@ -477,6 +621,109 @@ mod tests {
         assert_eq!(KNOWN.first().map(|k| k.id), Some("claude"), "the Claude Code adapter is the default");
     }
 
+    /// #9034: npm installed OpenCode without running its setup script, so the `opencode.exe` its
+    /// `.cmd` shim starts is one Windows refuses. It is still found (its shim is there), with
+    /// the system's reason and the command to install it again, while an agent that answers
+    /// `--version`, or ends without a word but successfully, has no problem.
+    #[test]
+    fn an_agent_that_does_not_start_is_found_with_the_reason() {
+        let root = std::env::temp_dir().join(format!("sc-agent-broken-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        #[cfg(windows)]
+        {
+            // npm's layout: the shim in the prefix, the program under node_modules.
+            let bin = root.join("node_modules").join("opencode-ai").join("bin");
+            std::fs::create_dir_all(&bin).unwrap();
+            std::fs::write(bin.join("opencode.exe"), "not a program for this computer").unwrap();
+            std::fs::write(root.join("opencode.cmd"), "@ECHO off\r\n\"%~dp0\\node_modules\\opencode-ai\\bin\\opencode.exe\" %*\r\n").unwrap();
+            // Started directly, the system itself refuses it.
+            std::fs::write(root.join("copilot.exe"), "not a program either").unwrap();
+            std::fs::write(root.join("grok.cmd"), "@echo off\r\nexit /b 3\r\n").unwrap();
+            std::fs::write(root.join("qwen.cmd"), "@echo off\r\necho 0.1.2\r\n").unwrap();
+            std::fs::write(root.join("goose.cmd"), "@echo off\r\n").unwrap();
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let run = |name: &str, body: &str| {
+                let path = root.join(name);
+                std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            };
+            run("opencode", "echo 'cannot execute binary file: Exec format error' >&2; exit 126");
+            // Not allowed to run: the system refuses it.
+            std::fs::write(root.join("copilot"), "not a program").unwrap();
+            std::fs::set_permissions(root.join("copilot"), std::fs::Permissions::from_mode(0o644)).unwrap();
+            run("grok", "exit 3");
+            run("qwen", "echo 0.1.2");
+            run("goose", "true");
+        }
+        // A generous limit: on a loaded machine `cmd` alone can take longer than three seconds to
+        // start, and a probe that runs out of time reports nothing.
+        let d = detect_in(std::slice::from_ref(&root), None, Duration::from_secs(60));
+        let found = |id: &str| d.found.iter().find(|f| f.id == id).unwrap_or_else(|| panic!("{id} not found: {:?}", d.found));
+
+        let opencode = found("opencode");
+        assert_eq!(opencode.version, None);
+        assert!(opencode.problem.as_deref().is_some_and(|p| !p.trim().is_empty()), "{opencode:?}");
+        assert_eq!(opencode.install, "npm install -g opencode-ai");
+        assert_eq!(opencode.argv.get(1).map(String::as_str), Some("acp"), "still offered with its ACP arguments");
+        let copilot = found("copilot");
+        assert!(copilot.problem.as_deref().is_some_and(|p| !p.trim().is_empty()), "{copilot:?}");
+        #[cfg(windows)]
+        assert!(
+            copilot.problem.as_deref().is_some_and(|p| (p.contains("216") || p.contains("193")) && p.contains("copilot.exe") && !p.contains("%1")),
+            "the system's reason, naming the program: {copilot:?}"
+        );
+        // Silent but failing: the exit status is the reason.
+        let grok = found("grok");
+        assert!(grok.problem.as_deref().is_some_and(|p| p.contains('3')), "{grok:?}");
+
+        let qwen = found("qwen");
+        assert_eq!((qwen.version.as_deref(), qwen.problem.as_deref()), (Some("0.1.2"), None));
+        let goose = found("goose");
+        assert_eq!((goose.version.as_deref(), goose.problem.as_deref()), (None, None));
+        assert!(d.found.iter().all(|f| f.problem.as_ref().is_none_or(|p| p.chars().count() <= PROBLEM_CHARS)));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A launcher can start SolidCraft with a PATH that lacks Node (#9297). On Windows, Node's
+    /// install folders are searched after it, so `node` is found, and an agent started with these
+    /// folders as its PATH (`command_for`) finds it too.
+    #[test]
+    fn on_windows_nodes_install_folders_are_searched() {
+        let root = std::env::temp_dir().join(format!("sc-agent-node-{}", std::process::id()));
+        let system = root.join("Windows");
+        let program_files = root.join("Program Files");
+        let x86 = root.join("Program Files (x86)");
+        let nvm = root.join("nvm4w").join("nodejs");
+        let env = |name: &str| -> Option<OsString> {
+            match name {
+                "PATH" => Some(system.clone().into()),
+                "ProgramFiles" => Some(program_files.clone().into()),
+                "ProgramFiles(x86)" => Some(x86.clone().into()),
+                "NVM_SYMLINK" => Some(nvm.clone().into()),
+                _ => None,
+            }
+        };
+        let dirs = search_dirs_in(&env, true);
+        assert_eq!(dirs.first(), Some(&system), "the PATH SolidCraft was given comes first");
+        for node in [program_files.join("nodejs"), x86.join("nodejs"), nvm.clone()] {
+            assert!(dirs.contains(&node), "{} in {dirs:?}", node.display());
+        }
+        std::fs::create_dir_all(program_files.join("nodejs")).unwrap();
+        for name in ["node.exe", "node"] {
+            std::fs::write(program_files.join("nodejs").join(name), "").unwrap();
+        }
+        assert_eq!(find_in("node", std::slice::from_ref(&system)), None, "not on the PATH the launcher gave");
+        assert!(find_in("node", &dirs).is_some_and(|p| p.starts_with(program_files.join("nodejs"))), "{dirs:?}");
+        // Nothing is made up where the variables are missing, and elsewhere they mean nothing.
+        assert_eq!(search_dirs_in(&|name| (name == "PATH").then(|| system.clone().into()), true), std::slice::from_ref(&system));
+        assert!(!search_dirs_in(&env, false).iter().any(|d| d.ends_with("nodejs")));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// Finder's PATH lacks user-installed runtimes. Discovery, the version probe and a live
     /// agent must all work with an env shebang whose interpreter is in ~/.local/bin.
     #[test]
@@ -491,7 +738,7 @@ mod tests {
             let agent = find_in("solidcraft-test-agent", &search_dirs()).unwrap();
             // Generous limits: both answer at once, but a whole test run on a loaded machine
             // can keep `env`, the shell and the script from starting within 3 s.
-            assert_eq!(version(&agent, Duration::from_secs(20)).as_deref(), Some("1.2.3"));
+            assert_eq!(probe(&agent, Duration::from_secs(20)).version.as_deref(), Some("1.2.3"));
             let mut p = AgentProcess::spawn(&[agent.to_string_lossy().into_owned()], &root, &[], || {}).unwrap();
             let message = serde_json::json!({"id": 1, "method": "initialize"});
             p.send(&message);

@@ -106,11 +106,16 @@ pub struct AgentConfig {
     /// API: the endpoint (`…/v1`) and model.
     pub base_url: String,
     pub model: String,
+    /// Added with the Ollama preset (even if its display name changes).
+    pub ollama: bool,
     /// API: a key is stored for it in the system keychain.
     pub key: bool,
     /// API: how long one model request may take, in seconds (clamped to
     /// [`MIN_REQUEST_TIMEOUT_S`]..=[`MAX_REQUEST_TIMEOUT_S`] where it is used).
     pub request_timeout_s: u64,
+    /// API: the reasoning effort to send as `reasoning_effort`; empty sends nothing and the
+    /// provider's own default applies (trimmed and length-capped by [`reasoning_effort`]).
+    pub reasoning_effort: String,
 }
 
 impl Default for AgentConfig {
@@ -122,8 +127,10 @@ impl Default for AgentConfig {
             command: String::new(),
             base_url: String::new(),
             model: String::new(),
+            ollama: false,
             key: false,
             request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
+            reasoning_effort: String::new(),
         }
     }
 }
@@ -145,6 +152,15 @@ pub fn request_timeout_s(secs: f64) -> u64 {
     secs.round().clamp(MIN_REQUEST_TIMEOUT_S as f64, MAX_REQUEST_TIMEOUT_S as f64) as u64
 }
 
+/// The longest reasoning effort an endpoint can be given (no provider names one near this).
+pub const MAX_REASONING_EFFORT_LEN: usize = 64;
+
+/// A reasoning effort as stored: trimmed, and capped so a hand-edited preferences file or the
+/// control channel cannot carry an absurd value into every request. Empty means "send nothing".
+pub fn reasoning_effort(raw: &str) -> String {
+    raw.trim().chars().take(MAX_REASONING_EFFORT_LEN).collect()
+}
+
 /// An agent as the picker and the switcher show it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Entry {
@@ -154,7 +170,8 @@ pub struct Entry {
     /// ACP: what to start.
     pub argv: Vec<String>,
     pub version: Option<String>,
-    /// `signed_in`, `key`, `signed_out`, `unknown` (found agents), or empty.
+    /// `login_found`, `key`, `signed_out`, `unknown` from discovery, `signed_in` after a
+    /// successful connection, or empty for an untested custom agent.
     pub login: &'static str,
     /// Found installed (not added by the user).
     pub found: bool,
@@ -163,6 +180,12 @@ pub struct Entry {
     pub key: bool,
     /// API: seconds one model request may take (in range).
     pub request_timeout_s: u64,
+    /// API: the reasoning effort to send, empty for none (trimmed, in length).
+    pub reasoning_effort: String,
+    /// Found installed, but its program didn't start when asked its version: why (#9034).
+    pub problem: Option<String>,
+    /// Found installed: the command that installs it again.
+    pub install: &'static str,
 }
 
 impl Entry {
@@ -179,17 +202,31 @@ impl Entry {
             model: c.model.clone(),
             key: c.key,
             request_timeout_s: c.request_timeout_s.clamp(MIN_REQUEST_TIMEOUT_S, MAX_REQUEST_TIMEOUT_S),
+            reasoning_effort: reasoning_effort(&c.reasoning_effort),
+            problem: None,
+            install: "",
         }
     }
-    /// A short line under the name: the version, the model, or the command.
+    /// A short line under the name: the version, the model, the command, or why it can't start.
     pub fn detail(&self) -> String {
         match self.kind {
             Kind::Api | Kind::Anthropic => format!("{} · {}", self.model, self.base_url),
-            Kind::Acp => match &self.version {
-                Some(v) => v.clone(),
-                None => super::panel::short_command(&self.argv.join(" ")),
+            Kind::Acp => match (&self.problem, &self.version) {
+                (Some(p), _) => crate::i18n::format("ui.agent_chat_cannot_start", &[("error", p)]),
+                (None, Some(v)) => v.clone(),
+                (None, None) => super::panel::short_command(&self.argv.join(" ")),
             },
         }
+    }
+    /// What to tell someone starting an agent that was found but didn't start (#9034): the reason,
+    /// and how to install it again. `None` when nothing was seen wrong.
+    pub fn problem_hint(&self) -> Option<String> {
+        let problem = self.problem.as_deref()?;
+        let program = self.argv.first().map(String::as_str).unwrap_or_default();
+        Some(crate::i18n::format(
+            "ui.agent_chat_reinstall",
+            &[("agent", &self.name), ("program", program), ("error", problem), ("install", self.install)],
+        ))
     }
 }
 
@@ -210,9 +247,19 @@ pub fn entries(app: &crate::SolveApp) -> Vec<Entry> {
             model: String::new(),
             key: false,
             request_timeout_s: DEFAULT_REQUEST_TIMEOUT_S,
+            reasoning_effort: String::new(),
+            problem: f.problem.clone(),
+            install: f.install,
         }));
     }
     out.extend(app.preferences.agents.iter().map(Entry::from_config));
+    for entry in &mut out {
+        if entry.kind == Kind::Acp
+            && let Some(signed_in) = app.agent_chat.login_results.get(&entry.id)
+        {
+            entry.login = if *signed_in { "signed_in" } else { "signed_out" };
+        }
+    }
     out
 }
 
@@ -258,6 +305,7 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "LM Studio", base_url: "http://localhost:1234/v1" },
     ApiPreset { name: "OpenAI", base_url: "https://api.openai.com/v1" },
     ApiPreset { name: "Mammouth AI", base_url: "https://api.mammouth.ai/v1" },
+    ApiPreset { name: "OpenCode Go", base_url: "https://opencode.ai/zen/go/v1" },
 ];
 
 /// Anthropic-compatible endpoints people use. The base URL is the one their documentation calls
@@ -369,5 +417,24 @@ mod tests {
         let saved = AgentConfig { id: "api-3".into(), kind: Kind::Api, request_timeout_s: 1200, ..Default::default() };
         let back: AgentConfig = serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
         assert_eq!(back, saved);
+    }
+
+    #[test]
+    fn reasoning_effort_defaults_to_empty_and_is_trimmed_and_capped() {
+        assert!(AgentConfig::default().reasoning_effort.is_empty());
+        // An older preferences file has no effort: empty, so nothing is sent.
+        let old: AgentConfig = serde_json::from_str(r#"{"id":"api-1","kind":"api","base_url":"http://localhost:11434/v1","model":"m"}"#).unwrap();
+        assert!(old.reasoning_effort.is_empty());
+        assert_eq!(reasoning_effort("  high "), "high");
+        assert!(reasoning_effort("   ").is_empty());
+        let long = reasoning_effort(&"x".repeat(500));
+        assert_eq!(long.chars().count(), MAX_REASONING_EFFORT_LEN);
+        let saved = AgentConfig { id: "api-2".into(), kind: Kind::Api, reasoning_effort: "max".into(), ..Default::default() };
+        let back: AgentConfig = serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
+        assert_eq!(back, saved);
+        // The entry carries it trimmed; a hand-edited over-long one is capped where used.
+        assert_eq!(Entry::from_config(&saved).reasoning_effort, "max");
+        let wild: AgentConfig = serde_json::from_str(&format!(r#"{{"id":"api-3","kind":"api","reasoning_effort":"{}"}}"#, "y".repeat(500))).unwrap();
+        assert_eq!(Entry::from_config(&wild).reasoning_effort.chars().count(), MAX_REASONING_EFFORT_LEN);
     }
 }

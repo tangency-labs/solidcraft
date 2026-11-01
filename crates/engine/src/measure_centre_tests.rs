@@ -159,6 +159,8 @@ fn two_holes_measure_centre_to_centre_with_min_and_max() {
     // One rim: Ø, R and circumference first-class.
     let r = measure(&mut s, vec![ea]);
     assert!(close(&r["diameter"], 6.0, 1e-9) && close(&r["radius"], 3.0, 1e-9) && close(&r["circumference"], TAU * 3.0, 1e-9), "{r}");
+    // Its length is its circumference, not the length of the polyline drawn for it (#9086).
+    assert!(close(&r["items"][0]["length_mm"], TAU * 3.0, 1e-9), "{r}");
     assert_eq!(r["items"][0]["round"], "circle", "{r}");
 }
 
@@ -259,9 +261,11 @@ fn sketch_circle_arc_and_slot() {
         run(&mut s, "sketch.arc.center_point", json!({"center": [30, 0], "start": [34, 0], "sweep": 90}))["curves"][0].as_str().unwrap().to_string();
     let r = measure(&mut s, vec![json!({"type": "sketch_curve", "id": c})]);
     assert!(close(&r["diameter"], 10.0, 1e-9) && close(&r["radius"], 5.0, 1e-9) && close(&r["circumference"], 10.0 * PI, 1e-9), "{r}");
+    assert!(close(&r["items"][0]["length_mm"], 10.0 * PI, 1e-9), "{r}");
     let r = measure(&mut s, vec![json!({"type": "sketch_curve", "id": a})]);
     assert!(close(&r["radius"], 4.0, 1e-9) && close(&r["diameter"], 8.0, 1e-9), "{r}");
     assert!(close(&r["angle_deg"], 90.0, 1e-9) && close(&r["arc_length"], 2.0 * PI, 1e-9), "{r}");
+    assert!(close(&r["items"][0]["length_mm"], 2.0 * PI, 1e-9), "{r}");
     assert_eq!(r["items"][0]["round"], "arc");
     // Circle to arc: centre to centre.
     let r = measure(&mut s, vec![json!({"type": "sketch_curve", "id": c}), json!({"type": "sketch_curve", "id": a})]);
@@ -315,7 +319,21 @@ fn a_fillet_edge_is_an_arc() {
     let r = measure(&mut s, vec![e]);
     assert!(close(&r["radius"], 5.0, 1e-9) && close(&r["diameter"], 10.0, 1e-9), "{r}");
     assert!(close(&r["angle_deg"], 90.0, 1e-6) && close(&r["arc_length"], 2.5 * PI, 1e-6), "{r}");
+    assert!(close(&r["items"][0]["length_mm"], 2.5 * PI, 1e-6), "{r}");
     assert!(close(&r["center"][0], 35.0, 1e-9) && close(&r["center"][1], 25.0, 1e-9), "{r}");
+}
+
+/// A cylinder's top circle is as long as its circumference, in the same reply: the length
+/// comes from the exact circle, not from the polyline drawn for it, which runs inside it
+/// (#9086, the report's own cylinder).
+#[test]
+fn a_cylinders_top_circle_is_as_long_as_its_circumference() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 20, "base": [40, 10, 0], "operation": "new"}));
+    let e = edge(&s, |p| (p.z - 20.0).abs() < 1e-9 && ((p - Vec3::new(40.0, 10.0, 20.0)).len() - 5.0).abs() < 1e-6);
+    let r = measure(&mut s, vec![e]);
+    assert!(close(&r["circumference"], TAU * 5.0, 1e-9), "{r}");
+    assert!(close(&r["items"][0]["length_mm"], TAU * 5.0, 1e-9), "{r}");
 }
 
 /// A plate with holes through STEP: the holes come back as cylinders, and measure the same.
@@ -422,4 +440,109 @@ fn box_edges_measure_by_point_only() {
     for pick in [json!({"type": "edge", "body": "Missing", "point": [5, 0, 0]}), json!({"type": "edge", "body": "Box", "point": [100, 100, 100]})] {
         assert!(s.execute("inspect.measure", &json!({"items": [pick]})).is_err());
     }
+}
+
+fn open_revolve(s: &mut Session) {
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(s, "sketch.line", json!({"points": [[30, 0], [30, 40]], "ids": ["side"]}));
+    run(s, "sketch.finish", json!({}));
+    run(s, "surface.revolve", json!({"sketch": "Profile", "curves": ["side"], "axis": "y", "angle": "270 deg", "body_name": "OpenTube"}));
+}
+
+#[test]
+fn open_surface_measurements_have_no_volume_properties() {
+    let mut s = Session::default();
+    open_revolve(&mut s);
+    let r = run(&mut s, "inspect.measure", json!({"bodies": ["OpenTube"]}));
+    let b = &r["bodies"][0];
+    assert_eq!(b["closed"], false);
+    for key in ["volume_mm3", "center_of_mass", "density_g_cm3", "mass_g"] {
+        assert!(b[key].is_null(), "{key}: {b}");
+    }
+    assert!(b["area_mm2"].as_f64().unwrap() > 0.0);
+    assert!(b["bbox"].is_object() && b["faces"].as_u64().unwrap() > 0);
+    assert_eq!(r["total"]["open_bodies_skipped"], 1);
+    assert_eq!(r["total"]["volume_mm3"], 0.0);
+    assert_eq!(r["total"]["mass_g"], 0.0);
+    let document = run(&mut s, "document.inspect", json!({"measure": true}));
+    assert_eq!(document["bodies"][0]["closed"], false);
+    assert!(document["bodies"][0]["center_of_mass"].is_null());
+    let picked = run(&mut s, "inspect.measure", json!({"items": [{"type": "body", "name": "OpenTube"}]}));
+    assert_eq!(picked["items"][0]["closed"], false);
+    assert!(picked["items"][0]["volume_mm3"].is_null());
+    let props = run(&mut s, "component.properties", json!({"component": "root"}));
+    assert_eq!(props["total"]["open_bodies_skipped"], 1);
+    assert!(props["bodies"][0]["mass_g"].is_null());
+    assert!(props["total"]["center_of_mass"].is_null());
+}
+
+#[test]
+fn volume_totals_skip_open_surfaces_and_keep_closed_box_properties() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30, "body_name": "Box"}));
+    let before = run(&mut s, "inspect.measure", json!({}));
+    let b = &before["bodies"][0];
+    assert_eq!(b["closed"], true);
+    assert!(close(&b["volume_mm3"], 6000.0, 1e-9));
+    assert!(close(&b["mass_g"], 6.0 * s.doc.density("Box"), 1e-9));
+    for (axis, expected) in [5.0, 10.0, 15.0].into_iter().enumerate() {
+        assert!(close(&b["center_of_mass"][axis], expected, 1e-9));
+    }
+    let props_before = run(&mut s, "component.properties", json!({"component": "root"}));
+    open_revolve(&mut s);
+    let after = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(after["body_count"], 2);
+    assert_eq!(after["total"]["open_bodies_skipped"], 1);
+    for key in ["volume_mm3", "mass_g"] {
+        assert_eq!(before["total"][key], after["total"][key]);
+    }
+    assert!(after["total"]["area_mm2"].as_f64().unwrap() > before["total"]["area_mm2"].as_f64().unwrap());
+    let props_after = run(&mut s, "component.properties", json!({"component": "root"}));
+    assert_eq!(props_after["total"]["open_bodies_skipped"], 1);
+    for key in ["volume_mm3", "mass_g", "center_of_mass"] {
+        assert_eq!(props_before["total"][key], props_after["total"][key]);
+    }
+}
+
+/// An ASCII STL of the tetrahedron (0,0,0), (10,0,0), (0,10,0), (0,0,10), outward facing; `open`
+/// leaves its slanted face out.
+fn tetra_stl(open: bool) -> String {
+    let faces: &[[[i32; 3]; 3]] = &[
+        [[0, 0, 0], [0, 10, 0], [10, 0, 0]],
+        [[0, 0, 0], [10, 0, 0], [0, 0, 10]],
+        [[0, 0, 0], [0, 0, 10], [0, 10, 0]],
+        [[10, 0, 0], [0, 10, 0], [0, 0, 10]],
+    ];
+    let mut stl = String::from("solid t\n");
+    for f in &faces[..if open { 3 } else { 4 }] {
+        stl += "facet normal 0 0 0\nouter loop\n";
+        for [x, y, z] in f {
+            stl += &format!("vertex {x} {y} {z}\n");
+        }
+        stl += "endloop\nendfacet\n";
+    }
+    stl + "endsolid t\n"
+}
+
+#[test]
+fn a_watertight_mesh_keeps_its_volume_and_an_open_mesh_has_none() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-measure-open-mesh-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut s = Session::default();
+    for (name, open) in [("Closed", false), ("Open", true)] {
+        let path = dir.join(format!("{name}.stl"));
+        std::fs::write(&path, tetra_stl(open)).unwrap();
+        run(&mut s, "file.insert_mesh", json!({"path": path.to_string_lossy()}));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    let r = run(&mut s, "inspect.measure", json!({}));
+    let bodies = r["bodies"].as_array().unwrap();
+    let by = |n: &str| bodies.iter().find(|b| b["name"] == n).unwrap_or_else(|| panic!("{n}: {r}"));
+    assert_eq!(by("Closed")["closed"], true);
+    assert!(close(&by("Closed")["volume_mm3"], 1000.0 / 6.0, 1e-6), "{r}");
+    assert_eq!(by("Open")["closed"], false);
+    assert!(by("Open")["volume_mm3"].is_null() && by("Open")["mass_g"].is_null(), "{r}");
+    assert_eq!(r["total"]["open_bodies_skipped"], 1);
+    assert!(close(&r["total"]["volume_mm3"], 1000.0 / 6.0, 1e-6), "{r}");
 }

@@ -71,10 +71,11 @@ deployment. The stable Flatpak repository is not automatically updated with nigh
    `Cargo.lock` (it changes only our own crates, never dependency versions, and needs no
    network). Inspect the diff: only `version = ` lines of workspace crates should change.
    SolidCraft does not currently implement `cargo xtask version set`.
-3. Fix the design format number: run `scripts/fold-format-pending.sh`. It moves the pending
-   format changes (`crates/doc/src/format/pending/*.rs`) into the next `crates/doc/src/format/v<N>/`
-   folder, so the release writes and reads that number for good, and does nothing when nothing
-   is pending. Commit the move with the version files. (CONTRIBUTING.md, "Changing the design
+3. Fix the file format numbers: run `scripts/fold-format-pending.sh`. It moves the pending
+   format changes of designs (`crates/doc/src/format/pending/*.rs`) and of drawings
+   (`crates/doc/src/drawing/format/pending/*.rs`) into each one's next `v<N>/` folder, so the
+   release writes and reads those numbers for good, and does nothing for a family with nothing
+   pending. Commit the move with the version files. (CONTRIBUTING.md, "Changing the design
    file format".)
 4. Run `cargo xtask ci` and the packaging checks in `.github/workflows/packaging-lint.yml`.
    Commit the version files through the normal review flow and land them on `main`.
@@ -109,6 +110,31 @@ new commits were added. An existing tag or published release is never overwritte
 version after publication. Do not push the version tag yourself: publishing the draft creates
 it at the draft's target commit.
 
+## macOS disk image
+
+`packaging/macos/package.sh` builds the `.dmg` with [dmgbuild](https://github.com/dmgbuild/dmgbuild)
+(MIT; hash-pinned in `packaging/macos/dmg-requirements.txt`, installed into a throwaway venv under
+`target/`). It writes the Finder layout, the background and the icon positions straight into the
+image, so the build needs no Finder session or AppleScript, which are unreliable on CI runners.
+
+The look lives in `assets/platforms/macos/dmg/`: `layout.json` (window size, icon size and
+positions, shared by both files below), `settings.py` (the dmgbuild settings) and `background.tiff`
+(a blueprint sheet, 540×360 pt, with a 1x and a 2x representation so Retina screens get the sharp one). Change the art with
+`make_background.py` (needs Pillow; its docstring has the commands), view the result by mounting the
+image, and commit the TIFF with the script. Rules the design follows:
+
+- The title bar adds to the window rectangle (`title_bar` in `layout.json`, 32 pt on macOS 27); the
+  content area must equal the background's size. Older macOS versions have a thinner title bar and
+  were not checked.
+- Finder draws the icon names itself, black in Light and white in Dark appearance, and art cannot
+  change that. Each name therefore sits on a mid-tone plate that both colours read on. Keep the
+  plates under the icons if you move them.
+- `README.txt` stays on the disk but is hidden (`SetFile -a V`), so the window stays calm.
+
+`package.sh` mounts the finished image and checks the layout files, the volume icon, the bundle and
+its signature. `hdiutil` prints deprecation warnings on macOS 27 (dmgbuild still uses it); if a
+later macOS removes it, dmgbuild needs a release that uses `diskutil image`.
+
 ## Notes for the next release
 
 Items to carry into the next release's notes (step 3 below), then remove from here:
@@ -129,8 +155,9 @@ change release infrastructure does not itself request publication of the applica
    other platforms; report any platform you could not exercise yourself.
 3. Review the generated notes. Add a concise description of features, fixes, breaking changes,
    and known limitations. Keep the installation instructions. The macOS app is Developer ID
-   signed and notarized only when the build summary says so; other packages are unsigned. Do not
-   claim otherwise. Resolve failed checks or missing artifacts before publication.
+   signed and notarized only when the build summary says so, and the Windows files are signed only
+   when it says which SignPath policy signed them (`test-signing` is a self-signed test certificate
+   that Windows does not trust); other packages are unsigned. Do not claim otherwise. Resolve failed checks or missing artifacts before publication.
 4. Publish the verified draft using `gh` or the equivalent GitHub release API. For example:
 
    ```sh
@@ -214,8 +241,14 @@ connect with `sudo snap connect solidcraft:removable-media` (getting-started.md)
 
 ## WinGet (Windows Package Manager)
 
-SolidCraft is in [winget-pkgs](https://github.com/microsoft/winget-pkgs) as
-`bherbruck.SolidCraft` (`winget install bherbruck.SolidCraft`). Publishing a non-prerelease
+SolidCraft is not in [winget-pkgs](https://github.com/microsoft/winget-pkgs) yet: its first
+version, as `bherbruck.SolidCraft`, has to be submitted and merged there once (by hand, with
+Komac or `wingetcreate`) before `winget install bherbruck.SolidCraft` finds it. A first
+submission, for 0.21.0, is already open as
+[microsoft/winget-pkgs#452486](https://github.com/microsoft/winget-pkgs/pull/452486) (flagged
+`Validation-Executable-Error`): take that one up rather than opening another. Until then the
+README and [downloads](downloads.md) don't offer the command (#5734); add it back when the
+package is listed. After that first version, publishing a non-prerelease
 GitHub release runs `winget.yml`, which uses [Komac](https://github.com/russellbanks/Komac)
 (a pinned, checksum-verified binary) to open a pull request at microsoft/winget-pkgs from the
 owner's fork `bherbruck/winget-pkgs`. It submits the three versioned MSIs
@@ -284,6 +317,42 @@ valid, because the signature carries a secure timestamp.
 Signing currently uses a maintainer's **personal** Developer ID, so downloads show that person's
 name, not an organisation's. Moving to an organisation account means replacing the certificate
 and the API key secrets (`APPLE_API_KEY_P8`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`).
+
+## Windows signing (SignPath Foundation)
+
+When the `SIGNPATH_API_TOKEN` secret (the API token of the SignPath CI user) exists, the release
+workflow's Windows jobs Authenticode-sign through [SignPath Foundation](https://signpath.org)
+(organization `fa603ff4-c702-404b-8588-a524371c7a4e`, project `solidcraft`). Each architecture
+sends two signing requests: `solidcraft.exe`, `solidcraft-cli.exe` and `solvecraft-cli.exe` first,
+so the MSI, the portable zip and the plain `.exe` are made from signed binaries, then the MSI. Each
+request uploads the files as a workflow artifact, SignPath fetches and signs it, and the job checks
+that every file came back signed. Without the secret (forks) the jobs build unsigned as before.
+
+- **Policy:** `test-signing` (a self-signed test certificate) unless the dispatch input
+  `signpath_signing_policy` or the repository variable `SIGNPATH_SIGNING_POLICY` says otherwise.
+  Switch to the real certificate with `gh variable set SIGNPATH_SIGNING_POLICY -b release-signing
+  -R tangency-labs/solidcraft` once SignPath has issued it. Requests under `release-signing` wait
+  for approval in SignPath; the workflow waits up to an hour for each.
+- **Artifact configuration:** `packaging/windows/signpath-artifact-configuration.xml`. When it
+  changes, paste the new version into the SignPath project's artifact configuration when it lands.
+- **Test-sign without publishing:** `gh workflow run release.yml -R tangency-labs/solidcraft --ref
+  <branch> -f draft=false`, then check the Windows jobs' summaries and the `release-assets`
+  artifact.
+- SignPath only signs runs whose jobs all ran on GitHub-hosted runners, so keep the `version`,
+  `icons` and `windows` jobs off self-hosted runners.
+
+## Homebrew tap
+
+macOS users install with `brew install --cask tangency-labs/tap/solidcraft` from the tap repository
+[tangency-labs/homebrew-tap](https://github.com/tangency-labs/homebrew-tap) (`Casks/solidcraft.rb`).
+Homebrew's own cask repository only takes signed and notarized apps, so the tap stays until the
+macOS signing work lands.
+
+After publishing a stable release, bump the cask: set `version` and the `sha256` of
+`solidcraft-<version>-macos-universal.dmg` (the line for that file in the release's
+`SHA256SUMS.txt`), run `brew style Casks/solidcraft.rb`, and push to the tap's `main`. The cask's
+`livecheck` follows the latest GitHub release, so `brew livecheck --cask tangency-labs/tap/solidcraft`
+shows when the tap is behind. Skip prereleases and nightlies.
 
 ## Update signing
 

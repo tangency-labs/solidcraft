@@ -242,6 +242,81 @@ mod tests {
         assert_eq!(h.app.session.path.as_deref(), path.to_str());
     }
 
+    /// The sheet-metal Output buttons must ask where to save, not discard the headless
+    /// command's returned text (#6847). Cancelling must not export or change the design.
+    #[test]
+    fn sheet_exports_wait_for_a_path_and_write_only_on_completion() {
+        for (command, extension, field) in [("sheet.export_dxf", "dxf", "dxf"), ("sheet.export_bend_table", "csv", "text")] {
+            let mut h = crate::scenario::Harness::new();
+            for (id, params) in [
+                ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+                ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})),
+                ("sketch.finish", json!({})),
+                ("sheet.flange", json!({"sketch": "Base"})),
+                ("sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": "20 mm", "position": "outside"})),
+            ] {
+                h.app.run(id, params).unwrap();
+            }
+            let answer = picker(&mut h.app, true);
+            let before = h.app.session.doc.to_json();
+            let expected = h.app.session.execute(command, &json!({})).unwrap();
+            assert!(!h.app.file_picker_busy(), "programmatic calls return text without a picker");
+            let text = expected[field].as_str().unwrap();
+            assert!(text.contains(if extension == "dxf" { "BEND_UP" } else { "Body1" }));
+            let path = h.dir.join(format!("flat.{extension}"));
+            for outcome in ["cancel", "fail", "save"] {
+                h.app.start(command);
+                h.frames(2);
+                assert!(h.app.file_picker_busy(), "{command} must open the save picker");
+                assert!(!path.exists());
+                assert_eq!(h.app.session.doc.to_json(), before);
+                let chosen = match outcome {
+                    "save" => Some(path.clone()),
+                    "fail" => Some(h.dir.join("missing").join(format!("flat.{extension}"))),
+                    _ => None,
+                };
+                finish(&mut h.app, &answer, chosen.map(|p| p.to_string_lossy().into_owned()));
+                assert_eq!(path.exists(), outcome == "save");
+                if outcome == "fail" {
+                    assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
+                }
+                assert_eq!(h.app.session.doc.to_json(), before);
+            }
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+            assert!(h.app.status.as_ref().is_some_and(|(text, _, error)| text.starts_with("Exported ") && !error));
+        }
+    }
+
+    /// Saving the design says where it went, as an export does (#8693).
+    #[test]
+    fn saving_the_design_says_where_it_went() {
+        let mut h = crate::scenario::Harness::new();
+        let path = h.dir.join("Bracket.sc").to_string_lossy().into_owned();
+        h.app.run("file.save", json!({"path": path})).unwrap();
+        assert!(h.app.status.as_ref().is_some_and(|(text, _, error)| *text == format!("Saved {path}") && !error), "{:?}", h.app.status);
+        // A save that fails says so instead.
+        let missing = h.dir.join("missing").join("Bracket.sc").to_string_lossy().into_owned();
+        assert!(h.app.run("file.save", json!({"path": missing})).is_err());
+        assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
+    }
+
+    #[test]
+    fn sheet_exports_without_a_sheet_report_an_error_without_a_picker() {
+        let mut h = crate::scenario::Harness::new();
+        let asked = Rc::new(Cell::new(0));
+        let count = asked.clone();
+        h.app.services.pick_save = Some(Box::new(move |_, _| {
+            count.set(count.get() + 1);
+            Box::pin(std::future::ready(None))
+        }));
+        for command in ["sheet.export_dxf", "sheet.export_bend_table"] {
+            h.app.start(command);
+            assert_eq!(asked.get(), 0);
+            assert!(!h.app.file_picker_busy());
+            assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
+        }
+    }
+
     #[test]
     fn close_and_quit_wait_for_save_as_and_cancel_or_failure_keeps_changes() {
         for quit in [false, true] {
@@ -410,5 +485,100 @@ mod tests {
         let (vals, _) = doc.param_values();
         let n = doc.canvas_plane(&vals, canvas).unwrap().normal();
         assert!(n.z.abs() > 0.99, "the canvas lies on {n:?}, not on XY");
+    }
+
+    /// A canvas and a decal clicked onto a face of a design with many curved faces land on it.
+    /// The click sent only the point, and the engine's search of every face of every body for it
+    /// gave up ("face capture work limit exceeded"), as on an imported trophy of nine bodies.
+    #[test]
+    fn a_canvas_and_a_decal_clicked_onto_a_face_of_a_large_design_land_on_it() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 200, "width": 120, "height": 40, "corner": [20, 20, 0]})).unwrap();
+        for i in 0..8 {
+            let center = [60 + 45 * (i % 4), 50 + 60 * (i / 4), 60];
+            h.app.run("solid.torus", json!({"major": 30, "minor": 8, "center": center, "operation": "new_body"})).unwrap();
+        }
+        for command in ["canvas.insert", "canvas.decal"] {
+            for step in [
+                json!({"make_image": "pic.png"}),
+                json!({"choose_file": "pic.png"}),
+                json!({"call": "ui.view", "params": {"view": "iso"}}),
+                json!({"start": command}),
+                json!({"click": {"world": [30, 30, 40]}}),
+            ] {
+                h.step(&step).unwrap();
+            }
+        }
+        let doc = &h.app.session.doc;
+        assert_eq!(doc.canvases.len(), 2, "both images are placed");
+        let (vals, _) = doc.param_values();
+        for canvas in &doc.canvases {
+            let plane = doc.canvas_plane(&vals, canvas).unwrap();
+            assert!(plane.normal().z.abs() > 0.99 && (plane.origin.z - 40.0).abs() < 1e-6, "{} lies on {plane:?}", canvas.name);
+        }
+    }
+
+    fn placement_hint_painted(h: &mut crate::scenario::Harness, hint: &str) -> bool {
+        fn contains(shape: &egui::Shape, hint: &str) -> bool {
+            match shape {
+                egui::Shape::Text(text) => text.galley.job.text == hint,
+                egui::Shape::Vec(shapes) => shapes.iter().any(|shape| contains(shape, hint)),
+                _ => false,
+            }
+        }
+        let out = h.ctx.run_ui(
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0))), ..Default::default() },
+            |ui| h.app.ui(ui),
+        );
+        out.shapes.iter().any(|shape| contains(&shape.shape, hint))
+    }
+
+    fn image_placement(command: &str) -> (crate::scenario::Harness, &'static str) {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        if command == "canvas.decal" {
+            h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+            h.app.fit_view();
+        } else {
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        }
+        let path = h.dir.join("image.png");
+        let png = solidcraft_engine::render::png(1, 1, vec![255, 0, 0, 255]).unwrap();
+        std::fs::write(&path, png).unwrap();
+        let answer = picker(&mut h.app, false);
+        h.app.start(command);
+        h.frames(2);
+        assert!(h.app.tool.is_none());
+        finish(&mut h.app, &answer, Some(path.to_string_lossy().into_owned()));
+        assert_eq!(h.app.tool.as_ref().map(|tool| tool.cmd), Some(command));
+        let hint = if command == "canvas.decal" { "Click a face to place the decal" } else { "Click a plane or face to place the canvas" };
+        assert!(placement_hint_painted(&mut h, hint), "{command}: placement instruction is visible");
+        // An expired ordinary status must not dismiss the active placement instruction.
+        h.app.status = Some(("Old status".into(), crate::now_ms() - 7000.0, false));
+        assert!(placement_hint_painted(&mut h, hint));
+        (h, hint)
+    }
+
+    #[test]
+    fn image_placement_hint_clears_after_placement() {
+        for command in ["canvas.insert", "canvas.decal"] {
+            let (mut h, hint) = image_placement(command);
+            let point = if command == "canvas.decal" { json!([5, 5, 10]) } else { json!([4, 3, 0]) };
+            h.step(&json!({"click":{"world":point}})).unwrap();
+            assert_eq!(h.app.session.doc.canvases.len(), 1, "{command}: {:?}", h.app.status);
+            assert!(h.app.tool.is_none());
+            assert!(!placement_hint_painted(&mut h, hint));
+        }
+    }
+
+    #[test]
+    fn image_placement_hint_clears_on_escape() {
+        for command in ["canvas.insert", "canvas.decal"] {
+            let (mut h, hint) = image_placement(command);
+            h.step(&json!({"key":"Escape"})).unwrap();
+            assert!(h.app.tool.is_none());
+            assert!(h.app.session.doc.canvases.is_empty());
+            assert!(!placement_hint_painted(&mut h, hint));
+        }
     }
 }

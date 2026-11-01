@@ -1,12 +1,12 @@
 # What works
 
-The full feature summary, moved out of the README. The commands by area are in [features.md](features.md); status and plans are in [ROADMAP](../ROADMAP.md).
+The full feature summary, moved out of the README. The commands by area are in [features.md](features.md); status and plans are in [ROADMAP](roadmap-detail.md).
 
 **Status: early but usable for simple parts.** 75 of 76 public reference parts
 match their analytic or FreeCAD-computed volume, area, centre of mass and bounding box
 ([oracle.md](oracle.md)); the other is a tracked bug.
 These checks do not establish complete geometric or workflow equivalence. The commands SolidCraft has
-are listed by area in [features.md](features.md); status and plans are in [ROADMAP.md](../ROADMAP.md).
+are listed by area in [features.md](features.md); status and plans are in [ROADMAP.md](roadmap-detail.md).
 Open work and known bugs are in [GitHub issues](https://github.com/tangency-labs/solidcraft/issues),
 and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
 
@@ -42,7 +42,7 @@ and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
 - **Features** on a parametric timeline: extrude, revolve, sweep, loft, fillet/chamfer,
   shell, draft, holes, threads, patterns, mirror, split, combine, move and construction geometry.
   The timeline rebuilds incrementally; features can be edited, suppressed, renamed, reordered
-  and deleted. Supported geometry and current limitations are described in [ROADMAP.md](../ROADMAP.md).
+  and deleted. Supported geometry and current limitations are described in [ROADMAP.md](roadmap-detail.md).
   New revolves preserve symmetric and two-sided angular placement across reversed axes;
   older designs retain their saved convention when reopened or edited.
 - **Parameters and configurations** with unit-aware expressions (`2 * width + 5 mm`,
@@ -54,7 +54,7 @@ and help is welcome: see [CONTRIBUTING.md](../CONTRIBUTING.md).
   retained shallow prismatic pockets, exact line/arc/circle DXF outlines and bend tables;
   plastic enclosure features and rules. Pocket depth and side survive unfold/refold and appear
   separately from through-hole outlines in the flat preview and DXF.
-- **Files**: design containers (`.solidcraft`) with lossless binary mesh payloads;
+- **Files**: design containers (`.sc`; `.solidcraft` still opens) with lossless binary mesh payloads;
   plain JSON remains supported for opening, Save As and export. Desktop Open can show a saved
   provisional picture from warm geometry caches while rebuilding before editing; caches never
   replace the parametric design. Export to STEP (AP242 with body names, colours and

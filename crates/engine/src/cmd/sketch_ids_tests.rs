@@ -328,3 +328,57 @@ fn commands_that_add_nothing_report_empty_lists() {
     let r = run(&mut s, "sketch.move_point", json!({"point": strs(&c["points"])[1], "to": [12, 6]}));
     assert_eq!(r["created"], json!({"points": [], "curves": [], "constraints": [], "dimensions": []}), "{r}");
 }
+
+/// Conic curves take the curve prefix `n`, not the constraints' `k` (#6173): however a conic
+/// is created — drawn, a Move/Copy copy, a pattern copy — its id still says it is a curve.
+#[test]
+fn conic_curves_take_the_n_prefix_not_the_constraints_k() {
+    let mut s = new_sketch();
+    let drawn = run(&mut s, "sketch.conic", json!({"start": [80, 490], "end": [100, 490], "apex": [90, 505], "rho": 0.5}));
+    let conic = strs(&drawn["curves"])[0].clone();
+    assert_eq!(conic, "n1", "a drawn conic starts its own counter");
+
+    // A constraint keeps its prefix, and it no longer shares a counter with conics.
+    run(&mut s, "sketch.constraint.fix", json!({"entity": format!("{conic}.start")}));
+    let sk = sketch(&s);
+    assert!(sk.constraints.iter().any(|k| k.id == "k1"), "constraint ids: {:?}", sk.constraints.iter().map(|k| &k.id).collect::<Vec<_>>());
+
+    let copy = run(&mut s, "sketch.move", json!({"entities": [conic], "translate": [40, 0], "copy": true}));
+    assert_eq!(strs(&copy["curves"]), vec!["n2".to_string()], "a Move/Copy copy continues the conic counter");
+
+    let pattern = run(&mut s, "sketch.pattern.rectangular", json!({"entities": [conic], "count": 2, "spacing": 40}));
+    let made: Vec<String> = strs(&pattern["curves"]);
+    assert!(!made.is_empty(), "{pattern}");
+    for id in made {
+        assert!(id.starts_with('n'), "a pattern copy keeps the conic prefix: {id}");
+    }
+}
+
+/// A curve id goes into the face names of the features that use the curve, so an id with a
+/// character the name grammar reads (`|`, `,`, `~`, `]`, `#`) would split every name it
+/// lands in: an id of `c|1` gave the edges of an extrusion the names
+/// `F2:side:c|1#1|F2:side:c|1#2~1`, three separators where an edge has two faces and one
+/// separator. An id that cannot be written into a name whole is refused instead (#5858).
+#[test]
+fn a_curve_id_that_cannot_be_written_into_a_name_is_refused() {
+    let mut s = new_sketch();
+    for id in ["c|1", "c,1", "c~1", "c]1", "c#1"] {
+        let p = json!({"center": [0, 0], "radius": 5, "id": id});
+        let e = match s.execute("sketch.circle.center", &p) {
+            Ok(v) => panic!("the id `{id}` was taken: {v:?}"),
+            Err(e) => e.to_string(),
+        };
+        assert!(e.contains(id), "the error names the id: {e}");
+    }
+    // The id that can be written into a name is still taken, and the faces it makes are
+    // named with it whole.
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5, "id": "c1"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 10}));
+    let edges = run(&mut s, "model.edges", json!({"body": "Body1"}));
+    let names: Vec<String> = edges["edges"].as_array().unwrap().iter().filter_map(|e| e["name"].as_str().map(str::to_string)).collect();
+    assert!(!names.is_empty(), "{edges}");
+    for name in &names {
+        assert_eq!(name.matches('|').count(), 1, "an edge names two faces and separates them once: {name}");
+    }
+}

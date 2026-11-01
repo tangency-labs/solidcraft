@@ -787,6 +787,58 @@ fn unfold_cut_refold_and_convert() {
     assert!(t.execute("sheet.convert", &json!({"body": "Block", "face": [50, 30, 2.5]})).is_err());
 }
 
+/// A pattern of a cut made in the flat is a set of cuts in the flat, kept like the cut itself: in
+/// the flat pattern and refolded, its count following a parameter. A circular pattern too, and a
+/// pattern of a cut through a folded sheet. They were refused ("this sheet machining cannot be
+/// preserved in its flat material").
+#[test]
+fn a_pattern_of_a_cut_in_the_flat_is_kept_like_the_cut() {
+    let cutouts = |s: &mut Session| flat(s)["cutouts"].as_array().map(Vec::len);
+    let slot = |s: &mut Session| {
+        rectangle_tool(s, "Slot", [10.0, 10.0], [14.0, 30.0]);
+        run(s, "solid.extrude", json!({"sketch": "Slot", "through_all": true, "operation": "cut", "direction": "symmetric", "name": "Slot_Cut"}));
+    };
+    // A 4 x 20 slot through the 2.5 mm sheet.
+    let each = 4.0 * 20.0 * 2.5;
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "N", "expression": "3", "unit": ""}));
+    base(&mut s, 80.0, 50.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[40, 50, 2.5]], "height": 20}));
+    let folded = volume(&mut s);
+    run(&mut s, "sheet.unfold", json!({}));
+    slot(&mut s);
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Slot_Cut"], "dir1": [1, 0, 0], "count1": "N", "spacing1": 15}));
+    assert_eq!(cutouts(&mut s), Some(3));
+    run(&mut s, "sheet.refold", json!({}));
+    assert!(rel(volume(&mut s), folded - 3.0 * each) < 1e-9, "{} vs {}", volume(&mut s), folded - 3.0 * each);
+    assert_eq!(cutouts(&mut s), Some(3));
+    run(&mut s, "parameters.change", json!({"name": "N", "expression": "5"}));
+    assert_eq!(cutouts(&mut s), Some(5));
+    assert!(rel(volume(&mut s), folded - 5.0 * each) < 1e-9, "{} vs {}", volume(&mut s), folded - 5.0 * each);
+
+    // Half a turn about the middle of the base: the copy lands at (66, 20) to (70, 40).
+    let mut s = Session::default();
+    base(&mut s, 80.0, 50.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[40, 50, 2.5]], "height": 20}));
+    let folded = volume(&mut s);
+    run(&mut s, "sheet.unfold", json!({}));
+    slot(&mut s);
+    run(&mut s, "solid.pattern.circular", json!({"features": ["Slot_Cut"], "axis": {"origin": [40, 25, 0], "dir": [0, 0, 1]}, "count": 2}));
+    run(&mut s, "sheet.refold", json!({}));
+    assert_eq!(cutouts(&mut s), Some(2));
+    assert!(rel(volume(&mut s), folded - 2.0 * each) < 1e-9, "{} vs {}", volume(&mut s), folded - 2.0 * each);
+
+    // Through the base of the folded sheet, never unfolded.
+    let mut s = Session::default();
+    base(&mut s, 80.0, 50.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[40, 50, 2.5]], "height": 20}));
+    let folded = volume(&mut s);
+    slot(&mut s);
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Slot_Cut"], "dir1": [1, 0, 0], "count1": 4, "spacing1": 15}));
+    assert_eq!(cutouts(&mut s), Some(4));
+    assert!(rel(volume(&mut s), folded - 4.0 * each) < 1e-9, "{} vs {}", volume(&mut s), folded - 4.0 * each);
+}
+
 /// A plate (15, -20) (0, 0) (-100, 0) (-100, -20) with a 20 mm inside flange on its slanted edge
 /// (2 mm sheet, R 2, K 0.5: the folded sheet holds its flat area times the thickness), unfolded,
 /// and a triangle cut out with a corner on the bend line: where the line ends on the plate's
@@ -2869,7 +2921,7 @@ fn fold_accepts_a_fixed_point_on_the_top_face() {
                               [440, 229.25], [440, 239.36], [30, 239.36], [30, 229.25], [1.7, 229.25]], "closed": true}),
         );
         run(&mut s, "sketch.finish", json!({}));
-        run(&mut s, "sheet.flange", json!({"base": {"sketch": "Blank"}, "rule": "SGCC 0.8"}));
+        run(&mut s, "sheet.flange", json!({"sketch": "Blank", "rule": "SGCC 0.8"}));
         let flat = volume(&mut s);
         run(&mut s, "sheet.fold", json!({"points": [[30, 230.255, 508.2], [440, 230.255, 508.2]], "fixed": [420, 120, fixed_z], "flip": true}));
         assert!(rel(volume(&mut s), flat) < 1e-3, "fixed z {fixed_z}: a fold keeps the material");
@@ -4551,6 +4603,209 @@ fn a_flange_asked_for_0_8_mm_is_0_8_mm_or_refused_never_silently_2_5_mm() {
         }
         Err(e) => assert!(e.to_string().contains("thickness"), "{e}"),
     }
+}
+
+/// A 100 x 60 base on XY under a rule 2 mm thick, R 2, K 0.4.
+fn r2_base(s: &mut Session) {
+    run(s, "sheet.manage_rules", json!({"name": "R2", "thickness": "2 mm", "k_factor": 0.4, "bend_radius": "2 mm", "active": true}));
+    base(s, 100.0, 60.0);
+}
+
+/// The top (z) of the sheet and its flat length across the flanged edge.
+fn top_and_flat(s: &mut Session) -> (f64, f64) {
+    let top = bbox(s)["max"][2].as_f64().unwrap_or(f64::NAN);
+    (top, flat(s)["flat_size_mm"][1].as_f64().unwrap_or(f64::NAN))
+}
+
+#[test]
+fn an_edge_flange_height_is_measured_from_the_outer_sharp_the_inner_sharp_or_the_bend_tangent() {
+    // T = 2, R = 2, K = 0.4, height 20 on the edge y = 0, inside position (setback (R + T)·tan(θ/2)).
+    // Before the leg: outer (R + T)·tan(θ/2), inner R·tan(θ/2), tangent the outer's up to 90° and
+    // R + T past it.
+    // The bend's axis is at z = T + R = 4; its far edge is the leg along the flange from the bend's
+    // end, so the top of the part is 4 − min((R + T)·cos θ, R·cos θ) + leg·sin θ, and the flat is
+    // 60 − setback + θ·(R + K·T) + leg.
+    let (t, r, k) = (2.0, 2.0, 0.4);
+    for deg in [90.0f64, 60.0, 120.0] {
+        let th = deg.to_radians();
+        let half = (th / 2.0).tan();
+        for (from, before) in [("outer", (r + t) * half), ("inner", r * half), ("tangent", if deg <= 90.0 { (r + t) * half } else { r + t })] {
+            let what = format!("{deg}° from {from}");
+            let mut s = Session::default();
+            r2_base(&mut s);
+            run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": format!("{deg} deg"), "height_from": from}));
+            let leg = 20.0 - before;
+            let top = r + t - ((r + t) * th.cos()).min(r * th.cos()) + leg * th.sin();
+            let length = 60.0 - (r + t) * half + th * (r + k * t) + leg;
+            let (got_top, got_flat) = top_and_flat(&mut s);
+            assert!((got_top - top).abs() < 1e-6, "{what}: top {got_top}, want {top}");
+            assert!((got_flat - length).abs() < 1e-6, "{what}: flat {got_flat}, want {length}");
+        }
+    }
+    // At 90°: legs 16, 18 and 16, so the far edge is at z = 20, 22 and 20.
+    let tops: Vec<f64> = ["outer", "inner", "tangent"]
+        .iter()
+        .map(|from| {
+            let mut s = Session::default();
+            r2_base(&mut s);
+            run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "height_from": from}));
+            top_and_flat(&mut s).0
+        })
+        .collect();
+    for (got, want) in tops.iter().zip([20.0, 22.0, 20.0]) {
+        assert!((got - want).abs() < 1e-6, "{tops:?}");
+    }
+}
+
+#[test]
+fn an_edge_flange_measured_from_the_outer_sharp_saves_and_builds_as_before() {
+    let build = |extra: Option<&str>| {
+        let mut s = Session::default();
+        r2_base(&mut s);
+        let mut p = json!({"edges": [[50, 0, 2]], "height": 20, "angle": "75 deg"});
+        if let Some(from) = extra {
+            p["height_from"] = json!(from);
+        }
+        run(&mut s, "sheet.flange", p);
+        let kind = serde_json::to_value(s.doc.features.last().map(|f| f.kind.clone())).unwrap_or_default();
+        let (top, length) = top_and_flat(&mut s);
+        (kind, top, length, volume(&mut s))
+    };
+    let (plain, top, length, v) = build(None);
+    assert!(plain.get("height_from").is_none(), "{plain}");
+    let (outer, top_o, length_o, v_o) = build(Some("OUTER"));
+    assert_eq!(plain, outer);
+    assert_eq!((top, length, v), (top_o, length_o, v_o));
+    let (inner, ..) = build(Some("inner"));
+    assert_eq!(inner["height_from"], "inner", "{inner}");
+}
+
+#[test]
+fn an_edge_flange_too_short_for_its_height_datum_or_with_an_unknown_one_is_refused() {
+    let mut s = Session::default();
+    r2_base(&mut s);
+    let (features, v) = (s.doc.features.len(), volume(&mut s));
+    let err = |s: &mut Session, p: Value| match s.execute("sheet.flange", &p) {
+        Ok(v) => panic!("{p} was accepted: {v}"),
+        Err(e) => e.to_string(),
+    };
+    // From the inner sharp at 90° the bend takes R·tan 45° = 2; from the tangent past 90°, R + T = 4.
+    let e = err(&mut s, json!({"edges": [[50, 0, 2]], "height": 1.5, "height_from": "inner"}));
+    assert!(e.contains("from the inner sharp must be at least 2.000 mm"), "{e}");
+    let e = err(&mut s, json!({"edges": [[50, 0, 2]], "height": 3, "angle": "120 deg", "height_from": "tangent"}));
+    assert!(e.contains("from the bend's tangent must be at least 4.000 mm"), "{e}");
+    // From the outer sharp the message is the one it always was.
+    let e = err(&mut s, json!({"edges": [[50, 0, 2]], "height": 3.9, "height_from": "outer"}));
+    assert!(e.contains("height must be at least 4.000 mm"), "{e}");
+    let e = err(&mut s, json!({"edges": [[50, 0, 2]], "height": 20, "height_from": "middle"}));
+    assert!(e.contains("`height_from` must be outer, inner or tangent"), "{e}");
+    let e = err(&mut s, json!({"edges": [[50, 0, 2]], "height": 20, "height_from": 3}));
+    assert!(e.contains("`height_from`"), "{e}");
+    assert_eq!(s.doc.features.len(), features);
+    assert!(rel(volume(&mut s), v) < 1e-12);
+    // Up to 90° the tangent is the outer sharp: at 90° the bend takes R + T = 4, at 60° 4·tan 30°.
+    let e = err(&mut s, json!({"edges": [[50, 0, 2]], "height": 3.9, "height_from": "tangent"}));
+    assert!(e.contains("from the bend's tangent must be at least 4.000 mm"), "{e}");
+    let e = err(&mut s, json!({"edges": [[50, 0, 2]], "height": 2.3, "angle": "60 deg", "height_from": "tangent"}));
+    assert!(e.contains("from the bend's tangent must be at least 2.309 mm"), "{e}");
+    assert_eq!(s.doc.features.len(), features);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 4, "height_from": "tangent"}));
+    assert_eq!(s.doc.features.len(), features + 1);
+}
+
+#[test]
+fn an_edge_flange_measured_from_the_tangent_does_not_jump_as_its_angle_passes_90_degrees() {
+    // T = 2, R = 2, K = 0.4, height 20 from the tangent, inside position. Before the leg:
+    // (R + T)·tan(θ/2) up to 90° (the outer sharp), R + T past it; at 90° both are 4, so the leg,
+    // the top and the flat change smoothly through 90°.
+    let (t, r, k) = (2.0, 2.0, 0.4);
+    let build = |deg: f64| {
+        let th = deg.to_radians();
+        let half = (th / 2.0).tan();
+        let before = if deg <= 90.0 { (r + t) * half } else { r + t };
+        let leg = 20.0 - before;
+        let top = r + t - ((r + t) * th.cos()).min(r * th.cos()) + leg * th.sin();
+        let length = 60.0 - (r + t) * half + th * (r + k * t) + leg;
+        let mut s = Session::default();
+        r2_base(&mut s);
+        run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": format!("{deg} deg"), "height_from": "tangent"}));
+        let (got_top, got_flat) = top_and_flat(&mut s);
+        assert!((got_top - top).abs() < 1e-6, "{deg}°: top {got_top}, want {top}");
+        assert!((got_flat - length).abs() < 1e-6, "{deg}°: flat {got_flat}, want {length}");
+        (got_top, got_flat)
+    };
+    // 60°: leg 20 − 4·tan 30° = 17.691, as from the outer sharp; the inner face's end is highest
+    // at the bend, 4 − R·cos 60° = 3.
+    let (top60, _) = build(60.0);
+    let want = 4.0 - 2.0 * 0.5 + (20.0 - 4.0 * (30f64.to_radians()).tan()) * (60f64.to_radians()).sin();
+    assert!((top60 - want).abs() < 1e-6, "60°: top {top60}, want {want}");
+    // 90°: leg 16, top 20.
+    let (top90, flat90) = build(90.0);
+    assert!((top90 - 20.0).abs() < 1e-6, "90°: top {top90}");
+    // A thousandth of a degree either side moves the top and the flat by hundredths at most.
+    for deg in [90.0 - 1e-3, 90.0 + 1e-3] {
+        let (top, flat) = build(deg);
+        assert!((top - top90).abs() < 1e-2 && (flat - flat90).abs() < 1e-2, "{deg}°: top {top} flat {flat}, at 90° {top90} {flat90}");
+    }
+}
+
+#[test]
+fn edge_flange_material_outside_and_tangent_positions_start_the_bend_where_they_say() {
+    // T = 2, R = 2, K = 0.4, height 20 from the outer sharp on the edge y = 0. Setback (where the
+    // bend starts, inside the edge): material_outside R·tan(θ/2), tangent R + T, outside 0, and
+    // bend_outside the same as outside. The flange's outermost point (least y) is the setback less
+    // what reaches furthest out: R + T past 90° (the bend's outside a quarter turn in), at 90°
+    // the outer face, R + T. The flat is 60 − setback + θ·(R + K·T) + 20 − (R + T)·tan(θ/2).
+    let (t, r, k) = (2.0, 2.0, 0.4);
+    for deg in [90.0f64, 120.0] {
+        let th = deg.to_radians();
+        let half = (th / 2.0).tan();
+        for (position, setback) in [("material_outside", r * half), ("tangent", r + t), ("outside", 0.0), ("bend_outside", 0.0)] {
+            let what = format!("{deg}° {position}");
+            let mut s = Session::default();
+            r2_base(&mut s);
+            run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": format!("{deg} deg"), "position": position}));
+            let least_y = bbox(&mut s)["min"][1].as_f64().unwrap_or(f64::NAN);
+            assert!((least_y - (setback - (r + t))).abs() < 1e-6, "{what}: least y {least_y}");
+            let length = flat(&mut s)["flat_size_mm"][1].as_f64().unwrap_or(f64::NAN);
+            let want = 60.0 - setback + th * (r + k * t) + 20.0 - (r + t) * half;
+            assert!((length - want).abs() < 1e-6, "{what}: flat {length}, want {want}");
+            let saved = serde_json::to_value(s.doc.features.last().map(|f| f.kind.clone())).unwrap_or_default();
+            assert_eq!(saved["position"], if position == "bend_outside" { "outside" } else { position }, "{what}");
+        }
+    }
+    // Below 90° the tangent position puts the bend's end on the edge's face: at 60° the setback
+    // is (R + T)·sin 60° = 3.464, the leg 20 − (R + T)·tan 30° = 17.691 leans on out past the
+    // face, so the least y is −leg·cos 60° = −8.845. Through 90° the setback does not jump.
+    let th = 60f64.to_radians();
+    let (setback, leg) = ((r + t) * th.sin(), 20.0 - (r + t) * (th / 2.0).tan());
+    let mut s = Session::default();
+    r2_base(&mut s);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": "60 deg", "position": "tangent"}));
+    let least_y = bbox(&mut s)["min"][1].as_f64().unwrap_or(f64::NAN);
+    assert!((least_y + leg * th.cos()).abs() < 1e-6, "60° tangent: least y {least_y}, want {}", -leg * th.cos());
+    let length = flat(&mut s)["flat_size_mm"][1].as_f64().unwrap_or(f64::NAN);
+    let want = 60.0 - setback + th * (r + k * t) + leg;
+    assert!((length - want).abs() < 1e-6, "60° tangent: flat {length}, want {want}");
+    let flat_at = |deg: f64| {
+        let mut s = Session::default();
+        r2_base(&mut s);
+        run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": format!("{deg} deg"), "position": "tangent"}));
+        flat(&mut s)["flat_size_mm"][1].as_f64().unwrap_or(f64::NAN)
+    };
+    let (below, at, above) = (flat_at(90.0 - 1e-3), flat_at(90.0), flat_at(90.0 + 1e-3));
+    assert!((below - at).abs() < 1e-2 && (above - at).abs() < 1e-2, "flats {below} {at} {above}");
+    // The default is still inside, and an unknown position is refused without a feature.
+    let mut s = Session::default();
+    r2_base(&mut s);
+    let features = s.doc.features.len();
+    let e = s.execute("sheet.flange", &json!({"edges": [[50, 0, 2]], "height": 20, "position": "flush"})).unwrap_err().to_string();
+    assert!(e.contains("`position` must be inside, outside, middle, material_outside or tangent"), "{e}");
+    assert_eq!(s.doc.features.len(), features);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20}));
+    let saved = serde_json::to_value(s.doc.features.last().map(|f| f.kind.clone())).unwrap_or_default();
+    assert_eq!(saved["position"], "inside");
+    assert!((bbox(&mut s)["min"][1].as_f64().unwrap_or(f64::NAN)).abs() < 1e-6);
 }
 
 /// A new fold still refuses a `fixed` point in a cut-out or past the outline, leaving the design
