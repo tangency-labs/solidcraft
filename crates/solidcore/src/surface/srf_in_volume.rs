@@ -115,7 +115,7 @@ use crate::surface::surface::p2::{
     B_SPLINE_SURFACE_TYPE, MAX_GEOMETRY_NESTING, SRF_IN_VOLUME_TYPE,
 };
 use crate::surface::volume::p1::{
-    lift_first_derivative_srf, lift_second_derivative_srf, lift_third_derivative_srf,
+    lift_first_derivative_srf, lift_second_derivative_srf, lift_third_derivative_srf_opt_in,
 };
 use crate::surface::volume::{EvalOptions, Volume, VolumeKind};
 use crate::topology::database_io::{DatabaseReader, FileType};
@@ -930,13 +930,14 @@ impl SrfInVolume {
                 sv(0, 1, 2),
                 sv(0, 0, 3),
             ];
-            let [duuu, duuv, duvv, dvvv] = lift_third_derivative_srf(
+            let [duuu, duuv, duvv, dvvv] = lift_third_derivative_srf_opt_in(
                 [su(1, 0), su(0, 1)],
                 [su(2, 0), su(1, 1), su(0, 2)],
                 [su(3, 0), su(2, 1), su(1, 2), su(0, 3)],
                 vol1,
                 vol2,
                 vol3,
+                k.fixes.volume_lift_third_derivative_terms,
             );
             // when managing the special case of lHighestUDeriv != lHighestVDeriv is
             // when one or the other is 0.

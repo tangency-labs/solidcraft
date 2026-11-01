@@ -132,7 +132,7 @@ use crate::nurbs::knots::Side;
 use crate::surface::plane::p1::Plane;
 use crate::surface::surface::p2::Surface;
 use crate::surface::volume::p1::{
-    concat_evals, is_kind_of as volume_is_kind_of, EvalOptions, Volume, VolumeKind,
+    concat_evals_opt_in, is_kind_of as volume_is_kind_of, EvalOptions, Volume, VolumeKind,
 };
 use crate::surface::volume::p2::ignore_read;
 use crate::topology::database_io::{DatabaseReader, FileType};
@@ -450,7 +450,12 @@ impl UnbendVolume {
                 };
                 let next_derivs = next.map(position, n, &map_opts)?;
                 // Concatenate Evaluate(ParamPoint) = Next(Mid(ParamPoint))
-                concat_evals(n, &d, &next_derivs)
+                concat_evals_opt_in(
+                    n,
+                    &d,
+                    &next_derivs,
+                    opts.fixes.volume_lift_third_derivative_terms,
+                )
             }
             _ => Ok(d),
         }
