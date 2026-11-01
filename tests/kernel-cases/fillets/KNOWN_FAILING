@@ -19,6 +19,7 @@ cov-fillet-g2-four-edge-apex-corner refused: the default setback is shorter than
 cov-fillet-g2-mixed-corner not supported yet: SMLib sets back a corner only where its edges are all convex or all concave
 cov-fillet-g2-oblique-three-edge-corner the G2 corner patch meets the new order-2 section's rounds only G1 at one face seam (its volume holds); the corner step rebuilds the patch
 cov-fillet-g2-pocket-corner the G2 corner patch meets the new order-2 section's rounds only G1 at one face seam (its volume holds); the corner step rebuilds the patch
+cov-fillet-section-curvature-pipe-on-plate-r2 builds, but a seam grades G3 where exactly G2 is wanted (the Gⁿ section on faces of finite smoothness; tangency-labs/smlib#93)
 cov-fillet-turn-swept-boss-base-r1 not supported yet: solid.fillet has no `turn`; the corners are mitred (12508.9676, the Mitre case's volume)
 cov-fillet-turn-swept-pocket-sharp-corner-refused-r1 not supported yet: solid.fillet has no `turn`, so the sharp concave corners are mitred, not refused
 cov-junction-boss-tilt-20-root-round SMLib fillet status 1001 on a cylinder tilted 20 degrees into the plate (also before the blend rework)
