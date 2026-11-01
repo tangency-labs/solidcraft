@@ -1425,6 +1425,41 @@ mod tests {
         assert!(d.rejected.is_empty());
     }
 
+    /// The model a save keeps writes each distinct sheet-metal body once, and every state names
+    /// the records of exactly the sheets it holds (found by the sheet's text, not by building its
+    /// record again for every state, which took most of a large sheet-metal design's save).
+    #[test]
+    fn a_saved_model_writes_each_sheet_once_for_the_states_that_hold_it() {
+        let mut s = Session::new(Document::new("Sheets"));
+        let sheet_rule = json!({"name": "AL2", "thickness": "2 mm", "k_factor": "0.5", "bend_radius": "1 mm", "active": true});
+        s.execute("sheet.manage_rules", &sheet_rule).unwrap();
+        for (i, x) in [0.0, 200.0, 400.0].into_iter().enumerate() {
+            s.execute("sketch.create", &json!({"plane": "XY", "name": format!("Base{i}")})).unwrap();
+            s.execute("sketch.rectangle.two_point", &json!({"p0": [x, 0], "p1": [x + 150.0, 100]})).unwrap();
+            s.execute("sketch.finish", &json!({})).unwrap();
+            s.execute("sheet.flange", &json!({"sketch": format!("Base{i}")})).unwrap();
+            s.execute("sheet.flange", &json!({"edges": [[x + 75.0, 0, 2]], "height": 20})).unwrap();
+        }
+        let saved = saved_geometry(&s, &s.doc).unwrap();
+        let records = &saved.records;
+        let sheets = records["sheets"].as_array().unwrap();
+        let texts: std::collections::HashSet<String> = sheets.iter().map(Value::to_string).collect();
+        assert_eq!(texts.len(), sheets.len(), "each sheet once");
+        let mut held = std::collections::HashSet::new();
+        for (r, feature) in s.model.results.iter().zip(records["features"].as_array().unwrap()) {
+            let state = &records["states"][feature["state"].as_u64().unwrap() as usize];
+            let named = state["sheets"].as_array().unwrap();
+            assert_eq!(named.len(), r.state.sheets.len());
+            for (i, sheet) in named.iter().zip(&r.state.sheets) {
+                let written = &sheets[i.as_u64().unwrap() as usize];
+                assert_eq!(*written, serde_json::to_value(sheet).unwrap(), "{}: the record of its own sheet", r.name);
+                held.insert(written.to_string());
+            }
+        }
+        assert_eq!(held, texts, "every record written is one a state holds");
+        assert!(sheets.len() >= 6, "each part's base, then with its flange: {}", sheets.len());
+    }
+
     /// A design whose saved model would give a body back with other topology opens with the
     /// bodies it was saved with. A pattern copy cut by an automatic extrude came back from the
     /// native codec with two loose vertices more (10 faces, 18 edges, 12 vertices instead of 10);
