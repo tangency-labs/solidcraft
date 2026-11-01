@@ -10,7 +10,8 @@ the app then matches the system's preferred locales — the OS locale on desktop
 `navigator.languages` in the browser, read with the `sys-locale` crate — against the registry:
 exact tag, then base language, then English (`match_system_tags` in
 `crates/ui-egui/src/i18n.rs`). A saved specific language always wins, so existing users keep
-their choice.
+their choice. In tests and scenarios the system's language is English, so they read the same
+words on every PC.
 
 ## Messages
 

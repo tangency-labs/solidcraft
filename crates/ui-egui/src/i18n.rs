@@ -154,8 +154,18 @@ pub fn match_system_tags(tags: &[String]) -> &'static str {
 /// The catalog id the system asks for, read once per process: the OS locale on desktop
 /// (Windows, macOS, Linux/BSD) and `navigator.languages` in the browser.
 pub fn system_language() -> &'static str {
-    static CACHED: OnceLock<&'static str> = OnceLock::new();
-    CACHED.get_or_init(|| match_system_tags(&sys_locale::get_locales().collect::<Vec<_>>()))
+    SYSTEM_LANGUAGE.get_or_init(|| {
+        // Tests read the same words on every PC, whatever its language.
+        if cfg!(test) { ENGLISH.id } else { match_system_tags(&sys_locale::get_locales().collect::<Vec<_>>()) }
+    })
+}
+
+static SYSTEM_LANGUAGE: OnceLock<&'static str> = OnceLock::new();
+
+/// `cfg!(test)` for the tests outside this crate, which link it without that: they all start from
+/// the test harness, which calls this first.
+pub(crate) fn pin_system_language() {
+    let _ = SYSTEM_LANGUAGE.set(ENGLISH.id);
 }
 
 /// The catalog id a `language` preference resolves to: the saved choice, or the system's for
@@ -407,6 +417,12 @@ mod tests {
         assert_eq!(super::match_system_tags(&tags(&["xx-YY"])), "en", "unknown: English");
         assert_eq!(super::match_system_tags(&tags(&[])), "en", "nothing: English");
         assert_eq!(super::match_system_tags(&tags(&["xx-YY", "de-DE"])), "de", "the first tag that matches wins");
+    }
+
+    /// Tests name English words, so the PC's own language never reaches them (#10297).
+    #[test]
+    fn tests_take_english_as_the_system_language() {
+        assert_eq!(super::system_language(), "en");
     }
 
     /// A saved language is never overridden: only `system` resolves through the OS (#10138).

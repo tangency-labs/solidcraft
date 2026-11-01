@@ -20,6 +20,14 @@ fn harness() -> Harness {
     h
 }
 
+/// These tests and the scenarios name English words, whatever the PC's language (#10297).
+#[test]
+fn the_harness_takes_english_as_the_system_language() {
+    let h = Harness::new();
+    assert_eq!(h.app.preferences.language, solidcraft_ui_egui::i18n::SYSTEM);
+    assert_eq!(solidcraft_ui_egui::i18n::effective_language(&h.app.preferences.language), "en");
+}
+
 #[test]
 fn every_dialog_opens_docked_within_its_width_limits() {
     let mut bad = Vec::new();
