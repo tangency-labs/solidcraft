@@ -315,7 +315,7 @@ fn render_select(s: &mut Session, p: &Value) -> Result<Value> {
     let result = serde_json::to_value(request).map_err(|e| bad("view.render_select", e.to_string()))?;
     if !s.selection.is_empty() {
         s.selection.clear();
-        s.revision += 1;
+        s.refresh_display();
     }
     Ok(result)
 }

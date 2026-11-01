@@ -144,7 +144,7 @@ impl Session {
             self.status_slot(id, active);
         }
         if self.status_items() != before {
-            self.revision += 1;
+            self.refresh_display();
         }
     }
 
