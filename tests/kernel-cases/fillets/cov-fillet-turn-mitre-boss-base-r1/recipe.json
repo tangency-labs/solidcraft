@@ -1,0 +1,59 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 10,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 10,
+    "width": 10,
+    "height": 5,
+    "corner": [
+     15,
+     10,
+     10
+    ],
+    "operation": "join",
+    "targets": [
+     "Part"
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      20,
+      10,
+      10
+     ],
+     [
+      25,
+      15,
+      10
+     ],
+     [
+      20,
+      20,
+      10
+     ],
+     [
+      15,
+      15,
+      10
+     ]
+    ],
+    "radius": 1.0,
+    "tangent_chain": false
+   }
+  }
+ ]
+}

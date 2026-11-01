@@ -1,0 +1,94 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "length": 40,
+    "width": 30,
+    "height": 10,
+    "body_name": "Part"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      10
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Pocket"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     10,
+     10
+    ],
+    "p1": [
+     30,
+     20
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Pocket",
+    "distance": -5,
+    "operation": "cut",
+    "targets": [
+     "Part"
+    ]
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      20,
+      10,
+      5
+     ],
+     [
+      30,
+      15,
+      5
+     ],
+     [
+      20,
+      20,
+      5
+     ],
+     [
+      10,
+      15,
+      5
+     ]
+    ],
+    "radius": 1.0,
+    "tangent_chain": false,
+    "turn": "swept"
+   }
+  }
+ ]
+}
