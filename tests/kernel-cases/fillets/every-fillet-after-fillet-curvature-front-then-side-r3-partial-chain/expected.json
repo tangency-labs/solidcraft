@@ -1,0 +1,12 @@
+{
+ "sources": [],
+ "what": "a box's top front edge rounded curvature-continuous size 3, then the top side edge meeting it at the corner rounded the same way alone (Tangent chain off)",
+ "source": "invariants",
+ "method": "box 40x30x20; the edge y=0, z=20 rounded type curvature 3 (every-box-edge-r3-curvature's section), then the edge x=40, z=20 (now y 3..30) rounded type curvature 3 alone: at y = 3 it runs on tangentially into the first round's end curve on x = 40 (the order-2 section, tangent to the top there), so the second round ends on a curved round, not a planar end face: no closed form. A valid body with every blend seam G2, or a refusal saying the edge continues tangentially (the 1207 precedent).",
+ "body_count": 1,
+ "outcome": "solid_or_refused",
+ "refusal": "continues tangentially",
+ "continuity": {
+  "order": "g2"
+ }
+}
