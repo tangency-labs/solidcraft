@@ -115,6 +115,42 @@ fn a_chamfer_face_takes_a_sketch_that_follows_the_chamfer() {
     healthy(&reopened(&s), "OnBevel");
 }
 
+/// #7476: a cone's base and the flat top of a cut-off cone take a sketch, as a cylinder's caps
+/// do, on the origin and placed along a slanted axis. The sketch on the top follows the height.
+#[test]
+fn the_flat_faces_of_a_cone_take_a_sketch_that_follows_the_cone() {
+    use solidcraft_geom::Vec3;
+    let slant = Vec3::new(1., 1., 0.).normalized().unwrap();
+    for (base, axis, along) in [(Vec3::ZERO, json!("Z"), Vec3::Z), (Vec3::new(5., -3., 2.), json!([1, 1, 0]), slant)] {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "tall", "expression": "20 mm"}));
+        let at = [base.x, base.y, base.z];
+        run(&mut s, "solid.cone", json!({"radius": 10, "top_radius": 4, "height": "tall", "base": at, "axis": axis, "name": "Cut"}));
+        run(&mut s, "solid.cone", json!({"radius": 3, "height": 5, "base": [40, 0, 0], "name": "Full"}));
+        no_errors(&s);
+        let top = |tall: f64| base + along * tall;
+        sketch_on(&mut s, [top(20.).x, top(20.).y, top(20.).z], "OnTop");
+        sketch_on(&mut s, at, "OnBase");
+        sketch_on(&mut s, [40., 0., 0.], "OnFullBase");
+        let height = |p: &solidcraft_geom::Plane| (p.origin - base).dot(along);
+        for (name, role) in [("OnTop", ":top"), ("OnBase", ":bottom"), ("OnFullBase", ":bottom")] {
+            let FaceAttachmentStatus::Healthy { plane, target, .. } = status(&s, name) else { panic!("{name}: {:?}", status(&s, name)) };
+            assert_eq!(target.certificate, Some(FaceCertificate::Lineage), "{name}");
+            assert!(target.name.ends_with(role), "{name}: {}", target.name);
+            let axis = if name == "OnFullBase" { Vec3::Z } else { along };
+            assert!(plane.normal().cross(axis).len() < 1e-9, "{name}: {plane:?}");
+        }
+        assert!((height(&healthy(&s, "OnTop").0) - 20.).abs() < 1e-9);
+        assert!(height(&healthy(&s, "OnBase").0).abs() < 1e-9);
+        run(&mut s, "parameters.change", json!({"name": "tall", "expression": "30 mm"}));
+        no_errors(&s);
+        assert!((height(&healthy(&s, "OnTop").0) - 30.).abs() < 1e-9);
+        assert!(height(&healthy(&s, "OnBase").0).abs() < 1e-9);
+        let t = reopened(&s);
+        assert!((height(&healthy(&t, "OnTop").0) - 30.).abs() < 1e-9);
+    }
+}
+
 /// A plate with a boss patterned 3 times along x, `pitch` apart.
 fn patterned_bosses(sketch_on_seed_first: bool) -> Session {
     let mut s = Session::default();

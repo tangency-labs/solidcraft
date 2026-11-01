@@ -407,6 +407,24 @@ pub(crate) fn cylinder_tool(body: Body) -> Traced {
     Traced::made(body, roles)
 }
 
+/// The roles of a cone primitive's faces, from the body revolved from its half section (base
+/// side first, then the sloped side, then the top side of a cut-off cone; the side on the axis
+/// makes no face): `bottom`, `side` and `top`, as a cylinder's are (#7476). `None` when the body
+/// has no history of its own.
+pub(crate) fn cone_roles(body: &Body) -> Option<Vec<Vec<String>>> {
+    body.history().filter(|h| h.operands == 0).map(|h| {
+        h.faces
+            .iter()
+            .map(|f| match f.origins.as_slice() {
+                [FaceOrigin::Profile { segment: 0 }] => vec!["bottom".to_string()],
+                [FaceOrigin::Profile { segment: 1 }] => vec!["side".to_string()],
+                [FaceOrigin::Profile { segment: 2 }] => vec!["top".to_string()],
+                _ => Vec::new(),
+            })
+            .collect()
+    })
+}
+
 /// A tool a feature builds without a sketch (a boss's post, a rib, a lip's band), its faces named
 /// by the part it makes: `<part>:top` (its end cap), `<part>:base` (its start cap) and
 /// `<part>:side:<k>` (swept from segment `k` of its profile), as its construction records them.
