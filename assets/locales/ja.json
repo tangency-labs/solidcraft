@@ -1411,7 +1411,6 @@
   "cmd.drawing_fill_edit": "シートの塗りつぶしを編集",
   "cmd.drawing_fill_inspect": "シートの塗りつぶしを検査",
   "cmd.drawing_fill_profiles": "塗りつぶしプロファイルを一覧表示",
-  "cmd.drawing_hole_callout": "穴の注記",
   "cmd.drawing_image_add": "画像を追加",
   "cmd.drawing_inspect": "図面を確認",
   "cmd.drawing_list": "図面を一覧表示",
