@@ -213,6 +213,18 @@ pub struct UpstreamFixes {
     /// `SmPlane::IsNurbSurfacePlane` places a recognised surface's origin after
     /// orthogonalising its axes (WR-652, upstream issue #1056).
     pub plane_recognition_origin_after_axes: bool,
+    /// `SmHashTable::IncMaxItemCount` ([`crate::geom::hash_table::HashTable::inc_max_item_count_with_fixes`],
+    /// [`crate::geom::hash_table::HashTable::add_with_fixes`], and
+    /// [`crate::geom::hash_table::ObjsInVoxels::add_with_fixes`]) preserves existing
+    /// removed `SmBucketItem` records (`bucket_index == None`, `item`, `item_id`) when
+    /// growing the item array while `GetUsedBucketItemCount() == 0`
+    /// (`GetTotalBucketItemCount() > 0`), so a subsequent `Remove` skips already-removed
+    /// slots instead of walking bucket `0` on `calloc`-zeroed records (`bucket_index == 0`,
+    /// `item == NULL`, `item_id == 0`) and incrementing the removed-item counter past the
+    /// total item count (WR-13, #2200; see
+    /// `plan/upstream-issues/WR-13--addendum-2026-11-01-preserve-removed-records-on-grow.md`).
+    /// Off by default for pinned C++ parity.
+    pub hash_table_grow_preserves_removed_records: bool,
     /// `SmGapFunction::BuildSampleSet` samples the B-spline spans inside the requested
     /// curve interval or surface domain, normalizing against that interval and keeping
     /// its exact endpoints. Upstream starts at the first knot and normalizes against

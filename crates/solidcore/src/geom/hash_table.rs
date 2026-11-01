@@ -16,12 +16,15 @@
 //! | [`ObjsInVoxels::map_point_to_voxel`]        | `SmObjsInVoxels::MapPointToVoxel`                |
 //! | [`ObjsInVoxels::map_voxel_index_to_bbox`]   | `SmObjsInVoxels::MapVoxelIndexToBBox`            |
 //! | [`ObjsInVoxels::find_point_items`]          | `SmObjsInVoxels::FindPointItems`                 |
-//! | [`ObjsInVoxels::add`]                       | `SmObjsInVoxels::Add`                            |
+//! | [`ObjsInVoxels::add`], [`ObjsInVoxels::add_with_fixes`] | `SmObjsInVoxels::Add`                |
 //! | [`ObjsInVoxels::remove`]                    | `SmObjsInVoxels::Remove`                         |
 //! | [`ObjsInVoxels::find_coincident_pairs`]     | `SmObjsInVoxels::FindCoincidentPairs`            |
 //! | [`ObjsInVoxels::point_items`], [`ObjsInVoxels::hash_table`], ... | `GetPointItems`, `m_sHashTable`, ... |
 //! | [`PointItem`]                               | `SmPointItem<TYPE>`                              |
 //! | [`HashTable`]                               | `SmHashTable<TYPE>` (template bodies this unit needs) |
+//! | [`HashTable::inc_max_item_count`], [`HashTable::inc_max_item_count_with_fixes`] | `SmHashTable::IncMaxItemCount` |
+//! | [`HashTable::add`], [`HashTable::add_with_fixes`] | `SmHashTable::Add`                         |
+//! | [`HashTable::remove`]                       | `SmHashTable::Remove`                            |
 //! | [`BucketItem`]                              | `SmBucketItem<TYPE>`                             |
 //! | [`gap_histogram_index`]                     | `SM_HISTOGRAM_GAPSIZE_INDEX`                     |
 //! | `ulong_from_f64` (private)                  | the `(ULONG)double` conversions of `MapPointToVoxel` (x86-64 g++) |
@@ -32,8 +35,11 @@
 //!   bucket-item indices, `SM_UNDEF_ULONG` bucket indices and voxel indices are
 //!   `None`. Growing the arrays therefore never invalidates anything. Capacities
 //!   (`GetDataSize`) are still tracked so growth happens at the same moments, and the
-//!   all-removed growth path that zeroes the bucket-item records upstream is
-//!   reproduced.
+//!   all-removed growth path that zeroes the bucket-item records upstream (WR-13) is
+//!   reproduced by default unless
+//!   [`UpstreamFixes::hash_table_grow_preserves_removed_records`] is enabled via
+//!   [`HashTable::inc_max_item_count_with_fixes`], [`HashTable::add_with_fixes`], or
+//!   [`ObjsInVoxels::add_with_fixes`].
 //! * Upstream undefined behaviour (a bucket index past the table, a voxel model
 //!   with a box but zero voxels in `Add`, an empty explicit bucket list, a zero
 //!   divisor in `MapVoxelIndexToIndices`) returns [`SolidError::InvalidInput`]
@@ -49,7 +55,7 @@
 use crate::error::{Result, SolidError};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::tol::xsect_tol3d;
-use crate::kernel::Kernel;
+use crate::kernel::{Kernel, UpstreamFixes};
 use crate::math::{Point3, UNDEF_DOUBLE};
 
 /// Number of gap-size histogram buckets (`SM_HISTOGRAM_GAPSIZE_BUCKETCNT`).
@@ -195,14 +201,31 @@ impl HashTable {
     }
 
     /// Grows the item capacity to `max(1.5 * capacity, capacity + 64)`
-    /// (`IncMaxItemCount`).
+    /// (`IncMaxItemCount`) with default [`UpstreamFixes`].
     ///
     /// Upstream copies the item records into the new array only while some item
-    /// is still in a bucket; otherwise the records come back zero-filled
-    /// (bucket `0`, no item, id `0`, no links), which is reproduced here.
+    /// is still in a bucket (`GetUsedBucketItemCount() > 0`); otherwise the
+    /// records come back zero-filled (bucket `0`, no item, id `0`, no links;
+    /// WR-13), which is reproduced here. Use
+    /// [`Self::inc_max_item_count_with_fixes`] to honour
+    /// [`UpstreamFixes::hash_table_grow_preserves_removed_records`].
     pub fn inc_max_item_count(&mut self) {
+        self.inc_max_item_count_with_fixes(&UpstreamFixes::default());
+    }
+
+    /// Grows the item capacity to `max(1.5 * capacity, capacity + 64)`
+    /// (`IncMaxItemCount`), honouring
+    /// [`UpstreamFixes::hash_table_grow_preserves_removed_records`].
+    ///
+    /// When `fixes.hash_table_grow_preserves_removed_records` is `false`
+    /// (default), reproduces upstream WR-13 by overwriting existing records with
+    /// zero-filled entries (`bucket_index: Some(0)`, `item: None`, `item_id: 0`,
+    /// no links) whenever `used_bucket_item_count() == 0`. When `true`, existing
+    /// removed records (`bucket_index: None`, `item`, `item_id`) are preserved
+    /// across growth even when all items have been removed.
+    pub fn inc_max_item_count_with_fixes(&mut self, fixes: &UpstreamFixes) {
         self.capacity = grown_capacity(self.capacity);
-        if self.used_bucket_item_count() == 0 {
+        if !fixes.hash_table_grow_preserves_removed_records && self.used_bucket_item_count() == 0 {
             self.bucket_items.fill(BucketItem {
                 next_used_bucket: None,
                 next_bucket_item: None,
@@ -270,15 +293,33 @@ impl HashTable {
         self.removed_bucket_item_count
     }
 
-    /// Adds `item` to bucket `bucket_index` with id `item_id` (`Add`): the first
-    /// item of an empty bucket is pushed on the used-bucket list, later items go
-    /// second in their bucket.
+    /// Adds `item` to bucket `bucket_index` with id `item_id` (`Add`) using
+    /// default [`UpstreamFixes`]: the first item of an empty bucket is pushed on
+    /// the used-bucket list, later items go second in their bucket.
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] when `bucket_index` is not a bucket (undefined
     /// behaviour upstream).
     pub fn add(&mut self, item: usize, bucket_index: usize, item_id: usize) -> Result<()> {
+        self.add_with_fixes(item, bucket_index, item_id, &UpstreamFixes::default())
+    }
+
+    /// Adds `item` to bucket `bucket_index` with id `item_id` (`Add`),
+    /// forwarding `fixes` to [`Self::inc_max_item_count_with_fixes`] when the
+    /// item array grows.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when `bucket_index` is not a bucket (undefined
+    /// behaviour upstream).
+    pub fn add_with_fixes(
+        &mut self,
+        item: usize,
+        bucket_index: usize,
+        item_id: usize,
+        fixes: &UpstreamFixes,
+    ) -> Result<()> {
         let Some(&head) = self.buckets.get(bucket_index) else {
             return Err(SolidError::InvalidInput {
                 operation: "geom::hash_table::HashTable::add",
@@ -286,7 +327,7 @@ impl HashTable {
             });
         };
         if self.bucket_items.len() == self.capacity {
-            self.inc_max_item_count();
+            self.inc_max_item_count_with_fixes(fixes);
         }
         let new = self.bucket_items.len();
         let mut rec = BucketItem {
@@ -569,8 +610,8 @@ impl<T: Copy + PartialEq> ObjsInVoxels<T> {
 
     /// Grows the point-item and bucket-item capacities together
     /// (`IncMaxItemCount`).
-    fn inc_max_item_count(&mut self) {
-        self.hash.inc_max_item_count();
+    fn inc_max_item_count(&mut self, fixes: &UpstreamFixes) {
+        self.hash.inc_max_item_count_with_fixes(fixes);
         self.point_capacity = self.hash.capacity();
     }
 
@@ -728,8 +769,9 @@ impl<T: Copy + PartialEq> ObjsInVoxels<T> {
 
     /// Places `item` at `point` with zone tolerance `zone_tol` into its voxel,
     /// and into each neighbouring voxel whose shared side is within `zone_tol`
-    /// (`Add`). Returns the voxel index, or `None` when the model has no box.
-    /// The voxels used are added (once) to `updated`.
+    /// (`Add`), using default [`UpstreamFixes`]. Returns the voxel index, or
+    /// `None` when the model has no box. The voxels used are added (once) to
+    /// `updated`.
     ///
     /// # Errors
     ///
@@ -740,7 +782,29 @@ impl<T: Copy + PartialEq> ObjsInVoxels<T> {
         item: T,
         point: Point3,
         zone_tol: f64,
+        updated: Option<&mut Vec<usize>>,
+    ) -> Result<Option<usize>> {
+        self.add_with_fixes(item, point, zone_tol, updated, &UpstreamFixes::default())
+    }
+
+    /// Places `item` at `point` with zone tolerance `zone_tol` into its voxel,
+    /// and into each neighbouring voxel whose shared side is within `zone_tol`
+    /// (`Add`), forwarding `fixes` when growing the item arrays (see
+    /// [`UpstreamFixes::hash_table_grow_preserves_removed_records`]). Returns
+    /// the voxel index, or `None` when the model has no box. The voxels used are
+    /// added (once) to `updated`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] when the model has a box but no voxels
+    /// (undefined behaviour upstream).
+    pub fn add_with_fixes(
+        &mut self,
+        item: T,
+        point: Point3,
+        zone_tol: f64,
         mut updated: Option<&mut Vec<usize>>,
+        fixes: &UpstreamFixes,
     ) -> Result<Option<usize>> {
         if self.bbox.is_init() {
             return Ok(None);
@@ -752,7 +816,7 @@ impl<T: Copy + PartialEq> ObjsInVoxels<T> {
             });
         };
         while self.point_items.len() + MAX_ITEMS_PER_ADD > self.point_capacity {
-            self.inc_max_item_count();
+            self.inc_max_item_count(fixes);
         }
         let v = hit.index;
         let pi = PointItem {
@@ -760,27 +824,27 @@ impl<T: Copy + PartialEq> ObjsInVoxels<T> {
             point,
             zone_tol,
         };
-        self.place(pi, v, &mut updated)?;
+        self.place(pi, v, &mut updated, fixes)?;
         let (on_boundary, inward) = hit.extent.is_point_on_boundary(point, zone_tol);
         if on_boundary {
             let xy = self.x_cnt.wrapping_mul(self.y_cnt);
             if inward.x == -1.0 && hit.ix < self.x_cnt.wrapping_sub(1) {
-                self.place(pi, v.wrapping_add(1), &mut updated)?;
+                self.place(pi, v.wrapping_add(1), &mut updated, fixes)?;
             }
             if inward.x == 1.0 && hit.ix > 0 {
-                self.place(pi, v.wrapping_sub(1), &mut updated)?;
+                self.place(pi, v.wrapping_sub(1), &mut updated, fixes)?;
             }
             if inward.y == -1.0 && hit.iy < self.y_cnt.wrapping_sub(1) {
-                self.place(pi, v.wrapping_add(self.x_cnt), &mut updated)?;
+                self.place(pi, v.wrapping_add(self.x_cnt), &mut updated, fixes)?;
             }
             if inward.y == 1.0 && hit.iy > 0 {
-                self.place(pi, v.wrapping_sub(self.x_cnt), &mut updated)?;
+                self.place(pi, v.wrapping_sub(self.x_cnt), &mut updated, fixes)?;
             }
             if inward.z == -1.0 && hit.iz < self.z_cnt.wrapping_sub(1) {
-                self.place(pi, v.wrapping_add(xy), &mut updated)?;
+                self.place(pi, v.wrapping_add(xy), &mut updated, fixes)?;
             }
             if inward.z == 1.0 && hit.iz > 0 {
-                self.place(pi, v.wrapping_sub(xy), &mut updated)?;
+                self.place(pi, v.wrapping_sub(xy), &mut updated, fixes)?;
             }
         }
         Ok(Some(v))
@@ -792,10 +856,11 @@ impl<T: Copy + PartialEq> ObjsInVoxels<T> {
         pi: PointItem<T>,
         voxel: usize,
         updated: &mut Option<&mut Vec<usize>>,
+        fixes: &UpstreamFixes,
     ) -> Result<()> {
         self.point_items.push(pi);
         let idx = self.point_items.len() - 1;
-        self.hash.add(idx, voxel, idx)?;
+        self.hash.add_with_fixes(idx, voxel, idx, fixes)?;
         if let Some(u) = updated.as_deref_mut() {
             add_unique(u, voxel);
         }
@@ -1316,5 +1381,239 @@ mod tests {
         let exp_full = [(1, 2), (1, 3), (1, 4), (2, 3), (2, 4), (3, 4)];
         assert_eq!(sorted_item_pairs(&w, &full), exp_full);
         assert_eq!(full_hist, [1, 0, 2, 0, 3, 0, 0, 0, 4, 0, 0]);
+    }
+
+    #[test]
+    fn wr13_default_grow_after_removing_all_zeroes_records_and_corrupts_remove() {
+        let mut ht = HashTable::new(1, 4).unwrap();
+        assert_eq!(ht.capacity(), 65);
+        ht.add(101, 2, 11).unwrap();
+        ht.add(202, 3, 22).unwrap();
+        ht.add(303, 2, 33).unwrap();
+        assert_eq!(ht.remove(&[0, 1, 2]), 3);
+
+        assert_eq!(ht.total_bucket_item_count(), 3);
+        assert_eq!(ht.removed_bucket_item_count(), 3);
+        assert_eq!(ht.used_bucket_item_count(), 0);
+        assert_eq!(ht.used_bucket_count(), 0);
+        assert_eq!(ht.first_used_bucket(), None);
+        assert!(ht.bucket_items().iter().all(BucketItem::is_removed));
+        assert_eq!(ht.bucket_items()[1].item, Some(202));
+        assert_eq!(ht.bucket_items()[1].item_id, 22);
+
+        let mut via_default_fixes = ht.clone();
+        ht.inc_max_item_count();
+        via_default_fixes.inc_max_item_count_with_fixes(&UpstreamFixes::default());
+        assert_eq!(ht.capacity(), 129);
+        assert_eq!(ht.bucket_items(), via_default_fixes.bucket_items());
+
+        let zeroed = BucketItem {
+            next_used_bucket: None,
+            next_bucket_item: None,
+            bucket_index: Some(0),
+            item: None,
+            item_id: 0,
+        };
+        assert_eq!(ht.bucket_items(), &[zeroed, zeroed, zeroed]);
+        assert!(ht.bucket_items().iter().all(|b| !b.is_removed()));
+        assert_eq!(ht.buckets(), &[None, None, None, None]);
+
+        // Re-removing already-removed handle 1 walks bucket 0 and increments
+        // removed_bucket_item_count past total_bucket_item_count (wrapping used count).
+        assert_eq!(ht.remove(&[1]), 1);
+        assert_eq!(ht.removed_bucket_item_count(), 4);
+        assert_eq!(ht.total_bucket_item_count(), 3);
+        assert_eq!(ht.used_bucket_item_count(), usize::MAX);
+        assert!(ht.bucket_items()[1].is_removed());
+        assert!(!ht.bucket_items()[0].is_removed());
+        assert!(!ht.bucket_items()[2].is_removed());
+    }
+
+    #[test]
+    fn wr13_opt_in_grow_after_removing_all_preserves_removed_records_and_invariants() {
+        let mut k = Kernel::default();
+        assert!(!k.fixes.hash_table_grow_preserves_removed_records);
+        let flag = k
+            .fixes
+            .flag_mut("hash_table_grow_preserves_removed_records")
+            .unwrap();
+        assert!(!*flag);
+        *flag = true;
+        assert!(k.fixes.hash_table_grow_preserves_removed_records);
+
+        let mut ht = HashTable::new(1, 4).unwrap();
+        ht.add_with_fixes(101, 2, 11, &k.fixes).unwrap();
+        ht.add_with_fixes(202, 3, 22, &k.fixes).unwrap();
+        ht.add_with_fixes(303, 2, 33, &k.fixes).unwrap();
+        assert_eq!(ht.remove(&[0, 1, 2]), 3);
+        let before_grow = ht.bucket_items().to_vec();
+
+        ht.inc_max_item_count_with_fixes(&k.fixes);
+        assert_eq!(ht.capacity(), 129);
+        assert_eq!(ht.bucket_items(), before_grow.as_slice());
+        assert!(ht.bucket_items().iter().all(BucketItem::is_removed));
+        assert_eq!(ht.buckets(), &[None, None, None, None]);
+
+        // Re-removing already-removed handles skips them without walking bucket 0 or
+        // perturbing counters.
+        assert_eq!(ht.remove(&[1]), 0);
+        assert_eq!(ht.remove(&[0, 1, 2]), 0);
+        assert_eq!(ht.total_bucket_item_count(), 3);
+        assert_eq!(ht.removed_bucket_item_count(), 3);
+        assert_eq!(ht.used_bucket_item_count(), 0);
+        assert_eq!(ht.used_bucket_count(), 0);
+
+        // Subsequent additions (including into bucket 0) and removals keep exact counts.
+        ht.add_with_fixes(404, 0, 44, &k.fixes).unwrap();
+        ht.add_with_fixes(505, 0, 55, &k.fixes).unwrap();
+        ht.add_with_fixes(606, 2, 66, &k.fixes).unwrap();
+        assert_eq!(ht.remove(&[0, 1, 2]), 0);
+        assert_eq!(ht.total_bucket_item_count(), 6);
+        assert_eq!(ht.removed_bucket_item_count(), 3);
+        assert_eq!(ht.used_bucket_item_count(), 3);
+        assert_eq!(ht.used_bucket_count(), 2);
+        assert_eq!(ht.buckets(), &[Some(3), None, Some(5), None]);
+
+        assert_eq!(ht.remove(&[3, 4, 5]), 3);
+        assert_eq!(ht.total_bucket_item_count(), 6);
+        assert_eq!(ht.removed_bucket_item_count(), 6);
+        assert_eq!(ht.used_bucket_item_count(), 0);
+        assert_eq!(ht.used_bucket_count(), 0);
+        assert_eq!(ht.first_used_bucket(), None);
+        assert!(ht.bucket_items().iter().all(BucketItem::is_removed));
+    }
+
+    #[test]
+    fn wr13_auto_grow_via_add_with_fixes_and_objs_in_voxels() {
+        let mut k = Kernel::default();
+        k.fixes.hash_table_grow_preserves_removed_records = true;
+
+        // 1. HashTable::add vs HashTable::add_with_fixes auto-growing at full capacity
+        // after all 64 initial slots were removed.
+        let mut ht_def = HashTable::new(0, 4).unwrap();
+        let mut ht_fix = HashTable::new(0, 4).unwrap();
+        for i in 0..64usize {
+            let bucket = (i % 3) + 1;
+            ht_def.add(1000 + i, bucket, i).unwrap();
+            ht_fix
+                .add_with_fixes(1000 + i, bucket, i, &k.fixes)
+                .unwrap();
+        }
+        let all_64: Vec<usize> = (0..64).collect();
+        assert_eq!(ht_def.remove(&all_64), 64);
+        assert_eq!(ht_fix.remove(&all_64), 64);
+        assert_eq!(ht_def.capacity(), 64);
+        assert_eq!(ht_def.used_bucket_item_count(), 0);
+
+        // 65th add triggers inc_max_item_count while used_bucket_item_count == 0.
+        ht_def.add(9999, 0, 999).unwrap();
+        ht_fix.add_with_fixes(9999, 0, 999, &k.fixes).unwrap();
+        assert_eq!(ht_def.capacity(), 128);
+        assert_eq!(ht_fix.capacity(), 128);
+        assert_eq!(ht_def.bucket_items()[0].bucket_index, Some(0));
+        assert_eq!(ht_def.bucket_items()[0].item, None);
+        assert_eq!(ht_fix.bucket_items()[0].bucket_index, None);
+        assert_eq!(ht_fix.bucket_items()[0].item, Some(1000));
+
+        // Re-removing slot 0 under default walks live bucket 0, double-counts removal,
+        // and drops used_bucket_item_count to 0 while slot 64 is still in bucket 0
+        // (causing a second grow to zero live slot 64 as well).
+        assert_eq!(ht_def.remove(&[0]), 1);
+        assert_eq!(ht_def.used_bucket_item_count(), 0);
+        assert_eq!(ht_def.buckets()[0], Some(64));
+        ht_def.inc_max_item_count();
+        assert_eq!(ht_def.bucket_items()[64].item, None);
+
+        // Under opt-in, slot 0 is skipped, live slot 64 stays intact across further
+        // growth, and removing slot 64 cleanly empties bucket 0.
+        assert_eq!(ht_fix.remove(&[0]), 0);
+        assert_eq!(ht_fix.used_bucket_item_count(), 1);
+        ht_fix.inc_max_item_count_with_fixes(&k.fixes);
+        assert_eq!(ht_fix.bucket_items()[64].item, Some(9999));
+        assert_eq!(ht_fix.bucket_items()[64].item_id, 999);
+        assert_eq!(ht_fix.remove(&[64]), 1);
+        assert_eq!(ht_fix.used_bucket_item_count(), 0);
+        assert_eq!(ht_fix.buckets()[0], None);
+
+        // 2. ObjsInVoxels::add vs ObjsInVoxels::add_with_fixes auto-growing when
+        // point_items.len() + MAX_ITEMS_PER_ADD > point_capacity after removing all.
+        let mut v_def = ObjsInVoxels::<u32>::new(2, 2, 1, Some(&unit_box()), 0).unwrap();
+        let mut v_fix = ObjsInVoxels::<u32>::new(2, 2, 1, Some(&unit_box()), 0).unwrap();
+        for id in 0..58u32 {
+            let p = Vec3::new(0.2, 0.2, 0.5);
+            v_def.add(id, p, 0.0, None).unwrap();
+            v_fix.add_with_fixes(id, p, 0.0, None, &k.fixes).unwrap();
+        }
+        for id in 0..58u32 {
+            assert_eq!(v_def.remove(id), 1);
+            assert_eq!(v_fix.remove(id), 1);
+        }
+        assert_eq!(v_def.point_capacity(), 64);
+        assert_eq!(v_def.hash_table().used_bucket_item_count(), 0);
+
+        let p_a = Vec3::new(0.75, 0.75, 0.5);
+        let p_b = Vec3::new(0.7502, 0.75, 0.5);
+        v_def.add(0, p_a, 1e-3, None).unwrap();
+        v_def.add(100, p_b, 1e-3, None).unwrap();
+        v_fix.add_with_fixes(0, p_a, 1e-3, None, &k.fixes).unwrap();
+        v_fix
+            .add_with_fixes(100, p_b, 1e-3, None, &k.fixes)
+            .unwrap();
+        assert_eq!(v_def.point_capacity(), 128);
+        assert_eq!(v_fix.point_capacity(), 128);
+
+        let pairs_fix = v_fix
+            .find_coincident_pairs(&k, FindPairsOptions::default())
+            .unwrap();
+        assert_eq!(sorted_item_pairs(&v_fix, &pairs_fix), [(0, 100)]);
+        assert_eq!(v_fix.find_point_items(0), vec![0, 58]);
+
+        // Removing item 0 visits historical slot 0 and live slot 58: default double-counts
+        // zeroed slot 0, whereas opt-in skips slot 0 and removes only live slot 58.
+        assert_eq!(v_def.remove(0), 2);
+        assert_eq!(v_def.hash_table().used_bucket_item_count(), 0);
+        assert_eq!(v_fix.remove(0), 1);
+        assert_eq!(v_fix.removed_point_item_count(), 59);
+        assert_eq!(v_fix.hash_table().used_bucket_item_count(), 1);
+    }
+
+    #[test]
+    fn wr13_non_empty_and_fresh_empty_grow_parity() {
+        let fixes = UpstreamFixes {
+            hash_table_grow_preserves_removed_records: true,
+            ..Default::default()
+        };
+
+        // Fresh empty table (total == 0, used == 0) grows identically under both modes.
+        let mut empty_def = HashTable::new(0, 4).unwrap();
+        let mut empty_fix = HashTable::new(0, 4).unwrap();
+        empty_def.inc_max_item_count();
+        empty_fix.inc_max_item_count_with_fixes(&fixes);
+        assert_eq!(empty_def.capacity(), 64);
+        assert_eq!(empty_fix.capacity(), 64);
+        assert_eq!(empty_def.bucket_items(), empty_fix.bucket_items());
+
+        // Non-empty table with both active and removed records grows identically under
+        // both modes, preserving both active and removed records.
+        let mut mixed_def = HashTable::new(1, 4).unwrap();
+        for (item, bucket, id) in [(10, 1, 1), (20, 2, 2), (30, 1, 3), (40, 3, 4)] {
+            mixed_def.add(item, bucket, id).unwrap();
+        }
+        assert_eq!(mixed_def.remove(&[0, 3]), 2);
+        assert_eq!(mixed_def.used_bucket_item_count(), 2);
+        assert_eq!(mixed_def.removed_bucket_item_count(), 2);
+        let mut mixed_fix = mixed_def.clone();
+
+        mixed_def.inc_max_item_count();
+        mixed_fix.inc_max_item_count_with_fixes(&fixes);
+        assert_eq!(mixed_def.capacity(), mixed_fix.capacity());
+        assert_eq!(mixed_def.buckets(), mixed_fix.buckets());
+        assert_eq!(mixed_def.bucket_items(), mixed_fix.bucket_items());
+        assert_eq!(mixed_def.first_used_bucket(), mixed_fix.first_used_bucket());
+        assert_eq!(mixed_def.used_bucket_count(), mixed_fix.used_bucket_count());
+        assert_eq!(
+            mixed_def.removed_bucket_item_count(),
+            mixed_fix.removed_bucket_item_count()
+        );
     }
 }
