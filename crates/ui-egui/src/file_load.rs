@@ -60,6 +60,8 @@ pub struct Request {
     pub design: Option<String>,
     /// The chat turn that requested the load. It must still be current when the file lands.
     pub(crate) chat_turn: Option<Arc<std::sync::atomic::AtomicBool>>,
+    /// Which operation it is ([`crate::operations::serial`]).
+    pub serial: u64,
 }
 
 impl Request {
@@ -73,6 +75,7 @@ impl Request {
             allow_hosts: Vec::new(),
             design: None,
             chat_turn: None,
+            serial: crate::operations::serial(),
         }
     }
     fn insert(&self) -> bool {
@@ -246,6 +249,13 @@ impl FileLoad {
     }
     /// Signal cancellation, release the import slot and drop queued requests.
     pub fn cancel(&mut self) {
+        self.cancel_running();
+        for q in self.queued.drain(..) {
+            q.answer(Err("file operation cancelled".into()));
+        }
+    }
+    /// Signal the running request's cancellation and release its slot; queued requests go on.
+    pub(crate) fn cancel_running(&mut self) {
         if let Some(r) = &self.running {
             r.progress.cancel();
         }
@@ -257,10 +267,60 @@ impl FileLoad {
         {
             r.request.answer(Err("file operation cancelled".into()));
         }
-        for q in self.queued.drain(..) {
+    }
+    /// Drop the `index`th queued request (from 0), answering it as cancelled.
+    pub(crate) fn cancel_queued(&mut self, index: usize) {
+        if let Some(q) = self.queued.remove(index) {
             q.answer(Err("file operation cancelled".into()));
         }
     }
+    /// The operations panel's view of the requests: the running one (if any), then the queued
+    /// ones in the order they will run. Each is its command, its file's name, how far it is
+    /// (`done` of `total`, when that is known) and whether it was cancelled.
+    pub(crate) fn operations(&self) -> Vec<FileOperation> {
+        let entry = |request: &Request| FileOperation {
+            serial: request.serial,
+            command: request.command().0,
+            name: match &request.kind {
+                Kind::Recover { .. } => request.path.clone(),
+                _ => std::path::Path::new(&request.path).file_name().map(|p| p.to_string_lossy().to_string()).unwrap_or_default(),
+            },
+            steps: None,
+            queued: true,
+            cancelled: false,
+        };
+        let running = self.running.as_ref().map(|r| FileOperation { steps: steps(r), queued: false, cancelled: r.cancelled(), ..entry(&r.request) });
+        running.into_iter().chain(self.queued.iter().map(entry)).collect()
+    }
+}
+
+/// A file operation as the operations panel shows it ([`FileLoad::operations`]).
+#[derive(Clone, Debug)]
+pub(crate) struct FileOperation {
+    pub serial: u64,
+    pub command: &'static str,
+    pub name: String,
+    pub steps: Option<(usize, usize)>,
+    pub queued: bool,
+    pub cancelled: bool,
+}
+
+/// How far a running request is: the long work inside a feature (a large STEP file read), the
+/// linked designs read again, or the features rebuilt; `None` when that is not known yet.
+fn steps(r: &Running) -> Option<(usize, usize)> {
+    if r.request.kind == Kind::UpdateLinks
+        && let Some((_, i, n)) = r.progress.item()
+    {
+        return Some((i, n));
+    }
+    // As the card reads them: in the web app a design opened a few features a frame counts them
+    // itself ([`Running::features`], [`Running::work`]).
+    let phase = r.phase.load(Ordering::Relaxed);
+    if let Some((_, d, t)) = r.work().filter(|(_, d, t)| r.request.kind == Kind::ExportDxf || (phase == 0 && d < t)) {
+        return Some((d, t));
+    }
+    let (done, total) = r.features();
+    (total > 0).then_some(if phase == 0 { (done, total) } else { (total, total) })
 }
 
 pub fn begin(app: &mut SolveApp, path: &str, insert: bool) {
@@ -412,6 +472,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         allow_hosts: Vec::new(),
         design: None,
         chat_turn: req.chat_turn,
+        serial: crate::operations::serial(),
     };
     let _ = begin_request(app, request);
     None
