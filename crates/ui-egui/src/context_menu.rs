@@ -2,8 +2,12 @@
 //!
 //! The viewport's right-click opens a list of commands for the selection or the thing under the
 //! cursor: faces, edges, bodies, sketch entities or empty space. The optional radial marking
-//! menu adds eight commands around the cursor, with Repeat at the top. With that preference on,
-//! holding the right button opens it too; releasing over a direction picks a command (a flick).
+//! menu adds up to eight commands around the cursor (Repeat at the top by default), and up to
+//! eight more in a second layer around those: the person's lists for the studio they are in
+//! (`mouse_gesture::radial_items`). With that preference on, holding the right button still for
+//! the hold time and then moving opens it at the press; releasing over a sector picks its command
+//! (a flick). Moving sooner leaves the drag to the camera, and a right-click, or a held press let
+//! go without moving, opens the list alone.
 //! The browser's right-click
 //! opens the same list styling for a body, sketch or component.
 //!
@@ -231,8 +235,12 @@ pub struct MenuState {
     pub flick: bool,
     /// A right press in the viewport that may become a press-and-hold: where and when.
     press: Option<(Pos2, f64)>,
-    /// `ui.menu` asked to open at a point once the pointer got there.
-    pending: Option<(Pos2, Target)>,
+    /// That press has been held still for the hold time: a move now opens the radial menu, and
+    /// the right drag no longer moves the camera.
+    held: bool,
+    /// `ui.menu` asked to open at a point once the pointer got there (with the radial ring when
+    /// the flag is set).
+    pending: Option<(Pos2, Target, bool)>,
     /// An inline rename in progress.
     pub rename: Option<Rename>,
     /// A delete waiting for its confirmation (it takes or breaks other features).
@@ -286,9 +294,14 @@ pub struct Rename {
 
 /// Radial slots, clockwise from the top.
 const DIRS: usize = 8;
-/// Half axes of the ring of radial items.
-const RX: f32 = crate::ui_kit::RADIAL_RADIUS;
-const RY: f32 = crate::ui_kit::RADIAL_RADIUS;
+/// Radius of the full menu's ring of radial items.
+#[cfg(test)]
+const RX: f32 = crate::ui_kit::RadialLayout { compact: false }.edge();
+/// Shortest and longest hold before the radial menu opens, in milliseconds.
+pub(crate) const MIN_HOLD_MS: u32 = 50;
+pub(crate) const MAX_HOLD_MS: u32 = 1000;
+/// How far (points) the pointer moves from the press before it counts as moved.
+const MOVED: f32 = 5.0;
 
 // ---------------------------------------------------------------------------------------------
 // What the menus offer
@@ -344,36 +357,25 @@ pub fn component_bodies(app: &SolveApp, id: u64) -> Vec<String> {
     app.session.model.state().bodies.iter().filter(|b| doc.component_within(doc.model_body_component(b), id)).map(|b| b.name.clone()).collect()
 }
 
-/// The eight radial commands, clockwise from the top.
+/// The radial menu's first layer of commands, clockwise from the top.
 pub fn radial_items(app: &SolveApp) -> Vec<Item> {
-    let key = crate::keymap::display_for(app, "edit.repeat").unwrap_or_default();
-    let repeat = match &app.last_command {
-        Some((_, label)) => act("ui.repeat", &format!("Repeat {label}"), "redo").key(&key),
-        None => act("ui.repeat", "Repeat", "redo").key(&key).on(false),
-    };
-    let delete = act("ui.delete", "Delete", "delete").key("Del").on(!app.session.selection.is_empty());
-    if app.session.active_sketch.is_some() {
-        return vec![
-            repeat,
-            delete,
-            cmd(app, "sketch.line", "Line"),
-            cmd(app, "sketch.rectangle.two_point", "Rectangle"),
-            act("ui.finishSketch", "Finish Sketch", "finish"),
-            cmd(app, "sketch.circle.center", "Circle"),
-            cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()),
-            cmd(app, "sketch.dimension", "Sketch Dimension"),
-        ];
-    }
-    vec![
-        repeat,
-        delete,
-        cmd(app, "solid.press_pull", "Press Pull"),
-        cmd(app, "solid.hole", "Hole"),
-        cmd(app, "sketch.create", "Create Sketch"),
-        cmd(app, "solid.extrude", "Extrude"),
-        cmd(app, "edit.undo", "Undo").on(!app.session.undo.is_empty()),
-        cmd(app, "solid.move", "Move/Copy"),
-    ]
+    crate::mouse_gesture::radial_items(app).0
+}
+
+/// Both layers of the radial menu: the first, and the one around it (often empty).
+fn radial_layers(app: &SolveApp) -> (Vec<Item>, Vec<Item>) {
+    crate::mouse_gesture::radial_items(app)
+}
+
+/// The hold time, in seconds, kept between [`MIN_HOLD_MS`] and [`MAX_HOLD_MS`].
+pub(crate) fn hold_secs(app: &SolveApp) -> f64 {
+    f64::from(app.preferences.radial_hold_ms.clamp(MIN_HOLD_MS, MAX_HOLD_MS)) / 1000.0
+}
+
+/// A right press has been held still past the hold time: its drag opens the radial menu, so the
+/// camera leaves it alone.
+pub(crate) fn holding(app: &SolveApp) -> bool {
+    app.menu.held
 }
 
 /// The list of a menu (under the ring for the viewport).
@@ -2120,13 +2122,20 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
     open_for(app, at, Target::Viewport);
 }
 
-/// Open a menu for a target (the radial ring only for the viewport).
+/// The viewport's menu with the radial ring around it, as a held right press opens it (the ring
+/// only while the radial menu is on): a right-click opens the list alone. `held`: the keys held.
+pub fn open_radial(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
+    open(app, at, held);
+    app.menu.radial = app.preferences.radial_context_menu;
+}
+
+/// Open a menu for a target: a list, without the radial ring ([`open_radial`] adds it).
 pub fn open_for(app: &mut SolveApp, at: Pos2, target: Target) {
     app.menu.key_row = None;
     app.menu.submenu = None;
     app.menu.submenu_key = None;
     app.menu.submenu_leave = None;
-    app.menu.radial = target == Target::Viewport && app.preferences.radial_context_menu;
+    app.menu.radial = false;
     app.menu.target = target;
     app.menu.flick = false;
     app.menu.opener = None;
@@ -2156,10 +2165,10 @@ pub fn close(app: &mut SolveApp) {
 }
 
 /// Open the menu at a point for automation: the pointer moves there first so what is under it
-/// counts, then the menu opens on a later frame.
-pub fn request_open(app: &mut SolveApp, at: Pos2, target: Target) {
+/// counts, then the menu opens on a later frame; `radial` adds the viewport's radial ring.
+pub fn request_open(app: &mut SolveApp, at: Pos2, target: Target, radial: bool) {
     app.synthetic.push(egui::Event::PointerMoved(at));
-    app.menu.pending = Some((at, target));
+    app.menu.pending = Some((at, target, radial));
 }
 
 /// The open menu as JSON (for `ui.menu`).
@@ -2167,7 +2176,7 @@ pub fn describe(app: &SolveApp) -> Value {
     let Some(at) = app.viewport.context_menu else {
         return json!({ "open": false, "pending": app.menu.pending.is_some() });
     };
-    let radial = if app.menu.radial { radial_items(app) } else { Vec::new() };
+    let (radial, radial_outer) = if app.menu.radial { radial_layers(app) } else { Default::default() };
     let describe_items = |items: Vec<Item>| {
         items
             .into_iter()
@@ -2184,6 +2193,7 @@ pub fn describe(app: &SolveApp) -> Value {
         "at": [at.x, at.y],
         "target": app.menu.target,
         "radial": describe_items(radial),
+        "radial_outer": describe_items(radial_outer),
         "items": describe_items(items(app, &app.menu.target)),
         "rename": app.menu.rename.as_ref().map(|r| r.text.clone()),
     })
@@ -2193,7 +2203,12 @@ pub fn describe(app: &SolveApp) -> Value {
 pub fn pick(app: &mut SolveApp, key: &str) -> Result<Value, String> {
     let Some(at) = app.viewport.context_menu else { return Err("no menu is open".into()) };
     let target = app.menu.target.clone();
-    let mut all = if app.menu.radial { radial_items(app) } else { Vec::new() };
+    let mut all = Vec::new();
+    if app.menu.radial {
+        let (inner, outer) = radial_layers(app);
+        all.extend(inner);
+        all.extend(outer);
+    }
     let roots = items(app, &target);
     all.extend(roots.iter().cloned());
     all.extend(roots.into_iter().flat_map(|item| item.children));
@@ -2207,10 +2222,15 @@ pub fn pick(app: &mut SolveApp, key: &str) -> Result<Value, String> {
     Ok(json!({ "ran": item.id, "label": item.label }))
 }
 
-/// Where the radial menu goes so its ring stays on screen.
-fn radial_center(at: Pos2, screen: Rect) -> Pos2 {
-    let mx = RX + 4.0;
-    let my = RY + 4.0;
+/// How far the radial menu reaches from its centre: past the second layer when it has commands.
+fn reach(app: &SolveApp, outer: &[Item]) -> f32 {
+    crate::ui_kit::RadialLayout { compact: app.preferences.radial_compact }.reach(!outer.is_empty())
+}
+
+/// Where the radial menu reaching `r` from its centre goes so its rings stay on screen.
+fn radial_center(at: Pos2, screen: Rect, r: f32) -> Pos2 {
+    let mx = r + 4.0;
+    let my = r + 4.0;
     let x = if screen.width() > 2.0 * mx { at.x.clamp(screen.left() + mx, screen.right() - mx) } else { screen.center().x };
     let y = if screen.height() > 2.0 * my { at.y.clamp(screen.top() + my, screen.bottom() - my) } else { screen.center().y };
     pos2(x, y)
@@ -2232,19 +2252,19 @@ fn list_height(items: &[Item]) -> f32 {
         .sum::<f32>()
 }
 
-/// Where the list goes next to a ring centred at `c`: below it when it fits, otherwise beside
-/// it (right, else left), kept on screen.
-fn list_place(c: Pos2, h: f32, screen: Rect) -> Pos2 {
-    let below = c.y + RY + 12.0;
+/// Where the list goes next to a ring reaching `r` from its centre `c`: below it when it fits,
+/// otherwise beside it (right, else left), kept on screen.
+fn list_place(c: Pos2, h: f32, screen: Rect, r: f32) -> Pos2 {
+    let below = c.y + r + 12.0;
     if below + h <= screen.bottom() - 4.0 {
         return pos2((c.x - LIST_W / 2.0).clamp(screen.left() + 4.0, (screen.right() - LIST_W - 4.0).max(screen.left())), below);
     }
     let y = (c.y - h / 2.0).clamp(screen.top() + 4.0, (screen.bottom() - h - 4.0).max(screen.top()));
-    let right = c.x + RX + 12.0;
+    let right = c.x + r + 12.0;
     if right + LIST_W <= screen.right() - 4.0 {
         return pos2(right, y);
     }
-    pos2((c.x - RX - 12.0 - LIST_W).max(screen.left() + 4.0), y)
+    pos2((c.x - r - 12.0 - LIST_W).max(screen.left() + 4.0), y)
 }
 
 /// Width of list menus.
@@ -2267,9 +2287,18 @@ pub fn place(at: Pos2, gap: Vec2, size: Vec2, screen: Rect) -> Pos2 {
     pos2(axis(at.x, gap.x, size.x, screen.left(), screen.right()), axis(at.y, gap.y, size.y, screen.top(), screen.bottom()))
 }
 
+/// The (layer, slot) of the radial menu a pointer offset points at, none near the centre: the
+/// second layer past the first one's edge (`edge` from the centre) where it has a command in
+/// that direction, otherwise the first, whose slots then reach outward without limit.
+fn radial_hot(d: Vec2, outer: &[Item], edge: f32) -> Option<(usize, usize)> {
+    let k = sector(d)?;
+    let past = d.length() > edge + 2.0;
+    Some(if past && outer.get(k).is_some() { (1, k) } else { (0, k) })
+}
+
 /// The radial slot a pointer offset points at (none near the centre).
 fn sector(d: Vec2) -> Option<usize> {
-    if d.length() < 22.0 {
+    if !d.is_finite() || d.length() < 22.0 {
         return None;
     }
     // Clockwise from the top (screen y points down).
@@ -2278,11 +2307,14 @@ fn sector(d: Vec2) -> Option<usize> {
     Some((k.rem_euclid(DIRS as i64)) as usize)
 }
 
-/// Press-and-hold of the right button in the viewport opens the menu; releasing over a
-/// direction picks it.
+/// Holding the right button still in the viewport for the hold time, then moving, opens the
+/// radial menu at the press; releasing over a sector picks its command. Letting go of a held
+/// press without moving opens the menu as a right-click does; moving before the hold time leaves
+/// the drag to the camera.
 fn track_hold(app: &mut SolveApp, ctx: &egui::Context) {
     if !app.preferences.radial_context_menu || crate::mouse_gesture::active(app) {
         app.menu.press = None;
+        app.menu.held = false;
         app.menu.flick = false;
         app.menu.radial = false;
         return;
@@ -2299,15 +2331,30 @@ fn track_hold(app: &mut SolveApp, ctx: &egui::Context) {
     let free = app.tool.is_none() && app.dialog.is_none() && app.preferences.nav != crate::prefs::OPENSCAD_NAV;
     if pressed && free && app.viewport.context_menu.is_none() && app.viewport.mouse.is_some() {
         app.menu.press = pos.map(|p| (p, time));
+        app.menu.held = false;
     }
     if let Some((p0, t0)) = app.menu.press {
-        let moved = pos.is_some_and(|p| p.distance(p0) > 5.0);
-        if !down || moved {
+        let moved = pos.is_some_and(|p| p.distance(p0) > MOVED);
+        let held_keys = crate::tool_modifiers::Held::from_modifiers(ctx.input(|i| i.modifiers));
+        if !down {
+            // Held and let go without moving: the list, as a right-click opens it.
+            if app.menu.held && app.viewport.context_menu.is_none() {
+                open(app, p0, held_keys);
+            }
             app.menu.press = None;
-        } else if time - t0 > 0.35 {
+            app.menu.held = false;
+        } else if app.menu.held {
+            if moved {
+                app.menu.press = None;
+                app.menu.held = false;
+                open_radial(app, p0, held_keys);
+                app.menu.flick = true;
+            }
+        } else if moved {
+            // A drag that began before the hold time: the camera's.
             app.menu.press = None;
-            open(app, p0, crate::tool_modifiers::Held::from_modifiers(ctx.input(|i| i.modifiers)));
-            app.menu.flick = true;
+        } else if time - t0 >= hold_secs(app) {
+            app.menu.held = true;
         } else {
             ctx.request_repaint_after(std::time::Duration::from_millis(30));
         }
@@ -2315,11 +2362,13 @@ fn track_hold(app: &mut SolveApp, ctx: &egui::Context) {
     if released && app.menu.flick {
         app.menu.flick = false;
         if let (Some(at), Some(p)) = (app.viewport.context_menu, pos) {
-            let c = radial_center(at, ctx.content_rect());
+            let (inner, outer) = radial_layers(app);
+            let c = radial_center(at, ctx.content_rect(), reach(app, &outer));
+            let edge = crate::ui_kit::RadialLayout { compact: app.preferences.radial_compact }.edge();
             if app.menu.radial
-                && let Some(k) = sector(p - c)
                 && p.distance(c) > 36.0
-                && let Some(item) = radial_items(app).into_iter().nth(k).filter(|i| i.enabled)
+                && let Some((layer, k)) = radial_hot(p - c, &outer, edge)
+                && let Some(item) = (if layer == 0 { inner } else { outer }).into_iter().nth(k).filter(|i| i.enabled)
             {
                 close(app);
                 run_item(app, &item, at);
@@ -2330,11 +2379,15 @@ fn track_hold(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Show the open menu, the rename box and the Properties window.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
-    if let Some((at, target)) = app.menu.pending.clone()
+    if let Some((at, target, radial)) = app.menu.pending.clone()
         && app.synthetic.is_empty()
     {
         app.menu.pending = None;
-        if target == Target::Viewport { open(app, at, crate::tool_modifiers::Held::default()) } else { open_for(app, at, target) }
+        match target {
+            Target::Viewport if radial => open_radial(app, at, crate::tool_modifiers::Held::default()),
+            Target::Viewport => open(app, at, crate::tool_modifiers::Held::default()),
+            target => open_for(app, at, target),
+        }
     }
     crate::browser::dims_overlay(app, ctx);
     track_hold(app, ctx);
@@ -2351,21 +2404,23 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let list_at = if target == Target::Workspace {
         pos2(at.x.clamp(screen.left(), (screen.right() - 470.0).max(screen.left())), at.y)
     } else if app.menu.radial {
-        let c = radial_center(at, screen);
-        let radial = radial_items(app);
-        let area = Rect::from_center_size(c, vec2(2.0 * (RX + 4.0), 2.0 * (RY + 4.0)));
+        let (radial, outer) = radial_layers(app);
+        let compact = app.preferences.radial_compact;
+        let r = reach(app, &outer);
+        let c = radial_center(at, screen, r);
+        let area = Rect::from_center_size(c, vec2(2.0 * (r + 4.0), 2.0 * (r + 4.0)));
         inside |= pointer.is_some_and(|p| area.contains(p));
-        let hot = pointer.and_then(|p| sector(p - c));
+        let hot = pointer.and_then(|p| radial_hot(p - c, &outer, crate::ui_kit::RadialLayout { compact }.edge()));
         let resp = Container::new(ctx, Surface::Popup)
             .area(egui::Id::new("sc_marking_menu"))
             .fixed_pos(area.min)
             .order(egui::Order::Foreground)
             .show(ctx, |ui| {
                 let _ = ui.allocate_exact_size(area.size(), Sense::hover());
-                picked = crate::ui_kit::radial_menu(ui, c, &radial, hot).or(picked.take());
+                picked = crate::ui_kit::radial_menu_layers(ui, c, &radial, &outer, hot, compact).or(picked.take());
             });
         inside |= resp.response.contains_pointer();
-        list_place(c, list_height(&list), screen)
+        list_place(c, list_height(&list), screen, r)
     } else {
         place(at, Vec2::ZERO, vec2(LIST_W, list_height(&list)), screen)
     };
@@ -2996,7 +3051,10 @@ mod tests {
         assert!(!h.app.origin_shown() && h.app.viewport.context_menu.is_none(), "the ordinary menu must execute Hide Origin and close");
         h.call("ui.prefs", json!({"radial_context_menu":true}));
         h.step(&json!({"click":point,"button":"right"})).unwrap();
-        assert_eq!(describe(&h.app)["radial"].as_array().unwrap().len(), DIRS);
+        assert!(describe(&h.app)["radial"].as_array().unwrap().is_empty(), "a right-click opens the list alone, radial menu on or not");
+        close(&mut h.app);
+        open_radial(&mut h.app, pos2(point[0] as f32, point[1] as f32), Default::default());
+        assert_eq!(describe(&h.app)["radial"].as_array().unwrap().len(), DIRS, "a held press opens the ring");
         open_for(&mut h.app, pos2(point[0] as f32, point[1] as f32), Target::Origin);
         assert!(!h.app.menu.radial, "browser menus remain lists when radial menus are enabled");
     }
@@ -3028,6 +3086,120 @@ mod tests {
         assert!(app.viewport.context_menu.is_none() && app.menu.press.is_none() && !app.menu.flick);
     }
 
+    /// Frames of `track_hold` on a 1600 × 1000 screen: (time, pointer, right button pressed or
+    /// released on that frame).
+    fn hold_frames(app: &mut SolveApp, frames: &[(f64, Pos2, Option<bool>)]) {
+        let ctx = crate::fonts::test_context();
+        let screen = Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1000.0));
+        app.viewport.mouse = frames.first().map(|f| f.1);
+        for (time, at, button) in frames {
+            let mut events = vec![egui::Event::PointerMoved(*at)];
+            if let Some(pressed) = button {
+                events.push(egui::Event::PointerButton {
+                    pos: *at,
+                    button: egui::PointerButton::Secondary,
+                    pressed: *pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            let raw = egui::RawInput { time: Some(*time), screen_rect: Some(screen), events, ..Default::default() };
+            let mut output = ctx.run_ui(raw, |_| track_hold(app, &ctx));
+            output.textures_delta.clear();
+        }
+    }
+
+    fn radial_app(hold_ms: u32) -> SolveApp {
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.preferences.radial_context_menu = true;
+        app.preferences.radial_hold_ms = hold_ms;
+        app
+    }
+
+    const AT: Pos2 = pos2(800.0, 500.0);
+
+    #[test]
+    fn a_move_before_the_hold_time_belongs_to_the_camera() {
+        let mut app = radial_app(150);
+        hold_frames(&mut app, &[(0.0, AT, Some(true)), (0.05, AT + vec2(20.0, 0.0), None), (0.3, AT + vec2(40.0, 0.0), None)]);
+        assert!(app.viewport.context_menu.is_none() && !holding(&app), "an early drag opens nothing and keeps the camera");
+    }
+
+    #[test]
+    fn held_still_for_the_hold_time_then_moved_opens_the_radial_menu_at_the_press() {
+        let mut app = radial_app(150);
+        hold_frames(&mut app, &[(0.0, AT, Some(true)), (0.1, AT, None), (0.16, AT + vec2(2.0, 0.0), None)]);
+        assert!(holding(&app) && app.viewport.context_menu.is_none(), "held: the camera leaves the drag alone, and nothing opens yet");
+        hold_frames(&mut app, &[(0.0, AT, Some(true)), (0.1, AT, None), (0.16, AT, None), (0.2, AT + vec2(20.0, 0.0), None)]);
+        assert_eq!(app.viewport.context_menu, Some(AT), "opens where the button went down");
+        assert!(app.menu.radial && app.menu.flick && !holding(&app));
+    }
+
+    #[test]
+    fn the_hold_time_follows_the_preference_within_its_range() {
+        let mut app = radial_app(600);
+        hold_frames(&mut app, &[(0.0, AT, Some(true)), (0.4, AT, None), (0.45, AT + vec2(20.0, 0.0), None)]);
+        assert!(app.viewport.context_menu.is_none(), "600 ms: 0.4 s is too soon");
+        for (ms, secs) in [(0, 0.05), (u32::MAX, 1.0), (350, 0.35)] {
+            app.preferences.radial_hold_ms = ms;
+            assert!((hold_secs(&app) - secs).abs() < 1e-9, "{ms} ms");
+        }
+    }
+
+    #[test]
+    fn held_and_let_go_without_moving_opens_the_list() {
+        let mut app = radial_app(150);
+        hold_frames(&mut app, &[(0.0, AT, Some(true)), (0.2, AT, None), (0.9, AT, Some(false))]);
+        assert_eq!(app.viewport.context_menu, Some(AT));
+        assert!(!app.menu.radial && !app.menu.flick, "the list alone, as a right-click opens it");
+    }
+
+    #[test]
+    fn letting_go_over_a_sector_of_either_layer_runs_it() {
+        let ids = |l: &[&str]| l.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // Outer layer, straight up past the first layer: Create Sketch.
+        let mut app = radial_app(150);
+        app.preferences.mouse_gestures.set_rings(crate::mouse_gesture::Studio::Part, ids(&["undo"]), ids(&["sketch.create"]));
+        let up = |d: f32| AT - vec2(0.0, d);
+        hold_frames(
+            &mut app,
+            &[(0.0, AT, Some(true)), (0.2, AT, None), (0.22, up(20.0), None), (0.3, up(200.0), None), (0.32, up(200.0), Some(false))],
+        );
+        assert!(app.tool.is_some() || app.dialog.is_some(), "the outer command started");
+        assert!(app.viewport.context_menu.is_none());
+        // The first layer, short of its edge: Undo has nothing to undo, so nothing runs.
+        let mut app = radial_app(150);
+        app.preferences.mouse_gestures.set_rings(crate::mouse_gesture::Studio::Part, ids(&["undo"]), ids(&["sketch.create"]));
+        hold_frames(
+            &mut app,
+            &[(0.0, AT, Some(true)), (0.2, AT, None), (0.22, up(20.0), None), (0.3, up(100.0), None), (0.32, up(100.0), Some(false))],
+        );
+        assert!(app.tool.is_none() && app.dialog.is_none(), "the inner sector is the one under the pointer");
+        // The first layer with Create Sketch, flicked far: no outer command that way, so it runs.
+        let mut app = radial_app(150);
+        app.preferences.mouse_gestures.set_rings(crate::mouse_gesture::Studio::Part, ids(&["sketch.create"]), ids(&["undo", "solid.extrude"]));
+        hold_frames(
+            &mut app,
+            &[(0.0, AT, Some(true)), (0.2, AT, None), (0.22, up(20.0), None), (0.3, up(100.0), None), (0.32, up(100.0), Some(false))],
+        );
+        assert!(app.tool.is_some() || app.dialog.is_some(), "the inner command started");
+    }
+
+    #[test]
+    fn the_second_layer_begins_past_the_first_where_it_has_a_command() {
+        let app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        let outer: Vec<Item> = ["undo", "solid.extrude"].iter().filter_map(|id| crate::mouse_gesture::item(&app, id)).collect();
+        assert_eq!(radial_hot(vec2(0.0, -100.0), &outer, RX), Some((0, 0)));
+        assert_eq!(radial_hot(vec2(0.0, -200.0), &outer, RX), Some((1, 0)));
+        assert_eq!(radial_hot(vec2(200.0, -200.0), &outer, RX), Some((1, 1)));
+        assert_eq!(radial_hot(vec2(200.0, 0.0), &outer, RX), Some((0, 2)), "no outer command to the right: the first layer reaches on");
+        assert_eq!(radial_hot(vec2(0.0, -900.0), &[], RX), Some((0, 0)), "one layer reaches outward without limit");
+        assert_eq!(radial_hot(vec2(2.0, 2.0), &outer, RX), None, "the centre");
+        assert_eq!(radial_hot(vec2(f32::NAN, 0.0), &outer, RX), None);
+        let edge = crate::ui_kit::RadialLayout { compact: true }.edge();
+        assert_eq!(radial_hot(vec2(0.0, -(edge - 5.0)), &outer, edge), Some((0, 0)), "compact: the first layer");
+        assert_eq!(radial_hot(vec2(0.0, -(edge + 10.0)), &outer, edge), Some((1, 0)), "compact: the second begins sooner");
+    }
+
     #[test]
     fn sectors_go_clockwise_from_the_top() {
         assert_eq!(sector(vec2(0.0, -50.0)), Some(0));
@@ -3042,14 +3214,14 @@ mod tests {
     #[test]
     fn list_goes_beside_the_ring_near_the_bottom() {
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1000.0));
-        let c = radial_center(pos2(800.0, 300.0), screen);
-        assert!(list_place(c, 300.0, screen).y > c.y + RY, "room below");
+        let c = radial_center(pos2(800.0, 300.0), screen, RX);
+        assert!(list_place(c, 300.0, screen, RX).y > c.y + RX, "room below");
         for at in [pos2(800.0, 900.0), pos2(1590.0, 900.0), pos2(10.0, 990.0)] {
-            let c = radial_center(at, screen);
-            let p = list_place(c, 400.0, screen);
+            let c = radial_center(at, screen, RX);
+            let p = list_place(c, 400.0, screen, RX);
             let r = Rect::from_min_size(p, vec2(LIST_W, 400.0));
             assert!(screen.contains_rect(r), "{at:?}: {r:?}");
-            let ring = Rect::from_center_size(c, vec2(2.0 * RX, 2.0 * RY));
+            let ring = Rect::from_center_size(c, vec2(2.0 * RX, 2.0 * RX));
             assert!(!ring.intersects(r), "{at:?}: list {r:?} over ring {ring:?}");
         }
     }
@@ -3070,8 +3242,10 @@ mod tests {
     fn radial_menu_stays_on_screen() {
         let screen = Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0));
         for at in [pos2(2.0, 2.0), pos2(1199.0, 799.0), pos2(600.0, 400.0), pos2(-50.0, 900.0)] {
-            let c = radial_center(at, screen);
-            assert!(screen.contains_rect(Rect::from_center_size(c, vec2(2.0 * RX, 2.0 * RY))));
+            for r in [RX, crate::ui_kit::RadialLayout { compact: false }.reach(true), crate::ui_kit::RadialLayout { compact: true }.reach(true)] {
+                let c = radial_center(at, screen, r);
+                assert!(screen.contains_rect(Rect::from_center_size(c, vec2(2.0 * r, 2.0 * r))), "{at:?}, reaching {r}");
+            }
         }
     }
 }

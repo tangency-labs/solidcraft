@@ -136,7 +136,6 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     ui_kit::checkbox(ui, crate::i18n::tr_label("Two-finger scroll pans"), &mut app.preferences.trackpad_pan)
                         .on_hover_text(if touchpad { crate::i18n::tr("nav.touchpad.scroll") } else { crate::i18n::tr("ui.trackpad_pan_tip") });
                 });
-                setting::radial_context_menu(app, ui);
             });
         });
         ui_kit::row(ui, app.tr("prefs.trackpad_zoom_modifier"), |ui| {
@@ -218,7 +217,42 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             setting::look_at_anim(app, ui);
             setting::look_at_speed(app, ui);
         });
+        radial_rows(app, ui, t);
         // The existing ring editor is part of the real product and remains available.
         crate::mouse_gesture::nav_rows(app, ui, t);
+    });
+}
+
+/// The radial menu's rows: the switch, the button that opens the editor of its commands, and how
+/// long the right button is held before a move opens it.
+fn radial_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
+    ui_kit::settings_block(ui, crate::i18n::tr_label("Radial menu"), t.space_24 * 6.0 + t.space_6, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            setting::radial_context_menu(app, ui);
+            let customize = ui_kit::button(ui, crate::i18n::tr_label("Commands…"), ui_kit::Button::Normal);
+            crate::scenario::publish_handle("radial:customize", customize.rect.center());
+            if customize.clicked() {
+                crate::mouse_gesture::open_editor(app);
+            }
+        });
+        ui.add_enabled_ui(app.preferences.radial_context_menu, |ui| {
+            ui_kit::checkbox(ui, crate::i18n::tr_label("Compact (icons only)"), &mut app.preferences.radial_compact);
+            ui.horizontal(|ui| {
+                ui.label(crate::i18n::tr_label("Hold before the radial menu opens"));
+                ui_kit::slider(
+                    ui,
+                    &mut app.preferences.radial_hold_ms,
+                    crate::context_menu::MIN_HOLD_MS..=crate::context_menu::MAX_HOLD_MS,
+                    ui_kit::Slider { step: Some(10.0), format: |value| format!("{value:.0} ms"), integer: true, ..Default::default() },
+                );
+            });
+            ui_kit::text(
+                ui,
+                crate::i18n::tr_label(
+                    "Hold the right button still, then move: the radial menu opens, and letting go over a command runs it. Moving sooner moves the view; letting go without moving opens the usual menu.",
+                ),
+                ui_kit::Text::Hint("radial_menu_help"),
+            );
+        });
     });
 }

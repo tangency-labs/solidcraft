@@ -1014,6 +1014,11 @@ preference_settings! {
     radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
     /// Work on the model directly in the viewport (pull a face to extrude or cut); off by default.
     direct_interaction: bool = false, PAGE_TOOLS => check("Direct interaction", "Work on the model directly in the viewport. Press a flat face or a profile and pull: up extrudes, down into a body cuts, and sideways movement sets the step size");
+    /// How long (milliseconds) the right button is held still before a move opens the radial
+    /// menu; read through `context_menu::hold_secs`, which keeps it in range.
+    radial_hold_ms: u32 = 350, PAGE_NAVIGATION;
+    /// The radial menu shows icons only, in smaller sectors (the lit command's name above it).
+    radial_compact: bool = false, PAGE_NAVIGATION;
     /// Mouse gestures: a ring of tools on the right button.
     mouse_gestures: crate::mouse_gesture::Config = Default::default(), PAGE_NAVIGATION;
     /// The wheel zooms out when turned forward.

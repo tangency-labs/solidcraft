@@ -395,7 +395,9 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
         "prefer_free_sketch_points",
         "project_options_dialog",
         "quick_measure",
+        "radial_compact",
         "radial_context_menu",
+        "radial_hold_ms",
         "ribbon_icon_grid",
         "ribbon_labels",
         "ribbon_menus_skip_pinned",
@@ -447,7 +449,7 @@ fn profile_keys_preserve_the_literal_pre_split_baseline() {
     ];
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
-    assert_eq!(expected.len(), 93);
+    assert_eq!(expected.len(), 95);
     assert_eq!(actual, expected);
 }
 
