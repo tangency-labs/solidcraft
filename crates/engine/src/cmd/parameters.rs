@@ -23,8 +23,8 @@ pub static COMMANDS: &[CommandSpec] = &[
          activation; driven parameters and restrictions wait for a configuration edit or activation)",
     ),
     CommandSpec::new("parameters.list", "List Parameters", list).icon("list").noundo().doc_only().params(
-        "favorites?: bool (only favourites), filter?: all|user|sketch|feature|favorites → parameters (name, expression, unit, value in its unit, \
-         source, feature/input, comment, favorite, uses, used_by, error) and cycles",
+        "favorites?: bool (only favourites), filter?: all|user|sketch|feature|favorites → parameters (name, expression, unit, value (mm/deg in every \
+         reply), display_value (in its own unit), source, feature/input, comment, favorite, uses, used_by, error) and cycles",
     ),
     CommandSpec::new("parameters.add", "Add User Parameter", add)
         .icon("new")
@@ -177,8 +177,8 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(t) = s.doc.text_param(&name) {
         out["text"] = json!(t.text);
     }
-    out["value"] = json!(vals.get(&name).map(|v| v.v));
-    out["display_value"] = json!(s.doc.param_display_value(&vals, &name));
+    out["value"] = json!(vals.get(&name).map(|v| expr::round_reported(expr::reported_value(*v))));
+    out["display_value"] = json!(s.doc.param_display_value(&vals, &name).map(expr::round_reported));
     out["recomputed"] = json!(s.model.last_recomputed);
     out["restored"] = json!(s.model.last_restored);
     out["errors"] = json!(failing(s));
@@ -280,7 +280,8 @@ fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -
     }
     s.settle_value_edit(solved)?;
     let (vals, _) = s.doc.param_values();
-    let values: serde_json::Map<String, Value> = list.iter().map(|(n, _)| (n.clone(), json!(vals.get(n).map(|v| v.v)))).collect();
+    let values: serde_json::Map<String, Value> =
+        list.iter().map(|(n, _)| (n.clone(), json!(vals.get(n).map(|v| expr::round_reported(expr::reported_value(*v)))))).collect();
     let mut out = json!({"changed": values, "recomputed": s.model.last_recomputed, "restored": s.model.last_restored, "errors": failing(s)});
     if !switched.is_empty() {
         out["switched"] = json!(switched);
@@ -343,7 +344,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         return Ok(json!({"name": name, "unit": solidcraft_doc::text_params::TEXT_UNIT, "text": t.text, "value": null}));
     }
     Ok(
-        json!({"name": name, "unit": s.doc.param(&name).map(|x| x.unit.clone()), "value": vals.get(&name).map(|v| v.v), "display_value": s.doc.param_display_value(&vals, &name)}),
+        json!({"name": name, "unit": s.doc.param(&name).map(|x| x.unit.clone()), "value": vals.get(&name).map(|v| expr::round_reported(expr::reported_value(*v))), "display_value": s.doc.param_display_value(&vals, &name).map(expr::round_reported)}),
     )
 }
 
@@ -426,7 +427,9 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
                 .param_rows()
                 .into_iter()
                 .filter(|r| r.source == "user")
-                .map(|r| json!({"name": r.name, "expression": r.expression, "unit": r.unit, "value": r.value, "comment": r.comment, "favorite": r.favorite}))
+                // The `value` field keeps the number in the parameter's own unit, as the CSV
+                // column does, rounded for reading (#10747).
+                .map(|r| json!({"name": r.name, "expression": r.expression, "unit": r.unit, "value": r.display_value.or(r.value), "comment": r.comment, "favorite": r.favorite}))
                 .collect();
             serde_json::to_string_pretty(&rows).map_err(|e| bad(cmd, e.to_string()))?
         }
@@ -501,7 +504,7 @@ fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
                 (None, Kind::Angle) => v.to_degrees(),
                 (None, _) => v,
             };
-            json!({"ok": true, "value": v, "kind": k, "display_value": shown, "references": refs})
+            json!({"ok": true, "value": expr::round_reported(v), "kind": k, "display_value": expr::round_reported(shown), "references": refs})
         }
         Err(err) => json!({"ok": false, "error": err.to_string().trim_start_matches("expression: ").to_string(), "references": refs}),
     };
@@ -526,7 +529,8 @@ fn complete(s: &mut Session, p: &Value) -> Result<Value> {
     // parameters, then the others.
     rows.sort_by_key(|r| (!starts(&r.name), !r.favorite, r.source != "user"));
     for r in rows.into_iter().take(200) {
-        let v = r.value.map(|v| format!("{v:.4} {}", r.unit).trim().to_string()).unwrap_or_else(|| "error".into());
+        // The completion shows the parameter's own unit, so it reads `display_value`.
+        let v = r.display_value.or(r.value).map(|v| format!("{v:.4} {}", r.unit).trim().to_string()).unwrap_or_else(|| "error".into());
         let mut detail = format!("{} = {v}", r.expression);
         if let (Some(f), Some(i)) = (&r.feature, r.input) {
             detail.push_str(&format!(" ({f} {i})"));

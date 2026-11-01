@@ -138,7 +138,9 @@ fn rows(app: &mut SolveApp) -> Vec<Row> {
             Row {
                 expression: s(r, "expression"),
                 unit: s(r, "unit"),
-                value: r.get("value").and_then(Value::as_f64),
+                // The dialog shows the parameter's own unit, so it reads `display_value`
+                // (`value` is mm / degrees in every reply, #10747).
+                value: r.get("display_value").and_then(Value::as_f64).or_else(|| r.get("value").and_then(Value::as_f64)),
                 error: r.get("error").and_then(Value::as_str).map(str::to_string),
                 comment: s(r, "comment"),
                 favorite: r.get("favorite").and_then(Value::as_bool).unwrap_or(false),
