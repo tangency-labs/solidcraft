@@ -317,6 +317,15 @@ pub struct UpstreamFixes {
     /// corner's degeneracy test takes anti-parallel side normals for an ordinary corner.
     /// Upstream refuses the edge as tangent (WR-570; the fork's tangency-labs/smlib@b7ec55b).
     pub fillet_knife_edge_rounds: bool,
+    /// `SmPointSet3d::SetUpTightPseudoBox` assigns the projected points returned by
+    /// `SmVector3d::ProjectPointToPlane(sPlanePoint, sPlaneZ)` on the four `basis[0]` /
+    /// `basis[1]` boundary points and each candidate point before forming chord vectors
+    /// for `CCWAngleBetween`, instead of calling the `const` `ProjectPointToPlane` and
+    /// discarding its return value so angles are measured between unprojected 3D points
+    /// (WR-14, #2201; see
+    /// `plan/upstream-issues/WR-14--addendum-2026-11-01-project-tight-pbox-points.md`).
+    /// Off by default for pinned C++ parity.
+    pub point_set_tight_pbox_projects_points: bool,
     /// `SmEdge::GetBlendEdgeuse` takes two faces for tangent (an edge with nothing to round) only within half a degree of each other, not 2 degrees: a crease of 0.5 to 2 degrees (a draft meeting a flat, a roof crease) is an edge the model means and is rounded like any other. Upstream refuses it (`SM_ERR_INVALID_INPUT` from the fillet) (WR-621, #1808; the fork's tangency-labs/smlib@2e8758b).
     pub fillet_half_degree_crease: bool,
     /// `DoExtendedOffset` finds the excess offset faces after the merge only, not also on the untrimmed faces before it (WR-341, #977).
