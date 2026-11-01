@@ -208,7 +208,10 @@ fn sample(segment: &Seg2, plane: &Plane, view: &PixelCurveView, budget: &mut Sam
     }
     let mut connected = false;
     let mut nodes = 0usize;
+    // Each point's projection and clip distances, worked out once per node (they were
+    // recomputed for every clip plane a test looked at).
     let mut q: [H; MAX_CONTROLS] = [[0.0; 4]; MAX_CONTROLS];
+    let mut dist = [[0.0; 7]; MAX_CONTROLS];
     while let Some((hull, depth, terms)) = stack.pop() {
         if budget.remaining_nodes == 0 || nodes == 32_768 {
             out.quality = SamplingQuality::BudgetLimited;
@@ -226,6 +229,10 @@ fn sample(segment: &Seg2, plane: &Plane, view: &PixelCurveView, budget: &mut Sam
             out.quality = SamplingQuality::Invalid;
             break;
         }
+        for (d, p) in dist.iter_mut().zip(q) {
+            *d = distances(*p, view, clip_xy);
+        }
+        let dist = &dist[..n];
         let e: H = terms.map(|t| t * f64::EPSILON * (f64::from(depth) + 4.0) * 64.0);
         let clip_error = [
             e[0] + e[3] * (1.0 + 2.0 / view.width_px),
@@ -236,16 +243,32 @@ fn sample(segment: &Seg2, plane: &Plane, view: &PixelCurveView, budget: &mut Sam
             e[2] + e[3],
             e[3],
         ];
-        if (0..7).any(|i| q.iter().all(|p| distances(*p, view, clip_xy)[i] < -clip_error[i])) {
+        if (0..7).any(|i| dist.iter().all(|d| d[i] < -clip_error[i])) {
             connected = false;
             continue;
         }
         let positive = q.iter().all(|p| p[3] > 1e-12);
-        let depth_safe = n == 2 || (4..7).all(|i| q.iter().all(|p| distances(*p, view, clip_xy)[i] >= 0.0));
+        let depth_safe = n == 2 || (4..7).all(|i| dist.iter().all(|d| d[i] >= 0.0));
         let flat = positive
             && q.first().zip(q.last()).is_some_and(|(a, b)| {
                 let (a, b) = (screen(*a, view), screen(*b, view));
-                let magnitude = q.iter().map(|p| screen(*p, view).len()).fold(1.0, f64::max);
+                let mut on_screen = [Vec2::ZERO; MAX_CONTROLS];
+                for (s, p) in on_screen.iter_mut().zip(q) {
+                    *s = screen(*p, view);
+                }
+                let on_screen = &on_screen[..n];
+                let mut off_chord = [0.0; MAX_CONTROLS];
+                for (d, s) in off_chord.iter_mut().zip(on_screen) {
+                    *d = distance_segment(*s, a, b);
+                }
+                let off_chord = &off_chord[..n];
+                // The allowance below is never negative (nor NaN), so a point already more than
+                // the bound off the chord fails the test whatever it is: most nodes the sampler
+                // visits are split, and this skips their roundoff estimate.
+                if off_chord.iter().any(|d| *d > PIXEL_ERROR) {
+                    return false;
+                }
+                let magnitude = on_screen.iter().map(|s| s.len()).fold(1.0, f64::max);
                 // Keep floating-point roundoff inside the advertised bound.
                 // Absolute summands also cover cancellation in VP multiplication.
                 // Subdivision propagates roundoff from the original homogeneous hull.
@@ -262,7 +285,7 @@ fn sample(segment: &Seg2, plane: &Plane, view: &PixelCurveView, budget: &mut Sam
                     })
                     .fold(0.0, f64::max);
                 let allowance = projection_error + magnitude * f64::EPSILON * 128.0;
-                allowance < PIXEL_ERROR && q.iter().all(|p| distance_segment(screen(*p, view), a, b) + allowance <= PIXEL_ERROR)
+                allowance < PIXEL_ERROR && off_chord.iter().all(|d| d + allowance <= PIXEL_ERROR)
             });
         if !flat || !depth_safe {
             if depth == MAX_DEPTH || out.vertex_count >= MAX_VERTICES {
@@ -275,10 +298,10 @@ fn sample(segment: &Seg2, plane: &Plane, view: &PixelCurveView, budget: &mut Sam
             stack.push((l, depth + 1, terms));
             continue;
         }
-        let (Some(a), Some(b), Some(qa), Some(qb)) = (c.first(), c.last(), q.first(), q.last()) else { continue };
+        let (Some(a), Some(b), Some(da), Some(db)) = (c.first(), c.last(), dist.first(), dist.last()) else { continue };
         let mut lo: f64 = 0.0;
         let mut hi: f64 = 1.0;
-        for (a, b) in distances(*qa, view, clip_xy).into_iter().zip(distances(*qb, view, clip_xy)) {
+        for (a, b) in da.iter().copied().zip(db.iter().copied()) {
             if a < 0.0 && b < 0.0 {
                 hi = -1.0;
                 break;

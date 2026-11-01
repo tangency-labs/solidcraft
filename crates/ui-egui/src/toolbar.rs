@@ -1362,7 +1362,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let host = Container::for_layout(layout, Surface::Chrome);
     let ribbon = host.edge("sc_toolbar", Edge::Top);
     let frame = host.edge_frame(fill);
-    let chrome = ribbon.exact_size(height).show_separator_line(false).frame(frame).show(ui, |ui| {
+    let chrome = host.show_edge(ui, ribbon.exact_size(height).show_separator_line(false), frame, |ui| {
         let r = if floating { Rect::from_min_max(cards.workspace.min, cards.ribbon.max) } else { frame.outer_rect(ui.max_rect()) };
         let ws = if floating { cards.workspace } else { Rect::from_min_size(r.left_top(), vec2(WORKSPACE_WIDTH, ribbon_height - 1.0)) };
         let ribbon_left = if floating { cards.ribbon.left() } else { ws.right() };
@@ -1371,7 +1371,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let fill =
                     if crate::render_workspace::active(app) && card == ws { crate::theme::TabAccent::current(ui.ctx()).soft } else { t.toolbar };
                 let frame = host.frame(ui.ctx(), fill, crate::frame::Side::Left);
-                ui.painter().add(frame.paint(card));
+                host.paint_background(ui.painter(), frame, card);
                 // Blank card space owns clicks as well as its buttons.
                 ui.interact(card, ui.id().with(("shell_card", card.left().to_bits())), Sense::click_and_drag());
             }
@@ -3181,8 +3181,10 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
             Key::F2 => {
-                let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or(ctx.content_rect().center());
-                crate::context_menu::rename_selection(app, at);
+                if !crate::context_menu::press_shortcut(app, "F2") {
+                    let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or(ctx.content_rect().center());
+                    crate::context_menu::rename_selection(app, at);
+                }
             }
             Key::F6 => app.animate_view("fit"),
             Key::Backspace if crate::tools::undo_spline_point(app) => {}

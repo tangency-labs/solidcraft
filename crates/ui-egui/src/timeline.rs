@@ -668,18 +668,19 @@ pub fn timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.shell.history = Some(rect);
         crate::scenario::publish_rect("history:card", rect);
         let mut child = ui.new_child(UiBuilder::new().id_salt("sc_timeline").max_rect(rect));
-        Container::paint_frame(ui.painter(), Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), t.timeline, crate::frame::Side::Left), rect);
+        Container::paint_panel_frame(
+            ui.painter(),
+            Container::new(ui.ctx(), Surface::Panel).frame(ui.ctx(), t.timeline, crate::frame::Side::Left),
+            rect,
+        );
         child.set_clip_rect(rect);
         timeline_contents(app, &mut child, true);
     } else {
-        let response = Container::new(ui.ctx(), Surface::Panel)
-            .edge("sc_timeline", Edge::Bottom)
-            .exact_size(40.0)
-            .frame(Container::new(ui.ctx(), Surface::Panel).edge_frame(t.timeline))
-            .show(ui, |ui| {
-                timeline_contents(app, ui, false);
-            });
-        let frame = Container::new(ui.ctx(), Surface::Panel).edge_frame(t.timeline);
+        let host = Container::new(ui.ctx(), Surface::Panel);
+        let response = host.show_edge(ui, host.edge("sc_timeline", Edge::Bottom).exact_size(40.0), host.edge_frame(t.timeline), |ui| {
+            timeline_contents(app, ui, false);
+        });
+        let frame = host.edge_frame(t.timeline);
         Container::paint_inset(ui.painter(), response.response.rect - frame.outer_margin, frame);
         app.shell.history = Some(response.response.rect);
         crate::scenario::publish_rect("history:strip", response.response.rect);

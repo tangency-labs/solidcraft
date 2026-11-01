@@ -364,7 +364,7 @@ pub fn group_items(app: &SolveApp, id: u64, scope: &str) -> Vec<Item> {
         v.push(Item::action("ui.newGroup", "New Group", "folder").with(json!({ "component": g.component, "folder": g.folder, "parent": id })));
     }
     v.extend([
-        Item::action("ui.rename", "Rename", "rename").with(json!({ "group": id })),
+        Item::action("ui.rename", "Rename", "rename").key("F2").with(json!({ "group": id })),
         Item::action("ui.ungroup", "Ungroup", "folder").with(json!({ "group": id })),
         Item::sep(),
         // The group itself: its items keep their own state.
@@ -2181,7 +2181,7 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
         Item::action("canvas.to_sketch", "Canvas to Sketch", "canvas").with(json!({ "canvas": id })),
         Item::sep(),
         Item::action("ui.delete", "Delete", "delete").with(json!({ "canvases": [id] })),
-        Item::action("ui.rename", "Rename", "rename").with(json!({ "canvas": id })),
+        Item::action("ui.rename", "Rename", "rename").key("F2").with(json!({ "canvas": id })),
         Item::sep(),
         Item::action("ui.canvasVisible", "Show/Hide", "eye").key("V").with(json!({ "canvas": id, "visible": !visible })),
     ]

@@ -47,8 +47,8 @@ use solidcraft_geom::Vec3;
 
 pub use cmd::settings::{MAX_PROFILE_NAME, profile_name};
 pub use cmd::{
-    Addition, CommandInfo, CommandSpec, addition, auto_operation, command_specs, dimension_roles, extrude_reach, find_command, resolve_design_links,
-    shown_scope, standard_view,
+    Addition, CommandInfo, CommandSpec, OpenSteps, addition, auto_operation, command_specs, dimension_roles, extrude_reach, find_command,
+    resolve_design_links, shown_scope, standard_view,
 };
 pub use solidcraft_doc as doc;
 pub use solidcraft_doc::Visibility;
@@ -671,14 +671,23 @@ impl Session {
         // The session keeps what is hidden (an undo step of its own); the design file carries it.
         let visibility = std::mem::take(&mut doc.visibility);
         let doc = Arc::new(doc);
-        let adopted = saved
-            .filter(|_| solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none())
-            .and_then(|saved| Model::adopt(&doc, saved).map_err(|e| log::info!("the saved model is not used: {e}")).ok());
-        let model = adopted.unwrap_or_else(|| {
+        let model = Self::saved_model(&doc, saved).unwrap_or_else(|| {
             let mut model = Model::new();
             model.evaluate_shared(&doc);
             model
         });
+        Self::with_model(doc, visibility, model)
+    }
+
+    /// The model `doc`'s file kept, when it is `doc`'s evaluation and the cache is not turned off.
+    pub(crate) fn saved_model(doc: &Arc<Document>, saved: Option<&solidcraft_doc::SavedModel>) -> Option<Model> {
+        saved
+            .filter(|_| solidcraft_geom::env::var_os("NO_MODEL_CACHE").is_none())
+            .and_then(|saved| Model::adopt(doc, saved).map_err(|e| log::info!("the saved model is not used: {e}")).ok())
+    }
+
+    /// A session on `doc` evaluated as `model`, with what it hides.
+    pub(crate) fn with_model(doc: Arc<Document>, visibility: Visibility, model: Model) -> Self {
         Session {
             saved: doc.clone(),
             doc,

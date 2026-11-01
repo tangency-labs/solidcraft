@@ -375,7 +375,8 @@ mod web {
             // Designs opened from the computer's disk (the files window): open them.
             let opened: Vec<_> = self.files.opened.borrow_mut().drain(..).collect();
             for path in opened {
-                self.app.open_path(&path);
+                // A few features a frame, with progress and Cancel (#10198).
+                self.app.open_path_async(&path);
                 self.files.panel.set(false);
             }
             // Recent designs whose file is gone are dropped from the list.
@@ -416,7 +417,7 @@ mod web {
                     path
                 };
                 match intent {
-                    Intent::Open => self.app.open_path(&path),
+                    Intent::Open => self.app.open_path_async(&path),
                     Intent::Insert | Intent::Theme => self.app.drop_path(&path),
                 }
                 self.files.panel.set(false);
@@ -580,7 +581,7 @@ mod web {
             let path = format!("{}{name}", files::OPFS);
             match what {
                 "open" => {
-                    self.app.open_path(&path);
+                    self.app.open_path_async(&path);
                     self.files.panel.set(false);
                 }
                 "insert" => {

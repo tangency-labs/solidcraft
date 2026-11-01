@@ -28,6 +28,15 @@ The control channel is **on by default**. SolidCraft listens on `127.0.0.1` only
 so agents can drive the app without a launch flag. Every connection still needs this launch's
 token (below); nothing else on the machine, and nothing off it, can send a command.
 
+Internal rendering harness: `ui.blur {radius_px?, surface_alpha?}` queries or sets
+session-only panel blur. Radius is finite physical pixels in 0..40; the optional
+capture tint is 0..1 (`null` restores ordinary fills). This is not a saved
+preference. The reply contains requested radius, capability/reason and cumulative
+actual effect counters, including live resources and encoded passes. Unsupported
+software/web/source contexts stay on ordinary painting. Use `ui.screenshot` for
+panel evidence; `ui.render` remains a model-only capture. Activation, full egui GPU
+fixture and manager-run evidence commands are in [blur-behind.md](blur-behind.md).
+
 | Launch | What listens |
 |---|---|
 | `solidcraft --control PORT`, or `SOLIDCRAFT_CONTROL_PORT=PORT` | exactly `127.0.0.1:PORT` (the flag wins over the variable), whatever the setting |

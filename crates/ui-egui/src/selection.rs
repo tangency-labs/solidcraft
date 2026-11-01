@@ -29,6 +29,19 @@ pub(crate) fn alignment_points(selection: &[Sel]) -> Option<[serde_json::Value; 
     (a != b).then_some([a, b])
 }
 
+/// Coincident's two operands for a two-item selection: points and curves by id, a line's
+/// midpoint as `{midpoint: line}`, which the command ties a point to (#10311).
+pub(crate) fn coincident_operands(selection: &[Sel]) -> Option<serde_json::Value> {
+    let [a, b] = selection else { return None };
+    let operand = |s: &Sel| match s {
+        Sel::SketchPoint { id } | Sel::SketchCurve { id, .. } => Some(serde_json::json!(id)),
+        Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
+        _ => None,
+    };
+    let (a, b) = (operand(a)?, operand(b)?);
+    (a != b).then(|| serde_json::json!({"a": a, "b": b}))
+}
+
 /// The current middle of a finite straight sketch edge.
 pub(crate) fn line_midpoint(sk: &solidcraft_engine::sketch::Sketch, line: usize) -> Option<solidcraft_engine::geom::Vec2> {
     let curve = sk.curves.get(line)?;
