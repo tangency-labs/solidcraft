@@ -560,6 +560,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         )
     });
     let hover = hover.filter(|p| !crate::frame::dock_dragging(ui.ctx()) && !crate::shell::covered(app, *p));
+    let delta = unwrapped_delta(app, delta);
     // The right button belongs to the marking menu while it is open.
     let secondary_down = secondary_down && app.viewport.context_menu.is_none();
     // The axis view handles its own clicks; the model underneath must not see them.
@@ -800,6 +801,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
                 None => app.viewport.nav.is_some(),
             };
         orbit_drag(app, rect, f64::from(delta.x), f64::from(delta.y), press, snap, true);
+        wrap_cursor(app, ui, rect);
     } else {
         if app.viewport.axis_drag.is_none() {
             app.viewport.orbit_free = None;
@@ -825,6 +827,7 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     if !dragging && motion.is_none() && !(trackpad_orbit && app.viewport.trackpad_gesture) {
         app.viewport.orbit_pivot = None;
         app.viewport.orbit_from = None;
+        app.viewport.cursor_wrap = None;
     }
     if app.viewport.spin {
         // A click on the navigation bar (its own button) is not a stop.
@@ -862,6 +865,58 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
         app.fit_view();
     }
     CameraInput { hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, inside, axes, pinch, pan, primary_nav, mode }
+}
+
+/// How close to the view's edge (points) an orbit drag moves the cursor to the other side.
+const WRAP_MARGIN: f32 = 4.0;
+
+/// An orbit drag that reaches the edge of the view keeps turning: the cursor moves to the other
+/// side of the view, so the drag can go on round the model as far as the user likes instead of
+/// stopping where the screen ends. One move at a time; the next waits until the pointer has
+/// reported the jump ([`unwrapped_delta`]). Where the cursor can't be moved (Wayland, the
+/// browser) the request does nothing, the jump never arrives and the drag stops at the edge. A
+/// synthetic drag (control channel, scripts) has no real cursor to move. With
+/// `orbit_cursor_wrap` off in the preferences the drag stops at the edge of the screen.
+pub(crate) fn wrap_cursor(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
+    if !app.preferences.orbit_cursor_wrap || app.viewport.cursor_wrap.is_some() || app.synthetic_press {
+        return;
+    }
+    let Some(at) = ui.input(|i| i.pointer.latest_pos()) else { return };
+    let Some(to) = wrapped(rect, at) else { return };
+    ui.ctx().send_viewport_cmd(egui::ViewportCommand::CursorPosition(to));
+    app.viewport.cursor_wrap = Some(to - at);
+}
+
+/// Where a pointer at `at`, at or past the edge of `rect`, continues on the opposite side; `None`
+/// while it is well inside.
+pub(crate) fn wrapped(rect: Rect, at: Pos2) -> Option<Pos2> {
+    let inner = rect.shrink(WRAP_MARGIN);
+    if !at.is_finite() || !inner.is_finite() || inner.width() < 2.0 * WRAP_MARGIN || inner.height() < 2.0 * WRAP_MARGIN {
+        return None;
+    }
+    let across = |v: f32, lo: f32, hi: f32| {
+        if v < lo {
+            v + (hi - lo)
+        } else if v > hi {
+            v - (hi - lo)
+        } else {
+            v
+        }
+    };
+    let to = inner.clamp(pos2(across(at.x, inner.min.x, inner.max.x), across(at.y, inner.min.y, inner.max.y)));
+    (to != at).then_some(to)
+}
+
+/// The pointer's motion this frame without the jump of a cursor wrap: the frame that reports it
+/// moves the camera only by what the hand did.
+fn unwrapped_delta(app: &mut SolveApp, delta: egui::Vec2) -> egui::Vec2 {
+    let Some(jump) = app.viewport.cursor_wrap else { return delta };
+    if (delta - jump).length() < jump.length() * 0.5 {
+        app.viewport.cursor_wrap = None;
+        delta - jump
+    } else {
+        delta
+    }
 }
 
 /// The 3D mouse's motion this frame (#1336), on a page `rect` whose camera may do `caps`: the cap
@@ -2306,6 +2361,103 @@ mod tests {
             let turned = (app.cam.yaw, app.cam.pitch, app.cam.roll) != (before.yaw, before.pitch, before.roll);
             assert_eq!(turned, turns, "{caps:?}: the cap turns the view only where the page orbits");
         }
+    }
+
+    /// Past an edge of the view the pointer continues from the opposite edge; well inside, it
+    /// stays where it is.
+    #[test]
+    fn the_cursor_wraps_to_the_opposite_edge() {
+        use egui::{Rect, pos2, vec2};
+        let view = Rect::from_min_size(pos2(100.0, 50.0), vec2(800.0, 600.0));
+        assert_eq!(super::wrapped(view, pos2(500.0, 300.0)), None);
+        assert_eq!(super::wrapped(view, pos2(104.0, 54.0)), None, "on the margin itself");
+        assert_eq!(super::wrapped(view, pos2(900.0, 300.0)), Some(pos2(108.0, 300.0)), "right to left");
+        assert_eq!(super::wrapped(view, pos2(100.0, 300.0)), Some(pos2(892.0, 300.0)), "left to right");
+        assert_eq!(super::wrapped(view, pos2(500.0, 650.0)), Some(pos2(500.0, 58.0)), "bottom to top");
+        assert_eq!(super::wrapped(view, pos2(500.0, 40.0)), Some(pos2(500.0, 632.0)), "top to bottom, from outside");
+        assert_eq!(super::wrapped(view, pos2(901.0, 651.0)), Some(pos2(109.0, 59.0)), "a corner wraps both ways");
+        assert_eq!(super::wrapped(view, pos2(5000.0, 300.0)), Some(pos2(896.0, 300.0)), "far outside lands inside");
+        assert_eq!(super::wrapped(view, pos2(f32::NAN, 300.0)), None);
+        assert_eq!(super::wrapped(Rect::from_min_size(pos2(0.0, 0.0), vec2(10.0, 10.0)), pos2(20.0, 5.0)), None, "too small a view");
+    }
+
+    /// An orbit drag that reaches the edge of the view keeps turning round the model: the cursor
+    /// moves to the other side, and the frame that reports the jump turns the view only by the
+    /// hand's motion. Events from before the move don't ask for a second one. With
+    /// `orbit_cursor_wrap` off the cursor is never moved.
+    #[test]
+    fn an_orbit_drag_at_the_edge_moves_the_cursor_across_and_keeps_turning() {
+        use crate::prefs::NavButton;
+        use egui::{Event, Modifiers, PointerButton, ViewportCommand, pos2, vec2};
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &serde_json::json!({"length":40,"width":30,"height":20})).unwrap();
+        let mut app = crate::SolveApp::new(s, crate::Services::default());
+        let (button, mods) = [(PointerButton::Secondary, NavButton::Right), (PointerButton::Middle, NavButton::Middle)]
+            .into_iter()
+            .flat_map(|b| [Modifiers::NONE, Modifiers::SHIFT].map(move |m| (b, m)))
+            .find(|((_, b), m)| crate::prefs::nav_mode(&app, *b, *m) == Some(crate::viewport::NavMode::Orbit))
+            .map(|((p, _), m)| (p, m))
+            .expect("the default preset orbits with the right or middle button");
+        let ctx = egui::Context::default();
+        let mut time = 0.0;
+        let mut frame = |app: &mut crate::SolveApp, events: Vec<Event>| {
+            time += 1.0 / 60.0;
+            let events = std::iter::once(Event::ModifiersChanged(mods)).chain(events).collect();
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 600.0))),
+                time: Some(time),
+                focused: true,
+                events,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(raw, |ui| {
+                let rect = ui.max_rect();
+                app.viewport.rect = Some(rect);
+                let resp = ui.interact(rect, ui.id().with("model"), egui::Sense::click_and_drag());
+                super::handle(app, ui, rect, &resp, super::NavCaps::MODEL);
+            });
+            out.textures_delta.clear();
+            let commands = out.viewport_output.remove(&egui::ViewportId::ROOT).map(|v| v.commands).unwrap_or_default();
+            commands.into_iter().filter_map(|c| if let ViewportCommand::CursorPosition(p) = c { Some(p) } else { None }).collect::<Vec<_>>()
+        };
+        let turn = |a: f64, b: f64| (b - a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        let at = pos2(600.0, 300.0);
+        frame(&mut app, vec![Event::PointerMoved(at)]);
+        frame(&mut app, vec![Event::PointerButton { pos: at, button, pressed: true, modifiers: mods }]);
+        let mut x = at.x;
+        let mut step = 0.0;
+        while x < 780.0 {
+            x += 20.0;
+            let before = app.cam.yaw;
+            assert!(frame(&mut app, vec![Event::PointerMoved(pos2(x, 300.0))]).is_empty(), "no move inside the view ({x})");
+            step = turn(before, app.cam.yaw);
+        }
+        assert!(step.abs() > 1e-4, "the drag turns the view");
+        // Past the right edge: the cursor goes to the left edge.
+        let before = app.cam.yaw;
+        assert_eq!(frame(&mut app, vec![Event::PointerMoved(pos2(800.0, 300.0))]), vec![pos2(8.0, 300.0)]);
+        assert!((turn(before, app.cam.yaw) - step).abs() < step.abs() * 0.01, "and the view turns on as usual");
+        // A move the window had queued before the cursor moved: no second request.
+        assert!(frame(&mut app, vec![Event::PointerMoved(pos2(806.0, 300.0))]).is_empty());
+        // The pointer reports the jump plus 20 points more of the hand's motion.
+        let before = app.cam.yaw;
+        assert!(frame(&mut app, vec![Event::PointerMoved(pos2(34.0, 300.0))]).is_empty());
+        let after = turn(before, app.cam.yaw);
+        assert!((after - step).abs() < step.abs() * 0.01, "the jump doesn't turn the view: {after} vs {step}");
+        assert_eq!(app.viewport.cursor_wrap, None);
+        let before = app.cam.yaw;
+        frame(&mut app, vec![Event::PointerMoved(pos2(54.0, 300.0))]);
+        assert!((turn(before, app.cam.yaw) - step).abs() < step.abs() * 0.01, "and keeps turning the same way");
+        frame(&mut app, vec![Event::PointerButton { pos: pos2(54.0, 300.0), button, pressed: false, modifiers: mods }]);
+        frame(&mut app, vec![]);
+        assert_eq!(app.viewport.cursor_wrap, None);
+        // With the preference off, the same drag reaches the edge and the cursor stays there.
+        app.preferences.orbit_cursor_wrap = false;
+        frame(&mut app, vec![Event::PointerButton { pos: at, button, pressed: true, modifiers: mods }]);
+        for x in [620.0, 700.0, 780.0, 800.0, 806.0] {
+            assert!(frame(&mut app, vec![Event::PointerMoved(pos2(x, 300.0))]).is_empty(), "no cursor move with wrapping off ({x})");
+        }
+        assert_eq!(app.viewport.cursor_wrap, None);
     }
 
     /// A device app's orbit turns pages that orbit and pans the others (a flat page, a sketch seen

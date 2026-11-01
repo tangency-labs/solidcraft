@@ -176,6 +176,9 @@ pub struct ViewportState {
     pub orbit_pivot: Option<Vec3>,
     /// The orbit drag under way, summed from where it began (see [`crate::navigation::orbit`]).
     pub orbit_from: Option<crate::navigation::OrbitFrom>,
+    /// An orbit drag moved the cursor to the view's other side: the jump, until the pointer
+    /// reports it (see [`crate::navigation::wrap_cursor`]).
+    pub(crate) cursor_wrap: Option<egui::Vec2>,
     /// Continuous orbit: the view turns about the vertical until the next click or key.
     pub spin: bool,
     /// The point continuous orbit turns about (Orbit around: origin or the cursor's model point),
