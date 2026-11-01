@@ -839,6 +839,17 @@ pub struct UpstreamFixes {
     pub sweep_frame_on_planar_path_normal: bool,
     /// `CreateLinearSweep` tests a profile curve for an arc to the zero an `SmCylinder`'s own check holds its generating curve to (`SM_EFF_ZERO * 1000 * (1 + the largest coordinate of the curve's ends)`), not to the B-rep's tolerance, so only a curve that is an arc becomes a cylinder and any other is swept as itself (`SmSurfOfExtrusion`), not as a cylinder its own edge is off (WR-576, #1507; SolidCraft change, tangency-labs/smlib fd59111).
     pub linear_sweep_arc_to_cylinder_zero: bool,
+    /// `SmDatabaseIO::ReadBoolean` ([`crate::topology::database_io::DatabaseReader::read_boolean`]
+    /// on a reader configured via [`crate::topology::database_io::DatabaseReader::with_fixes`] or
+    /// [`crate::topology::database_io::DatabaseReader::set_fixes`]) byte-swaps a 4-byte binary
+    /// `SmBoolean` when `m_bByteSwap` is active (matching `SmDatabaseIO::ReadBooleans` at
+    /// `SmDatabaseIO.cpp:547`), and `SmDatabaseIO::ByteSwap32(unsigned short)`
+    /// ([`crate::topology::database_io::byte_swap_32_u16_with_fixes`]) swaps the two bytes of the
+    /// `u16` (`SmDatabaseIO::ByteSwap16`) instead of shifting both bytes into bits `16..31` of a
+    /// 32-bit intermediate and truncating back to `0` (`WR-47`;
+    /// `plan/upstream-issues/WR-47--addendum-2026-11-01-database-io-byte-swap.md`). Off by
+    /// default for pinned C++ parity.
+    pub database_io_byte_swaps_read_boolean_and_u16: bool,
     /// `CoverCoincidentSurface` refuses a cover that extends a B-spline-based surface onto a continuation whose normal vanishes or turns back (a fold) over the domain the merge would use (WR-407, #434; SolidCraft change, tangency-labs/smlib e960ca1 (was 1b6f5fa)).
     pub cover_refuses_folded_continuation: bool,
     /// `SmSurface::CoverCoincidentSurface` covers a face straddling this surface's seam in a direction the surface already wraps (`IsClosed` over its natural domain: a cylinder's full turn): a step of its boundary walk across that seam is no failure, and the domain in that direction stays the period it spans; a crossing in an open direction, or at a pole, still refuses. `SmMerge::BooleanPostProcess` then completes each merged face as a periodic face has it (`HasSeamProblem`, then `SplitAtSeam` when a seam is crossed or missing), so the seam runs on through the covered part. Upstream refuses every crossing and the two walls stay apart (WR-599; the fork's tangency-labs/smlib@16bf1cb). `sm_CoverOtherCoincidentFace` lets only its trim-derived attempt cross such a seam (`bAcrossWrappedSeams`): the stored-domain attempt stays within one period, so faces whose stored domains are their whole surfaces do not merge to those (360 x 208 for half-turn faces spanning 180 x 3; tangency-labs/smlib@b518bbe).
