@@ -658,6 +658,9 @@ pub struct SolveApp {
     pub network_prompt: Option<network_prompt::NetworkPrompt>,
     /// Designs left by crashed apps, offered for recovery.
     pub recoverable: Vec<solidcraft_engine::recovery::Entry>,
+    /// The recovery folder holding this launch's reopen-guard marker (#5064); `None` when
+    /// there is no recovery folder. A reopened design that finishes opening is taken off it.
+    pub reopen_guard_dir: Option<std::path::PathBuf>,
     /// Discard all was clicked in the recovery window: its confirmation is showing (#9299).
     pub recovery_discard_all: bool,
     /// The selection's measurement in the view's corner (#7000).
@@ -858,6 +861,7 @@ impl SolveApp {
             disk_prompt: false,
             network_prompt: None,
             recoverable: Vec::new(),
+            reopen_guard_dir: None,
             recovery_discard_all: false,
             quick_measure: Default::default(),
             stand_up: None,

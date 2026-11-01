@@ -995,6 +995,8 @@ fn main() -> eframe::Result {
             solidcraft_engine::crash::install(dir, build)
         })
         .unwrap_or_default();
+    // The recovery folder also holds the reopen guard marker (#5064); read once, reused below.
+    let recovery_dir = solidcraft_engine::recovery::default_dir();
     // A crash in native code (a graphics driver) says where it happened: the exception or signal
     // and the module on Windows and macOS, and on every system the startup step the app was in.
     #[cfg(target_os = "windows")]
@@ -1188,8 +1190,25 @@ fn main() -> eframe::Result {
             };
             // No design given: the designs open at the last quit, when the preference asks (#5542).
             // Not when driven over the control channel, whose clients expect a fresh design.
-            let files =
-                if files.is_empty() && !sample && control_port.is_none() { solidcraft_ui_egui::documents::designs_to_reopen(&app) } else { files };
+            // A design that stopped the last session while it was being reopened is skipped this
+            // time, so one bad file cannot brick every launch (#5064).
+            app.reopen_guard_dir = recovery_dir.clone();
+            let files = if files.is_empty() && !sample && control_port.is_none() {
+                let (reopen, skipped) = solidcraft_ui_egui::documents::reopen_plan(&app, recovery_dir.as_deref());
+                if !skipped.is_empty() {
+                    let names: Vec<String> = skipped
+                        .iter()
+                        .map(|p| std::path::Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| p.clone()))
+                        .collect();
+                    notes.push(format!(
+                        "The last session stopped while reopening {}. It was not reopened this time; open it yourself if you need it.",
+                        names.join(", ")
+                    ));
+                }
+                reopen
+            } else {
+                files
+            };
             for f in &files {
                 app.open_path_async(f);
             }
@@ -1205,9 +1224,9 @@ fn main() -> eframe::Result {
                 app.home.show(rev);
             }
             // Autosave, and offer what crashed sessions left behind.
-            if let Some(dir) = solidcraft_engine::recovery::default_dir() {
+            if let Some(dir) = recovery_dir.as_ref() {
                 let every = if app.autosave_minutes > 0.0 { app.autosave_minutes * 60.0 } else { f64::MAX / 4.0 };
-                solidcraft_ui_egui::recovery_ui::start(&mut app, &dir, std::time::Duration::from_secs_f64(every.min(1e9)));
+                solidcraft_ui_egui::recovery_ui::start(&mut app, dir, std::time::Duration::from_secs_f64(every.min(1e9)));
                 // Safe mode keeps autosaving but offers nothing: the entries wait for a normal start.
                 if safe_mode {
                     app.recoverable.clear();

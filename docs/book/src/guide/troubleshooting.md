@@ -23,6 +23,11 @@ uses only the software renderer and keeps your settings.
 
 ## A design won't open or hangs while opening
 
+- **A design that stopped the app while it was being reopened is skipped once.** If SolidCraft
+  crashes or hangs while reopening the designs from the last session, the next start does not
+  reopen them: it says which design the last session stopped on and opens the start page
+  instead, so the app stays usable. Open the design yourself if you want it; the skip clears
+  itself either way.
 - **Open the previous save.** Every save keeps the version it replaced next to it as
   `<file>.bak` (see [Files](files.md)). Copy it to a new name ending in `.sc`, for
   example `bracket-previous.sc`, and open that. Work saved after the previous save is
