@@ -1109,6 +1109,10 @@ preference_settings! {
     /// A preview that removes material shows the removed shape as a red see-through ghost. Off:
     /// the ghost is fully transparent and only its outline is drawn (`preview::Colors::cut_tint`).
     cut_preview_tint: bool = true, PAGE_GRAPHICS => check_id("prefs.cut_preview_tint");
+    /// In Fillet and Chamfer the edges a click would take are drawn thin in `hover_edge_lit`
+    /// (orange in Light and Dark): the edge under the pointer, or the edges of the face under it.
+    /// Off: the edge or face is lit as everywhere else.
+    hover_edge_lit: bool = true, PAGE_GRAPHICS => check_id("prefs.hover_edge_lit");
     /// Restore the previous platform-specific fixed Render preview geometry budget.
     render_previous_geometry_budget: bool = false, PAGE_GRAPHICS => check_id("prefs.render_previous_geometry_budget");
     /// How finely the viewport tessellates curved faces and edges: `coarse`, `normal`, `fine` or

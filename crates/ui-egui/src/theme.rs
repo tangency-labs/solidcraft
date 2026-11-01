@@ -1078,6 +1078,9 @@ pub struct Tokens {
     /// Hovered edge: dark core with a light halo.
     pub hover_edge: Color32,
     pub hover_edge_halo: Color32,
+    /// A hovered edge in Fillet and Chamfer, whose edge input also takes faces (Preferences ›
+    /// Graphics): a colour none of the model's edges have, so the edge a click takes stands out.
+    pub hover_edge_lit: Color32,
     /// How much lighter a hovered face is (grey levels).
     pub hover_face_lift: u8,
     /// Selected profile fill and outline.
@@ -1362,6 +1365,7 @@ impl Tokens {
             sel_edge_rim: view.sel_edge_rim,
             hover_edge: view.hover_edge,
             hover_edge_halo: view.hover_edge_halo,
+            hover_edge_lit: view.hover_edge_lit,
             hover_face_lift: view.hover_face_lift,
             sel_profile: view.sel_profile,
             sel_profile_edge: view.sel_profile_edge,
