@@ -327,6 +327,14 @@ impl Document {
         self.occurrences.iter().map(|o| o.bom_type.or_else(|| types.get(&o.component).copied()).unwrap_or_default()).collect()
     }
 
+    /// The occurrences that count as reference ([`Document::occurrence_bom_types`]). A body placed
+    /// through any of them is a reference part: the bill of materials counts nothing inside a
+    /// reference, and a drawing draws all of it as reference.
+    pub fn reference_occurrences(&self) -> std::collections::HashSet<u64> {
+        let types = self.occurrences.iter().zip(self.occurrence_bom_types());
+        types.filter(|(_, bom_type)| *bom_type == BomType::Reference).map(|(o, _)| o.id).collect()
+    }
+
     /// World transform of a component's frame (through its first occurrence and its parents').
     pub fn component_transform(&self, component: u64) -> Mat {
         transform_through(component, |c| self.occurrence_of(c))

@@ -12,7 +12,7 @@ use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::hlr::{Source, Visibility};
 use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, ObjectKind};
 use solidcraft_geom::section::CurveAccuracy;
-use solidcraft_geom::{EPS, Plane, Seg2, Similarity2, Vec2, Vec3};
+use solidcraft_geom::{Aabb2, EPS, Plane, Seg2, Similarity2, Vec2, Vec3};
 
 use super::ShownSet;
 use crate::mesh_lines::{self, Ask, Origin, Owner, Scene, View};
@@ -32,6 +32,8 @@ pub const MIN_MODEL_CHORD_MM: f64 = 0.0001;
 pub struct ViewLine {
     /// The index of the body among the shown set's.
     pub shown: usize,
+    /// The body is a reference part.
+    pub reference: bool,
     pub source: Source,
     pub pieces: Vec<Piece>,
 }
@@ -69,9 +71,26 @@ pub struct Stats {
     pub occlusion_ms: f64,
 }
 
-/// The lines of the bodies `shown` holds in the view `frame` places on paper: the hidden ones too
-/// when `hidden`, the tangent edges too when `tangent_edges`, sampled at `chord_mm` on paper.
-pub fn lines(s: &Session, shown: &ShownSet, frame: &ViewFrame, hidden: bool, tangent_edges: bool, chord_mm: f64, cmd: &str) -> Result<Lines> {
+/// What a view asks of its lines.
+#[derive(Clone, Copy, Debug)]
+pub struct LineRequest {
+    /// What the view's boundary holds, on its plane (model mm). Reference lines stop at it when the
+    /// view shows model parts too: only then can they reach past it.
+    pub shows: Aabb2,
+    /// The model's hidden lines too.
+    pub hidden: bool,
+    /// Reference parts' hidden lines too.
+    pub reference_hidden: bool,
+    pub reference_hides_model: bool,
+    /// The edges where faces meet smoothly too.
+    pub tangent_edges: bool,
+    /// The chord they are sampled at, on paper.
+    pub chord_mm: f64,
+}
+
+/// The lines of the bodies `shown` holds in the view `frame` places on paper, as `request` asks.
+pub fn lines(s: &Session, shown: &ShownSet, frame: &ViewFrame, request: &LineRequest, cmd: &str) -> Result<Lines> {
+    let LineRequest { shows, hidden, reference_hidden, reference_hides_model, tangent_edges, chord_mm } = *request;
     let scale = frame.scale();
     let model_chord_mm = chord_mm / scale.factor();
     if !(model_chord_mm.is_finite() && model_chord_mm >= MIN_MODEL_CHORD_MM) {
@@ -83,19 +102,31 @@ pub fn lines(s: &Session, shown: &ShownSet, frame: &ViewFrame, hidden: bool, tan
     }
     let started = web_time::Instant::now();
     let names: BTreeSet<&str> = shown.bodies.iter().filter_map(|b| shown.body(b)).map(|b| b.name.as_str()).collect();
-    let scene = mesh_lines::prepare(s, cmd, model_chord_mm, Ask { tangent_edges, sources: true }, |b| names.contains(b.name.as_str()))?;
+    let mut scene = mesh_lines::prepare(s, cmd, model_chord_mm, Ask { tangent_edges, sources: true }, |b| names.contains(b.name.as_str()))?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
     if scene.placements.len() != shown.bodies.len() {
         return Err(bad(cmd, "two shown bodies have one name: the view can't tell their lines apart"));
     }
-    let drawing = mesh_lines::drawing(&scene, &[], &View::orthographic(&frame.basis())).map_err(|e| bad(cmd, e))?;
     // The scene places the shown bodies in the shown set's order, one placement each.
+    for (placement, body) in scene.placements.iter_mut().zip(&shown.bodies) {
+        placement.reference = body.reference;
+    }
+    scene.reference_hides_model = reference_hides_model;
+    let has_model = shown.bodies.iter().any(|b| !b.reference);
+    let is_reference = |owner: Owner| shown.bodies.get(owner.placement as usize).is_some_and(|b| b.reference);
+    let drawing = mesh_lines::drawing(&scene, &[], &View::orthographic(&frame.basis())).map_err(|e| bad(cmd, e))?;
     let mut by_owner: BTreeMap<Owner, Vec<(Vec2, Vec2, bool)>> = BTreeMap::new();
     let mut covered = 0;
-    for line in drawing.lines.iter().filter(|l| hidden || !l.hidden) {
+    for line in &drawing.lines {
         let Some(owner) = line.owner else { continue };
+        let reference = is_reference(owner);
+        if line.hidden && !(if reference { reference_hidden } else { hidden }) {
+            continue;
+        }
+        let kept = if reference && has_model { within(line.a, line.b, &shows) } else { Some((line.a, line.b)) };
+        let Some((a, b)) = kept else { continue };
         covered += usize::from(line.covered);
-        by_owner.entry(owner).or_default().push((line.a, line.b, line.hidden));
+        by_owner.entry(owner).or_default().push((a, b, line.hidden));
     }
     // The merge drops spans up to its tolerance long, so where two stretches meet each can stop
     // that short of the corner.
@@ -133,7 +164,7 @@ pub fn lines(s: &Session, shown: &ShownSet, frame: &ViewFrame, hidden: bool, tan
         if pieces_count > MAX_RECORDS {
             return Err(bad(cmd, format!("the view has more than {MAX_RECORDS} line pieces: raise chord_mm, or choose a smaller view")));
         }
-        out.push(ViewLine { shown: owner.placement as usize, source, pieces });
+        out.push(ViewLine { shown: owner.placement as usize, reference: is_reference(owner), source, pieces });
     }
     let stats = Stats {
         bodies: scene.placements.len(),
@@ -145,6 +176,16 @@ pub fn lines(s: &Session, shown: &ShownSet, frame: &ViewFrame, hidden: bool, tan
         occlusion_ms: drawing.occlusion_ms,
     };
     Ok(Lines { lines: out, covered, model_chord_mm, stats })
+}
+
+/// The part of the line from `a` to `b` inside `area`, if any.
+fn within(a: Vec2, b: Vec2, area: &Aabb2) -> Option<(Vec2, Vec2)> {
+    let (mut lo, mut hi) = (0.0, 1.0);
+    let inside = mesh_lines::clip(&mut lo, &mut hi, a.x - area.min.x, b.x - area.min.x)
+        && mesh_lines::clip(&mut lo, &mut hi, area.max.x - a.x, area.max.x - b.x)
+        && mesh_lines::clip(&mut lo, &mut hi, a.y - area.min.y, b.y - area.min.y)
+        && mesh_lines::clip(&mut lo, &mut hi, area.max.y - a.y, area.max.y - b.y);
+    inside.then(|| (a + (b - a) * lo, a + (b - a) * hi))
 }
 
 /// A visible line's width on paper until D2 sets widths by kind of line: the thick line of ISO
@@ -328,7 +369,7 @@ mod tests {
     use super::*;
 
     fn lines_of(pieces: Vec<Piece>) -> Lines {
-        let line = ViewLine { shown: 0, source: Source::Edge { edge: 0, tangent: false }, pieces };
+        let line = ViewLine { shown: 0, reference: false, source: Source::Edge { edge: 0, tangent: false }, pieces };
         Lines { lines: vec![line], covered: 0, model_chord_mm: 0.01, stats: Stats::default() }
     }
 
@@ -429,6 +470,22 @@ mod tests {
         let (part, whole) = on_arc(&circle, &[at(20.0), at(0.0), at(-20.0)], false, near, 1e-9).unwrap();
         let Seg2::Arc { start, sweep, .. } = part else { panic!("{part:?}") };
         assert!(!whole && (start - 20f64.to_radians()).abs() < 1e-12 && (sweep + 40f64.to_radians()).abs() < 1e-12, "{part:?}");
+    }
+
+    /// A line keeps what lies in the box: all of it, its middle, one end, or nothing; one along an
+    /// edge of the box is inside.
+    #[test]
+    fn a_line_is_cut_at_a_box() {
+        let area = Aabb2 { min: Vec2::new(0.0, 0.0), max: Vec2::new(10.0, 10.0) };
+        let p = Vec2::new;
+        assert_eq!(within(p(1.0, 1.0), p(9.0, 9.0), &area), Some((p(1.0, 1.0), p(9.0, 9.0))));
+        assert_eq!(within(p(-5.0, 5.0), p(15.0, 5.0), &area), Some((p(0.0, 5.0), p(10.0, 5.0))));
+        assert_eq!(within(p(5.0, 5.0), p(5.0, 20.0), &area), Some((p(5.0, 5.0), p(5.0, 10.0))));
+        assert_eq!(within(p(11.0, 0.0), p(20.0, 5.0), &area), None);
+        assert_eq!(within(p(-1.0, 12.0), p(12.0, 12.0), &area), None);
+        // Past a corner, though each end is inside the box along one axis.
+        assert_eq!(within(p(8.0, 13.0), p(13.0, 8.0), &area), None);
+        assert_eq!(within(p(10.0, 2.0), p(10.0, 8.0), &area), Some((p(10.0, 2.0), p(10.0, 8.0))));
     }
 
     /// Stretches of one source in any order and either way round join into one run per visibility

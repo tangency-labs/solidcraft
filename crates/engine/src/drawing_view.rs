@@ -3,7 +3,9 @@
 //! their pictures (W17b) will too.
 //!
 //! A view shows every body the design places, where its occurrences place it ([`shown`]). The
-//! browser's eye counts for nothing: hiding a part in the model never changes a drawing.
+//! browser's eye counts for nothing: hiding a part in the model never changes a drawing. A body
+//! placed through a reference occurrence is a reference part: it doesn't set the view's extents
+//! when model parts are there too ([`measure`]).
 
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
@@ -21,7 +23,7 @@ use crate::{Result, Session};
 #[path = "drawing_view_lines.rs"]
 mod lines;
 
-pub use lines::{CHORD_MM, CHORD_RANGE, Lines, MIN_MODEL_CHORD_MM, Piece, Stats, VISIBLE_MM, ViewLine, lines, paper_group};
+pub use lines::{CHORD_MM, CHORD_RANGE, LineRequest, Lines, MIN_MODEL_CHORD_MM, Piece, Stats, VISIBLE_MM, ViewLine, lines, paper_group};
 
 /// The paper millimetres each way of a view's boundary when there's nothing to measure, round its
 /// centre, so it can still be picked, moved and deleted.
@@ -76,11 +78,13 @@ pub struct Shown {
     pub path: Vec<u64>,
     /// Its definition's body name.
     pub body: String,
+    /// It is placed through a reference occurrence ([`solidcraft_doc::Document::reference_occurrences`]).
+    pub reference: bool,
 }
 
 /// What a view shows, worked out once per request: the world state and each body it shows, in the
 /// world state's order. The extents and the lines read it; choosing occurrences and hiding parts
-/// (V4) and the reference split (V5) will filter it.
+/// (V4) will filter it.
 pub struct ShownSet {
     pub state: Arc<ModelState>,
     pub bodies: Vec<Shown>,
@@ -126,13 +130,15 @@ pub fn shown(s: &Session) -> std::result::Result<ShownSet, Unmeasured> {
     // The world state names each placed body as this walk does, so its name finds its path.
     let mut placed: BTreeMap<String, (Vec<u64>, String)> =
         s.doc.body_frames_with_source(&s.model.state()).into_iter().map(|(name, body, _, path, _)| (name, (path, body))).collect();
+    let references = s.doc.reference_occurrences();
     let bodies: Vec<Shown> = state
         .bodies
         .iter()
         .enumerate()
         .map(|(index, b)| {
             let (path, body) = placed.remove(&b.name).unwrap_or_else(|| (Vec::new(), b.definition_name().to_string()));
-            Shown { index, path, body }
+            let reference = path.iter().any(|occurrence| references.contains(occurrence));
+            Shown { index, path, body, reference }
         })
         .collect();
     if bodies.is_empty() { Err(Unmeasured::NoBodies) } else { Ok(ShownSet { state, bodies }) }
@@ -151,21 +157,24 @@ pub struct OnSheet {
 }
 
 /// Why a view drawing in `display` and `reference` styles can't be drawn yet, if it can't: shaded
-/// views need pictures, and a paper scene (`scene`) has no dashed lines for hidden ones. The
-/// snapshot and the sheet scene refuse alike.
+/// views need pictures, and a paper scene (`scene`) has no dashed lines for hidden ones, of the
+/// model or of reference parts. The snapshot and the sheet scene refuse alike.
 pub fn not_drawable(display: VisualStyle, reference: VisualStyle, scene: bool) -> Option<&'static str> {
     if display.is_shaded() || reference.is_shaded() {
         Some("not supported yet: shaded views need the drawing renderer (#5624)")
-    } else if scene && display == VisualStyle::VisibleHidden {
+    } else if scene && (display == VisualStyle::VisibleHidden || reference == VisualStyle::VisibleHidden) {
         Some("not supported yet: hidden lines in the paper scene need dashed lines (#4890 A5)")
     } else {
         None
     }
 }
 
-/// The extents of the bodies `shown` holds, seen on `basis`, or that they have nothing to measure.
+/// The extents of the bodies `shown` holds, seen on `basis`, or that they have nothing to measure:
+/// of its model parts when it has any, as a reference part only shows around them, else of its
+/// reference parts.
 pub fn measure(shown: &ShownSet, basis: &Plane) -> std::result::Result<Extents, Unmeasured> {
-    let bodies = shown.bodies.iter().filter_map(|b| shown.body(b));
+    let has_model = shown.bodies.iter().any(|b| !b.reference);
+    let bodies = shown.bodies.iter().filter(|b| !(has_model && b.reference)).filter_map(|b| shown.body(b));
     let extents = bodies.fold(Extents { model: Aabb2::EMPTY, error_mm: 0.0, bodies: 0 }, |e, body| Extents {
         model: e.model.union(&body.mesh_bounds_in(basis)),
         error_mm: e.error_mm.max(body.display_tol()),
