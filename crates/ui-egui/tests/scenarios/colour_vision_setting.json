@@ -22,7 +22,7 @@
   {"call": "ui.scroll", "params": {"x": 1000, "y": 500, "delta": -5000}},
   {"call": "ui.inspect", "params": {}},
   {"expect": {"shown": "Tritan", "same_width": "prefs:window"}},
-  {"widget": "Restore Defaults"},
+  {"widget": "Restore defaults"},
   {"expect": {"prefs": {"color_vision": "off"}}},
   {"widget": "OK"},
   {"expect": {"prefs": {"dialog": null, "color_vision": "off"}}}

@@ -250,7 +250,7 @@ the legacy behavior: surface shading and Continuity remain independently active 
 and `view.status_items` faithfully lists both, using a separate stable `continuity` ID. Together
 with Section there are at most three slots. Turning the preference back on keeps the last
 successfully started or changed analysis at the oldest analysis-group position beside Section.
-Queries never normalize state. Graphics Restore Defaults restores `true`; other page resets
+Queries never normalize state. Graphics Restore defaults restores `true`; other page resets
 leave it alone. It applies immediately to all open designs without document edits or undo.
 Cancel restores the opening preference value, but does not restart an analysis already stopped
 by switching to single mode. Run that analysis again to restore coexistence after cancelling.
@@ -538,7 +538,7 @@ when both occur in a call. Imported themes cannot claim the retired built-in ids
 
 Theme option values persist per theme, including a followed file's own id, through the same
 preference store in the browser and on desktop. Switching themes restores their saved values;
-Interface's Restore Defaults clears them. Preference exports and settings profiles carry values;
+Interface's Restore defaults clears them. Preference exports and settings profiles carry values;
 `theme_export` carries the author's defaults. Saved entries that no longer fit a definition remain
 stored and use the default with a notice; unknown ids have a notice and no effective value.
 

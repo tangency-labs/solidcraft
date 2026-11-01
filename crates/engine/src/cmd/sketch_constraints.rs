@@ -31,7 +31,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("auto_constrain")
         .enabled(in_sketch)
         .params("tolerance?: mm (default 0.01), angle_tolerance?: deg (default 1), dimensions?: bool (default true): infer constraints, then dimension until fully constrained"),
-    CommandSpec::new("sketch.auto_constrain_from_datum", "AutoConstrain from datum", auto_constrain_datum)
+    CommandSpec::new("sketch.auto_constrain_from_datum", "AutoConstrain from Datum", auto_constrain_datum)
         .at("SKETCH", "CONSTRAINTS")
         .icon("auto_constrain")
         .enabled(in_sketch)
