@@ -1996,7 +1996,7 @@ impl SolveApp {
             let extrude = matches!(d.kind, dialogs::Kind::Extrude { .. });
             self.dialog = Some(d);
             if extrude {
-                self.turn_for_extrude(view);
+                self.turn_for_extrude(view, finished_sketch);
             }
             return;
         }
@@ -2169,8 +2169,16 @@ impl SolveApp {
     /// Extrude opened: turn the view to isometric when Preferences say so, and remember `before`,
     /// the view on screen when Extrude was asked for, for when the dialog closes (#9176). Started
     /// from an open sketch, that is the sketch's view, not the one "When a sketch ends" turned to.
-    fn turn_for_extrude(&mut self, before: Camera) {
+    /// Only a view square to the sketch turns (the sketch Extrude ends, else any sketch): a view
+    /// already turned in 3D stays as it is.
+    fn turn_for_extrude(&mut self, before: Camera, sketch: Option<u64>) {
         if !self.preferences.extrude_view_isometric {
+            return;
+        }
+        let back = before.back();
+        let state = self.session.world_state();
+        let square = state.sketches.iter().filter(|s| sketch.is_none_or(|id| s.feature == id)).any(|s| back.dot(s.plane.normal()).abs() > 0.999);
+        if !square {
             return;
         }
         let mut to = self.settled_cam();
