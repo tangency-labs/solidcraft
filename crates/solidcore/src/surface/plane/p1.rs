@@ -105,7 +105,7 @@ use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::iso_curve::IsoCurve;
 use crate::curve::line::{BoundedLineOptions, Line};
-use crate::error::{ignore_status, Result, SolidError};
+use crate::error::{ignore_status, Result, SolidError, SM_ERR_INVALID_INPUT};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -1141,7 +1141,7 @@ impl Plane {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` for a zero line vector; `SM_ERR` for a vanishing determinant;
+    /// `SM_ERR_INVALID_INPUT` for a zero line vector; `SM_ERR` for a vanishing determinant;
     /// [`SolidError::Unported`] from the unported callees of the general
     /// `SmSurface::GlobalLineIntersect` (a line in the plane meeting the domain in a
     /// single line parameter).
@@ -1231,8 +1231,13 @@ impl Plane {
         distance_tolerance: f64,
         base: impl FnOnce(&Extent1d) -> Result<SolutionArray<O>>,
     ) -> Result<SolutionArray<O>> {
+        // `SER(SM_ERR_INVALID_INPUT)`: the exact status, which callers may ignore
         if line_vector.length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::invalid_input(OP_LINE, "zero line vector"));
+            return Err(SolidError::Upstream {
+                operation: OP_LINE,
+                code: SM_ERR_INVALID_INPUT,
+                entity: None,
+            });
         }
 
         // init output
@@ -2550,6 +2555,27 @@ mod tests {
             Vec2::new(2.0, 3.0),
             &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
         )
+    }
+
+    /// `SER(SM_ERR_INVALID_INPUT)` for a zero line vector, the exact status.
+    #[test]
+    fn zero_line_vector_is_sm_err_invalid_input() {
+        use crate::surface::surface::p4::NoObject;
+        let p = unit_plane();
+        let r = p.global_line_intersect::<NoObject>(
+            &Kernel::default(),
+            NoObject,
+            &p.step_uv_domain(),
+            Point3::new(1.0, 2.0, 0.0),
+            Vec3::new(0.0, 1e-300, 0.0),
+            None,
+            false,
+            1e-6,
+        );
+        assert_eq!(
+            r.err().and_then(|e| e.sm_status()),
+            Some(SM_ERR_INVALID_INPUT)
+        );
     }
 
     #[test]

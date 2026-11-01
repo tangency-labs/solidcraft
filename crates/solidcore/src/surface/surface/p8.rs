@@ -76,6 +76,7 @@ use crate::curve::curve_cache::CurveCache;
 use crate::curve::line::Line;
 use crate::error::{
     ignore_or_pass_on, ignore_status, ignored, ignored_or_pass_on, passed_on, Result, SolidError,
+    SM_ERR_INVALID_INPUT,
 };
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -1373,7 +1374,7 @@ impl Surface {
     ///
     /// # Errors
     ///
-    /// `InvalidInput` for a zero line vector; `SM_ERR_NULL_POINTER` when the cache
+    /// `SM_ERR_INVALID_INPUT` for a zero line vector; `SM_ERR_NULL_POINTER` when the cache
     /// cannot be built; [`SolidError::Unported`]: `LocalPointSolve`
     /// (`surface.surface_p5`), `DropCurve` (`intersect.surface_drop_lib_p3`) and the
     /// callees of the leaf solves.
@@ -1619,8 +1620,13 @@ impl Surface {
         distance_tolerance: f64,
     ) -> Result<SolutionArray<O>> {
         // check input - LineVector must be NonZero
+        // (`SER(SM_ERR_INVALID_INPUT)`: the exact status, which callers may ignore)
         if line_vector.length_squared() < EFF_ZERO_SQ {
-            return Err(SolidError::invalid_input(OP_LINE, "zero line vector"));
+            return Err(SolidError::Upstream {
+                operation: OP_LINE,
+                code: SM_ERR_INVALID_INPUT,
+                entity: None,
+            });
         }
 
         // init output
@@ -3485,7 +3491,11 @@ mod tests {
             false,
             1e-6,
         );
-        assert!(r.is_err());
+        // `SER(SM_ERR_INVALID_INPUT)`, the exact status
+        assert_eq!(
+            r.err().and_then(|e| e.sm_status()),
+            Some(SM_ERR_INVALID_INPUT)
+        );
         assert!(s
             .local_line_intersect(
                 &k,
