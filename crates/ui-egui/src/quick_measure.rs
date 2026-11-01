@@ -151,9 +151,21 @@ pub(crate) fn item_lines(app: &SolveApp, it: &Value) -> Vec<String> {
     match it["type"].as_str() {
         Some("edge" | "sketch_curve") if !round => lines.push(format!("{}  {}", tr("Length"), mm(&it["length_mm"]))),
         Some("face" | "profile") => lines.push(format!("{}  {}", tr("Area"), crate::prefs::show_mm(app, it["area_mm2"].as_f64().unwrap_or(0.0), 2))),
-        Some("vertex" | "sketch_point") => {
+        Some("vertex" | "sketch_point" | "point") => {
             let p = &it["position"];
             lines.push(format!("{}  {}, {}, {}", tr("measure.at"), mm(&p[0]), mm(&p[1]), mm(&p[2])));
+        }
+        Some("plane") => {
+            let p = &it["point"];
+            lines.push(format!("{}  {}, {}, {}", tr("measure.at"), mm(&p[0]), mm(&p[1]), mm(&p[2])));
+            let n = &it["normal"];
+            lines.push(format!("Normal  {}, {}, {}", mm(&n[0]), mm(&n[1]), mm(&n[2])));
+        }
+        Some("axis") => {
+            let p = &it["origin"];
+            lines.push(format!("{}  {}, {}, {}", tr("measure.at"), mm(&p[0]), mm(&p[1]), mm(&p[2])));
+            let d = &it["direction"];
+            lines.push(format!("Direction  {}, {}, {}", mm(&d[0]), mm(&d[1]), mm(&d[2])));
         }
         _ => {}
     }

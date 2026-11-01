@@ -12,20 +12,24 @@ use solidcraft_geom::{Plane, Vec2, Vec3};
 use solidcraft_kernel as kernel;
 use solidcraft_sketch::Sketch;
 
+use crate::eval::{PlacementReads, body_world, hash_placement, placement_digest};
 use crate::*;
 
 /// Work counted on this thread: bodies moved, STEP texts digested, joint faces and bodies
-/// measured.
+/// measured, bodies searched for by name, features searched for by id.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(super) struct Counts {
     pub moved: usize,
     pub digested: usize,
     pub joint_faces: usize,
     pub measures: usize,
+    pub body_searches: usize,
+    pub feature_searches: usize,
 }
 
 thread_local! {
-    static COUNTS: Cell<Counts> = const { Cell::new(Counts { moved: 0, digested: 0, joint_faces: 0, measures: 0 }) };
+    static COUNTS: Cell<Counts> =
+        const { Cell::new(Counts { moved: 0, digested: 0, joint_faces: 0, measures: 0, body_searches: 0, feature_searches: 0 }) };
 }
 
 pub(super) fn count(f: impl FnOnce(&mut Counts)) {
@@ -50,6 +54,17 @@ fn written(f: impl FnOnce()) -> usize {
     WRITTEN.with(|c| c.set(0));
     f();
     WRITTEN.with(Cell::get)
+}
+
+/// A search on this thread through all of a design's features for one.
+pub(crate) fn count_feature_search() {
+    count(|c| c.feature_searches += 1);
+}
+
+/// The searches `f` makes on this thread through all features or all bodies.
+fn searched(f: impl FnOnce()) -> usize {
+    let n = counted(f);
+    n.feature_searches + n.body_searches
 }
 
 /// The work `f` does on this thread.
@@ -850,4 +865,204 @@ fn saved_states_read_back_their_sketch_keys() {
             serde_json::json!([{"set": [], "drop": []}, {"set": [], "drop": []}, {"set": [], "drop": []}, {"base": base, "set": [], "drop": []}]);
         assert!(with_sets(sets).final_state().is_err(), "base {base}");
     }
+}
+
+/// The dirty check and autosave compare the whole document after every edit; a scanned
+/// part's shared triangles must not be read for that. A coordinate that equals nothing (not a
+/// number) shows whether the shared arrays were read: only reading them makes a mesh differ
+/// from its own copy.
+#[test]
+fn comparing_a_copied_mesh_does_not_read_its_shared_arrays() {
+    let mesh = MeshData {
+        name: "Scan".into(),
+        positions: Arc::from([0., 0., 0., 1., 0., 0., 0., 1., f64::NAN]),
+        triangles: Arc::from([0, 1, 2]),
+        color: None,
+    };
+    let copy = mesh.clone();
+    assert!(copy == mesh, "a copy shares the arrays and is the same mesh without reading them");
+    let mut renamed = mesh.clone();
+    renamed.name = "Other".into();
+    assert!(renamed != mesh);
+    let mut coloured = mesh.clone();
+    coloured.color = Some([0.2, 0.4, 0.6]);
+    assert!(coloured != mesh);
+    let unshared = MeshData { positions: Arc::from(mesh.positions.to_vec()), ..mesh.clone() };
+    assert!(unshared != mesh, "arrays that are not shared still compare value by value");
+    let finite = MeshData { positions: Arc::from([0., 0., 0., 1., 0., 0., 0., 1., 0.]), ..mesh.clone() };
+    let equal = MeshData { positions: Arc::from(finite.positions.to_vec()), triangles: Arc::from(finite.triangles.to_vec()), ..finite.clone() };
+    assert!(equal == finite, "equal values in other arrays are the same mesh");
+    let flipped = MeshData { triangles: Arc::from([0, 2, 1]), ..finite.clone() };
+    assert!(flipped != finite);
+}
+
+/// `blocks` boxes, each its own body, in component `comp`, then a cut box without targets
+/// through each of the first `cuts` (it cuts every body of its component).
+fn blocks_with_cuts(doc: &mut Document, comp: u64, blocks: usize, cuts: usize) {
+    let y = 100.0 * comp as f64;
+    for k in 0..blocks {
+        let corner = point_expr(Vec3::new(20.0 * k as f64, y, 0.0));
+        let kind = FeatureKind::Box { corner, length: "10".into(), width: "10".into(), height: "4".into(), operation: Operation::NewBody };
+        let id = doc.add_feature(kind, None).unwrap();
+        doc.feature_mut(id).unwrap().component = comp;
+    }
+    for k in 0..cuts {
+        let corner = point_expr(Vec3::new(20.0 * k as f64 + 4.0, y + 4.0, -1.0));
+        let kind = FeatureKind::Box { corner, length: "2".into(), width: "2".into(), height: "6".into(), operation: Operation::Cut };
+        let id = doc.add_feature(kind, None).unwrap();
+        doc.feature_mut(id).unwrap().component = comp;
+    }
+}
+
+#[test]
+fn an_evaluation_from_the_cache_does_not_search_the_bodies_for_each_cut() {
+    // Each cut reads where every body of its component is placed; looking each one up by name
+    // made an evaluation quadratic in the bodies, even with every feature taken from the cache.
+    let searches = |blocks: usize| {
+        let mut doc = Document::new("blocks");
+        blocks_with_cuts(&mut doc, 0, blocks, 3);
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+        let work = counted(|| model.evaluate(&doc));
+        assert_eq!(model.last_recomputed, 0);
+        work.body_searches
+    };
+    let (few, many) = (searches(4), searches(24));
+    assert_eq!(few, many, "searches grew with the bodies: {few} for 4 blocks, {many} for 24");
+}
+
+/// The bodies part of the placement digest as it was before the bodies were looked up once:
+/// each body searched by name, placed through [`body_world`].
+fn digest_searching_each_body(doc: &Document, f: &Feature, st: &ModelState) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut reads = PlacementReads::default();
+    reads.drawn_targets(Some(st), f);
+    let inverse = mat_inverse(&doc.component_transform(f.component)).unwrap();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for name in &reads.bodies {
+        name.hash(&mut h);
+        match st.body(name) {
+            Some(b) => hash_placement(&mat_mul(&inverse, &body_world(doc, b)), &mut h),
+            None => u8::MAX.hash(&mut h),
+        }
+    }
+    h.finish() | 1
+}
+
+#[test]
+fn looking_bodies_up_once_keeps_every_placement_digest() {
+    // Two parts placed apart, a body moved into the other part and one moved within its part:
+    // each cut's digest is the one searching each body gave, bit for bit, so saved caches stay
+    // valid.
+    let mut doc = Document::new("digests");
+    let a = doc.add_component(Some("A"), 0).unwrap();
+    let b = doc.add_component(Some("B"), 0).unwrap();
+    blocks_with_cuts(&mut doc, a, 5, 2);
+    blocks_with_cuts(&mut doc, b, 4, 2);
+    blocks_with_cuts(&mut doc, 0, 3, 1);
+    place(&mut doc, a, rigid(Vec3::new(3.0, -7.0, 1.5), Vec3::ZERO, Vec3::Z, 0.4));
+    place(&mut doc, b, rigid(Vec3::new(-20.0, 5.0, 0.0), Vec3::ZERO, Vec3::X, 0.25));
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let names: Vec<String> = model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names.len(), 12);
+    doc.body_components.insert(names[1].clone(), b);
+    doc.body_offsets.insert(names[2].clone(), rigid(Vec3::new(0.0, 0.0, 2.0), Vec3::ZERO, Vec3::Y, 0.1));
+    doc.body_offsets.insert(names[6].clone(), rigid(Vec3::new(1.0, 1.0, 0.0), Vec3::ZERO, Vec3::Z, -0.3));
+    model.evaluate(&doc);
+    let st = model.state();
+    let cuts: Vec<&Feature> = doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Box { operation: Operation::Cut, .. })).collect();
+    assert_eq!(cuts.len(), 5);
+    for f in cuts {
+        let digest = placement_digest(&doc, f, Some(&st));
+        assert_ne!(digest, 0);
+        assert_eq!(digest, digest_searching_each_body(&doc, f, &st), "cut {}", f.id);
+    }
+}
+
+/// `comps` parts, each with `bodies` boxes, `sketches` sketches and `taps` taps, placed `copies`
+/// times: a design and its state, made without evaluating it.
+fn placed_parts(comps: usize, bodies: usize, sketches: usize, taps: usize, copies: usize) -> (Document, ModelState) {
+    let mut doc = Document::new("placed parts");
+    let mut one = Document::new("one sketch");
+    one.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(3.0, 4.0)), None).unwrap();
+    let mut m = Model::new();
+    m.evaluate(&one);
+    let solved = m.state().sketches.first().unwrap().clone();
+    let mut st = ModelState::default();
+    let solid = kernel::box_solid(Vec3::ZERO, Vec3::new(2.0, 3.0, 4.0)).unwrap();
+    for c in 0..comps {
+        let comp = doc.add_component(Some(&format!("C{c}")), 0).unwrap();
+        let o = doc.occurrences.iter_mut().find(|o| o.component == comp).unwrap();
+        o.transform = rigid(Vec3::new(10.0 * c as f64, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.01 * c as f64);
+        for k in 1..copies {
+            doc.add_occurrence(comp, 0, rigid(Vec3::new(10.0 * c as f64, 20.0 * k as f64, 0.0), Vec3::ZERO, Vec3::Z, 0.02 * k as f64)).unwrap();
+        }
+        let mut names = Vec::new();
+        for b in 0..bodies {
+            let kind =
+                serde_json::from_value(serde_json::json!({"type": "box", "corner": [0, 0, 0], "length": "2", "width": "3", "height": "4"})).unwrap();
+            let name = format!("B{c}_{b}");
+            let id = doc.add_feature(kind, Some(&name)).unwrap();
+            doc.feature_mut(id).unwrap().component = comp;
+            st.bodies.push(ModelBody::new(name.clone(), solid.clone(), id));
+            names.push((name, id));
+        }
+        for s in 0..sketches {
+            let id = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(1.0 + s as f64, 2.0)), None).unwrap();
+            doc.feature_mut(id).unwrap().component = comp;
+            let mut s2 = SolvedSketch::clone(&solved);
+            s2.feature = id;
+            st.sketches.push(Arc::new(s2));
+        }
+        for t in 0..taps {
+            let (body, feature) = names[t % names.len()].clone();
+            st.threads.push(ThreadInfo {
+                feature,
+                body,
+                designation: "M6".into(),
+                major_diameter: 6.0,
+                radius: 3.0,
+                pitch: 1.0,
+                internal: true,
+                axis_point: Vec3::new(1.0, 1.0, 0.0),
+                axis: solidcraft_geom::UnitVec3::Z,
+                start: 0.0,
+                end: 4.0,
+                form: Default::default(),
+                hand: Default::default(),
+                starts: 1,
+            });
+        }
+    }
+    (doc, st)
+}
+
+#[test]
+fn placing_parts_looks_each_sketch_and_tap_up_once() {
+    // A large assembly searched all features for every sketch and construction, and all bodies
+    // twice for every tap and placement, each time its world state was made (every command).
+    let searches = |sketches: usize, taps: usize| {
+        let (doc, state) = placed_parts(4, 2, sketches, taps, 3);
+        let mut world = ModelState::default();
+        let n = searched(|| world = world_state(&doc, &state).unwrap());
+        assert_eq!(world.bodies.len(), 4 * 2 * 3);
+        assert_eq!(world.sketches.len(), 4 * sketches);
+        assert_eq!(world.threads.len(), 4 * taps * 3);
+        n
+    };
+    assert_eq!(searches(8, 6), searches(1, 1));
+}
+
+#[test]
+fn a_placed_tap_follows_its_body_offset() {
+    let (mut doc, state) = placed_parts(1, 1, 0, 1, 1);
+    let comp = doc.components[0].id;
+    doc.body_offsets.insert("B0_0".into(), rigid(Vec3::new(0.0, 0.0, 7.0), Vec3::ZERO, Vec3::Z, 0.0));
+    let world = world_state(&doc, &state).unwrap();
+    let tap = world.threads.first().unwrap();
+    let expected =
+        apply_point(&mat_mul(&doc.component_transform(comp), &rigid(Vec3::new(0.0, 0.0, 7.0), Vec3::ZERO, Vec3::Z, 0.0)), Vec3::new(1.0, 1.0, 0.0));
+    assert!(tap.axis_point.dist(expected) < 1e-9, "{:?} {expected:?}", tap.axis_point);
 }

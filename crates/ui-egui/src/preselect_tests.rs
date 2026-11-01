@@ -2529,6 +2529,8 @@ fn offset_plane_through_a_picked_vertex() {
     assert_eq!(commands.first().map(|c| c.1.clone()), Some(json!({"base":"XY","through":{"vertex":[40.0,30.0,20.0]},"offset":null})));
     h.step(&json!({"key":"Enter"})).unwrap();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    h.frames(3);
+    axis_point_evidence(&mut h, "axis-point-result");
     let (id, _, pl) = solidcraft_engine::view::construction_planes(&h.app.session).into_iter().next().expect("the plane");
     assert!(pl.normal().cross(Vec3::Z).len() < 1e-6 && (pl.origin.z - 20.0).abs() < 1e-6, "{pl:?}");
     let reopened = crate::dialogs::for_feature(&h.app, id, None).unwrap();
@@ -2645,6 +2647,101 @@ fn plane_through_two_picked_edges() {
     assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
     let (_, _, pl) = solidcraft_engine::view::construction_planes(&h.app.session).into_iter().next().expect("the plane");
     assert!(pl.normal().cross(Vec3::Z).len() < 1e-6 && (pl.origin.z - 20.0).abs() < 1e-6, "the top face's plane: {pl:?}");
+}
+
+fn axis_point_evidence(h: &mut crate::scenario::Harness, name: &str) {
+    if let Ok(dir) = std::env::var("SOLIDCRAFT_AXIS_POINT_EVIDENCE") {
+        // Real egui output, with the font/icon texture deltas retained for the rasteriser.
+        h.ctx = egui::Context::default();
+        crate::fonts::setup_bundled_fonts(&h.ctx);
+        let mut textures = std::collections::HashMap::new();
+        let mut output = None;
+        for frame in 0..12 {
+            let mut drawn = h.ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600., 1000.))),
+                    time: Some(frame as f64 / 60.),
+                    ..Default::default()
+                },
+                |ui| h.app.ui(ui),
+            );
+            crate::ui_kit::test_textures_update(&mut textures, &drawn.textures_delta);
+            drawn.textures_delta.clear();
+            output = Some(drawn);
+        }
+        let output = output.unwrap();
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600., 1000.));
+        let image = crate::ui_kit::test_raster(&h.ctx, output.shapes, output.pixels_per_point, bounds, &textures);
+        std::fs::create_dir_all(&dir).unwrap();
+        image.save(std::path::Path::new(&dir).join(format!("{name}.png"))).unwrap();
+    }
+}
+
+/// An axis and an off-axis point fill the form and stay associative through an unchanged edit.
+#[test]
+fn plane_through_axis_and_point_preselects_creates_and_reopens_exact_references() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("construct.point.vertex", json!({"point":{"point":[20,10,0]},"name":"Peg"})).unwrap();
+    h.app.session.selection = vec![Sel::Axis { name: "Z".into() }, Sel::ConstructionPoint { name: "Peg".into() }];
+    h.app.ui.tab = "MODEL".into();
+    h.frames(4);
+    h.step(&json!({"click":{"handle":"panel:MODEL:CONSTRUCT"}})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"dropdown:construct.plane.axis_point"}})).unwrap();
+    h.frames(2);
+    let d = h.app.dialog.as_ref().expect("axis-and-point form");
+    assert_eq!((d.inputs[0].items.len(), d.inputs[1].items.len()), (1, 1));
+    assert_eq!((d.inputs[0].label, d.inputs[1].label), ("Axis", "Point"));
+    axis_point_evidence(&mut h, "axis-point-dialog");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    h.frames(3);
+    axis_point_evidence(&mut h, "axis-point-result");
+    let (id, _, pl) = solidcraft_engine::view::construction_planes(&h.app.session).into_iter().next().unwrap();
+    assert!(pl.normal().dot(Vec3::Z).abs() < 1e-6);
+    assert!((Vec3::new(20., 10., 0.) - pl.origin).dot(pl.normal()).abs() < 1e-6);
+    let before = h.app.session.doc.to_json();
+    h.app.edit_feature(id);
+    h.frames(2);
+    assert!(h.app.dialog.is_some(), "construction plane can be edited");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc.to_json(), before, "reopening and OK preserves saved references");
+}
+
+#[test]
+fn plane_through_axis_and_point_edit_replaces_only_the_picked_saved_reference() {
+    let mut h = crate::scenario::Harness::new();
+    let made = h.app.run("construct.plane.axis_point", json!({"axis":{"axis":"Z"},"point":{"point":[10,0,0]},"name":"Fence"})).unwrap();
+    let id = made["feature"].as_u64().unwrap();
+    h.app.edit_feature(id);
+    h.frames(1);
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.active = 0;
+        d.pick(&h.app.session, Sel::Axis { name: "Y".into() });
+    }
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    let (_, _, pl) = solidcraft_engine::view::construction_planes(&h.app.session).into_iter().next().unwrap();
+    assert!(pl.normal().cross(Vec3::Z).len() < 1e-6, "Y and fixed [10,0,0] define XY: {pl:?}");
+    let definition = h.app.run("timeline.inspect", json!({"feature":"Fence"})).unwrap();
+    assert_eq!(definition["definition"]["plane"]["point"], json!({"type":"point","p":[10.,0.,0.]}));
+}
+
+#[test]
+fn plane_through_axis_and_point_edit_in_a_moved_component_keeps_its_fixed_point() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("component.create", json!({"name":"Part","grounded":false})).unwrap();
+    h.app.run("occurrence.move", json!({"occurrence":"Part:1","translate":[50,20,0]})).unwrap();
+    let made = h.app.run("construct.plane.axis_point", json!({"axis":{"axis":"Z"},"point":{"point":[60,20,0]},"name":"Fence"})).unwrap();
+    let before = h.app.session.doc.to_json();
+    h.app.edit_feature(made["feature"].as_u64().unwrap());
+    h.frames(1);
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    assert_eq!(h.app.session.doc.to_json(), before, "editing maps saved local references through world and back once");
 }
 
 /// Point Along Path asks for its position too, and a missing pick names the input.

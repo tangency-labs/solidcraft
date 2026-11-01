@@ -100,6 +100,9 @@ pub struct Tool {
     /// The Line tool's chain, which a rest on its last point switches to tangent arcs and back
     /// (#9489).
     pub chain: crate::sketch_line_arc::LineChain,
+    /// The construction line tools' Construction/Normal switch (#10258): a segment with a length
+    /// becomes a normal sketch line. Each start of a tool begins at Construction.
+    pub normal: bool,
 }
 
 impl Tool {
@@ -153,6 +156,7 @@ impl Tool {
             arc_turn: 0.0,
             lined: Vec::new(),
             chain: Default::default(),
+            normal: false,
         })
     }
 }
@@ -215,6 +219,10 @@ fn midpoint_at(app: &SolveApp, proj: &Proj, pos: Pos2, radius: f32) -> Option<(V
 
 pub fn on_hover(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
     crate::sketch3d::on_hover(app, proj, pos);
+    if let Some(mut tool) = app.tool.take() {
+        crate::sketch_line_arc::rejoin(app, &mut tool);
+        app.tool = Some(tool);
+    }
     let midpoint = (shift && app.tool.as_ref().is_some_and(|t| t.kind == Kind::HorizontalVertical))
         .then(|| midpoint_at(app, proj, pos, f32::INFINITY))
         .flatten();
@@ -501,6 +509,7 @@ fn dimension_picks(tool: &Tool, id: String, midpoint: Option<&str>, midpoint_tar
 /// the typed values as dimension constraints).
 pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
     let Some(mut tool) = app.tool.take() else { return };
+    crate::sketch_line_arc::rejoin(app, &mut tool);
     if tool.kind == Kind::Ext {
         crate::sketch_tools::place_point(app, &mut tool, p);
         // A placed text opens Edit Text, which ends the tool.
@@ -551,7 +560,7 @@ pub fn place(app: &mut SolveApp, p: (Vec2, Option<String>)) {
                     tool.pts[last].1 = Some(format!("{id}.end"));
                     // The chain needs only its current endpoint, even after many segments.
                     tool.pts = vec![tool.pts[last].clone()];
-                    tool.chain.placed(id);
+                    tool.chain.placed(id, a.clone());
                 }
                 crate::sketch_dims::reset(&mut tool);
             } else {
@@ -740,6 +749,11 @@ pub(crate) fn constraint_preselection(
         }
         ("sketch.constraint.horizontal_vertical", _) => crate::selection::alignment_points(selection).map(|points| json!({"points": points})),
         ("sketch.constraint.coincident", [_, _]) => crate::selection::coincident_operands(selection),
+        ("sketch.constraint.concentric", [SketchCurve { id: a, .. }, SketchPoint { id: b }] | [SketchPoint { id: a }, SketchCurve { id: b, .. }])
+            if a != b =>
+        {
+            Some(json!({"a":a,"b":b}))
+        }
         (
             "sketch.constraint.midpoint",
             [SketchPoint { id: point }, SketchCurve { id: line, .. }] | [SketchCurve { id: line, .. }, SketchPoint { id: point }],

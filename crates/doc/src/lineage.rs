@@ -749,8 +749,9 @@ pub(crate) fn order_lumps(bodies: &mut [crate::ModelBody], origin: &Arc<crate::n
         let keys: Option<Vec<(String, usize)>> = members.iter().map(|i| bodies.get(*i).and_then(least).map(|k| (k, *i))).collect();
         let Some(mut keys) = keys else { continue };
         keys.sort();
-        // A name goes with the feature that made it: the piece taking the first name is the body
-        // the feature was given, whichever piece the kernel lists first.
+        // A name moves with the feature it belongs to: in a cut's family the first name is the
+        // cut body's own feature's and the rest are the cut's, and `body.rename` stores a name in
+        // the `body_names` of the feature a body says made it (#10438).
         let names: Vec<(String, u64)> = members.iter().filter_map(|i| bodies.get(*i).map(|b| (b.name.clone(), b.feature))).collect();
         for ((name, feature), (_, i)) in names.into_iter().zip(keys) {
             if let Some(b) = bodies.get_mut(i) {

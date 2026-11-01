@@ -25,6 +25,15 @@ impl Lcg {
     }
 }
 
+thread_local! {
+    static ID_SEARCHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// A linear search for a point or curve by id on this thread.
+pub(crate) fn count_id_search() {
+    ID_SEARCHES.with(|c| c.set(c.get() + 1));
+}
+
 /// Run `f` with the constructive seed on or off, without the seed-on/seed-off comparison (for
 /// tests that measure the difference).
 pub(crate) fn seeded<T>(on: bool, f: impl FnOnce() -> T) -> T {
@@ -1550,4 +1559,32 @@ fn a_held_solve_that_cannot_succeed_stops_once_it_stalls() {
     assert!(stalled < 100, "a held solve gives up once stalled: {stalled} iterations");
     // A solve whose report names the violated constraints still iterates to the end.
     assert!(solve(Analysis::Full) >= 500);
+}
+
+/// Pattern upkeep runs before every solve, each drag frame included. It once looked up every
+/// copy and its arc points by a linear search over all ids, so dragging anything in a sketch
+/// with a large pattern of arcs spent most of each frame there; its searches must not grow
+/// with the copies. The copies still follow their seed's arc direction.
+#[test]
+fn pattern_upkeep_does_not_search_ids_per_copy() {
+    let mut sk = Sketch::new();
+    let center = sk.add_point(v(0.0, 0.0), None).unwrap();
+    let arc = sk.add_arc(v(20.0, 0.0), v(23.0, 0.0), v(20.0, 3.0), [None, None, None], None).unwrap();
+    let entities = vec![sk.curves[arc].id.clone()];
+    let kind = SketchPatternKind::Circular {
+        center: sk.points[center].id.clone(),
+        count: 50,
+        angle: 360.0,
+        alignment: PatternAlignment::Right,
+        reversed: false,
+    };
+    let id = sk.fresh("pat").unwrap();
+    sk.patterns.push(SketchPattern { id, entities, kind: kind.clone(), count_expression: None, instances: vec![], expressions: Default::default() });
+    sk.update_pattern(0, kind).unwrap();
+    assert_eq!(sk.curves.len(), 50);
+    sk.curves[arc].reversed = true;
+    ID_SEARCHES.with(|c| c.set(0));
+    sk.refresh_pattern_shapes();
+    assert_eq!(ID_SEARCHES.with(std::cell::Cell::get), 0, "id searches in pattern upkeep");
+    assert!(sk.curves.iter().all(|c| c.reversed));
 }

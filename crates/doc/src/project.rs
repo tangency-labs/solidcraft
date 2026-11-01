@@ -153,7 +153,7 @@ fn resolve_uncached(
             let mesh = b.mesh();
             match kind {
                 LinkKind::Intersect => section(plane, &mesh, None),
-                _ => silhouette(plane, &mesh),
+                _ => silhouette(plane, &mesh, Some(&b.body)),
             }
         }
         LinkSource::Vertex { body, at } => {
@@ -507,19 +507,38 @@ fn sketch_curves(ss: &crate::eval::SolvedSketch, ci: usize) -> Vec<WireCurve> {
 /// lines, circles and arcs, and a free-form curve as the one spline it is, its knots and weights
 /// its own. `None` for an edge that doesn't lie in a plane parallel to `plane`, isn't read
 /// exactly (a mesh body's) or is a spline no sketch holds (past degree 9 or 500 points): it is
-/// fitted to its polyline instead.
+/// fitted to its polyline instead. An edge read as free-form pieces, or not read, that runs
+/// along a circle in a plane parallel to `plane` comes in as that circle ([`circular`]): a
+/// round's edge is a spline that only follows its circle.
 fn exact_edges(body: &crate::ModelBody, plane: &Plane, edges: &[usize]) -> Vec<Option<Vec<LinkGeom>>> {
+    use crate::kernel::PlanarPiece;
+    let free_form = |p: &PlanarPiece| matches!(p, PlanarPiece::Spline(_) | PlanarPiece::Seg(Seg2::Cubic { .. } | Seg2::Bezier { .. }));
+    let link = |p: &PlanarPiece| match p {
+        PlanarPiece::Seg(s) => link_geom(s),
+        PlanarPiece::Spline(s) => link_spline(s),
+    };
+    let mut mesh = None;
     body.body
         .planar_edges(plane, edges)
         .into_iter()
-        .map(|pieces| {
-            pieces?
-                .iter()
-                .map(|piece| match piece {
-                    crate::kernel::PlanarPiece::Seg(s) => link_geom(s),
-                    crate::kernel::PlanarPiece::Spline(s) => link_spline(s),
-                })
-                .collect()
+        .zip(edges)
+        .map(|(pieces, e)| match pieces {
+            Some(pieces) if !pieces.iter().any(free_form) => pieces.iter().map(link).collect(),
+            Some(pieces) => {
+                let samples: Option<Vec<Vec2>> = pieces.iter().map(piece_samples).collect::<Option<Vec<_>>>().map(|s| s.concat());
+                match samples.as_deref().and_then(circular) {
+                    Some((g, _)) => Some(vec![g]),
+                    None => pieces.iter().map(link).collect(),
+                }
+            }
+            None if body.body.is_mesh() => None,
+            None => {
+                // Not read: its polyline lies on the curve, but only many points of it show a circle.
+                let pts = mesh.get_or_insert_with(|| body.mesh()).edges.get(*e).filter(|pts| pts.len() > 8)?;
+                let level = plane.height(*pts.first()?);
+                let (g, radius) = circular(&pts.iter().map(|p| plane.to_local(*p)).collect::<Vec<_>>())?;
+                pts.iter().all(|p| (plane.height(*p) - level).abs() <= radius * CIRCLE_TOL).then(|| vec![g])
+            }
         })
         .collect()
 }
@@ -531,6 +550,63 @@ fn link_spline(s: &crate::kernel::PlanarSpline) -> Option<LinkGeom> {
     let nurbs = solidcraft_sketch::Nurbs { knots: s.knots.clone(), weights: s.weights.clone() };
     nurbs.check(s.points.len(), degree).ok()?;
     Some(LinkGeom::Spline { pts: s.points.clone(), control: true, degree, periodic: false, nurbs: Some(nurbs) })
+}
+
+/// Points sampled along each free-form piece of an edge to see whether it runs along a circle.
+const CIRCLE_SAMPLES: u16 = 16;
+/// How far round (radians) a curve turns at least to be taken for a circle: a letter's nearly
+/// straight stroke lies near a large circle too.
+const CIRCLE_MIN_TURN: f64 = 0.1;
+/// How far (a fraction of its radius) a curve may stray from a circle and still be that circle:
+/// a round's edge keeps to it within 3e-7, a curve that merely looks round (a letter's bowl of
+/// four cubic spans) only within 3e-4.
+const CIRCLE_TOL: f64 = 1e-5;
+
+/// The circle (closing points) or arc through `samples`, taken in order along a curve, with
+/// its radius: when they all lie on one within [`CIRCLE_TOL`]. The arc ends at the first and
+/// last sample, so it meets what the curve met.
+fn circular(samples: &[Vec2]) -> Option<(LinkGeom, f64)> {
+    let (first, last) = (*samples.first()?, *samples.last()?);
+    let (c, radius) = ls_circle(samples)?;
+    let tol = radius * CIRCLE_TOL;
+    if !(radius.is_finite() && tol > 0.0) || samples.iter().any(|p| (p.dist(c) - radius).abs() > tol) {
+        return None;
+    }
+    let mut sweep = 0.0;
+    for w in samples.windows(2) {
+        let (Some(a), Some(b)) = (w.first(), w.get(1)) else { continue };
+        let mut d = (*b - c).angle() - (*a - c).angle();
+        if d > std::f64::consts::PI {
+            d -= std::f64::consts::TAU;
+        } else if d < -std::f64::consts::PI {
+            d += std::f64::consts::TAU;
+        }
+        sweep += d;
+    }
+    let turn = sweep.abs();
+    if turn > std::f64::consts::TAU + 1e-6 || turn < CIRCLE_MIN_TURN {
+        return None;
+    }
+    if first.dist(last) <= tol {
+        return (turn > std::f64::consts::TAU - 1e-6).then_some((LinkGeom::Circle(c, radius), radius));
+    }
+    // Counter-clockwise from `a` to `b`.
+    let (a, b) = if sweep > 0.0 { (first, last) } else { (last, first) };
+    Some((LinkGeom::Arc { c, a, b }, radius))
+}
+
+/// [`CIRCLE_SAMPLES`] + 1 points along a piece of an edge, ends included; `None` for a spline
+/// whose knots don't fit its points.
+fn piece_samples(piece: &crate::kernel::PlanarPiece) -> Option<Vec<Vec2>> {
+    let at = |i: u16| f64::from(i) / f64::from(CIRCLE_SAMPLES);
+    match piece {
+        crate::kernel::PlanarPiece::Seg(s) => Some((0..=CIRCLE_SAMPLES).map(|i| s.point_at(at(i))).collect()),
+        crate::kernel::PlanarPiece::Spline(s) => {
+            let degree = u8::try_from(s.degree).ok()?;
+            let nurbs = solidcraft_sketch::Nurbs { knots: s.knots.clone(), weights: s.weights.clone() };
+            (0..=CIRCLE_SAMPLES).map(|i| nurbs.point(&s.points, degree, at(i))).collect()
+        }
+    }
 }
 
 /// `edges` of `body` projected on `plane`: each exactly ([`exact_edges`]) or fitted to its
@@ -1353,34 +1429,170 @@ fn surface_facing(m: &Mesh, t: &[u32; 3], flat: Vec3) -> Vec3 {
 }
 
 /// The outline of a body seen along the sketch normal: mesh edges between triangles facing the
-/// sketch and triangles facing away (or edge-on), projected and fitted.
-fn silhouette(plane: &Plane, m: &Mesh) -> Vec<LinkGeom> {
+/// sketch and triangles facing away (or edge-on), projected and fitted. A face of `body` that
+/// faces one way all over ([`face_facing`]) does so in every triangle, though they lean a hair
+/// either way: a round wall seen edge-on joins its two rims at different angles, and thin
+/// slivers of a narrow chamfer can point the other way. Any other triangle faces as the surface
+/// does at its corners ([`surface_facing`]).
+fn silhouette(plane: &Plane, m: &Mesh, body: Option<&solidcraft_kernel::Body>) -> Vec<LinkGeom> {
     let n = plane.normal();
     let size = m.bounds().diagonal().max(1e-9);
-    let q = size * 1e-7;
-    let key = |p: Vec3| ((p.x / q).round() as i64, (p.y / q).round() as i64, (p.z / q).round() as i64);
-    // Undirected mesh edge → facing flags of the triangles using it.
-    let mut edges: BTreeMap<((i64, i64, i64), (i64, i64, i64)), (Vec3, Vec3, Vec<bool>)> = BTreeMap::new();
-    for t in &m.triangles {
-        let Some([a, b, c]) = m.tri(t) else { continue };
-        let fnrm = (b - a).cross(c - a);
-        let Some(flat) = fnrm.normalized() else { continue };
-        let front = surface_facing(m, t, flat).dot(n) > 1e-6;
-        for (p, r) in [(a, b), (b, c), (c, a)] {
-            let (kp, kr) = (key(p), key(r));
-            let k = if kp <= kr { (kp, kr) } else { (kr, kp) };
-            edges.entry(k).or_insert_with(|| (p, r, Vec::new())).2.push(front);
+    // Vertices welded within this: the copies of a vertex on the seam between two faces can lie
+    // a few 1e-7 apart, and an edge used by one triangle only is outline.
+    let weld = size * 1e-6;
+    let cell = |p: Vec3| ((p.x / weld).floor() as i64, (p.y / weld).floor() as i64, (p.z / weld).floor() as i64);
+    let mut grid: BTreeMap<(i64, i64, i64), Vec<usize>> = BTreeMap::new();
+    let mut verts: Vec<Vec3> = Vec::new();
+    let mut vertex = |p: Vec3| -> usize {
+        let (x, y, z) = cell(p);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    let found = grid
+                        .get(&(x + dx, y + dy, z + dz))
+                        .and_then(|ids| ids.iter().copied().find(|i| verts.get(*i).is_some_and(|v| v.dist(p) <= weld)));
+                    if let Some(i) = found {
+                        return i;
+                    }
+                }
+            }
+        }
+        verts.push(p);
+        grid.entry((x, y, z)).or_default().push(verts.len() - 1);
+        verts.len() - 1
+    };
+    let tris: Vec<([Vec3; 3], Vec3, Option<u32>, &[u32; 3])> = m
+        .triangles
+        .iter()
+        .enumerate()
+        .filter_map(|(ti, t)| {
+            let [a, b, c] = m.tri(t)?;
+            Some(([a, b, c], (b - a).cross(c - a), m.tri_face.get(ti).copied(), t))
+        })
+        .collect();
+    // Each face's area-weighted facing, and whether any triangle of it is in doubt: near
+    // edge-on, or facing against the rest of its face. Only those faces ask what they are.
+    let mut faces: BTreeMap<u32, (f64, bool)> = BTreeMap::new();
+    for (_, w, f, _) in &tris {
+        if let Some(f) = f {
+            faces.entry(*f).or_default().0 += w.dot(n);
         }
     }
-    let segs: Vec<(Vec2, Vec2)> = edges
+    for (_, w, f, _) in &tris {
+        let (Some(f), Some(un)) = (f, w.normalized()) else { continue };
+        if let Some(face) = faces.get_mut(f) {
+            face.1 |= un.dot(n).abs() < 0.5 || (un.dot(n) > 0.0) != (face.0 > 0.0);
+        }
+    }
+    let facing: BTreeMap<u32, Facing> = match body {
+        Some(body) => faces.iter().filter(|(_, (_, doubt))| *doubt).filter_map(|(f, (sum, _))| Some((*f, face_facing(body, *f, n, *sum)?))).collect(),
+        None => BTreeMap::new(),
+    };
+    // Undirected mesh edge → facing flags of the triangles using it.
+    let ids: Vec<[usize; 3]> = tris.iter().map(|([a, b, c], _, _, _)| [vertex(*a), vertex(*b), vertex(*c)]).collect();
+    let mut edges: BTreeMap<(usize, usize), (Vec3, Vec3, Vec<(bool, Option<u32>)>)> = BTreeMap::new();
+    for ((_, w, f, t), [ia, ib, ic]) in tris.iter().zip(ids) {
+        let Some(un) = w.normalized() else { continue };
+        let front = match f.and_then(|f| facing.get(&f)) {
+            Some(Facing::Front) => true,
+            Some(Facing::Away) => false,
+            None => surface_facing(m, t, un).dot(n) > 1e-6,
+        };
+        for (p, r) in [(ia, ib), (ib, ic), (ic, ia)] {
+            if p == r {
+                continue;
+            }
+            let (Some(vp), Some(vr)) = (verts.get(p).copied(), verts.get(r).copied()) else { continue };
+            edges.entry((p.min(r), p.max(r))).or_insert((vp, vr, Vec::new())).2.push((front, *f));
+        }
+    }
+    let mut segs: Vec<(Vec2, Vec2)> = edges
         .values()
         .filter(|(_, _, f)| {
-            let fronts = f.iter().filter(|x| **x).count();
-            fronts > 0 && fronts < f.len() || (f.len() == 1 && fronts == 1)
+            let fronts = f.iter().filter(|x| x.0).count();
+            fronts > 0 && fronts < f.len()
         })
         .map(|(a, b, _)| (plane.to_local(*a), plane.to_local(*b)))
         .collect();
+    let singles: Vec<(Vec3, Vec3, bool, Option<u32>)> = edges
+        .values()
+        .filter_map(|(a, b, f)| match f.as_slice() {
+            [(front, face)] => Some((*a, *b, *front, *face)),
+            _ => None,
+        })
+        .collect();
+    segs.extend(open_edges(&singles, size).into_iter().map(|(a, b)| (plane.to_local(a), plane.to_local(b))));
     fit_segments(&segs, size, true)
+}
+
+/// Of the mesh edges used by one triangle each (`a`, `b`, whether the triangle faces the sketch,
+/// its face), those facing the sketch that are outline: an open sheet's border. Where two faces
+/// meet, one face's triangles can split the seam at a vertex the other's run straight past, and
+/// both sides are then used once; a seam whose other side faces the sketch too is no outline.
+fn open_edges(singles: &[(Vec3, Vec3, bool, Option<u32>)], size: f64) -> Vec<(Vec3, Vec3)> {
+    // The two sides of a seam stray from each other by at most a chord's sag.
+    let seam = size * 2e-3;
+    let cell = seam * 8.0;
+    let at = |p: Vec3| ((p.x / cell).floor() as i64, (p.y / cell).floor() as i64, (p.z / cell).floor() as i64);
+    let mut grid: BTreeMap<(i64, i64, i64), Vec<usize>> = BTreeMap::new();
+    let mut long: Vec<usize> = Vec::new();
+    for (i, (a, b, front, _)) in singles.iter().enumerate() {
+        if !front {
+            continue;
+        }
+        let (lo, hi) = (at(a.min(*b) - Vec3::new(seam, seam, seam)), at(a.max(*b) + Vec3::new(seam, seam, seam)));
+        let cells = (hi.0 - lo.0 + 1).saturating_mul(hi.1 - lo.1 + 1).saturating_mul(hi.2 - lo.2 + 1);
+        if cells > 512 {
+            long.push(i);
+            continue;
+        }
+        for x in lo.0..=hi.0 {
+            for y in lo.1..=hi.1 {
+                for z in lo.2..=hi.2 {
+                    grid.entry((x, y, z)).or_default().push(i);
+                }
+            }
+        }
+    }
+    singles
+        .iter()
+        .enumerate()
+        .filter(|(i, (a, b, front, face))| {
+            let m = (*a + *b) * 0.5;
+            *front
+                && !grid
+                    .get(&at(m))
+                    .into_iter()
+                    .flatten()
+                    .chain(&long)
+                    .any(|j| singles.get(*j).is_some_and(|(p, q, _, other)| j != i && other != face && m.dist_to_segment(*p, *q) <= seam))
+        })
+        .map(|(_, (a, b, _, _))| (*a, *b))
+        .collect()
+}
+
+/// Which way a whole face of a body faces, seen along a sketch normal.
+#[derive(Clone, Copy)]
+enum Facing {
+    Front,
+    /// Away from the sketch or edge-on.
+    Away,
+}
+
+/// Which way face `face` of `body` faces seen along `n`, when it faces one way all over: a
+/// plane (edge-on when it contains `n`), a cylinder about `n` (edge-on), a cone about `n`.
+/// `sum` is the face's triangles' normals weighted by their areas, dotted with `n`: the side a
+/// plane or such a cone faces. `None` for any other face: each triangle says.
+fn face_facing(body: &solidcraft_kernel::Body, face: u32, n: Vec3, sum: f64) -> Option<Facing> {
+    use solidcraft_kernel::FaceSurface;
+    let side = if sum > 0.0 { Facing::Front } else { Facing::Away };
+    match solidcraft_kernel::face_surface(body, face as usize)? {
+        FaceSurface::Plane { normal, .. } if normal.vec().dot(n).abs() < 1e-9 => Some(Facing::Away),
+        FaceSurface::Plane { .. } => Some(side),
+        FaceSurface::Cylinder { axis, .. } if axis.vec().dot(n).abs() > 1.0 - 1e-12 => Some(Facing::Away),
+        FaceSurface::Cone { axis, .. } if axis.vec().dot(n).abs() > 1.0 - 1e-12 => Some(side),
+        _ => None,
+    }
 }
 
 /// Section of a mesh (or one of its faces) with the sketch plane.

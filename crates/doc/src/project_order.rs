@@ -191,7 +191,7 @@ mod tests {
         for normals in [Vec::new(), vec![Vec3::Z; 3], vec![Vec3::ZERO; 8], vec![nan; 8], vec![Vec3::new(f64::INFINITY, 0.0, 0.0); 8], averaged] {
             let tri_face = vec![0; triangles.len()];
             let mesh = Mesh { positions: positions.clone(), normals: normals.clone(), triangles: triangles.clone(), tri_face, ..Mesh::default() };
-            let outline = super::super::silhouette(&Plane::XY, &mesh);
+            let outline = super::super::silhouette(&Plane::XY, &mesh, None);
             let sides = outline.iter().filter(|g| matches!(g, solidcraft_sketch::LinkGeom::Line(a, b) if (a.dist(*b) - 10.0).abs() < 1e-9)).count();
             assert_eq!((outline.len(), sides), (4, 4), "{normals:?}: {outline:?}");
         }

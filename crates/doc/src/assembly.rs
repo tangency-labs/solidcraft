@@ -225,6 +225,7 @@ fn map_plane_ref(m: &Mat, p: &mut PlaneRef) {
         }
         PlaneRef::Midplane { .. }
         | PlaneRef::TwoEdges { .. }
+        | PlaneRef::AxisPoint { .. }
         | PlaneRef::ThreePoints { .. }
         | PlaneRef::AlongPath { .. }
         | PlaneRef::Perpendicular { .. } => {
@@ -430,6 +431,19 @@ impl Document {
             match self.components.iter().find(|x| x.id == c) {
                 Some(x) => c = x.parent,
                 None => return false,
+            }
+        }
+        false
+    }
+
+    /// Is `c` (or one of its ancestors) marked out of the History bar (#10393)? The root (0)
+    /// never is: its own features always show.
+    pub fn component_history_hidden(&self, mut c: u64) -> bool {
+        for _ in 0..1000 {
+            match self.components.iter().find(|x| x.id == c) {
+                Some(x) if x.history_hidden => return true,
+                Some(x) if x.parent != 0 => c = x.parent,
+                _ => return false,
             }
         }
         false

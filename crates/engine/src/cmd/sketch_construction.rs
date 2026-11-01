@@ -24,7 +24,7 @@ macro_rules! variant {
         .enabled(in_sketch)
         .contract(&CONTRACT)
         .output(output_schema_for::<ConstructionLineResult>)
-        .params(concat!("Construction line, ", $mode, ". at: point; through?: second point; curve?, curve2?: sketch references; angle?: degrees from sketch X; near?: solution selector, and the side a line with a length runs towards; solution?: zero-based solution index; length?: a segment of this length from `at`, held by a length dimension, instead of an infinite line (horizontal, vertical, angle, parallel, perpendicular). Tangents take circles/arcs, or an open spline/conic endpoint for tangent_at.", created_doc!()))
+        .params(concat!("Construction line, ", $mode, ". at: point; through?: second point; curve?, curve2?: sketch references; angle?: degrees from sketch X; near?: solution selector, and the side a line with a length runs towards; solution?: zero-based solution index; length?: a segment of this length from `at`, held by a length dimension, instead of an infinite line (horizontal, vertical, angle, parallel, perpendicular); construction?: false makes that segment a normal line. Tangents take circles/arcs, or an open spline/conic endpoint for tangent_at.", created_doc!()))
     };
 }
 
@@ -306,6 +306,14 @@ fn run(s: &mut Session, p: &Value, default_mode: &str) -> Result<Value> {
                 Some((e, value))
             }
         };
+        let construction = match p.get("construction") {
+            None | Some(Value::Null) => true,
+            Some(Value::Bool(value)) => *value,
+            Some(_) => return Err(bad(CMD, "`construction` must be a boolean")),
+        };
+        if !construction && length.is_none() {
+            return Err(bad(CMD, "only a line with a `length` can be a normal line: an infinite line is construction geometry"));
+        }
         let solutions = construction_line_solutions(sk, &params, mode)?;
         let choice = construction_line_choice(&solutions, &params)?;
         let chosen = solutions.get(choice).ok_or_else(|| bad(CMD, "no solution"))?;
@@ -331,7 +339,7 @@ fn run(s: &mut Session, p: &Value, default_mode: &str) -> Result<Value> {
         let l = sk.add_line(start, end, start_ref, through.as_ref().and_then(|q| q.idx()), None)?;
         if let Some(c) = sk.curves.get_mut(l) {
             c.infinite = length.is_none();
-            c.construction = true;
+            c.construction = construction;
         }
         let mut cons = Vec::new();
         let kind = match (mode, reference) {

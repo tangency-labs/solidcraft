@@ -366,11 +366,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::SketchIntersect { bodies, projection_link } => {
             let mut selected = if *bodies { 1 } else { 0 };
             let changed = ui_kit::row(ui, tr("ui.sketch_intersect_selection_filter"), |ui| {
-                ui_kit::segmented(ui, &mut selected, &[tr("Faces"), tr("Bodies")], Default::default())
+                ui_kit::segmented(ui, &mut selected, &[tr("Geometry"), tr("Bodies")], Default::default())
             });
             if changed && let Some(input) = d.inputs.first_mut() {
                 *bodies = selected == 1;
-                input.accept = if *bodies { BODIES } else { FACES };
+                input.accept = if *bodies { BODIES } else { super::INTERSECT_GEOMETRY };
                 input.items.clear();
             }
             ui_kit::row(ui, tr("ui.sketch_intersect_projection_link"), |ui| ui_kit::checkbox(ui, "", projection_link));
