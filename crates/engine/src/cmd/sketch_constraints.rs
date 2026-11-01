@@ -20,11 +20,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_smooth")
         .enabled(in_sketch)
+        .from_selection(super::sketch_selection::curvature)
         .params("a, b: two curves sharing an end point (curvature continuous, G2)"),
     CommandSpec::new("sketch.constraint.polygon", "Polygon", c_polygon)
         .at("SKETCH", "CONSTRAINTS")
         .icon("c_polygon")
         .enabled(in_sketch)
+        .from_selection(super::sketch_selection::polygon)
         .params("lines: [line ids] of a closed chain: equal sides with every corner on one circle (a regular polygon)"),
     CommandSpec::new("sketch.auto_constrain", "AutoConstrain", auto_constrain)
         .at("SKETCH", "CONSTRAINTS")

@@ -1927,9 +1927,8 @@ impl SolveApp {
             return;
         }
         if let Some(mut t) = tools::Tool::for_command(id) {
-            let state = self.session.world_state();
-            let sketch = self.session.active_sketch.and_then(|s| state.sketch(s)).map(|ss| &ss.sketch);
-            if let Some(params) = tools::constraint_preselection(id, &self.session.selection, sketch) {
+            // A selection the constraint takes whole runs it at once (`CommandSpec::for_selection`).
+            if let Some(params) = solidcraft_engine::find_command(id).and_then(|c| c.for_selection(&self.session)) {
                 if self.run(id, params).is_ok() {
                     let _ = self.session.execute("select.clear", &json!({}));
                     self.set_status("Constraint applied", false);
@@ -1942,27 +1941,6 @@ impl SolveApp {
                 if self.run(id, json!({"refs":refs})).is_ok() {
                     let _ = self.session.execute("select.clear", &json!({}));
                     self.set_status("Projection applied", false);
-                }
-                return;
-            }
-            // Curve-pair constraints can consume an exact preselection. Leave ambiguous
-            // selections to the ordinary pick tool; never silently constrain a subset.
-            if matches!(
-                id,
-                "sketch.constraint.parallel"
-                    | "sketch.constraint.perpendicular"
-                    | "sketch.constraint.equal"
-                    | "sketch.constraint.tangent"
-                    | "sketch.constraint.concentric"
-                    | "sketch.constraint.collinear"
-            ) && let [solidcraft_engine::Sel::SketchCurve { id: a, .. }, solidcraft_engine::Sel::SketchCurve { id: b, .. }] =
-                self.session.selection.as_slice()
-                && a != b
-            {
-                let params = json!({ "a": a, "b": b });
-                if self.run(id, params).is_ok() {
-                    let _ = self.session.execute("select.clear", &json!({}));
-                    self.set_status("Constraint applied", false);
                 }
                 return;
             }

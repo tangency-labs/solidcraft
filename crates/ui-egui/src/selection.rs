@@ -19,27 +19,12 @@ pub(crate) fn same_item(a: &Sel, b: &Sel) -> bool {
 
 /// Two distinct point intents for the alignment command, without creating sketch points.
 pub(crate) fn alignment_points(selection: &[Sel]) -> Option<[serde_json::Value; 2]> {
-    let [a, b] = selection else { return None };
-    let point = |s: &Sel| match s {
-        Sel::SketchPoint { id } => Some(serde_json::json!(id)),
-        Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
-        _ => None,
-    };
-    let (a, b) = (point(a)?, point(b)?);
-    (a != b).then_some([a, b])
+    solidcraft_engine::sketch_selection::alignment_points(selection)
 }
 
-/// Coincident's two operands for a two-item selection: points and curves by id, a line's
-/// midpoint as `{midpoint: line}`, which the command ties a point to (#10311).
+/// Coincident's two operands for a two-item selection.
 pub(crate) fn coincident_operands(selection: &[Sel]) -> Option<serde_json::Value> {
-    let [a, b] = selection else { return None };
-    let operand = |s: &Sel| match s {
-        Sel::SketchPoint { id } | Sel::SketchCurve { id, .. } => Some(serde_json::json!(id)),
-        Sel::SketchMidpoint { id } => Some(serde_json::json!({"midpoint": id})),
-        _ => None,
-    };
-    let (a, b) = (operand(a)?, operand(b)?);
-    (a != b).then(|| serde_json::json!({"a": a, "b": b}))
+    solidcraft_engine::sketch_selection::coincident_operands(selection)
 }
 
 /// The current middle of a finite straight sketch edge.
