@@ -25,6 +25,8 @@ pub mod panels;
 pub mod params;
 pub mod product_scene;
 pub mod recovery;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod remote_sftp;
 pub mod remote_slicers;
 pub mod render_jobs;
 pub mod render_lights;
