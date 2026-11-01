@@ -162,7 +162,7 @@ pub fn projection_symbol(projection: Projection, h: f64, centre: Vec2) -> [Item;
     [stroke(cone), stroke(Loop2::circle(circles, h)), stroke(Loop2::circle(circles, h / 2.0))]
 }
 
-/// The built-in block, 180 x 54 mm: the twelve cells of the layout approved on #3875, each under a
+/// The built-in block, 180 x 49 mm: the twelve cells of the layout approved on #3875, each under a
 /// 2.5 mm label, and no type, status or scale cell. Values come from the component the sheet
 /// documents, the drawing, its newest revision and the sheet; the legal owner is the drawing's
 /// `organization`, and the general tolerances are text to change.
@@ -181,18 +181,18 @@ pub fn default_block() -> TitleBlock {
         ("identification_number", [-68.0, 0.0, 0.0, 14.0], "Identification number", text(5.0, Left, most(16), vec![field(Drawing, "number")])),
         ("created_by", [-180.0, 14.0, -121.0, 24.0], "Created by", text(3.5, Left, most(20), vec![field(Revision, "designer")])),
         ("approved_by", [-121.0, 14.0, -62.0, 24.0], "Approved by", text(3.5, Left, most(20), vec![field(Revision, "checker")])),
-        ("date_of_issue", [-62.0, 14.0, -31.0, 24.0], "Date of issue", text(3.5, Left, most(10), vec![field(Revision, "date")])),
-        ("sheet", [-31.0, 14.0, 0.0, 24.0], "Sheet", text(3.5, Centre, most(9), sheet)),
+        ("date_of_issue", [-62.0, 14.0, -30.0, 24.0], "Date of issue", text(3.5, Left, most(10), vec![field(Revision, "date")])),
+        ("sheet", [-30.0, 14.0, 0.0, 24.0], "Sheet", text(3.5, Centre, most(9), sheet)),
         ("material", [-180.0, 24.0, -100.0, 34.0], "Material", text(3.5, Left, whole, vec![field(Component, "material")])),
         ("finish", [-100.0, 24.0, -30.0, 34.0], "Finish", text(3.5, Left, whole, vec![field(Component, "properties.finish")])),
         ("mass", [-30.0, 24.0, 0.0, 34.0], "Mass", text(3.5, Centre, whole, vec![field(Component, "mass")])),
-        ("legal_owner", [-180.0, 34.0, -100.0, 54.0], "Legal owner", text(3.5, Left, wrap, vec![field(Drawing, "organization")])),
-        ("general_tolerances", [-100.0, 34.0, -30.0, 54.0], "General tolerances", text(2.5, Left, wrap, tolerances)),
-        ("projection", [-30.0, 34.0, 0.0, 54.0], "Projection", CellKind::ProjectionSymbol),
+        ("legal_owner", [-180.0, 34.0, -100.0, 49.0], "Legal owner", text(3.5, Left, wrap, vec![field(Drawing, "organization")])),
+        ("general_tolerances", [-100.0, 34.0, -30.0, 49.0], "General tolerances", text(2.5, Left, wrap, tolerances)),
+        ("projection", [-30.0, 34.0, 0.0, 49.0], "Projection", CellKind::ProjectionSymbol),
     ];
     let label = |text: &str| Some(Label { text: text.into(), cap_mm: 2.5 });
     let cells = cells.into_iter().map(|(name, rect_mm, text, kind)| Cell { name: name.into(), rect_mm, label: label(text), kind }).collect();
-    TitleBlock { size_mm: Vec2::new(180.0, 54.0), outline_line_mm: 0.7, cell_line_mm: 0.35, cells }
+    TitleBlock { size_mm: Vec2::new(180.0, 49.0), outline_line_mm: 0.7, cell_line_mm: 0.35, cells }
 }
 
 impl TitleBlock {
