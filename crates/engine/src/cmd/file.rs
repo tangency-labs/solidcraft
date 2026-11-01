@@ -1961,8 +1961,9 @@ mod tests {
         assert_eq!((stepped.path.as_deref(), stepped.read_only), (Some(path.as_str()), true));
         let summary = |s: &Session| -> Vec<(u64, bool, bool)> { s.model.results.iter().map(|r| (r.id, r.skipped, r.error.is_some())).collect() };
         assert_eq!(summary(&stepped), summary(&whole));
-        let bodies =
-            |s: &Session| -> Vec<(String, usize)> { s.world_state().unwrap().bodies.iter().map(|b| (b.name.clone(), b.mesh().triangles.len())).collect() };
+        let bodies = |s: &Session| -> Vec<(String, usize)> {
+            s.world_state().unwrap().bodies.iter().map(|b| (b.name.clone(), b.mesh().triangles.len())).collect()
+        };
         assert_eq!(bodies(&stepped), bodies(&whole));
         assert_eq!(stepped.world_state().unwrap().bodies.len(), 3, "the box, the cylinder and the box before the marker");
         assert!(stepped.model.is_current(&stepped.doc));

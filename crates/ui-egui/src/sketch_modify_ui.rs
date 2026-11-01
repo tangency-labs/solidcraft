@@ -315,7 +315,7 @@ pub fn candidate(d: &Dialog, session: &solidcraft_engine::Session, hit: &Hit) ->
     match hit {
         Hit::SketchCurve { sketch, .. } | Hit::SketchPoint { sketch, .. } | Hit::Profile { sketch, .. } if *sketch != active => None,
         Hit::SketchCurve { id, .. } if matches!(d.kind, Kind::SketchModify(Mod::Corner { .. })) => {
-            let state = crate::open_meshing::session_world(&session);
+            let state = crate::open_meshing::session_world(session);
             let sk = &state.sketch(active)?.sketch;
             if sk.is_spatial_corner_curve(id) {
                 return None;
@@ -726,7 +726,7 @@ fn entity_ids(session: &solidcraft_engine::Session, inputs: &[SelInput], i: usiz
             Sel::SketchCurve { id, .. } => out.push(id.clone()),
             Sel::Profile { sketch, index } => {
                 if let Some(ids) =
-                    crate::open_meshing::session_world(&session).sketch(*sketch).and_then(|ss| ss.profiles.get(*index)).map(|p| p.curve_ids())
+                    crate::open_meshing::session_world(session).sketch(*sketch).and_then(|ss| ss.profiles.get(*index)).map(|p| p.curve_ids())
                 {
                     out.extend(ids);
                 }

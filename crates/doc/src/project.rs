@@ -1345,7 +1345,7 @@ fn surface_facing(m: &Mesh, t: &[u32; 3], flat: Vec3) -> Vec3 {
     let mut sum = Vec3::ZERO;
     for i in t {
         match m.normals.get(*i as usize).and_then(|v| v.normalized()) {
-            Some(v) if v.dot(flat) >= AGREES => sum = sum + v,
+            Some(v) if v.dot(flat) >= AGREES => sum += v,
             _ => return flat,
         }
     }

@@ -345,7 +345,7 @@ fn side_pick(app: &SolveApp, o: &JointOrigin) -> Option<Sel> {
     let at =
         if o.occurrence == 0 { solidcraft_engine::doc::IDENTITY } else { solidcraft_engine::doc::joints::occurrence_world(&s.doc, o.occurrence) };
     let p = solidcraft_engine::doc::apply_point(&at, pick);
-    let st = crate::open_meshing::session_world(&s);
+    let st = crate::open_meshing::session_world(s);
     let own: Vec<&solidcraft_engine::doc::ModelBody> = st.bodies.iter().filter(|b| occurrence_of_body(s, &b.name) == Some(o.occurrence)).collect();
     let named = match (face, edge) {
         (Some(name), _) => own.iter().filter_map(|b| named_face(b, name, p)).min_by(|a, b| a.0.total_cmp(&b.0)),
